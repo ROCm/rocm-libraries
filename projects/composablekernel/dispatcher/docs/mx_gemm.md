@@ -111,7 +111,6 @@ product (Tile Engine). Missing keys take rocKE's defaults:
 | --- | --- | --- |
 | `cluster_dim` | `[4, 4]` | Workgroup cluster (x, y); the grid must divide by it |
 | `gl2_prefetch_distance` | `4` | K tiles of GL2 prefetch ahead; `0` turns it off |
-| `cluster_signal_wmmas` | `null` | WMMAs before the cluster signal; `null` is rocKE's derived value |
 | `local_prefetch` | `1` | LDS-to-register prefetch depth (0 or 1) |
 | `half_plr` | `"b"` | Split the B register prefetch in halves (`"b"`) or not (`"none"`) |
 | `lds_segment_interleave` | `true` | Interleave the LDS segments |
@@ -120,7 +119,7 @@ product (Tile Engine). Missing keys take rocKE's defaults:
 | `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
 | `store_width` | `0` | D store width in elements; `0` is the widest the tile allows |
 
-The first six are rocKE's knobs; the last four are shape traits fixed at
+The first five are rocKE's knobs; the last four are shape traits fixed at
 compile time (rocKE derives them from its compile-time M, N and K). Every kernel
 runs any K tile count: the pipeline picks the odd or even variant at run time,
 as the other TDM pipelines do. The kernel name adds rocKE's tuning suffix and

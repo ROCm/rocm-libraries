@@ -24,7 +24,6 @@ ATOM_K = 128
 WAVE = 32
 WAVES = 4
 BLOCK_K = 32
-DEFAULT_SIGNAL = 6
 DATA_PAD_BYTES = 16
 BANK_CYCLE_BYTES = 256
 MXS_BLOCK_BYTES = 256
@@ -43,11 +42,10 @@ LANE_GROUPS = 2
 MX_DTYPES = ("fp4", "fp8", "bf8")
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 
-#: rocKE's tuning knobs and defaults; cluster_signal_wmmas None means derived.
+#: rocKE's tuning knobs and defaults.
 TUNING_DEFAULTS: Dict[str, object] = {
     "cluster_dim": (4, 4, 1),
     "gl2_prefetch_distance": 4,
-    "cluster_signal_wmmas": None,
     "local_prefetch": 1,
     "half_plr": "b",
     "lds_segment_interleave": True,
@@ -82,7 +80,6 @@ REASONS = (
     "local_prefetch",
     "half_plr",
     "half_plr_b",
-    "signal_wmmas",
     "gl2_distance",
     "cluster_dim",
     "cluster_size",
@@ -189,12 +186,18 @@ def _place(
     )
 
 
-def _drop_half_b_order(fields: Dict, what: str) -> None:
-    """Removes rocKE's half_b_order: "ahead" is the only order; "late" is not supported."""
+def _drop_fixed_knobs(fields: Dict, what: str) -> None:
+    """Removes rocKE knobs that comp_tdm_scheduled fixes: half_b_order (only "ahead") and
+    cluster_signal_wmmas (only derived: None or negative)."""
     order = str(fields.pop("half_b_order", "ahead")).lower()
     if order != "ahead":
         raise ValueError(
             f"half_b_order {order!r} in the {what} is not supported (only 'ahead')"
+        )
+    signal = fields.pop("cluster_signal_wmmas", None)
+    if signal is not None and signal >= 0:
+        raise ValueError(
+            f"cluster_signal_wmmas {signal!r} in the {what} is not supported (only derived)"
         )
 
 
@@ -212,7 +215,6 @@ class MxTdmScheduledSpec:
     wave_group: Tuple[int, int] = (2, 2)
     cluster_dim: Tuple[int, int, int] = (4, 4, 1)
     gl2_prefetch_distance: int = 4
-    cluster_signal_wmmas: Optional[int] = None
     local_prefetch: int = 1
     half_plr: str = "b"
     lds_segment_interleave: bool = True
@@ -223,7 +225,7 @@ class MxTdmScheduledSpec:
     @classmethod
     def from_dict(cls, d: Dict) -> "MxTdmScheduledSpec":
         fields = dict(d)
-        _drop_half_b_order(fields, "spec")
+        _drop_fixed_knobs(fields, "spec")
         for key in ("wave_group", "cluster_dim"):
             if key in fields:
                 fields[key] = tuple(fields[key])
@@ -342,17 +344,6 @@ class MxTdmScheduledSpec:
     @property
     def half_b(self) -> bool:
         return self.local_prefetch == 1 and self.half_plr == "b"
-
-    @property
-    def signal_limit(self) -> int:
-        per_step = self.wave_repeat_m * self.wave_repeat_n
-        return per_step // 2 if self.half_b else per_step
-
-    @property
-    def signal_wmmas(self) -> int:
-        if self.cluster_signal_wmmas is not None:
-            return self.cluster_signal_wmmas
-        return min(DEFAULT_SIGNAL, self.signal_limit)
 
     @property
     def fp8_convert_width(self) -> int:
@@ -623,8 +614,6 @@ class MxTdmScheduledSpec:
             return "half_plr"
         if self.half_plr == "b" and (self.local_prefetch != 1 or rn % 2):
             return "half_plr_b"
-        if self.signal_wmmas < 0 or self.signal_wmmas > self.signal_limit:
-            return "signal_wmmas"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:
             return "gl2_distance"
         cx, cy, cz = self.cluster_dim
@@ -674,8 +663,6 @@ class MxTdmScheduledSpec:
             name += f"_wg{self.warp_m}x{self.warp_n}"
         if self.gl2_prefetch_distance != 4:
             name += f"_pf{self.gl2_prefetch_distance}"
-        if self.cluster_signal_wmmas is not None:
-            name += f"_cs{self.cluster_signal_wmmas}"
         if self.local_prefetch == 0:
             name += "_lp0"
         if self.half_plr == "none":
@@ -741,7 +728,7 @@ def parse_kernel_name(name: str) -> Tuple[str, MxTdmScheduledSpec]:
         elif f["pf"]:
             fields["gl2_prefetch_distance"] = int(f["pf"])
         elif f["cs"]:
-            fields["cluster_signal_wmmas"] = int(f["cs"])
+            raise ValueError(f"cluster_signal_wmmas (cs) is not supported: {name!r}")
         elif f["lp0"]:
             fields["local_prefetch"] = 0
         elif f["hplrnone"]:
@@ -770,8 +757,6 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
     out["cluster_dim"] = tuple(out["cluster_dim"])
     if len(out["cluster_dim"]) == 2:
         out["cluster_dim"] = (*out["cluster_dim"], 1)
-    if out["cluster_signal_wmmas"] is not None and out["cluster_signal_wmmas"] < 0:
-        out["cluster_signal_wmmas"] = None
     out["half_plr"] = str(out["half_plr"]).lower()
     out["lds_segment_interleave"] = bool(out["lds_segment_interleave"])
     out["edge"] = bool(out["edge"])
@@ -803,8 +788,6 @@ def encode_tuning(tuning: Optional[Dict]) -> str:
         value = t[key]
         if isinstance(value, tuple):
             value = "x".join(str(v) for v in value)
-        elif value is None:
-            value = "none"
         elif isinstance(value, bool):
             value = "1" if value else "0"
         parts.append(f"{key}={value}")
@@ -819,8 +802,6 @@ def decode_tuning(token: str) -> Dict[str, object]:
         default = {**TUNING_DEFAULTS, **SHAPE_DEFAULTS}.get(key)
         if key == "cluster_dim":
             out[key] = tuple(int(v) for v in value.split("x"))
-        elif key == "cluster_signal_wmmas":
-            out[key] = None if value == "none" else int(value)
         elif isinstance(default, bool):
             out[key] = value == "1"
         elif isinstance(default, int):
@@ -896,7 +877,6 @@ def spec_from_tile(
         wave_group=(tile_config["warp_m"], tile_config["warp_n"]),
         cluster_dim=t["cluster_dim"],
         gl2_prefetch_distance=t["gl2_prefetch_distance"],
-        cluster_signal_wmmas=t["cluster_signal_wmmas"],
         local_prefetch=t["local_prefetch"],
         half_plr=t["half_plr"],
         lds_segment_interleave=t["lds_segment_interleave"],
@@ -991,12 +971,11 @@ def cpp_cluster_sequence(tuning: Optional[Dict]) -> str:
 def cpp_policy_type(tuning: Optional[Dict]) -> str:
     """The MxGemmPipelineAgBgCrCompTDMScheduledPolicy<...> spelling of a tuning's other knobs."""
     t = normalize_tuning(tuning)
-    signal = -1 if t["cluster_signal_wmmas"] is None else t["cluster_signal_wmmas"]
     plr = "B" if t["half_plr"] == "b" else "None"
     lsi = "true" if t["lds_segment_interleave"] else "false"
     return (
         f"ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<{t['gl2_prefetch_distance']}, "
-        f"{signal}, {t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, {lsi}>"
+        f"{t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, {lsi}>"
     )
 
 

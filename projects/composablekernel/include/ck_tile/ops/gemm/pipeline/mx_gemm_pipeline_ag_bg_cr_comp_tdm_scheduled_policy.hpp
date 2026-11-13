@@ -45,7 +45,6 @@ enum class MxTdmScheduledReason : int
     LocalPrefetch,
     HalfPlr,
     HalfPlrB,
-    SignalWmmas,
     Gl2Distance,
     ClusterDim,
     ClusterSize,
@@ -79,7 +78,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmSche
     case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch";
     case MxTdmScheduledReason::HalfPlr: return "half_plr";
     case MxTdmScheduledReason::HalfPlrB: return "half_plr_b";
-    case MxTdmScheduledReason::SignalWmmas: return "signal_wmmas";
     case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
     case MxTdmScheduledReason::ClusterSize: return "cluster_size";
@@ -120,8 +118,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
     case MxTdmScheduledReason::HalfPlr: return "half_plr must be 'b' or 'none'";
     case MxTdmScheduledReason::HalfPlrB:
         return "half_plr 'b' needs local_prefetch 1 and an even wave_repeat_n";
-    case MxTdmScheduledReason::SignalWmmas:
-        return "cluster_signal_wmmas must be in 0..signal_limit";
     case MxTdmScheduledReason::Gl2Distance:
         return "gl2_prefetch_distance must be 0 (off) or 2..8 tiles";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim must be a positive (x, y, z) triple";
@@ -295,23 +291,18 @@ struct InvalidTuning<MxTdmScheduledReason::Ok>
  *
  * @tparam Gl2PrefetchDistance  GL2 prefetch of the tile this many K tiles ahead; 0 is off, else
  *                              2..8.
- * @tparam ClusterSignalWmmas   WMMAs of the second-to-last K step before wave 0 signals the
- *                              cluster; -1 derives it (6, clamped to the K step's WMMAs, or half
- *                              of them with HalfPlr::B).
  * @tparam LocalPrefetch        1: K step s + 1 is read from LDS during K step s. 0: each K step
  *                              reads, drains, computes.
  * @tparam LdsSegmentInterleave TensileLite's LDSSegmentInterleave 1 (true) or 0 (the baseline
  *                              region order).
  */
 template <index_t Gl2PrefetchDistance   = 4,
-          index_t ClusterSignalWmmas    = -1,
           index_t LocalPrefetch         = 1,
           MxTdmScheduledHalfPlr HalfPlr = MxTdmScheduledHalfPlr::B,
           bool LdsSegmentInterleave     = true>
 struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 {
     static constexpr index_t kGl2PrefetchDistance   = Gl2PrefetchDistance;
-    static constexpr index_t kClusterSignalWmmas    = ClusterSignalWmmas;
     static constexpr index_t kLocalPrefetch         = LocalPrefetch;
     static constexpr MxTdmScheduledHalfPlr kHalfPlr = HalfPlr;
     static constexpr bool kLdsSegmentInterleave     = LdsSegmentInterleave;
@@ -331,7 +322,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     static constexpr index_t kDscntMax = 63;
     /// VGPRs per lane, which bound the accumulators.
     static constexpr index_t kVgprs = 1024;
-    /// The cluster signal's WMMAs when ClusterSignalWmmas is -1, before clamping.
+    /// The cluster signal's WMMAs, before clamping to GetSignalLimit.
     static constexpr index_t kDefaultSignalWmmas = 6;
 
     /// Whether T is an A or B type: pk_fp4_t, fp8_t or bf8_t.
@@ -475,11 +466,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         const index_t per_step = GetWaveRepeatM<Problem>() * GetWaveRepeatN<Problem>();
         return GetHalfB<Problem>() ? per_step / 2 : per_step;
     }
+    /// WMMAs of the second-to-last K step before wave 0 signals the cluster.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSignalWmmas()
     {
-        return kClusterSignalWmmas >= 0 ? kClusterSignalWmmas
-                                        : min_i(kDefaultSignalWmmas, GetSignalLimit<Problem>());
+        return min_i(kDefaultSignalWmmas, GetSignalLimit<Problem>());
     }
 
     /// Bytes of an E element (fp8_t 1, half_t and bf16_t 2).
@@ -558,8 +549,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             return R::HalfPlr;
         if(kHalfPlr == MxTdmScheduledHalfPlr::B && (kLocalPrefetch != 1 || rn % 2))
             return R::HalfPlrB;
-        if(GetSignalWmmas<Problem>() < 0 || GetSignalWmmas<Problem>() > GetSignalLimit<Problem>())
-            return R::SignalWmmas;
         if(kGl2PrefetchDistance != 0 && !(2 <= kGl2PrefetchDistance && kGl2PrefetchDistance <= 8))
             return R::Gl2Distance;
         if(Shape::kclusterN < 1 || Shape::kclusterM < 1 || Shape::kclusterK < 1)
@@ -1116,7 +1105,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 
     /**
      * @brief The part of rocKE's kernel name after the tile: the cluster, then every value that is
-     *        not its default (out dtype, wave group, pf, cs, then the lp0 / hplrnone / lsi0 /
+     *        not its default (out dtype, wave group, pf, then the lp0 / hplrnone / lsi0 /
      *        mma16 flags), each with a leading "_".
      *
      * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
@@ -1139,8 +1128,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             name += "_wg" + std::to_string(wm) + "x" + std::to_string(wn);
         if(kGl2PrefetchDistance != 4)
             name += "_pf" + std::to_string(kGl2PrefetchDistance);
-        if(kClusterSignalWmmas >= 0)
-            name += "_cs" + std::to_string(kClusterSignalWmmas);
         if(kLocalPrefetch == 0)
             name += "_lp0";
         if(kHalfPlr == MxTdmScheduledHalfPlr::None)

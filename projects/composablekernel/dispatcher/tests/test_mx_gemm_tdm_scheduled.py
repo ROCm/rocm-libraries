@@ -49,7 +49,7 @@ class TestTuning(unittest.TestCase):
         tunings = sched.expand_tuning_config(
             {
                 "cluster_dim": {"values": [[4, 4], [2, 1, 1]]},
-                "cluster_signal_wmmas": {"values": [None, 3]},
+                "gl2_prefetch_distance": {"values": [4, 2]},
                 "half_plr": {"values": ["b", "none"]},
                 "lds_segment_interleave": {"values": [True, False]},
                 "store_width": {"values": [0, 4]},
@@ -94,7 +94,7 @@ class TestTuning(unittest.TestCase):
         )
         self.assertEqual(
             sched.cpp_policy_type(t),
-            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, "
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, "
             "ck_tile::MxTdmScheduledHalfPlr::B, false>",
         )
         self.assertEqual(
@@ -449,7 +449,7 @@ class TestDispatcher(unittest.TestCase):
         self.assertTrue(path.name.endswith("_c2x2.hpp"))
         self.assertIn("using Cluster = ck_tile::sequence<2, 2, 1>;", header)
         self.assertIn(
-            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1", header
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, ", header
         )
         self.assertIn("KMajorScales = true", header)
         self.assertIn("ck_tile::MxDirectStoreEpilogue<", header)
@@ -491,19 +491,25 @@ class TestRockeConversion(unittest.TestCase):
         self.assertNotIn("odd_tiles", cfg)
         self.assertTrue(codegen.kernel_name(cfg).endswith("_32x16x128_c4x4_noedge"))
 
-    def test_half_b_late_rejected(self):
+    def test_fixed_knobs_rejected(self):
         name = "mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4"
         with self.assertRaisesRegex(ValueError, "hblate"):
             sched.parse_kernel_name(name + "_hblate")
+        with self.assertRaisesRegex(ValueError, "cs"):
+            sched.parse_kernel_name(name + "_cs3")
         spec = sched.parse_kernel_name(name)[1].to_dict()
+        rocke_defaults = {"half_b_order": "ahead", "cluster_signal_wmmas": None}
         self.assertEqual(
-            sched.MxTdmScheduledSpec.from_dict({**spec, "half_b_order": "ahead"}),
+            sched.MxTdmScheduledSpec.from_dict({**spec, **rocke_defaults}),
             sched.MxTdmScheduledSpec.from_dict(spec),
         )
         with self.assertRaisesRegex(ValueError, "half_b_order"):
             sched.MxTdmScheduledSpec.from_dict({**spec, "half_b_order": "late"})
-        with self.assertRaisesRegex(ValueError, "half_b_order"):
-            sched.normalize_tuning({"half_b_order": "late"})
+        with self.assertRaisesRegex(ValueError, "cluster_signal_wmmas"):
+            sched.MxTdmScheduledSpec.from_dict({**spec, "cluster_signal_wmmas": 3})
+        for key, value in (("half_b_order", "late"), ("cluster_signal_wmmas", 3)):
+            with self.assertRaisesRegex(ValueError, key):
+                sched.normalize_tuning({key: value})
 
     def test_cli(self):
         r = subprocess.run(

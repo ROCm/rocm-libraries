@@ -24,7 +24,7 @@ using Bad = Kernel<pk_fp4_t,
                    2,
                    2,
                    32,
-                   Tu<4, 4, 4, -1, 0>,
+                   Tu<4, 4, 4, 0>,
                    Shape<false, false, 0, 8>>;
 #elif MX_TDM_SCHEDULED_REJECT == 2
 // 8-bit types on the 32x16 FP4 atom.

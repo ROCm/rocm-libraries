@@ -77,8 +77,8 @@ TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
     using ck_tile::fp8_t;
     using ck_tile::pk_fp4_t;
     using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
-    using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None, false>;
-    using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None>;
+    using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, H::None, false>;
+    using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, H::None>;
     {
         SCOPED_TRACE("maf fp4");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32>, Default>(
@@ -181,7 +181,7 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     EXPECT_EQ(Pf2::GetTuningName<MafProblem>(), "_c4x4_pf2");
 
     using Mab = ck_tile::
-        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, -1, 0, ck_tile::MxTdmScheduledHalfPlr::None>;
+        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, 0, ck_tile::MxTdmScheduledHalfPlr::None>;
     static_assert(Mab::GetReason<MabProblem>() == MxTdmScheduledReason::Ok);
     EXPECT_EQ(
         (PipelineOf<MabProblem, Mab>::GetRockeName(65536, 16, 65536, "mxfp4_gemm")),

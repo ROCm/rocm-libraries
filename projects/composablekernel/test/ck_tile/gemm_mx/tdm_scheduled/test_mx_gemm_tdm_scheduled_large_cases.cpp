@@ -62,7 +62,7 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      4,
                      1,
                      16,
-                     Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                     Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
                      ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 1>>;
     check_sampled<K>(65536, 16, 81920);
 }

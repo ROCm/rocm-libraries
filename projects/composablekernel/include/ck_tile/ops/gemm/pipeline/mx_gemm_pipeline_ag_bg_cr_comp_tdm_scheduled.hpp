@@ -903,7 +903,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         /// local_prefetch 0: each K step reads, drains and computes. The tile's last read is the
         /// last K step's: its refill (GL2 prefetch, the signal) follows the drain, the cluster
-        /// wait and TDM come cluster_signal_wmmas WMMAs later (at once without a cluster).
+        /// wait and TDM come kSignalWmmas WMMAs later (at once without a cluster).
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void
         k_tile_direct(AccTile& acc, index_t k0, index_t parity, index_t buffer) const

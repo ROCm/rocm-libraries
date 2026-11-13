@@ -102,14 +102,13 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
 template <index_t CX,
           index_t CY,
           index_t Gl2               = 4,
-          index_t Signal            = -1,
           index_t Lp                = 1,
           MxTdmScheduledHalfPlr Plr = MxTdmScheduledHalfPlr::B,
           bool Lsi                  = true>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Lsi>;
+    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Lp, Plr, Lsi>;
 };
 
 // Whole M and N tiles, no K tail.
@@ -480,7 +479,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            2,
                            16,
-                           Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
+                           Tu<4, 4, 4, 1, MxTdmScheduledHalfPlr::None>,
                            Whole<4>>>}},
             {"mab",
              {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
@@ -493,7 +492,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            4,
                            1,
                            16,
-                           Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                           Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
                            Whole<1>>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
@@ -506,7 +505,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            4,
                            1,
                            16,
-                           Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                           Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
                            Whole<1>>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
