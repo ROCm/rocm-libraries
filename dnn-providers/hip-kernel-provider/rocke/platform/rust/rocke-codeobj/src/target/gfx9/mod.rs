@@ -68,6 +68,7 @@ pub mod select;
 pub mod smem_sink;
 pub mod spill;
 pub mod trade;
+pub mod trunc_mix;
 pub mod unrolled;
 pub mod vectorize;
 pub mod waitcnt;
