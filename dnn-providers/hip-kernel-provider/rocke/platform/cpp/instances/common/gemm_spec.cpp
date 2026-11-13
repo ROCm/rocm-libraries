@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target_internal.h" /* rocke_ati_gemm_caps */
 #include "rocke/dtypes.h" /* rocke_dtype_info                   */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_*, rocke_mmaop_* */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type               */
@@ -717,6 +718,37 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
 }
 
+/* The gemm capability flags a reject message can name. */
+typedef enum rocke_gemm_cap_flag
+{
+    ROCKE_GEMM_CAP_FP8_AB,
+    ROCKE_GEMM_CAP_WMMA_CSHUFFLE,
+} rocke_gemm_cap_flag_t;
+
+/* The arches whose gemm capabilities set `flag`, ", "-joined in registry order
+ * (the same order as Python known_arches()), or "none": for a reject message to
+ * say where the rejected feature is admitted. Mirrors Python _gemm_arches_with. */
+static const char* rocke_gemm_arches_with(rocke_gemm_cap_flag_t flag, char* out, size_t cap)
+{
+    size_t used = 0;
+    out[0] = '\0';
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        const rocke_ati_gemm_caps_t* caps = rocke_ati_gemm_caps(row->target);
+        const bool set = (flag == ROCKE_GEMM_CAP_FP8_AB) ? caps->fp8_ab : caps->wmma_cshuffle;
+        if(!set)
+            continue;
+        const int n = snprintf(out + used, cap - used, "%s%s", used ? ", " : "", row->gfx);
+        if(n < 0 || (size_t)n >= cap - used)
+            break;
+        used += (size_t)n;
+    }
+    if(used == 0)
+        snprintf(out, cap, "none");
+    return out;
+}
+
 /* ===================================================================== *
  *  is_valid_spec(spec, arch) -> (ok, reason).
  *
@@ -784,14 +816,19 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         return false;
     }
 
-    /* The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is built and verified on
-     * gfx1250 only. gfx942 / gfx950 carry fp8 MFMA atoms, so the catalog check
-     * below would admit them, but nothing there is verified: gfx942 reads FNUZ
-     * encodings, and the DirectToLDS path assumes 2-byte elements. */
+    /* The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is admitted only where it has
+     * been built and verified (gemm.fp8_ab). gfx942 / gfx950 carry fp8 MFMA
+     * atoms and gfx1201 an fp8 WMMA atom, so the catalog check below would admit
+     * them, but nothing there is verified: gfx942 reads FNUZ encodings, and the
+     * DirectToLDS path assumes 2-byte elements. */
+    const rocke_ati_gemm_caps_t* gemm_caps = rocke_ati_gemm_caps(target);
     if((rocke_gemm_is_fp8_ab(spec->data.dtype_a) || rocke_gemm_is_fp8_ab(spec->data.dtype_b))
-       && strcmp(target->gfx, "gfx1250") != 0)
+       && !gemm_caps->fp8_ab)
     {
-        CK_GEMM_REJECT("fp8/bf8 A/B GEMM is supported only on gfx1250 (got %s)", arch);
+        char supported[128];
+        CK_GEMM_REJECT("fp8/bf8 A/B GEMM is not supported on %s (supported on: %s)",
+                       arch,
+                       rocke_gemm_arches_with(ROCKE_GEMM_CAP_FP8_AB, supported, sizeof(supported)));
     }
 
     /* MMA atom must be in the target's catalog for this dtype combo. */
@@ -848,29 +885,38 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
     }
 
-    /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
-     * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
-     * 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128 (fp8, via the
-     * f8f6f4 opcode) atoms, all through the simple 'mem' pipeline. */
+    /* WMMA coverage is narrower than CDNA's MFMA matrix: the arch's
+     * gemm.wmma_atoms (16x16x16 on gfx11/gfx12 RDNA; 16x16x32 f16/bf16,
+     * 16x16x64 fp8/bf8 and dense 16x16x128 fp8, via the f8f6f4 opcode, on
+     * gfx1250), all through the simple 'mem' pipeline. */
     if(strcmp(family, "wmma") == 0)
     {
-        bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
-        bool atom_ok;
-
-        if(is_gfx1250)
+        bool atom_ok = false;
+        for(int i = 0; i < gemm_caps->num_wmma_atoms; ++i)
         {
-            atom_ok
-                = (atom_m == 16 && atom_n == 16 && (atom_k == 32 || atom_k == 64 || atom_k == 128));
-        }
-        else
-        {
-            atom_ok = (atom_m == 16 && atom_n == 16 && atom_k == 16);
+            const int* a = gemm_caps->wmma_atoms[i];
+            atom_ok = atom_ok || (a[0] == atom_m && a[1] == atom_n && a[2] == atom_k);
         }
         if(!atom_ok)
         {
-            /* Python: ", ".join(f"{m}x{n}x{k}" for ... in sorted(supported_atoms)). */
+            /* Python: ", ".join(f"{m}x{n}x{k}" for ... in sorted(supported_atoms)),
+             * and the table is kept sorted. */
+            char supported[128] = "";
+            size_t used = 0;
+            for(int i = 0; i < gemm_caps->num_wmma_atoms && used < sizeof(supported); ++i)
+            {
+                const int* a = gemm_caps->wmma_atoms[i];
+                int n = snprintf(supported + used,
+                                 sizeof(supported) - used,
+                                 "%s%dx%dx%d",
+                                 i ? ", " : "",
+                                 a[0],
+                                 a[1],
+                                 a[2]);
+                used += n > 0 ? (size_t)n : 0;
+            }
             CK_GEMM_REJECT("WMMA path supports only %s (got (%d, %d, %d)) on %s",
-                           is_gfx1250 ? "16x16x32, 16x16x64, 16x16x128" : "16x16x16",
+                           supported,
                            atom_m,
                            atom_n,
                            atom_k,
@@ -885,15 +931,19 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                            spec->trait.pipeline,
                            arch);
         }
-        /* The cshuffle epilogue is admitted on gfx1250 only. The emitter is
-         * arch-neutral (its scatter is driven by the op's dst_layout() map); what
-         * the other WMMA targets lack is coverage, not capability. Lift the arch
-         * test once gfx1151 / gfx1201 have gate configs of their own. */
-        if(strcmp(spec->trait.epilogue, "default") != 0 && !is_gfx1250)
+        /* The cshuffle epilogue is admitted only where gemm.wmma_cshuffle is
+         * set (gfx1250). The emitter is arch-neutral (its scatter is driven by
+         * the op's dst_layout() map); what the other WMMA targets lack is
+         * coverage, not capability. Set the flag for gfx1151 / gfx1201 once
+         * they have gate configs of their own. */
+        if(strcmp(spec->trait.epilogue, "default") != 0 && !gemm_caps->wmma_cshuffle)
         {
-            CK_GEMM_REJECT("WMMA path supports the '%s' epilogue only on gfx1250, not %s",
-                           spec->trait.epilogue,
-                           arch);
+            char supported[128];
+            CK_GEMM_REJECT(
+                "WMMA path does not support the '%s' epilogue on %s (supported on: %s)",
+                spec->trait.epilogue,
+                arch,
+                rocke_gemm_arches_with(ROCKE_GEMM_CAP_WMMA_CSHUFFLE, supported, sizeof(supported)));
         }
         /* The Python loop walks (flag, label) in this fixed order and rejects on
          * the first set flag. */
@@ -1133,12 +1183,13 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * live-interval start, so A lands at offset 0 and the C tile -- live only
      * after the last A/B read -- reuses it. Charging the sum over-counted by a
      * whole C tile and rejected specs the emitter builds and runs fine.
-     * Counted as max on gfx1250 only, where it has run on silicon; the other
-     * targets keep the sum until they have been run with it.
+     * Counted as max only where gemm.cshuffle_lds_aliased is set (gfx1250,
+     * where it has run on silicon); the other targets keep the sum until they
+     * have been run with it.
      * cshuffle_no_alias (C marked exclusive) and persistent (the grid-stride
      * tile loop makes A/B and C interfere) really are additive. */
-    if(c_bytes != 0 && strcmp(target->gfx, "gfx1250") == 0 && !spec->trait.cshuffle_no_alias
-       && !spec->trait.persistent)
+    if(c_bytes != 0 && rocke_ati_gemm_caps(target)->cshuffle_lds_aliased
+       && !spec->trait.cshuffle_no_alias && !spec->trait.persistent)
     {
         bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
     }

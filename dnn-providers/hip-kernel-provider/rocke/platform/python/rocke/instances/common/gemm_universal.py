@@ -76,6 +76,7 @@ from ...core.ir import (
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
+from ._gemm_kloop_tdm import TdmKLoop
 
 
 # ---------------------------------------------------------------------
@@ -230,8 +231,8 @@ class TraitSpec:
     # issue/wait/compute form and depth 2 ping-pongs, both of which drain
     # TENSORcnt to zero every K-tile because nothing else is outstanding at the
     # wait. Depth >= 3 keeps ``depth - 2`` further fills in flight *across* that
-    # wait, which is the whole point of the extra stages; see
-    # ``_emit_kloop_tdm_ring``. Each stage costs another full A/B LDS region, so
+    # wait, which is the whole point of the extra stages; see ``TdmKLoop.ring``
+    # in ``_gemm_kloop_tdm``. Each stage costs another full A/B LDS region, so
     # this buys latency hiding with occupancy: on gfx1250 the 320 KiB cap still
     # admits depth 4 at the widest tile, but any ring past half the cap gives up
     # the second co-resident workgroup. Only meaningful when ``tdm`` is set.
@@ -623,6 +624,17 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     return ab_single, db, two_buf
 
 
+def _gemm_arches_with(flag: str) -> str:
+    """The arches whose ``gemm`` capabilities set ``flag``, comma-joined in
+    :func:`~rocke.core.arch.known_arches` order, for a reject message to say
+    where the rejected feature is admitted. The C++ engine lists the same arches
+    in the same order (``rocke_gemm_arches_with`` in ``gemm_spec.cpp``)."""
+    from ...core.arch import ArchTarget, known_arches
+
+    arches = [g for g in known_arches() if getattr(ArchTarget.from_gfx(g).gemm, flag)]
+    return ", ".join(arches) or "none"
+
+
 def _tdm_pipelined(trait: "TraitSpec") -> bool:
     """Whether the TDM path ping-pongs two LDS buffers.
 
@@ -677,14 +689,18 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     except ValueError as e:
         return False, str(e)
 
-    # The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is built and verified on
-    # gfx1250 only. gfx942 / gfx950 carry fp8 MFMA atoms, so the catalog check
-    # below would admit them, but nothing there is verified: gfx942 reads FNUZ
-    # encodings, and the DirectToLDS path assumes 2-byte elements.
+    # The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is admitted only where it has
+    # been built and verified (``gemm.fp8_ab``). gfx942 / gfx950 carry fp8 MFMA
+    # atoms and gfx1201 an fp8 WMMA atom, so the catalog check below would admit
+    # them, but nothing there is verified: gfx942 reads FNUZ encodings, and the
+    # DirectToLDS path assumes 2-byte elements.
     if (
         spec.data.dtype_a in _FP8_AB_DTYPES or spec.data.dtype_b in _FP8_AB_DTYPES
-    ) and target.gfx != "gfx1250":
-        return False, f"fp8/bf8 A/B GEMM is supported only on gfx1250 (got {arch})"
+    ) and not target.gemm.fp8_ab:
+        return False, (
+            f"fp8/bf8 A/B GEMM is not supported on {arch} "
+            f"(supported on: {_gemm_arches_with('fp8_ab')})"
+        )
 
     # MMA atom must be in the target's catalog for this dtype combo. The
     # family is selected from the target's wave size: CDNA (wave64) uses MFMA,
@@ -735,17 +751,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
-    # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and 16x16x128
-    # (fp8, the dedicated fp8 x fp8 instruction) atoms, all
-    # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
+    # the arch's ``gemm.wmma_atoms`` (16x16x16 on gfx11/gfx12 RDNA; 16x16x32
+    # f16/bf16, 16x16x64 fp8/bf8 and the dedicated fp8 x fp8 16x16x128 on
+    # gfx1250), all through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
     # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
     # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps
     # the full matrix.
     if family == "wmma":
-        supported_atoms = {(16, 16, 16)}
-        if arch == "gfx1250":
-            supported_atoms = {(16, 16, 32), (16, 16, 64), (16, 16, 128)}
+        supported_atoms = set(target.gemm.wmma_atoms)
         if atom not in supported_atoms:
             supported = ", ".join(
                 f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
@@ -756,18 +769,20 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
-        # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
+        # The cshuffle epilogue is admitted only where ``gemm.wmma_cshuffle``
+        # is set (gfx1250). Its accumulator
         # scatter is driven by the op's ``dst_layout()`` map, so the emitter is
         # already arch-neutral and nothing MFMA-shaped leaks in -- what the
         # other WMMA targets lack is *coverage*, not capability: the parity
         # configs and the on-silicon verification are gfx1250. Admitting it
         # everywhere (as this gate briefly did) ships an epilogue nothing has
-        # ever run on gfx1151 / gfx1201. Lift the arch test once those targets
-        # have gate configs of their own.
-        if spec.trait.epilogue != "default" and arch != "gfx1250":
+        # ever run on gfx1151 / gfx1201. Set the flag for those targets once
+        # they have gate configs of their own.
+        if spec.trait.epilogue != "default" and not target.gemm.wmma_cshuffle:
             return False, (
-                f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
-                f"only on gfx1250, not {arch}"
+                f"WMMA path does not support the {spec.trait.epilogue!r} "
+                f"epilogue on {arch} "
+                f"(supported on: {_gemm_arches_with('wmma_cshuffle')})"
             )
         # ``lds_swizzle`` is rejected for the whole family, not only the load
         # paths that structurally cannot express it. It XORs the LDS *column*
@@ -816,8 +831,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         elif row_bytes % 4 or row_bytes < 8:
             return False, f"tdm needs a dword-multiple tile row (got {row_bytes}B)"
         # Depth counts LDS buffers: 1 is unpipelined, 2 ping-pongs, and 3+
-        # take the modular ring in ``_emit_kloop_tdm_ring``. Each stage costs
-        # another A/B region, which the LDS budget charges via ``_ab_lds_buffers``.
+        # take the modular ring (``TdmKLoop.ring`` in ``_gemm_kloop_tdm``). Each
+        # stage costs another A/B region, which the LDS budget charges via
+        # ``_ab_lds_buffers``.
         if not 1 <= spec.trait.tdm_depth <= _TDM_MAX_DEPTH:
             return False, (
                 f"tdm_depth must be in 1..{_TDM_MAX_DEPTH} "
@@ -927,9 +943,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # here over-counted by a whole C tile and spuriously rejected specs the
     # emitter builds and runs fine: a 256x256 C tile is 128 KiB, enough to push
     # a tile that fits comfortably past every cap we have, which silently
-    # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` on
-    # gfx1250 only, where it has run on silicon; the other targets keep the
-    # sum until they have been run with it.
+    # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` only
+    # where ``gemm.cshuffle_lds_aliased`` is set (gfx1250, where it has run on
+    # silicon); the other targets keep the sum until they have been run with it.
     #
     # Two flags opt out, and both really are additive. ``cshuffle_no_alias``
     # marks the C tile exclusive so the packer gives it its own byte range.
@@ -956,7 +972,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     )
     if (
         c_bytes
-        and target.gfx == "gfx1250"
+        and target.gemm.cshuffle_lds_aliased
         and not (spec.trait.cshuffle_no_alias or spec.trait.persistent)
     ):
         bytes_lds = max(ab_bytes, c_bytes)
@@ -2514,128 +2530,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         do_work_cond = b.cmp_ge(first_token, c0)
 
     def emit_compute_and_epilogue() -> None:
-        if _prefetch:
+        nonlocal _for_results
+        if spec.trait.tdm:
+            _for_results = TdmKLoop(
+                b=b,
+                trait=spec.trait,
+                a_smem=A_smem,
+                b_smem=B_smem,
+                load=emit_load_phase,
+                wmma=_emit_wmma_phase,
+                mma=emit_mfma_phase,
+                accs=accs,
+                k_lo=k_lo,
+                k_upper=_k_upper,
+                block_k=block_k,
+                c_block_k=c_block_k,
+                c0=c0,
+                waves=_tdm_waves,
+                wave_id=_tdm_wave_id,
+            ).emit()
+        elif _prefetch:
             _emit_kloop_prefetch()
         elif _db:
             _emit_kloop_db()
         else:
             _emit_kloop_simple()
         _emit_epilogue()
-
-    # Workgroup ids of the split barrier: signal / wait the whole workgroup.
-    _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
-
-    def _tdm_publish(allowed: int) -> None:
-        """Publish TDM fills: wait until at most ``allowed`` are outstanding, then
-        signal the split barrier. Shared by the TDM K-loops."""
-        b.s_wait_tensorcnt(allowed)
-        b.s_barrier_signal(_WG_SIGNAL)
-
-    def _tdm_signal(allowed: int) -> None:
-        """A K tile's split-barrier signal: drain this wave's fragment reads, then
-        publish."""
-        b.s_waitcnt(lgkmcnt=0)
-        _tdm_publish(allowed)
-
-    def _tdm_drain() -> None:
-        """Drain every TDM fill, then rendezvous on LDS. TENSORcnt ticks once per
-        descriptor, so a full drain is 0 regardless of tile shape. Shared by the
-        K-loops whose non-TDM form waits and barriers instead."""
-        b.s_wait_tensorcnt(0)
-        b.sync_lds_only()
-
-    def _k_tile_count() -> Value:
-        """ceil((K - k_lo) / block_k): the K tiles of this K range. The last one is
-        partial when K is not a multiple of block_k; the mover clips it to K.
-        Shared by the TDM K-loops that count tiles."""
-        return b.div(b.add(b.sub(_k_upper, k_lo), b.const_i32(block_k - 1)), c_block_k)
-
-    def _emit_kloop_tdm_ring() -> None:
-        """TDM K-loop over a ``tdm_depth``-buffer LDS ring with a partial wait.
-
-        Generalisation of the depth-2 ping-pong to ``D = tdm_depth >= 3``
-        buffers.  Body order and barrier count are chosen so that at any
-        given point ``D - 2`` descriptor fills are in flight, one buffer is
-        being read by the WMMAs, and one is being written by the fill that
-        just finished.  The partial wait count ``(D-2)*per_tile`` is a
-        constant because TENSORcnt retires in order.
-
-        Follows the reference ring design exactly (the prologue clamping and
-        the single trailing ``s_wait_tensorcnt(0)`` included).
-        """
-        nonlocal _for_results
-        D = spec.trait.tdm_depth
-        # Descriptor sets per tile per issuing wave.
-        per_tile = 1 if _tdm_waves > 1 else 2
-        allowed = (D - 2) * per_tile
-        ahead_k = (D - 1) * block_k
-        # Last in-bounds tile origin, block_k-aligned from k_lo. Never below
-        # k_lo: with no K tile at all (K = 0) every prologue fill starts at k_lo
-        # with an empty K extent instead of one tile before A and B.
-        last_origin = b.smax(
-            b.add(k_lo, b.mul(b.sub(_k_tile_count(), b.const_i32(1)), c_block_k)),
-            k_lo,
-        )
-
-        # Prologue: fill ring slots 0 .. D-2 (clamped so every fill is real).
-        for j in range(D - 1):
-            emit_load_phase(
-                A_smem,
-                B_smem,
-                b.smin(b.add(k_lo, b.const_i32(j * block_k)), last_origin),
-                lds_parity=j,
-            )
-
-        # Split barrier: the joint barrier at each iteration's top becomes a
-        # wait there, paired with a signal raised once the previous iteration's
-        # last fragment reads have drained and its tile + 1 has landed -- the
-        # same ``allowed`` count, since the outstanding fills (tiles k+1 ..
-        # k+D-1) are the same set at both points. The prologue raises the
-        # first signal and a wait after the loop consumes the last one.
-        split = spec.trait.split_barrier
-
-        def _signal_next_tile_ready() -> None:
-            _tdm_signal(allowed)
-
-        if split:
-            _tdm_publish(allowed)
-
-        c_ring = b.const_i32(D)
-        c_ahead = b.const_i32(D - 1)
-        c_one = b.const_i32(1)
-        loop_args = [("ring", c0)] + list(accs)
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, loop_args, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            ring = iter_vars[0]
-            acc_iter = iter_vars[1:]
-            if split:
-                b.s_barrier_wait(_WG_WAIT)
-            else:
-                b.s_wait_tensorcnt(allowed)
-                b.sync_lds_only()
-            emit_load_phase(
-                A_smem,
-                B_smem,
-                b.smin(b.add(k0, b.const_i32(ahead_k)), last_origin),
-                lds_parity=b.mod(b.add(ring, c_ahead), c_ring),
-            )
-            if split:
-                new_accs = _emit_wmma_phase(
-                    A_smem,
-                    B_smem,
-                    acc_iter,
-                    lds_parity=ring,
-                    after_last_reads=_signal_next_tile_ready,
-                )
-            else:
-                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=ring)
-            b.scf_yield(b.mod(b.add(ring, c_one), c_ring), *new_accs)
-
-        if split:
-            b.s_barrier_wait(_WG_WAIT)
-        # Drain the in-flight look-ahead fills before the epilogue reuses LDS.
-        b.s_wait_tensorcnt(0)
-        _for_results = for_op.results[1:]
 
     def _emit_kloop_db() -> None:
         """compv4 double-buffered K-loop (non-DTL, VGPR-staged).
@@ -2708,12 +2628,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # instead routes through ``_emit_kloop_db``; the scheduler
             # hints in ``emit_mfma_phase`` carry the in-tile interleave.
             emit_load_phase(A_smem, B_smem, k0)
-            if spec.trait.tdm:
-                # Unlike ASYNCcnt, which counts instructions and would need
-                # passes_a + passes_b, TENSORcnt drains to 0 for any tile.
-                _tdm_drain()
-            else:
-                b.sync()
+            b.sync()
 
             new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
 
@@ -2721,101 +2636,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b.scf_yield(*new_accs)
         nonlocal _for_results
         _for_results = for_op.results
-
-    def _emit_kloop_tdm_early_refill() -> None:
-        """Depth-2 TDM ping-pong with the early refill (``tdm_early_refill``).
-
-        Waves ``2p``/``2p+1`` own half ``p`` (alternating issuers). For K-tile
-        ``i`` in half ``p``, after the wave's split-barrier signal and the first
-        row of the last k-atom's WMMAs, the pair owning half ``p`` waits on that
-        barrier (every wave has finished reading half ``p``) and refills it with
-        tile ``i + 2``; the wait is issued right before the TDM load so the
-        descriptor arithmetic overlaps it. Every other wave consumes the same
-        barrier phase at the top of tile ``i + 1``, so each wave waits exactly
-        once per phase. The pair's signal for tile ``i + 1`` waits for the tile
-        it refilled two steps earlier, which is what makes tile ``i + 2``
-        visible to the waves that read it.
-
-        The loop runs two tiles per iteration with static parity, so the LDS
-        reads use immediate offsets, over an even tile count (see below).
-        """
-        nonlocal _for_results
-        c1 = b.const_i32(1)
-        c2 = b.const_i32(2)
-        bk2 = b.const_i32(2 * block_k)
-        pair = b.div(_tdm_wave_id, c2)
-
-        def _parity(p):
-            return p if isinstance(p, Value) else b.const_i32(p)
-
-        def _other(p):
-            return b.sub(c1, p) if isinstance(p, Value) else b.const_i32(1 - p)
-
-        def _signal() -> None:
-            _tdm_signal(0)
-
-        def _wait() -> None:
-            b.s_barrier_wait(_WG_WAIT)
-
-        def _top_wait(p) -> None:
-            # The pair owning the other half already consumed this phase when
-            # it refilled that half.
-            with b.scf_if(b.cmp_ne(pair, _other(p))):
-                _wait()
-
-        def _refill(p, k_cur, refill: bool) -> None:
-            with b.scf_if(b.cmp_eq(pair, _parity(p))):
-                if refill:
-                    emit_load_phase(
-                        A_smem,
-                        B_smem,
-                        b.add(k_cur, bk2),
-                        lds_parity=p,
-                        before_issue=_wait,
-                    )
-                else:
-                    _wait()
-
-        def _tile(p, k_cur, acc, refill: bool) -> List[Value]:
-            _top_wait(p)
-            return _emit_wmma_phase(
-                A_smem,
-                B_smem,
-                acc,
-                lds_parity=p,
-                after_last_reads=_signal,
-                after_first_row=lambda: _refill(p, k_cur, refill),
-            )
-
-        # Prologue: tiles 0 and 1 into halves 0 and 1. Pair 1 consumes the
-        # prologue phase here, as if it had refilled half 1 after tile -1.
-        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
-        emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
-        _tdm_publish(0)
-        with b.scf_if(b.cmp_eq(pair, c1)):
-            _wait()
-
-        # The loop runs an even number of tiles so every parity is static (a
-        # runtime-parity tail spills the steady state at the 256-VGPR budget).
-        # The tile count is rounded up first, so a partial last tile (K not a
-        # multiple of block_k) is loaded; the mover clips it to K. With an odd
-        # count the extra tile lies past K: its descriptor's remaining-K extent
-        # is zero, the mover fills it with zeros, and its WMMAs add nothing.
-        n_tiles = _k_tile_count()
-        n_even = b.add(n_tiles, b.mod(n_tiles, c2))
-        n_pairs = b.div(b.sub(n_even, c2), c2)
-        k_pairs_end = b.add(k_lo, b.mul(n_pairs, bk2))
-        pairs = b.scf_for_iter(k_lo, k_pairs_end, bk2, list(accs), iv_name="k0")
-        with pairs as (k0, acc_iter):
-            acc = _tile(0, k0, list(acc_iter), refill=True)
-            acc = _tile(1, b.add(k0, c_block_k), acc, refill=True)
-            b.scf_yield(*acc)
-
-        # Tail: tile T-2 (half 0) has nothing left to refill; tile T-1 (half 1)
-        # raises no signal.
-        acc = _tile(0, k_pairs_end, list(pairs.results), refill=False)
-        _top_wait(1)
-        _for_results = _emit_wmma_phase(A_smem, B_smem, acc, lds_parity=1)
 
     def _emit_kloop_prefetch() -> None:
         """Software-pipelined K-loop with DTLA ping-pong.
@@ -2836,21 +2656,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         tile's count) in flight while the current tile drains, so the
         loop's MFMA work overlaps the next tile's HBM transfers.
         """
-        loads_per_tile = 2 if spec.trait.tdm else (_dtl_a_passes + _dtl_b_passes)
+        loads_per_tile = _dtl_a_passes + _dtl_b_passes
         # vmcnt is 6 bits on gfx950 (max 63). If next-tile loads exceed
         # that, we'd saturate and the prefetch buys nothing extra.
-        if arch != "gfx1250" and loads_per_tile > 63:
+        if loads_per_tile > 63:
             # Fall back to the non-prefetched path; the constant would
             # have to be encoded as 63 either way.
             _emit_kloop_simple()
-            return
-
-        # A deep TDM ring is its own loop shape. It is a separate branch rather
-        # than a generalisation of the code below so that depths 1 and 2 -- the
-        # form both tuned shapes currently ship -- keep emitting exactly what
-        # they did before this knob existed.
-        if _tdm_ring:
-            _emit_kloop_tdm_ring()
             return
 
         nonlocal _for_results
@@ -2888,26 +2700,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _for_results = acc
             return
 
-        if spec.trait.tdm_early_refill:
-            _emit_kloop_tdm_early_refill()
-            return
-
         # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
-
-        # Split barrier: every wait (each iteration's top, and the epilogue's)
-        # pairs with the signal raised one phase earlier -- the prologue's for
-        # the first iteration, then the one inside each iteration's WMMA phase.
-        # A signal follows the wave's own drains, so arriving at the wait means
-        # every wave has finished reading the buffer about to be refilled and
-        # the mover's fill of the tile about to be read has landed.
-        split = spec.trait.split_barrier
-
-        def _signal_tile_done() -> None:
-            _tdm_signal(0)
-
-        if split:
-            _tdm_publish(0)
 
         # Loop bounds: iterate k in [k_lo, k_hi - block_k), so the last tile
         # is handled by the epilogue (which doesn't need to issue a
@@ -2939,39 +2733,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # MFMAs (its HBM transfer overlaps the matrix work). The prior
             # structure issued that write BEFORE draining, which both raced and
             # forced the extra barrier this collapses away.
-            if split:
-                b.s_barrier_wait(_WG_WAIT)
-            elif spec.trait.tdm:
-                # Only the current tile's two descriptors are outstanding at
-                # this point -- the next tile is issued after the drain -- so a
-                # full TENSORcnt drain still leaves the copy overlapped with
-                # the previous iteration's WMMAs.
-                _tdm_drain()
-            else:
-                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-                b.s_barrier_bare()
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.s_barrier_bare()
             emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            if split:
-                new_accs = _emit_wmma_phase(
-                    A_smem,
-                    B_smem,
-                    acc_iter,
-                    lds_parity=parity,
-                    after_last_reads=_signal_tile_done,
-                )
-            else:
-                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
+            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
         # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
         final_parity = for_op.results[0]
-        if split:
-            b.s_barrier_wait(_WG_WAIT)
-        elif spec.trait.tdm:
-            _tdm_drain()
-        else:
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
+        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+        b.s_barrier_bare()
         epi_accs = emit_mfma_phase(
             A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
         )
