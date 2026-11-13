@@ -250,21 +250,21 @@ int run_kernel(const Options& o)
     const auto s = P::Policy::template GetSpec<typename P::Problem>(o.M, o.N, o.K);
     {
         uint8_t dummy = 0;
-        const typename K::HostArgs probe{{&dummy},
-                                         {&dummy},
-                                         {&dummy},
-                                         {&dummy},
-                                         {},
-                                         &dummy,
-                                         1,
-                                         o.M,
-                                         o.N,
-                                         o.K,
-                                         {o.K},
-                                         {o.K},
-                                         {},
-                                         o.N};
-        if(const char* why = K::GetUnsupportedReason(probe))
+        const ck_tile::MxGemmHostArgs<> probe{{&dummy},
+                                              {&dummy},
+                                              {&dummy},
+                                              {&dummy},
+                                              {},
+                                              &dummy,
+                                              1,
+                                              o.M,
+                                              o.N,
+                                              o.K,
+                                              {o.K},
+                                              {o.K},
+                                              {},
+                                              o.N};
+        if(const char* why = K::GetUnsupportedReason(K::MakeKernelArgs(probe)))
         {
             std::cerr << K::GetName() << " does not run M " << o.M << " N " << o.N << " K " << o.K
                       << ": " << why << "\n";
@@ -294,20 +294,20 @@ int run_kernel(const Options& o)
     as.ToDevice(h.as.data());
     bs.ToDevice(h.bs.data());
     e.SetZero();
-    const typename K::HostArgs host_args{{a.GetDeviceBuffer()},
-                                         {as.GetDeviceBuffer()},
-                                         {b.GetDeviceBuffer()},
-                                         {bs.GetDeviceBuffer()},
-                                         {},
-                                         e.GetDeviceBuffer(),
-                                         1,
-                                         o.M,
-                                         o.N,
-                                         o.K,
-                                         {o.K},
-                                         {o.K},
-                                         {},
-                                         o.N};
+    const ck_tile::MxGemmHostArgs<> host_args{{a.GetDeviceBuffer()},
+                                              {as.GetDeviceBuffer()},
+                                              {b.GetDeviceBuffer()},
+                                              {bs.GetDeviceBuffer()},
+                                              {},
+                                              e.GetDeviceBuffer(),
+                                              1,
+                                              o.M,
+                                              o.N,
+                                              o.K,
+                                              {o.K},
+                                              {o.K},
+                                              {},
+                                              o.N};
     const auto args = K::MakeKernelArgs(host_args);
 
     if(o.mode == "bench")

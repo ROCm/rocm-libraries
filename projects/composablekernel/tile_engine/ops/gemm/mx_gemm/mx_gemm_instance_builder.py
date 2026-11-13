@@ -285,21 +285,7 @@ struct SelectedKernel {{
 
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
-        const typename Kernel::HostArgs host_args{{args.as_ptr,
-                                                  args.as_scale_ptr,
-                                                  args.bs_ptr,
-                                                  args.bs_scale_ptr,
-                                                  {{}},
-                                                  args.e_ptr,
-                                                  args.k_batch,
-                                                  args.M,
-                                                  args.N,
-                                                  args.K,
-                                                  args.stride_As,
-                                                  args.stride_Bs,
-                                                  {{}},
-                                                  args.stride_E}};
-        const auto kargs = Kernel::MakeKernelArgs(host_args);
+        const auto kargs = Kernel::MakeKernelArgs(args);
         if(!Kernel::IsSupportedArgument(kargs))
         {{
             const char* why = Kernel::GetUnsupportedReason(kargs);

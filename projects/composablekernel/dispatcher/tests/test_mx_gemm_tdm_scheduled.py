@@ -366,7 +366,7 @@ class TestTileEngine(unittest.TestCase):
         self.assertIn("static constexpr bool KMajorScales = true;", header)
         self.assertIn("ck_tile::MxTdmScheduledHalfBOrder::Late", header)
         self.assertIn("ck_tile::GemmTile2DNMajorPartitioner", header)
-        self.assertIn("Kernel::MakeKernelArgs(host_args)", header)
+        self.assertIn("Kernel::MakeKernelArgs(args)", header)
         self.assertIn("using CDataType = ck_tile::fp16_t;", header)
 
     def test_invalid_single_rejected(self):

@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <string>
-
 #include "ck_tile/ops/gemm/kernel/gemm_tile_partitioner.hpp"
 #include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
 
@@ -525,28 +523,26 @@ struct MxGemmKernel
         return integer_divide_ceil(K, BlockScaleSize * KXdlPackEff);
     }
 
-    using HostArgs   = MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>;
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
-    CK_TILE_HOST static constexpr MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>
+    CK_TILE_HOST static constexpr KernelArgs
     MakeKernelArgs(const MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>& hostArgs)
     {
-        return MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>{
-            {hostArgs.as_ptr,
-             hostArgs.bs_ptr,
-             hostArgs.ds_ptr,
-             hostArgs.e_ptr,
-             hostArgs.M,
-             hostArgs.N,
-             hostArgs.K,
-             hostArgs.stride_As,
-             hostArgs.stride_Bs,
-             hostArgs.stride_Ds,
-             hostArgs.stride_E,
-             hostArgs.k_batch,
-             hostArgs.async_input_scheduler},
-            hostArgs.as_scale_ptr,
-            hostArgs.bs_scale_ptr};
+        return KernelArgs{{hostArgs.as_ptr,
+                           hostArgs.bs_ptr,
+                           hostArgs.ds_ptr,
+                           hostArgs.e_ptr,
+                           hostArgs.M,
+                           hostArgs.N,
+                           hostArgs.K,
+                           hostArgs.stride_As,
+                           hostArgs.stride_Bs,
+                           hostArgs.stride_Ds,
+                           hostArgs.stride_E,
+                           hostArgs.k_batch,
+                           hostArgs.async_input_scheduler},
+                          hostArgs.as_scale_ptr,
+                          hostArgs.bs_scale_ptr};
     }
 
     /// For a pipeline that checks problems itself (kPipelineChecks): nullptr if this instance runs
@@ -567,11 +563,6 @@ struct MxGemmKernel
            kargs.e_ptr == nullptr)
             return "null operand";
         return nullptr;
-    }
-
-    CK_TILE_HOST static const char* GetUnsupportedReason(const HostArgs& h)
-    {
-        return GetUnsupportedReason(MakeKernelArgs(h));
     }
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)

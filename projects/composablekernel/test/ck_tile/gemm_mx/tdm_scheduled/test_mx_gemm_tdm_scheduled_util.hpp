@@ -207,20 +207,20 @@ inline Inputs make_inputs(MxTdmScheduledDtype a_dtype,
     return in;
 }
 
-/// The packed host arguments of a comp_tdm_scheduled run (k_batch 1, strides K for A and B, N for
+/// The packed kernel arguments of a comp_tdm_scheduled run (k_batch 1, strides K for A and B, N for
 /// E).
 template <typename Kernel>
-typename Kernel::HostArgs host_args(const void* a,
-                                    const void* b,
-                                    const void* a_scale,
-                                    const void* b_scale,
-                                    void* e,
-                                    index_t M,
-                                    index_t N,
-                                    index_t K)
+typename Kernel::KernelArgs kernel_args(const void* a,
+                                        const void* b,
+                                        const void* a_scale,
+                                        const void* b_scale,
+                                        void* e,
+                                        index_t M,
+                                        index_t N,
+                                        index_t K)
 {
-    return typename Kernel::HostArgs{
-        {a}, {a_scale}, {b}, {b_scale}, {}, e, 1, M, N, K, {K}, {K}, {}, N};
+    return Kernel::MakeKernelArgs(ck_tile::MxGemmHostArgs<>{
+        {a}, {a_scale}, {b}, {b_scale}, {}, e, 1, M, N, K, {K}, {K}, {}, N});
 }
 
 /// The compile-time spec of a kernel's pipeline.
@@ -275,14 +275,14 @@ std::vector<uint8_t> run_device(const Inputs& in, index_t M, index_t N, index_t 
 #ifdef MX_TDM_SCHEDULED_DRY_RUN
     // CPU-only build: check that the instance runs the problem, launch nothing.
     ck_tile::ignore  = e_bytes;
-    const auto probe = host_args<Kernel>(in.a.data(),
-                                         in.b.data(),
-                                         in.a_scale.data(),
-                                         in.b_scale.data(),
-                                         const_cast<uint8_t*>(in.a.data()),
-                                         M,
-                                         N,
-                                         K);
+    const auto probe = kernel_args<Kernel>(in.a.data(),
+                                           in.b.data(),
+                                           in.a_scale.data(),
+                                           in.b_scale.data(),
+                                           const_cast<uint8_t*>(in.a.data()),
+                                           M,
+                                           N,
+                                           K);
     const char* why  = Kernel::GetUnsupportedReason(probe);
     EXPECT_EQ(why, nullptr) << Kernel::GetName() << ": " << why;
     return {};
@@ -294,14 +294,14 @@ std::vector<uint8_t> run_device(const Inputs& in, index_t M, index_t N, index_t 
     as.ToDevice(in.a_scale.data());
     bs.ToDevice(in.b_scale.data());
     e.SetZero();
-    const auto args = Kernel::MakeKernelArgs(host_args<Kernel>(a.GetDeviceBuffer(),
-                                                               b.GetDeviceBuffer(),
-                                                               as.GetDeviceBuffer(),
-                                                               bs.GetDeviceBuffer(),
-                                                               e.GetDeviceBuffer(),
-                                                               M,
-                                                               N,
-                                                               K));
+    const auto args = kernel_args<Kernel>(a.GetDeviceBuffer(),
+                                          b.GetDeviceBuffer(),
+                                          as.GetDeviceBuffer(),
+                                          bs.GetDeviceBuffer(),
+                                          e.GetDeviceBuffer(),
+                                          M,
+                                          N,
+                                          K);
     launch<Kernel>(ck_tile::stream_config{nullptr, false}, args);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
     std::vector<uint8_t> out(e_bytes);
@@ -379,14 +379,14 @@ void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
                  std::to_string(K) + " scale shift " + std::to_string(scale_shift));
     const Inputs in = make_inputs(s.a_dtype, s.b_dtype, M, N, K, s.tile_k, scale_shift);
     const char* why =
-        Kernel::GetUnsupportedReason(host_args<Kernel>(in.a.data(),
-                                                       in.b.data(),
-                                                       in.a_scale.data(),
-                                                       in.b_scale.data(),
-                                                       const_cast<uint8_t*>(in.a.data()),
-                                                       M,
-                                                       N,
-                                                       K));
+        Kernel::GetUnsupportedReason(kernel_args<Kernel>(in.a.data(),
+                                                         in.b.data(),
+                                                         in.a_scale.data(),
+                                                         in.b_scale.data(),
+                                                         const_cast<uint8_t*>(in.a.data()),
+                                                         M,
+                                                         N,
+                                                         K));
     ASSERT_EQ(why, nullptr) << why;
     const auto got = run_device<Kernel>(in, M, N, K);
 #ifndef MX_TDM_SCHEDULED_DRY_RUN
