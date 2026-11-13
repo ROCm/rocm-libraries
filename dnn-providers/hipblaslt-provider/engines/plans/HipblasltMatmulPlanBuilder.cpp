@@ -360,7 +360,6 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto nodeAttrs = getNodeAttrs(opGraph);
@@ -375,6 +374,9 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                             opGraph.getTensorMap());
 
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
+
+        // Graph-property checks above need no device; the arch query comes after them.
+        REJECT_IF_WORKAROUND_ISSUE_9962(handle);
 
         MatmulParams params(std::get<0>(nodeAttrs),
                             std::get<1>(nodeAttrs),

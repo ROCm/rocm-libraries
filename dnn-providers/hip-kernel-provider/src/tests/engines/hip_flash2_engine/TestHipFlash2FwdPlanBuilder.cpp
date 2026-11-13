@@ -574,6 +574,21 @@ TEST_F(TestHipFlash2FwdUnservedAttributes, UnmutatedGraphIsApplicable)
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
+TEST_F(TestHipFlash2FwdUnservedAttributes, SeedAndOffsetAtZeroDropoutAreApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createFlash2Fp16Graph(),
+                                          asm_sdpa_engine::seedAndOffsetAtZeroDropoutCase());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
 TEST_P(TestHipFlash2FwdUnservedAttributes, IsNotApplicable)
 {
     SKIP_IF_NO_DEVICES();

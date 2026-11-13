@@ -2384,6 +2384,20 @@ TEST_F(TestSdpaFwdUnservedAttributes, UnmutatedGraphIsApplicable)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
 }
 
+TEST_F(TestSdpaFwdUnservedAttributes, SeedAndOffsetAtZeroDropoutAreApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), seedAndOffsetAtZeroDropoutCase());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+}
+
 TEST_P(TestSdpaFwdUnservedAttributes, IsNotApplicable)
 {
     SKIP_IF_NO_DEVICES();

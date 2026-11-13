@@ -958,6 +958,10 @@ std::vector<TrainingGraphMutation> trainingGraphMutations()
                         }});
     }
 
+    rows.push_back({"SaveMeanWithoutInvVariance",
+                    [](GraphT& g) { batchnormAttrs(g).inv_variance_tensor_uid.reset(); }});
+    rows.push_back({"SaveInvVarianceWithoutMean",
+                    [](GraphT& g) { batchnormAttrs(g).mean_tensor_uid.reset(); }});
     rows.push_back({"MissingPrevRunningMean",
                     [](GraphT& g) { batchnormAttrs(g).prev_running_mean_tensor_uid.reset(); }});
     rows.push_back({"MissingPrevRunningVariance",
@@ -986,6 +990,19 @@ protected:
 TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByBothBuilders)
 {
     auto builder = mutatedTrainingGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedByBothBuilders)
+{
+    auto builder = mutatedTrainingGraph([](GraphT& g) {
+        batchnormAttrs(g).mean_tensor_uid.reset();
+        batchnormAttrs(g).inv_variance_tensor_uid.reset();
+    });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1089,6 +1106,20 @@ std::vector<OneNodeVirtualOperandCase> oneNodeVirtualOperandCases()
     addBackward("Dx", &BatchnormBackwardAttributesT::dx_tensor_uid);
     addBackward("Dscale", &BatchnormBackwardAttributesT::dscale_tensor_uid);
     addBackward("Dbias", &BatchnormBackwardAttributesT::dbias_tensor_uid);
+
+    const auto addBackwardOptional
+        = [&](const std::string& role,
+              ::flatbuffers::Optional<int64_t> BatchnormBackwardAttributesT::*field) {
+              cases.push_back(
+                  {"Backward" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(); },
+                   [field](GraphT& g) {
+                       return (g.nodes.at(0)->attributes.AsBatchnormBackwardAttributes()->*field)
+                           .value();
+                   }});
+          };
+    addBackwardOptional("Mean", &BatchnormBackwardAttributesT::mean_tensor_uid);
+    addBackwardOptional("InvVariance", &BatchnormBackwardAttributesT::inv_variance_tensor_uid);
     return cases;
 }
 } // namespace

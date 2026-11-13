@@ -355,23 +355,19 @@ static bool
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
     // Dropout operands the kernels never read: a graph that carries one asks for dropout
-    // or its debug output, which these kernels do not produce.
+    // or its debug output, which these kernels do not produce. seed and offset are inert
+    // at dropout_probability 0, and a non-zero probability is declined below.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
                                "dropout_scale tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
     // The plan writes only the output and the optional stats tensor, never max or sum_exp.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
                                "max and sum_exp output tensors not supported");
-    // max_seq_len_kv sizes a paged K/V cache, and implementation selects a non-default
-    // strategy; neither is honored.
+    // max_seq_len_kv sizes a paged K/V cache, which is not honored.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.implementation() != AttentionImplementation::AUTO,
-                               "implementation must be AUTO");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout_probability must be unset or zero (Actual value: "

@@ -435,6 +435,19 @@ void checkRunningStatsComplete(const BatchnormAttrs& bnAttr)
     }
 }
 
+// The plan writes saved statistics only when both saved mean and saved inv_variance
+// are present, so exactly one of them would never be written.
+void checkSavedStatsPair(const BatchnormAttrs& bnAttr)
+{
+    if(bnAttr.mean_tensor_uid().has_value() != bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires saved mean and saved inv_variance together or "
+            "not at all.");
+    }
+}
+
 // A one-node training graph reads and writes every buffer operand, so none may be virtual.
 void checkOperandsNotVirtual(
     const BatchnormAttrs& bnAttr,
@@ -482,6 +495,7 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     }
 
     checkRunningStatsComplete(bnAttr);
+    checkSavedStatsPair(bnAttr);
     checkOperandsNotVirtual(bnAttr, _tensorMap);
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
@@ -526,6 +540,7 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     }
 
     checkRunningStatsComplete(bnAttr);
+    checkSavedStatsPair(bnAttr);
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
     const std::vector<int64_t> affineTensorIds

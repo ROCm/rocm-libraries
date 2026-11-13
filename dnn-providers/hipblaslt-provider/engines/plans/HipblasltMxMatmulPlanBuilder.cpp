@@ -474,12 +474,15 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
         REJECT_IF_WORKAROUND_ISSUE_10811(deqAttrA, deqAttrB, opGraph.getTensorMap());
         checkConstraints(opGraph, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
+
+        // Graph-property checks above need no device; the arch query comes after them.
+        REJECT_IF_WORKAROUND_ISSUE_9962(handle);
+
         // Constructing the plan runs hipblasLtMatmulAlgoGetHeuristic, the
         // authoritative check that this GPU + hipBLASLt build actually has an MX
         // GEMM kernel for this problem. MX support is arch/library-dependent, so

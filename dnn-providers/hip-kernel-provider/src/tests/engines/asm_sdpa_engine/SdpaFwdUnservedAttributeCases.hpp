@@ -41,52 +41,53 @@ inline flatbuffers::FlatBufferBuilder
     return hipdnn_test_sdk::utilities::sdpa::detail::repack(*graph);
 }
 
-// Attributes both forward engines decline: dropout operands, block mask, max and sum_exp
-// outputs, paged-KV length and the implementation hint. The frontend and the cuDNN-compatibility layer leave each at its
-// default (tensor absent, max_seq_len_kv unset, implementation AUTO).
-inline std::vector<SdpaFwdUnservedAttributeCase> commonUnservedFwdAttributeCases()
+// Attributes both forward engines decline: dropout mask, scale and rng_dump operands, block
+// mask, max and sum_exp outputs, and paged-KV length. The frontend and the cuDNN-compatibility
+// layer leave each at its default (tensor absent, max_seq_len_kv unset).
+// seed and offset feed dropout only, so with dropout_probability 0 they are inert and both
+// forward engines accept them.
+inline SdpaFwdUnservedAttributeCase seedAndOffsetAtZeroDropoutCase()
 {
-    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     using hipdnn_flatbuffers_sdk::data_objects::GraphT;
     using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
     using hipdnn_test_sdk::utilities::sdpa::detail::appendIndexTensor;
 
-    return {
-        {"DropoutMaskTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.dropout_mask_tensor_uid = appendIndexTensor(g, "dropout_mask");
-         }},
-        {"DropoutScaleTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.dropout_scale_tensor_uid = appendIndexTensor(g, "dropout_scale");
-         }},
-        {"SeedTensor",
-         [](SdpaAttributesT& a, GraphT& g) { a.seed_tensor_uid = appendIndexTensor(g, "seed"); }},
-        {"OffsetTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.offset_tensor_uid = appendIndexTensor(g, "offset");
-         }},
-        {"RngDumpTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.rng_dump_tensor_uid = appendIndexTensor(g, "rng_dump");
-         }},
-        {"BlockMaskTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.block_mask_tensor_uid = appendIndexTensor(g, "block_mask");
-         }},
-        {"MaxTensor",
-         [](SdpaAttributesT& a, GraphT& g) { a.max_tensor_uid = appendIndexTensor(g, "max"); }},
-        {"SumExpTensor",
-         [](SdpaAttributesT& a, GraphT& g) {
-             a.sum_exp_tensor_uid = appendIndexTensor(g, "sum_exp");
-         }},
-        {"MaxSeqLenKv", [](SdpaAttributesT& a, GraphT&) { a.max_seq_len_kv = 256; }},
-        {"ImplementationComposite",
-         [](SdpaAttributesT& a, GraphT&) {
-             a.implementation = AttentionImplementation::COMPOSITE;
-         }},
-        {"ImplementationUnified",
-         [](SdpaAttributesT& a, GraphT&) { a.implementation = AttentionImplementation::UNIFIED; }}};
+    return {"SeedAndOffsetAtZeroDropout", [](SdpaAttributesT& a, GraphT& g) {
+                a.dropout_probability = 0.f;
+                a.seed_tensor_uid = appendIndexTensor(g, "seed");
+                a.offset_tensor_uid = appendIndexTensor(g, "offset");
+            }};
+}
+
+inline std::vector<SdpaFwdUnservedAttributeCase> commonUnservedFwdAttributeCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
+    using hipdnn_test_sdk::utilities::sdpa::detail::appendIndexTensor;
+
+    return {{"DropoutMaskTensor",
+             [](SdpaAttributesT& a, GraphT& g) {
+                 a.dropout_mask_tensor_uid = appendIndexTensor(g, "dropout_mask");
+             }},
+            {"DropoutScaleTensor",
+             [](SdpaAttributesT& a, GraphT& g) {
+                 a.dropout_scale_tensor_uid = appendIndexTensor(g, "dropout_scale");
+             }},
+            {"RngDumpTensor",
+             [](SdpaAttributesT& a, GraphT& g) {
+                 a.rng_dump_tensor_uid = appendIndexTensor(g, "rng_dump");
+             }},
+            {"BlockMaskTensor",
+             [](SdpaAttributesT& a, GraphT& g) {
+                 a.block_mask_tensor_uid = appendIndexTensor(g, "block_mask");
+             }},
+            {"MaxTensor",
+             [](SdpaAttributesT& a, GraphT& g) { a.max_tensor_uid = appendIndexTensor(g, "max"); }},
+            {"SumExpTensor",
+             [](SdpaAttributesT& a, GraphT& g) {
+                 a.sum_exp_tensor_uid = appendIndexTensor(g, "sum_exp");
+             }},
+            {"MaxSeqLenKv", [](SdpaAttributesT& a, GraphT&) { a.max_seq_len_kv = 256; }}};
 }
 
 } // namespace asm_sdpa_engine
