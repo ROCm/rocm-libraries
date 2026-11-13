@@ -714,7 +714,7 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
         }
         catch(...)
         {
-            // non-numeric suffix: keep split_k = 1
+            split_k = 1; // non-numeric suffix: fall back to the default
         }
         return {kid.substr(0, plus), split_k};
     };
