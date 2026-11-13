@@ -76,7 +76,7 @@ TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();
     // Any valid graph — tests exercise the API, not a specific operation type
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -153,7 +153,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullSizeParam)
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -196,7 +196,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
 
 TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProperties)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     // Deserialize, set handle, finalize
@@ -245,7 +245,7 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuffer)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -282,7 +282,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuffer)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -328,7 +328,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     // Deserialize into a backend descriptor
@@ -401,7 +401,7 @@ namespace
 flatbuffers::DetachedBuffer
     serializeReductionGraphWithVersion(uint32_t major, uint32_t minor, uint32_t patch)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
@@ -419,7 +419,7 @@ flatbuffers::DetachedBuffer
 // left unstamped (null), simulating a writer that never populated the field.
 flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
