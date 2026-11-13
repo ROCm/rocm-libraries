@@ -9,8 +9,8 @@ namespace TensileLite
     // Contractions.py writes these values from the solution's MXScaleFormat.
     // HostPreSwizzle reads scales the host has already swizzled. NoSwizzle and
     // InMemorySwizzle read the scale tensor as the caller packs it.
-    // HostPreSwizzle128x4 reads scales the host has shuffled in tiles of 128 rows
-    // by 4 K blocks. Append only.
+    // HostPreSwizzle128x4 reads scales the host shuffled in 128-row by 4-K-block
+    // tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT). Append only.
     enum class MXScaleFormat : int
     {
         NoSwizzle           = 0,

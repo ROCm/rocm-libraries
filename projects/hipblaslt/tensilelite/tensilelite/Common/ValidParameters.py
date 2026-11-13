@@ -1358,7 +1358,8 @@ validParameters = { # we need to make sure this matches develop
     #   "InMemorySwizzle": scales swizzled in device memory by TDM;
     #                      requires MXLoadInst="TDM".
     #   "HostPreSwizzle128x4": scales pre-shuffled on the host in 128-row by 4-K-block
-    #                      tiles; handwritten gfx950 custom kernels only.
+    #                      tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+    #                      handwritten gfx950 custom kernels only.
     # Internal sentinel (do NOT use in yamls):
     #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
     #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
