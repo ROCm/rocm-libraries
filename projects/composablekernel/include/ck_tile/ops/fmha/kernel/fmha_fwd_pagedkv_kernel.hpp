@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/tdm_page_tracker.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 
 #include <string>
@@ -25,33 +26,13 @@ namespace ck_tile {
 
 namespace detail {
 
-// Nested in its own sub-namespace (rather than directly in ck_tile::detail)
-// because fmha_fwd_kernel.hpp (the dense kernel) is frequently included in
-// the same translation unit as this file (both are pulled in by
-// ops/fmha.hpp) and already defines equally-named, equally-purposed traits
-// directly in ck_tile::detail -- colliding with those would be an ODR
-// violation, not just a style clash. The two copies are intentionally
-// independent: this one's "not detected" fallback is plain false, since
-// (unlike the dense kernel) this file never had a pre-opt-in-marker pipeline
-// to special-case by name.
+// kUsesTdmAffineDramPath is detected with the shared uses_tdm_affine_dram_path_v
+// (fmha_fwd_kernel_path_markers.hpp). The fixed segmented LDS arena marker has no
+// shared detector; this one is kept in its own sub-namespace.
 namespace pagedkv_kernel {
 
 template <typename T>
-using has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
-
-template <typename T>
 using has_fixed_segmented_lds_arena = decltype(T::kUsesFixedSegmentedLdsArena);
-
-// qr_pagedkv_tdm_sched is the only pipeline usable from this kernel that sets
-// these flags; everything else (the navigator-based paged pipelines this
-// kernel was originally written for) falls through to false.
-template <typename T>
-static inline constexpr bool uses_tdm_affine_dram_path_v = []() {
-    if constexpr(is_detected<has_tdm_affine_dram_path, T>::value)
-        return static_cast<bool>(T::kUsesTdmAffineDramPath);
-    else
-        return false;
-}();
 
 template <typename T>
 static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
@@ -101,7 +82,7 @@ struct FmhaFwdPagedKVKernel
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
     static constexpr bool kUsesTdmAffineDramPath =
-        detail::pagedkv_kernel::uses_tdm_affine_dram_path_v<FmhaPipeline>;
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
     static constexpr bool kUsesFixedSegmentedLdsArena =
         detail::pagedkv_kernel::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
     // O is staged in the K0 LDS slot and copied out with async LDS-to-global stores when the
