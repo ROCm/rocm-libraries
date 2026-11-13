@@ -159,7 +159,7 @@ KnobSetting kernelFamilyKnob(int64_t family)
 // The kernel the last non-benchmarked plan build selected, or empty.
 std::string selectedKernel(const LogRecorderBase& recorder)
 {
-    const std::string marker = "' selected kernel ";
+    const std::string marker = detail::SELECTED_KERNEL_LOG;
     std::string selected;
     for(const auto& log : recorder.getRecordedLogs())
     {
@@ -281,30 +281,9 @@ protected:
         EXPECT_TRUE(validator->allClose(cpu.getTensor(3), gpu.getTensor(3)));
     }
 
-    // The engine keys its shard by its full identity (revision, UHD id, model hash), which
-    // only the loaded descriptor set knows. Each test owns a fresh cache, so the engine's
-    // one shard for this arch is found on disk instead:
-    // <engine>/<uhd id>/<revision>-<model hash>/<arch>/winners.jsonl.
     std::filesystem::path winnerShardPath() const
     {
-        const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
-                               / std::string(ingestor::winnerCacheVersion())
-                               / hipdnn_data_sdk::utilities::sanitizeForPath(engineName());
-        const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(_arch));
-        std::vector<std::filesystem::path> shards;
-        std::error_code error;
-        for(auto it = std::filesystem::recursive_directory_iterator(engineDir, error);
-            !error && it != std::filesystem::recursive_directory_iterator();
-            it.increment(error))
-        {
-            const auto& path = it->path();
-            if(path.filename() == "winners.jsonl" && path.parent_path().filename() == arch)
-            {
-                shards.push_back(path);
-            }
-        }
-        EXPECT_LE(shards.size(), 1U) << "more than one winner shard under " << engineDir;
-        return shards.empty() ? std::filesystem::path{} : shards.front();
+        return integration::winnerShardPath(engineName(), _arch);
     }
 
     std::optional<ingestor::WinnerRecord> persistedRanking() const
