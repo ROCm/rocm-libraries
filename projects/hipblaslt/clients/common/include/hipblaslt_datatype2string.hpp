@@ -93,6 +93,27 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     }
 }
 
+// Short MX scale element-format token for test names ("UE8M0"/"UE4M3"/"UE5M3").
+// Pairs with blockSize() to build a self-describing "_SAMX_<block>_<fmt>" test-name suffix.
+inline const char* mxScaleFormatName(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_16_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return "UE8M0";
+    case hipblaslt_scaling_format::Block_32_UE4M3:
+    case hipblaslt_scaling_format::Block_16_UE4M3:
+        return "UE4M3";
+    case hipblaslt_scaling_format::Block_32_UE5M3:
+    case hipblaslt_scaling_format::Block_16_UE5M3:
+        return "UE5M3";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 // w4a16 group scaling. Not part of isBlockScaling(), which selects the MX generator and layouts.
 
 // K-group size of a w4a16 scale mode, or 0 when `s` is not one.

@@ -869,10 +869,10 @@ namespace
                     name << "_SA";
                 else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                     name << "_SAV";
-                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0)
-                    name << "_SAMX_32_UE8M0";
                 else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SAMX_32_UE8M0_32_8";
+                else if(isBlockScaling(arg.scaleA))
+                    name << "_SAMX_" << blockSize(arg.scaleA) << "_" << mxScaleFormatName(arg.scaleA);
                 else if(isW4A16Scaling(arg.scaleA))
                     name << "_SAG" << w4a16GroupSize(arg.scaleA)
                          << (isW4A16ZeroPoint(arg.scaleA) ? "_ZP" : "")
@@ -882,10 +882,10 @@ namespace
                     name << "_SB";
                 else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                     name << "_SBV";
-                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0)
-                    name << "_SBMX_32_UE8M0";
                 else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SBMX_32_UE8M0_32_8";
+                else if(isBlockScaling(arg.scaleB))
+                    name << "_SBMX_" << blockSize(arg.scaleB) << "_" << mxScaleFormatName(arg.scaleB);
 
                 if(arg.scaleC)
                     name << "_SC";
