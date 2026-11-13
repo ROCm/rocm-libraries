@@ -112,7 +112,7 @@ std::vector<std::filesystem::path> packedArchShards()
     {                                                                                     \
         GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                  \
                      << " -- the packaging rule did not run. Configure with "             \
-                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a HIP compiler, "        \
+                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a HIP compiler, "         \
                         "then build the descriptor staging targets.";                     \
     }                                                                                     \
     static_assert(true, "swallow the trailing semicolon")

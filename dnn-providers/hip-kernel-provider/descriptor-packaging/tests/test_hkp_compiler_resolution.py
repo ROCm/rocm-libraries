@@ -103,7 +103,9 @@ class TestHipPathDerivation:
             CMAKE_CXX_COMPILER="/usr/bin/clang++",
             hip_DIR=str(hip_dir),
         )
-        assert hip_path == str(fake_prefix)
+        # CMake normalises paths to forward slashes; compare via Path so
+        # the assertion holds on Windows where str(Path) uses backslashes.
+        assert Path(hip_path) == fake_prefix
 
     def test_no_hip_dir_gives_empty_path(self, cmake, tmp_path):
         _, hip_path, _, _ = _resolve(
@@ -123,7 +125,7 @@ class TestDeviceLibPathDerivation:
         _, _, device_lib_path, _ = _resolve(
             cmake, tmp_path, CMAKE_CXX_COMPILER=str(compiler)
         )
-        assert device_lib_path == str(bitcode)
+        assert Path(device_lib_path) == bitcode
 
     def test_no_sibling_gives_empty_path(self, cmake, tmp_path):
         compiler = tmp_path / "prefix" / "bin" / "clang++"
