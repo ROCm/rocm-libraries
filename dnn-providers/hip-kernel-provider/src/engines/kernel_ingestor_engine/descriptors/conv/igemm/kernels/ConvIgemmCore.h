@@ -2393,7 +2393,11 @@ __device__ void k1ConvMma(const K1Args& a)
 
 // ---------------------------------------------------------------------------------------------
 // FMA kernel: every arch and dtype (fp32 on RDNA, everything on gfx906). k-major LDS tiles; each
-// thread computes TM x TN outputs in runs of 4 rows and 4 columns.
+// thread computes TM x TN outputs in runs of 4 rows and 4 columns. fp16 multiplies pairs of k on
+// v_dot2_f32_f16 (CONV_IGEMM_FMA_DOT2, on by default; 0 restores one fma a product).
+#ifndef CONV_IGEMM_FMA_DOT2
+#define CONV_IGEMM_FMA_DOT2 1
+#endif
 
 template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
 __device__ void k1ConvFma(const K1Args& a)
@@ -2450,20 +2454,96 @@ __device__ void k1ConvFma(const K1Args& a)
         tiles.storeColumns(As, Bs, LDA, LDB);
         __syncthreads();
         tiles.load();
+#if CONV_IGEMM_FMA_DOT2
+        if constexpr(__is_same(T, k1_half) && BK % 2 == 0)
+        {
+            // fp16: pairs of k on v_dot2_f32_f16 (two exact fp16 products added to the fp32
+            // sum), half the VALU work of one fma_mix a product. A pair is the 16-bit elements
+            // of rows kk and kk + 1 of the k-major tile, packed into one dword.
+            typedef _Float16 K1H2 __attribute__((ext_vector_type(2)));
+#pragma unroll 2
+            for(int kk = 0; kk < BK; kk += 2)
+            {
+                unsigned ap[TM], bp[TN];
+                // Runs of 4 elements are 8-byte aligned (the tiles' leading dimensions are
+                // multiples of 8 elements): one 8-byte read a row, the pairs built by a byte
+                // permute (row kk's element in the low half, row kk + 1's in the high).
+                typedef unsigned K1U2 __attribute__((ext_vector_type(2)));
+#pragma unroll
+                for(int q = 0; q < TM / 4; ++q)
+                {
+                    const int m = (q * TY + ty) * 4;
+                    const K1U2 lo = *reinterpret_cast<const K1U2*>(As + kk * LDA + m);
+                    const K1U2 hi = *reinterpret_cast<const K1U2*>(As + (kk + 1) * LDA + m);
+                    ap[q * 4 + 0] = __builtin_amdgcn_perm(hi[0], lo[0], 0x05040100u);
+                    ap[q * 4 + 1] = __builtin_amdgcn_perm(hi[0], lo[0], 0x07060302u);
+                    ap[q * 4 + 2] = __builtin_amdgcn_perm(hi[1], lo[1], 0x05040100u);
+                    ap[q * 4 + 3] = __builtin_amdgcn_perm(hi[1], lo[1], 0x07060302u);
+                }
+#pragma unroll
+                for(int q = 0; q < TN / 4; ++q)
+                {
+                    const int nn = (q * TX + tx) * 4;
+                    const K1U2 lo = *reinterpret_cast<const K1U2*>(Bs + kk * LDB + nn);
+                    const K1U2 hi = *reinterpret_cast<const K1U2*>(Bs + (kk + 1) * LDB + nn);
+                    bp[q * 4 + 0] = __builtin_amdgcn_perm(hi[0], lo[0], 0x05040100u);
+                    bp[q * 4 + 1] = __builtin_amdgcn_perm(hi[0], lo[0], 0x07060302u);
+                    bp[q * 4 + 2] = __builtin_amdgcn_perm(hi[1], lo[1], 0x05040100u);
+                    bp[q * 4 + 3] = __builtin_amdgcn_perm(hi[1], lo[1], 0x07060302u);
+                }
+#pragma unroll
+                for(int i = 0; i < TM; ++i)
+#pragma unroll
+                    for(int j = 0; j < TN; ++j)
+                        acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(K1H2, ap[i]),
+                                                           __builtin_bit_cast(K1H2, bp[j]),
+                                                           acc[i][j],
+                                                           false);
+            }
+            continue;
+        }
+#endif
 #pragma unroll 2
         for(int kk = 0; kk < BK; ++kk)
         {
             float av[TM], bv[TN];
+            if constexpr(sizeof(T) == 2)
+            {
+                // 16-bit runs of 4: one 8-byte read each (the leading dimensions are multiples
+                // of 8 elements), not four 2-byte reads.
+                typedef unsigned short K1U4s __attribute__((ext_vector_type(4)));
 #pragma unroll
-            for(int q = 0; q < TM / 4; ++q)
+                for(int q = 0; q < TM / 4; ++q)
+                {
+                    const K1U4s v
+                        = *reinterpret_cast<const K1U4s*>(As + kk * LDA + (q * TY + ty) * 4);
 #pragma unroll
-                for(int e = 0; e < 4; ++e)
-                    av[q * 4 + e] = K1Elem<T>::load(As[kk * LDA + (q * TY + ty) * 4 + e]);
+                    for(int e = 0; e < 4; ++e)
+                        av[q * 4 + e] = K1Elem<T>::load(__builtin_bit_cast(T, v[e]));
+                }
 #pragma unroll
-            for(int q = 0; q < TN / 4; ++q)
+                for(int q = 0; q < TN / 4; ++q)
+                {
+                    const K1U4s v
+                        = *reinterpret_cast<const K1U4s*>(Bs + kk * LDB + (q * TX + tx) * 4);
 #pragma unroll
-                for(int e = 0; e < 4; ++e)
-                    bv[q * 4 + e] = K1Elem<T>::load(Bs[kk * LDB + (q * TX + tx) * 4 + e]);
+                    for(int e = 0; e < 4; ++e)
+                        bv[q * 4 + e] = K1Elem<T>::load(__builtin_bit_cast(T, v[e]));
+                }
+            }
+            else
+            {
+#pragma unroll
+                for(int q = 0; q < TM / 4; ++q)
+#pragma unroll
+                    for(int e = 0; e < 4; ++e)
+                        av[q * 4 + e] = K1Elem<T>::load(As[kk * LDA + (q * TY + ty) * 4 + e]);
+#pragma unroll
+                for(int q = 0; q < TN / 4; ++q)
+#pragma unroll
+                    for(int e = 0; e < 4; ++e)
+                        bv[q * 4 + e] = K1Elem<T>::load(Bs[kk * LDB + (q * TX + tx) * 4 + e]);
+            }
 #pragma unroll
             for(int i = 0; i < TM; ++i)
 #pragma unroll
