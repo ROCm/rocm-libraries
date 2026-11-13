@@ -492,6 +492,20 @@ struct DeviceGemmDl : public DeviceGemm<ALayout,
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Descriptor construction divides K by K1. Do not admit a truncated raw K
+        // on gfx90c when constructor assertions are disabled in release builds.
+        if(ck::get_device_name() == "gfx90c" && arg.K_raw_ % K1 != 0)
+        {
+            return false;
+        }
+
+        // Padded descriptors validate only the first element of each C vector.
+        // Keep every gfx90c store within the unpadded row, including with Col B.
+        if(ck::get_device_name() == "gfx90c" && arg.N_raw_ % CThreadTransferDstScalarPerVector != 0)
+        {
+            return false;
+        }
+
         // Make sure that the M, N, K dimensions before padding are divisible by respective vector
         // lengths.
         if constexpr(is_same<tensor_layout::gemm::RowMajor, ALayout>::value)
@@ -536,13 +550,23 @@ struct DeviceGemmDl : public DeviceGemm<ALayout,
             }
         }
 
-        // gfx90c supports the vector-based FP32 path with column-major A and row-major B/C.
-        constexpr bool IsGfx90cConfiguration =
+        // Keep FP32 input layouts separate from the narrower FP16 storage path.
+        constexpr bool IsGfx90cFp32Configuration =
             is_same_v<ADataType, float> && is_same_v<BDataType, float> &&
             is_same_v<CDataType, float> && is_same_v<AccDataType, float> &&
+            (is_same_v<ALayout, tensor_layout::gemm::RowMajor> ||
+             is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>) &&
+            (is_same_v<BLayout, tensor_layout::gemm::RowMajor> ||
+             is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>) &&
+            is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
+        constexpr bool IsGfx90cFp16Configuration =
+            is_same_v<ADataType, half_t> && is_same_v<BDataType, half_t> &&
+            is_same_v<CDataType, half_t> && is_same_v<AccDataType, float> &&
             is_same_v<ALayout, tensor_layout::gemm::ColumnMajor> &&
             is_same_v<BLayout, tensor_layout::gemm::RowMajor> &&
             is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
+        constexpr bool IsGfx90cConfiguration =
+            IsGfx90cFp32Configuration || IsGfx90cFp16Configuration;
 
         if((IsGfx90cConfiguration && ck::get_device_name() == "gfx90c") ||
            ck::get_device_name() == "gfx906" || ck::is_gfx103_supported() ||
