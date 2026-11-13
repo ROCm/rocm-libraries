@@ -397,9 +397,7 @@ class TestOverrideExecution:
         handle = hipdnn.create_handle()
         result = graph.build(handle)
         if result.is_bad():
-            pytest.skip(
-                f"No SDPA engine with override support: {result.get_message()}"
-            )
+            pytest.skip(f"No SDPA engine with override support: {result.get_message()}")
 
         # Override with halved sequence lengths
         q_dim = q.get_dim()  # [2, 8, 16, 64]
@@ -418,23 +416,13 @@ class TestOverrideExecution:
 
         override_uids = [q.get_uid(), k.get_uid(), v.get_uid(), o.get_uid()]
         override_shapes = [q_ovr, k_ovr, v_ovr, o_dim]
-        override_strides = [
-            _row_major_strides(s) for s in override_shapes
-        ]
+        override_strides = [_row_major_strides(s) for s in override_shapes]
 
         # Allocate device buffers for the original (max) dimensions
-        q_buf = hipdnn.DeviceBuffer(
-            int(np.prod(q_dim)) * np.dtype(np.float32).itemsize
-        )
-        k_buf = hipdnn.DeviceBuffer(
-            int(np.prod(k_dim)) * np.dtype(np.float32).itemsize
-        )
-        v_buf = hipdnn.DeviceBuffer(
-            int(np.prod(v_dim)) * np.dtype(np.float32).itemsize
-        )
-        o_buf = hipdnn.DeviceBuffer(
-            int(np.prod(q_dim)) * np.dtype(np.float32).itemsize
-        )
+        q_buf = hipdnn.DeviceBuffer(int(np.prod(q_dim)) * np.dtype(np.float32).itemsize)
+        k_buf = hipdnn.DeviceBuffer(int(np.prod(k_dim)) * np.dtype(np.float32).itemsize)
+        v_buf = hipdnn.DeviceBuffer(int(np.prod(v_dim)) * np.dtype(np.float32).itemsize)
+        o_buf = hipdnn.DeviceBuffer(int(np.prod(q_dim)) * np.dtype(np.float32).itemsize)
         stats_buf = hipdnn.DeviceBuffer(
             int(np.prod(stats.get_dim())) * np.dtype(np.float32).itemsize
         )
