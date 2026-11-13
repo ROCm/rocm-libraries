@@ -56,4 +56,6 @@ requests the modes as the ``SelectionHeuristic::ModeA`` /
 ``SelectionHeuristic::ModeB`` entries of the ordered policy list, bracketed by
 ``SelectionHeuristic::Config`` and ``SelectionHeuristic::StaticOrdering``, so
 model-free selection still runs when a prediction policy declines, and sets the
-metric from ``Graph::set_ranking_metric()``.
+metric from ``Graph::set_ranking_metric()``. A descriptor with no policy order uses
+the built-in default, which is that same order for mode A, so default engine selection
+ranks by engine predictions too.

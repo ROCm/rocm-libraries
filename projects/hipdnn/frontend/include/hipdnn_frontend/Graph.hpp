@@ -6854,8 +6854,9 @@ public:
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
      * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
-     * Engine order changes only under HeuristicMode A/B, where engines with no model for the
-     * metric rank last; the default FALLBACK mode (Config, then StaticOrdering) ignores it.
+     * Engine order follows it under every heuristic mode while an applicable engine has a
+     * model for the metric; engines with none rank last. HeuristicMode A and the default
+     * FALLBACK mode rank by ModeA (Config, ModeA, then StaticOrdering), B by ModeB.
      * An engine that ranks its own kernels ranks them by it in every mode. Applies to later
      * heuristic queries and explicit-engine configurations; HIPDNN_HEUR_RANKING_METRIC
      * overrides it for heuristic selection.

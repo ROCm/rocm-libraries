@@ -157,7 +157,7 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
-| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. |
+| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::ModeA, SelectionHeuristic::StaticOrdering]`: `ModeA` ranks engines by their engine-level (L1) prediction and declines, leaving `StaticOrdering` to decide, when no applicable engine has one. |
 | `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
 
 This variable has the **highest priority**: it overrides both the descriptor attribute and the built-in default.
