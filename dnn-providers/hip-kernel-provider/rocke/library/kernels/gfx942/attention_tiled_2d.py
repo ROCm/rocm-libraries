@@ -2713,22 +2713,27 @@ def build_unified_attention_2d_tiled(
                 ),
             )
 
-    # i64 K/V addressing: load the tile's page ids once and build one buffer
-    # resource per page. A resource per copy would reload its page id and wait
-    # on it, and since vmcnt drains in order, those waits also drain the copies
-    # issued before it. The non-fast K/V loaders below are i32-only otherwise.
+    # A tile of whole pages whose copies each stay in one page: the K/V copies
+    # read through one buffer resource per page, under i32 and i64 addressing
+    # alike, and each page id is read once per tile rather than once per copy.
+    # A page id read just before the copies waits on vmcnt, which drains in
+    # order, so it would also drain the copies issued before it.
+    KV_PAGES = (
+        not FAST_PAGED_KV_DESC and T % BS == 0 and (BS * HD) % KV_HALVES_PER_CALL == 0
+    )
+    # i64 K/V addressing has no whole-cache loader: every K/V loader reads
+    # through per-page bases.
     PAGE_RSRC_I64 = I64_KV_ADDR and not FAST_PAGED_KV_DESC
     if PAGE_RSRC_I64:
         # The spec and supports_tiled_2d guarantee both: tile_size is a multiple
         # of block_size, and a copy (at most 8 warps x 64 lanes x 2 halves) never
         # exceeds a page (at least 16 x 64 halves), all powers of two. Raised,
         # not asserted, so python -O cannot emit copies that straddle pages.
-        if T % BS != 0 or (BS * HD) % KV_HALVES_PER_CALL != 0:
+        if not KV_PAGES:
             raise ValueError(
                 f"i64 K/V copies need whole pages per tile and per copy "
                 f"(T={T}, BS={BS}, HD={HD}, halves per copy={KV_HALVES_PER_CALL})"
             )
-        CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
 
         def _tile_page_ptrs(src: Value, kv_tile_idx: Value) -> list[Value]:
             """Base pointers of the tile's pages, from one page-id load each."""
@@ -2761,24 +2766,129 @@ def build_unified_attention_2d_tiled(
                 b.mul(dim, b.const_i32(KV_BYTES)),
             )
 
-        def _tile_pages(
-            src: Value, kv_tile_idx: Value
-        ) -> tuple[list[Value], list[Value], Value]:
-            """Base pointers and buffer resources of the tile's pages, and the
-            kv head's byte offset within a page."""
-            ptrs = _tile_page_ptrs(src, kv_tile_idx)
-            rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
-            return ptrs, rsrcs, _kv_head_page_b()
-
-        def _page_voff(call: int, kv_head_b: Value) -> Value:
-            # Byte offset of this lane's halves within the call's page.
-            half = b.add(
-                b.const_i32((call % CALLS_PER_PAGE) * KV_HALVES_PER_CALL),
-                lane_half_base,
+    # The bf16/fp16 async K and V loaders take page copies; the register V
+    # loaders, the K slice ring and fp8 keep their own addressing.
+    K_PAGE_COPIES = KV_PAGES and not (
+        K_SLICED_ACTIVE or K_HBM_DIRECT or K_FP8_MFMA or KV_FP8
+    )
+    V_PAGE_COPIES = KV_PAGES and not (
+        V_HBM_DIRECT or PV_FP8_MFMA or KV_FP8 or TRANSPOSED_V
+    )
+    PAGE_COPIES = K_PAGE_COPIES or V_PAGE_COPIES
+    # The loop carries the page ids of the current and the next tile and reads
+    # those of the tile after next one iteration ahead, right after the
+    # iteration-start drain, so no copy waits on a page-id load. Grouped KV2
+    # loads two tiles ahead and reads in place, as do tiles of more than 16
+    # pages, which the C++ twin's carry arrays bound.
+    PAGE_PREFETCH = PAGE_COPIES and not GROUPED_KV2 and N_BLOCKS_PER_TILE <= 16
+    # Page ids already read for a tile, by the tile index value.
+    tile_pages = {}
+    if PAGE_COPIES:
+        # Where a copy's own part of the offset goes. Added to the lane VGPR it
+        # measured fastest for whole-row copies; for copies that cover part of
+        # a row (head size 256 with one warp) the scalar offset was faster.
+        COPY_PART_SOFF = KV_HALVES_PER_CALL < HD
+        CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
+        # A copy covers whole rows or an aligned part of one row when one of
+        # the copy and the row divides the other. Its offset within the page
+        # then splits into the lane's part (one VGPR, built once here) and the
+        # copy's part, the same for every lane. Otherwise (head size 192 with
+        # one warp) each copy builds its whole offset within the page.
+        SPLIT_COPY = KV_HALVES_PER_CALL % HD == 0 or HD % KV_HALVES_PER_CALL == 0
+        page_kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+        if SPLIT_COPY:
+            lane_within_b = b.add(
+                b.add(
+                    b.mul(b.div(lane_half_base, b.const_i32(HD)), kv_stride_tok_b),
+                    page_kv_head_b,
+                ),
+                b.mul(b.mod(lane_half_base, b.const_i32(HD)), b.const_i32(KV_BYTES)),
             )
-            token = b.div(half, b.const_i32(HD))
-            dim = b.mod(half, b.const_i32(HD))
-            return _kv_page_off(token, dim, kv_head_b)
+
+        def _copy_part(slot: int) -> Optional[Value]:
+            """Byte offset of copy ``slot`` of a page from the page's first
+            row, the same for every lane; None when it is zero."""
+            tok, dim = divmod(slot * KV_HALVES_PER_CALL, HD)
+            part = None
+            if tok:
+                part = b.mul(kv_stride_tok_b, b.const_i32(tok))
+            if dim:
+                dim_b = b.const_i32(dim * KV_BYTES)
+                part = dim_b if part is None else b.add(part, dim_b)
+            return part
+
+        def _lane_copy_off(slot: int) -> Value:
+            """This lane's byte offset within the page for copy ``slot``, for
+            copies that do not split."""
+            half = b.add(b.const_i32(slot * KV_HALVES_PER_CALL), lane_half_base)
+            return b.add(
+                b.add(
+                    b.mul(b.div(half, b.const_i32(HD)), kv_stride_tok_b),
+                    page_kv_head_b,
+                ),
+                b.mul(b.mod(half, b.const_i32(HD)), b.const_i32(KV_BYTES)),
+            )
+
+    def _tile_page_ids(kv_tile_idx: Value) -> list[Value]:
+        """The tile's page ids: one guarded block-table read each,
+        wave-uniform."""
+        first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
+        pages = []
+        for page in range(N_BLOCKS_PER_TILE):
+            idx = b.add(first, b.const_i32(page))
+            physical = b.masked_global_load(
+                block_tables,
+                idx,
+                b.cmp_lt(idx, block_table_max_idx),
+                b.const_i32(0),
+                dtype=I32,
+                align=4,
+            )
+            pages.append(b.to_sgpr_u32(physical))
+        return pages
+
+    if PAGE_COPIES:
+
+        def _tile_page_bases(src: Value, kv_tile_idx: Value, ptrs: bool) -> list:
+            """Per page of the tile, its base pointer when ``ptrs`` (for
+            global_load_lds), else a buffer resource covering that page. The
+            page ids come from the loop carry when it holds this tile."""
+            pages = tile_pages.get(id(kv_tile_idx))
+            if pages is None:
+                pages = _tile_page_ids(kv_tile_idx)
+            bases = []
+            for page in pages:
+                ptr = b.global_ptr_add(
+                    src, b.mul(b.zext(page, I64), b.zext(kv_stride_blk_b, I64))
+                )
+                bases.append(ptr if ptrs else b.buffer_rsrc(ptr, kv_block_bytes_c))
+            return bases
+
+        def _page_copy(rsrcs: list, call: int):
+            """(rsrc, voffset, soffset) of one async K/V copy."""
+            slot = call % CALLS_PER_PAGE
+            if SPLIT_COPY:
+                voff, part = lane_within_b, _copy_part(slot)
+                if not COPY_PART_SOFF and part is not None:
+                    voff, part = b.add(voff, part), None
+            else:
+                voff, part = _lane_copy_off(slot), None
+            soff = zero_soff if part is None else part
+            return rsrcs[call // CALLS_PER_PAGE], voff, soff
+
+        def _page_copy_ptr(ptrs: list, call: int):
+            """(pointer, voffset) of one global_load_lds K copy; the copy's
+            part of the offset goes into the scalar pointer."""
+            ptr = ptrs[call // CALLS_PER_PAGE]
+            slot = call % CALLS_PER_PAGE
+            if not SPLIT_COPY:
+                return ptr, _lane_copy_off(slot)
+            part = _copy_part(slot)
+            if part is None:
+                return ptr, lane_within_b
+            if not COPY_PART_SOFF:
+                return ptr, b.add(lane_within_b, part)
+            return b.global_ptr_add(ptr, b.zext(part, I64)), lane_within_b
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
@@ -2801,20 +2911,21 @@ def build_unified_attention_2d_tiled(
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
-        if PAGE_RSRC_I64:
-            page_ptrs, page_rsrcs, kv_head_b = _tile_pages(key, kv_tile_idx)
+        if K_PAGE_COPIES:
+            k_bases = _tile_page_bases(key, kv_tile_idx, USE_GLOBAL_LOAD_LDS_K)
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
             k_ptr = key
+            k_soff = zero_soff
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:  # I64_KV_ADDR: per-block 64-bit base
                     k_ptr = b.global_ptr_add(key, base_i64)
                     k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
-            elif PAGE_RSRC_I64:
-                k_ptr = page_ptrs[call // CALLS_PER_PAGE]
-                k_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
-                voff = _page_voff(call, kv_head_b)
+            elif K_PAGE_COPIES and USE_GLOBAL_LOAD_LDS_K:
+                k_ptr, voff = _page_copy_ptr(k_bases, call)
+            elif K_PAGE_COPIES:
+                k_rsrc, voff, k_soff = _page_copy(k_bases, call)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
@@ -2839,7 +2950,7 @@ def build_unified_attention_2d_tiled(
                     k_rsrc,
                     k_dst,
                     voff,
-                    zero_soff,
+                    k_soff,
                     ASYNC_LDS_MAX_DWORDS,
                     coherency=kv_cache_aux,
                 )
@@ -2936,19 +3047,19 @@ def build_unified_attention_2d_tiled(
         V_wave_base = b.smem_ptr_add(V_lds_addr, v_wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
-        if PAGE_RSRC_I64:
-            _, page_rsrcs, kv_head_b = _tile_pages(value, kv_tile_idx)
+        if V_PAGE_COPIES:
+            v_bases = _tile_page_bases(value, kv_tile_idx, False)
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
+            v_soff = zero_soff
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:
                     v_rsrc = b.buffer_rsrc(
                         b.global_ptr_add(value, base_i64), kv_block_bytes_c
                     )
-            elif PAGE_RSRC_I64:
-                v_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
-                voff = _page_voff(call, kv_head_b)
+            elif V_PAGE_COPIES:
+                v_rsrc, voff, v_soff = _page_copy(v_bases, call)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
@@ -2969,7 +3080,7 @@ def build_unified_attention_2d_tiled(
                 v_rsrc,
                 v_dst,
                 voff,
-                zero_soff,
+                v_soff,
                 ASYNC_LDS_MAX_DWORDS,
                 coherency=kv_cache_aux,
             )
@@ -4003,6 +4114,16 @@ def build_unified_attention_2d_tiled(
     # the next thing scheduled, so this ordering is naturally
     # correct in the IR.
 
+    if PAGE_PREFETCH:
+        # Page ids of the first tile and of the one after it, carried into the
+        # loop; iteration i then reads the ids of tile i + 2.
+        start_next_raw = b.add(tile_start, b.const_i32(1))
+        start_next = b.select(
+            b.cmp_lt(start_next_raw, tile_end), start_next_raw, tile_start
+        )
+        start_pages = _tile_page_ids(tile_start)
+        start_next_pages = _tile_page_ids(start_next)
+        tile_pages[id(tile_start)] = start_pages
     # Prefetch tile_start's K into buffer 0 BEFORE the loop.
     _issue_k(tile_start, b.const_i32(0))
 
@@ -4021,6 +4142,11 @@ def build_unified_attention_2d_tiled(
     #   6. Yield ``(m, l, acc, nxt_buf)`` so the next iter consumes nxt_buf.
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
+    if PAGE_PREFETCH:
+        for j in range(N_BLOCKS_PER_TILE):
+            iter_args.append((f"page_cur{j}", start_pages[j]))
+        for j in range(N_BLOCKS_PER_TILE):
+            iter_args.append((f"page_next{j}", start_next_pages[j]))
 
     # ---------------- LICM hoist: per-reg invariants ----------------
     # ``qp_r``, ``qh_r``, ``row_ok``, ``causal_lim``, and ``alibi_per_row``
@@ -4144,6 +4270,13 @@ def build_unified_attention_2d_tiled(
             return acc_vals[n * ACC_M_ATOMS + atom]
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
+        if PAGE_PREFETCH:
+            pages_at = ml_count + ACC_N_TILES * ACC_M_ATOMS + 1
+            cur_pages = list(carry[pages_at : pages_at + N_BLOCKS_PER_TILE])
+            next_pages = list(
+                carry[pages_at + N_BLOCKS_PER_TILE : pages_at + 2 * N_BLOCKS_PER_TILE]
+            )
+            tile_pages[id(kv_tile_iv)] = cur_pages
         # Single-buffered K: there is only slot 0, so the "next" buffer IS the
         # current one. (cur_buf is also pinned to 0 by the const-0 carry init +
         # the const-0 yield below.) Double-buffered K alternates 0<->1.
@@ -4207,11 +4340,22 @@ def build_unified_attention_2d_tiled(
             next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
         in_range_next = b.cmp_lt(next_tile_iv_raw, tile_end)
         safe_next_tile = b.select(in_range_next, next_tile_iv_raw, kv_tile_iv)
+        if PAGE_PREFETCH:
+            tile_pages[id(safe_next_tile)] = next_pages
 
         # Wait for current K. There should be no in-flight next-K work here;
         # the previous iteration waited all async loads before PV.
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
+        if PAGE_PREFETCH:
+            # Read the page ids of the tile after next now, right after the
+            # iteration-start drain, so they arrive long before next iteration's
+            # copies need them. That tile is next iteration's safe_next_tile.
+            after_next_raw = b.add(kv_tile_iv, b.const_i32(2))
+            after_next = b.select(
+                b.cmp_lt(after_next_raw, tile_end), after_next_raw, next_tile_iv_raw
+            )
+            after_next_pages = _tile_page_ids(after_next)
         if EARLY_V_SCHEDULE:
             # V_lds is single-buffered. The iter-start full drain guarantees
             # the previous PV's V reads retired, so current V can be issued
@@ -4708,18 +4852,29 @@ def build_unified_attention_2d_tiled(
                     S32_n[n] = acc32
         else:
             S_n = [[None] * QK_N_TILES for _ in range(M_ATOMS_PER_WARP)]
+
+            def _qk_b(n, k):
+                # 16x16x16 B (K^T) operand per lane: col = n*16 + lane%16,
+                # K = k*16 + lane_rg*4 + 0..3 (<4 x dtype>). K-step is 16 on
+                # gfx942 (no wide-K atom), so the per-lane column base is
+                # lane_rg*4 and each load is <4 x dtype>.
+                kc_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
+                k_row = b.add(b.const_i32(n * 16), lane_col)
+                return b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=4)
+
+            # Read every K operand of QK before the first MFMA. Interleaved, LLVM
+            # can schedule each read right before its MFMAs and wait on it alone
+            # (seen when the K copies' page ids are loop-carried), paying one LDS
+            # round trip per read instead of one for the batch.
+            qk_b_all = {
+                (n, k): _qk_b(n, k)
+                for n in range(QK_N_TILES)
+                for k in range(QK_K_ITERS)
+            }
             for n in range(QK_N_TILES):
                 acc_per_atom = [b.zero_vec_f32(4) for _ in range(M_ATOMS_PER_WARP)]
                 for k in range(QK_K_ITERS):
-                    # 16x16x16 B (K^T) operand per lane: col = n*16 + lane%16,
-                    # K = k*16 + lane_rg*4 + 0..3 (<4 x dtype>). K-step is 16 on
-                    # gfx942 (no wide-K atom), so the per-lane column base is
-                    # lane_rg*4 and each load is <4 x dtype>.
-                    kc_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
-                    k_row = b.add(b.const_i32(n * 16), lane_col)
-                    B_v = b.smem_load_vN(
-                        K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=4
-                    )
+                    B_v = qk_b_all[(n, k)]
                     for atom in range(M_ATOMS_PER_WARP):
                         acc_per_atom[atom] = _mfma_16x16x16(
                             b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
@@ -5557,6 +5712,9 @@ def build_unified_attention_2d_tiled(
             for atom in range(ACC_M_ATOMS):
                 yields.append(new_acc[n * ACC_M_ATOMS + atom])
         yields.append(cur_buf if GROUPED_KV2 else nxt_buf)
+        if PAGE_PREFETCH:
+            yields.extend(next_pages)
+            yields.extend(after_next_pages)
         b.scf_yield(*yields)
 
     # ---- drive the (one or two) KV-loop phases ----

@@ -417,7 +417,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     rocke_value_t* in_range_next = rocke_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
-    (void)safe_next_tile;
+    const bool page_prefetch = rocke_gfx942_attn2d_page_prefetch(ctx);
+    if(page_prefetch)
+        ctx->page_next_tile = safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket (filled by the narrow
      * path below; alpha/new_l/m_carry per softmax state slot, where m_carry is
@@ -452,6 +454,17 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     /* ---- wait for current K + LDS barrier (lines 3776-3777) ---- */
     rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
     rocke_b_sync(b);
+    if(page_prefetch)
+    {
+        /* Read the page ids of the tile after next right after the iteration-
+         * start drain; that tile is next iteration's safe_next_tile. */
+        rocke_value_t* c_two = rocke_b_const_i32(b, 2);
+        rocke_value_t* after_next_raw = rocke_b_add(b, ctx->kv_tile_iv, c_two);
+        rocke_value_t* in_range_after = rocke_b_cmp_lt(b, after_next_raw, ctx->tile_end);
+        rocke_value_t* after_next
+            = rocke_b_select(b, in_range_after, after_next_raw, next_tile_iv_raw);
+        rocke_gfx942_attn2d_tile_page_ids(ctx, after_next, ctx->page_after_next);
+    }
 
     /* EARLY_V_SCHEDULE / GROUPED_KV2 iter-start prefetch (Python 2566-2575).
      * EARLY_V: issue current V before QK. GROUPED_KV2: while QK0 reads cur_buf,
@@ -981,13 +994,12 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
          * S_n[atom][n] is a per-atom, per-N-tile <4 x f32> accumulator.        */
         rocke_value_t* S_n[ROCKE_GFX942_ATTN2D_MAX_N_TILES]
                           [ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE]; /* [n][atom] */
+        /* Every K operand of QK is read before the first MFMA (Python qk_b_all).
+         * Interleaved, LLVM can wait on each read alone, paying one LDS round trip
+         * per read instead of one for the batch. */
+        rocke_value_t* qk_b[ROCKE_GFX942_ATTN2D_MAX_N_TILES][ROCKE_GFX942_ATTN2D_MAX_K_ITERS];
         for(int n = 0; n < QK_N_TILES; ++n)
         {
-            rocke_value_t* acc_per_atom[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-            for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
-            {
-                acc_per_atom[atom] = rocke_b_zero_vec_f32(b, 4);
-            }
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
                 /* 16x16x16 B (K^T) operand per lane: col = n*16 + lane%16,
@@ -1006,7 +1018,19 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 idx[0] = ctx->cur_buf; /* cur_buf */
                 idx[1] = k_row;
                 idx[2] = kc_off;
-                rocke_value_t* B_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 4);
+                qk_b[n][k] = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 4);
+            }
+        }
+        for(int n = 0; n < QK_N_TILES; ++n)
+        {
+            rocke_value_t* acc_per_atom[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+            for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
+            {
+                acc_per_atom[atom] = rocke_b_zero_vec_f32(b, 4);
+            }
+            for(int k = 0; k < QK_K_ITERS; ++k)
+            {
+                rocke_value_t* B_v = qk_b[n][k];
                 for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
                 {
                     /* A operand = Q_reg[atom][k]; q_regs is flat [atom*QK_K_ITERS+k]
