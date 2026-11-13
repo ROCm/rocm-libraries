@@ -2661,6 +2661,23 @@ namespace rocalution
         {
             if(mis[ai] == 0)
             {
+                // A nonsymmetric pattern can couple ai to a node of the set that is not
+                // coupled to ai, and then ai cannot join the set
+                for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
+                    ++aj)
+                {
+                    if(ai != this->mat_.col[aj] && mis[this->mat_.col[aj]] == 1)
+                    {
+                        mis[ai] = -1;
+                        break;
+                    }
+                }
+
+                if(mis[ai] == -1)
+                {
+                    continue;
+                }
+
                 // set the node
                 mis[ai] = 1;
                 ++size;
@@ -4012,11 +4029,9 @@ namespace rocalution
         cast_perm->Clear();
         cast_perm->Allocate(this->nrow_);
 
-        int next   = 0;
-        int head   = 0;
-        int tmp    = 0;
-        int test   = 1;
-        int maxdeg = 0;
+        int next = 0;
+        int head = 0;
+        int tmp  = 0;
 
         int* nd         = NULL;
         int* marker     = NULL;
@@ -4033,27 +4048,37 @@ namespace rocalution
         for(int k = 0; k < this->nrow_; ++k)
         {
             marker[k] = 0;
-            nd[k] = static_cast<int>(this->mat_.row_offset[k + 1] - this->mat_.row_offset[k] - 1);
+            nd[k]     = 0;
 
-            if(nd[k] > maxdeg)
+            // A row need not store its diagonal, so only the other entries count
+            for(PtrType j = this->mat_.row_offset[k]; j < this->mat_.row_offset[k + 1]; ++j)
             {
-                maxdeg = nd[k];
+                if(this->mat_.col[j] != k)
+                {
+                    ++nd[k];
+                }
             }
         }
 
-        head               = this->mat_.col[0];
-        levset[0]          = head;
-        cast_perm->vec_[0] = 0;
+        levset[0]             = head;
+        cast_perm->vec_[head] = 0;
         ++next;
         marker[head] = 1;
+
+        // Every node before restart is numbered
+        int restart = 0;
 
         while(next < this->nrow_)
         {
             int position = 0;
 
+            // The nodes of the level are in the order of their numbers. Each one numbers its
+            // unnumbered neighbours by increasing degree
             for(int h = 0; h < qlength; ++h)
             {
                 head = levset[h];
+
+                int first = position;
 
                 for(PtrType k = this->mat_.row_offset[head]; k < this->mat_.row_offset[head + 1];
                     ++k)
@@ -4064,30 +4089,42 @@ namespace rocalution
                     {
                         nextlevset[position] = tmp;
                         marker[tmp]          = 1;
-                        cast_perm->vec_[tmp] = next;
-                        ++next;
                         ++position;
                     }
+                }
+
+                // std::stable_sort allocates a buffer on every call, so short lists are sorted
+                // in place
+                if(position - first > 16)
+                {
+                    std::stable_sort(nextlevset + first, nextlevset + position, [&](int a, int b) {
+                        return nd[a] < nd[b];
+                    });
+                }
+                else
+                {
+                    for(int j = first + 1; j < position; ++j)
+                    {
+                        int node = nextlevset[j];
+                        int i    = j;
+
+                        for(; i > first && nd[nextlevset[i - 1]] > nd[node]; --i)
+                        {
+                            nextlevset[i] = nextlevset[i - 1];
+                        }
+
+                        nextlevset[i] = node;
+                    }
+                }
+
+                for(int j = first; j < position; ++j)
+                {
+                    cast_perm->vec_[nextlevset[j]] = next;
+                    ++next;
                 }
             }
 
             qlength = position;
-
-            while(test == 1)
-            {
-                test = 0;
-
-                for(int j = position - 1; j > 0; --j)
-                {
-                    if(nd[nextlevset[j]] < nd[nextlevset[j - 1]])
-                    {
-                        tmp               = nextlevset[j];
-                        nextlevset[j]     = nextlevset[j - 1];
-                        nextlevset[j - 1] = tmp;
-                        test              = 1;
-                    }
-                }
-            }
 
             for(int i = 0; i < position; ++i)
             {
@@ -4096,15 +4133,16 @@ namespace rocalution
 
             if(qlength == 0)
             {
-                for(int i = 0; i < this->nrow_; ++i)
+                for(; restart < this->nrow_; ++restart)
                 {
-                    if(marker[i] == 0)
+                    if(marker[restart] == 0)
                     {
-                        levset[0]          = i;
-                        qlength            = 1;
-                        cast_perm->vec_[i] = next;
-                        marker[i]          = 1;
+                        levset[0]                = restart;
+                        qlength                  = 1;
+                        cast_perm->vec_[restart] = next;
+                        marker[restart]          = 1;
                         ++next;
+                        break;
                     }
                 }
             }
@@ -4160,7 +4198,7 @@ namespace rocalution
 
         for(int i = 0; i < this->nrow_; ++i, ++it)
         {
-            cast_perm->vec_[i] = it->second;
+            cast_perm->vec_[it->second] = i;
         }
 
         return true;
@@ -10195,6 +10233,62 @@ namespace rocalution
 
         assert(cast_G != NULL);
 
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
+        // Ordering
+        HostVector<int> perm(this->local_backend_);
+
+        switch(ordering)
+        {
+        case 0: // No ordering
+            break;
+
+        case 1: // Connectivity ordering
+            this->ConnectivityOrder(&perm);
+            break;
+
+        case 2: // CMK
+            this->CMK(&perm);
+            break;
+
+        case 3: // RCMK
+            this->RCMK(&perm);
+            break;
+
+        case 4: // MIS
+            int size;
+            this->MaximalIndependentSet(size, &perm);
+            break;
+
+        case 5: // MultiColoring
+            int  num_colors;
+            int* size_colors = NULL;
+            this->MultiColoring(num_colors, &size_colors, &perm);
+            free_host(&size_colors);
+            break;
+        }
+
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
         {
@@ -10244,54 +10338,13 @@ namespace rocalution
         nc              = 0;
         ValueType betam = -beta;
 
-        // Ordering
-        HostVector<int> perm(this->local_backend_);
-
-        switch(ordering)
-        {
-        case 0: // No ordering
-            break;
-
-        case 1: // Connectivity ordering
-            this->ConnectivityOrder(&perm);
-            break;
-
-        case 2: // CMK
-            this->CMK(&perm);
-            break;
-
-        case 3: // RCMK
-            this->RCMK(&perm);
-            break;
-
-        case 4: // MIS
-            int size;
-            this->MaximalIndependentSet(size, &perm);
-            break;
-
-        case 5: // MultiColoring
-            int  num_colors;
-            int* size_colors = NULL;
-            this->MultiColoring(num_colors, &size_colors, &perm);
-            free_host(&size_colors);
-            break;
-        }
-
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10303,7 +10356,8 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
@@ -10330,7 +10384,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = j;
@@ -10344,9 +10397,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10397,6 +10450,62 @@ namespace rocalution
 
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
+
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
+        // Ordering
+        HostVector<int> perm(this->local_backend_);
+
+        switch(ordering)
+        {
+        case 0: // No ordering
+            break;
+
+        case 1: // Connectivity ordering
+            this->ConnectivityOrder(&perm);
+            break;
+
+        case 2: // CMK
+            this->CMK(&perm);
+            break;
+
+        case 3: // RCMK
+            this->RCMK(&perm);
+            break;
+
+        case 4: // MIS
+            int size;
+            this->MaximalIndependentSet(size, &perm);
+            break;
+
+        case 5: // MultiColoring
+            int  num_colors;
+            int* size_colors = NULL;
+            this->MultiColoring(num_colors, &size_colors, &perm);
+            free_host(&size_colors);
+            break;
+        }
+
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
 
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
@@ -10456,54 +10565,13 @@ namespace rocalution
         nc              = 0;
         ValueType betam = -beta;
 
-        // Ordering
-        HostVector<int> perm(this->local_backend_);
-
-        switch(ordering)
-        {
-        case 0: // No ordering
-            break;
-
-        case 1: // Connectivity ordering
-            this->ConnectivityOrder(&perm);
-            break;
-
-        case 2: // CMK
-            this->CMK(&perm);
-            break;
-
-        case 3: // RCMK
-            this->RCMK(&perm);
-            break;
-
-        case 4: // MIS
-            int size;
-            this->MaximalIndependentSet(size, &perm);
-            break;
-
-        case 5: // MultiColoring
-            int  num_colors;
-            int* size_colors = NULL;
-            this->MultiColoring(num_colors, &size_colors, &perm);
-            free_host(&size_colors);
-            break;
-        }
-
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10515,7 +10583,8 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
@@ -10542,7 +10611,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = col_j;
@@ -10556,9 +10624,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10574,9 +10642,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }
@@ -10642,29 +10710,10 @@ namespace rocalution
         HostVector<int>* cast_G = dynamic_cast<HostVector<int>*>(G);
         assert(cast_G != NULL);
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            rGc[i] = -1;
+            return false;
         }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10699,19 +10748,53 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int  rGsizec = this->nrow_;
+        int* rGc     = NULL;
+        allocate_host(Gsize * rGsizec, &rGc);
+
+        for(int i = 0; i < Gsize * rGsizec; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)
@@ -10748,7 +10831,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
@@ -10770,12 +10854,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
-
                     if(U[col_j] == 0)
                     {
                         min_j    = j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10785,9 +10867,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10852,29 +10934,10 @@ namespace rocalution
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            rGc[i] = -1;
+            return false;
         }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10909,19 +10972,53 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int  rGsizec = this->nrow_;
+        int* rGc     = NULL;
+        allocate_host(Gsize * rGsizec, &rGc);
+
+        for(int i = 0; i < Gsize * rGsizec; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)
@@ -10958,7 +11055,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
@@ -10980,11 +11078,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(U[col_j] == 0)
                     {
                         min_j    = col_j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10994,9 +11091,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -11012,9 +11109,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }

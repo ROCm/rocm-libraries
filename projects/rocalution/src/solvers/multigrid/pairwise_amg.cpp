@@ -268,9 +268,21 @@ namespace rocalution
         while(static_cast<double>(op.GetM()) / static_cast<double>(coarse->GetM())
               < this->coarsening_factor_)
         {
+            int64_t coarse_m = coarse->GetM();
+
             coarse->FurtherPairwiseAggregation(
                 this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
             op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
+
+            // A pass that formed no pair leaves the coarse operator as it was, so the next pass
+            // would not form one either
+            if(coarse->GetM() == coarse_m)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: PairwiseAMG::Build() Pairwise aggregation formed "
+                                 "no pair, coarsening factor not reached");
+                break;
+            }
 
             ++cycle;
 
@@ -280,6 +292,13 @@ namespace rocalution
                                  "*** warning: PairwiseAMG::Build() Coarsening cannot obtain "
                                  "satisfying coarsening factor");
             }
+        }
+
+        // A level that does not coarsen at all would be followed by identical ones
+        if(coarse->GetM() == op.GetM())
+        {
+            free_host(&rG);
+            return false;
         }
 
         res->CreateFromMap(*trans, op.GetLocalM(), nc, pro);
