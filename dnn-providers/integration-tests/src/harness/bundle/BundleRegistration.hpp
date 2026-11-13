@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <functional>
@@ -358,10 +359,14 @@ struct DiscoveredBundleSet
     std::vector<UnparsedSweep> unparsedSweeps;
 };
 
-// True when a discovery found no bundle test and no sweep root that it did not parse.
+// True when a discovery found no bundle test and no case in a sweep root that it did
+// not parse.
 inline bool hasNoDiscoveredBundles(const BundleDiscoveryResult& result)
 {
-    return result.bundles.empty() && result.unparsedSweeps.empty();
+    return result.bundles.empty()
+           && std::all_of(result.unparsedSweeps.begin(),
+                          result.unparsedSweeps.end(),
+                          [](const UnparsedSweep& sweep) { return sweep.caseCount == 0; });
 }
 
 // Discovery, shared by both binaries. Returns nullopt when bundles are switched off

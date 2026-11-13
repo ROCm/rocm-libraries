@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -2010,15 +2011,34 @@ TEST_F(TestBundleDiscoveryFixture, NameCollisionThrowsWhenTheFilterCanSelectTheS
     EXPECT_NO_THROW(discoverForFilter(_tempDir, "standard_*"));
 }
 
-TEST(TestHasNoDiscoveredBundles, IsTrueOnlyWithoutBundlesAndWithoutUnparsedSweeps)
+TEST(TestHasNoDiscoveredBundles, IsTrueOnlyWithoutBundlesAndWithoutUnparsedCases)
 {
     const DiscoveredBundle bundle{"quick/S/graph.json", "quick_S", "graph", std::nullopt};
     const UnparsedSweep sweep{"quick/T", "quick_T", 3};
+    const UnparsedSweep emptySweep{"quick/E", "quick_E", 0};
 
     EXPECT_TRUE(detail::hasNoDiscoveredBundles({}));
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({{}, {emptySweep}}));
     EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {}}));
     EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {emptySweep, sweep}}));
     EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {sweep}}));
+}
+
+// A tree whose only bundles are sweeps without cases has nothing to discover, also
+// when the filter skips those sweeps.
+TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {}, true);
+
+    const auto skipped = discoverBundles(_tempDir, [](const std::string&) { return false; });
+    EXPECT_EQ(skipped.unparsedSweeps.size(), 2u);
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(skipped));
+
+    const auto parsed = discoverBundles(_tempDir, [](const std::string&) { return true; });
+    EXPECT_TRUE(parsed.unparsedSweeps.empty());
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(parsed));
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -4092,6 +4112,11 @@ TEST_F(StandardCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryM
         const size_t expected = found == discoveredCaseCounts.end() ? 0 : found->second;
         const auto scanned = countSweepCases(sweepPath);
         EXPECT_EQ(scanned, expected) << sweepPath.string();
+        std::ifstream stream(sweepPath, std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(stream),
+                                  std::istreambuf_iterator<char>()};
+        EXPECT_TRUE(detail::countSweepCasesWithoutParsing(content).has_value())
+            << sweepPath.string();
         scannedCases += scanned;
     }
     EXPECT_GT(scannedCases, 0u);
