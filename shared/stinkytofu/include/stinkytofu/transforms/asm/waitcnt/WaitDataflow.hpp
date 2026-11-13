@@ -120,6 +120,11 @@ struct PerPredQueue {
     std::unordered_set<StinkyInstruction*> saturatedOps;
 
     int countFrom(StinkyInstruction* op) const;
+
+    /// countFrom for CK_Async: counts only ops of op's direction. Async loads and
+    /// stores each complete in order, but not in order with each other.
+    int countFromAsync(StinkyInstruction* op) const;
+
     bool operator==(const PerPredQueue& other) const {
         return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps;
     }

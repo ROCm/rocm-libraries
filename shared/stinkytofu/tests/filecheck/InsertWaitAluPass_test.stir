@@ -435,7 +435,7 @@ st.func @valu_to_global_prefetch_suppressed() {
 
 st.func @async_store_to_valu_war() {
 ^entry:
-  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
+  "st.global_store_async_from_lds_b64"(v0, v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
@@ -472,7 +472,7 @@ st.func @valu_to_global_atomic_data_raw_not_suppressed() {
 
 st.func @async_store_lds_addr_to_valu_war() {
 ^entry:
-  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
+  "st.global_store_async_from_lds_b64"(v0, v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
   v2 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
