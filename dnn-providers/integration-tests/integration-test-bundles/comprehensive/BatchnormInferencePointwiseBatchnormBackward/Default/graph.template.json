@@ -1,0 +1,153 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormBackwardActivationTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "bias_tensor_uid": 5,
+        "inv_variance_tensor_uid": 7,
+        "mean_tensor_uid": 8,
+        "scale_tensor_uid": 9,
+        "x_tensor_uid": 10
+      },
+      "name": "BatchnormInference_0",
+      "outputs": {
+        "y_tensor_uid": 3
+      },
+      "type": "BatchnormInferenceAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 6,
+        "in_1_tensor_uid": 3,
+        "in_2_tensor_uid": null,
+        "operation": "relu_bwd",
+        "relu_lower_clip": "${case.attributes.relu_lower_clip}",
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": "${case.attributes.relu_upper_clip}",
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_1",
+      "outputs": {
+        "out_0_tensor_uid": 4
+      },
+      "type": "PointwiseAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "dy_tensor_uid": 4,
+        "inv_variance_tensor_uid": 7,
+        "mean_tensor_uid": 8,
+        "peer_stats_tensor_uid": [],
+        "scale_tensor_uid": 9,
+        "x_tensor_uid": 10
+      },
+      "name": "BatchnormBackward_2",
+      "outputs": {
+        "dbias_tensor_uid": 0,
+        "dscale_tensor_uid": 1,
+        "dx_tensor_uid": 2
+      },
+      "type": "BatchnormBackwardAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_2::DBIAS",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_2::DSCALE",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_2::DX",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormInference_0::Y",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "dy",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "inv_variance",
+      "strides": "${case.strides}",
+      "uid": 7,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "mean",
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 9,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 10,
+      "virtual": false
+    }
+  ]
+}

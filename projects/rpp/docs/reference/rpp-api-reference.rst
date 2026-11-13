@@ -1,11 +1,20 @@
 .. meta::
-  :description: ROCm Performance Primitives (RPP) API reference
-  :keywords: RPP, ROCm, Performance Primitives, API, reference
+  :description: ROCm Performance Primitives (RPP) API reference guide
+  :keywords: RPP, ROCm, Performance Primitives, API, reference, tensor, augmentation
 
-*******************************************
-ROCm Performance Primitives API reference
-*******************************************
+********************************************************************
+RPP API reference guide
+********************************************************************
 
-* :doc:`Header files <../doxygen/html/files>`
-* :doc:`Common definitions <../doxygen/html/group__group__rppdefs>`
-* :doc:`Data structures <../doxygen/html/annotated>`
+* :doc:`Handle API <./rpp-api-handle>`
+* :doc:`Common definitions <./rpp-api-common-definitions>`
+* :doc:`Arithmetic operations <./rpp-api-tensor-arithmetic-operations>`
+* :doc:`Audio augmentations <./rpp-api-tensor-audio-augmentations>`
+* :doc:`Bitwise operations <./rpp-api-tensor-bitwise-operations>`
+* :doc:`Color augmentations <./rpp-api-tensor-color-augmentations>`
+* :doc:`Data exchange operations <./rpp-api-tensor-data-exchange-operations>`
+* :doc:`Effects augmentations <./rpp-api-tensor-effects-augmentations>`
+* :doc:`Filter augmentations <./rpp-api-tensor-filter-augmentations>`
+* :doc:`Geometric augmentations <./rpp-api-tensor-geometric-augmentations>`
+* :doc:`Morphological operations <./rpp-api-tensor-morphological-operations>`
+* :doc:`Statistical operations <./rpp-api-tensor-statistical-operations>`

@@ -55,20 +55,26 @@ try
     size_t size_workArr;
     // size for temporary householder scalars
     size_t size_tau;
+    // 2-stage workspace sizes
+    size_t size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st;
 
     rocsolver_syevd_heevd_getMemorySize<false, false, T, S>(
         handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &optim_mem);
+        &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr,
+        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
-                                                      size_work3, size_work4, size_tmpz, size_splits,
-                                                      size_tmptau_W, size_tau, size_workArr);
+        return rocblas_set_optimal_device_memory_size(
+            handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_tmpz,
+            size_splits, size_tmptau_W, size_tau, size_workArr, size_Aband, size_he2hb_work,
+            size_V_hb2st, size_tau_hb2st);
 
     // memory workspace allocation
     void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tmptau_W, *tau, *workArr;
+    void *Aband, *he2hb_work, *V_hb2st, *tau_hb2st;
     rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_tmpz, size_splits, size_tmptau_W, size_tau, size_workArr);
+                              size_tmpz, size_splits, size_tmptau_W, size_tau, size_workArr,
+                              size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -83,6 +89,10 @@ try
     tmptau_W = mem[7];
     tau = mem[8];
     workArr = mem[9];
+    Aband = mem[10];
+    he2hb_work = mem[11];
+    V_hb2st = mem[12];
+    tau_hb2st = mem[13];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
@@ -90,7 +100,7 @@ try
     return rocsolver_syevd_heevd_template<false, false, T>(
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, info, batch_count,
         (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (I*)splits, (T*)tmptau_W, (T*)tau,
-        (T**)workArr, optim_mem);
+        (T**)workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st, optim_mem);
 }
 catch(...)
 {

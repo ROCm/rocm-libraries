@@ -27,7 +27,9 @@
 #define CK_ASM_IMPLICITGEMM_HPP_
 
 #include <miopen/config.h>
+#include <miopen/conv/problem_description.hpp>
 
+#include <algorithm>
 #include <string>
 #include <cmath>
 #include <ostream>
@@ -234,6 +236,62 @@ HeuristicInitMacroTileNoPadGemmK(size_t gemm_m,
         return std::make_tuple(0, 0, 0);
 }
 
+// The ASM-GTC NHWC solvers originate in the (now unmaintained) MISA project and address
+// global tensor memory with 32-bit BYTE offsets. AllTensorsDimsFitIntoInt() only validates
+// that each individual length/stride fits in int32; it does NOT bound the flattened tensor
+// size. A tensor whose total size in bytes exceeds the addressable range therefore overflows
+// the kernel's 32-bit addressing and silently returns wrong results, so gate the solver off
+// such shapes and let a large-tensor-capable solver be selected instead.
+//
+// The bound is expressed in BYTES, not elements: these kernels index memory by byte offset,
+// so an element-count bound would admit shapes up to sizeof(T) times the addressable size.
+//
+// Forward and backward-data: each kernel addresses a full 4 GiB window per dispatch slice and
+// correctly advances its base pointer per batch-split, so the input and output tensors are
+// handled by the split mechanism and need no bound here. The weight base is advanced per group
+// with 64-bit arithmetic, so the per-group weight size is the only quantity that must fit the
+// window.
+//
+// Backward-weights cannot split: 292 of its 900 kernels ignore the batch-split dimension and
+// compute only the first slice (https://github.com/ROCm/rocm-libraries/issues/11805). Every
+// activation must therefore fit one 4 GiB window, so the solver never asks for a split.
+//
+// Inside that window there is a second hazard. The FP16/BF16 kernels with filter padding
+// (nxe == 1) load batch rows in packs of 4 or 8 and rely on the buffer range check to zero the
+// rows past N. Those row offsets are computed in 32 bits, so a padding row whose offset reaches
+// 4 GiB wraps back into the tensor and reads real data. FP32 kernels and the last gemm-k
+// split of any kernel can read past N as well. The WRW solver therefore checks every perf
+// config it may run (see ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC) and this function only
+// bounds the tensors themselves.
+//
+// `max_wrw_bytes` is INT_MAX except on targets where the 4 GiB window was validated against a
+// GPU reference, and it applies to the activations only, and only when they are FP32 with NCHW
+// or NHWC on all three tensors. FP16/BF16 keep INT_MAX: on some 2-4 GiB shapes their error was
+// several times that of another solver on the same data (cause not isolated), and none of those
+// find-db rows was the fastest entry. Mixed layouts keep INT_MAX (#13219). The weight tensor
+// keeps INT_MAX everywhere: no 2-4 GiB backward-weights weight tensor has been run against a
+// GPU reference, and no shipped find-db row has one.
+static inline bool igemm_tensor_size_exceeds_asm_gtc_addressing(
+    const miopen::conv::ProblemDescription& problem,
+    std::size_t max_wrw_bytes = std::numeric_limits<int>::max())
+{
+    constexpr std::size_t max_uint32 = 0xffffffffULL;
+    if(problem.IsDirectionBackwardWrW())
+    {
+        const auto max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        const auto window =
+            problem.IsFp32() && (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) ? max_uint32
+                                                                                      : max_int32;
+        const auto max_bytes = std::min(max_wrw_bytes, window);
+        return problem.GetIn().GetNumBytes() > max_bytes ||
+               problem.GetOut().GetNumBytes() > max_bytes ||
+               problem.GetWeights().GetNumBytes() > max_int32;
+    }
+
+    const auto group_count = static_cast<std::size_t>(problem.GetGroupCount());
+    return problem.GetWeights().GetNumBytes() / group_count > max_uint32;
+}
+
 // This is to support big tensor > 4G. Need to decide how many splits needed.
 // Return the number of splits.
 static inline int igemm_split_batch_size(const int hi,
@@ -266,7 +324,7 @@ static inline int igemm_split_batch_size(const int hi,
     {
         // find the smallest multiple m of n such that (n / m) * image_size <= max_tensor_size.
         // once m is known, max_n := (n / m)
-        size_t m       = std::ceil(n / max_n); // m >= n * (image_size / max_tensor_size)
+        size_t m       = (static_cast<size_t>(n) + max_n - 1) / max_n;
         size_t _sqrt_n = std::sqrt(n);
         while(n % max_n != 0)
         {

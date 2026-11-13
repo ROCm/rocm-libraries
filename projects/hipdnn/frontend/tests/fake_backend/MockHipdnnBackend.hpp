@@ -127,6 +127,10 @@ public:
         (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
         ());
     MOCK_METHOD(hipdnnStatus_t,
+                getEngineNameByIdExt,
+                (hipdnnHandle_t handle, int64_t engineId, char* engineName, size_t* engineNameLen),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
                 getHeuristicPolicyCount,
                 (hipdnnHandle_t handle, size_t* numPolicies),
                 (override));

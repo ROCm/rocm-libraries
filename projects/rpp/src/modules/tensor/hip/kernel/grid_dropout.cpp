@@ -118,7 +118,8 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                        Rpp32u boxesInEachImage, Rpp32u maxHoleW, Rpp32u maxHoleH,
                                        RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                        rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = maxHoleW;
     int globalThreads_y = maxHoleH;
@@ -147,6 +148,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             globalThreads_x = maxHoleW;
             globalThreads_y = maxHoleH;
             globalThreads_z = srcDescPtr->n * boxesInEachImage;
@@ -161,6 +163,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride,
                                       dstDescPtr->strides.wStride),
                            anchorBoxInfoTensor, boxesInEachImage);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->c == 1)) {
         RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
@@ -176,6 +179,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, boxesInEachImage);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if ((dstDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->c == 3)) {
         // if src layout is NCHW, copy src to dst
         if (srcDescPtr->layout == RpptLayout::NCHW)
@@ -198,6 +202,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             globalThreads_x = maxHoleW;
             globalThreads_y = maxHoleH;
             globalThreads_z = srcDescPtr->n * boxesInEachImage;
@@ -212,6 +217,7 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, boxesInEachImage);
+        HIP_CHECK_LAUNCH_RETURN();
     }
 
     return RPP_SUCCESS;

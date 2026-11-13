@@ -48,53 +48,79 @@ namespace rocsparse
         __shared__ int all_short_rows;
         __shared__ int short_rows[BLOCKSIZE / WF_SIZE];
 
-        all_short_rows = 1;
+        // AISPARSE-685. The launcher sizes grid.x as ((int64_t)WF_SIZE * m - 1) /
+        // BLOCKSIZE + 1. That cast is deliberate and correct -- it is the reference
+        // idiom of this epic -- but the 64-bit result was then assigned into a dim3,
+        // which narrows it back to unsigned int, and this kernel indexed rows with
+        // hipBlockIdx_x alone with no x-stride. The launcher now clamps that same
+        // 64-bit expression against the device grid.x limit, and the loop below
+        // covers the rows the clamp drops. The long-row path further down does have a
+        // stride loop, but it strides over the non-zero index within one row, not
+        // over the grid, so it never helped here.
+        //
+        // Block-uniform stride bound: row_base is built from hipBlockIdx_x,
+        // hipGridDim_x, the kernel argument m and compile-time constants only, so
+        // every thread of a block runs the same number of iterations. That is what
+        // makes the three __syncthreads() below legal. There is no `return` in the
+        // body, so no thread can leave the loop early and strand the others at a
+        // barrier.
+        constexpr int64_t rows_per_block = BLOCKSIZE / WF_SIZE;
+        const int64_t     row_stride     = rows_per_block * hipGridDim_x;
 
-        __syncthreads();
-
-        J row = (BLOCKSIZE / WF_SIZE) * hipBlockIdx_x + wid;
-
-        I start = (row < m) ? csr_row_ptr_begin[row] - idx_base : static_cast<I>(0);
-        I end   = (row < m) ? csr_row_ptr_end[row] - idx_base : static_cast<I>(0);
-
-        int short_row = (end - start <= 8 * WF_SIZE) ? 1 : 0;
-
-        if(short_row)
+        for(int64_t row_base = rows_per_block * hipBlockIdx_x; row_base < m; row_base += row_stride)
         {
-            for(I j = start + lid; j < end; j += WF_SIZE)
+            all_short_rows = 1;
+
+            __syncthreads();
+
+            J row = static_cast<J>(row_base) + wid;
+
+            I start = (row < m) ? csr_row_ptr_begin[row] - idx_base : static_cast<I>(0);
+            I end   = (row < m) ? csr_row_ptr_end[row] - idx_base : static_cast<I>(0);
+
+            int short_row = (end - start <= 8 * WF_SIZE) ? 1 : 0;
+
+            if(short_row)
             {
-                coo_row_ind[j] = row + idx_base;
-            }
-        }
-        else
-        {
-            all_short_rows = 0;
-        }
-
-        short_rows[wid] = short_row;
-
-        __syncthreads();
-
-        // Process any long rows
-        if(all_short_rows == 0)
-        {
-            for(int i = 0; i < (BLOCKSIZE / WF_SIZE); i++)
-            {
-                if(short_rows[i] == 0)
+                for(I j = start + lid; j < end; j += WF_SIZE)
                 {
-                    J long_row = (BLOCKSIZE / WF_SIZE) * hipBlockIdx_x + i;
+                    coo_row_ind[j] = row + idx_base;
+                }
+            }
+            else
+            {
+                all_short_rows = 0;
+            }
 
-                    I start = (long_row < m) ? csr_row_ptr_begin[long_row] - idx_base
-                                             : static_cast<I>(0);
-                    I end
-                        = (long_row < m) ? csr_row_ptr_end[long_row] - idx_base : static_cast<I>(0);
+            short_rows[wid] = short_row;
 
-                    for(I j = start + tid; j < end; j += BLOCKSIZE)
+            __syncthreads();
+
+            // Process any long rows
+            if(all_short_rows == 0)
+            {
+                for(int i = 0; i < (BLOCKSIZE / WF_SIZE); i++)
+                {
+                    if(short_rows[i] == 0)
                     {
-                        coo_row_ind[j] = long_row + idx_base;
+                        J long_row = static_cast<J>(row_base) + i;
+
+                        I start = (long_row < m) ? csr_row_ptr_begin[long_row] - idx_base
+                                                 : static_cast<I>(0);
+                        I end   = (long_row < m) ? csr_row_ptr_end[long_row] - idx_base
+                                                 : static_cast<I>(0);
+
+                        for(I j = start + tid; j < end; j += BLOCKSIZE)
+                        {
+                            coo_row_ind[j] = long_row + idx_base;
+                        }
                     }
                 }
             }
+
+            // Separates this iteration's reads of all_short_rows / short_rows from
+            // the next iteration's writes to them.
+            __syncthreads();
         }
     }
 }

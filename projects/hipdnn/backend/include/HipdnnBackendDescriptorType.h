@@ -35,6 +35,9 @@ typedef enum
      * Represents a specific execution engine that can run an operation graph.
      * Engines are discovered through heuristics and provide different
      * performance/precision trade-offs.
+     * Finalization validates applicability without fetching plugin EngineDetails.
+     * Name, knob-info, and behavior-note queries load and validate that metadata
+     * lazily, so their first read can fail after successful finalization.
      */
     HIPDNN_BACKEND_ENGINE_DESCRIPTOR = 1,
 

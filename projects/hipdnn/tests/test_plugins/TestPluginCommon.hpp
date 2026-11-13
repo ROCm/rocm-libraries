@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -27,7 +28,7 @@
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_plugin_sdk/version.h>
+#include <hipdnn_plugin_sdk/version_number.h>
 
 struct HipdnnEnginePluginHandle
 {
@@ -131,6 +132,44 @@ static_assert(std::is_trivially_destructible_v<TestPluginLastCallRecord>,
         s_record_##suffix = TestPluginLastCallRecord{};                         \
     }                                                                           \
     /* NOLINTEND(readability-identifier-naming) */
+
+// Defines the engine-config recorder TestPluginKnobRecorder.hpp reads: per-thread raw
+// EngineConfig bytes, recordTestPluginEngineConfig() to append one, and the four exported
+// accessors TestPluginKnobRecorder resolves by name.
+#define DEFINE_TEST_PLUGIN_KNOB_RECORDER()                                                       \
+    namespace                                                                                    \
+    {                                                                                            \
+    thread_local std::vector<std::vector<uint8_t>> s_receivedEngineConfigs; /* NOLINT */         \
+    }                                                                                            \
+    static inline void recordTestPluginEngineConfig(const hipdnnPluginConstData_t* engineConfig) \
+    {                                                                                            \
+        if(engineConfig != nullptr && engineConfig->ptr != nullptr && engineConfig->size > 0)    \
+        {                                                                                        \
+            const auto* bytes = static_cast<const uint8_t*>(engineConfig->ptr);                  \
+            s_receivedEngineConfigs.emplace_back(bytes, bytes + engineConfig->size);             \
+        }                                                                                        \
+    }                                                                                            \
+    extern "C" HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()        \
+    {                                                                                            \
+        return static_cast<uint32_t>(s_receivedEngineConfigs.size());                            \
+    }                                                                                            \
+    extern "C" HIPDNN_PLUGIN_EXPORT const uint8_t* hipdnnTestKnobsPluginGetReceivedKnobsDataAt(  \
+        uint32_t index)                                                                          \
+    {                                                                                            \
+        return index < s_receivedEngineConfigs.size() ? s_receivedEngineConfigs[index].data()    \
+                                                      : nullptr;                                 \
+    }                                                                                            \
+    extern "C" HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsSizeAt(        \
+        uint32_t index)                                                                          \
+    {                                                                                            \
+        return index < s_receivedEngineConfigs.size()                                            \
+                   ? static_cast<uint32_t>(s_receivedEngineConfigs[index].size())                \
+                   : 0;                                                                          \
+    }                                                                                            \
+    extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnTestKnobsPluginResetReceivedKnobs()               \
+    {                                                                                            \
+        s_receivedEngineConfigs.clear();                                                         \
+    }
 
 // Per-plugin observation entry points. Tests resolve these against the
 // plugin's own dynamic-loader handle.
@@ -373,18 +412,58 @@ public:
     virtual const char* getPluginVersion() const = 0;
     virtual const char* getPluginApiVersion() const = 0;
     virtual int64_t getEngineId() const = 0;
+
+    /// Engine name this plugin reports for its engine, or `nullptr` when the plugin
+    /// supplies no name. Feeds both `hipdnnEnginePluginGetEngineName` and
+    /// `EngineDetails.name`. Overrides must return storage that outlives the call.
+    virtual const char* getEngineName() const
+    {
+        return nullptr;
+    }
+
     virtual uint32_t getNumEngines() const = 0;
+
+    /// The engine IDs `hipdnnEnginePluginGetAllEngineIds` publishes, in the order it
+    /// reports them. Defaults to the single engine `getEngineId()` names.
+    virtual std::vector<int64_t> getAllEngineIds() const
+    {
+        return {getEngineId()};
+    }
+
     virtual uint32_t getNumApplicableEngines() const = 0;
     virtual bool supportsEngineOperations() const
     {
         return getNumApplicableEngines() > 0;
     }
 
+    // The engine id the details for `requestedId` describe. The default describes
+    // getEngineId() whatever was asked for; an override may throw to reject an id.
+    virtual int64_t describedEngineId(int64_t /*requestedId*/) const
+    {
+        return getEngineId();
+    }
+
+    // The knobs an engine's details advertise.
+    virtual std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+        engineKnobs(flatbuffers::FlatBufferBuilder& /*builder*/, int64_t /*engineId*/) const
+    {
+        return {};
+    }
+
+    // Sees every engine config a workspace-size query receives.
+    virtual void onWorkspaceSizeQuery(const hipdnnPluginConstData_t& /*engineConfig*/) const {}
+
     // Execute graph - derived classes override this for custom behavior
     virtual void executeGraph() const
     {
         HIPDNN_PLUGIN_LOG_INFO("executeGraph called");
     }
+
+    // Called from CreateExecutionContext once the engine is known to be usable.
+    // Derived classes override this to simulate a plugin that accepts a graph in
+    // GetApplicableEngineIds but then fails to build a plan for it (e.g. no solver,
+    // out of memory).
+    virtual void onCreateExecutionContext(int64_t /*engineId*/) const {}
 
     /// Returns the calling thread's mutable last-call record for this plugin.
     virtual TestPluginLastCallRecord& lastCallRecord() const
@@ -575,14 +654,57 @@ public:
 
             *numEngines = getInstance()->getNumEngines();
 
-            if(maxEngines >= 1 && *numEngines > 0)
+            // A subclass may override getNumEngines() without overriding getAllEngineIds(),
+            // so the declared count is not a bound on the list. Clamp against both.
+            const auto publishedIds = getInstance()->getAllEngineIds();
+            const auto copied = std::min<uint32_t>(
+                {maxEngines, *numEngines, static_cast<uint32_t>(publishedIds.size())});
+            for(uint32_t i = 0; i < copied; ++i)
             {
-                assert(*numEngines == 1);
-                engineIds[0] = getInstance()->getEngineId();
+                engineIds[i] = publishedIds[i];
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
+    }
+
+    /// Services the optional engine-name entry point emitted by
+    /// `REGISTER_TEST_PLUGIN_ENGINE_NAME_API()`, following the status contract
+    /// documented on `hipdnnEnginePluginGetEngineName`.
+    static hipdnnPluginStatus_t enginePluginGetEngineName(int64_t engineId, const char** name)
+    {
+        LOG_API_ENTRY("engineId=" << engineId << ", name=" << static_cast<const void*>(name));
+
+        hipdnnPluginStatus_t nameStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+
+        const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(name);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(engineId == getInstance()->getEngineId())
+            {
+                const char* engineName = getInstance()->getEngineName();
+                if(engineName != nullptr)
+                {
+                    *name = engineName;
+                    nameStatus = HIPDNN_PLUGIN_STATUS_SUCCESS;
+                }
+                else
+                {
+                    nameStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName,
+                            "engineId=" << engineId << ", status=" << static_cast<int>(nameStatus));
+        });
+
+        if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        return nameStatus;
     }
 
     static hipdnnPluginStatus_t enginePluginCreate(hipdnnEnginePluginHandle_t* handle)
@@ -650,10 +772,11 @@ public:
 
             *numEngines = getInstance()->getNumApplicableEngines();
 
-            if(maxEngines >= 1 && *numEngines > 0)
-            {
-                engineIds[0] = getInstance()->getEngineId();
-            }
+            // The first getNumApplicableEngines() of getAllEngineIds() are applicable.
+            const std::vector<int64_t> ids = getInstance()->getAllEngineIds();
+            const auto copied = std::min<std::size_t>(
+                {static_cast<std::size_t>(maxEngines), *numEngines, ids.size()});
+            std::copy_n(ids.begin(), copied, engineIds);
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
@@ -681,13 +804,19 @@ public:
                     "No engines available - cannot get engine details");
             }
 
+            const int64_t describedId = getInstance()->describedEngineId(engineId);
             flatbuffers::FlatBufferBuilder builder;
+            const auto knobs = getInstance()->engineKnobs(builder, describedId);
             // This plugin serializes execution plans, so it advertises the note
             // the frontend checks before serializing a plan alongside the graph.
             const std::vector<int32_t> behaviorNotes{
                 static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
             auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-                builder, getInstance()->getEngineId(), nullptr, &behaviorNotes);
+                builder,
+                describedId,
+                knobs.empty() ? nullptr : &knobs,
+                &behaviorNotes,
+                getInstance()->getEngineName());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
@@ -754,6 +883,7 @@ public:
                     "No engines available - cannot get workspace size");
             }
 
+            getInstance()->onWorkspaceSizeQuery(*engineConfig);
             *workspaceSize = 1024;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
@@ -817,6 +947,7 @@ public:
                 opGraph->ptr, opGraph->size);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+            getInstance()->onCreateExecutionContext(engineConfigWrapper.engineId());
 
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
             context->engineId = engineConfigWrapper.engineId();
@@ -1256,4 +1387,15 @@ private:
                                                                        overrideShapes,    \
                                                                        overrideStrides);  \
     }                                                                                     \
+    } // extern "C"
+
+/// Emits only the optional engine-name C symbol, alongside
+/// `REGISTER_TEST_PLUGIN_API()`, for the fake plugins that name their engine.
+#define REGISTER_TEST_PLUGIN_ENGINE_NAME_API()                               \
+    extern "C" {                                                             \
+    HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t        \
+        hipdnnEnginePluginGetEngineName(int64_t engineId, const char** name) \
+    {                                                                        \
+        return TestPluginBase::enginePluginGetEngineName(engineId, name);    \
+    }                                                                        \
     } // extern "C"

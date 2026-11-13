@@ -8,6 +8,8 @@ enum class MXScaleLayout
     None    = 0,
     GFX950  = 1,
     GFX1250 = 2,
+    // 128-row by 4-K-block tiles (Block_32_UE8M0_128_4_EXT); K-contiguous operands only.
+    Tile128x4 = 3,
 };
 
 #include "hipblaslt_scaling_format.hpp"
@@ -16,8 +18,9 @@ enum class MXScaleLayout
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 
 // Maps a block-scaling format and device arch to the client scale swizzle layout.
-// Only Block_32_UE8M0_32_8_EXT uses GFX950 swizzle; gfx1250 uses GFX1250 for other
-// block formats; everything else stays natural-packed (None).
+// Only Block_32_UE8M0_32_8_EXT uses GFX950 swizzle and only Block_32_UE8M0_128_4_EXT
+// uses Tile128x4; gfx1250 uses GFX1250 for other block formats; everything else stays
+// natural-packed (None).
 MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
                                      std::string_view       archName);
 
@@ -31,6 +34,8 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 
 #include <vector>
 
+// integer_exact supports fp8 data. With swizzled scales it currently requires K along
+// stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

@@ -20,7 +20,8 @@ before chasing performance**. These probes are step (3).
 | Want to answer | Use |
 |---|---|
 | "Will the kernel fit at the occupancy I expect?" | `probe_occupancy.py` |
-| "Are the right MFMA / async-DMA / ds.read.tr16 intrinsics emitted?" | `probe_intrinsic_counts.py` |
+| "What are the VGPR/spill/LDS, ISA mix and occupancy of one kernel or a pre-built `.co`/`.hsaco`?" | `probe_regs.py` |
+| "Are the right MFMA / WMMA / async-DMA / ds.read.tr16 intrinsics emitted?" | `probe_intrinsic_counts.py` |
 | "What is the ISA opcode mix between two variants?" | `probe_isa_inspect.py` |
 | "Does the HIP-debug backend agree with LLVM-direct on this kernel?" | `probe_lowering_compare.py` |
 | "Which `(num_warps, tile_size, …)` variant is fastest for my shapes?" | `probe_config_sweep.py` (+ your `run_fn`) |
@@ -41,27 +42,57 @@ list before paying the rocprof cost.
 coarse estimate of waves/CU and workgroups/CU, with the apparent
 limiter (`VGPR`, `LDS`, `WAVES_PER_EU_HINT`, …) annotated.
 
-How it works: compiles each kernel via `compile_kernel`, dumps the
-HSACO notes with `llvm-readelf --notes`, and applies the gfx950 / gfx942 /
+How it works: compiles each kernel via `compile_kernel` for `arch.name`, dumps
+the HSACO notes with `llvm-readelf --notes`, and applies the gfx950 / gfx942 /
 gfx90a per-CU resource caps. The occupancy math matches what `rocprofv3`
-reports as `OccupancyPct` for typical kernels within a few percent.
+reports as `OccupancyPct` for typical kernels within a few percent. There are
+no caps for RDNA / wave32 targets yet.
 
 Useful for: tile / block-size sweeps where the wall-clock difference
 is on the order of LDS or VGPR bumps. If the limiter switches from
 `LDS` to `VGPR` across the sweep, the optimal tile size will sit at the
 boundary.
 
+### `probe_regs.py`
+**Input**: one kernel, supplied as a pre-built code object (`--co` /
+`--hsaco`), a runtime-resolved builder (`--builder module:fn`), a
+programmatic list of `(label, KernelDef, block_size)`, or -- with only
+`--arch` -- a tiny self-contained demo kernel. `--arch` is required in
+every mode (it selects the occupancy model and the unbundling target).
+**Output**: single-kernel VGPR / SGPR / spill / LDS / scratch, the ISA
+opcode mix (MFMA, `ds_read` / `ds_write`, `buffer_load_lds`, `s_waitcnt` /
+`s_barrier` / `sched_barrier`, VALU / SALU), the `ds_read/mfma` ratio,
+and a gfx950/gfx942 unified-VGPR occupancy estimate (blocks/CU + limiter).
+
+How it works: compiles via `compile_kernel` (comgr, or `--hipcc` for the
+`hipcc --genco` path), unbundles the code object if needed, then runs
+`rocke.analysis.isa.analyze_hsaco` (one `llvm-objdump` + `llvm-readelf`
+pass) for both the resource notes and the opcode histogram.
+
+Unlike `probe_occupancy.py` (notes-only, multi-variant table) this is a
+single-kernel deep-dive that folds in the ISA mix, and it can probe a
+**pre-built `.co`/`.hsaco` with no rocke build at all**. It imports
+nothing from `rocke.instances`/kernels: point `--builder` at a family, or
+feed `probe_regs([(label, kdef, bs)], arch=...)` a `KernelDef` you built.
+
+Useful for: the "inspect the artifact before chasing performance" step on
+one variant -- e.g. confirming an LDS bump dropped occupancy from 2 to 1
+block/CU, or that the `ds_read/mfma` ratio moved after a swizzle change.
+
 ### `probe_isa_inspect.py`
 **Input**: list of `(label, KernelDef)`.
-**Output**: per-variant ISA opcode histogram (MFMA, `ds_read{_tr}`,
-`ds_write`, `vmem_load`, `vmem_store`, `waitcnt`, `barrier`, VALU /
-SALU sub-buckets), plus the most frequent `s_waitcnt` operand patterns.
+**Output**: per-variant ISA opcode histogram (`mfma` / `wmma`,
+`ds_read{_tr}`, `ds_write`, `vmem_load`, `vmem_store`, `scratch_load` /
+`scratch_store`, `waitcnt`, `s_wait_alu`, `barrier`, VALU / SALU
+sub-buckets), plus the most frequent memory-wait operand patterns. Zero
+categories are omitted.
 
-How it works: compiles via `compile_kernel`, runs
-`llvm-objdump -d --mcpu=gfx950`, parses the output with the same opcode
-regex `analysis/isa.py` uses internally. Adds the SALU/VALU
-sub-buckets that are missing from `parse_isa` because they only matter
-during optimization, not at runtime.
+How it works: compiles via `compile_kernel(kdef, arch=mcpu)`, runs
+`llvm-objdump -d --mcpu=<mcpu>`, and takes the headline counts from
+`rocke.analysis.isa.parse_isa`, so CDNA and RDNA/gfx12 spellings are both
+recognized (`ds_load` = `ds_read`, gfx12 split barriers and `s_wait_*cnt`
+waits). Adds the SALU/VALU sub-buckets that are missing from `parse_isa`
+because they only matter during optimization, not at runtime.
 
 Useful for: confirming that an MFMA-atom switch actually emitted the
 new shape, that the cshuffle epilogue uses wide `buffer_store_dwordx{2,4}`
@@ -71,13 +102,15 @@ adding sched groups, etc.
 ### `probe_intrinsic_counts.py`
 **Input**: list of `(label, KernelDef)`.
 **Output**: per-variant histogram of AMDGCN LLVM intrinsics
-(`mfma.f32.*`, `ds.read.tr16.*`, `ds.bpermute`, `ds.swizzle`,
-`raw.ptr.buffer.load.lds`, `cvt.pk.f32.fp8`, `s.waitcnt`, …) plus
-structural counts (load, store, fmul, fadd, fmuladd, br, phi).
+(`mfma.f32.*`, `wmma` / `swmmac` (any shape), `ds.read.tr16.*`, `ds.bpermute`,
+`ds.swizzle`, `raw.ptr.buffer.load.lds`, `cvt.pk.f32.fp8`, `s.waitcnt`, …)
+plus structural counts (load, store, fmul, fadd, fmuladd, br, phi).
 
-How it works: just `lower_kernel_to_llvm(kdef)` plus a small regex
-table. Faster than `probe_isa_inspect` because it doesn't shell out to
-`llvm-objdump` and doesn't pay the COMGR HSACO step.
+How it works: just `lower_kernel_to_llvm(kdef, arch=arch)` (default `gfx950`)
+plus a small regex table. Faster than `probe_isa_inspect` because it doesn't
+shell out to `llvm-objdump` and doesn't pay the COMGR HSACO step.
+An `ArchDomainWarning` is a per-entry `LOWER-FAIL`: the unsupported kernel
+gets no histogram for that target, and later entries are still inspected.
 
 Useful for: pre-COMGR sanity checks — did the spec switch flip the
 right intrinsic call? — and for catching DSL-level miscompiles where
@@ -85,12 +118,12 @@ an `if` statement is silently elided by an AST rewriter (the canonical
 symptom: stores went from N to 0, see the optimization runbook §10).
 
 ### `probe_lowering_compare.py`
-**Input**: list of `(label, KernelDef)`, `--arch=gfx950`.
+**Input**: list of `(label, KernelDef)`, `arch` (default `gfx950`).
 **Output**: side-by-side HSACO sizes from the LLVM-direct and HIP-debug
 backends; optional VGPR / LDS deltas from `llvm-readelf` on both.
 
-How it works: production path is `compile_kernel`; debug path is
-`lower_kernel_to_hip(kdef)` written to disk and compiled with
+How it works: production path is `compile_kernel(kdef, arch=arch)`; debug path is
+`lower_kernel_to_hip(kdef, arch=arch)` written to disk and compiled with
 `hipcc --offload-arch=<arch> --genco`. The two backends should agree
 on a healthy kernel; large size or resource deltas usually mean one
 backend is missing an op lowering (the HIP-debug backend's op coverage
@@ -106,7 +139,7 @@ moved to `builders.common.hip_lowering_attention_parity` in the library
 ### `probe_config_sweep.py`
 **Input**: `build_fn`, a `base_spec` dataclass, a list of
 `replace()` override dicts, an optional `run_fn(KernelArtifact, label)
--> latency_us`.
+-> latency_us`, and `arch` (default `gfx950`) to compile the variants for.
 **Output**: build status, HSACO size, optional latency per variant,
 and the "best" variant.
 
@@ -155,6 +188,7 @@ Useful for: pairing with the rocprof-based tools under
 dsl_probes/
 ├── README.md                         # this file
 ├── probe_occupancy.py                # llvm-readelf notes → occupancy
+├── probe_regs.py                     # analyze_hsaco → regs + ISA mix + occupancy (1 kernel/.co)
 ├── probe_isa_inspect.py              # llvm-objdump → opcode histogram
 ├── probe_intrinsic_counts.py         # lower_kernel_to_llvm → intrinsic histogram
 ├── probe_lowering_compare.py         # LLVM-direct vs HIP-debug HSACO compare
@@ -198,6 +232,13 @@ PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
   --probe occupancy|config_sweep|intrinsic_counts|isa_inspect|lowering_compare \
   [--arch <arch>]
 ```
+
+`--arch` is forwarded by all five demos and accepts rocKE's known targets.
+Only `occupancy` requires a target in its resource-cap table (`gfx950`,
+`gfx942`, `gfx90a`); other targets produce a clear CLI error for that probe.
+The demo kernels use gfx950 attention intrinsics, so selecting an RDNA/gfx12
+target can report per-entry failures rather than a normal result for the wrong
+chip. The generic probe entry points also accept kernels built for that target.
 
 Each script also exposes a Python entry point so you can wire it into
 a one-off exploration script — see the per-script docstring.

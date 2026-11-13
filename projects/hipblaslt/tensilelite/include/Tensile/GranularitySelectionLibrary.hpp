@@ -32,6 +32,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Properties.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Utils.hpp>
 
 #include <Tensile/PropertyMatching.hpp>
@@ -114,9 +115,7 @@ namespace TensileLite
                 auto rv = solutions.at(index);
 
                 Task task(hardware, problem, *rv);
-                bool predicateMatch = (*rv->problemPredicate)(problem)
-                                      && (*rv->taskPredicate)(task)
-                                      && (*rv->hardwarePredicate)(hardware);
+                bool predicateMatch = selectionPredicate(task, hardware, *rv, problem);
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -149,9 +148,8 @@ namespace TensileLite
                 if(myPerformance > bestPerformance)
                 {
                     Task task(hardware, problem, *(row.second));
-                    bool predicateMatch = (*row.second->problemPredicate)(problem)
-                                          && (*row.second->taskPredicate)(task)
-                                          && (*row.second->hardwarePredicate)(hardware);
+                    bool predicateMatch
+                        = selectionPredicate(task, hardware, *(row.second), problem);
 
                     if(debug)
                     {
@@ -238,12 +236,18 @@ namespace TensileLite
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            if(!(*row.second->problemPredicate)(problem)
-                               || !(*row.second->taskPredicate)(task))
+                            // setGroupedGemm(true) re-aims GroupedGemmEqual,
+                            // SynchronizerSizeCheck and the free-size-B clause on
+                            // this local copy, so it is USO-gated like the widened
+                            // predicate. Task holds a reference to problem, so the
+                            // mutation is visible to taskPredicate either way.
+                            if(problem.getParams().uniformSummationOrder() != 0)
+                                problem.setGroupedGemm(true);
+                            if(!selectionPredicate(task, hardware, *(row.second), problem))
                                 useSolution = false;
                         }
                     }
-                    else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                    else if(isGemmTypeOnlySearch(searchType))
                     {
                         if(!isGemmTypeSame((*row.second), problems[0]))
                             useSolution = false;
@@ -251,13 +255,7 @@ namespace TensileLite
 
                     if(useSolution)
                     {
-                        if((*row.second).requiredHostWorkspaceSizePerProblem
-                           == static_cast<size_t>(-1))
-                        {
-                            (*row.second).requiredHostWorkspaceSizePerProblem
-                                = (*row.second)
-                                      .requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                        }
+                        (*row.second).ensureRequiredHostWorkspaceSize(problems[0], hardware);
                         rv.insert(row.second);
                     }
                 }

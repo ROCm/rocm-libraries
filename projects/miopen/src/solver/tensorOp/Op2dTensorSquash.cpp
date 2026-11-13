@@ -68,13 +68,6 @@ bool Op2dTensorSquash::IsApplicable([[maybe_unused]] const ExecutionContext& con
     return false;
 }
 
-std::size_t Op2dTensorSquash::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution
 Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
                               const miopen::tensorOp::ProblemDescription& problem) const

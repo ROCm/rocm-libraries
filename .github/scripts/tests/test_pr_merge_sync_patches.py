@@ -14,9 +14,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -436,11 +437,7 @@ class StageChangesTest(unittest.TestCase):
         sut._stage_changes(self.repo)
         self.assertIn("README.md", self._staged_files())
 
-    @pytest.mark.xfail(
-        reason="BUG: 'git add .' respects .gitignore and silently drops new untracked files that match ignore patterns",
-        strict=True,
-    )
-    def test_gitignored_file_is_NOT_staged(self):
+    def test_gitignored_file_is_staged(self):
         (self.repo / ".gitignore").write_text("*.log\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -451,10 +448,9 @@ class StageChangesTest(unittest.TestCase):
         self.assertIn("output.log", self._staged_files())
 
     def test_previously_force_tracked_file_modifications_are_staged(self):
-        # `git add .` DOES stage modifications to already-tracked files even when
-        # they match .gitignore -- git only skips *new untracked* files that match.
-        # This documents that boundary: modifications to force-tracked files are
-        # NOT lost by the current implementation.
+        # Modifications to already-tracked files were staged even before `-f`,
+        # because git only skips *new untracked* files that match an ignore rule.
+        # Kept as a boundary marker: this case was never the broken one.
         (self.repo / ".gitignore").write_text("generated/\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -471,11 +467,7 @@ class StageChangesTest(unittest.TestCase):
         # Modifications to already-tracked files ARE staged even under .gitignore.
         self.assertIn("generated/output.h", self._staged_files())
 
-    @pytest.mark.xfail(
-        reason="BUG: if a patch introduces a brand-new file whose path matches .gitignore, 'git add .' silently skips it; the sync appears to succeed but the file is never committed to the sub-repo",
-        strict=True,
-    )
-    def test_new_gitignored_file_added_by_patch_is_NOT_staged(self):
+    def test_new_gitignored_file_added_by_patch_is_staged(self):
         (self.repo / ".gitignore").write_text("generated/\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -488,6 +480,25 @@ class StageChangesTest(unittest.TestCase):
         sut._stage_changes(self.repo)
 
         self.assertIn("generated/new_output.h", self._staged_files())
+
+    def test_new_file_outside_nested_ignore_allowlist_is_staged(self):
+        # The shape that actually dropped a file: a nested .gitignore excluding a
+        # glob and allowlisting specific names. Siblings on the allowlist synced
+        # normally, which is why the missing one went unnoticed.
+        heuristics = self.repo / "heuristics"
+        heuristics.mkdir()
+        (heuristics / ".gitignore").write_text("*.md\n!README.md\n")
+        _git(["add", "heuristics/.gitignore"], cwd=self.repo)
+        _git(["commit", "-m", "add nested gitignore"], cwd=self.repo)
+
+        (heuristics / "README.md").write_text("# allowlisted")
+        (heuristics / "HEURISTIC_REPORT.md").write_text("# not allowlisted")
+
+        sut._stage_changes(self.repo)
+
+        staged = self._staged_files()
+        self.assertIn("heuristics/README.md", staged)
+        self.assertIn("heuristics/HEURISTIC_REPORT.md", staged)
 
 
 # ---------------------------------------------------------------------------
@@ -513,15 +524,18 @@ class ApplyPatchTest(unittest.TestCase):
         self.repo = Path(self._tmpdir.name) / "repo"
         self.repo.mkdir()
         make_git_repo(self.repo)
-        make_initial_commit(self.repo, "file.txt", "line1\nline2\nline3\n")
+        base_content = "".join(f"line{i}\n" for i in range(1, 10))
+        make_initial_commit(self.repo, "file.txt", base_content)
 
         patch_repo = Path(self._tmpdir.name) / "patch_repo"
         patch_repo.mkdir()
         make_git_repo(patch_repo)
-        make_initial_commit(patch_repo, "file.txt", "line1\nline2\nline3\n")
-        (patch_repo / "file.txt").write_text("line1\nline2 modified\nline3\n")
+        make_initial_commit(patch_repo, "file.txt", base_content)
+        (patch_repo / "file.txt").write_text(
+            base_content.replace("line5\n", "line5 modified\n")
+        )
         _git(["add", "file.txt"], cwd=patch_repo)
-        _git(["commit", "-m", "modify line2"], cwd=patch_repo)
+        _git(["commit", "-m", "modify line5"], cwd=patch_repo)
 
         self.patch_file = Path(self._tmpdir.name) / "change.patch"
         subprocess.run(
@@ -534,26 +548,150 @@ class ApplyPatchTest(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def test_clean_patch_applied_successfully(self):
-        sut._apply_patch(self.repo, self.patch_file)
-        content = (self.repo / "file.txt").read_text()
-        self.assertIn("line2 modified", content)
-
-    @pytest.mark.xfail(
-        reason="BUG: applying a patch a second time raises RuntimeError; there is no already-synced guard and no --3way flag so it errors out instead of being a no-op",
-        strict=True,
-    )
-    def test_applying_same_patch_twice_raises(self):
-        sut._apply_patch(self.repo, self.patch_file)
-        _git(["add", "."], cwd=self.repo)
-        _git(["commit", "-m", "apply patch"], cwd=self.repo)
-
-        sut._apply_patch(self.repo, self.patch_file)  # should be a no-op, not raise
-
-    def test_patch_failure_raises_runtime_error(self):
-        # Corrupt the working tree so the patch cannot apply cleanly.
-        (self.repo / "file.txt").write_text("completely different content\n")
-        with self.assertRaises(RuntimeError):
+        with patch.object(sut, "_run_git", wraps=sut._run_git) as run_git:
             sut._apply_patch(self.repo, self.patch_file)
+
+        expected = "".join(
+            "line5 modified\n" if i == 5 else f"line{i}\n" for i in range(1, 10)
+        )
+        self.assertEqual((self.repo / "file.txt").read_text(), expected)
+        self.assertEqual(
+            [call.args[0] for call in run_git.call_args_list],
+            [["apply", str(self.patch_file)]],
+        )
+
+    def test_drifted_context_uses_three_way_fallback(self):
+        # Change context that the patch does not modify. Strict application fails,
+        # while the common base blobs let --3way merge both independent edits.
+        drifted_content = "".join(
+            "line2 drifted\n" if i == 2 else f"line{i}\n" for i in range(1, 10)
+        )
+        (self.repo / "file.txt").write_text(drifted_content)
+        _git(["add", "file.txt"], cwd=self.repo)
+        _git(["commit", "-m", "drift patch context"], cwd=self.repo)
+
+        with patch.object(sut, "_run_git", wraps=sut._run_git) as run_git:
+            sut._apply_patch(self.repo, self.patch_file)
+
+        expected = drifted_content.replace("line5\n", "line5 modified\n")
+        self.assertEqual((self.repo / "file.txt").read_text(), expected)
+        self.assertEqual(
+            [call.args[0] for call in run_git.call_args_list],
+            [
+                ["apply", str(self.patch_file)],
+                ["apply", "--3way", str(self.patch_file)],
+            ],
+        )
+
+    def test_already_present_patch_records_empty_provenance_commit(self):
+        sut._apply_patch(self.repo, self.patch_file)
+        sut._stage_changes(self.repo)
+        sut._commit_changes(
+            self.repo, "first sync", "Original Author", "author@example.com"
+        )
+
+        sut._apply_patch(self.repo, self.patch_file)
+        sut._stage_changes(self.repo)
+        self.assertFalse(sut._has_staged_changes(self.repo))
+
+        sut._commit_changes(
+            self.repo,
+            "provenance for existing content",
+            "Original Author",
+            "author@example.com",
+            allow_empty=True,
+        )
+        subject = subprocess.check_output(
+            ["git", "log", "-1", "--format=%s"], cwd=self.repo, text=True
+        ).strip()
+        self.assertEqual(subject, "provenance for existing content")
+
+    def test_patch_failure_reports_both_attempts(self):
+        # Change the same line as the patch, making the three-way merge conflict.
+        conflicting_content = "".join(
+            "conflicting line5\n" if i == 5 else f"line{i}\n" for i in range(1, 10)
+        )
+        (self.repo / "file.txt").write_text(conflicting_content)
+        _git(["add", "file.txt"], cwd=self.repo)
+        _git(["commit", "-m", "conflict with patch"], cwd=self.repo)
+
+        with self.assertRaises(RuntimeError) as raised:
+            sut._apply_patch(self.repo, self.patch_file)
+
+        message = str(raised.exception)
+        self.assertIn("Strict apply failure:", message)
+        self.assertIn(f"git apply {self.patch_file}", message)
+        self.assertIn("Three-way apply failure:", message)
+        self.assertIn(f"git apply --3way {self.patch_file}", message)
+
+
+# ---------------------------------------------------------------------------
+# _is_already_synced — provenance-log guard
+# ---------------------------------------------------------------------------
+
+
+class AlreadySyncedTest(unittest.TestCase):
+
+    MONOREPO = "ROCm/rocm-libraries"
+    PR = 42
+    MERGE_SHA = "abc1234def567890"
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmpdir.name)
+        make_git_repo(self.repo)
+        make_initial_commit(self.repo)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _commit_message(self, subject: str, body: str | None = None) -> None:
+        args = ["commit", "--allow-empty", "-m", subject]
+        if body is not None:
+            args.extend(["-m", body])
+        _git(args, cwd=self.repo)
+
+    def _is_synced(
+        self,
+        *,
+        monorepo: str = MONOREPO,
+        pr: int = PR,
+        merge_sha: str = MERGE_SHA,
+    ) -> bool:
+        return sut._is_already_synced(self.repo, monorepo, pr, merge_sha)
+
+    def test_formatted_provenance_is_detected_below_head(self):
+        message = sut._format_commit_message(
+            self.MONOREPO, self.PR, self.MERGE_SHA, "Original subject"
+        )
+        self._commit_message(message)
+        self._commit_message("later unrelated commit")
+
+        self.assertTrue(self._is_synced())
+
+    def test_different_pr_is_not_detected(self):
+        marker = sut._sync_annotation(self.MONOREPO, self.PR - 1, self.MERGE_SHA)
+        self._commit_message(marker)
+
+        self.assertFalse(self._is_synced())
+
+    def test_different_monorepo_is_not_detected(self):
+        marker = sut._sync_annotation("ROCm/another-repo", self.PR, self.MERGE_SHA)
+        self._commit_message(marker)
+
+        self.assertFalse(self._is_synced())
+
+    def test_different_merge_sha_is_not_detected(self):
+        marker = sut._sync_annotation(self.MONOREPO, self.PR, "def5678abc1234")
+        self._commit_message(marker)
+
+        self.assertFalse(self._is_synced())
+
+    def test_marker_quoted_only_in_body_is_not_detected(self):
+        marker = sut._sync_annotation(self.MONOREPO, self.PR, self.MERGE_SHA)
+        self._commit_message("ordinary commit", f"Diagnostic output quoted {marker}")
+
+        self.assertFalse(self._is_synced())
 
 
 # ---------------------------------------------------------------------------
@@ -561,43 +699,185 @@ class ApplyPatchTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+FAKE_SHA = "abc1234def5678901234567890123456789abcdef"
+
+
 class PushChangesTest(unittest.TestCase):
+    """Tests for _push_changes(repo_path, branch).
 
-    @pytest.mark.xfail(
-        reason="BUG: push failures are not retried — they propagate immediately; after the fix there should be retry logic before the error propagates",
-        strict=True,
-    )
-    def test_push_failure_propagates_as_runtime_error(self):
-        call_count = 0
+    _run_git is always mocked. The call sequence for a clean push is:
+      1. rev-parse HEAD          -> local SHA
+      2. push origin <branch>    -> ""
+      3. ls-remote origin <ref>  -> "<sha>\trefs/heads/<branch>"
+    """
 
-        def fail_then_succeed(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("push rejected")
-            return ""
+    def _make_git_mock(self, *, push_side_effect=None):
+        """Return a side_effect function that routes by git sub-command."""
 
-        with patch.object(sut, "_run_git", side_effect=fail_then_succeed):
-            sut._push_changes(Path("/tmp/fake"), "develop")  # should retry, not raise
-        self.assertGreater(call_count, 1)
+        def _git(args, **kwargs):
+            sub = args[0]
+            if sub == "rev-parse":
+                return FAKE_SHA
+            if sub == "push":
+                if push_side_effect:
+                    return push_side_effect(args, **kwargs)
+                return ""
+            if sub == "ls-remote":
+                return f"{FAKE_SHA}\trefs/heads/develop"
+            if sub in ("fetch", "rebase"):
+                return ""
+            raise AssertionError(f"Unexpected git call: {args}")
+
+        return _git
 
     def test_successful_push_calls_git_push_origin_branch(self):
-        with patch.object(sut, "_run_git") as mock_git:
-            mock_git.return_value = ""
-            sut._push_changes(Path("/tmp/repo"), "develop")
-        mock_git.assert_called_once_with(
-            ["push", "origin", "develop"], cwd=Path("/tmp/repo")
-        )
+        calls = []
 
-    @pytest.mark.xfail(
-        reason="BUG: after a successful push there is no verification step (e.g. fetching the remote to confirm the commit landed); the current code calls _run_git exactly once and returns",
-        strict=True,
-    )
-    def test_no_post_push_verification_performed(self):
-        with patch.object(sut, "_run_git") as mock_git:
-            mock_git.return_value = ""
+        def side_effect(args, **kwargs):
+            calls.append((args, kwargs))
+            return self._make_git_mock()(args, **kwargs)
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
             sut._push_changes(Path("/tmp/repo"), "develop")
-        self.assertGreater(mock_git.call_count, 1)
+
+        push_call = next(((args, kw) for args, kw in calls if args[0] == "push"), None)
+        self.assertIsNotNone(push_call, "expected a push call but none was made")
+        push_args, push_kwargs = push_call
+        self.assertEqual(push_args, ["push", "origin", "develop"])
+        self.assertEqual(push_kwargs.get("cwd"), Path("/tmp/repo"))
+
+    def test_transient_failure_is_retried_and_succeeds(self):
+        push_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            if len(push_calls) == 1:
+                raise RuntimeError(
+                    "Git command failed: push\nremote: Internal Server Error"
+                )
+            return ""
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ), patch.object(time, "sleep"):
+            sut._push_changes(Path("/tmp/fake"), "develop")  # should not raise
+
+        self.assertEqual(len(push_calls), 2)
+
+    def test_transient_failure_exhausts_retries_and_raises(self):
+        def push_side_effect(args, **kwargs):
+            raise RuntimeError(
+                "Git command failed: push\nremote: Internal Server Error"
+            )
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ), patch.object(time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop", max_attempts=1)
+
+    def test_non_fast_forward_triggers_rebase_and_retry(self):
+        push_calls = []
+        extra_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            if len(push_calls) == 1:
+                raise RuntimeError(
+                    "Git command failed: push\nerror: failed to push some refs (non-fast-forward)"
+                )
+            return ""
+
+        def side_effect(args, **kwargs):
+            result = self._make_git_mock(push_side_effect=push_side_effect)(
+                args, **kwargs
+            )
+            if args[0] in ("fetch", "rebase"):
+                extra_calls.append(args[0])
+            return result
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            sut._push_changes(Path("/tmp/fake"), "develop")  # should not raise
+
+        self.assertEqual(len(push_calls), 2)
+        self.assertEqual(extra_calls, ["fetch", "rebase"])
+
+    def test_non_fast_forward_exhausts_retries_and_raises(self):
+        def push_side_effect(args, **kwargs):
+            raise RuntimeError(
+                "Git command failed: push\nerror: failed to push some refs (non-fast-forward)"
+            )
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop", max_attempts=1)
+
+    def test_auth_failure_propagates_immediately(self):
+        push_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            raise RuntimeError("Git command failed: push\nerror: authentication failed")
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop")
+
+        self.assertEqual(len(push_calls), 1)  # no retry on auth failure
+
+    def test_post_push_verification_uses_ls_remote(self):
+        calls = []
+
+        def side_effect(args, **kwargs):
+            calls.append(args[0])
+            return self._make_git_mock()(args, **kwargs)
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            sut._push_changes(Path("/tmp/repo"), "develop")
+
+        self.assertIn("ls-remote", calls)
+
+    def test_verification_fails_if_remote_sha_does_not_match(self):
+        wrong_sha = "0" * 40
+
+        def side_effect(args, **kwargs):
+            if args[0] == "rev-parse":
+                return FAKE_SHA
+            if args[0] == "push":
+                return ""
+            if args[0] == "ls-remote":
+                return f"{wrong_sha}\trefs/heads/develop"
+            return ""
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/repo"), "develop")
+
+    def test_ls_remote_empty_output_raises(self):
+        def side_effect(args, **kwargs):
+            if args[0] == "rev-parse":
+                return FAKE_SHA
+            if args[0] == "push":
+                return ""
+            if args[0] == "ls-remote":
+                return ""  # branch not found on remote
+            return ""
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/repo"), "develop")
 
 
 # ---------------------------------------------------------------------------
@@ -607,11 +887,14 @@ class PushChangesTest(unittest.TestCase):
 
 class ApplyPatchToSubrepoTest(unittest.TestCase):
 
-    def test_dry_run_skips_all_git_operations(self):
-        """In dry-run mode the function must log and return without cloning."""
+    def test_dry_run_inspects_provenance_then_skips_mutating_git_operations(self):
         with patch.object(sut, "_clone_subrepo") as mock_clone, patch.object(
+            sut, "_is_already_synced", return_value=False
+        ) as already_synced, patch.object(
             sut, "_apply_patch"
-        ) as mock_apply, patch.object(sut, "_push_changes") as mock_push:
+        ) as mock_apply, patch.object(
+            sut, "_push_changes"
+        ) as mock_push:
             sut.apply_patch_to_subrepo(
                 entry=make_entry("rocblas"),
                 monorepo_url="ROCm/rocm-libraries",
@@ -622,18 +905,78 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
                 merge_sha="abc1234",
                 dry_run=True,
             )
-        # The production code clones before checking --dry-run, so _clone_subrepo
-        # is called even in dry-run mode. If that changes, update this assertion.
         mock_clone.assert_called_once()
+        already_synced.assert_called_once_with(ANY, "ROCm/rocm-libraries", 1, "abc1234")
         mock_apply.assert_not_called()
         mock_push.assert_not_called()
+
+    def test_already_synced_pr_skips_apply_commit_and_push(self):
+        with patch.object(sut, "_clone_subrepo"), patch.object(
+            sut, "_is_already_synced", return_value=True
+        ) as already_synced, patch.object(
+            sut, "_apply_patch"
+        ) as mock_apply, patch.object(
+            sut, "_commit_changes"
+        ) as mock_commit, patch.object(
+            sut, "_push_changes"
+        ) as mock_push:
+            sut.apply_patch_to_subrepo(
+                entry=make_entry("rocblas"),
+                monorepo_url="ROCm/rocm-libraries",
+                monorepo_pr=99,
+                patch_path=FIXTURES / "simple.patch",
+                author_name="Jane Doe",
+                author_email="jane@example.com",
+                merge_sha="abc1234",
+                dry_run=False,
+            )
+
+        already_synced.assert_called_once_with(
+            ANY, "ROCm/rocm-libraries", 99, "abc1234"
+        )
+        mock_apply.assert_not_called()
+        mock_commit.assert_not_called()
+        mock_push.assert_not_called()
+
+    def test_content_without_provenance_records_empty_commit(self):
+        with patch.object(sut, "_clone_subrepo"), patch.object(
+            sut, "_is_already_synced", return_value=False
+        ), patch.object(sut, "_configure_git_user"), patch.object(
+            sut, "_apply_patch"
+        ), patch.object(
+            sut, "_stage_changes"
+        ), patch.object(
+            sut, "_has_staged_changes", return_value=False
+        ), patch.object(
+            sut, "_commit_changes"
+        ) as mock_commit, patch.object(
+            sut, "_set_authenticated_remote"
+        ), patch.object(
+            sut, "_push_changes"
+        ):
+            sut.apply_patch_to_subrepo(
+                entry=make_entry("rocblas"),
+                monorepo_url="ROCm/rocm-libraries",
+                monorepo_pr=99,
+                patch_path=FIXTURES / "simple.patch",
+                author_name="Jane Doe",
+                author_email="jane@example.com",
+                merge_sha="abc1234",
+                dry_run=False,
+            )
+
+        self.assertTrue(mock_commit.call_args.kwargs["allow_empty"])
 
     def test_non_dry_run_commits_and_pushes(self):
         """The full pipeline runs commit and push exactly once."""
         with patch.object(sut, "_clone_subrepo"), patch.object(
-            sut, "_configure_git_user"
-        ), patch.object(sut, "_apply_patch"), patch.object(
+            sut, "_is_already_synced", return_value=False
+        ), patch.object(sut, "_configure_git_user"), patch.object(
+            sut, "_apply_patch"
+        ), patch.object(
             sut, "_stage_changes"
+        ), patch.object(
+            sut, "_has_staged_changes", return_value=True
         ), patch.object(
             sut, "_commit_changes"
         ) as mock_commit, patch.object(
@@ -652,6 +995,7 @@ class ApplyPatchToSubrepoTest(unittest.TestCase):
                 dry_run=False,
             )
         mock_commit.assert_called_once()
+        self.assertFalse(mock_commit.call_args.kwargs["allow_empty"])
         mock_push.assert_called_once()
 
 

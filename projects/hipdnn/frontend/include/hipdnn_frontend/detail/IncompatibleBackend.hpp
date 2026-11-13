@@ -179,6 +179,14 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t /*handle*/,
+                                        int64_t /*engineId*/,
+                                        char* /*engineName*/,
+                                        size_t* /*engineNameLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     // RFC 0007 Section 16: Heuristic policy enumeration
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t /*handle*/,
                                            size_t* /*numPolicies*/) override

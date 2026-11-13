@@ -1,6 +1,7 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 /* SPDX-License-Identifier:  MIT */
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -12,7 +13,6 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
@@ -547,6 +547,29 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               false,
               "Leaky RELU is NOT supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "RELU with zero slope is supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, -1.0, 1.0, 0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "CLAMP with zero slope is supported"},
         Param{FusedOp::CA,
               validConvTestCase4d(),
               TensorLayout::NCHW,
@@ -580,6 +603,19 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               false,
               "Leaky RELU is NOT supported"},
+        Param{FusedOp::CA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  6.0,
+                  0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "Clipped RELU with zero slope is supported"},
     };
 
     return params;

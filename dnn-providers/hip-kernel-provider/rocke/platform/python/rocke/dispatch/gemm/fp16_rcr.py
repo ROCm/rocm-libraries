@@ -27,14 +27,15 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
+    RDNA_WMMA_GEMM_ARCHES,
     GemmRequest,
     apply_split_k,
     rcr_request_errors,
-    selector_matches,
 )
 from .support import (
     gemm_config_supported,
@@ -227,10 +228,11 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 
 # Explicit gfx targets rather than a cdna/rdna family label. Family does not
 # imply wave size -- gfx1250 is cdna at wave32 -- so a family gate would admit a
-# wave32 target into these wave64 MFMA candidates. An arch absent from a list is
-# a target the candidate was never built or run against.
+# wave32 target into these wave64 MFMA candidates. A candidate admits a target
+# when its list names the target or its generic (the row arch_specs.json points
+# the target at); any other target is one the candidate was never built or run
+# against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
-_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
@@ -252,7 +254,7 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_fp16_cdna_mem",
@@ -266,7 +268,7 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
     )
 )
@@ -303,19 +305,31 @@ def build_kernel(result: DispatchResult):
     return result.build()
 
 
+def registered_gemm_fp16_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, UniversalGemmSpec], ...]:
+    """Every registered FP16 RCR candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_gemm_fp16` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return GEMM_FP16_REGISTRY.combos(req)
+
+
 def gemm_fp16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:
     """Bounded sweep space from all registered FP16 RCR candidates."""
     if _request_errors(req):
         return ()
-    specs: list[UniversalGemmSpec] = []
-    seen = set()
-    for candidate in GEMM_FP16_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        spec_hash = stable_json_hash(asdict(spec), n=16)
-        if spec_hash not in seen:
-            seen.add(spec_hash)
-            specs.append(spec)
-    return tuple(specs)
+    return GEMM_FP16_REGISTRY.sweep_space(req)
+
+
+def dispatch_gemm_fp16_all(req: GemmRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible FP16 RCR kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return GEMM_FP16_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_gemm_fp16(

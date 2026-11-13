@@ -10,7 +10,6 @@
  * rocke_i_set_err (the sticky-error spelling used across the C port).
  */
 #include "rocke/helper_rocke.helpers.epilogues.h"
-
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* make_lds_view, rocke_tensor_view_t */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -89,74 +88,6 @@ rocke_value_t* rocke_warp_grid_warp_n_off(rocke_ir_builder_t* b, const rocke_war
         return NULL;
     return rocke_b_mul(
         b, grid->warp_n_idx, rocke_b_const_i32(b, (int64_t)mfmas_n * grid->warp_tile_n));
-}
-
-/* -------------------------------------------------------------- lane_to_output *
- *
- * File-local port of MfmaAtom.lane_to_output (rocke/helpers/atoms.py): the
- * per-lane (row_in_atom, col_in_atom) of accumulator slot `i` within one atom.
- * The two epilogues are the only consumers, so it lives here as a static helper
- * (atoms.h does not yet export it). Returns 0 on success and writes *out_row /
- * *out_col; returns -1 + sets the builder error for the NotImplementedError
- * dispatch miss. */
-static int rocke_epi_lane_to_output(rocke_ir_builder_t* b,
-                                    const rocke_mfma_atom_t* atom,
-                                    rocke_value_t* lane,
-                                    int i,
-                                    rocke_value_t** out_row,
-                                    rocke_value_t** out_col)
-{
-    if(atom->m == 16 && atom->n == 16)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python (atoms.py:572):
-         *   row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)), b.const_i32(i))
-         * The b.mul subtree (and its inner const) runs before b.const_i32(i).
-         * Sequence into temporaries so C arg-evaluation order does not perturb
-         * the SSA numbering. */
-        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
-        rocke_value_t* row_ci = rocke_b_const_i32(b, i);
-        rocke_value_t* row = rocke_b_add(b, row_mul, row_ci);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return 0;
-    }
-    if(atom->m == 32 && atom->n == 32)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        int rb = i / 4;
-        int ri = i % 4;
-        /* Python (atoms.py:580-583):
-         *   row = b.add(
-         *       b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
-         *       b.const_i32(ri))
-         * Evaluation order is strictly left-to-right:
-         *   const(rb*8); const(4); mul; inner add; const(ri); outer add.
-         * Sequence into temporaries to keep the SSA numbering byte-identical. */
-        rocke_value_t* rb_ci = rocke_b_const_i32(b, rb * 8);
-        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
-        rocke_value_t* row_in = rocke_b_add(b, rb_ci, row_mul);
-        rocke_value_t* ri_ci = rocke_b_const_i32(b, ri);
-        rocke_value_t* row = rocke_b_add(b, row_in, ri_ci);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return 0;
-    }
-    if(atom->m == 4 && atom->n == 4)
-    {
-        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
-        *out_row = rocke_b_const_i32(b, i);
-        *out_col = lane_in_batch;
-        return 0;
-    }
-    rocke_i_set_err(
-        b, ROCKE_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
-    return -1;
 }
 
 /* ============================ DirectEpilogue ============================ */
@@ -289,8 +220,7 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                 rocke_value_t* off_elems;
                 rocke_value_t* off_bytes;
                 rocke_value_t* safe;
-                if(rocke_epi_lane_to_output(b, atom, grid->lane, 0, &row_off, &col_off) != 0)
-                    return;
+                rocke_mfma_atom_lane_to_output(b, atom, grid->lane, 0, &row_off, &col_off);
                 m_val = rocke_b_add(b, atom_m_off, row_off);
                 n_val = rocke_b_add(b, atom_n_off, col_off);
                 ok = rocke_direct_epilogue_bounds_check(
@@ -369,8 +299,7 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                     rocke_value_t* off_elems;
                     rocke_value_t* off_bytes;
                     rocke_value_t* safe;
-                    if(rocke_epi_lane_to_output(b, atom, grid->lane, i, &row_off, &col_off) != 0)
-                        return;
+                    rocke_mfma_atom_lane_to_output(b, atom, grid->lane, i, &row_off, &col_off);
                     m_val = rocke_b_add(b, atom_m_off, row_off);
                     n_val = rocke_b_add(b, atom_n_off, col_off);
                     ok = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bounds_m, bounds_n, 1);
@@ -567,7 +496,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     }
 
     /* ---- step 1: publish accs to LDS. ----
-     * WMMA path: use op->c_layout().coord() for the scatter.
+     * WMMA path: use the op's result layout for the scatter.
      * MFMA path: use atom->lane_to_output(). */
     for(mi = 0; mi < mfmas_m; ++mi)
     {
@@ -589,7 +518,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->c_frag_len;
+                c_per_lane = epi->mma_op->dst.frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }
@@ -617,16 +546,15 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                     rocke_value_t* idx[2];
                     if(epi->mma_op != NULL)
                     {
-                        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(epi->mma_op, b);
+                        const rocke_arch_layout_map_t* c_map
+                            = rocke_mma_op_dst_layout(epi->mma_op, b);
                         rocke_arch_layout_map_coord(
                             c_map, b, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
                     else
                     {
-                        if(rocke_epi_lane_to_output(
-                               b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
-                           != 0)
-                            return;
+                        rocke_mfma_atom_lane_to_output(
+                            b, atom, grid->lane, i, &row_in_atom, &col_in_atom);
                     }
                     ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
@@ -697,15 +625,18 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
         if(_fp32_out)
         {
+            /* Python: b.smem_load_vN(c_smem, row, col, dtype=F32, n=...) -- the
+             * generic vector load, not smem_load_vN_f32 (whose result name
+             * differs), so the f32 tile reads mirror it. */
             if(sv == 1)
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, 1);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), 1);
                 rocke_b_buffer_store_f32(
                     b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vf32, 0));
             }
             else
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, sv);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), sv);
                 rocke_b_buffer_store_vN_f32(b, d_rsrc, safe, rocke_b_const_i32(b, 0), vf32, sv);
             }
         }
@@ -713,7 +644,9 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         {
             if(sv == 1)
             {
-                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
+                /* One element, as Python: a 2-wide load at the last column
+                 * reads past the end of the C tile row. */
+                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 1);
                 rocke_b_buffer_store_bf16(
                     b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vbf, 0));
             }
@@ -728,7 +661,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         {
             if(sv == 1)
             {
-                rocke_value_t* v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, 2);
+                rocke_value_t* v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, 1);
                 rocke_value_t* h = rocke_b_vec_extract(b, v, 0);
                 rocke_b_buffer_store_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), h);
             }
@@ -742,6 +675,328 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                     v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, sv);
                 dwords = sv / 2;
                 rocke_b_buffer_store_vN_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v, dwords);
+            }
+        }
+    }
+}
+
+void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
+                                          const rocke_cshuffle_epilogue_t* epi,
+                                          rocke_value_t* const* accs,
+                                          int num_accs,
+                                          rocke_value_t* dw_ptr,
+                                          rocke_value_t* wg_N,
+                                          rocke_value_t* bounds_m,
+                                          rocke_value_t* bounds_n)
+{
+    /* Steps 1+2 are identical to rocke_cshuffle_epilogue_store (scatter accs
+     * to LDS then barrier).  Step 3 replaces wide buffer_store with atomic-adds:
+     *   fp32 -> global_atomic_add per element in the sv chunk.
+     *   bf16 -> global_atomic_add_pk_bf16 per adjacent (even,odd) pair.
+     *   fp16 -> global_atomic_add_pk_f16  per adjacent (even,odd) pair.
+     * For bf16/fp16: sv must be even (validated below); adjacent pairs in the
+     * sv-wide chunk share a row and are consecutive in N after the shuffle, so
+     * they form a genuine <2 x dtype> pair without zero-fill. */
+    const rocke_mfma_atom_t* atom = epi->atom;
+    const rocke_warp_grid_t* grid = &epi->grid;
+    int mfmas_m, mfmas_n, mi, ni;
+    rocke_value_t* warp_m_off;
+    rocke_value_t* warp_n_off;
+    rocke_tensor_view_t c_view;
+    rocke_value_t* c_smem;
+    int lds_shape[2];
+    int threads, sv, vecs_per_thread, e;
+    rocke_value_t* c_threads;
+    rocke_value_t* c_tile_n_div_vec;
+    bool _fp32_out;
+    bool _bf16_out;
+    const rocke_type_t* _lds_dtype;
+
+    if(!rocke_warp_grid_is_bound(grid))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CShuffleEpilogue.atomic_store: grid must be bound first");
+        return;
+    }
+    if(epi->atom == NULL && epi->mma_op == NULL)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CShuffleEpilogue.atomic_store: must set atom or mma_op");
+        return;
+    }
+
+    mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
+    mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
+    if(mfmas_m < 0 || mfmas_n < 0)
+        return;
+    if(num_accs != mfmas_m * mfmas_n)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "CShuffleEpilogue.atomic_store: expected %d accs, got %d",
+                        mfmas_m * mfmas_n,
+                        num_accs);
+        return;
+    }
+
+    _fp32_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'f' && epi->out_dtype[1] == 'p' && epi->out_dtype[2] == '3'
+                    && epi->out_dtype[3] == '2');
+    _bf16_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'b' && epi->out_dtype[1] == 'f' && epi->out_dtype[2] == '1'
+                    && epi->out_dtype[3] == '6');
+    _lds_dtype = _fp32_out ? rocke_f32() : (_bf16_out ? rocke_bf16() : rocke_f16());
+
+    warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
+    warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
+    if(warp_m_off == NULL || warp_n_off == NULL)
+        return;
+
+    /* ---- step 1: scatter accs to LDS (identical to store). ---- */
+    lds_shape[0] = grid->tile_m;
+    lds_shape[1] = grid->tile_n;
+    if(rocke_make_lds_view_ex(
+           b, &c_view, _lds_dtype, lds_shape, 2, epi->smem_name_hint, NULL, epi->no_alias ? 1 : 0)
+       != ROCKE_OK)
+        return;
+    c_smem = c_view.base;
+
+    (void)rocke_b_const_i32(b, 0);
+    (void)rocke_b_const_i32(b, 0);
+
+    if(!epi->no_alias)
+    {
+        int wb;
+        for(wb = 0; wb < epi->war_barriers; ++wb)
+            rocke_b_sync(b);
+    }
+
+    for(mi = 0; mi < mfmas_m; ++mi)
+    {
+        for(ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = accs[mi * mfmas_n + ni];
+            rocke_value_t* acc_staged;
+            int c_per_lane;
+            int atom_m, atom_n;
+            int i;
+            rocke_value_t* elems[64];
+
+            if(_fp32_out)
+                acc_staged = acc;
+            else if(_bf16_out)
+                acc_staged = rocke_b_vec_trunc_f32_to_bf16(b, acc);
+            else
+                acc_staged = rocke_b_vec_trunc_f32_to_f16(b, acc);
+
+            if(epi->mma_op != NULL)
+            {
+                c_per_lane = epi->mma_op->dst.frag_len;
+                atom_m = epi->mma_op->m;
+                atom_n = epi->mma_op->n;
+            }
+            else
+            {
+                c_per_lane = atom->c_per_lane;
+                atom_m = atom->m;
+                atom_n = atom->n;
+            }
+
+            for(i = 0; i < c_per_lane; ++i)
+                elems[i] = rocke_b_vec_extract(b, acc_staged, i);
+
+            {
+                rocke_value_t* tile_m_base
+                    = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, (int64_t)mi * atom_m));
+                rocke_value_t* tile_n_base
+                    = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, (int64_t)ni * atom_n));
+                for(i = 0; i < c_per_lane; ++i)
+                {
+                    rocke_value_t* row_in_atom = NULL;
+                    rocke_value_t* col_in_atom = NULL;
+                    rocke_value_t* ld_m;
+                    rocke_value_t* ld_n;
+                    rocke_value_t* idx[2];
+                    if(epi->mma_op != NULL)
+                    {
+                        const rocke_arch_layout_map_t* c_map
+                            = rocke_mma_op_dst_layout(epi->mma_op, b);
+                        rocke_arch_layout_map_coord(
+                            c_map, b, grid->lane, i, &row_in_atom, &col_in_atom);
+                    }
+                    else
+                    {
+                        rocke_mfma_atom_lane_to_output(
+                            b, atom, grid->lane, i, &row_in_atom, &col_in_atom);
+                    }
+                    ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
+                    ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
+                    idx[0] = ld_m;
+                    idx[1] = ld_n;
+                    if(_fp32_out)
+                        rocke_b_smem_store_vN_f32(b, c_smem, idx, 2, elems[i], 1);
+                    else if(_bf16_out)
+                        rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
+                    else
+                        rocke_b_smem_store_vN_f16(b, c_smem, idx, 2, elems[i], 1);
+                }
+            }
+        }
+    }
+
+    /* ---- step 2: barrier. ---- */
+    rocke_b_sync(b);
+
+    /* ---- step 3: atomic-adds from LDS. ---- */
+    threads = rocke_warp_grid_block_size(grid);
+    sv = epi->store_vec;
+    if((grid->tile_n % sv) || ((grid->tile_m * grid->tile_n) / sv < threads)
+       || (((grid->tile_m * grid->tile_n) / sv) % threads))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "atomic_store: store_vec %d does not distribute over tile %dx%d "
+                        "and block_size %d",
+                        sv,
+                        grid->tile_m,
+                        grid->tile_n,
+                        threads);
+        return;
+    }
+    if(!_fp32_out && sv % 2 != 0)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "atomic_store: bf16/fp16 requires even store_vec (got %d)", sv);
+        return;
+    }
+
+    vecs_per_thread = (grid->tile_m * grid->tile_n / sv) / threads;
+    c_threads = rocke_b_const_i32(b, threads);
+    c_tile_n_div_vec = rocke_b_const_i32(b, grid->tile_n / sv);
+
+    for(e = 0; e < vecs_per_thread; ++e)
+    {
+        rocke_value_t* vec_idx
+            = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), grid->tid);
+        rocke_value_t* row = rocke_b_div(b, vec_idx, c_tile_n_div_vec);
+        rocke_value_t* col_v = rocke_b_mod(b, vec_idx, c_tile_n_div_vec);
+        rocke_value_t* col = (sv > 1) ? rocke_b_mul(b, col_v, rocke_b_const_i32(b, sv)) : col_v;
+        rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, row);
+
+        /* Python re-evaluates m_ok per element / pair (after the n coords) and
+         * builds every LDS column with an add, the "+0" included; mirror that
+         * order exactly -- the emitted IR is byte-compared. */
+        if(_fp32_out)
+        {
+            int s;
+            for(s = 0; s < sv; ++s)
+            {
+                /* Bind the inner add first: C++ leaves argument evaluation order
+                 * unspecified, and Python emits it before the constant. */
+                rocke_value_t* n_base = rocke_b_add(b, grid->block_n_off, col);
+                rocke_value_t* n_val = rocke_b_add(b, n_base, rocke_b_const_i32(b, s));
+                rocke_value_t* m_ok
+                    = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
+                rocke_value_t* n_ok
+                    = (bounds_n != NULL) ? rocke_b_cmp_lt(b, n_val, bounds_n) : NULL;
+                rocke_value_t* ok = NULL;
+                if(m_ok != NULL && n_ok != NULL)
+                    ok = rocke_b_land(b, m_ok, n_ok);
+                else if(m_ok != NULL)
+                    ok = m_ok;
+                else
+                    ok = n_ok;
+
+                /* Python emits the LDS read and the address inside the if. */
+                if(ok != NULL)
+                {
+                    rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                    rocke_b_region_enter(b, if_op.then_region);
+                }
+                {
+                    rocke_value_t* smem_col = rocke_b_add(b, col, rocke_b_const_i32(b, s));
+                    rocke_value_t* smem_idx[2] = {row, smem_col};
+                    /* Python: b.smem_load_vN(c_smem, row, c_smem_col, dtype=F32, n=1) --
+                     * the generic vector load (result name av1), not smem_load_vN_f32
+                     * (av1f32), exactly as the plain store path above. */
+                    rocke_value_t* vf32
+                        = rocke_b_smem_load_vN(b, c_smem, smem_idx, 2, rocke_f32(), 1);
+                    rocke_value_t* v = rocke_b_vec_extract(b, vf32, 0);
+                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
+                    rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
+                }
+                if(ok != NULL)
+                    rocke_b_region_leave(b);
+            }
+        }
+        else
+        {
+            /* sv/2 pairs per thread.  pair p: columns col+2p and col+2p+1. */
+            int p;
+            for(p = 0; p < sv / 2; ++p)
+            {
+                rocke_value_t* n_base = rocke_b_add(b, grid->block_n_off, col);
+                rocke_value_t* n_even = rocke_b_add(b, n_base, rocke_b_const_i32(b, 2 * p));
+                rocke_value_t* n_odd = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
+                rocke_value_t* m_ok
+                    = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
+                rocke_value_t* n_ok
+                    = (bounds_n != NULL) ? rocke_b_cmp_lt(b, n_odd, bounds_n) : NULL;
+                rocke_value_t* ok = NULL;
+                if(m_ok != NULL && n_ok != NULL)
+                    ok = rocke_b_land(b, m_ok, n_ok);
+                else if(m_ok != NULL)
+                    ok = m_ok;
+                else
+                    ok = n_ok;
+
+                {
+                    rocke_value_t* sce = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p));
+                    rocke_value_t* sco = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p + 1));
+                    rocke_value_t* c_off_even = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+                    rocke_value_t* smem_idx_e[2];
+                    rocke_value_t* smem_idx_o[2];
+                    rocke_value_t* v_e;
+                    rocke_value_t* v_o;
+                    rocke_value_t* vec;
+                    rocke_value_t* elems2[2];
+                    smem_idx_e[0] = row;
+                    smem_idx_e[1] = sce;
+                    smem_idx_o[0] = row;
+                    smem_idx_o[1] = sco;
+
+                    if(ok != NULL)
+                    {
+                        rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                        rocke_b_region_enter(b, if_op.then_region);
+                    }
+
+                    if(_bf16_out)
+                    {
+                        v_e = rocke_b_vec_extract(
+                            b, rocke_b_smem_load_vN(b, c_smem, smem_idx_e, 2, rocke_bf16(), 1), 0);
+                        v_o = rocke_b_vec_extract(
+                            b, rocke_b_smem_load_vN(b, c_smem, smem_idx_o, 2, rocke_bf16(), 1), 0);
+                        elems2[0] = v_e;
+                        elems2[1] = v_o;
+                        vec = rocke_b_vec_pack(b, elems2, 2, v_e->type);
+                        rocke_b_global_atomic_add_pk_bf16(b, dw_ptr, c_off_even, vec, NULL);
+                    }
+                    else
+                    {
+                        v_e = rocke_b_vec_extract(
+                            b, rocke_b_smem_load_vN_f16(b, c_smem, smem_idx_e, 2, 1), 0);
+                        v_o = rocke_b_vec_extract(
+                            b, rocke_b_smem_load_vN_f16(b, c_smem, smem_idx_o, 2, 1), 0);
+                        elems2[0] = v_e;
+                        elems2[1] = v_o;
+                        vec = rocke_b_vec_pack(b, elems2, 2, v_e->type);
+                        rocke_b_global_atomic_add_pk_f16(b, dw_ptr, c_off_even, vec, NULL);
+                    }
+
+                    if(ok != NULL)
+                        rocke_b_region_leave(b);
+                }
             }
         }
     }

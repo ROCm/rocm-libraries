@@ -1,0 +1,66 @@
+# Third-Party Licenses
+
+hipDNN contains source code derived from the following third-party project.
+
+---
+
+## NVIDIA cuDNN frontend
+
+- **Version:** v1.24.0 (commit c4a97621eca52fa0c3a1862a411a16be580b25c6)
+- **License:** MIT
+- **Project:** https://github.com/NVIDIA/cudnn-frontend
+- **Use:** Paths are relative to `projects/hipdnn/`. Portions of the
+  cuDNN compatibility layer (`frontend/include/hipdnn_compatibility/`) and of
+  `frontend/include/hipdnn_frontend/Types.hpp` and
+  `frontend/include/hipdnn_frontend/Error.hpp` are derived from cuDNN frontend.
+  The compatibility layer's cuDNN C declarations,
+  `frontend/include/hipdnn_compatibility/cudnn/detail/c_types.h`, copy only the
+  identifier names, from upstream's `include/` headers and
+  `samples/legacy_samples/` sources; the enumerator values are the compatibility layer's own. Its NVIDIA notice
+  names those files.
+  The cuDNN compatibility samples `samples/cudnn_shim/ConvFprop.cpp`,
+  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp` and `Pointwise.cpp` mirror upstream samples, and
+  `tests/cudnn_samples/legacy/overlay/cudnn.h` (legacy-corpus harness only,
+  installed with the harness under `share/hipdnn/cudnn_samples`, never under
+  `include/`) stubs the raw backend C functions that upstream
+  `include/cudnn_frontend_shim.h` wraps, with the attribute names and types
+  one legacy sample passes to them.
+  Each such file carries a "Portions derived from NVIDIA cuDNN frontend" header
+  naming its upstream sources.
+  `tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are
+  substituted copies of upstream `samples/legacy_samples/utils/` and keep
+  upstream's license header.
+
+```
+Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+Individual upstream source files carry the following additional notices,
+reproduced in the hipDNN files derived from them. They are licensed under the
+same MIT terms as above.
+
+```
+Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+```

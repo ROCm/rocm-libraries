@@ -31,8 +31,6 @@ message("")
 message("Commands:")
 message("  help                       Show this message and exit.")
 message("")
-message("  --minimum                  Install minimum dependencies.")
-message("")
 return()
 endif()
 

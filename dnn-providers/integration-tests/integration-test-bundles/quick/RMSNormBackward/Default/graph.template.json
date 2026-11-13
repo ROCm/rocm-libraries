@@ -3,6 +3,11 @@
   "intermediate_data_type": "float",
   "io_data_type": "unset",
   "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
   "name": "RMSNormBackwardTest",
   "nodes": [
     {

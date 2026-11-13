@@ -44,6 +44,10 @@ constexpr auto datatypeToNative()
     {
         return int32_t{};
     }
+    else if constexpr(DT == DataType::BOOLEAN)
+    {
+        return bool{};
+    }
     else if constexpr(DT == DataType::BFLOAT16)
     {
         return bfloat16{};
@@ -87,19 +91,22 @@ constexpr auto datatypeToNative()
     }
 }
 
-inline std::variant<float,
-                    half,
-                    double,
-                    int32_t,
-                    bfloat16,
-                    fp8_e4m3,
-                    fp8_e5m2,
-                    fp8_e8m0,
-                    fp4_e2m1,
-                    fp6_e2m3,
-                    fp6_e3m2,
-                    fp8_e4m3_fnuz,
-                    fp8_e5m2_fnuz>
+using NativeDataTypeVariant = std::variant<float,
+                                           half,
+                                           double,
+                                           int32_t,
+                                           bool,
+                                           bfloat16,
+                                           fp8_e4m3,
+                                           fp8_e5m2,
+                                           fp8_e8m0,
+                                           fp4_e2m1,
+                                           fp6_e2m3,
+                                           fp6_e3m2,
+                                           fp8_e4m3_fnuz,
+                                           fp8_e5m2_fnuz>;
+
+inline NativeDataTypeVariant
     datatypeToNativeVariant(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -117,6 +124,9 @@ inline std::variant<float,
         break;
     case DataType::INT32:
         return int32_t{};
+        break;
+    case DataType::BOOLEAN:
+        return bool{};
         break;
     case DataType::BFLOAT16:
         return bfloat16{};
@@ -169,6 +179,10 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::INT32;
     }
+    else if constexpr(std::is_same_v<T, bool>)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN;
+    }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
         return hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
@@ -213,6 +227,23 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
 using DataTypeToNative = decltype(datatypeToNative<DT>());
+
+// Native type for an SDPA attention-mask tensor. UNSET means "no mask": the placeholder
+// float is never read because the builder for the UNSET key always passes a null mask.
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
+struct MaskDataTypeToNativeImpl
+{
+    using type = DataTypeToNative<DT>;
+};
+
+template <>
+struct MaskDataTypeToNativeImpl<hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
+{
+    using type = float;
+};
+
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
+using MaskDataTypeToNative = typename MaskDataTypeToNativeImpl<DT>::type;
 
 template <typename T>
 using NativeToDataType = decltype(nativeTypeToDataType<T>());

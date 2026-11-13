@@ -1,0 +1,31 @@
+#include "algorithm.h"
+
+#include <array>
+
+using hipconv::ConvAlgorithm;
+using hipconv::ConvKernelGroup;
+using hipconv::ConvParams;
+
+// Symbols defined by autoshard
+extern const ConvKernelGroup direct_cdna5_kernels;
+extern const ConvKernelGroup direct_wgrad_cdna5_kernels;
+
+namespace
+{
+
+bool is_applicable(const ConvParams& par)
+{
+    return par.dilation_h == 1 && par.dilation_w == 1;
+}
+
+constexpr std::array<const ConvKernelGroup*, 2> kernel_groups = {
+    &direct_cdna5_kernels,
+    &direct_wgrad_cdna5_kernels,
+};
+
+} // namespace
+
+// Host-only: the device linker must not see this object or its function pointer.
+#ifndef __HIP_DEVICE_COMPILE__
+extern const ConvAlgorithm direct_cdna5{is_applicable, kernel_groups};
+#endif

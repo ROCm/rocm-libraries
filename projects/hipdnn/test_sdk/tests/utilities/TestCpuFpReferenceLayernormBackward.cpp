@@ -863,17 +863,20 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropTypicalTransformerShape)
 // Type compatibility: various type combinations
 // ============================================================================
 
-template <typename T1, typename T2>
-struct TypePair
+template <typename T1, typename T2, typename T3>
+struct TypeTriple
 {
     using First = T1;
     using Second = T2;
+    using Third = T3;
 };
 
-using LayernormBpropTypes = ::testing::Types<TypePair<float, float>,
-                                             TypePair<half, float>,
-                                             TypePair<bfloat16, float>,
-                                             TypePair<double, double>>;
+using LayernormBpropTypes = ::testing::Types<TypeTriple<float, float, float>,
+                                             TypeTriple<half, half, float>,
+                                             TypeTriple<bfloat16, bfloat16, float>,
+                                             TypeTriple<float, half, float>,
+                                             TypeTriple<half, float, float>,
+                                             TypeTriple<double, double, double>>;
 
 template <class T>
 class CpuFpReferenceLayernormBpropTyped : public ::testing::Test
@@ -885,19 +888,20 @@ TYPED_TEST_SUITE(CpuFpReferenceLayernormBpropTyped, LayernormBpropTypes, );
 TYPED_TEST(CpuFpReferenceLayernormBpropTyped, BpropRunsWithoutError)
 {
     using DyType = typename TypeParam::First;
-    using ScaleType = typename TypeParam::Second;
+    using DxType = typename TypeParam::Second;
+    using ScaleType = typename TypeParam::Third;
 
     Tensor<DyType> dy({2, 8, 32});
-    Tensor<DyType> x({2, 8, 32});
+    Tensor<DxType> x({2, 8, 32});
     Tensor<ScaleType> scale({32});
     Tensor<DyType> mean({2, 8});
     Tensor<DyType> rstd({2, 8});
-    Tensor<DyType> dx({2, 8, 32});
+    Tensor<DxType> dx({2, 8, 32});
     Tensor<ScaleType> dscale({32});
     Tensor<ScaleType> dbias({32});
 
     dy.fillWithValue(safeTestTypeCast<DyType>(0.0));
-    x.fillWithValue(safeTestTypeCast<DyType>(1.0));
+    x.fillWithValue(safeTestTypeCast<DxType>(1.0));
     scale.fillWithValue(safeTestTypeCast<ScaleType>(1.0));
     mean.fillWithValue(safeTestTypeCast<DyType>(1.0));
     rstd.fillWithValue(safeTestTypeCast<DyType>(1.0 / std::sqrt(LAYERNORM_DEFAULT_EPSILON)));
@@ -1727,4 +1731,92 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop5DNormalizeLast2)
             EXPECT_NEAR(outDbias, dbias.getHostValue(l, m), tolerance);
         }
     }
+}
+
+// ============================================================================
+// Whole-tensor normalization with recomputed statistics
+// ============================================================================
+
+// The intersection of two paths that are each covered separately elsewhere: a
+// whole-tensor normalization (every dimension is normalized, so the batch walk is a single
+// position indexed by no dimension) and absent mean/rstd (so bprop recomputes the
+// statistics with Welford and carries them from pass 1 to pass 2 itself).
+//
+// The recomputed statistics have to agree with supplied ones, so the two paths are run
+// against each other rather than against hand-computed values.
+TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropWholeTensorNormalizationRecomputesStats)
+{
+    // Rank-1 input with a rank-2 scale: normalizedDimCount covers every input dimension,
+    // which leaves no batch dimension.
+    const std::vector<int64_t> ioDims{4};
+    const std::vector<int64_t> paramDims{1, 4};
+    constexpr int64_t NORMALIZED_DIM_COUNT = 1;
+    constexpr double EPSILON = 1e-5;
+
+    Tensor<float> x(ioDims);
+    Tensor<float> dy(ioDims);
+    Tensor<float> scale(paramDims);
+    Tensor<float> bias(paramDims);
+
+    const std::vector<float> xValues{1.0f, 2.0f, 4.0f, 8.0f};
+    const std::vector<float> dyValues{0.5f, -1.5f, 2.0f, 0.25f};
+    const std::vector<float> scaleValues{1.5f, -0.5f, 2.0f, 0.75f};
+    for(int64_t i = 0; i < ioDims[0]; ++i)
+    {
+        x.setHostValue(xValues[static_cast<size_t>(i)], i);
+        dy.setHostValue(dyValues[static_cast<size_t>(i)], i);
+        scale.setHostValue(scaleValues[static_cast<size_t>(i)], 0, i);
+        bias.setHostValue(0.0f, 0, i);
+    }
+
+    // Produce the statistics the recompute path has to reproduce.
+    Tensor<float> y(ioDims);
+    Tensor<float> mean({1});
+    Tensor<float> rstd({1});
+    CpuFpReferenceLayernorm::fprop<float, float, float, float, float>(
+        x, &scale, &bias, y, EPSILON, NORMALIZED_DIM_COUNT, &mean, &rstd);
+
+    Tensor<float> dxSupplied(ioDims);
+    Tensor<float> dscaleSupplied(paramDims);
+    Tensor<float> dbiasSupplied(paramDims);
+    CpuFpReferenceLayernorm::bprop<float, float, float, float, float>(dy,
+                                                                      x,
+                                                                      scale,
+                                                                      dxSupplied,
+                                                                      dscaleSupplied,
+                                                                      dbiasSupplied,
+                                                                      EPSILON,
+                                                                      &mean,
+                                                                      &rstd,
+                                                                      NORMALIZED_DIM_COUNT);
+
+    // The path under test: no statistics, so bprop recomputes them for an empty batch
+    // index space.
+    Tensor<float> dxRecomputed(ioDims);
+    Tensor<float> dscaleRecomputed(paramDims);
+    Tensor<float> dbiasRecomputed(paramDims);
+    CpuFpReferenceLayernorm::bprop<float, float, float, float, float>(dy,
+                                                                      x,
+                                                                      scale,
+                                                                      dxRecomputed,
+                                                                      dscaleRecomputed,
+                                                                      dbiasRecomputed,
+                                                                      EPSILON,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      NORMALIZED_DIM_COUNT);
+
+    for(int64_t i = 0; i < ioDims[0]; ++i)
+    {
+        EXPECT_FLOAT_EQ(dxRecomputed.getHostValue(i), dxSupplied.getHostValue(i))
+            << "dx element " << i;
+        EXPECT_FLOAT_EQ(dscaleRecomputed.getHostValue(0, i), dscaleSupplied.getHostValue(0, i))
+            << "dscale element " << i;
+        EXPECT_FLOAT_EQ(dbiasRecomputed.getHostValue(0, i), dbiasSupplied.getHostValue(0, i))
+            << "dbias element " << i;
+    }
+
+    // Guard against both paths being uniformly zero, which would satisfy the comparison
+    // above without exercising anything.
+    EXPECT_NE(dxRecomputed.getHostValue(0), 0.0f);
 }

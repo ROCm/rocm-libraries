@@ -4,6 +4,7 @@
 #ifdef _WIN32
 // Must precede every include: <stdlib.h> only declares rand_s when this is already defined, and
 // any header that reaches it first silently leaves rand_s undeclared.
+// NOLINTNEXTLINE(bugprone-reserved-identifier) - name is mandated by the CRT.
 #define _CRT_RAND_S
 #endif
 
@@ -23,34 +24,15 @@ namespace hipdnn_backend::platform_utilities
 
 std::filesystem::path getCurrentModuleDirectory()
 {
-    std::filesystem::path modulePath;
-
-    HMODULE moduleHandle = nullptr;
-    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&getCurrentModuleDirectory),
-                          &moduleHandle)
-       == TRUE)
+    try
     {
-        std::array<char, MAX_PATH> dst{};
-        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
-        std::string modulePathStr(dst.data());
-
-        if(len > 0 && len < MAX_PATH)
-        {
-            modulePath = std::filesystem::path(modulePathStr).parent_path();
-        }
-        else
-        {
-            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get module file name.");
-        }
+        return hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+            reinterpret_cast<const void*>(&getCurrentModuleDirectory));
     }
-    else
+    catch(const std::runtime_error& ex)
     {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get module handle.");
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, ex.what());
     }
-
-    return std::filesystem::weakly_canonical(std::filesystem::absolute(modulePath));
 }
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)

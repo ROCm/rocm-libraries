@@ -136,12 +136,14 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 include(Dependencies)
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
     message(STATUS "Enabling compile flags for coverage-mapping")
@@ -168,9 +170,29 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # projects/miopen as a sibling component, the MIOpen target is already in the
 # build graph and find_package would either fail or pull in a stale installed
 # copy.
-if(NOT TARGET MIOpen)
+if(NOT TARGET MIOpen AND NOT TARGET MIOpen_private)
     find_package(miopen CONFIG REQUIRED)
 endif()
+
+# Select which MIOpen library the provider links against.
+#
+# With the hipDNN public/private split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON in
+# the MIOpen build) MIOpen ships a private implementation library MIOpen_private
+# that exports the internal C API under _impl names. The provider links it directly
+# and, via the force-included MiopenApiPrivateRename.hpp (below), its public C API
+# calls are renamed to those _impl entry points — linking the public
+# wrapper would fail to load, since libMIOpen.so exports only the public names. We
+# detect that build by the presence of the MIOpen_private target.
+#
+# When the split is OFF (the default) there is no MIOpen_private target: the
+# provider links the single public MIOpen library and its sources call the public
+# C API unchanged, exactly as before the split.
+if(TARGET MIOpen_private)
+    set(MIOPEN_PROVIDER_MIOPEN_LIB MIOpen_private)
+else()
+    set(MIOPEN_PROVIDER_MIOPEN_LIB MIOpen)
+endif()
+message(STATUS "miopen-provider: linking MIOpen library target '${MIOPEN_PROVIDER_MIOPEN_LIB}'")
 
 # Treat MIOpen headers as system headers so neither the compiler nor
 # clang-tidy emits diagnostics for code we do not own. MIOpen's exported
@@ -178,40 +200,69 @@ endif()
 # does not mark its include dirs SYSTEM, so we promote them here.
 # Requires CMake 3.25+ (SYSTEM target property); enforced by
 # cmake_minimum_required above.
-set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
+set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
 
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
-    engines/plans/MiopenUnaryActivationPlan.cpp
-    engines/plans/MiopenUnaryActivationChecks.cpp
-    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
+    engines/plans/MiopenBatchnormPlanBuilder.cpp
+    engines/plans/MiopenBinaryPointwiseChecks.cpp
+    engines/plans/MiopenBinaryPointwisePlan.cpp
+    engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
+    engines/plans/MiopenPointwiseTensorChecks.cpp
+    engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlan.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     HipdnnMiopenHandle.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenUtils.cpp
-    MiopenTensor.cpp
     MiopenPluginPublic.cpp
+    MiopenTensor.cpp
+    MiopenUtils.cpp
 )
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
+# When linking the private implementation library, force-include the symbol-rename
+# header so the provider's public C API calls bind the _impl entry points exported
+# by libMIOpen_private.so. The header is generated from MIOpen's
+# include/miopen/miopen.h by projects/miopen/script/generate_wrapper_sources.py, in
+# the same run that writes the src/private/miopen_private_rename.h MIOpen_private is
+# built with, so the two renames cannot differ. It keeps the provider sources free
+# of _impl spellings. PUBLIC so the force-include also reaches the unit-test
+# targets, which compile the provider headers. With the split OFF nothing is
+# force-included and the provider calls the public C API unchanged.
+#
+# The header is named without a directory: it resolves through the PUBLIC include
+# directory set above, which keeps the build-machine path -- and any space in it --
+# out of a flag that SHELL: splits on spaces. Force-include is spelled -include by
+# GNU-style drivers and /FI by MSVC-style ones (cl, clang-cl), and both accept the
+# filename as a separate argument.
+if(TARGET MIOpen_private)
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(miopen_provider_force_include "/FI")
+    else()
+        set(miopen_provider_force_include "-include")
+    endif()
+    target_compile_options(miopen_plugin_impl PUBLIC
+        "SHELL:${miopen_provider_force_include} MiopenApiPrivateRename.hpp")
+    unset(miopen_provider_force_include)
+endif()
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -231,10 +282,10 @@ clang_tidy_check(miopen_plugin_impl)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties
-target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
+target_link_libraries(miopen_plugin_private PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -299,8 +350,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     if(TARGET hipdnn_integration_tests)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
     endif()
-    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
-
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -374,6 +423,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            # Five small batchnorm inference bundles: a few seconds on one GPU.
+            BENCHMARK_REFERENCE_SMOKE_FILTER "quick_BatchnormFwdInference_Inference.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
@@ -402,6 +453,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             apply_ctest_category_labels(
                 "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                               ${PROJECT_NAME}-external-integration-check-benchmark-reference-smoke
             )
         endif()
     else()
@@ -427,6 +479,7 @@ install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 add_clang_tidy_custom_target()
 
@@ -504,3 +557,4 @@ if(MIOPENPROVIDER_ENABLE_COVERAGE)
     add_custom_coverage_target(current-coverage "")
 
 endif()
+hipdnn_apply_long_path_manifest()

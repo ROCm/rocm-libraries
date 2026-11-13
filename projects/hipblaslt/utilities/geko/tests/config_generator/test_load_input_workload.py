@@ -11,12 +11,14 @@ import pandas as pd
 import pytest
 import yaml
 
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.config_generator.load_input_config import (
     apply_input_config_defaults,
     gemm_configs_from_gemm_dataframe,
     gemm_configs_from_gemm_log_path,
     load_prepared_config_from_yaml,
     validate_input_config,
+    validate_mx_arch_support,
 )
 
 
@@ -238,3 +240,126 @@ def test_heuristic_rejected_for_complex_gemm_problems() -> None:
     }
     with pytest.raises(NotImplementedError, match="Heuristic search space"):
         apply_input_config_defaults(cfg)
+
+
+def test_mx_auto_forced_for_f4_data_type() -> None:
+    """F4 GemmConfig should auto-enable mx=True regardless of explicit flag."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F4", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]])
+    assert gc.mx is True
+
+
+def test_mx_auto_forced_for_f4_even_when_explicit() -> None:
+    """F4 GemmConfig with explicit mx=True should stay True."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F4", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    assert gc.mx is True
+
+
+def test_mx_not_auto_forced_for_f8() -> None:
+    """F8 GemmConfig should default to mx=False unless explicitly set."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]])
+    assert gc.mx is False
+
+
+def test_mx_explicit_true_accepted_for_f8() -> None:
+    """F8 GemmConfig with explicit mx=True should be accepted."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    assert gc.mx is True
+
+
+@pytest.mark.parametrize("dtype", ["H", "B", "S", "D", "X"])
+def test_mx_rejects_non_mx_data_type(dtype: str) -> None:
+    """GemmConfig with mx=True and a non-MX data type should raise ValueError."""
+    from geko.schemas import GemmConfig, GemmType
+
+    dest = "D" if dtype == "D" else "S"
+    comp = "D" if dtype == "D" else "S"
+    gt = GemmType.from_tensile("T", "N", dtype, dest, comp)
+    with pytest.raises(ValueError, match="MX mode is not compatible with data type"):
+        GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+
+
+@pytest.mark.parametrize("dtype", ["F4", "F8"])
+def test_mx_accepts_compatible_data_types(dtype: str) -> None:
+    """GemmConfig with mx=True should be accepted for FP4 and FP8."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", dtype, "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    assert gc.mx is True
+
+
+def test_validate_mx_arch_support_rejects_unsupported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        validate_mx_arch_support([gc], "gfx942")
+
+
+def test_validate_mx_arch_support_accepts_supported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    validate_mx_arch_support([gc], "gfx950")
+
+
+def test_validate_mx_arch_support_accepts_gfx1250() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    validate_mx_arch_support([gc], "gfx1250")
+
+
+def test_hardware_map_gfx1250_mx_scale_is_three() -> None:
+    assert HARDWARE_MAP["gfx1250"]["mx_scale"] == 3
+
+
+def test_hardware_map_mx_block_size_per_arch() -> None:
+    assert HARDWARE_MAP["gfx950"]["mx_block_size"] == 32
+    assert HARDWARE_MAP["gfx1250"]["mx_block_size"] == 32
+    assert HARDWARE_MAP["gfx942"]["mx_block_size"] is None
+
+
+def test_validate_mx_arch_support_ignores_non_mx_configs_on_unsupported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "H", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]])
+    validate_mx_arch_support([gc], "gfx942")
+
+
+def test_load_prepared_config_from_yaml_rejects_mx_on_unsupported_arch(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "cfg.yaml"
+    yaml.safe_dump(
+        {
+            "ARCH": "gfx942",
+            "TRANSA": "N",
+            "TRANSB": "N",
+            "DataType": "F8",
+            "DestDataType": "S",
+            "ComputeDataType": "S",
+            "SIZE_OPTION": 0,
+            "Sizes": [[32, 32, 1, 32]],
+            "MX": True,
+        },
+        cfg_path.open("w"),
+        sort_keys=False,
+    )
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        load_prepared_config_from_yaml(cfg_path)

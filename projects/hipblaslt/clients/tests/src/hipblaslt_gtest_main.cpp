@@ -24,12 +24,23 @@
  *
  *******************************************************************************/
 
+#include "d_vector.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
+#include "memory_estimate_check.hpp"
 #include "test_cleanup.hpp"
 #include "utility.hpp"
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+namespace hipblaslt_bench
+{
+    int run_rank_child();
+}
+#endif
+
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -39,6 +50,8 @@ class ConfigurableEventListener : public TestEventListener
 {
     TestEventListener* const eventListener;
     std::atomic_size_t       skipped_tests{0}; // Number of skipped tests.
+    MemoryShortageLog        memory_shortages;
+    std::string              current_test; // suite.name of the running test
 
 public:
     bool showTestCases      = true; // Show the names of each test case.
@@ -88,30 +101,20 @@ public:
 
     void OnTestStart(const TestInfo& test_info) override
     {
+        // OnTestPartResult runs under the lock that UnitTest::current_test_info() takes, so the
+        // name is kept here.
+        current_test = std::string(test_info.test_suite_name()) + "." + test_info.name();
         if(showTestNames)
             eventListener->OnTestStart(test_info);
     }
 
     void OnTestPartResult(const TestPartResult& result) override
     {
-        if(!strcmp(result.message(), LIMITED_MEMORY_STRING_GTEST))
-        {
-            if(showInlineSkips)
-                hipblaslt_cout << "Skipped test due to limited memory environment." << std::endl;
-            ++skipped_tests;
-        }
-        else if(!strcmp(result.message(), TOO_MANY_DEVICES_STRING_GTEST))
+        memory_shortages.record(current_test, result.message());
+        if(!strcmp(result.message(), TOO_MANY_DEVICES_STRING_GTEST))
         {
             if(showInlineSkips)
                 hipblaslt_cout << "Skipped test due to too few GPUs." << std::endl;
-            ++skipped_tests;
-        }
-        // GTEST_SKIP() messages may include trailing detail (e.g. matched
-        // platforms), so use substring match instead of strcmp.
-        else if(strstr(result.message(), KNOWN_BUG_STRING_GTEST))
-        {
-            if(showInlineSkips)
-                hipblaslt_cout << "Skipped known bug for current platform." << std::endl;
             ++skipped_tests;
         }
         eventListener->OnTestPartResult(result);
@@ -150,6 +153,13 @@ public:
     {
         if(skipped_tests)
             hipblaslt_cout << "[ SKIPPED  ] " << skipped_tests << " tests." << std::endl;
+        hipblaslt_cout << memory_shortages.summary() << std::flush;
+        if(auto peak = peak_resident_bytes())
+        {
+            char gib[32];
+            snprintf(gib, sizeof(gib), "%.2f", double(*peak) / double(size_t(1) << 30));
+            hipblaslt_cout << "[ PEAK RSS ] " << gib << " GiB of host memory" << std::endl;
+        }
         eventListener->OnTestProgramEnd(unit_test);
     }
 };
@@ -181,14 +191,7 @@ static void hipblaslt_set_listener()
     }
 
     listeners.Append(listener);
-}
-
-static int hipblaslt_version()
-{
-    int                    version;
-    hipblaslt_local_handle handle;
-    hipblasLtGetVersion(handle, &version);
-    return version;
+    listeners.Append(new HostPoolReleaseListener);
 }
 
 static void hipblaslt_print_usage_warning()
@@ -232,6 +235,19 @@ static void hipblaslt_print_args(const std::string& args)
     hipblaslt_cout.flush();
 }
 
+// Spawned by a test that re-launches this binary, which passes the role as the
+// first argument. The process plays that role and exits without reaching
+// Google Test.
+static void hipblaslt_gtest_run_child(int argc, char** argv)
+{
+    if(argc < 2 || argv[1] == nullptr)
+        return;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    if(!strcmp(argv[1], "--a2a-rank-child"))
+        std::exit(hipblaslt_bench::run_rank_child());
+#endif
+}
+
 // Device Query
 static void hipblaslt_set_test_device()
 {
@@ -251,6 +267,8 @@ static void hipblaslt_set_test_device()
  *****************/
 int main(int argc, char** argv)
 {
+    hipblaslt_gtest_run_child(argc, argv);
+
     std::string args = hipblaslt_capture_args(argc, argv);
 
     hipblaslt_gtest_check_host_side_fill_kernel_flags(argc, argv);

@@ -85,13 +85,6 @@ bool OpTensorLeadingOnes::IsApplicable([[maybe_unused]] const ExecutionContext& 
     return false;
 }
 
-std::size_t OpTensorLeadingOnes::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution
 OpTensorLeadingOnes::GetSolution([[maybe_unused]] const ExecutionContext& context,
                                  const miopen::tensorOp::ProblemDescription& problem) const

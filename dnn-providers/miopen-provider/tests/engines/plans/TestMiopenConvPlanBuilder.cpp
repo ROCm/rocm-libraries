@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -14,10 +15,10 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
+#include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
 using namespace miopen_plugin;
@@ -115,6 +116,11 @@ static std::vector<test_conv_common::ConvTestCase> getWorkspaceRangeShapes()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
     return {
+        // 1D (NCL) shapes. MIOpen has no 1D convolution, so the provider pads
+        // these to 2D internally.
+        {{1, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {1}, {1}, seed},
+        {{2, 32, 16}, {4, 8, 3}, {1}, {1}, {2}, {2}, seed},
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
@@ -398,7 +404,6 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
-    SKIP_IF_ASAN(); // CK/MIOpen Fwd convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -427,8 +432,6 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     const auto& tc = GetParam();
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -835,6 +838,108 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeReturnsCachedDefault)
 
     auto result = _planBuilder.getMaxWorkspaceSize(*_handle, graph, settings);
     EXPECT_EQ(result, cachedValue);
+}
+
+// fp32 N64 C256 56x56, 3x3 forward. On gfx90a the default query reports a workspace far below the
+// range max for this problem. These tests only query MIOpen: no device memory and no Find.
+static flatbuffers::FlatBufferBuilder createLargeConvFwdGraph()
+{
+    return hipdnn_test_sdk::utilities::createValidConvFwdGraph({64, 256, 56, 56},
+                                                               {802816, 3136, 56, 1},
+                                                               {256, 256, 3, 3},
+                                                               {2304, 9, 3, 1},
+                                                               {64, 256, 56, 56},
+                                                               {802816, 3136, 56, 1},
+                                                               {1, 1},
+                                                               {1, 1},
+                                                               {1, 1},
+                                                               {1, 1});
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeIsRangeMaxWhenBenchmarking)
+{
+    auto builder = createLargeConvFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(_planBuilder.getMaxWorkspaceSize(*_handle, graph, HipdnnMiopenSettings{})
+       == _planBuilder.getWorkspaceSizeRange(*_handle, graph).max)
+    {
+        GTEST_SKIP() << "The default workspace already equals the range max here, so there is "
+                        "nothing for benchmarking to change";
+    }
+
+    HipdnnMiopenSettings settings;
+    settings.setBenchmarkingEnabled(true);
+
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings),
+              _planBuilder.getWorkspaceSizeRange(*_handle, graph).max);
+}
+
+// Without benchmarking the builder keeps reporting what MIOpen reports for the problem.
+TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeWithoutBenchmarkingIsTheMiopenDefault)
+{
+    auto builder = createLargeConvFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& attributes
+        = graph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+    const ConvFwdParams params(attributes, graph.getTensorMap(), /*deterministicEnabled=*/false);
+    size_t expected = 0;
+    ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(_handle->miopenHandle,
+                                                       params.w().tensorDescriptor(),
+                                                       params.x().tensorDescriptor(),
+                                                       params.conv().convDescriptor(),
+                                                       params.y().tensorDescriptor(),
+                                                       &expected),
+              miopenStatusSuccess);
+
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(*_handle, graph, HipdnnMiopenSettings{}), expected);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeHonorsLimitWhenBenchmarking)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    HipdnnMiopenSettings settings;
+    settings.setBenchmarkingEnabled(true);
+    settings.setWorkspaceSizeLimit(1);
+
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(*_handle, graph, settings), 1u);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, DefaultWorkspaceSizeIsRangeMaxWhenBenchmarking)
+{
+    auto builder = createLargeConvFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(_planBuilder.getMaxWorkspaceSize(*_handle, graph, HipdnnMiopenSettings{})
+       == _planBuilder.getWorkspaceSizeRange(*_handle, graph).max)
+    {
+        GTEST_SKIP() << "The default workspace already equals the range max here, so there is "
+                        "nothing for benchmarking to change";
+    }
+
+    flatbuffers::FlatBufferBuilder configBuilder;
+    configBuilder.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(configBuilder, 1, 0));
+    auto buffer = configBuilder.Release();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
+
+    HipdnnMiopenSettings settings;
+    settings.setBenchmarkingEnabled(true);
+    _planBuilder.initializeExecutionSettings(*_handle, graph, configWrapper, settings);
+
+    ASSERT_TRUE(settings.defaultWorkspaceSize().has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access,-warnings-as-errors)
+    EXPECT_EQ(*settings.defaultWorkspaceSize(),
+              _planBuilder.getWorkspaceSizeRange(*_handle, graph).max);
 }
 
 TEST(TestHipdnnMiopenSettings, SelectedWorkspaceSizeReturnsZeroWhenNothingSet)

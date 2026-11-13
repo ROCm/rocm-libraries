@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_coo2dense_aos.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_sddmm_coox_kernel.hpp"
 
 template <typename T, typename I, typename J, typename A, typename B, typename C>
@@ -54,7 +55,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
         ROCSPARSE_ROUTINE_TRACE;
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         {
             if(nnz == 0)
             {
@@ -102,7 +103,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
         ROCSPARSE_ROUTINE_TRACE;
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         case rocsparse_sddmm_alg_default:
         {
             return rocsparse_status_success;
@@ -146,7 +147,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
 
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         {
             if(nnz == 0)
             {
@@ -220,10 +221,9 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
             // Sample dense C
             static constexpr int NB = 512;
 
-            const int64_t num_blocks_x = rocsparse::min(
-                ((nnz - 1) / NB + 1), static_cast<I>(handle->properties.maxGridSize[0]));
-            const dim3 blocks(num_blocks_x);
-            const dim3 threads(NB);
+            const int64_t num_blocks_x = rocsparse::get_grid_size_x(handle, (nnz - 1) / NB + 1, NB);
+            const dim3    blocks(num_blocks_x);
+            const dim3    threads(NB);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_sample_kernel<NB, true, T>),
                                                blocks,
@@ -245,40 +245,45 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
         {
             static constexpr int NB = 512;
 
-#define LAUNCH(K_)                                                                       \
-    int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
-    dim3    threads(NB);                                                                 \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, true, T>),  \
-                                       blocks,                                           \
-                                       threads,                                          \
-                                       0,                                                \
-                                       handle->stream,                                   \
-                                       trans_A,                                          \
-                                       trans_B,                                          \
-                                       order_A,                                          \
-                                       order_B,                                          \
-                                       m,                                                \
-                                       n,                                                \
-                                       k,                                                \
-                                       nnz,                                              \
-                                       batch_count,                                      \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha), \
-                                       A_val,                                            \
-                                       A_ld,                                             \
-                                       batch_stride_A,                                   \
-                                       B_val,                                            \
-                                       B_ld,                                             \
-                                       batch_stride_B,                                   \
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
-                                       C_val_data,                                       \
-                                       values_batch_stride_C,                            \
-                                       C_row_data,                                       \
-                                       offsets_batch_stride_C,                           \
-                                       C_col_data,                                       \
-                                       indices_batch_stride_C,                           \
-                                       C_base,                                           \
-                                       handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH(K_)                                                                             \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                               \
+        handle,                                                                                \
+        (nnz - 1) / (NB / K_) + 1,                                                             \
+        NB,                                                                                    \
+        [&](auto grid_stride, uint32_t grid) -> rocsparse_status {                             \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
+                (rocsparse::sddmm_coox_kernel<NB, K_, true, decltype(grid_stride)::value, T>), \
+                dim3(grid, get_grid_size_y(handle, batch_count)),                              \
+                dim3(NB),                                                                      \
+                0,                                                                             \
+                handle->stream,                                                                \
+                trans_A,                                                                       \
+                trans_B,                                                                       \
+                order_A,                                                                       \
+                order_B,                                                                       \
+                m,                                                                             \
+                n,                                                                             \
+                k,                                                                             \
+                nnz,                                                                           \
+                batch_count,                                                                   \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                              \
+                A_val,                                                                         \
+                A_ld,                                                                          \
+                batch_stride_A,                                                                \
+                B_val,                                                                         \
+                B_ld,                                                                          \
+                batch_stride_B,                                                                \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                               \
+                C_val_data,                                                                    \
+                values_batch_stride_C,                                                         \
+                C_row_data,                                                                    \
+                offsets_batch_stride_C,                                                        \
+                C_col_data,                                                                    \
+                indices_batch_stride_C,                                                        \
+                C_base,                                                                        \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                          \
+            return rocsparse_status_success;                                                   \
+        }))
 
             if(handle->pointer_mode == rocsparse_pointer_mode_host)
             {

@@ -71,14 +71,15 @@ template <typename T>
 void cpu_syr(rocblas_fill uplo, rocblas_int n, T alpha, T *x,
                rocblas_int incx, T *A, rocblas_int lda);
 */
-template <typename T>
-void cpu_lacpy(char uplo, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, T* B, rocblas_int ldb);
 
 template <typename T>
 void cpu_laset(char norm, rocblas_int m, rocblas_int n, T alpha, T beta, T* A, rocblas_int lda);
 
-template <typename T, typename S>
-S cpu_lange(char norm, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, S* work);
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lange(char norm, rocblas_int m, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, rocblas_int lda, S* rwork);
 
 template <typename T, typename S>
 S cpu_gecon(char norm, rocblas_int n, T* A, rocblas_int lda, S anorm, T* work, S* rwork, rocblas_int* iwork);
@@ -482,6 +483,16 @@ void cpu_orgql_ungql(rocblas_int m,
                      rocblas_int sizeW);
 
 template <typename T>
+void cpu_orgrq_ungrq(rocblas_int m,
+                     rocblas_int n,
+                     rocblas_int k,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
+                     T* work,
+                     rocblas_int sizeW);
+
+template <typename T>
 void cpu_orgbr_ungbr(rocblas_storev storev,
                      rocblas_int m,
                      rocblas_int n,
@@ -586,6 +597,20 @@ void cpu_ormql_unmql(rocblas_side side,
                      rocblas_int sizeW);
 
 template <typename T>
+void cpu_ormrq_unmrq(rocblas_side side,
+                     rocblas_operation trans,
+                     rocblas_int m,
+                     rocblas_int n,
+                     rocblas_int k,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
+                     T* C,
+                     rocblas_int ldc,
+                     T* work,
+                     rocblas_int sizeW);
+
+template <typename T>
 void cpu_ormbr_unmbr(rocblas_storev storev,
                      rocblas_side side,
                      rocblas_operation trans,
@@ -629,6 +654,33 @@ void cpu_gebrd(rocblas_int m,
                T* work,
                rocblas_int size_w);
 
+template <typename T>
+void cpu_gehd2(rocblas_int n, rocblas_int ilo, rocblas_int ihi, T* A, rocblas_int lda, T* ipiv, T* work);
+
+template <typename T>
+void cpu_gehrd(rocblas_int n,
+               rocblas_int ilo,
+               rocblas_int ihi,
+               T* A,
+               rocblas_int lda,
+               T* ipiv,
+               T* work,
+               rocblas_int lwork);
+
+template <typename T, typename S>
+void cpu_sbev_hbev(rocblas_evect evect,
+                   rocblas_fill uplo,
+                   rocblas_int n,
+                   rocblas_int kd,
+                   T* Aband,
+                   rocblas_int ldab,
+                   S* Lambda,
+                   T* Z,
+                   rocblas_int ldz,
+                   T* work,
+                   S* rwork,
+                   rocblas_int* info);
+
 template <typename T, typename S>
 void cpu_sytrd_hetrd(rocblas_fill uplo,
                      rocblas_int n,
@@ -651,6 +703,16 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      T* tau,
                      T* work,
                      rocblas_int size_w);
+
+template <typename T, typename S>
+void cpu_sb2st_hb2st(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     T* AB,
+                     rocblas_int ldab,
+                     S* D,
+                     S* E,
+                     T* work);
 
 template <typename T, typename S>
 void cpu_sytd2_hetd2(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda, S* D, S* E, T* tau);

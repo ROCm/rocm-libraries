@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <unordered_set>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -151,6 +153,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_HandlesNesting) {
     const std::vector<StinkyInstruction*> expectedChildren = {outerNarrow, innerNarrow, guarded,
                                                               innerReset,  guarded2,    outerReset};
     EXPECT_EQ(groupData->children, expectedChildren);
+
+    expandExecMaskedGroups(*bb);
 }
 
 TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_LeavesUnmatchedNarrowUngrouped) {
@@ -186,6 +190,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_MultipleSiblingSpans) {
     EXPECT_EQ(insts[1]->getUnifiedOpcode(), GFX::v_add_f32);
     EXPECT_EQ(insts[2]->getUnifiedOpcode(), GFX::EXEC_GROUP);
     EXPECT_NE(insts[0], insts[2]);
+
+    expandExecMaskedGroups(*bb);
 }
 
 // s_mov_b64 exec, -1 must be recognized as a full-mask reset even in wave32.
@@ -206,6 +212,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_B64ResetClosesWave32Span)
     auto* groupData = group->getModifier<ExecGroupData>();
     ASSERT_NE(groupData, nullptr);
     EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{narrow, guarded, b64reset}));
+
+    expandExecMaskedGroups(*bb);
 }
 
 // Any exec write that isn't a literal-(-1) reset opens a span, including non-mov
@@ -229,4 +237,75 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_NonMovExecWriteOpensSpan)
     auto* groupData = group->getModifier<ExecGroupData>();
     ASSERT_NE(groupData, nullptr);
     EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{orNarrow, guarded, reset}));
+
+    expandExecMaskedGroups(*bb);
+}
+
+// ---------------------------------------------------------------------------
+// execMaskedInstructions
+// ---------------------------------------------------------------------------
+
+TEST_F(ExecMaskGroupingTest, MaskedSetHoldsTheGuardedInstructionsOnly) {
+    // The two exec writes bounding a span are not themselves covered: what they
+    // write is EXEC, which no lane mask applies to.
+    StinkyInstruction* before = createVAddInBlock(bb, arch, 40, 41, 42);
+    createExecNarrow(10);
+    StinkyInstruction* guarded = createVAddInBlock(bb, arch, 0, 1, 2);
+    createExecReset();
+    StinkyInstruction* after = createVAddInBlock(bb, arch, 50, 51, 52);
+
+    bool unmatched = true;
+    const std::unordered_set<const StinkyInstruction*> masked =
+        execMaskedInstructions(*bb, /*wavefrontSize=*/32, &unmatched);
+
+    EXPECT_FALSE(unmatched);
+    EXPECT_EQ(masked.size(), 1u);
+    EXPECT_EQ(masked.count(guarded), 1u);
+    EXPECT_EQ(masked.count(before), 0u);
+    EXPECT_EQ(masked.count(after), 0u);
+}
+
+TEST_F(ExecMaskGroupingTest, MaskedSetTracksNesting) {
+    // The inner reset closes only the inner span, so the instruction after it is
+    // still covered by the outer one.
+    createExecNarrow(10);
+    StinkyInstruction* outer = createVAddInBlock(bb, arch, 0, 1, 2);
+    createExecNarrow(11);
+    StinkyInstruction* inner = createVAddInBlock(bb, arch, 3, 4, 5);
+    createExecReset();
+    StinkyInstruction* backOutside = createVAddInBlock(bb, arch, 6, 7, 8);
+    createExecReset();
+    StinkyInstruction* clear = createVAddInBlock(bb, arch, 9, 10, 11);
+
+    const std::unordered_set<const StinkyInstruction*> masked =
+        execMaskedInstructions(*bb, /*wavefrontSize=*/32);
+
+    EXPECT_EQ(masked.count(outer), 1u);
+    EXPECT_EQ(masked.count(inner), 1u);
+    EXPECT_EQ(masked.count(backOutside), 1u);
+    EXPECT_EQ(masked.count(clear), 0u);
+}
+
+TEST_F(ExecMaskGroupingTest, AnUnmatchedSpanIsReportedAndCoversTheRestOfTheBlock) {
+    // The mask is still narrow on the way out, and this walk cannot say which
+    // successors it reaches. Covering the rest of the block is exact; the flag
+    // is how a caller learns to say something about the successors.
+    createExecNarrow(10);
+    StinkyInstruction* guarded = createVAddInBlock(bb, arch, 0, 1, 2);
+
+    bool unmatched = false;
+    const std::unordered_set<const StinkyInstruction*> masked =
+        execMaskedInstructions(*bb, /*wavefrontSize=*/32, &unmatched);
+
+    EXPECT_TRUE(unmatched);
+    EXPECT_EQ(masked.count(guarded), 1u);
+}
+
+TEST_F(ExecMaskGroupingTest, NoExecWriteMeansNothingIsMasked) {
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+
+    bool unmatched = true;
+    EXPECT_TRUE(execMaskedInstructions(*bb, /*wavefrontSize=*/32, &unmatched).empty());
+    EXPECT_FALSE(unmatched);
 }

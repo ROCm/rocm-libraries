@@ -12,6 +12,7 @@
 
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <type_traits>
 
@@ -59,6 +60,11 @@ miopen::fs::path GetOwningModuleDirectory()
                           reinterpret_cast<LPCWSTR>(miopenCreate),
                           &hmod) != 0)
     {
+        // Windows paths top out at 32767 wide characters even with long-path support, so the
+        // buffer never needs to grow past that. Capping it keeps a misbehaving
+        // GetModuleFileNameW (one that keeps reporting "buffer too small") from looping until
+        // the allocation fails, at the cost of giving up on a path that cannot exist.
+        constexpr size_t max_module_path = 32768;
         std::wstring module_path(MAX_PATH, L'\0');
         while(true)
         {
@@ -71,7 +77,15 @@ miopen::fs::path GetOwningModuleDirectory()
                 module_path.resize(len);
                 return miopen::weakly_canonical(miopen::fs::path{module_path}).parent_path();
             }
-            module_path.resize(module_path.size() * 2);
+            if(module_path.size() >= max_module_path)
+            {
+                MIOPEN_LOG_W("Module path exceeds " << max_module_path << " characters");
+                break;
+            }
+            // Not std::min: this TU pulls in windows.h without NOMINMAX, so its min() macro
+            // breaks the std:: call.
+            const auto grown = module_path.size() * 2;
+            module_path.resize(grown < max_module_path ? grown : max_module_path);
         }
     }
 #else
@@ -532,6 +546,45 @@ ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
     auto status       = solver_fns_[ToSolverIndex(solver)].get_solution(
         &ctx, &problem, kernel_id.c_str(), use_tf32, &ptr);
     return ExtractSolution(status, ptr, "get_solution");
+}
+
+bool CkImplLibLoader::IsArgsSupportedTf32Aware(CKSolverType solver,
+                                               const conv::ProblemDescription& problem,
+                                               const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    const bool tf32  = (dtype == miopenFloat) && problem.UseTF32();
+    // Try TF32 first when requested, then fall back to FP32: a restored config carries only
+    // kernel_id, so a TF32-only id must still validate, and an id chosen via the FP32 fallback
+    // (no TF32 instance) must validate as FP32. IsArgsSupported handles the "<type>+<split_k>"
+    // kernel_id form, so no suffix stripping is needed here.
+    if(tf32 && IsArgsSupported(solver, problem, kernel_id, dtype, true))
+        return true;
+    return IsArgsSupported(solver, problem, kernel_id, dtype, false);
+}
+
+ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
+                                                   const ExecutionContext& ctx,
+                                                   const conv::ProblemDescription& problem,
+                                                   const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    bool use_tf32    = (dtype == miopenFloat) && problem.UseTF32();
+    // A perf-db-restored config carries only kernel_id; if it was chosen via the FP32 fallback (no
+    // TF32 instance for this problem) a TF32 build would fail and log a spurious error. Decide
+    // before building: use TF32 only if kernel_id is in the TF32 valid set -- the same predicate
+    // the config build used in FillValidKernelsWithTf32Fallback.
+    if(use_tf32)
+    {
+        // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but FillValidKernels returns
+        // the bare type string; strip the suffix before the membership test, as the invoker does.
+        const auto pos          = kernel_id.find_last_of('+');
+        const auto type_string  = (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
+        const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
+        use_tf32 =
+            std::find(tf32_kernels.begin(), tf32_kernels.end(), type_string) != tf32_kernels.end();
+    }
+    return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }
 
 std::vector<std::string> CkImplLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const

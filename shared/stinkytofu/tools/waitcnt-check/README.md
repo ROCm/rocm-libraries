@@ -19,9 +19,14 @@ each counter is drained by its own wait instruction:
 | Counter | Producers                                            | Wait op             |
 | ------- | ---------------------------------------------------- | ------------------- |
 | DS      | `ds_read` / `ds_load` / `ds_write` / `ds_store` / `ds_atomic` | `s_wait_dscnt`      |
-| Buffer  | vector `buffer` / `global` / `flat` load + store     | `s_wait_loadcnt`    |
+| Load    | vector `buffer` / `global` / `flat` **loads**         | `s_wait_loadcnt`    |
 | KM      | scalar `s_load` / `s_buffer_load`                    | `s_wait_kmcnt`      |
 | Tensor  | `tensor_load_to_lds`                                 | `s_wait_tensorcnt`  |
+
+Vector **stores** are deliberately absent from the Load counter: they increment
+`STOREcnt`, which neither this tool nor the reference pass models. Counting them
+on `loadcnt` would shift later loads' queue positions and overstate the required
+wait.
 
 The validator models, per counter:
 
@@ -29,7 +34,7 @@ The validator models, per counter:
   predecessor (not a single union), so a consumer at a join computes the
   strictest required wait as the `min` over paths. Queues are capped at the
   hardware in-flight window (64) so loops converge.
-- **Completion order.** DS / Buffer / Tensor complete in issue order and count
+- **Completion order.** DS / Load / Tensor complete in issue order and count
   1 per op, so a wait of `N` drains everything but the `N` newest ops. `kmcnt`
   completes **out of order** (and does not count instructions: +1 per
   single-DWORD fetch, +2 per fetch of two or more DWORDs), so a nonzero

@@ -138,6 +138,141 @@ TEST(hipfftTest, Create1dPlan)
     ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
 }
 
+#ifdef __HIP_PLATFORM_AMD__
+TEST(hipfftTest, ZeroSizePlan)
+{
+    PROB_SKIP_UNITTEST();
+    int const         rank        = 3;
+    int               n[3]        = {64, 64, 64};
+    int               n_zero[3]   = {64, 0, 64};
+    long long int     n64[3]      = {64, 64, 64};
+    long long int     n64_zero[3] = {64, 0, 64};
+    int const         stride      = 1;
+    int const         dist        = 0;
+    hipfftType const  type        = HIPFFT_C2C;
+    hipDataType const xt_type     = HIP_C_32F;
+    size_t            workSize;
+
+    auto expect_rejected = [](hipfftResult ret) {
+        EXPECT_EQ(ret, HIPFFT_INVALID_SIZE) << "not rejected: " << hipfftResult_string(ret);
+    };
+
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(hipfftPlan1d(&plan, 0, type, 1));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(hipfftPlan1d(&plan, 64, type, 0));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(hipfftPlan2d(&plan, 0, 64, type));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(hipfftPlan3d(&plan, 64, 64, 0, type));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(hipfftPlanMany(
+            &plan, rank, n_zero, nullptr, stride, dist, nullptr, stride, dist, type, 1));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        expect_rejected(
+            hipfftPlanMany(&plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0));
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+
+    {
+        hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
+        ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
+
+        expect_rejected(hipfftMakePlan1d(plan, 0, type, 1, &workSize));
+        expect_rejected(hipfftMakePlan1d(plan, 64, type, 0, &workSize));
+
+        expect_rejected(hipfftMakePlan2d(plan, 0, 64, type, &workSize));
+        expect_rejected(hipfftMakePlan2d(plan, 64, 0, type, &workSize));
+
+        expect_rejected(hipfftMakePlan3d(plan, 0, 64, 64, type, &workSize));
+        expect_rejected(hipfftMakePlan3d(plan, 64, 0, 64, type, &workSize));
+        expect_rejected(hipfftMakePlan3d(plan, 64, 64, 0, type, &workSize));
+
+        expect_rejected(hipfftMakePlanMany(
+            plan, rank, n_zero, nullptr, stride, dist, nullptr, stride, dist, type, 1, &workSize));
+        expect_rejected(hipfftMakePlanMany(
+            plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize));
+
+        expect_rejected(hipfftMakePlanMany64(plan,
+                                             rank,
+                                             n64_zero,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             type,
+                                             1,
+                                             &workSize));
+        expect_rejected(hipfftMakePlanMany64(
+            plan, rank, n64, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize));
+
+        expect_rejected(hipfftXtMakePlanMany(plan,
+                                             rank,
+                                             n64_zero,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             xt_type,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             xt_type,
+                                             1,
+                                             &workSize,
+                                             xt_type));
+        expect_rejected(hipfftXtMakePlanMany(plan,
+                                             rank,
+                                             n64,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             xt_type,
+                                             nullptr,
+                                             stride,
+                                             dist,
+                                             xt_type,
+                                             0,
+                                             &workSize,
+                                             xt_type));
+
+        // hipfftGetSize* and hipfftEstimate* plan internally, so they reject too.
+        expect_rejected(hipfftGetSize1d(plan, 0, type, 1, &workSize));
+        expect_rejected(hipfftGetSize1d(plan, 64, type, 0, &workSize));
+        expect_rejected(hipfftGetSize2d(plan, 64, 0, type, &workSize));
+        expect_rejected(hipfftGetSize3d(plan, 64, 64, 0, type, &workSize));
+        expect_rejected(hipfftGetSizeMany(
+            plan, rank, n_zero, nullptr, stride, dist, nullptr, stride, dist, type, 1, &workSize));
+        expect_rejected(hipfftEstimate1d(0, type, 1, &workSize));
+        expect_rejected(hipfftEstimate2d(64, 0, type, &workSize));
+        expect_rejected(hipfftEstimate3d(64, 64, 0, type, &workSize));
+        expect_rejected(hipfftEstimateMany(
+            rank, n_zero, nullptr, stride, dist, nullptr, stride, dist, type, 1, &workSize));
+
+        // the handle is still usable for a valid plan, the guard does not over-reject
+        ASSERT_EQ(hipfftMakePlan1d(plan, 64, type, 1, &workSize), HIPFFT_SUCCESS);
+        ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+    }
+}
+#endif
+
 TEST(hipfftTest, CreatePlanMany)
 {
     PROB_SKIP_UNITTEST();

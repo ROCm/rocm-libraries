@@ -3,6 +3,10 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 TEST(TestResampleFwdAttributes, CreateResample)
 {
     hipdnn_frontend::graph::ResampleFwdAttributes resampleFwdAttributes;
@@ -165,6 +169,21 @@ TEST(TestResampleFwdAttributes, ResampleMode)
 
     resampleFwdAttributes.set_resample_mode(hipdnn_frontend::ResampleMode::MAXPOOL);
     EXPECT_EQ(resampleFwdAttributes.get_resample_mode(), hipdnn_frontend::ResampleMode::MAXPOOL);
+}
+
+// cuDNN's spelling must reach the same field, and must chain like every other
+// setter on this class.
+TEST(TestResampleFwdAttributes, ResamplingModeIsTheCudnnSpellingOfResampleMode)
+{
+    hipdnn_frontend::graph::ResampleFwdAttributes resampleFwdAttributes;
+
+    resampleFwdAttributes
+        .set_resampling_mode(hipdnn_frontend::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+        .set_window({2, 3});
+
+    EXPECT_EQ(resampleFwdAttributes.get_resample_mode(),
+              hipdnn_frontend::ResampleMode::AVGPOOL_INCLUDE_PADDING);
+    EXPECT_EQ(resampleFwdAttributes.get_window(), (std::vector<int64_t>{2, 3}));
 }
 
 TEST(TestResampleFwdAttributes, PaddingMode)

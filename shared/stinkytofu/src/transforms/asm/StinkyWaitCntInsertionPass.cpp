@@ -14,7 +14,8 @@
 //   2. WaitDataflow.solve() computes a sound per-consumer wait plan
 //      via forward dataflow with per-pred queues.
 //   3. ShallowPredPromotion (and any other WaitPlanOptimizer) may relax
-//      anchor waits by recording predecessor tail drains.
+//      anchor waits by recording predecessor tail drains; WmmaRunWaitMerge
+//      (when enabled) moves the waits of a WMMA run onto its first WMMA.
 //   4. finalizePlan() replays blocks against the final plan (all counters)
 //      with tail-drain-aware entry state so later anchors stay correct.
 //   5. emitWaits() materialises the plan as s_wait_* IR nodes.
@@ -36,6 +37,7 @@
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlanOptimizer.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WmmaRunWaitMerge.hpp"
 
 #define DEBUG_TYPE "StinkyWaitCntInsertionPass"
 
@@ -81,7 +83,9 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         WaitInsertionPlan plan = df.materializePlan();
 
         ShallowPredPromotion shallowPred;
+        WmmaRunWaitMerge wmmaRunMerge;
         std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
+        if (options.mergeWaitsInWmmaRuns) optimizers.push_back(&wmmaRunMerge);
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
 
         df.finalizePlan(plan);
@@ -134,11 +138,11 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
         }
-        if (spec.bufferCount != WaitCountSpec::kUnused) {
+        if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
-            w->addSrcReg(StinkyRegister(spec.bufferCount));
+            w->addSrcReg(StinkyRegister(spec.loadCount));
             SWaitCntData d;
-            d.vlcnt = spec.bufferCount;
+            d.vlcnt = spec.loadCount;
             w->addModifier<SWaitCntData>(d);
         }
         if (spec.kmCount != WaitCountSpec::kUnused) {

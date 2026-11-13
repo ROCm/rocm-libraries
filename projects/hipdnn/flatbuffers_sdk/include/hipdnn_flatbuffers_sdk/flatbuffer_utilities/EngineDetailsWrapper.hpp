@@ -5,6 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +32,12 @@ public:
     virtual const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IKnob&
         getKnobByName(const std::string& knobName) const
         = 0;
+
+    /// Empty when the engine details carry no name.
+    virtual std::string name() const
+    {
+        return {};
+    }
 };
 
 class EngineDetailsWrapper : public IEngineDetails
@@ -72,6 +79,18 @@ public:
         throwIfNotValid();
 
         return _shallowEngineDetails->engine_id();
+    }
+
+    std::string name() const override
+    {
+        throwIfNotValid();
+
+        auto rawName = _shallowEngineDetails->name();
+        if(rawName == nullptr)
+        {
+            return {};
+        }
+        return rawName->str();
     }
 
     uint32_t knobCount() const override

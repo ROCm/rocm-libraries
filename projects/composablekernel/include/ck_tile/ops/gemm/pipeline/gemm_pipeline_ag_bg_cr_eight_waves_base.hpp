@@ -42,6 +42,19 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
     // Rely on the policy. In this way it works for both GEMM and blockscale
     static constexpr bool Preshuffle = Policy::template IsPreshuffle<Problem>();
 
+    template <index_t vmcnt = 0>
+    CK_TILE_DEVICE static void SyncLds()
+    {
+#if defined(__gfx125__)
+        // Both groups reuse LDS after this rendezvous. Finish their register
+        // reads as well as global-to-LDS writes before releasing the other group.
+        s_waitcnt_lgkm<0>();
+        block_sync_lds_direct_load();
+#else
+        block_sync_lds_direct_load<vmcnt>();
+#endif
+    }
+
     // A/B matrix
     template <typename DataType, typename DstBlockWindow, typename SrcTileWindow>
     CK_TILE_DEVICE void GlobalPrefetchAsync(DataType* smem,
@@ -50,7 +63,11 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
     {
         constexpr auto NEG1 = number<-1>{};
         dts_block_window.set_bottom_tensor_view_data_ptr(smem);
-        async_load_tile(dts_block_window, dram_tile_window, NEG1, false_type{}, true_type{});
+        async_load_tile(dts_block_window,
+                        dram_tile_window,
+                        NEG1,
+                        false_type{},
+                        bool_constant<get_warp_size() == 64>{});
     }
 
     template <typename DataType, typename DstBlockTile, typename SrcTileWindow>
@@ -60,7 +77,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
     {
         // swizzle factor limitation
         using static_move_ys =
-            std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
+            bool_constant<get_warp_size() == 64 && !std::is_same_v<DataType, pk_fp6x16_t>>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
         lds_tile_window.load(dst_block_tile, number<-1>{}, true_type{}, static_move_ys{});
     }
@@ -80,7 +97,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         constexpr index_t KIterPerWarp = KPerBlock / (KWarps * KPerXdl);
         // swizzle factor limitation
         using static_move_ys =
-            std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
+            bool_constant<get_warp_size() == 64 && !std::is_same_v<DataType, pk_fp6x16_t>>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
         static_for_product<number<NIterPerWarp>, number<KIterPerWarp>>{}(
             [&](auto nIter, auto kIter) {
@@ -353,10 +370,18 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         constexpr BQDramTileWindowStep bq_move_step = {0, GetKStepBQ(bq_copy_dram_window)};
 
         // Instructions Count
-        constexpr index_t VectorSizeB  = Policy::template GetVectorSizeB<Problem>();
-        constexpr index_t B_LOAD_INST  = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
-        constexpr index_t AQ_LOAD_INST = GetInstCountAQ(aq_copy_dram_window);
-        constexpr index_t BQ_LOAD_INST = GetInstCountBQ(bq_copy_dram_window);
+        constexpr index_t VectorSizeB = Policy::template GetVectorSizeB<Problem>();
+        constexpr index_t B_LOAD_INST = NPerBlock * KPerBlock / BlockSize / VectorSizeB;
+        // Loads allowed in flight once the A tile has landed in LDS: everything load_global /
+        // main_body issues after the A DMA. With asyncmark, the wait counts only asyncmark'd
+        // DMAs, so the AQ/BQ scale loads (ordinary VMEM loads) must not be included.
+#if CK_TILE_HAS_ASYNCMARK
+        constexpr index_t A_LANDED_INFLIGHT = B_LOAD_INST;
+#else
+        constexpr index_t AQ_LOAD_INST      = GetInstCountAQ(aq_copy_dram_window);
+        constexpr index_t BQ_LOAD_INST      = GetInstCountBQ(bq_copy_dram_window);
+        constexpr index_t A_LANDED_INFLIGHT = AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST;
+#endif
 
         // -------
         // Lambdas
@@ -406,7 +431,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
             calc_gemm(tic);
 
             move_tile_window(a_copy_dram_window, a_move_step);
-            block_sync_lds_direct_load();
+            SyncLds();
 
             __builtin_amdgcn_sched_barrier(0);
 
@@ -435,7 +460,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                            number<WarpGemm::kK>{});
 
             __builtin_amdgcn_sched_barrier(0);
-            block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
+            SyncLds<A_LANDED_INFLIGHT>();
             __builtin_amdgcn_sched_barrier(0);
         };
 
@@ -446,13 +471,13 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         if(is_pong)
         {
             load_global(1);
-            block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
+            SyncLds<A_LANDED_INFLIGHT>();
             move_global();
         }
         __builtin_amdgcn_sched_barrier(0);
 
         clear_tile(c_block_tile);
-        block_sync_lds_direct_load();
+        SyncLds();
         __builtin_amdgcn_sched_barrier(0);
 
         if constexpr(N_LOOP >= 2)
@@ -467,7 +492,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         {
             load_local(1);
         }
-        block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
+        SyncLds<A_LANDED_INFLIGHT>();
         __builtin_amdgcn_sched_barrier(0);
 
         if(is_pong)
@@ -479,14 +504,14 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         {
             move_global();
         }
-        block_sync_lds_direct_load();
+        SyncLds();
         __builtin_amdgcn_sched_barrier(0);
 
         if constexpr(N_LOOP >= 3)
         {
             load_global(1);
             load_local(0);
-            block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
+            SyncLds<A_LANDED_INFLIGHT>();
         }
 
         if constexpr(HasHotLoop)
@@ -517,7 +542,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         {
             calc_gemm(tic);
             move_global();
-            block_sync_lds_direct_load();
+            SyncLds();
             __builtin_amdgcn_sched_barrier(0);
         }
 
@@ -528,11 +553,11 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
 
             __builtin_amdgcn_sched_barrier(0);
             load_local(toc);
-            block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
+            SyncLds<A_LANDED_INFLIGHT>();
             __builtin_amdgcn_sched_barrier(0);
 
             calc_gemm(toc);
-            block_sync_lds_direct_load();
+            SyncLds();
             __builtin_amdgcn_sched_barrier(0);
         }
 

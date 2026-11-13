@@ -276,6 +276,8 @@ int main(int argc, char** argv) {
                                iBufferSize, iBufferSizeSecond, iBufferSizeInBytes,
                                iBufferSizeSecondInBytes, srcDescriptorPtrND,
                                srcDescriptorPtrNDSecond, testCase);
+        free(inputF32);
+        if (inputF32Second != NULL) free(inputF32Second);
     }
 
     if (testCase == LOG1P) {
@@ -314,6 +316,7 @@ int main(int argc, char** argv) {
     bool externalMeanStd = true;
 
     Rpp32u missingFuncFlag = 0;
+    int exitStatus = 0;  // non-zero once a run fails; returned after cleanup
     double startWallTime, endWallTime;
     double maxWallTime = 0, minWallTime = 500, avgWallTime = 0, wallTime = 0;
     string testCaseName;
@@ -527,25 +530,25 @@ int main(int argc, char** argv) {
                 testCaseName = "tensor_add_tensor";
 
                 startWallTime = omp_get_wtime();
-                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
-                    BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8 ||
-                    BitDepthTestMode == I16_TO_I16 || BitDepthTestMode == U16_TO_U16 ||
-                    BitDepthTestMode == I32_TO_I32 || BitDepthTestMode == U32_TO_U32) {
+                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F32_TO_F32 ||
+                    BitDepthTestMode == I8_TO_I8 || BitDepthTestMode == I16_TO_I16 ||
+                    BitDepthTestMode == U16_TO_U16 || BitDepthTestMode == I32_TO_I32 ||
+                    BitDepthTestMode == U32_TO_U32) {
                     if (broadCastFlag == 1)
-                        rppt_tensor_add_tensor(d_inputSecond, d_input, srcDescriptorPtrNDSecond,
-                                               srcDescriptorPtrND, d_output, dstDescriptorPtrND,
-                                               RPP_BROADCAST_ENABLE, roiTensorSecond, roiTensor,
-                                               handle, RPP_HIP_BACKEND);
+                        errorCodeCapture = rppt_tensor_add_tensor(
+                            d_inputSecond, d_input, srcDescriptorPtrNDSecond, srcDescriptorPtrND,
+                            d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensorSecond,
+                            roiTensor, handle, RPP_HIP_BACKEND);
                     else if (broadCastFlag == 2)
-                        rppt_tensor_add_tensor(d_input, d_inputSecond, srcDescriptorPtrND,
-                                               srcDescriptorPtrNDSecond, d_output,
-                                               dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensor,
-                                               roiTensorSecond, handle, RPP_HIP_BACKEND);
+                        errorCodeCapture = rppt_tensor_add_tensor(
+                            d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
+                            d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensor,
+                            roiTensorSecond, handle, RPP_HIP_BACKEND);
                     else
-                        rppt_tensor_add_tensor(d_input, d_inputSecond, srcDescriptorPtrND,
-                                               srcDescriptorPtrNDSecond, d_output,
-                                               dstDescriptorPtrND, RPP_BROADCAST_DISABLE, roiTensor,
-                                               roiTensorSecond, handle, RPP_HIP_BACKEND);
+                        errorCodeCapture = rppt_tensor_add_tensor(
+                            d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
+                            d_output, dstDescriptorPtrND, RPP_BROADCAST_DISABLE, roiTensor,
+                            roiTensorSecond, handle, RPP_HIP_BACKEND);
                 } else
                     missingFuncFlag = 1;
 
@@ -555,22 +558,22 @@ int main(int argc, char** argv) {
                 testCaseName = "tensor_subtract_tensor";
 
                 startWallTime = omp_get_wtime();
-                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
-                    BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8 ||
-                    BitDepthTestMode == I16_TO_I16 || BitDepthTestMode == U16_TO_U16 ||
-                    BitDepthTestMode == I32_TO_I32 || BitDepthTestMode == U32_TO_U32) {
+                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F32_TO_F32 ||
+                    BitDepthTestMode == I8_TO_I8 || BitDepthTestMode == I16_TO_I16 ||
+                    BitDepthTestMode == U16_TO_U16 || BitDepthTestMode == I32_TO_I32 ||
+                    BitDepthTestMode == U32_TO_U32) {
                     if (broadCastFlag == 1)
-                        rppt_tensor_subtract_tensor(
+                        errorCodeCapture = rppt_tensor_subtract_tensor(
                             d_inputSecond, d_input, srcDescriptorPtrNDSecond, srcDescriptorPtrND,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensorSecond,
                             roiTensor, handle, RPP_HIP_BACKEND);
                     else if (broadCastFlag == 2)
-                        rppt_tensor_subtract_tensor(
+                        errorCodeCapture = rppt_tensor_subtract_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
                     else
-                        rppt_tensor_subtract_tensor(
+                        errorCodeCapture = rppt_tensor_subtract_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_DISABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
@@ -583,22 +586,22 @@ int main(int argc, char** argv) {
                 testCaseName = "tensor_multiply_tensor";
 
                 startWallTime = omp_get_wtime();
-                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
-                    BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8 ||
-                    BitDepthTestMode == I16_TO_I16 || BitDepthTestMode == U16_TO_U16 ||
-                    BitDepthTestMode == I32_TO_I32 || BitDepthTestMode == U32_TO_U32) {
+                if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F32_TO_F32 ||
+                    BitDepthTestMode == I8_TO_I8 || BitDepthTestMode == I16_TO_I16 ||
+                    BitDepthTestMode == U16_TO_U16 || BitDepthTestMode == I32_TO_I32 ||
+                    BitDepthTestMode == U32_TO_U32) {
                     if (broadCastFlag == 1)
-                        rppt_tensor_multiply_tensor(
+                        errorCodeCapture = rppt_tensor_multiply_tensor(
                             d_inputSecond, d_input, srcDescriptorPtrNDSecond, srcDescriptorPtrND,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensorSecond,
                             roiTensor, handle, RPP_HIP_BACKEND);
                     else if (broadCastFlag == 2)
-                        rppt_tensor_multiply_tensor(
+                        errorCodeCapture = rppt_tensor_multiply_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
                     else
-                        rppt_tensor_multiply_tensor(
+                        errorCodeCapture = rppt_tensor_multiply_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_DISABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
@@ -611,22 +614,22 @@ int main(int argc, char** argv) {
                 testCaseName = "tensor_divide_tensor";
 
                 startWallTime = omp_get_wtime();
-                if (BitDepthTestMode == U8_TO_F32 || BitDepthTestMode == F16_TO_F16 ||
-                    BitDepthTestMode == U16_TO_F32 || BitDepthTestMode == U32_TO_F32 ||
-                    BitDepthTestMode == I8_TO_F32 || BitDepthTestMode == I16_TO_F32 ||
-                    BitDepthTestMode == I32_TO_F32 || BitDepthTestMode == F32_TO_F32) {
+                if (BitDepthTestMode == U8_TO_F32 || BitDepthTestMode == U16_TO_F32 ||
+                    BitDepthTestMode == U32_TO_F32 || BitDepthTestMode == I8_TO_F32 ||
+                    BitDepthTestMode == I16_TO_F32 || BitDepthTestMode == I32_TO_F32 ||
+                    BitDepthTestMode == F32_TO_F32) {
                     if (broadCastFlag == 1)
-                        rppt_tensor_divide_tensor(d_inputSecond, d_input, srcDescriptorPtrNDSecond,
-                                                  srcDescriptorPtrND, d_output, dstDescriptorPtrND,
-                                                  RPP_BROADCAST_ENABLE, roiTensorSecond, roiTensor,
-                                                  handle, RPP_HIP_BACKEND);
+                        errorCodeCapture = rppt_tensor_divide_tensor(
+                            d_inputSecond, d_input, srcDescriptorPtrNDSecond, srcDescriptorPtrND,
+                            d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensorSecond,
+                            roiTensor, handle, RPP_HIP_BACKEND);
                     else if (broadCastFlag == 2)
-                        rppt_tensor_divide_tensor(
+                        errorCodeCapture = rppt_tensor_divide_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_ENABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
                     else
-                        rppt_tensor_divide_tensor(
+                        errorCodeCapture = rppt_tensor_divide_tensor(
                             d_input, d_inputSecond, srcDescriptorPtrND, srcDescriptorPtrNDSecond,
                             d_output, dstDescriptorPtrND, RPP_BROADCAST_DISABLE, roiTensor,
                             roiTensorSecond, handle, RPP_HIP_BACKEND);
@@ -645,13 +648,15 @@ int main(int argc, char** argv) {
 
         if (missingFuncFlag == 1) {
             cout << "\nThe functionality " << func << " doesn't yet exist in RPP\n";
-            return RPP_ERROR_NOT_IMPLEMENTED;
+            exitStatus = RPP_ERROR_NOT_IMPLEMENTED;
+            break;
         }
         if (errorCodeCapture != RPP_SUCCESS) {
             cout << "\nThe functionality " << func << " returned an error status "
-                 << rppStatusToString[errorCodeCapture] << " on run number " << perfCount + 1
+                 << rppGetStatusString(errorCodeCapture) << " on run number " << perfCount + 1
                  << " of " << numRuns << " runs.\n";
-            return errorCodeCapture;
+            exitStatus = errorCodeCapture;
+            break;
         }
 
         wallTime = endWallTime - startWallTime;
@@ -660,7 +665,7 @@ int main(int argc, char** argv) {
         avgWallTime += wallTime;
     }
 
-    if (DEBUG_MODE) {
+    if (DEBUG_MODE && exitStatus == 0) {
         // Misc uses F32, so filename is {func}_f32.bin
         std::string binFileName = func + "_f32.bin";
         CHECK_RETURN_STATUS(hipMemcpy(output, d_output, oBufferSizeInBytes, hipMemcpyDeviceToHost));
@@ -673,12 +678,12 @@ int main(int argc, char** argv) {
     }
 
     // compare outputs if qaMode is true
-    if (qaMode) {
+    if (qaMode && exitStatus == 0) {
         CHECK_RETURN_STATUS(hipMemcpy(output, d_output, oBufferSizeInBytes, hipMemcpyDeviceToHost));
         compare_output(output, nDim, batchSize, BitDepthTestMode, oBufferSize, dst, func,
                        testCaseName, additionalParam, scriptPath, broadCastCase ? broadCastFlag : 0,
                        "HIP", externalMeanStd);
-    } else {
+    } else if (exitStatus == 0) {
         maxWallTime *= 1000;
         minWallTime *= 1000;
         avgWallTime *= 1000;
@@ -688,6 +693,7 @@ int main(int argc, char** argv) {
     }
 
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
 
     // Free device memory
     CHECK_RETURN_STATUS(hipFree(d_input));
@@ -712,5 +718,5 @@ int main(int argc, char** argv) {
     if (meanTensorCPU != nullptr) free(meanTensorCPU);
     if (stdDevTensorCPU != nullptr) free(stdDevTensorCPU);
 
-    return 0;
+    return exitStatus;
 }

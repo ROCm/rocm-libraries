@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "MiopenApi.hpp"
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
-#include <miopen/miopen.h>
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
@@ -76,7 +76,7 @@ public:
 
     // Defined in HipdnnMiopenHandle.cpp to avoid circular dependency
     hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
-        getEngineManager();
+        getEngineManager() const;
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)

@@ -23,6 +23,8 @@
 
 #include "helper.hpp"
 
+#include <cstdlib>
+
 // This file includes platform specific helpers that differ between POSIX and
 // Windows. The alternatives are switched at a whole-file level. Please do
 // not use inline/fine-grained ifdefs.
@@ -69,22 +71,26 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     State state;
 
     // Windows implementation using CreateProcess and pipes.
+    // run() is called from several threads at once (rocIsa::initMany), and
+    // CreateProcess hands each child every inheritable handle in the process.
+    // So the pipes start non-inheritable and only the child's ends are made
+    // inheritable: if a parent end were ever inheritable, another thread's
+    // child could hold this child's stdin open, and it would never see EOF.
     SECURITY_ATTRIBUTES saAttr;
     saAttr.nLength              = sizeof(SECURITY_ATTRIBUTES);
-    saAttr.bInheritHandle       = TRUE;
+    saAttr.bInheritHandle       = FALSE;
     saAttr.lpSecurityDescriptor = NULL;
 
     // Create a pipe for the child process's STDOUT.
     if(!CreatePipe(&state.hChildStd_OUT_Rd, &state.hChildStd_OUT_Wr, &saAttr, 0))
         throw std::runtime_error("Stdout pipe creation failed");
-    // Ensure the read handle is NOT inherited.
-    if(!SetHandleInformation(state.hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0))
+    if(!SetHandleInformation(state.hChildStd_OUT_Wr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
         throw std::runtime_error("Stdout SetHandleInformation failed");
 
     // Create a pipe for the child process's STDIN.
     if(!CreatePipe(&state.hChildStd_IN_Rd, &state.hChildStd_IN_Wr, &saAttr, 0))
         throw std::runtime_error("Stdin pipe creation failed");
-    if(!SetHandleInformation(state.hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0))
+    if(!SetHandleInformation(state.hChildStd_IN_Rd, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
         throw std::runtime_error("Stdin SetHandleInformation failed");
 
     // Build a command-line string from the vector of arguments.
@@ -225,8 +231,16 @@ std::string demangle(const char* name)
     return result;
 }
 
+std::string nullDevicePath()
+{
+    // Not plain "NUL": LLVM turns a relative path under a long working directory
+    // into a \\?\ path, where NUL is an ordinary file name.
+    return "\\\\.\\NUL";
+}
+
 #else
 // POSIX implementation.
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #ifdef __GNUG__
@@ -235,24 +249,43 @@ std::string demangle(const char* name)
 
 std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string& input, bool debug)
 {
+    // The pipe only feeds `input` to the child's stdin. O_CLOEXEC keeps it out of
+    // children forked concurrently by other threads: an inherited write end would
+    // keep this child's stdin from ever seeing EOF.
     int   p[2];
     pid_t pid;
-    if(pipe(p) == -1)
+    if(pipe2(p, O_CLOEXEC) == -1)
     {
         throw std::runtime_error("cmd failed!");
     }
 
     pid = fork();
+    if(pid == -1)
+    {
+        close(p[0]);
+        close(p[1]);
+        throw std::runtime_error("fork failed!");
+    }
     if(pid == 0)
     {
-        close(p[1]);
-        dup2(p[0], STDIN_FILENO);
+        // dup2 clears FD_CLOEXEC on the new descriptor; the pipe fds themselves are
+        // closed by execvp.
+        if(p[0] == STDIN_FILENO)
+            fcntl(p[0], F_SETFD, 0);
+        else
+            dup2(p[0], STDIN_FILENO);
         if(!debug)
         {
-            dup2(p[0], STDERR_FILENO);
-            dup2(p[0], STDOUT_FILENO);
+            // Discard the child's output; only its exit status is reported.
+            int devNull = open("/dev/null", O_WRONLY);
+            if(devNull != -1)
+            {
+                dup2(devNull, STDOUT_FILENO);
+                dup2(devNull, STDERR_FILENO);
+                if(devNull > STDERR_FILENO)
+                    close(devNull);
+            }
         }
-        close(p[0]);
         execvp(cmd[0], cmd.data());
         perror("execvp");
         // 127 is the conventional "command not found" status; _exit (not exit) is
@@ -264,11 +297,9 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
         close(p[0]);
         write(p[1], input.c_str(), input.size());
         close(p[1]);
-        char        buf[128] = {0};
+        // The child's output is not captured (see above), so there is no result text.
         std::string result;
-        read(p[0], buf, 128);
-        result += buf;
-        int rcode;
+        int         rcode;
         waitpid(pid, &rcode, 0);
         if(WIFEXITED(rcode))
         {
@@ -288,6 +319,11 @@ std::string demangle(const char* name)
     result                = (status == 0) ? demangled : name;
     free(demangled);
     return result;
+}
+
+std::string nullDevicePath()
+{
+    return "/dev/null";
 }
 
 #endif // POSIX

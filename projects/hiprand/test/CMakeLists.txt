@@ -197,6 +197,9 @@ endif()
 # Checks for simple linkage problems
 add_subdirectory(linkage)
 
+# Checks that the public headers compile as C
+add_subdirectory(c_compile)
+
 # Bake YAML-driven category labels into the install-tree
 # CTestTestfile.cmake fragment so `ctest --test-dir
 # $THEROCK_BIN_DIR/hipRAND -L <tier>` works against the install tree.

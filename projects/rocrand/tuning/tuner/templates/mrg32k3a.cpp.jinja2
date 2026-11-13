@@ -1,0 +1,13 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block backend_include %}
+    #include "rng/mrg.hpp"
+{% endblock %}
+
+{% block generator_define %}
+    template<class ConfigProvider>
+    using generator_template
+        = rocrand_impl::host::mrg_generator_template<rocrand_impl::system::device_system,
+                                                 rocrand_device::mrg32k3a_engine,
+                                                 ConfigProvider>;
+{% endblock %}

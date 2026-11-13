@@ -299,6 +299,25 @@ constexpr float getToleranceFwd()
     }
 }
 
+// MoE grouped matmul backward is a per-expert GEMM reducing over that expert's token
+// rows; reuse the matmul error model.
+template <typename T>
+constexpr float getToleranceBwd()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
 } // namespace moe
 
 namespace reduction
@@ -412,5 +431,35 @@ constexpr float getToleranceFwd()
 }
 
 } // namespace sdpa
+
+namespace resample
+{
+
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7f;
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace resample
 
 } // namespace hipdnn_test_sdk::utilities

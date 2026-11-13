@@ -30,7 +30,9 @@
 #define ROCBLAS_VERSION_MINOR       @rocblas_VERSION_MINOR@
 #define ROCBLAS_VERSION_PATCH       @rocblas_VERSION_PATCH@
 #define ROCBLAS_VERSION_TWEAK       @rocblas_VERSION_TWEAK@
-#define ROCBLAS_TENSILE_COMMIT_ID   "@rocblas_VERSION_COMMIT_ID@" , "@tensile_VERSION_COMMIT_ID@"
+#define ROCBLAS_VERSION_STRING      "@rocblas_VERSION_MAJOR@.@rocblas_VERSION_MINOR@.@rocblas_VERSION_PATCH@.@rocblas_VERSION_TWEAK@"
+#define ROCBLAS_COMMIT_ID           "@rocblas_VERSION_COMMIT_ID@"
+#define ROCBLAS_TENSILE_COMMIT_ID   ROCBLAS_COMMIT_ID , "@tensile_VERSION_COMMIT_ID@"
 // clang-format on
 
 #endif /* ROCBLAS_VERSION_H */

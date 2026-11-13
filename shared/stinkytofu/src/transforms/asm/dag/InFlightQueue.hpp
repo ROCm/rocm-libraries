@@ -23,17 +23,17 @@
 #pragma once
 
 #include <algorithm>
-#include <cmath>
 #include <deque>
+#include <vector>
 
 namespace stinkytofu {
 
 // Simulation of a finite-depth hardware pipeline queue.
 //
 // Entries are tracked by absolute expiry time (currentTime_ + drainLatency).
-// advance() is O(1) — it only increments the clock. Expired entries are
-// evicted lazily on push() and full(). Each entry carries its own drain
-// latency to support per-entry math-model variation.
+// advance() is O(1): it increments the clock. Expired entries are evicted lazily
+// on push() and full(). Each entry carries its own drain latency to support
+// per-entry math-model variation.
 class InFlightQueue {
    public:
     InFlightQueue() = default;
@@ -41,10 +41,6 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
-    }
-
-    void setThrottleInterval(double issueInterval) {
-        throttleInterval_ = issueInterval;
     }
 
     void push(int drainLatency) {
@@ -74,33 +70,20 @@ class InFlightQueue {
     void clear() {
         expiries_.clear();
         currentTime_ = 0;
-        nextIssueTick_ = -1.0;
     }
 
     // Seed with `count` entries each expiring `residual` cycles from now.
     void seed(int count, int residual) {
         expiries_.clear();
         for (int i = 0; i < count; ++i) expiries_.push_back(currentTime_ + residual);
-        nextIssueTick_ = -1.0;
     }
 
-    // Wait cycles to satisfy a saturated-queue issue pacing interval.
-    // Returns 0 when queue is not full or interval is invalid.
-    int throttleWait() const {
-        if (!full() || throttleInterval_ <= 0.0) return 0;
-        const double now = (double)currentTime_;
-        const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
-        return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
-    }
-
-    // Push one entry and update saturation pacing state.
-    void pushWithThrottle(int drainLatency) {
-        push(drainLatency);
-        const double now = (double)currentTime_;
-        if (full() && throttleInterval_ > 0.0)
-            nextIssueTick_ = std::max(nextIssueTick_, now) + throttleInterval_;
-        else
-            nextIssueTick_ = now;
+    // Seed with each entry's own residual (as captured by residuals()), so a
+    // predecessor's occupancy carries over without collapsing every entry to
+    // one worst-case value.
+    void seed(const std::vector<int>& residuals) {
+        expiries_.clear();
+        for (int r : residuals) expiries_.push_back(currentTime_ + r);
     }
 
     // Remaining cycles until the oldest in-flight entry expires.
@@ -117,6 +100,17 @@ class InFlightQueue {
         return std::max(0, *std::max_element(expiries_.begin(), expiries_.end()) - currentTime_);
     }
 
+    // Remaining cycles until each currently in-flight entry expires, oldest
+    // first (the order push() built them in). Pairs with seed(vector<int>) to
+    // carry occupancy across a BB boundary without collapsing to one value.
+    std::vector<int> residuals() const {
+        evict();
+        std::vector<int> out;
+        out.reserve(expiries_.size());
+        for (int e : expiries_) out.push_back(std::max(0, e - currentTime_));
+        return out;
+    }
+
    private:
     void evict() const {
         while (!expiries_.empty() && expiries_.front() <= currentTime_) expiries_.pop_front();
@@ -124,8 +118,6 @@ class InFlightQueue {
 
     int depth_ = 0;
     int currentTime_ = 0;
-    double throttleInterval_ = 0.0;
-    double nextIssueTick_ = -1.0;
     mutable std::deque<int> expiries_;
 };
 

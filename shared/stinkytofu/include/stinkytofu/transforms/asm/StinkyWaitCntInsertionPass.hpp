@@ -35,6 +35,10 @@ struct WaitCntInsertionOptions {
     /// sweep, preventing tensor state from propagating through back-edges.
     /// Enable to restore conservative tensor fixed-point iteration.
     bool enableLoopCarriedTokenDeps = false;
+    /// Plan one wait per run of back-to-back matrix instructions, before its
+    /// first WMMA, instead of one per WMMA, so a scheduled WMMA batch stays
+    /// back-to-back (see WmmaRunWaitMerge). Set when WMMA batching is on.
+    bool mergeWaitsInWmmaRuns = false;
 };
 
 /**

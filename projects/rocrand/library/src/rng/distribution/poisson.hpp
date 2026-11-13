@@ -39,6 +39,16 @@
 #include <variant>
 #include <vector>
 
+inline double _lgamma(double x)
+{
+#if defined(_WIN32)
+    return std::lgamma(x);
+#else
+    int t;
+    return ::lgamma_r(x, &t);
+#endif
+}
+
 namespace rocrand_impl::host
 {
 
@@ -62,8 +72,7 @@ public:
 
     template<class T>
     __forceinline__ __host__ __device__
-    unsigned int
-        operator()(T x) const
+    unsigned int operator()(T x) const
     {
         return base_t::operator()(x);
     }
@@ -73,6 +82,32 @@ public:
     void operator()(const T (&input)[1], unsigned int (&output)[1]) const
     {
         output[0] = (*this)(input[0]);
+    }
+
+    template<class T>
+    __forceinline__ __device__
+    unsigned int generate_lds(T x) const
+    {
+        return base_t::generate_lds(x);
+    }
+
+    template<class T>
+    __forceinline__ __device__
+    void generate_lds(const T (&input)[1], unsigned int output[1]) const
+    {
+        output[0] = generate_lds(input[0]);
+    }
+
+    __forceinline__ __host__ __device__
+    bool check_lds_size() const
+    {
+        return base_t::check_lds_size();
+    }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        base_t::stage_to_lds(tid, block_size);
     }
 };
 
@@ -89,8 +124,7 @@ public:
 
     template<class T>
     __forceinline__ __host__ __device__
-    unsigned int
-        operator()(T x) const
+    unsigned int operator()(T x) const
     {
         const double normal_d = rocrand_device::detail::normal_distribution_double(x);
         return static_cast<unsigned int>(round(m_sqrt_lambda * normal_d + m_lambda));
@@ -128,7 +162,7 @@ inline std::vector<double>
     for(int i = capacity / 2; i >= 0; i--)
     {
         const double x  = left + i;
-        const double pp = std::exp(x * log_lambda - std::lgamma(x + 1.0) - lambda);
+        const double pp = std::exp(x * log_lambda - _lgamma(x + 1.0) - lambda);
         if(pp < p_epsilon)
         {
             lo = i + 1;
@@ -141,7 +175,7 @@ inline std::vector<double>
     for(int i = capacity / 2 + 1; i < static_cast<int>(capacity); i++)
     {
         const double x  = left + i;
-        const double pp = std::exp(x * log_lambda - std::lgamma(x + 1.0) - lambda);
+        const double pp = std::exp(x * log_lambda - _lgamma(x + 1.0) - lambda);
         if(pp < p_epsilon)
         {
             hi = i - 1;

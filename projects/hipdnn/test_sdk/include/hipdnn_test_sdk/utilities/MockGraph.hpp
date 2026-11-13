@@ -26,6 +26,14 @@ public:
             .WillByDefault(::testing::ReturnRef(
                 *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
                     _defaultGraphBuffer.GetBufferPointer())));
+        // Bytes must come from the same buffer getGraph() reads, or a content key built
+        // from this mock would not match the graph it reports.
+        ON_CALL(*this, bytes())
+            .WillByDefault(
+                ::testing::Return(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView{
+                    _defaultGraphBuffer.GetBufferPointer(), _defaultGraphBuffer.GetSize()}));
+        // Lets isApplicable() tensor-map guards pass without every test stubbing getTensorMap().
+        ON_CALL(*this, getTensorMap()).WillByDefault(::testing::ReturnRef(_emptyTensorMap));
     }
 
     MOCK_METHOD(const hipdnn_flatbuffers_sdk::data_objects::Graph&,
@@ -58,12 +66,18 @@ public:
                 nodeWrappers,
                 (),
                 (const, override));
+    MOCK_METHOD(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView,
+                bytes,
+                (),
+                (const, override));
 
     ~MockGraph() override = default;
 
 private:
     flatbuffers::FlatBufferBuilder _defaultGraphBuffer;
     flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> _defaultGraphBuilder;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _emptyTensorMap;
 };
 
 }

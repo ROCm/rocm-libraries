@@ -104,8 +104,6 @@ static_assert(buf_type == TYPE_FP32 || buf_type == TYPE_FP16 || buf_type == TYPE
 .else
     tiles_per_wave = wave_size / xformy_d_size
 .endif
-slot_size = xformx_d_size
-
 // Starting from gfx90a, vgpr tuples must be 64bit aligned
 // Tuples are used only in buffer_load_dwordx/buffer_store_dwordx instructions
 //
@@ -119,6 +117,13 @@ slot_size = xformx_d_size
    tuple_alignment = 1
 .else
    tuple_alignment = 0
+.endif
+
+// Keep each pipeline slot equally aligned so tuple splitting does not change its VMEM load count.
+.if tuple_alignment && (xformx_d_size % 2)
+    slot_size = xformx_d_size + 1
+.else
+    slot_size = xformx_d_size
 .endif
 
 .text

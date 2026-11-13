@@ -98,6 +98,7 @@ using bhalf_t = __bf16;
 using bhalf_t = ushort;
 #endif
 typedef bhalf_t bhalf2_t __attribute__((ext_vector_type(2)));
+typedef __bf16 llvm_bf16x2_t __attribute__((ext_vector_type(2)));
 
 __host__ __device__ static inline constexpr bool fnuz_f8_is_nan(f8_fnuz_t a)
 {
@@ -421,6 +422,28 @@ struct bf8_ocp_t
 };
 
 template <typename T>
+inline constexpr bool is_f8_type_v = is_same_v<T, f8_fnuz_t> || is_same_v<T, f8_ocp_t>;
+
+template <typename T>
+inline constexpr bool is_bf8_type_v = is_same_v<T, bf8_fnuz_t> || is_same_v<T, bf8_ocp_t>;
+
+template <typename T>
+inline constexpr bool is_fp8_type_v = is_f8_type_v<T> || is_bf8_type_v<T>;
+
+// Native FP8 instructions interpret the same bits differently on gfx942 and gfx950.
+template <typename T>
+__host__ __device__ constexpr bool is_native_fp8_type()
+{
+#if defined(__gfx94__) && !defined(__gfx950__)
+    return is_same_v<T, f8_fnuz_t> || is_same_v<T, bf8_fnuz_t>;
+#elif defined(__gfx950__) || defined(__gfx12__)
+    return is_same_v<T, f8_ocp_t> || is_same_v<T, bf8_ocp_t>;
+#else
+    return false;
+#endif
+}
+
+template <typename T>
 __host__ __device__ static inline constexpr bool fp8_is_nan(T);
 
 template <>
@@ -482,10 +505,10 @@ __host__ __device__ static inline void
 __is_interpret_supported([[maybe_unused]] ck_fp8_interpretation_t interp)
 {
 #if defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__
-#if CK_USE_OCP_FP8
+#if CK_USE_OCP_FP8 && !CK_USE_FNUZ_FP8
     __fp8_impl_assert_ocp_support(interp);
 #endif
-#if CK_USE_FNUZ_FP8
+#if CK_USE_FNUZ_FP8 && !CK_USE_OCP_FP8
     __fp8_impl_assert_fnuz_support(interp);
 #endif
 #endif
@@ -685,7 +708,7 @@ static __device__ fp8_storage_t cast_to_f8_from_f16(_Float16 v, unsigned int rng
         }
     }
 
-    val.half_vec =
+    val.i16_vec =
         __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(i16x2val, val.half_vec, /* scale */ 1.f, 0);
 
     return val.i8val[0];
@@ -859,8 +882,8 @@ static __device__ fp8_storage_t cast_to_f8_from_bf16(ushort v, unsigned int rng 
         }
     }
 
-    val.i16_vec =
-        __builtin_amdgcn_cvt_scalef32_pk_fp8_bf16(i16x2val, val.bhalf_vec, /* scale */ 1.f, 0);
+    val.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_bf16(
+        i16x2val, bit_cast<llvm_bf16x2_t>(val.bhalf_vec), /* scale */ 1.f, 0);
 
     return val.i8val[0];
 }
@@ -907,8 +930,8 @@ static __device__ fp8x2_storage_t cast_to_f8_from_bf16(ushortx2_t v, unsigned in
         }
     }
 
-    val.i16_vec =
-        __builtin_amdgcn_cvt_scalef32_pk_fp8_bf16(i16x2val, val.bhalf_vec, /* scale */ 1.f, 0);
+    val.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_bf16(
+        i16x2val, bit_cast<llvm_bf16x2_t>(val.bhalf_vec), /* scale */ 1.f, 0);
 
     return fp8x2_storage_t{val.i8val[0], val.i8val[1]};
 #endif
@@ -945,8 +968,8 @@ static __device__ fp8_storage_t cast_to_f8_from_bf16(ushort v, unsigned int rng 
         }
     }
 
-    val.i16_vec =
-        __builtin_amdgcn_cvt_scalef32_pk_bf8_bf16(i16x2val, val.bhalf_vec, /* scale */ 1.f, 0);
+    val.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_bf16(
+        i16x2val, bit_cast<llvm_bf16x2_t>(val.bhalf_vec), /* scale */ 1.f, 0);
 
     return val.i8val[0];
 }
@@ -988,8 +1011,8 @@ static __device__ fp8x2_storage_t cast_to_f8_from_bf16(ushortx2_t v, unsigned in
         }
     }
 
-    val.i16_vec =
-        __builtin_amdgcn_cvt_scalef32_pk_bf8_bf16(i16x2val, val.bhalf_vec, /* scale */ 1.f, 0);
+    val.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_bf16(
+        i16x2val, bit_cast<llvm_bf16x2_t>(val.bhalf_vec), /* scale */ 1.f, 0);
 
     return fp8x2_storage_t{val.i8val[0], val.i8val[1]};
 }

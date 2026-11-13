@@ -4,6 +4,10 @@ defaults:
   numbered: False
 root: index
 subtrees:
+- entries:
+  - file: about/rocThrust-cccl-update
+    title: rocThrust migration to CCCL 3.0.3
+
 - caption: Install
   entries:
   - file: install/install
@@ -32,6 +36,8 @@ subtrees:
 
 - caption: Reference
   entries:
+  - url: https://rocm.docs.amd.com/projects/primbench/en/latest
+    title: Benchmarking with Primbench
   - file: reference/rocThrust-data-type-support
     title: Precision support
   - file: reference/rocThrust-bitwise-repro

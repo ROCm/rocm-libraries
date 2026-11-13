@@ -234,6 +234,17 @@ TEST_F(AnalysisManagerTest, GetCachedResultHit) {
     EXPECT_EQ(cached->value, 42);
 }
 
+TEST_F(AnalysisManagerTest, GetResultCanUpdateCachedAnalysis) {
+    AnalysisManager AM;
+    AM.registerPass<CountingAnalysis>();
+
+    AM.getResult<CountingAnalysis>(func).value = 17;
+
+    const auto* cached = AM.getCachedResult<CountingAnalysis>();
+    ASSERT_NE(cached, nullptr);
+    EXPECT_EQ(cached->value, 17);
+}
+
 // -----------------------------------------------------------------------
 // Invalidation
 // -----------------------------------------------------------------------

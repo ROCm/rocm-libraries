@@ -97,6 +97,24 @@ public:
         }
         return reinterpret_cast<uintptr_t>(stream);
     }
+    std::string engineIdToName(int64_t engineId) const
+    {
+        checkNotDestroyed();
+        size_t engineNameLen = 0;
+        if(hipdnnGetEngineNameById_ext(get(), engineId, nullptr, &engineNameLen)
+           != HIPDNN_STATUS_SUCCESS)
+        {
+            throw std::out_of_range("Engine ID is not loaded");
+        }
+        std::vector<char> engineName(engineNameLen);
+        if(hipdnnGetEngineNameById_ext(get(), engineId, engineName.data(), &engineNameLen)
+           != HIPDNN_STATUS_SUCCESS)
+        {
+            throw std::runtime_error("Failed to resolve engine name");
+        }
+        return {engineName.data()};
+    }
+
     EngineInfo getEngineInfo(int64_t engineId) const
     {
         checkNotDestroyed();
@@ -186,6 +204,12 @@ void handleBindings(nb::module_& m)
              &HandleWrapper::getEngineInfo,
              nb::arg("engine_id"),
              "Return metadata for a loaded engine ID")
+        .def("engine_id_to_name",
+             &HandleWrapper::engineIdToName,
+             nb::arg("engine_id"),
+             "Resolve a loaded engine ID to the name that engine carries, including "
+             "plugin-supplied engines absent from the built-in registry.\n\n"
+             "Raises IndexError if no loaded engine carries the ID.")
         .def("__int__", [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })
         .def("__index__",
              [](const HandleWrapper& h) { return reinterpret_cast<uintptr_t>(h.get()); })

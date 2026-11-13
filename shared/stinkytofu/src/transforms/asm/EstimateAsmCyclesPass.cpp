@@ -245,7 +245,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             calculateMathClocksInUnrolledLoop(bb, passCtx);
         }
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
-        func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+        if (publishMetadata_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
@@ -264,6 +264,22 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// pass can be used purely as a cycle-position query by other passes.
     void setAnnotateComments(bool annotate) {
         annotateComments_ = annotate;
+    }
+
+    /// When false, suppress publishing the total-cycles function metadata
+    /// (`EstimateAsmCyclesPass.totalCycles`). Read-only query callers set this
+    /// alongside setAnnotateComments(false) so run() has no IR/function side
+    /// effects — the AnalysisManager contract for a pure analysis.
+    void setPublishMetadata(bool publish) {
+        publishMetadata_ = publish;
+    }
+
+    /// When true, also model non-loop blocks that contain an embedded
+    /// `label_LoopBeginL` (hierarchical / sub-loop IR). Used only by
+    /// computeEstimatedCyclesPerInstruction(); the published pass total stays
+    /// loop-block-only.
+    void setPerInstructionCycleQuery(bool query) {
+        perInstructionCycleQuery_ = query;
     }
 
    private:
@@ -790,17 +806,25 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
 
         uint32_t totalCycles = 0;
-        // When IR is hierarchical (e.g. populateFunctionFromString), ^block: is only a block
-        // boundary. "LoopBeginL" avoids parser conflating label_* with branch target;
-        // "label_LoopBeginL" for compat.
-        bool isLoopBeginL = (bb.getLabel() == "label_LoopBeginL" || bb.getLabel() == "LoopBeginL");
-        for (StinkyInstruction* inst : instructions) {
-            if (isLoopBeginL == false) {
-                if (isLabel(*inst) && inst->getModifier<LabelData>()->label == "label_LoopBeginL") {
-                    isLoopBeginL = true;
-                } else
-                    continue;
+        // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
+        // ^label_LoopBeginL and the leading label instruction matches bb.getLabel()).
+        // computeEstimatedCyclesPerInstruction() also covers blocks that embed that label.
+        std::size_t startIdx = 0;
+        if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
+            startIdx = instructions.size();
+            if (perInstructionCycleQuery_) {
+                for (std::size_t i = 0; i < instructions.size(); ++i) {
+                    const LabelData* labelData = instructions[i]->getModifier<LabelData>();
+                    if (isLabel(*instructions[i]) && labelData != nullptr &&
+                        labelData->label == "label_LoopBeginL") {
+                        startIdx = i;
+                        break;
+                    }
+                }
             }
+        }
+        for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
+            StinkyInstruction* inst = instructions[idx];
             bool isCoIssued =
                 (!isMatrixInstruction(*inst) &&
                  canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
@@ -992,6 +1016,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
     GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
+    bool perInstructionCycleQuery_ = false;
+    bool publishMetadata_ = true;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
@@ -1020,8 +1046,19 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
+    Function& func, AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return computeEstimatedCyclesPerInstruction(func, passCtx);
+}
+
 unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
@@ -1031,6 +1068,8 @@ std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPer
     Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
     pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
+    pass.setPerInstructionCycleQuery(true);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getPerInstructionCycles();

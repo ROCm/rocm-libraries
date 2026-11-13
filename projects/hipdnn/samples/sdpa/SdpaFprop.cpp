@@ -30,6 +30,8 @@ bool runSdpa(F&& f)
 {
     bool allPassed = true;
 
+    warnOnUnknownEngineName(f.handle, f.config);
+
     const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
     const std::vector<std::pair<std::string, TensorLayout>> layouts
         = {{"bhsd", TensorLayout::BHSD}, {"bshd", TensorLayout::BSHD}};
@@ -179,7 +181,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> oRefTensor(oAttrRef->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
-            qTensor, kTensor, vTensor, oRefTensor, attnScaleVal);
+            qTensor,
+            kTensor,
+            vTensor,
+            oRefTensor,
+            hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}.setScale(attnScaleVal));
 
         // SDPA involves two matrix multiplies and softmax, requiring more generous
         // tolerances than single-operation validation.

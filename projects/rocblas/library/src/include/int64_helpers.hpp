@@ -22,7 +22,11 @@
 
 #pragma once
 
+#include "handle.hpp"
+
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <rocblas.h>
 
 #if defined(ROCBLAS_INTERNAL_ILP64)
@@ -75,6 +79,20 @@ constexpr int64_t c_i64_grid_X_chunk  = int64_t(512);
 constexpr int64_t c_i64_grid_YZ_chunk = int64_t(512);
 
 #endif
+
+// Largest grid.x whose work-item count (grid.x * block_size) still fits in the
+// 32-bit AQL grid_size_x field. HIP rejects the launch once that product
+// reaches 2^32, which is below the block count maxGridSize[0] reports.
+inline unsigned int rocblas_limit_grid_x(rocblas_handle handle, rocblas_int n, int block_size)
+{
+    const unsigned int nb         = block_size > 0 ? static_cast<unsigned int>(block_size) : 1u;
+    unsigned int       cap        = std::numeric_limits<uint32_t>::max() / nb;
+    const int          device_cap = handle->device_properties.maxGridSize[0];
+    if(device_cap > 0 && static_cast<unsigned int>(device_cap) < cap)
+        cap = static_cast<unsigned int>(device_cap);
+    const unsigned int wanted = n > 0 ? static_cast<unsigned int>(n) : 1u;
+    return std::min(wanted, cap);
+}
 
 // int64 outer loop helpers
 

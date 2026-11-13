@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "0f3a9eaa-342f-523e-a827-54d0597827af",
+  "name": "example: graph operation is add (rocKE half)",
+  "scope": "graph",
+  "match_symbol": "hipkernel.pointwise.add_match"
+}

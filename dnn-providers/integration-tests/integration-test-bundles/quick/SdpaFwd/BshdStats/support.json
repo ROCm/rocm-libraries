@@ -1,0 +1,33 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionUnified2D": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:Gfx950AttentionUnified3D": [
+      {
+        "cases": [
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

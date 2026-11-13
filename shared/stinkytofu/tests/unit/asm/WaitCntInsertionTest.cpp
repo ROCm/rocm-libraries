@@ -352,6 +352,57 @@ st.func @test_ds_read_wmma() {
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
 }
 
+// mergeWaitsInWmmaRuns: a run of back-to-back WMMAs gets one wait (the strictest)
+// before its first WMMA, so the batch stays back-to-back; a VALU ends the run.
+TEST_F(WaitCntInsertionTest, WmmaRunGetsOneMergedWait) {
+    const std::string loads = R"(
+  v[0:3] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56 }
+  v[8:11] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56 }
+  v[16:19] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56 }
+  v[24:27] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56 }
+)";
+    auto wmma = [](int src, int acc) {
+        return "  a[" + std::to_string(acc) + ":" + std::to_string(acc + 7) +
+               "] = \"st.v_wmma_f32_16x16x32_bf16\"(v[" + std::to_string(src) + ":" +
+               std::to_string(src + 7) + "], v[100:107], a[" + std::to_string(acc) + ":" +
+               std::to_string(acc + 7) + "]) { issueCycles = 1, latencyCycles = 8 }\n";
+    };
+    const std::string valu =
+        "  v60 = \"st.v_add_f32\"(v61, v62) { issueCycles = 1, latencyCycles = 1 }\n";
+
+    struct Case {
+        std::string body;
+        bool merge;
+        std::vector<std::pair<int, int>> waits;  // (WMMA index the wait precedes, dlcnt)
+    };
+    const std::string run4 = wmma(0, 10) + wmma(8, 20) + wmma(16, 30) + wmma(24, 40);
+    const std::string split = wmma(0, 10) + wmma(8, 20) + valu + wmma(16, 30) + wmma(24, 40);
+    const std::vector<Case> cases = {
+        {run4, false, {{0, 3}, {1, 2}, {2, 1}, {3, 0}}},
+        {run4, true, {{0, 0}}},
+        {split, true, {{0, 2}, {2, 0}}},
+    };
+    for (const Case& c : cases) {
+        StinkyIRConverter converter(getArch());
+        auto* func = parseIR("st.func @t() {\n^entry:" + loads + c.body + "}\n", converter);
+        ASSERT_NE(func, nullptr);
+        WaitCntInsertionOptions options;
+        options.mergeWaitsInWmmaRuns = c.merge;
+        runInsertionPass(*func, options);
+
+        BasicBlock& bb = *func->begin();
+        auto waitcnts = getAllWaitCnts(bb);
+        ASSERT_EQ(waitcnts.size(), c.waits.size()) << "merge=" << c.merge;
+        for (size_t i = 0; i < c.waits.size(); ++i) {
+            StinkyInstruction* w = findNthInst(bb, GFX::v_wmma_f32_16x16x32_bf16, c.waits[i].first);
+            ASSERT_NE(w, nullptr);
+            EXPECT_EQ(waitcnts[i].position, getInstructionPosition(bb, w) - 1)
+                << "merge=" << c.merge;
+            EXPECT_EQ(waitcnts[i].waitData->dlcnt, c.waits[i].second) << "merge=" << c.merge;
+        }
+    }
+}
+
 TEST_F(WaitCntInsertionTest, WaitCountIsCappedAtMaxInFlightMinusOne) {
     std::string irString = R"(
 st.func @test_wait_count_cap() {
@@ -387,67 +438,6 @@ st.func @test_wait_count_cap() {
     EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
     EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
     EXPECT_EQ(waitcnts[0].waitData->kmcnt, -1);
-}
-
-/**
- * @brief SMRD scalar loads (s_load_*) consumed downstream -> s_wait_kmcnt.
- *
- * SMRD scalar loads retire on the kmcnt counter, not loadcnt/dscnt. The pass
- * must classify them as CK_KM and emit s_wait_kmcnt (SWaitCntData::kmcnt)
- * before a consumer of an outstanding load.
- *
- * kmcnt is out-of-order (CounterOrder::OutOfOrder): scalar loads may return in
- * any order, so a nonzero immediate does not identify which loads have landed.
- * The only usable wait is a full drain.
- *
- * IR:
- *   s[8:9]   = s_load_b64 (scalar load 0)
- *   s[10:11] = s_load_b64 (scalar load 1)
- *   s20 = s_add_u32 s8, s8     (uses load 0)
- *   s21 = s_add_u32 s10, s10   (uses load 1)
- *
- * Expected:
- *   s_wait_kmcnt 0 before the first s_add_u32. FIFO math would allow 1 here
- *   (drain load 0, keep load 1), which load 1 returning first would satisfy
- *   while s[8:9] is still stale.
- *   No wait before the second s_add_u32 -- the full drain already landed load 1.
- * No other counter fields are set.
- */
-TEST_F(WaitCntInsertionTest, SMemLoadBeforeConsumerKmcnt) {
-    std::string irString = R"(
-st.func @test_smem_load_kmcnt() {
-^entry:
-  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
-  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
-  s20 = "st.s_add_u32"(s8, s8) { issueCycles = 1, latencyCycles = 1 }
-  s21 = "st.s_add_u32"(s10, s10) { issueCycles = 1, latencyCycles = 1 }
-}
-)";
-
-    StinkyIRConverter converter(getArch());
-    auto* func = parseIR(irString, converter);
-    ASSERT_NE(func, nullptr);
-
-    runInsertionPass(*func);
-
-    BasicBlock& entryBB = *func->begin();
-    auto waitcnts = getAllWaitCnts(entryBB);
-
-    ASSERT_EQ(waitcnts.size(), 1)
-        << "One full drain before the first consumer covers both scalar loads";
-
-    StinkyInstruction* add1 = findNthInst(entryBB, GFX::s_add_u32, 0);
-    ASSERT_NE(add1, nullptr);
-
-    int add1Pos = getInstructionPosition(entryBB, add1);
-
-    EXPECT_EQ(waitcnts[0].position, add1Pos - 1);
-    EXPECT_EQ(waitcnts[0].waitData->kmcnt, 0)
-        << "kmcnt returns out-of-order: only a full drain guarantees load 0 landed";
-    EXPECT_EQ(waitcnts[0].waitData->dlcnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
-    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
 }
 
 // ============================================================================

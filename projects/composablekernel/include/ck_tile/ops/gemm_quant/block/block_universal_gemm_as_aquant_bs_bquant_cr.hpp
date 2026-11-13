@@ -334,10 +334,11 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                     if constexpr(BPreshuffleQuant)
                     {
                         constexpr index_t reg_offset = [&]() {
-                            if constexpr(GemmTraits::BQuantGroupSize::kN > (NWarp * WarpGemm::kN) &&
-                                         Traits::NPerBlock == GemmTraits::BQuantGroupSize::kN)
+                            if constexpr(GemmTraits::BQuantGroupSize::kN >= (NWarp * WarpGemm::kN))
                             {
-                                return kQScale;
+                                // KQ is selected by pull_from_lane; registers index N groups.
+                                return (nIter * NWarp * WarpGemm::kN) /
+                                       GemmTraits::BQuantGroupSize::kN;
                             }
                             else
                             {
@@ -442,7 +443,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
             c_block_tensor, aq_block_tensor, bq_block_tensor, a_block_window, b_block_window);
     }
 
-    private:
+    protected:
     BlockGemmImpl<Scheduler, Traits> block_gemm_impl_{};
 };
 

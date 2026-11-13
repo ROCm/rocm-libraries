@@ -83,6 +83,7 @@ void testing_lahr2_bad_arg()
     rocblas_int ldt = 2;
     rocblas_int ldy = 5;
 
+#ifdef ROCSOLVER_ENABLE_HESSENBERG
     // memory allocations
     device_strided_batch_vector<T> dA(lda * n, 1, lda * n, 1);
     device_strided_batch_vector<T> dTau(nb, 1, nb, 1);
@@ -95,6 +96,7 @@ void testing_lahr2_bad_arg()
 
     // check bad arguments
     lahr2_checkBadArgs(handle, n, k, nb, dA.data(), lda, dTau.data(), dT.data(), ldt, dY.data(), ldy);
+#endif
 }
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Th>
@@ -280,6 +282,20 @@ void testing_lahr2(Arguments& argus)
     size_t size_tauRes = (argus.unit_check || argus.norm_check) ? size_tau : 0;
     size_t size_TRes = (argus.unit_check || argus.norm_check) ? size_T : 0;
     size_t size_YRes = (argus.unit_check || argus.norm_check) ? size_Y : 0;
+
+// check feature flag
+#ifndef ROCSOLVER_ENABLE_HESSENBERG
+    {
+        EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, n, k, nb, (T*)nullptr, lda, (T*)nullptr,
+                                              (T*)nullptr, ldt, (T*)nullptr, ldy),
+                              rocblas_status_not_implemented);
+
+        if(argus.timing)
+            rocsolver_bench_inform(inform_not_implemented);
+
+        return;
+    }
+#endif
 
     // check invalid sizes (n<=1 is quick return, not invalid)
     bool invalid_size = (n < 0 || k < 1 || nb < 0 || (n > 1 && (nb < 1 || k >= n || nb > n - k))

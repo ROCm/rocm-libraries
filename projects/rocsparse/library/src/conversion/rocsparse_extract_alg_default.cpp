@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_extract_alg_default.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 
 namespace rocsparse
@@ -122,15 +123,27 @@ namespace rocsparse
                               rocsparse_diag_type  target_diag_,
                               I* __restrict__ target_ptr_)
     {
-        const I seq = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-        if(seq < nseq_)
+        // AISPARSE-686. `hipBlockDim_x * hipBlockIdx_x` is unsigned-int arithmetic --
+        // both operands are unsigned int -- so it wrapped at 2^32 before it was ever
+        // assigned to I, and there was no grid-stride loop to cover a grid.x that the
+        // caller clamped against the device limit.
+        //
+        // Block-uniform stride bound: every term is hipBlockIdx_x, hipGridDim_x, a
+        // kernel argument or a compile-time constant. This kernel has no
+        // __syncthreads(), and the guard it used to apply is now the loop condition.
+        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
+
+        auto predicate = [extract_before_diagonal_, target_diag_](int64_t i, J j) {
+            return (extract_before_diagonal_)
+                       ? ((target_diag_ == rocsparse_diag_type_unit) ? (i > j) : (i >= j))
+                       : ((target_diag_ == rocsparse_diag_type_unit) ? (i < j) : (i <= j));
+        };
+
+        for(int64_t seq = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
+            seq < nseq_;
+            seq += stride)
         {
-            I    count     = 0;
-            auto predicate = [extract_before_diagonal_, target_diag_](J i, J j) {
-                return (extract_before_diagonal_)
-                           ? ((target_diag_ == rocsparse_diag_type_unit) ? (i > j) : (i >= j))
-                           : ((target_diag_ == rocsparse_diag_type_unit) ? (i < j) : (i <= j));
-            };
+            I count = 0;
             for(I k = source_ptr_[seq] - base_; k < source_ptr_[seq + 1] - base_; ++k)
             {
                 const J ind = source_ind_[k] - base_;
@@ -250,24 +263,27 @@ namespace rocsparse
                 target_ptr_, &base_value, sizeof(I), hipMemcpyHostToDevice, handle_->stream));
         }
 
-        static constexpr int nthreads_per_block = 1024;
-        dim3                 threads(nthreads_per_block);
-        J                    nblocks = (num_seq - 1) / nthreads_per_block + 1;
-        dim3                 blocks(nblocks);
+        if(num_seq > 0)
+        {
+            static constexpr int nthreads_per_block = 1024;
+            dim3                 threads(nthreads_per_block);
+            dim3                 blocks(rocsparse::get_grid_size_x(
+                handle_, (num_seq - 1) / nthreads_per_block + 1, nthreads_per_block));
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::extract_count_kernel<nthreads_per_block, I, J>),
-            blocks,
-            threads,
-            0,
-            handle_->stream,
-            num_seq,
-            (const I* __restrict__)source_ptr_,
-            (const J* __restrict__)source_ind_,
-            source_base_,
-            extract_before_diagonal,
-            target_diag_,
-            (I* __restrict__)target_ptr_);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::extract_count_kernel<nthreads_per_block, I, J>),
+                blocks,
+                threads,
+                0,
+                handle_->stream,
+                num_seq,
+                (const I* __restrict__)source_ptr_,
+                (const J* __restrict__)source_ind_,
+                source_base_,
+                extract_before_diagonal,
+                target_diag_,
+                (I* __restrict__)target_ptr_);
+        }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::internal_extract_inclusive_scan(
             handle_, num_seq, (I* __restrict__)target_ptr_, buffer_size_, buffer_));
@@ -423,16 +439,26 @@ namespace rocsparse
                                       T* __restrict__ target_val_,
                                       rocsparse_index_base target_base_)
     {
-        const I seq = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-        if(seq < nseq_)
+        // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as
+        // extract_count_kernel above; the two must move together because they walk
+        // the same sequence range and the second consumes the first's prefix sums.
+        //
+        // Block-uniform stride bound: every term is hipBlockIdx_x, hipGridDim_x, a
+        // kernel argument or a compile-time constant. No __syncthreads() here either.
+        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
+
+        auto predicate = [extract_before_diagonal_, target_diag_](int64_t i, J j) {
+            return (extract_before_diagonal_)
+                       ? ((target_diag_ == rocsparse_diag_type_unit) ? (i > j) : (i >= j))
+                       : ((target_diag_ == rocsparse_diag_type_unit) ? (i < j) : (i <= j));
+        };
+
+        for(int64_t seq = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
+            seq < nseq_;
+            seq += stride)
         {
             const I end          = source_ptr_[seq + 1] - source_base_;
             I       target_start = target_ptr_[seq] - target_base_;
-            auto    predicate    = [extract_before_diagonal_, target_diag_](J i, J j) {
-                return (extract_before_diagonal_)
-                                 ? ((target_diag_ == rocsparse_diag_type_unit) ? (i > j) : (i >= j))
-                                 : ((target_diag_ == rocsparse_diag_type_unit) ? (i < j) : (i <= j));
-            };
 
             for(I k = source_ptr_[seq] - source_base_; k < end; ++k)
             {
@@ -527,10 +553,15 @@ namespace rocsparse
         }
         }
 
+        if(num_seq == 0)
+        {
+            return rocsparse_status_success;
+        }
+
         static constexpr uint32_t nthreads_per_block = 1024;
         dim3                      threads(nthreads_per_block);
-        J                         nblocks = (num_seq - 1) / nthreads_per_block + 1;
-        dim3                      blocks(nblocks);
+        dim3                      blocks(rocsparse::get_grid_size_x(
+            handle_, (num_seq - 1) / nthreads_per_block + 1, nthreads_per_block));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::internal_extract_fill_kernel<nthreads_per_block, T, I, J>),

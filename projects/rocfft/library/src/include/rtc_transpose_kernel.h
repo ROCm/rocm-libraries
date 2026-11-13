@@ -26,10 +26,11 @@
 struct RTCKernelTranspose : public RTCKernel
 {
     RTCKernelTranspose(const std::string&                       kernel_name,
+                       KIntType                                 itype,
                        std::shared_future<hipModule_wrapper_t>& module,
                        dim3                                     gridDim,
                        dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 

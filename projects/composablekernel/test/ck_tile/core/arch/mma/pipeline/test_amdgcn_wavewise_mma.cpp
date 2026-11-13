@@ -39,9 +39,10 @@ struct WaveWisePipelineKernel
                                                    WaveTileK,
                                                    AccumPolicy,
                                                    TransposeC,
-                                                   1, // SwizzleFactor
-                                                   1, // AttrNumAccessAV
-                                                   1, // AttrNumAccessBV
+                                                   1,     // SwizzleFactor
+                                                   1,     // AttrNumAccessAV
+                                                   1,     // AttrNumAccessBV
+                                                   false, // UsePackedNumAccess
                                                    CompilerTarget>;
 
         using ATensor = typename Pipeline::AWarpTensor;
@@ -70,7 +71,7 @@ struct WaveWisePipelineKernel
 
 namespace {
 const auto should_skip = [](amdgcn_target_id currentArchId) {
-    bool isSupportedWmma = false;
+    bool isSupportedWmma = currentArchId == amdgcn_target_id::GFX1250;
     bool isSupportedMfma =
         (currentArchId >= amdgcn_target_id::GFX942) && (currentArchId <= amdgcn_target_id::GFX950);
     return ((currentArchId == amdgcn_target_id::HOST) || !(isSupportedWmma || isSupportedMfma));
@@ -100,6 +101,7 @@ struct WaveWisePipelineFactory
                                          1,     // SwizzleFactor
                                          1,     // AttrNumAccessAV
                                          1,     // AttrNumAccessBV
+                                         false, // UsePackedNumAccess
                                          Target>;
     };
 };
@@ -139,6 +141,16 @@ void WaveWisePipeline_Real_impl()
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32)
 {
     WaveWisePipeline_Real_impl<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u>();
+}
+
+TEST(WaveWiseMmaPipeline, FullMatrixVerify_BF16_16x16x32)
+{
+    WaveWisePipeline_Real_impl<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u>();
+}
+
+TEST(WaveWiseMmaPipeline, FullMatrixVerify_FP32_16x16x4)
+{
+    WaveWisePipeline_Real_impl<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u>();
 }
 
 TEST(WaveWiseMmaPipeline, FullMatrixVerify_16x16x32_SwapAB)

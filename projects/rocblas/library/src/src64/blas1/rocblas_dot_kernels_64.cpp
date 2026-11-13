@@ -99,14 +99,15 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
             auto    y_ptr       = adjust_ptr_batch(y, b_base, stridey);
             int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
+            // additional workspace if n_passes as results are only partial sum
+            V* partial_results = (V*)(workspace);
+
             T* output = &results[b_base];
             if(handle->pointer_mode == rocblas_pointer_mode_host)
             {
-                output = (T*)(workspace);
+                // Use the scratch region after the partial results.
+                output = reinterpret_cast<T*>(partial_results + n_passes * batch_count);
             }
-
-            // additional workspace if n_passes as results are only partial sum
-            V* partial_results = (V*)(workspace);
 
             for(int64_t n_base = 0, pass = 0; n_base < n_64; n_base += c_i64_grid_X_chunk, pass++)
             {
@@ -140,12 +141,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
 
             // sum partial_results to results always needed if only to down convert
             ROCBLAS_LAUNCH_KERNEL(
-                (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                 dim3(batch_count),
                 dim3(NB),
                 0,
                 handle->get_stream(),
                 n_passes,
+                batch_count,
                 partial_results,
                 output);
 
@@ -178,15 +180,15 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                 int32_t batch_count
                     = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
-                T* output = &results[b_base];
+                // Keep host-mode output separate from the pass-major partial results.
+                V* partial_results = workspace;
+                T* output          = &results[b_base];
                 if(handle->pointer_mode == rocblas_pointer_mode_host)
                 {
-                    output = (T*)(workspace);
+                    output = reinterpret_cast<T*>(partial_results + n_passes * batch_count);
                 }
 
                 // additional workspace if n_passes as results are only partial sum
-                V* partial_results = (V*)(workspace);
-
                 {
                     // defeat synch copy of partial results by pushing pointer_mode_device
 
@@ -234,12 +236,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                 // reduce n partitions within batch chunk
                 // sum partial_results to results always needed as may down convert
                 ROCBLAS_LAUNCH_KERNEL(
-                    (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                    (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                     dim3(batch_count),
                     dim3(NB),
                     0,
                     handle->get_stream(),
                     n_passes,
+                    batch_count,
                     partial_results,
                     output);
 
@@ -261,9 +264,8 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
             // we only reduce the block count to 1 so safe to ignore extra workspace allocated in caller
             int32_t n = n_64;
 
-            // in case of negative inc shift pointer to end of data for negative indexing tid*inc
-            int64_t shiftx = incx_64 < 0 ? offsetx - (incx_64) * (n - 1) : offsetx;
-            int64_t shifty = incx_64 < 0 ? offsety - (incx_64) * (n - 1) : offsety;
+            // The launcher walks (n - 1) for a negative increment. This path is one
+            // chunk (n == n_64), so pass offsetx and offsety unshifted.
 
             static constexpr int NB_OB  = 1024;
             static constexpr int WIN_OB = 32; // 32K max n threshold, assert guard below
@@ -294,11 +296,11 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                         = rocblas_internal_dot_launcher<int64_t, NB, CONJ, T, U, V>(handle,
                                                                                     n,
                                                                                     x_ptr,
-                                                                                    shiftx,
+                                                                                    offsetx,
                                                                                     (incx_64),
                                                                                     stridex,
                                                                                     y_ptr,
-                                                                                    shifty,
+                                                                                    offsety,
                                                                                     (incy_64),
                                                                                     stridey,
                                                                                     batch_count,

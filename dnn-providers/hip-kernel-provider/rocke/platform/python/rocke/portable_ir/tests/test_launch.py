@@ -1,0 +1,520 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Tests for launch geometry and the launch-plan API (src/launch.py,
+# cpp/include/rocke/recipe_launch.h).
+#
+# What these defend is the step that used to be impossible without an
+# interpreter: taking a shipped CBOR bundle all the way to a launch. Two
+# properties carry the weight.
+#
+#   The two engines agree. A C client and a Python client must compute the same
+#   grid and the same kernarg offsets for the same shape, or a kernel validated
+#   through one path is launched wrongly through the other.
+#
+#   Offsets follow natural alignment. This only becomes observable when a
+#   signature mixes widths, so the interesting case is tested explicitly rather
+#   than relying on the all-pointer recipes that happen to be lying around --
+#   those are correct under back-to-back packing too, and would pass whatever
+#   the code did.
+#
+#   python3 -m unittest rocke.portable_ir.tests.test_launch
+
+import os
+import unittest
+
+from rocke.portable_ir.examples import recipe_toy
+from rocke.portable_ir.src import launch
+from rocke.portable_ir.src.recipe_bundle import build_bundle, cbor_encode
+from rocke.portable_ir.utils.recipe_expand import ExpandError
+from rocke.tests.gpu_check_recipes import (
+    GPU_CHECK_AND_FACTS_REFUSAL,
+    GPU_CHECK_REFUSAL,
+    gpu_check_recipe,
+)
+
+# grid.x = ceil(D / 64), the shape of a real elementwise dispatch.
+CEIL_DIV_D_64 = {"div": [{"add": [{"spec": "D"}, 63]}, 64]}
+
+
+def toy(**kw):
+    return launch.attach_launch(
+        recipe_toy.make_recipe(),
+        grid=kw.pop("grid", [CEIL_DIV_D_64, 1, 1]),
+        block=kw.pop("block", [64, 1, 1]),
+        **kw,
+    )
+
+
+def mixed_signature_recipe():
+    """A kernel whose args mix 8- and 4-byte widths.
+
+    The recipes in the tree are all-pointer, and every packing rule agrees on
+    those. (ptr, i32, ptr) is the smallest signature where natural alignment and
+    back-to-back packing disagree: the trailing pointer belongs at 16, not 12."""
+    ptr = {"kind": "ptr", "pointee": "f32", "space": "global"}
+    return {
+        "schema": "rocke.recipe/v1",
+        "kernel_name_fmt": "mixed_{D}",
+        "spec": [],
+        "attrs": {},
+        "program": [
+            {"op": "param", "name": "A", "type": ptr, "bind": "A"},
+            {"op": "param", "name": "n", "type": "i32", "bind": "n"},
+            {"op": "param", "name": "B", "type": ptr, "bind": "B"},
+            {"op": "ret"},
+        ],
+    }
+
+
+class TestGeometry(unittest.TestCase):
+    def test_grid_is_a_function_of_the_shape(self):
+        r = toy()
+        for d, want in ((64, 1), (65, 2), (256, 4), (1000, 16)):
+            g = launch.eval_launch(r, {"D": d}, {"dtype": "f32"})
+            self.assertEqual(g["grid"], (want, 1, 1), f"D={d}")
+            self.assertEqual(g["block"], (64, 1, 1))
+
+    def test_absent_geometry_is_none_not_a_default(self):
+        """A recipe with no launch block is not a recipe that wants one
+        workgroup. Defaulting would turn missing metadata into a wrong launch,
+        which is undetectable at the call site."""
+        self.assertIsNone(
+            launch.eval_launch(recipe_toy.make_recipe(), {"D": 4}, {"dtype": "f32"})
+        )
+
+    def test_nonpositive_extent_is_refused(self):
+        r = launch.attach_launch(
+            recipe_toy.make_recipe(),
+            grid=[{"sub": [{"spec": "D"}, 4]}, 1, 1],
+            block=[64, 1, 1],
+        )
+        with self.assertRaises(ExpandError) as cm:
+            launch.eval_launch(r, {"D": 4}, {"dtype": "f32"})
+        self.assertIn(">= 1", str(cm.exception))
+
+    def test_malformed_block_is_refused(self):
+        r = dict(recipe_toy.make_recipe(), launch={"grid": [1, 1], "block": [64, 1, 1]})
+        with self.assertRaises(ExpandError):
+            launch.eval_launch(r, {"D": 4}, {"dtype": "f32"})
+
+    def test_attach_validates_shape_at_authoring_time(self):
+        """Caught in the generator, where the fix is, rather than inside a JIT
+        on a machine that cannot trace it back."""
+        with self.assertRaises(ExpandError):
+            launch.attach_launch(
+                recipe_toy.make_recipe(), grid=[1, 1], block=[64, 1, 1]
+            )
+
+
+class TestSignature(unittest.TestCase):
+    def test_natural_alignment_on_a_mixed_signature(self):
+        args = launch.signature(mixed_signature_recipe(), {"D": 1}, {})
+        self.assertEqual(
+            [(a["name"], a["offset"], a["size"]) for a in args],
+            [("A", 0, 8), ("n", 8, 4), ("B", 16, 8)],
+            "the trailing pointer must be padded to 8-byte alignment",
+        )
+        self.assertEqual(launch.kernarg_size(args), 24)
+
+    def test_kernarg_size_matches_what_python_actually_packs(self):
+        """Pins this against runtime/packing.py, the third implementation of the
+        same rule and the one already in production. If they disagree, one of
+        the two is writing outside a buffer the other sized."""
+        from rocke.runtime.packing import pack_args
+
+        args = launch.signature(mixed_signature_recipe(), {"D": 1}, {})
+        blob = pack_args(
+            [{"name": a["name"], "type": a["type"]} for a in args],
+            {"A": 0x1000, "n": 7, "B": 0x2000},
+        )
+        self.assertEqual(len(blob), launch.kernarg_size(args))
+
+    def test_unsupported_arg_type_refuses_the_plan(self):
+        """A guessed width does not fail, it shifts every following argument."""
+        r = mixed_signature_recipe()
+        r["program"][1]["type"] = "f16"
+        with self.assertRaises(ExpandError) as cm:
+            launch.signature(r, {"D": 1}, {})
+        self.assertIn("f16", str(cm.exception))
+
+
+def facts_recipe():
+    """A recorded kernel whose integer parameters state facts, one as an int
+    and one as a relation over an earlier parameter, with launch geometry."""
+    from rocke.core.intexpr import product_of
+    from rocke.core.ir import F32, I32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("facts_kernel")
+    x = b.param("X", PtrType(F32, "global"), align=16)
+    m = b.param("M", I32, ge=1, multiple_of=64)
+    b.param("ld", I32, ge=product_of(m, 2))
+    b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+    b.ret()
+    return launch.attach_launch(
+        kerneldef_to_recipe(b.kernel), grid=[1, 1, 1], block=[64, 1, 1]
+    )
+
+
+FACTS_REFUSAL = (
+    "facts_kernel: parameters carry facts, which a launch from a code object or "
+    "from a launch plan does not check -- launch it through "
+    "KernelLauncher.from_artifact"
+)
+
+
+class TestStatedFacts(unittest.TestCase):
+    """The caller packs the arguments itself, so a plan cannot check the facts
+    a parameter states; the plan is refused rather than handed out unchecked."""
+
+    def test_a_recipe_whose_params_state_facts_is_refused(self):
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(facts_recipe(), {}, {})
+        self.assertEqual(str(cm.exception), FACTS_REFUSAL)
+
+    def test_one_fact_on_one_param_is_enough(self):
+        r = mixed_signature_recipe()
+        r["program"][1]["attrs"] = {"le": 4096}
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(r, {"D": 1}, {})
+        self.assertIn("mixed_1: parameters carry facts", str(cm.exception))
+
+    def test_pointer_attributes_are_not_facts(self):
+        """The toy kernel's pointers carry noalias / readonly / align, which
+        recipes carried before facts existed; it plans as before."""
+        p = launch.plan(toy(), {"D": 256}, {"dtype": "f32"})
+        self.assertEqual(p["geometry"]["grid"], (4, 1, 1))
+
+
+def exact_block_recipe(block=(64, 1, 1)):
+    """A recorded kernel that states an exact workgroup_size of 64, launched
+    with ``block``, or with no launch geometry when ``block`` is None."""
+    from rocke.core.ir import F32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("exact_block")
+    b.kernel.attrs["workgroup_size"] = 64
+    x = b.param("X", PtrType(F32, "global"), align=16)
+    b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+    b.ret()
+    recipe = kerneldef_to_recipe(b.kernel)
+    if block is None:
+        return recipe
+    return launch.attach_launch(recipe, grid=[1, 1, 1], block=list(block))
+
+
+NO_BLOCK_REFUSAL = (
+    "exact_block: the kernel states workgroup_size 64 but the recipe carries no "
+    "launch block to check it against -- record the launch geometry, or launch "
+    "it through KernelLauncher.from_artifact"
+)
+
+
+def wrong_block_refusal(block):
+    return (
+        f"exact_block: recipe block {block} differs from the kernel's "
+        "workgroup_size 64 -- the block must be (64, 1, 1)"
+    )
+
+
+class TestExactWorkgroupSize(unittest.TestCase):
+    """A kernel stating workgroup_size N is compiled for exactly N threads, so a
+    plan hands out only the block (N, 1, 1): a smaller block would run it with
+    threads missing, a larger one would fail at launch."""
+
+    def test_the_stated_block_plans(self):
+        p = launch.plan(exact_block_recipe(), {}, {})
+        self.assertEqual(p["geometry"]["block"], (64, 1, 1))
+
+    def test_any_other_block_is_refused(self):
+        for block in ((128, 1, 1), (32, 1, 1), (32, 2, 1)):
+            with self.assertRaises(ExpandError) as cm:
+                launch.plan(exact_block_recipe(block), {}, {})
+            self.assertEqual(str(cm.exception), wrong_block_refusal(block))
+
+    def test_a_recipe_without_a_block_is_refused(self):
+        """The caller would pick the block, and the plan could not check it."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(exact_block_recipe(None), {}, {})
+        self.assertEqual(str(cm.exception), NO_BLOCK_REFUSAL)
+
+
+class TestGpuChecks(unittest.TestCase):
+    """A lane whose gpu_checked_value fact is false stores to the kernel's
+    GPU-check word and returns. A plan's caller never reads that word, so the
+    launch would succeed with every output undefined: the plan is refused."""
+
+    def test_a_recipe_whose_kernel_checks_on_the_gpu_is_refused(self):
+        recipe = gpu_check_recipe()
+        top_level = [i.get("opcode") for i in recipe["program"]]
+        self.assertNotIn("tile.gpu_check_failed", top_level, "the check is nested")
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(recipe, {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_REFUSAL)
+
+    def test_a_check_whose_marker_was_optimized_away_is_refused(self):
+        """Nothing uses the checked value, so optimization drops its range
+        marker; the failure path still stores to the word, so the plan is
+        refused all the same."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(gpu_check_recipe(result_used=False), {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_REFUSAL)
+
+    def test_stated_facts_are_named_first(self):
+        """Both engines refuse in the same order, so they give the same text."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(gpu_check_recipe(with_facts=True), {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_AND_FACTS_REFUSAL)
+
+
+def int_list(*vals):
+    """A kernel list attr as rocke.core.ir_export._attrs_to_json writes it."""
+    return {"t": "l", "v": [{"_": {"t": "i", "v": v}} for v in vals]}
+
+
+def clustered(*dims, **kw):
+    r = toy(**kw)
+    r["attrs"] = dict(r.get("attrs") or {}, cluster_dims=int_list(*dims))
+    return r
+
+
+class TestCluster(unittest.TestCase):
+    def test_absent_cluster_is_none(self):
+        self.assertIsNone(launch.plan(toy(), {"D": 256}, {"dtype": "f32"})["cluster"])
+
+    def test_cluster_comes_from_the_kernel_attr(self):
+        p = launch.plan(clustered(2, 1, 1), {"D": 256}, {"dtype": "f32"})
+        self.assertEqual(p["geometry"]["grid"], (4, 1, 1))
+        self.assertEqual(p["cluster"], (2, 1, 1))
+
+    def test_attr_matches_what_the_exporter_writes(self):
+        """The recipe form must be the one kerneldef_to_recipe produces, or a
+        recorded clustered kernel would silently plan as unclustered."""
+        from rocke.core.ir_export import _attrs_to_json
+
+        self.assertEqual(
+            _attrs_to_json({"cluster_dims": (2, 1, 1)})["cluster_dims"],
+            int_list(2, 1, 1),
+        )
+
+    def test_bad_shape_is_refused(self):
+        r = toy()
+        r["attrs"] = {"cluster_dims": int_list(2, 1)}
+        with self.assertRaises(ExpandError) as cm:
+            launch.eval_cluster(r)
+        self.assertIn("three integers", str(cm.exception))
+        r["attrs"] = {"cluster_dims": {"t": "i", "v": 2}}
+        with self.assertRaises(ExpandError):
+            launch.eval_cluster(r)
+
+    def test_out_of_range_dimension_is_refused(self):
+        for dims in ((0, 1, 1), (16, 1, 1)):
+            with self.assertRaises(ExpandError) as cm:
+                launch.eval_cluster(clustered(*dims))
+            self.assertIn("1..15", str(cm.exception))
+
+    def test_oversized_cluster_is_refused(self):
+        with self.assertRaises(ExpandError) as cm:
+            launch.eval_cluster(clustered(4, 4, 2))
+        self.assertIn("limit of 16", str(cm.exception))
+
+    def test_grid_must_be_whole_clusters(self):
+        """ceil(65/64) = 2 workgroups is fine for a cluster of 2; 3 is not."""
+        r = clustered(2, 1, 1)
+        self.assertEqual(
+            launch.plan(r, {"D": 65}, {"dtype": "f32"})["cluster"], (2, 1, 1)
+        )
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(r, {"D": 129}, {"dtype": "f32"})
+        self.assertIn("not a multiple of cluster (2, 1, 1) in x", str(cm.exception))
+
+    def test_cluster_without_geometry_is_not_checked_against_a_grid(self):
+        r = recipe_toy.make_recipe()
+        r["attrs"] = dict(r.get("attrs") or {}, cluster_dims=int_list(2, 1, 1))
+        p = launch.plan(r, {"D": 4}, {"dtype": "f32"})
+        self.assertIsNone(p["geometry"])
+        self.assertEqual(p["cluster"], (2, 1, 1))
+
+
+def _online_lib():
+    from rocke.portable_ir.src import online
+
+    return online.resolve_library_path(build=False)
+
+
+@unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
+class TestCEngineAgrees(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ["ROCKE_ONLINE_LIB"] = _online_lib()
+        from rocke.portable_ir.src import online
+
+        cls.online = online
+        online.load()
+
+    def test_plans_match_across_shapes(self):
+        """The whole point: a C client and a Python client launch identically."""
+        r = toy()
+        for d in (64, 65, 256, 1000, 4096):
+            si, ss = {"D": d}, {"dtype": "f32"}
+            self.assertEqual(
+                self.online.plan_launch(cbor_encode(r), ints=si, strs=ss),
+                launch.plan(r, si, ss),
+                f"engines disagree at D={d}",
+            )
+
+    def test_mixed_signature_offsets_match(self):
+        r = mixed_signature_recipe()
+        c = self.online.plan_launch(cbor_encode(r), ints={"D": 1})
+        self.assertEqual(
+            [(a["name"], a["offset"], a["size"]) for a in c["args"]],
+            [("A", 0, 8), ("n", 8, 4), ("B", 16, 8)],
+        )
+        self.assertEqual(c["kernarg_size"], 24)
+        self.assertEqual(c["args"], launch.signature(r, {"D": 1}, {}))
+
+    def test_absent_geometry_reported_as_absent(self):
+        c = self.online.plan_launch(
+            cbor_encode(recipe_toy.make_recipe()), ints={"D": 4}, strs={"dtype": "f32"}
+        )
+        self.assertIsNone(c["geometry"])
+        self.assertEqual(c["kernel_name"], "rocke_recipe_toy_d4_f32")
+
+    def test_plan_from_a_bundle(self):
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                bundle = cbor_encode(
+                    build_bundle([{"key": "toy", "arch": arch, "recipe": toy()}])
+                )
+                c = self.online.plan_launch(
+                    bundle, "toy", arch=arch, ints={"D": 256}, strs={"dtype": "f32"}
+                )
+                self.assertEqual(c["geometry"]["grid"], (4, 1, 1))
+                with self.assertRaises(KeyError):
+                    self.online.plan_launch(
+                        bundle,
+                        "nope",
+                        arch=arch,
+                        ints={"D": 256},
+                        strs={"dtype": "f32"},
+                    )
+
+    def test_nonpositive_extent_refused_by_c_too(self):
+        r = launch.attach_launch(
+            recipe_toy.make_recipe(),
+            grid=[{"sub": [{"spec": "D"}, 4]}, 1, 1],
+            block=[64, 1, 1],
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(
+                cbor_encode(r), ints={"D": 4}, strs={"dtype": "f32"}
+            )
+        self.assertIn(">= 1", str(cm.exception))
+
+    def test_guard_refusal_blocks_planning(self):
+        """Planning a launch for a shape the kernel will not serve is not a
+        meaningful question, and answering it would hand back a grid for a
+        kernel that is never going to be built."""
+        from rocke.portable_ir.utils.recipe_expand import GUARD_SCHEMA
+
+        r = toy()
+        r["guard"] = {
+            "schema": GUARD_SCHEMA,
+            "free": ["D"],
+            "rules": [
+                {"axis": "D", "kind": "bounds", "pred": {"ge": [{"spec": "D"}, 128]}}
+            ],
+        }
+        blob = cbor_encode(r)
+        self.assertEqual(
+            self.online.plan_launch(blob, ints={"D": 256}, strs={"dtype": "f32"})[
+                "geometry"
+            ]["grid"],
+            (4, 1, 1),
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(blob, ints={"D": 64}, strs={"dtype": "f32"})
+        self.assertIn("guard", str(cm.exception).lower())
+
+    def test_cluster_plans_match(self):
+        r = clustered(2, 1, 1)
+        for d in (65, 256, 4096):
+            si, ss = {"D": d}, {"dtype": "f32"}
+            c = self.online.plan_launch(cbor_encode(r), ints=si, strs=ss)
+            self.assertEqual(c["cluster"], (2, 1, 1))
+            self.assertEqual(c, launch.plan(r, si, ss), f"engines disagree at D={d}")
+        c = self.online.plan_launch(
+            cbor_encode(toy()), ints={"D": 256}, strs={"dtype": "f32"}
+        )
+        self.assertIsNone(c["cluster"])
+
+    def test_stated_facts_refused_by_c_too_with_the_same_message(self):
+        blob = cbor_encode(facts_recipe())
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(blob)
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
+        bundle = cbor_encode(
+            build_bundle([{"key": "facts", "arch": "gfx950", "recipe": facts_recipe()}])
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(bundle, "facts", arch="gfx950")
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
+
+    def test_exact_workgroup_size_checked_by_c_too_with_the_same_messages(self):
+        blob = cbor_encode(exact_block_recipe())
+        self.assertEqual(
+            self.online.plan_launch(blob), launch.plan(exact_block_recipe(), {}, {})
+        )
+        for block in ((128, 1, 1), (32, 1, 1), (32, 2, 1)):
+            with self.assertRaises(RuntimeError) as cm:
+                self.online.plan_launch(cbor_encode(exact_block_recipe(block)))
+            self.assertTrue(
+                str(cm.exception).endswith(wrong_block_refusal(block)),
+                str(cm.exception),
+            )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(cbor_encode(exact_block_recipe(None)))
+        self.assertTrue(str(cm.exception).endswith(NO_BLOCK_REFUSAL), str(cm.exception))
+        bundle = cbor_encode(
+            build_bundle(
+                [
+                    {
+                        "key": "wg",
+                        "arch": "gfx950",
+                        "recipe": exact_block_recipe((32, 1, 1)),
+                    }
+                ]
+            )
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(bundle, "wg", arch="gfx950")
+        self.assertTrue(
+            str(cm.exception).endswith(wrong_block_refusal((32, 1, 1))),
+            str(cm.exception),
+        )
+
+    def test_gpu_checks_refused_by_c_too_with_the_same_message(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(cbor_encode(gpu_check_recipe()))
+        self.assertTrue(
+            str(cm.exception).endswith(GPU_CHECK_REFUSAL), str(cm.exception)
+        )
+
+    def test_partial_cluster_refused_by_c_too(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(
+                cbor_encode(clustered(2, 1, 1)), ints={"D": 129}, strs={"dtype": "f32"}
+            )
+        self.assertIn("not a multiple of cluster (2, 1, 1) in x", str(cm.exception))
+
+    def test_oversized_cluster_refused_by_c_too(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(
+                cbor_encode(clustered(4, 4, 2)), ints={"D": 256}, strs={"dtype": "f32"}
+            )
+        self.assertIn("limit of 16", str(cm.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()

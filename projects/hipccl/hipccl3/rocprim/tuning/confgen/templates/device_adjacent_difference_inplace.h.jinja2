@@ -1,0 +1,9 @@
+{% extends "device_adjacent_difference.h.jinja2" %}
+
+{%- macro mk_target_symbol() -%}
+    adjacent_difference_config_picker
+{%- endmacro -%}    
+
+{% block params_type -%}
+    adjacent_difference_config_params
+{% endblock -%}

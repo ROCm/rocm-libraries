@@ -58,8 +58,8 @@ namespace rocsparse
                                     T* __restrict__ y_,
                                     const T* __restrict__ invdiag)
     {
-        const uint32_t tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             y_[tid] = y_[tid] + invdiag[tid] * r_[tid];
         }
@@ -85,8 +85,8 @@ namespace
                                      rocsparse_index_base ptr_diag_base,
                                      rocsparse_int* __restrict__ zero_pivot)
         {
-            const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-            if(tid < m)
+            for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+                tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
             {
                 const I k = ptr_diag[tid] - ptr_diag_base + ptr_shift;
                 const J j = ind[k] - base;
@@ -130,8 +130,8 @@ namespace
             // Compute inverse of the diagonal.
             //
             static constexpr uint32_t BLOCKSIZE = 1024;
-            dim3                      blocks((m - 1) / BLOCKSIZE + 1);
-            dim3                      threads(BLOCKSIZE);
+            dim3 blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
+            dim3 threads(BLOCKSIZE);
             switch(trans)
             {
             case rocsparse_operation_transpose:
@@ -220,7 +220,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
 
     rocsparse_csritsv_info    csritsv_info = info->csritsv_info;
     static constexpr uint32_t BLOCKSIZE    = 1024;
-    dim3                      blocks((m - 1) / BLOCKSIZE + 1);
+    dim3                      blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
     dim3                      threads(BLOCKSIZE);
 
     //

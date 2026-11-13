@@ -28,6 +28,22 @@ def _import_benchmark_utils():
 benchmark_utils = _import_benchmark_utils()
 
 
+def _import_split_trait():
+    """Import the trait-combo splitter that sits next to this file."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    spec = importlib.util.spec_from_file_location(
+        "trait_parse", os.path.join(current_dir, "trait_parse.py")
+    )
+    trait_parse = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trait_parse)
+
+    return trait_parse.split_trait
+
+
+split_trait = _import_split_trait()
+
+
 class GemmBenchmark:
     def __init__(
         self, build_dir: str, verbose: bool = False, name: str = "benchmark_gemm_"
@@ -36,6 +52,8 @@ class GemmBenchmark:
         self.verbose = verbose
         self.results = []
         self.name = name
+        self.launch_attempted = 0
+        self.launch_failed = 0
 
     def discover_kernels(self) -> List[Path]:
         """Find all benchmark_gemm_* executables in the build directory"""
@@ -78,9 +96,20 @@ class GemmBenchmark:
         if len(parts) >= 5:
             info["data_type"] = parts[0]
             info["layout"] = parts[1]
-            info["pipeline"] = parts[2]
-            info["epilogue"] = parts[3]
-            info["scheduler"] = parts[4]
+            # The trait combo starts after <data_type>_<layout>. Multi-token
+            # pipeline names (comp_tdm, comp_tdm_v2, comp_tdm_pc, comp_async,
+            # comp_async_eight_waves, weight_preshuffle) contain '_', so a
+            # positional split reports pipeline 'comp' and shifts every field
+            # after it. split_trait is the same helper the instance builders
+            # and the CMake trait splitter use.
+            # Pad to three so the keys are always present: the summary reader
+            # indexes them unguarded, and a short/malformed name must degrade,
+            # not raise.
+            trait_fields = split_trait("_".join(parts[2:]))
+            trait_fields += [""] * (3 - len(trait_fields))
+            info["pipeline"] = trait_fields[0]
+            info["epilogue"] = trait_fields[1]
+            info["scheduler"] = trait_fields[2]
 
         # Extract detailed configuration from the end of the name
         config_info = self.parse_detailed_config(name)
@@ -244,6 +273,7 @@ class GemmBenchmark:
 
         for kernel_path in kernels:
             kernel_info = self.extract_kernel_info(kernel_path)
+            self.launch_attempted += 1
             result = benchmark_utils.run_kernel(
                 self.build_dir, kernel_path, params, verbose=self.verbose
             )
@@ -278,6 +308,8 @@ class GemmBenchmark:
                     print(
                         f"  {kernel_info['config_id']}: {structured_result['tflops']:.2f} TFLOPS, {structured_result['bandwidth_gb_s']:.2f} GB/s, {structured_result['time_ms']:.2f}ms"
                     )
+            else:
+                self.launch_failed += 1
 
         return results
 

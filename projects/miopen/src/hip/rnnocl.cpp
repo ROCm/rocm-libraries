@@ -40,6 +40,13 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_RNNFWD_EXP)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_RNNFWD_MS_DISPATCH)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_RNN_MS_STREAM_CNT)
 
+// EXPERIMENTAL, OFF BY DEFAULT. Fused single-layer LSTM forward-inference path:
+// runs the recurrent timestep loop in one cooperative kernel launch per
+// direction instead of ~2 host-launched kernels per timestep. Only valid for
+// single-layer LSTM, fp32, packed, batch=1, no dropout (Kokoro-class workloads).
+// Enabling it globally would break other RNN shapes — keep it gated.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_RNN_FUSED_INFERENCE)
+
 namespace miopen {
 
 namespace {
@@ -68,6 +75,27 @@ bool RNNForwardMSIsFast(const int seqLen)
     if(seqLen >= 32 && !env::disabled(MIOPEN_RNNFWD_EXP))
         return true;
     return false;
+}
+
+// EXPERIMENTAL fused single-layer LSTM inference gate. OFF unless the env var is
+// set. Restricts to the case the fused cooperative kernel supports & was
+// validated for: single layer, LSTM/default algo, no dropout, packed inputs,
+// linear input mode, fp32. The kernel handles uniform batch (constant batch
+// across timesteps); per-timestep uniformity of in_n is checked at dispatch.
+bool RNNFusedInferenceIsSupported(const Handle& handle,
+                                  const RNNDescriptor& desc,
+                                  miopenDataType_t dtype)
+{
+#if MIOPEN_BACKEND_HIP
+    return env::enabled(MIOPEN_DEBUG_RNN_FUSED_INFERENCE) && handle.CooperativeLaunchSupported() &&
+           desc.rnnMode == miopenLSTM && desc.algoMode == miopenRNNdefault && desc.nLayers == 1 &&
+           desc.inputMode != miopenRNNskip && dtype == miopenFloat;
+#else
+    std::ignore = handle;
+    std::ignore = desc;
+    std::ignore = dtype;
+    return false;
+#endif
 }
 
 void checkGemmStatusAndLog(miopenStatus_t gemm_status)
@@ -959,6 +987,16 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
     // stage 0 bias and input preload
     // stage 0.2 first chunk compute and preload
     {
+        // Add the bias on the root stream, after the memset and before any side stream starts.
+        // call_bias_add (beta = 0, in place) and the x GEMMs (beta = 1) are both
+        // read-modify-write on the same gate buffer in extra_space, so they must not run
+        // concurrently on different streams.
+        if(biasMode != 0u)
+        {
+            for(int layer_id = 0; layer_id < nLayers; layer_id++)
+                call_bias_add(layer_id);
+        }
+
         ms_controller.AllStreamsWaitRoot();
         const auto first_layer_id  = 0;
         const auto stream_id       = 1; // 1
@@ -966,18 +1004,9 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
 
         ms_controller.ChangeActiveStream(stream_id);
 
-        if(biasMode != 0u)
-            call_bias_add(first_layer_id);
-
         call_next_chunk_compute(first_layer_id, stream_id);
 
         ms_controller.ChangeActiveStream(extra_stream_id);
-
-        if(biasMode != 0u)
-        {
-            for(int layer_id = 1; layer_id < nLayers; layer_id++)
-                call_bias_add(layer_id);
-        }
 
         call_inx_next_chunk_preload(first_layer_id);
 
@@ -1816,6 +1845,54 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
             }
         }
 
+        // EXPERIMENTAL fused single-layer LSTM inference (gated, batch=1). Runs the
+        // recurrent timestep loop in one cooperative launch per direction, then
+        // skips the host-side per-timestep loop below. The input-projection GEMM +
+        // bias above already populated the workSpace gates; the fused kernel only
+        // adds W_hh*h_{t-1} and the LSTM cell update. cx carry handled in-kernel.
+        // The fused kernel assumes UNIFORM batch (constant in_n across timesteps);
+        // packed variable-length sequences (decreasing in_n) fall back to the loop.
+        if(RNNFusedInferenceIsSupported(handle, *this, wDesc.GetType()))
+        {
+            const bool uniform_batch =
+                std::all_of(in_n.begin(), in_n.end(), [&](int v) { return v == in_n.at(0); });
+            if(uniform_batch)
+            {
+                const int max_batch = in_n.at(0);
+                const size_t wei_shift_dir =
+                    static_cast<size_t>(in_h) * wei_stride +
+                    static_cast<size_t>(li) * (bi * hy_h + hy_h) * wei_stride;
+                for(int ri = 0; ri < bi; ri++)
+                {
+                    const size_t hcx_off = hx_shift + static_cast<size_t>(ri) * hy_n * hy_h;
+                    RNNFusedLSTMInferenceLoop(handle,
+                                              workSpace,
+                                              w,
+                                              cx,
+                                              hx,
+                                              hy,
+                                              cy,
+                                              seqLen,
+                                              max_batch,
+                                              hy_h,
+                                              hy_stride,
+                                              wei_len,
+                                              static_cast<int>(hid_off),
+                                              uni_stride,
+                                              bi,
+                                              ri,
+                                              /*reverse=*/ri,
+                                              wei_shift_dir,
+                                              hcx_off,
+                                              cx != nullptr,
+                                              hx != nullptr,
+                                              hy != nullptr,
+                                              cy != nullptr);
+                    profileRNNkernels(handle, 1, ctime);
+                }
+                continue;
+            }
+        }
         // from hidden state
         int bacc   = 0;
         int baccbi = batch_n;

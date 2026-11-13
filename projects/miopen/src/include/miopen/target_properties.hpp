@@ -42,6 +42,12 @@ static inline bool IsTF32Supported(const std::string& device_name)
     return device_name == "gfx942" || StartsWith(device_name, "gfx95");
 }
 
+// Keep in sync with MIOPEN_CK_USE_OCP_FP8_TARGETS in cmake/MiopenCkCompileDefs.cmake.
+static inline bool UsesIeeeExponentBias(const std::string& device_name)
+{
+    return device_name == "gfx950" || StartsWith(device_name, "gfx12");
+}
+
 struct Handle;
 
 class TargetProperties
@@ -188,6 +194,15 @@ public:
 
     MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
+
+// gfx9 consumer APUs (gfx902/gfx909/gfx90c). The hand-written .s conv kernels have
+// never been validated on these parts; they also emit a fixed xnack-off code object
+// that these APUs' loader rejects, so such kernels cannot run there.
+inline bool IsGfx9ConsumerApu(const TargetProperties& target)
+{
+    const auto& name = target.Name();
+    return name == "gfx902" || name == "gfx909" || name == "gfx90c";
+}
 
 } // namespace miopen
 

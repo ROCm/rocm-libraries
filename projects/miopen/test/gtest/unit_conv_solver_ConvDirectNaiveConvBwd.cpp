@@ -137,6 +137,35 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 4, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}, 4}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {64, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
+
+    // Large spatial shapes to exercise BWD spatial tiling with large tensors
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 3, 600, 600}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {1, 3, 600, 600}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {8, 3, 200, 200}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+
+    // 3D coverage (NCDHW/NDHWC)
+    // Plain 3x3x3
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Padding on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    // Stride 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    // Dilation 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    // Grouped, g=4
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {8, 2, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {8, 2, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    // Batch-dominant
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNCDHW, {8, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNDHWC, {8, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Large spatial extent
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNCDHW, {1, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNDHWC, {1, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
     // clang-format on
 
     return cases;
@@ -147,9 +176,29 @@ const auto& GetTestParams()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.UseCpuRef(); // CPU verification
+        // Float accumulators (solver mode) introduce slightly more rounding
+        // error than the previous double accumulators. Relax tolerance
+        // from 1x to 2x epsilon.
+        p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
+        p.SetTolerance(Gpu::All, miopenHalf, 2.0f);
+        p.SetTolerance(Gpu::All, miopenBFloat16, 2.0f);
         return p;
     }();
     return params;
+}
+
+// Bwd-data grid-overflow (subbatch) test case
+// Bwd-data launch grid ∝ n·c; need n·c > MAX_GRID_SIZE (16M) to trigger overflow.
+// n=16777217, c=1 → n·c = 16777217 > 16M → exercises the unhandled overflow path.
+auto GetSubbatchTestCaseBwd()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        // n·c > 16M: triggers grid-dimension overflow in naive Bwd-data kernel launch
+        TestCase{{16777217, 1, 1, 1}, {1, 1, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
 }
 
 } // namespace
@@ -224,3 +273,17 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
+
+// Bwd-data grid-overflow suite — disabled pending ROCM-28047 fix.
+// To re-enable: drop this alias+TEST_P block and add a Standard instantiation
+// to GPU_UnitTestConvSolverDirectNaiveBwd_FP16 directly.
+using GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16 = GPU_UnitTestConvSolverDirectNaiveBwd_FP16;
+TEST_P(GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16, DISABLED_ConvDirectNaiveConvBwd)
+{
+    this->RunTest(miopen::solver::conv::ConvDirectNaiveConvBwd{});
+}
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetSubbatchTestCaseBwd())));

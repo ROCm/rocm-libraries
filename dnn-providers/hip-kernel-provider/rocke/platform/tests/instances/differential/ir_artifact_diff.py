@@ -42,7 +42,6 @@ import run_diff  # noqa: E402  (reuse family discovery + enumeration constants)
 
 PARITY = run_diff.PARITY
 PYROOT = run_diff.PYROOT
-MAX_CFG = run_diff.MAX_CFG
 TIMEOUT = run_diff.TIMEOUT
 
 # Arch derivation. A family whose name starts with one of these prefixes lowers
@@ -55,7 +54,14 @@ ARCH_PREFIXES = (
     ("gfx950_", "gfx950"),
 )
 DEFAULT_ARCH = "gfx950"
-CANDIDATE_ARCHES = ("gfx950", "gfx942", "gfx1201", "gfx1151", "gfx11-generic")
+CANDIDATE_ARCHES = (
+    "gfx950",
+    "gfx942",
+    "gfx1201",
+    "gfx1151",
+    "gfx11-generic",
+    "gfx12-generic",
+)
 
 
 def primary_arch(family):
@@ -206,7 +212,7 @@ def lower_artifact(cli, family, ir_text, ll_ref):
 
 def run_family(cli, family):
     rows = []
-    for idx in range(MAX_CFG):
+    for idx in range(run_diff.config_limit(family)):
         pr_ir, ir_text, ir_err = run_py(family, idx, "ir")
         pr_ll, ll_ref, ll_err = run_py(family, idx, "ll")
 
@@ -374,7 +380,7 @@ def main():
             "build it: cmake -S <rocke/platform> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
             "Release && cmake --build /tmp/rocke_irart --target rocke_core -j && "
             "c++ -std=c++20 -I <rocke/platform>/cpp/include <rocke/platform>/tests/core/"
-            "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm "
+            "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm -ldl -pthread "
             "-o /tmp/rocke_irart/ir_lower_cli"
         )
 

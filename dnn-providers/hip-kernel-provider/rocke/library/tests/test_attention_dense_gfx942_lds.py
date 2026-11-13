@@ -7,17 +7,17 @@
 builder's ``smem_alloc`` calls are two INDEPENDENT re-derivations of the same
 footprint. Nothing previously compared them: there was no gfx942 test that read the
 emitted LDS pool size at all. That is a live drift vector, and the
-:class:`Gfx942DenseTuning` promotion of ``lds_row_pad`` / ``v_row_pad`` to sweepable
-knobs widens it -- ``v_row_pad`` in particular is read in exactly two places, the
-budget in ``_lds_bytes`` and the ``V_lds`` allocation in the builder, and if those two
-ever disagree the gate passes a config whose real allocation overflows the 64 KB LDS.
-An over-budget kernel does not fail loudly: it reaches comgr and dies with an opaque
-``CODEGEN_BC_TO_RELOCATABLE`` abort, or (worse, when the model UNDER-counts by less
-than the slack) compiles and stomps memory.
+:class:`Gfx942AttentionDenseSpec` promotion of ``lds_row_pad`` / ``v_row_pad`` to
+sweepable knobs widens it -- ``v_row_pad`` in particular is read in exactly two
+places, the budget in ``_lds_bytes`` and the ``V_lds`` allocation in the builder, and
+if those two ever disagree the gate passes a config whose real allocation overflows
+the 64 KB LDS. An over-budget kernel does not fail loudly: it reaches comgr and dies
+with an opaque ``CODEGEN_BC_TO_RELOCATABLE`` abort, or (worse, when the model
+UNDER-counts by less than the slack) compiles and stomps memory.
 
-The assertion is therefore the strong form: for every legal (spec, tuning) in the
-cohort, ``_lds_bytes(spec, tuning)`` must EQUAL the ``addrspace(3) global [N x i8]``
-pool actually emitted -- not merely "the two sites read the same field".
+The assertion is therefore the strong form: for every legal spec in the cohort,
+``_lds_bytes(spec)`` must EQUAL the ``addrspace(3) global [N x i8]`` pool actually
+emitted -- not merely "the two sites read the same field".
 
 ``_lds_pool_bytes`` is PORTED from the gfx950 ``test_attention_dense_d64_lds.py``
 rather than imported: that file is a gfx950 test with an 18-case x 3-flavor golden
@@ -29,7 +29,7 @@ under ``library/tests/``, which ``platform/tests/run_all.py`` does not collect; 
 with the library lane:
 
     cd rocke/library
-    PYTHONPATH=../platform/python:. python -m pytest \
+    PYTHONPATH=../platform/python:. python -m pytest \\
         tests/test_attention_dense_gfx942_lds.py
 """
 
@@ -41,19 +41,18 @@ import pytest
 
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.gfx942.attention_dense import (
-    AttentionDenseSpec,
-    Gfx942DenseTuning,
+    Gfx942AttentionDenseSpec,
     build_attention_dense,
     supports_attention_dense,
+    _DEFAULT_LDS_ROW_PAD,
     _lds_bytes,
 )
 
 _POOL_RE = re.compile(r"addrspace\(3\)\s+global\s+\[(\d+) x i8\]")
 _CAPACITY = attention_lds_capacity_bytes("gfx942")
-_DEFAULT_TUNING = Gfx942DenseTuning()
 
 
-def _spec(**kw) -> AttentionDenseSpec:
+def _spec(**kw) -> Gfx942AttentionDenseSpec:
     base = dict(
         batch=1,
         seqlen_q=2048,
@@ -66,31 +65,31 @@ def _spec(**kw) -> AttentionDenseSpec:
         block_n=64,
     )
     base.update(kw)
-    return AttentionDenseSpec(**base)
+    return Gfx942AttentionDenseSpec(**base)
 
 
-def _lower(spec, tuning) -> str:
+def _lower(spec) -> str:
     from rocke.core.lower_llvm import (
         _lower_kernel_to_llvm_python,
         _resolve_llvm_flavor,
     )
 
     return _lower_kernel_to_llvm_python(
-        build_attention_dense(spec, arch="gfx942", tuning=tuning),
+        build_attention_dense(spec, arch="gfx942"),
         arch="gfx942",
         llvm_flavor=_resolve_llvm_flavor(),
     )
 
 
-def _lds_pool_bytes(spec, tuning) -> int:
-    """Size of the unified ``addrspace(3)`` smem pool this (spec, tuning) emits.
+def _lds_pool_bytes(spec) -> int:
+    """Size of the unified ``addrspace(3)`` smem pool this spec emits.
 
     Ported from the gfx950 ``test_attention_dense_d64_lds.py`` helper. Asserts there
     is EXACTLY one pool global: the whole point of comparing against ``_lds_bytes`` is
     that the model accounts for the entire footprint, and a second allocation the
     model knows nothing about would otherwise be silently ignored by a ``search``.
     """
-    pools = _POOL_RE.findall(_lower(spec, tuning))
+    pools = _POOL_RE.findall(_lower(spec))
     assert len(pools) == 1, (
         f"expected exactly one addrspace(3) smem pool in the lowered IR, found "
         f"{len(pools)}: {pools} -- _lds_bytes models a single unified pool"
@@ -101,12 +100,13 @@ def _lds_pool_bytes(spec, tuning) -> int:
 # --------------------------------------------------------------------------- #
 # the cohort
 # --------------------------------------------------------------------------- #
-# Tuning variants. Every knob that can move the LDS footprint appears at its default
-# AND at a non-default value, plus both cfvst states (cfvst switches V between the
-# transposed [dim, token+v_row_pad] layout and the natural [token, dim] one, i.e. it
-# selects WHICH of the two pads is live) and a block_m variant (the footprint is
-# block_m-invariant; that invariance is itself worth pinning, since a builder that
-# started sizing LDS from block_m would silently escape the budget check).
+# Tuning variants -- now plain field overrides on the spec itself. Every knob that
+# can move the LDS footprint appears at its default AND at a non-default value, plus
+# both cfvst states (cfvst switches V between the transposed [dim, token+v_row_pad]
+# layout and the natural [token, dim] one, i.e. it selects WHICH of the two pads is
+# live) and a block_m variant (the footprint is block_m-invariant; that invariance is
+# itself worth pinning, since a builder that started sizing LDS from block_m would
+# silently escape the budget check).
 _TUNING_VARIANTS = (
     dict(),
     dict(lds_row_pad=0),
@@ -117,13 +117,18 @@ _TUNING_VARIANTS = (
     dict(lds_row_pad=16, v_row_pad=16),
     dict(use_cfvst=False),
     dict(use_cfvst=True),
+    # KDB/VPF are legal only on persistent BF16 D128 CFVST at BN64.
+    # Keep these within the filtered cohort and ensure anti-vacuity catches drift.
+    dict(use_cfvst=True, persistent=True, lds_num_buffers=2),
+    dict(use_cfvst=True, persistent=True, v_reg_prefetch=True),
+    dict(use_cfvst=True, persistent=True, lds_num_buffers=2, v_reg_prefetch=True),
     dict(use_cfvst=False, v_row_pad=32),
     dict(block_m=128),
 )
 
 
 def _cohort():
-    """Legal (spec, tuning) pairs across D64/D128 x bf16/fp16 x block_n x tuning.
+    """Legal specs across D64/D128 x bf16/fp16 x block_n x tuning override.
 
     Filtered through ``supports_attention_dense`` at COLLECTION time so the suite has
     no skipped cases: an out-of-scope combination (cfvst forced on at D64, an
@@ -137,24 +142,29 @@ def _cohort():
     ):
         if kpad and d != 64:
             continue  # inert at D128; keeps the cohort from tripling for nothing
-        spec = _spec(head_size=d, dtype=dtype, block_n=block_n, lds_k_group_pad=kpad)
         for kw in _TUNING_VARIANTS:
-            tuning = dataclasses.replace(_DEFAULT_TUNING, **kw)
-            ok, _ = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
+            spec = _spec(
+                head_size=d,
+                dtype=dtype,
+                block_n=block_n,
+                lds_k_group_pad=kpad,
+                **kw,
+            )
+            ok, _ = supports_attention_dense(spec, arch="gfx942")
             if not ok:
                 continue
             ident = f"d{d}-{dtype}-bn{block_n}-kpad{kpad}-" + (
                 "default" if not kw else "-".join(f"{k}{v}" for k, v in kw.items())
             )
-            cases.append(pytest.param(spec, tuning, id=ident))
+            cases.append(pytest.param(spec, id=ident))
     return cases
 
 
 _COHORT = _cohort()
 
 
-@pytest.mark.parametrize("spec, tuning", _COHORT)
-def test_lds_budget_equals_the_emitted_allocation(spec, tuning):
+@pytest.mark.parametrize("spec", _COHORT)
+def test_lds_budget_equals_the_emitted_allocation(spec):
     """``_lds_bytes`` must equal the pool the builder actually allocates, and fit.
 
     The equality is the drift guard: the budget and the allocation are separate
@@ -167,8 +177,8 @@ def test_lds_budget_equals_the_emitted_allocation(spec, tuning):
     lowering serves both) with distinct messages, so the two failure modes stay
     distinguishable.
     """
-    expected = _lds_bytes(spec, tuning)
-    actual = _lds_pool_bytes(spec, tuning)
+    expected = _lds_bytes(spec)
+    actual = _lds_pool_bytes(spec)
     assert actual == expected, (
         f"LDS budget/allocation drift: _lds_bytes says {expected} B, the emitted "
         f"addrspace(3) pool is {actual} B (delta {actual - expected}). The budget is "
@@ -191,14 +201,44 @@ def test_cohort_is_not_vacuous():
     """
     assert len(_COHORT) >= 60, f"cohort collapsed to {len(_COHORT)} cases"
     specs = [p.values[0] for p in _COHORT]
-    tunings = [p.values[1] for p in _COHORT]
     assert {s.head_size for s in specs} == {64, 128}
     assert {s.dtype for s in specs} == {"bf16", "fp16"}
     assert {s.block_n for s in specs} >= {32, 64, 128}
-    assert {t.resolved_use_cfvst(s) for s, t in zip(specs, tunings)} == {False, True}
-    assert {t.lds_row_pad for t in tunings} > {_DEFAULT_TUNING.lds_row_pad}
-    assert {t.v_row_pad for t in tunings} > {_DEFAULT_TUNING.v_row_pad}
-    sizes = {_lds_bytes(s, t) for s, t in zip(specs, tunings)}
+    assert {s.resolved_use_cfvst() for s in specs} == {False, True}
+    assert {s.persistent for s in specs} == {False, True}
+    assert any(
+        s.dtype == "bf16"
+        and s.head_size == 128
+        and s.resolved_use_cfvst()
+        and s.lds_num_buffers == 2
+        and s.persistent
+        and s.block_n == 64
+        for s in specs
+    ), "cohort must exercise the BF16 D128 CFVST KDB allocation"
+    assert any(
+        sp.dtype == "bf16"
+        and sp.head_size == 128
+        and sp.resolved_use_cfvst()
+        and sp.lds_num_buffers == 1
+        and sp.v_reg_prefetch
+        and sp.persistent
+        and sp.block_n == 64
+        for sp in specs
+    ), "cohort must exercise V register prefetch without K double buffering"
+    assert any(
+        sp.dtype == "bf16"
+        and sp.head_size == 128
+        and sp.resolved_use_cfvst()
+        and sp.lds_num_buffers == 2
+        and sp.v_reg_prefetch
+        and sp.persistent
+        and sp.block_n == 64
+        for sp in specs
+    ), "cohort must exercise the combined KDB + VPF pipeline"
+    assert {s.lds_row_pad for s in specs} > {_DEFAULT_LDS_ROW_PAD}
+    # v_row_pad is tri-state: None ("ask the policy") is its shipped default.
+    assert {s.v_row_pad for s in specs} > {None}
+    sizes = {_lds_bytes(s) for s in specs}
     assert len(sizes) >= 10, f"cohort produces only {len(sizes)} distinct footprints"
 
 
@@ -214,16 +254,16 @@ def test_v_row_pad_moves_budget_and_allocation_by_the_same_amount(pad):
     changes: on the cfvst path V is ``[D, block_n + v_row_pad]``, so a pad delta of
     ``dp`` must move both numbers by exactly ``D * dp * 2`` bytes and nothing else.
     """
-    spec = _spec(head_size=128, dtype="fp16")  # the cfvst path: v_row_pad is live
-    # Hold the swizzle off so the pad varies independently: an explicit non-pow2 pad
-    # with the swizzle on is rejected (the mask would address out of bounds) -- exactly
-    # the pad/swizzle decoupling use_v_swizzle exists for.
-    base_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=0, use_v_swizzle=False)
-    alt_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=pad, use_v_swizzle=False)
-    assert base_t.resolved_use_cfvst(spec), "premise: this config takes the cfvst path"
-    expect = spec.head_size * pad * 2
-    assert _lds_bytes(spec, alt_t) - _lds_bytes(spec, base_t) == expect
-    assert _lds_pool_bytes(spec, alt_t) - _lds_pool_bytes(spec, base_t) == expect
+    # The cfvst path: v_row_pad is live. Hold the swizzle off so the pad varies
+    # independently: an explicit non-pow2 pad with the swizzle on is rejected (the mask
+    # would address out of bounds) -- exactly the pad/swizzle decoupling
+    # use_v_swizzle exists for.
+    base = _spec(head_size=128, dtype="fp16", v_row_pad=0, use_v_swizzle=False)
+    alt = dataclasses.replace(base, v_row_pad=pad)
+    assert base.resolved_use_cfvst(), "premise: this config takes the cfvst path"
+    expect = base.head_size * pad * 2
+    assert _lds_bytes(alt) - _lds_bytes(base) == expect
+    assert _lds_pool_bytes(alt) - _lds_pool_bytes(base) == expect
 
 
 @pytest.mark.parametrize("pad", [0, 16, 32])
@@ -232,12 +272,12 @@ def test_v_row_pad_is_inert_on_the_naive_v_path(pad):
     and ``v_row_pad`` must not reach the allocation at all. Without this the pair of
     tests could both pass on a builder that applied the pad unconditionally while the
     budget did the same -- consistent, but wrong for the D64 layout the DMA needs."""
-    spec = _spec(head_size=64, dtype="bf16")  # naive V (cfvst is policy-off at D64)
-    base_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=0)
-    alt_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=pad)
-    assert not base_t.resolved_use_cfvst(spec), "premise: this config is naive-V"
-    assert _lds_pool_bytes(spec, alt_t) == _lds_pool_bytes(spec, base_t)
-    assert _lds_bytes(spec, alt_t) == _lds_bytes(spec, base_t)
+    # naive V (cfvst is policy-off at D64)
+    base = _spec(head_size=64, dtype="bf16", v_row_pad=0)
+    alt = dataclasses.replace(base, v_row_pad=pad)
+    assert not base.resolved_use_cfvst(), "premise: this config is naive-V"
+    assert _lds_pool_bytes(alt) == _lds_pool_bytes(base)
+    assert _lds_bytes(alt) == _lds_bytes(base)
 
 
 @pytest.mark.parametrize("pad", [0, 16, 32])
@@ -248,11 +288,10 @@ def test_lds_row_pad_is_inert_on_the_packed_d64_path(pad):
     instead. The two are mutually exclusive and merely happen to share the value 8 --
     which is exactly the kind of coincidence a sweep breaks. Pinned on the ALLOCATION,
     not just the model."""
-    spec = _spec(head_size=64, dtype="fp16")
-    base = _lds_pool_bytes(spec, dataclasses.replace(_DEFAULT_TUNING, lds_row_pad=0))
-    alt_t = dataclasses.replace(_DEFAULT_TUNING, lds_row_pad=pad)
-    assert _lds_pool_bytes(spec, alt_t) == base
-    assert _lds_bytes(spec, alt_t) == base
+    base = _lds_pool_bytes(_spec(head_size=64, dtype="fp16", lds_row_pad=0))
+    alt = _spec(head_size=64, dtype="fp16", lds_row_pad=pad)
+    assert _lds_pool_bytes(alt) == base
+    assert _lds_bytes(alt) == base
 
 
 @pytest.mark.parametrize("pad", [0, 8, 16])
@@ -269,12 +308,10 @@ def test_k_group_pad_grows_the_allocation_by_one_pad_per_row_group(pad):
 
     block_n = 64
     base = _lds_pool_bytes(
-        _spec(head_size=64, dtype="bf16", block_n=block_n, lds_k_group_pad=0),
-        _DEFAULT_TUNING,
+        _spec(head_size=64, dtype="bf16", block_n=block_n, lds_k_group_pad=0)
     )
     grown = _lds_pool_bytes(
-        _spec(head_size=64, dtype="bf16", block_n=block_n, lds_k_group_pad=pad),
-        _DEFAULT_TUNING,
+        _spec(head_size=64, dtype="bf16", block_n=block_n, lds_k_group_pad=pad)
     )
     expect = (block_n // _rows_per_instr(64)) * pad * 2
     assert grown - base == expect, (
@@ -292,9 +329,40 @@ def test_capacity_boundary_allocation_is_exactly_capacity():
     gate's boundary would admit an overflow. The complementary supports()-side
     assertion lives in ``test_attention_dense_gfx942.py``.
     """
-    spec = _spec(block_n=128, head_size=128, dtype="bf16")
-    tuning = dataclasses.replace(_DEFAULT_TUNING, lds_row_pad=0)
-    ok, why = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
+    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=0)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
-    assert _lds_bytes(spec, tuning) == _CAPACITY
-    assert _lds_pool_bytes(spec, tuning) == _CAPACITY
+    assert _lds_bytes(spec) == _CAPACITY
+    assert _lds_pool_bytes(spec) == _CAPACITY
+
+
+def test_bf16_d128_kdb_and_vpf_have_independent_lds_footprints():
+    """KDB allocates one additional K slot; VPF adds no LDS slot.
+    V LDS remains single-buffered for every mode.
+    """
+    cfvst = _spec(
+        dtype="bf16",
+        head_size=128,
+        block_n=64,
+        lds_row_pad=8,
+        use_cfvst=True,
+        persistent=True,
+        num_persistent=304,
+        lds_num_buffers=1,
+        v_reg_prefetch=False,
+    )
+    kdb = dataclasses.replace(cfvst, lds_num_buffers=2)
+    vpf = dataclasses.replace(cfvst, v_reg_prefetch=True)
+    both = dataclasses.replace(kdb, v_reg_prefetch=True)
+    for spec in (cfvst, kdb, vpf, both):
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        assert ok, why
+    assert _lds_bytes(cfvst) == _lds_pool_bytes(cfvst) == 33792
+    assert _lds_bytes(kdb) == _lds_pool_bytes(kdb) == 51200
+    assert _lds_bytes(vpf) == _lds_pool_bytes(vpf) == 33792
+    assert _lds_bytes(both) == _lds_pool_bytes(both) == 51200
+    extra_k_slot = 64 * (128 + 8) * 2
+    assert _lds_pool_bytes(kdb) - _lds_pool_bytes(cfvst) == extra_k_slot
+    assert _lds_pool_bytes(both) - _lds_pool_bytes(vpf) == extra_k_slot
+    assert _lds_pool_bytes(vpf) == _lds_pool_bytes(cfvst)
+    assert _lds_pool_bytes(both) == _lds_pool_bytes(kdb)

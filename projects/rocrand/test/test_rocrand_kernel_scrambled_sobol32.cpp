@@ -41,8 +41,7 @@
 struct rocrand_f
 {
     __device__ __forceinline__
-    unsigned int
-        operator()(rocrand_state_scrambled_sobol32* state_ptr)
+    unsigned int operator()(rocrand_state_scrambled_sobol32* state_ptr)
     {
         return rocrand(state_ptr);
     }
@@ -51,8 +50,7 @@ struct rocrand_f
 struct rocrand_uniform_f
 {
     __device__ __forceinline__
-    float
-        operator()(rocrand_state_scrambled_sobol32* state_ptr)
+    float operator()(rocrand_state_scrambled_sobol32* state_ptr)
     {
         return rocrand_uniform(state_ptr);
     }
@@ -61,8 +59,7 @@ struct rocrand_uniform_f
 struct rocrand_uniform_double_f
 {
     __device__ __forceinline__
-    double
-        operator()(rocrand_state_scrambled_sobol32* state_ptr)
+    double operator()(rocrand_state_scrambled_sobol32* state_ptr)
     {
         return rocrand_uniform_double(state_ptr);
     }
@@ -71,8 +68,7 @@ struct rocrand_uniform_double_f
 struct rocrand_normal_f
 {
     __device__ __forceinline__
-    float
-        operator()(rocrand_state_scrambled_sobol32* state_ptr)
+    float operator()(rocrand_state_scrambled_sobol32* state_ptr)
     {
         return rocrand_normal(state_ptr);
     }
@@ -81,8 +77,7 @@ struct rocrand_normal_f
 struct rocrand_normal_double_f
 {
     __device__ __forceinline__
-    double
-        operator()(rocrand_state_scrambled_sobol32* state_ptr)
+    double operator()(rocrand_state_scrambled_sobol32* state_ptr)
     {
         return rocrand_normal_double(state_ptr);
     }
@@ -91,8 +86,7 @@ struct rocrand_normal_double_f
 struct rocrand_log_normal_f
 {
     __device__ __forceinline__
-    float
-        operator()(rocrand_state_scrambled_sobol32* state_ptr, float mean, float std)
+    float operator()(rocrand_state_scrambled_sobol32* state_ptr, float mean, float std)
     {
         return rocrand_log_normal(state_ptr, mean, std);
     }
@@ -101,8 +95,7 @@ struct rocrand_log_normal_f
 struct rocrand_log_normal_double_f
 {
     __device__ __forceinline__
-    double
-        operator()(rocrand_state_scrambled_sobol32* state_ptr, double mean, double std)
+    double operator()(rocrand_state_scrambled_sobol32* state_ptr, double mean, double std)
     {
         return rocrand_log_normal_double(state_ptr, mean, std);
     }
@@ -111,8 +104,7 @@ struct rocrand_log_normal_double_f
 struct rocrand_poisson_f
 {
     __device__ __forceinline__
-    unsigned int
-        operator()(rocrand_state_scrambled_sobol32* state_ptr, double lambda)
+    unsigned int operator()(rocrand_state_scrambled_sobol32* state_ptr, double lambda)
     {
         return rocrand_poisson(state_ptr, lambda);
     }
@@ -121,9 +113,8 @@ struct rocrand_poisson_f
 struct rocrand_discrete_f
 {
     __device__ __forceinline__
-    unsigned int
-        operator()(rocrand_state_scrambled_sobol32* state_ptr,
-                   rocrand_discrete_distribution    discrete_distribution)
+    unsigned int operator()(rocrand_state_scrambled_sobol32* state_ptr,
+                            rocrand_discrete_distribution    discrete_distribution)
     {
         return rocrand_discrete(state_ptr, discrete_distribution);
     }
@@ -566,4 +557,5 @@ const double lambdas[] = {1.0, 5.5, 20.0, 100.0, 1234.5, 5000.0};
 
 INSTANTIATE_TEST_SUITE_P(rocrand_kernel_scrambled_sobol32_poisson,
                          rocrand_kernel_scrambled_sobol32_poisson,
-                         ::testing::ValuesIn(lambdas));
+                         ::testing::ValuesIn(lambdas),
+                         lambda_param_name);

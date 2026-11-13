@@ -1,17 +1,16 @@
 {
-    "generated_on": "07 Dec 2025, 10:44:36",
+    "generated_on": "03 Jul 2026, 13:57:15",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
     },
     "version_info": {
-        "miopen_version": "8e7018af9b"
+        "miopen_version": "3.5.2"
     },
     "sessions": [
-        1,
-        72
+        2
     ],
-    "note": "Data merged from sessions: [1, 72]",
+    "note": "Data merged from sessions: [2]",
     "num_inputs": 24,
     "num_solvers": 12,
     "num_outputs": 12,
@@ -31,7 +30,8 @@
         "precision": {
             "BF16": 0,
             "FP16": 1,
-            "FP32": 2
+            "FP32": 2,
+            "INT8": 3
         },
         "direction": {
             "B": 0,
@@ -39,9 +39,9 @@
             "W": 2
         },
         "solver": {
-            "ConvDirectNaiveConvBwd_DEACTIVATE": 0,
-            "ConvDirectNaiveConvFwd_DEACTIVATE": 1,
-            "ConvDirectNaiveConvWrw_DEACTIVATE": 2,
+            "ConvDirectNaiveConvBwd": 0,
+            "ConvDirectNaiveConvFwd": 1,
+            "ConvDirectNaiveConvWrw": 2,
             "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
             "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
             "ConvHipImplicitGemm3DGroupWrwXdlops": 5,

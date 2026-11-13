@@ -43,9 +43,22 @@ struct EstimateAsmCyclesAnalysis {
     static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
 };
 
+/// Analysis result type for the per-instruction estimated cumulative cycle map
+/// (see computeEstimatedCyclesPerInstruction).
+struct EstimateAsmCyclesPerInstructionAnalysis {
+    STINKYTOFU_ANALYSIS_KEY("EstimateAsmCyclesPerInstructionAnalysis")
+    using Result = std::unordered_map<const StinkyInstruction*, uint32_t>;
+    static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
+};
+
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 
-/// Calculate estimate asm cycles for a function
+/// Calculate estimate asm cycles for a function. This is a pure query: unlike
+/// createEstimateAsmCyclesPass(), it does NOT annotate instructions with
+/// `<This is N-cycle>` comments or publish the total-cycles function metadata,
+/// so it is safe to call from AM.getResult<EstimateAsmCyclesAnalysis>() and
+/// other read-only contexts. Use createEstimateAsmCyclesPass() when you want
+/// the annotated IR.
 /// @param func The function to analyze
 /// @param passCtx The pass context
 /// @return The total estimated cycles
@@ -53,11 +66,12 @@ STINKYTOFU_EXPORT unsigned int calculateEstimateAsmCycles(Function& func, PassCo
 
 /// Run the asm-cycle estimator and return a per-instruction map of estimated
 /// cumulative cycle positions (the cycle index at which each instruction is
-/// modeled to issue). Only instructions inside the modeled `label_LoopBeginL`
-/// unrolled-loop region are populated, and only for Gfx1250 (the estimator
-/// self-disables otherwise, yielding an empty map). Unlike the pass form, this
-/// helper does NOT annotate instructions with `<This is N-cycle>` comments, so
-/// it is safe to call from other passes as a pure query.
+/// modeled to issue). Coverage matches the pass for `label_LoopBeginL` /
+/// `LoopBeginL` blocks; the query form also models non-loop blocks that embed
+/// `label_LoopBeginL` (sub-loop / hierarchical IR). Gfx1250 only; other arches
+/// yield an empty map. Unlike the pass form, this helper does NOT annotate
+/// instructions with `<This is N-cycle>` comments or publish total-cycles
+/// metadata, so it is safe to call from other passes as a pure query.
 STINKYTOFU_EXPORT std::unordered_map<const StinkyInstruction*, uint32_t>
 computeEstimatedCyclesPerInstruction(Function& func, PassContext& passCtx);
 }  // namespace stinkytofu

@@ -30,6 +30,24 @@ table. Two consequences drive everything below:
 - **The ABI stays C-callable.** Prefer C-expressible constructs on the public surface;
   keep C++ features to the internal boundary layer.
 
+## API design (the cross-language standard)
+
+How functions are layered, named, and exported follows the shared
+[API design standard](API_DESIGN_STANDARD.md). The C++ mechanics for its rules:
+
+- **The public door is the `extern "C"` surface**; internal `ckc::`/`.hpp` code is the
+  machinery behind it (§2, §4). A symbol being linkable is not the same as being part of the
+  public ABI.
+- **A thin wrapper has zero logic** — field access plus one delegating call; anything with real
+  logic is a named function, not a wrapper.
+- **A function takes the base type it operates on**, matching its Python counterpart's signature (§4).
+
+Enforcement note: the registered C++ style guide is not yet wired to these rules — they are
+reviewed by hand for the engine until the matching C++ guard is added; the standard's
+[What is enforced](API_DESIGN_STANDARD.md#what-is-enforced) is the single home for that status.
+The byte-identity invariant still binds: an emitter API that cannot be expressed in both engines
+is unshippable.
+
 ## 1. Cardinal rules (never break)
 
 **Compliance** (export controls, restricted data, NPI, product/marketing/code names,

@@ -198,9 +198,26 @@ bool match_test_category(const Arguments& arg, const char* category);
 // INSTANTIATE_TEST_CATEGORY(testclass, HMM)         \
 // INSTANTIATE_TEST_CATEGORY(testclass, known_bug)
 
-// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression
-#define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test) \
-    catch_signals_and_exceptions_as_failures([&] { test; }, true)
+// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression.
+// YAML threads>1, devices>1 (except harness-owned GPU loops: repeatability_check
+// and multiheaded), or HMM:true require RUN_TEST_ON_THREADS_STREAMS in TEST_P;
+// this path ignores those fields (including the HMM managed-memory skip).
+#define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test)                                           \
+    do                                                                                           \
+    {                                                                                            \
+        const auto& arg = GetParam();                                                            \
+        ASSERT_LE(arg.threads, 1)                                                                \
+            << "YAML threads>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P";                  \
+        if(!arg.repeatability_check && strcmp(arg.function, "multiheaded") != 0)                 \
+        {                                                                                        \
+            ASSERT_LE(arg.devices, 1)                                                            \
+                << "YAML devices>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P "              \
+                   "(repeatability_check and multiheaded loop devices in the harness)";          \
+        }                                                                                        \
+        ASSERT_FALSE(arg.HMM) << "YAML HMM:true requires RUN_TEST_ON_THREADS_STREAMS in TEST_P " \
+                                 "(managed-memory skip is only in that dispatch)";               \
+        catch_signals_and_exceptions_as_failures([&] { test; }, true);                           \
+    } while(0)
 
 // Function to catch signals and exceptions as failures
 void launch_test_on_threads(std::function<void()> test,
@@ -219,44 +236,45 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
 #define LAUNCH_TEST_ON_STREAMS(test, streams, devices) \
     launch_test_on_streams([&] { test; }, streams, devices)
 
-// Macro to run test across threads
-#define RUN_TEST_ON_THREADS_STREAMS(test)                                                    \
-    do                                                                                       \
-    {                                                                                        \
-        const auto& arg          = GetParam();                                               \
-        size_t      threads      = arg.threads;                                              \
-        size_t      streams      = arg.streams;                                              \
-        size_t      devices      = arg.devices;                                              \
-        int         availDevices = 0;                                                        \
-        bool        HMM          = arg.HMM;                                                  \
-        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                                   \
-        if(devices > availDevices)                                                           \
-        {                                                                                    \
-            GTEST_SKIP() << TOO_FEW_DEVICES_PRESENT_STRING;                                  \
-            return;                                                                          \
-        }                                                                                    \
-        else if(HMM)                                                                         \
-        {                                                                                    \
-            for(int i = 0; i < devices; i++)                                                 \
-            {                                                                                \
-                int flag = 0;                                                                \
-                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
-                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), devices)); \
-                if(!flag)                                                                    \
-                {                                                                            \
-                    GTEST_SKIP() << HMM_NOT_SUPPORTED_STRING;                                \
-                    return;                                                                  \
-                }                                                                            \
-            }                                                                                \
-        }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
-        if(threads)                                                                          \
-        {                                                                                    \
-            client_omp_manager manager(threads);                                             \
-            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
-        }                                                                                    \
-        else                                                                                 \
-            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                                  \
+// Macro to run test across threads or streams
+// threads and streams are defaulted to 0 if not specified in the YAML file
+#define RUN_TEST_ON_THREADS_STREAMS(test)                                              \
+    do                                                                                 \
+    {                                                                                  \
+        const auto& arg          = GetParam();                                         \
+        size_t      threads      = arg.threads;                                        \
+        size_t      streams      = arg.streams;                                        \
+        size_t      devices      = arg.devices > 0 ? arg.devices : 1;                  \
+        int         availDevices = 0;                                                  \
+        bool        HMM          = arg.HMM;                                            \
+        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                             \
+        if(devices > availDevices)                                                     \
+        {                                                                              \
+            GTEST_SKIP() << TOO_FEW_DEVICES_PRESENT_STRING;                            \
+            return;                                                                    \
+        }                                                                              \
+        else if(HMM)                                                                   \
+        {                                                                              \
+            for(int i = 0; i < devices; i++)                                           \
+            {                                                                          \
+                int flag = 0;                                                          \
+                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                 \
+                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
+                if(!flag)                                                              \
+                {                                                                      \
+                    GTEST_SKIP() << HMM_NOT_SUPPORTED_STRING;                          \
+                    return;                                                            \
+                }                                                                      \
+            }                                                                          \
+        }                                                                              \
+        g_stream_pool.reset(devices, streams);                                         \
+        if(threads)                                                                    \
+        {                                                                              \
+            client_omp_manager manager(threads);                                       \
+            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                   \
+        }                                                                              \
+        else                                                                           \
+            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                            \
     } while(0)
 
 // Thread worker class

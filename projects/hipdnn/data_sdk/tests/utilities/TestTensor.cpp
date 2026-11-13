@@ -11,6 +11,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -789,12 +790,88 @@ TEST(TestTensor, ConstructorThrowsOnNegativeStride)
     EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
-TEST(TestTensor, ConstructorThrowsOnZeroStride)
+TEST(TestTensor, ZeroStrideAxisReadsOneElement)
 {
     const std::vector<int64_t> dims = {2, 3, 4};
-    const std::vector<int64_t> strides = {12, 0, 1};
+    const std::vector<int64_t> strides = {4, 0, 1};
 
-    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
+    Tensor<float> tensor(dims, strides);
+
+    EXPECT_EQ(tensor.elementCount(), 24);
+    EXPECT_EQ(tensor.elementSpace(), 8);
+    EXPECT_FALSE(tensor.isPacked());
+    EXPECT_EQ(tensor.getIndex(1, 0, 3), 7);
+    EXPECT_EQ(tensor.getIndex(1, 2, 3), 7);
+
+    tensor.setHostValue(5.0F, 1, 0, 2);
+    for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+    {
+        EXPECT_EQ(tensor.getHostValue(1, i1, 2), 5.0F);
+    }
+}
+
+TEST(TestTensor, AllZeroStridesUseOneElement)
+{
+    Tensor<float> tensor({2, 3}, {0, 0});
+
+    EXPECT_EQ(tensor.elementCount(), 6);
+    EXPECT_EQ(tensor.elementSpace(), 1);
+    EXPECT_FALSE(tensor.isPacked());
+
+    tensor.fillWithValue(3.0F);
+    EXPECT_EQ(tensor.getHostValue(1, 2), 3.0F);
+}
+
+TEST(TestTensor, ZeroStrideIsNotPackedWhenElementSpaceEqualsItemCount)
+{
+    const Tensor<float> tensor({2, 2}, {3, 0});
+
+    ASSERT_EQ(tensor.elementCount(), tensor.elementSpace());
+    EXPECT_FALSE(tensor.isPacked());
+}
+
+TEST(TestTensor, ZeroStrideOnUnitExtentAxisStaysPacked)
+{
+    const Tensor<float> tensor({2, 1, 3}, {3, 0, 1});
+
+    EXPECT_TRUE(tensor.isPacked());
+}
+
+TEST(TestTensor, FillWithRandomValuesBroadcastsAlongZeroStrideAxis)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    const std::vector<int64_t> dims = {3, 4, 2};
+    Tensor<float> tensor(dims, {2, 0, 1});
+    ASSERT_EQ(tensor.elementSpace(), 6);
+
+    tensor.fillWithSentinelValue();
+    tensor.fillWithRandomValues(-1.0F, 1.0F, 1234);
+
+    const auto* hostData = static_cast<const float*>(tensor.rawHostData());
+    for(size_t offset = 0; offset < tensor.elementSpace(); ++offset)
+    {
+        EXPECT_FALSE(isnan(hostData[offset])) << "offset " << offset;
+        EXPECT_GE(hostData[offset], -1.0F);
+        EXPECT_LE(hostData[offset], 1.0F);
+    }
+}
+
+TEST(TestTensor, ZeroStrideTensorRoundTripsThroughDevice)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({2, 3}, {1, 0});
+    tensor.setHostValue(1.5F, 0, 0);
+    tensor.setHostValue(2.5F, 1, 0);
+
+    auto* device = tensor.rawDeviceData();
+    std::vector<float> fromDevice(tensor.elementSpace());
+    ASSERT_EQ(
+        hipMemcpy(
+            fromDevice.data(), device, fromDevice.size() * sizeof(float), hipMemcpyDeviceToHost),
+        hipSuccess);
+    EXPECT_EQ(fromDevice, (std::vector<float>{1.5F, 2.5F}));
 }
 
 TEST(TestTensor, ConstructorThrowsOnMultipleInvalidDimensions)
@@ -922,6 +999,139 @@ TYPED_TEST(TensorSentinel, StridedTensorFilled)
         else
         {
             EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
+}
+
+/// A stride PERMUTATION must be iterated in index order, not linearly.
+///
+/// Regression guard for visitsInIndexOrder. dims {2,3,4} with strides {12,1,3} makes
+/// axis 1 the fastest-varying in memory, and elementCount == elementSpace == 24, so
+/// isPacked() is true and the old gate took the linear path. Writes then landed on
+/// coordinates the stride-aware reads did not fetch them by, with no error anywhere.
+TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 1, 3};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+
+    EXPECT_TRUE(tensor.isPacked())
+        << "a permutation spans the same memory, so isPacked() must still be true here "
+           "-- if it is not, this test no longer covers the case it was written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::CompositeIndex>(tensor.begin().index()))
+        << "a stride permutation must be demoted to the stride-aware walk";
+
+    // Write a distinct value per position in iteration order, the way a random fill does.
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    // Read back by coordinate: the n-th value written must land on the n-th coordinate.
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected)
+                    << "value at (" << i0 << "," << i1 << "," << i2
+                    << ") does not match its position in iteration order. The iterator "
+                       "wrote linearly while the read honoured the declared strides.";
+                expected += 1.0F;
+            }
+        }
+    }
+}
+
+/// Row-major tensors must keep the linear fast path.
+///
+/// The gate is only correct if it does not demote every packed tensor to the slower
+/// walk. Both strategies produce the right values, so assert the chosen one too.
+TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 4, 1};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked())
+        << "these strides are the packed row-major strides, so isPacked() must be true "
+           "here -- if it is not, this test no longer guards the fast path it was "
+           "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "packed row-major strides must keep the linear fast path";
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected);
+                expected += 1.0F;
+            }
+        }
+    }
+}
+
+/// An axis of extent 1 must not disqualify the fast path.
+///
+/// NHWC activations with 1x1 spatial extent carry dims {N,C,1,1} with strides
+/// {C,1,C,C}, because the H and W strides come from the layout rather than from the
+/// unit extents. Index 0 on such an axis contributes 0 whatever the stride says, so
+/// the tensor still visits memory in index order. Both index strategies satisfy that,
+/// so the value check alone cannot tell whether the exemption survives; assert the
+/// chosen strategy as well, the way TestTensorIterator does.
+TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 1, 1};
+    const std::vector<int64_t> strides{3, 1, 3, 3};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked())
+        << "the unused unit-axis strides do not extend the span, so isPacked() must be "
+           "true here -- if it is not, this test no longer covers the case it was "
+           "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "unit-extent axes must not push a row-major tensor onto the strided walk";
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            EXPECT_EQ(tensor.getHostValue(i0, i1, 0, 0), expected)
+                << "value at (" << i0 << "," << i1
+                << ",0,0) does not match its position in iteration order";
+            expected += 1.0F;
         }
     }
 }

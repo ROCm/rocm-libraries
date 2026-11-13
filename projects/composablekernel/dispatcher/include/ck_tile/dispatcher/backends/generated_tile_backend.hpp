@@ -14,10 +14,36 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <type_traits>
 
 namespace ck_tile {
 namespace dispatcher {
 namespace backends {
+
+// True for pipelines that declare skipCheckValidLaunchParams (the TDM pipelines).
+// ck_tile::UniversalGemmKernel::IsSupportedArgument accepts every problem for them:
+// TDM clips each box to the tensor's real extent, so no dim must be a tile multiple.
+template <typename Pipeline, typename = void>
+struct pipeline_skips_launch_checks : std::false_type
+{
+};
+template <typename Pipeline>
+struct pipeline_skips_launch_checks<Pipeline,
+                                    std::void_t<decltype(Pipeline::skipCheckValidLaunchParams)>>
+    : std::bool_constant<Pipeline::skipCheckValidLaunchParams>
+{
+};
+
+// True for kernels whose launcher rejects partial N/K tiles (preshuffle compute TDM).
+template <typename Kernel, typename = void>
+struct kernel_requires_full_nk_tiles : std::false_type
+{
+};
+template <typename Kernel>
+struct kernel_requires_full_nk_tiles<Kernel, std::void_t<decltype(Kernel::RequiresFullNKTiles)>>
+    : std::bool_constant<Kernel::RequiresFullNKTiles>
+{
+};
 
 /**
  * Kernel instance wrapper for unified_gemm_codegen.py generated kernels
@@ -65,36 +91,62 @@ class GeneratedTileKernelInstance : public KernelInstance
         // wrongly rejected e.g. rcr kernels (RowMajor A & C never gate M) on
         // M-indivisible problems that Old-TE runs fine. Anything this lets through
         // is still validated by the kernel's own IsSupportedArgument inside launch(),
-        // so the bridge stays a strict functional equivalent of Old-TE.
-        constexpr bool pad_m = SelectedKernel::kPadM;
-        constexpr bool pad_n = SelectedKernel::kPadN;
-        constexpr bool pad_k = SelectedKernel::kPadK;
+        // so the bridge stays a strict functional equivalent of Old-TE. Pipelines
+        // that skip that check (TDM) skip this gate too: they clip to real extents.
+        using Pipeline = typename SelectedKernel::GemmPipeline;
+        if constexpr(!pipeline_skips_launch_checks<Pipeline>::value)
+        {
+            constexpr bool pad_m = SelectedKernel::kPadM;
+            constexpr bool pad_n = SelectedKernel::kPadN;
+            constexpr bool pad_k = SelectedKernel::kPadK;
 
-        constexpr int tile_m = SelectedKernel::TileM;
-        constexpr int tile_n = SelectedKernel::TileN;
-        constexpr int tile_k = SelectedKernel::TileK;
+            constexpr int tile_m = SelectedKernel::TileM;
+            constexpr int tile_n = SelectedKernel::TileN;
+            constexpr int tile_k = SelectedKernel::TileK;
 
-        const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
-        const bool row_a  = is_row(key_.signature.layout_a);
-        const bool row_b  = is_row(key_.signature.layout_b);
-        const bool row_c  = is_row(key_.signature.layout_c);
+            const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
+            const bool row_a  = is_row(key_.signature.layout_a);
+            const bool row_b  = is_row(key_.signature.layout_b);
+            const bool row_c  = is_row(key_.signature.layout_c);
 
-        // Which problem dimensions are actually constrained for this layout combo.
-        const bool require_m = (!row_a) || (!row_c); // ColMajor A or C gate M
-        const bool require_n = row_b || row_c;       // RowMajor B or C gate N
-        const bool require_k = row_a || (!row_b);    // RowMajor A or ColMajor B gate K
+            // Which problem dimensions are actually constrained for this layout combo.
+            const bool require_m = (!row_a) || (!row_c); // ColMajor A or C gate M
+            const bool require_n = row_b || row_c;       // RowMajor B or C gate N
+            const bool require_k = row_a || (!row_b);    // RowMajor A or ColMajor B gate K
 
-        const std::int64_t k_grain =
-            static_cast<std::int64_t>(tile_k) * (problem.k_batch > 0 ? problem.k_batch : 1);
+            const std::int64_t k_grain =
+                static_cast<std::int64_t>(tile_k) * (problem.k_batch > 0 ? problem.k_batch : 1);
 
-        if(require_m && !pad_m && problem.M % tile_m != 0)
-            return false;
-        if(require_n && !pad_n && problem.N % tile_n != 0)
-            return false;
-        if(require_k && !pad_k && problem.K % k_grain != 0)
-            return false;
+            if(require_m && !pad_m && problem.M % tile_m != 0)
+                return false;
+            if(require_n && !pad_n && problem.N % tile_n != 0)
+                return false;
+            if(require_k && !pad_k && problem.K % k_grain != 0)
+                return false;
+        }
+        else
+        {
+            // TdmEpilogue overwrites C, so TDM cannot split K, and the kernel's own
+            // check accepts any k_batch. The preshuffle compute TDM launcher also
+            // requires complete N/K tiles.
+            if(problem.k_batch != 1)
+                return false;
+            if constexpr(kernel_requires_full_nk_tiles<SelectedKernel>::value)
+            {
+                if(problem.N % SelectedKernel::TileN != 0 || problem.K % SelectedKernel::TileK != 0)
+                    return false;
+            }
+        }
 
-        return true;
+        // Select the host-side A/B distribution for this kernel's target.
+        // This avoids a HIP device query for every candidate in the registry.
+        const bool wave32  = key_.gfx_arch.rfind("gfx9", 0) != 0;
+        const auto width_a = wave32 ? Pipeline::template GetVectorSizeA<true>()
+                                    : Pipeline::template GetVectorSizeA<false>();
+        const auto width_b = wave32 ? Pipeline::template GetVectorSizeB<true>()
+                                    : Pipeline::template GetVectorSizeB<false>();
+        return vector_widths_divide(
+            key_, problem.M, problem.N, problem.K, width_a, width_b, SelectedKernel::VectorSizeC);
     }
 
     std::string get_name() const override { return name_; }

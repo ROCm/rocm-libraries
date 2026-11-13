@@ -67,6 +67,9 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
+bool quick_tests_only = false;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;
 size_t      max_nbatch_for_hipfftw_test;
@@ -77,6 +80,10 @@ std::string hipfftw_token_for_functional_test;
 
 // Transform parameters for manual test:
 hipfft_params manual_params;
+
+// (Maximum) number of hip devices to use in tests (per process).
+size_t           gpus_per_rank             = 0;
+constexpr size_t upper_bound_gpus_per_rank = 16;
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
@@ -254,6 +261,12 @@ void precompile_test_kernels(const std::string& precompile_file)
                         {
                             hipfft_params params;
                             params.from_token(token);
+
+                            // JIT callbacks would require JIT state to be
+                            // specified which we're not doing here
+                            if(params.run_callbacks == fft_callback_type_jit)
+                                continue;
+
                             params.validate();
                             params.create_plan();
                             if(params.is_forward())
@@ -347,32 +360,46 @@ int main(int argc, char* argv[])
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
         ->default_val(DivRoundingUp(
             device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
+    const auto opt_ngpus
+        = app.add_option("--ngpus",
+                         gpus_per_rank,
+                         "Maximum number of GPUs per process to be considered (cannot exceed 1 if "
+                         "mp_lib == mpi). An upper bound of "
+                             + std::to_string(upper_bound_gpus_per_rank)
+                             + " is enforced. The number of GPUs must not exceed the available "
+                               "device count.")
+              ->option_text("Default value is 1 if mp_lib == mpi; all visible "
+                            "devices are considered if mp_lib == none")
+              ->check(CLI::PositiveNumber);
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
-                   "default to alleviate redundancy with rocfft-test)")
+                   "default to alleviate redundancy with rocfft-test). "
+                   "2D or 3D emulation test probabilities are scaled relative to test_prob: "
+                   "emulation_prob is used directly when test_prob is 1 and scaled down by the "
+                   "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(0.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
         ->default_val(1.0)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--planar_prob",
                    complex_planar_prob_factor,
                    "Probability multiplier for running individual planar transforms")
         ->default_val(0.1)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option(
            "--complex_interleaved_prob_factor",
            complex_interleaved_prob_factor,
            "Probability multiplier for running individual transforms with complex interleaved data")
         ->default_val(1)
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.0)
+        ->default_val(0.2)
         ->check(CLI::NonNegativeNumber);
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
@@ -392,6 +419,9 @@ int main(int argc, char* argv[])
 
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
+
+            // Very large transforms are not an emulation test target.
+            quick_tests_only = true;
 
             if(emulationtype == emulation_quick)
             {
@@ -462,11 +492,15 @@ int main(int argc, char* argv[])
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
-    app.add_option("--mp_lib", mp_lib, "Multi-process library type: none (default), mpi")
+    app.add_option("--mp_lib", mp_lib, "Multi-process library type: none, mpi.")
+        ->check(CLI::IsMember({"none", "mpi"}))
         ->default_val("none");
-    app.add_option("--mp_ranks", mp_ranks, "Number of multi-process ranks to launch")
+    app.add_option("--mp_ranks",
+                   mp_ranks,
+                   "Number of multi-process ranks to launch (can exceed 1 only if mp_lib == mpi)")
         ->default_val(1)
-        ->check(CLI::NonNegativeNumber);
+        ->check(CLI::PositiveNumber)
+        ->needs("--mp_lib");
     app.add_option("--mp_launch",
                    mp_launch,
                    "Command line prefix to launch multi-process transforms, e.g. \n"
@@ -475,21 +509,42 @@ int main(int argc, char* argv[])
                    "space character(s). For instance,\n"
                    "\"mpirun --np 4 \\\"/path with spaces/to/hipfft_mpi_worker\\\"\"")
         ->default_val("")
-        ->each([&](const std::string&) {
-            if(mp_lib == fft_params::fft_mp_lib_none)
-            {
-                throw CLI::ValidationError(
-                    "--mp_launch requires an mp library (see mp_lib in --help)");
-            }
-        })
         ->needs("--mp_lib");
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
+    app.callback([&]() {
+        if(mp_lib == fft_params::fft_mp_lib_mpi)
+        {
+            if(!*opt_ngpus)
+                gpus_per_rank = 1;
+            else if(gpus_per_rank > 1)
+                throw std::invalid_argument("--ngpus must be 1 if mp_lib == mpi (see --help)");
+            if(mp_launch.empty())
+                throw std::invalid_argument(
+                    "--mp_launch must be specified if mp_lib == mpi (see --help)");
+        }
+        else
+        {
+            assert(mp_lib == fft_params::fft_mp_lib_none);
+            if(!*opt_ngpus)
+                gpus_per_rank = rocfft_scoped_device::device_count();
+            gpus_per_rank = std::min(gpus_per_rank, upper_bound_gpus_per_rank);
+            if(mp_ranks > 1)
+                throw std::invalid_argument("--mp_ranks must be 1 if mp_lib == none (see --help)");
+            if(!mp_launch.empty())
+                throw std::invalid_argument(
+                    "--mp_launch must be empty if mp_lib == none (see --help)");
+            if(gpus_per_rank > static_cast<size_t>(rocfft_scoped_device::device_count()))
+                throw CLI::ValidationError(
+                    "ngpus", "ngpus must not exceed the number of visible devices (see --help)");
+        }
+    });
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
         ->each([&](const std::string&) {
             // The objective is to have an test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob = 0.002;
+            test_prob        = 0.002;
+            quick_tests_only = true;
         });
     // Token string to fully specify fft params for the manual test.
     std::string test_token;
@@ -547,8 +602,6 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--odist", manual_params.odist, "Logical distance between output batches")
         ->default_val(0);
-    non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
-    non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.

@@ -209,7 +209,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_slahr2(rocblas_handle handle,
                                                  float* Y,
                                                  const rocblas_int ldy)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_lahr2_impl<float>(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dlahr2(rocblas_handle handle,
@@ -224,7 +228,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dlahr2(rocblas_handle handle,
                                                  double* Y,
                                                  const rocblas_int ldy)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_lahr2_impl<double>(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_clahr2(rocblas_handle handle,
@@ -239,8 +247,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_clahr2(rocblas_handle handle,
                                                  rocblas_float_complex* Y,
                                                  const rocblas_int ldy)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_lahr2_impl<rocblas_float_complex>(handle, n, k, nb, A, lda, tau, T,
                                                                   ldt, Y, ldy);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2(rocblas_handle handle,
@@ -255,8 +267,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2(rocblas_handle handle,
                                                  rocblas_double_complex* Y,
                                                  const rocblas_int ldy)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_lahr2_impl<rocblas_double_complex>(handle, n, k, nb, A, lda, tau, T,
                                                                    ldt, Y, ldy);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 //! @}
 

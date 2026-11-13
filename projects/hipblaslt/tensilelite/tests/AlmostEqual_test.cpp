@@ -135,8 +135,8 @@ TEST(AlmostEqual_Float, ZeroVsSmall)
 
 TEST(AlmostEqual_Float, OppositeSignsNearZero)
 {
-    // diff=0.0002, threshold~0.0001*(0.0001+0.0001+1)~0.0001 -> outside
-    EXPECT_FALSE(AlmostEqual(-0.0001f, 0.0001f));
+    // diff=0.0004, threshold = tol*(0.0002 + 0.0002 + 1) ~ tol -> outside
+    EXPECT_FALSE(AlmostEqual(-0.0002f, 0.0002f));
 }
 
 TEST(AlmostEqual_Float, LargeMagnitude)

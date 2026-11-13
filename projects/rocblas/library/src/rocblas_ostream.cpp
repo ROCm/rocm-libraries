@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -251,12 +251,6 @@ void rocblas_internal_ostream::worker::send(std::string str)
     // The future indicating when the operation has completed
     auto future = promise.get_future();
 
-#ifdef WIN32
-    // Passing an empty string will make the worker thread exit.
-    // The below flag will be used to handle worker thread exit condition for Windows
-    bool empty_string = str.empty();
-#endif
-
     // task_t consists of string and promise
     // std::move transfers ownership of str and promise to task
     task_t worker_task(std::move(str), std::move(promise));
@@ -271,13 +265,19 @@ void rocblas_internal_ostream::worker::send(std::string str)
         m_cond.notify_one();
     }
 
-// Wait for the task to be completed, to ensure flushed IO
+// Wait for the task to complete so IO is flushed. On Windows the wait is
+// bounded (see below) and may return before completion during shutdown.
 #ifdef WIN32
-    if(empty_string)
-        // Occassionaly this thread is not getting the promise set by the 'worker' thread during exit condition.
-        // Added a timed wait to exit after one second, if we do not get the promise from worker thread.
-        future.wait_for(std::chrono::seconds(1));
-    else
+    // On Windows the worker thread may already have been terminated by the OS
+    // before this runs: rocBLAS ships as a DLL, so static objects (such as the
+    // profile-logging table enabled by ROCBLAS_LAYER=4) are destroyed during
+    // DLL_PROCESS_DETACH, which the loader runs *after* secondary threads are
+    // gone. A detached worker is then dead and can never fulfill the promise, so
+    // an unconditional future.get() blocks forever and the process hangs on exit.
+    // Bound the wait for every payload (not just the empty shutdown sentinel) so a
+    // dead worker can never deadlock shutdown. When the worker is alive it sets the
+    // promise well within the timeout, preserving normal flushing semantics.
+    if(future.wait_for(std::chrono::seconds(1)) == std::future_status::ready)
         future.get();
 #else
     future.get();
@@ -289,6 +289,9 @@ void rocblas_internal_ostream::worker::thread_function()
 {
     // Clear any errors in the FILE
     clearerr(m_file);
+
+    // Whether the previous write failed, to report only the first of consecutive failures
+    bool write_failed = false;
 
     // Lock the mutex in preparation for cond.wait
     std::unique_lock<std::mutex> lock(m_mutex);
@@ -319,14 +322,23 @@ void rocblas_internal_ostream::worker::thread_function()
         // Detect any error and flush the C FILE stream
         if(ferror(m_file) || fflush(m_file))
         {
-            perror("Error writing log file");
+            // Report only the first of consecutive failures (e.g. a full disk), so a
+            // persistently failing file does not print an error for every message
+            if(!write_failed)
+                perror("Error writing log file");
+            write_failed = true;
 
-            // Tell future to wake up
-            task.set_value();
-            break;
+            // Keep servicing the queue: senders wait until their task completes, so
+            // exiting here would hang every later message sent to this worker. Clear
+            // the error so later writes are retried if the failure was transient.
+            clearerr(m_file);
+        }
+        else
+        {
+            write_failed = false;
         }
 
-        // Promise that the data has been written
+        // Promise that the data has been handled
         task.set_value();
 
         // Re-lock the mutex in preparation for cond.wait

@@ -43,14 +43,15 @@ from ..core import (
     Ranker,
     ShapeRange,
     stable_json_hash,
+    selector_matches,
 )
 from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
+    RDNA_WMMA_GEMM_ARCHES,
     GemmRequest,
     apply_split_k,
     rcr_request_errors,
-    selector_matches,
 )
 from .support import (
     gemm_config_supported,
@@ -251,7 +252,7 @@ def _make_candidate(
         ),
         _supports=support,
         select_spec=select,
-        signature=lambda _spec: gemm_args_signature(),
+        signature=lambda _spec: gemm_args_signature(dtype="bf16"),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
@@ -270,13 +271,14 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 
 
 # Explicit gfx targets rather than a cdna/rdna family label; see fp16_rcr for
-# why family is the wrong gate. bf16's CDNA lists differ from fp16's: gfx90a has
-# the 16x16x16 bf16 atom the cshuffle candidate needs, and the decode candidate's
-# deep-K 16x16x32 bf16 atom exists only on gfx950.
+# why family is the wrong gate. As there, a candidate admits a target when its
+# list names the target or its generic (the row arch_specs.json points the
+# target at). bf16's CDNA lists differ from fp16's: gfx90a has the 16x16x16 bf16
+# atom the cshuffle candidate needs, and the decode candidate's deep-K 16x16x32
+# bf16 atom exists only on gfx950.
 _CDNA_MFMA_BF16 = ("gfx90a", "gfx942", "gfx950")
 _CDNA_MEM_BF16 = ("gfx942", "gfx950")
 _CDNA_DECODE_BF16 = ("gfx950",)
-_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
 GEMM_BF16_REGISTRY = CandidateRegistry(
     _FAMILY,
@@ -298,7 +300,7 @@ GEMM_BF16_REGISTRY.extend(
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_mem",
@@ -312,7 +314,7 @@ GEMM_BF16_REGISTRY.extend(
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_decode",
@@ -359,19 +361,31 @@ def build_kernel(result: DispatchResult):
     return result.build()
 
 
+def registered_gemm_bf16_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, UniversalGemmSpec], ...]:
+    """Every registered BF16 RCR candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_gemm_bf16` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return GEMM_BF16_REGISTRY.combos(req)
+
+
 def gemm_bf16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:
     """Bounded sweep space from all registered BF16 RCR candidates."""
     if _request_errors(req):
         return ()
-    specs: list[UniversalGemmSpec] = []
-    seen = set()
-    for candidate in GEMM_BF16_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        spec_hash = stable_json_hash(asdict(spec), n=16)
-        if spec_hash not in seen:
-            seen.add(spec_hash)
-            specs.append(spec)
-    return tuple(specs)
+    return GEMM_BF16_REGISTRY.sweep_space(req)
+
+
+def dispatch_gemm_bf16_all(req: GemmRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible BF16 RCR kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return GEMM_BF16_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_gemm_bf16(

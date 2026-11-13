@@ -19,11 +19,13 @@ namespace stinkytofu {
 
 /// Hardware encoding size in bytes from **`HwInstDesc::encoding`** (bits),
 /// filled by tablegen from resolved **`Gfx1250Formats.def`** **`.encoding`**
-/// (including **`.parent`** merge, e.g. TENSOR → VIMAGE → 96 b).  If
-/// **`encoding == 0`**, returns **4** (defensive default).
+/// (including **`.parent`** merge, e.g. TENSOR → VIMAGE → 96 b).
+/// encoding == 0: pseudo (LABEL/PHI/FENCE/FUNCTION_ASM_PLACEMENT_MARKER) -> 0;
+/// a real instruction missing tablegen .encoding -> 4 (every GFX op is >= 4 B).
 inline int hardwareEncodingBytes(const StinkyInstruction& inst) {
     const HwInstDesc* d = inst.getHwInstDesc();
     if (d != nullptr && d->encoding > 0) return static_cast<int>(d->encoding) / 8;
+    if (isPseudoInst(&inst)) return 0;
     return 4;
 }
 

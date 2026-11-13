@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -46,9 +47,8 @@ void testing_gebsr2gebsc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
-    hipsparseStatus_t              status;
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseStatus_t      status;
+    hipsparseLocalHandle_t handle;
 
     static const size_t safe_size = 1;
 
@@ -441,8 +441,7 @@ void testing_gebsr2gebsc(Arguments argus)
     hipsparseIndexBase_t base          = argus.baseA;
     std::string          filename      = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     int mb = m * row_block_dim;
     int nb = n * col_block_dim;

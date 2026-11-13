@@ -92,6 +92,10 @@ struct ArchDef {
     int maxAGPR = 0;
     int totalVgprPerSimd = 0;
     int vgprAllocGranule = 0;
+    int maxWavesPerSimd = 0;
+    // Work-item ID packing at kernel launch: 1 when X, Y and Z share v0, so
+    // exactly one VGPR arrives filled however many dimensions are enabled.
+    int packedWorkitemId = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
     // ECC presence: D16 VMEM zero-fills the non-data half and True16 VALU does
@@ -141,6 +145,10 @@ struct FormatDef {
     int cycle = 0;  // 0 = not specified (inherit from parent or arch default)
     int latency = 0;
     int coIssueWindow = -1;  // -1 = not specified (inherit from parent); VALU co-issue window
+    // -1 = not specified (inherit from parent); end-anchored mask of window cycles no
+    // pipe can issue into (bit 0 = last cycle)
+    int blockedScale = -1;
+    int wmmaQueueDepth = -1;  // -1 = not specified (inherit from parent)
     std::vector<std::string> flags;
 
     // Default operand field descriptions for instructions using this format
@@ -179,6 +187,13 @@ struct InstructionDef {
     int cycle = 0;       // 0 = not specified (inherit from format, then arch default)
     int latency = 0;
     int coIssueWindow = -1;  // -1 = not specified (inherit from format); VALU co-issue window
+    // -1 = not specified (inherit from format); end-anchored mask of window cycles no
+    // pipe can issue into (bit 0 = last cycle)
+    int blockedScale = -1;
+    int wmmaQueueDepth = -1;  // -1 = not specified (inherit from format)
+    // 0 = not specified. Per-opcode LDS-burst drain model params (see HwInstDesc).
+    int dsMaxDrain = 0;
+    int dsThroughput = 0;
     std::vector<CostOverrideEntry> costOverrides;        // modifier-keyed overrides
     std::vector<CoIssueOverrideEntry> coIssueOverrides;  // modifier-keyed co-issue overrides
     std::vector<OperandSpec> operands;                   // Operand specifications
@@ -283,6 +298,8 @@ class DefTParser {
         if (fmt.cycle == 0) fmt.cycle = p.cycle;
         if (fmt.latency == 0) fmt.latency = p.latency;
         if (fmt.coIssueWindow < 0) fmt.coIssueWindow = p.coIssueWindow;
+        if (fmt.blockedScale < 0) fmt.blockedScale = p.blockedScale;
+        if (fmt.wmmaQueueDepth < 0) fmt.wmmaQueueDepth = p.wmmaQueueDepth;
         // Flags: parent first, then child (child adds MFMA etc.)
         fmt.flags = p.flags;
         fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
@@ -305,6 +322,8 @@ class DefTParser {
                 if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
                 if (inst.latency == 0) inst.latency = arch_.defaultLatency;
                 if (inst.coIssueWindow < 0) inst.coIssueWindow = 0;
+                if (inst.blockedScale < 0) inst.blockedScale = 0;
+                if (inst.wmmaQueueDepth < 0) inst.wmmaQueueDepth = 0;
                 continue;
             }
 
@@ -341,6 +360,24 @@ class DefTParser {
             if (inst.coIssueWindow > 0xFFFF) {
                 std::cerr << "error: " << inst.mnemonic << ": .coissue value 0x" << std::hex
                           << inst.coIssueWindow << " exceeds uint16_t range\n";
+                return false;
+            }
+            if (inst.blockedScale < 0 && fmt.blockedScale >= 0)
+                inst.blockedScale = fmt.blockedScale;
+            if (inst.blockedScale < 0) inst.blockedScale = 0;
+            if (inst.wmmaQueueDepth < 0 && fmt.wmmaQueueDepth >= 0)
+                inst.wmmaQueueDepth = fmt.wmmaQueueDepth;
+            if (inst.wmmaQueueDepth < 0) inst.wmmaQueueDepth = 0;
+            // The mask is anchored at the window end, so every set bit must fall inside
+            // the SHORTEST window this instruction can have -- .costOverride can shorten
+            // it per matrix format (e.g. 8 -> 4 for FP4xFP4).
+            int minLatency = inst.latency;
+            for (const auto& ov : inst.costOverrides) minLatency = std::min(minLatency, ov.latency);
+            if (minLatency < 16 && inst.blockedScale >= (1 << minLatency)) {
+                std::cerr << "error: " << inst.mnemonic << ": .blockedScale 0x" << std::hex
+                          << inst.blockedScale << std::dec
+                          << " sets a bit past the start of its shortest " << minLatency
+                          << "-cycle window\n";
                 return false;
             }
 
@@ -475,6 +512,8 @@ class DefTParser {
                     parseFieldInt(block, ".maxAGPR", arch_.maxAGPR);
                     parseFieldInt(block, ".totalVgprPerSimd", arch_.totalVgprPerSimd);
                     parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
+                    parseFieldInt(block, ".maxWavesPerSimd", arch_.maxWavesPerSimd);
+                    parseFieldInt(block, ".packedWorkitemId", arch_.packedWorkitemId);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
                     parseFieldInt(block, ".d16Writes32BitVgpr", arch_.d16Writes32BitVgpr);
@@ -589,6 +628,8 @@ class DefTParser {
             parseFieldInt(block, ".maxOperands", fmt.maxOperands);
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
             parseFieldIntAuto(block, ".coissue", fmt.coIssueWindow);
+            parseFieldIntAuto(block, ".blockedScale", fmt.blockedScale);
+            parseFieldInt(block, ".wmmaQueueDepth", fmt.wmmaQueueDepth);
             parseFieldEncoding(block, ".encoding", fmt.encoding);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
@@ -760,6 +801,10 @@ class DefTParser {
                 // Parse per-entry optional fields (same helpers as DEF_T)
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
                 parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
+                parseFieldIntAuto(entryFields, ".blockedScale", inst.blockedScale);
+                parseFieldInt(entryFields, ".wmmaQueueDepth", inst.wmmaQueueDepth);
+                parseFieldInt(entryFields, ".dsMaxDrain", inst.dsMaxDrain);
+                parseFieldInt(entryFields, ".dsThroughput", inst.dsThroughput);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
                 parseFieldCoIssueOverrides(entryFields, inst.coIssueOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
@@ -898,6 +943,10 @@ class DefTParser {
             parseField(block, ".format", inst.format);
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
             parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
+            parseFieldIntAuto(block, ".blockedScale", inst.blockedScale);
+            parseFieldInt(block, ".wmmaQueueDepth", inst.wmmaQueueDepth);
+            parseFieldInt(block, ".dsMaxDrain", inst.dsMaxDrain);
+            parseFieldInt(block, ".dsThroughput", inst.dsThroughput);
             parseFieldCostOverrides(block, inst.costOverrides);
             parseFieldCoIssueOverrides(block, inst.coIssueOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
@@ -1806,8 +1855,9 @@ static bool emitArchIsaFile(const std::string& arch,
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_OPCODE_ENUMERATION\n\n";
 
-    // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, mnemonic, flags, microcode,
-    // encoding bits, unit, operandFields placeholder)
+    // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, coissue,
+    // blockedScale, mnemonic, flags, microcode, encoding, unit, dsMaxDrain,
+    // dsThroughput, wmmaQueueDepth, operandFields placeholder)
     EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
     out << "// MCIDTable: operandFields set by ArchInfo getMCIDTable()\n"
         << "static HwInstDesc MCIDTable[] = {\n";
@@ -1821,9 +1871,13 @@ static bool emitArchIsaFile(const std::string& arch,
             << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex
             << std::setfill('0') << std::setw(4)
             << (inst.coIssueWindow >= 0 ? inst.coIssueWindow : 0) << std::dec << std::setfill(' ')
+            << ", " << "0x" << std::hex << std::setfill('0') << std::setw(4)
+            << (inst.blockedScale >= 0 ? inst.blockedScale : 0) << std::dec << std::setfill(' ')
             << ", " << "\"" << inst.mnemonic << "\", " << "makeFlagSet({"
             << (flagStr.empty() ? "" : flagStr) << "}), " << microcodeToCpp(inst.finalMicrocode)
-            << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", " << "{} },\n";
+            << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", "
+            << inst.dsMaxDrain << ", " << inst.dsThroughput << ", " << inst.wmmaQueueDepth << ", "
+            << "{} },\n";
     }
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_HWINSTDESC_TABLE\n\n";
@@ -1940,7 +1994,10 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "        : ArchInfo(\"" << lowerName << "\" /* name */" << ", " << arch.major << ", "
         << arch.minor << ", " << arch.stepping << ", " << arch.wavefront << " /* waveFrontSize */"
         << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
-        << arch.vgprAllocGranule << " /* vgprAllocGranule */)\n"
+        << arch.vgprAllocGranule << " /* vgprAllocGranule */" << ", " << arch.maxWavesPerSimd
+        << " /* maxWavesPerSimd */" << ", " << arch.maxVGPR << " /* maxVGPR */" << ", "
+        << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR << " /* maxAGPR */" << ", "
+        << arch.packedWorkitemId << " /* packedWorkitemId */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"

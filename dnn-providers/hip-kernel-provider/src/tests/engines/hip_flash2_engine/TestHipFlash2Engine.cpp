@@ -4,22 +4,29 @@
 // Unit tests for HipFlash2Engine following the asm_sdpa_engine pattern.
 // Run with: ninja unit-check
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
+#include "mocks/MockPlanBuilder.hpp"
 
 namespace hip_flash2_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestHipFlash2Engine : public ::testing::Test
 {
@@ -33,6 +40,19 @@ protected:
         _engine->addPlanBuilder(std::make_unique<HipFlash2FwdPlanBuilder>());
     }
 };
+
+TEST_F(TestHipFlash2Engine, GetDetailsReportsGraphCaptureSupport)
+{
+    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
+    hipdnnPluginConstData_t result;
+    _engine->getDetails(_handle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
+                                                                                     result.size);
+    EXPECT_THAT(
+        details.behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
 
 // -- isApplicable tests --------------------------------------------------------
 
@@ -52,7 +72,9 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForFP16SdpaGraphOnGfx942)
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(arch != "gfx942")
+    {
         GTEST_SKIP() << "HipFlash2Engine requires gfx942, got: " << arch;
+    }
 
     // FP16 SDPA graph -- should be accepted
     const std::vector<int64_t> dims{1, 32, 2048, 128}; // {batch, heads, seq, D}
@@ -104,7 +126,9 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(arch != "gfx942")
+    {
         GTEST_SKIP();
+    }
 
     // D=256 is not supported (VGPR budget exceeded)
     const std::vector<int64_t> dims{1, 32, 2048, 256};
@@ -124,6 +148,74 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_engine->isApplicable(_handle, graph));
+}
+
+// Device-independent guard test: start from an SDPA graph an accepting plan builder
+// would take, then mark Q/K/V/O ragged. The flip to rejected must come from the
+// engine's ragged guard, not the plan builder -- the baseline proves the graph is
+// otherwise accepted, and the ragged case asserts the plan builder is never consulted.
+// The engine's isApplicable inspects no dims, so the default SDPA graph suffices.
+
+TEST_F(TestHipFlash2Engine, RaggedTensorFlipsApplicableGraphToRejected)
+{
+    auto baseBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseGraph(
+        baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_TRUE(engine.isApplicable(_handle, baseGraph));
+    }
+
+    auto raggedBuilder = sdpa::withRaggedTensors(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(), {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper raggedGraph(
+        raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_FALSE(engine.isApplicable(_handle, raggedGraph));
+    }
+}
+
+TEST_F(TestHipFlash2Engine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
+{
+    auto baseBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseGraph(
+        baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_TRUE(engine.isApplicable(_handle, baseGraph));
+    }
+
+    auto misalignedBuilder = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(), 8);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper misalignedGraph(
+        misalignedBuilder.GetBufferPointer(), misalignedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_FALSE(engine.isApplicable(_handle, misalignedGraph));
+    }
 }
 
 // -- ID and name tests ---------------------------------------------------------
@@ -153,7 +245,9 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
 
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(arch != "gfx942")
+    {
         GTEST_SKIP();
+    }
 
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
