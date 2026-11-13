@@ -39,7 +39,13 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     out_dir = tmp_path / "out"
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    updated = {}
+
+    def _fake_update(rows, **kwargs):
+        updated.update(kwargs)
+        return rows, None
+
+    monkeypatch.setattr(pipeline.bench.log, "update", _fake_update)
 
     dumped = {}
 
@@ -64,6 +70,8 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     assert (out_dir / "wkld.csv").is_file()
     assert called["kwargs"]["devices"] == [0]
     assert called["kwargs"]["duration"] == 0.1
+    assert called["kwargs"]["adaptive"] is True
+    assert updated == {"duration": 0.1, "adaptive": True}
     assert called["kwargs"]["custom_lib_dir"] is None
 
 
@@ -73,7 +81,7 @@ def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatc
     workload = _make_workload(tmp_path / "wkld.yaml")
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     called = {}
@@ -102,7 +110,7 @@ def test_run_bench_uses_custom_lib_dir_over_custom_lib_src(monkeypatch: pytest.M
     custom_dir.mkdir()
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     create_called = {"n": 0}
@@ -144,7 +152,7 @@ def test_run_bench_builds_custom_lib_from_src(monkeypatch: pytest.MonkeyPatch, t
     custom_src.mkdir()
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     created = {}
@@ -209,6 +217,7 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
 
     def _fake_summarize(*_args, **kwargs):
         called["devices"] = kwargs["devices"]
+        called["adaptive"] = kwargs.get("adaptive")
         return pd.DataFrame(), pd.DataFrame([{"M": 16}])
 
     monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
@@ -217,6 +226,7 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
 
     pipeline.run_configure(str(hip), str(workload), devices=[0, 1], device=2, workdir=str(tmp_path / "w"))
     assert called["devices"] == [2]
+    assert called["adaptive"] is False
 
 
 def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -263,6 +273,7 @@ def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatc
     def _fake_summarize(*_args, **kwargs):
         called["force_benchmark"] = kwargs.get("force_benchmark")
         called["keep_thr"] = kwargs.get("keep_thr")
+        called["adaptive"] = kwargs.get("adaptive")
         return pd.DataFrame(), pd.DataFrame()
 
     monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
@@ -270,6 +281,7 @@ def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatc
     pipeline.run_search(str(hip), str(workload), devices=[0], keep_thr=0.0, workdir=str(tmp_path / "w"))
 
     assert called["force_benchmark"] is True
+    assert called["adaptive"] is False
     assert called["keep_thr"] == 0.0
 
 

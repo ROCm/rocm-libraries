@@ -426,7 +426,7 @@ def analyze(
     devices: Sequence[int] | None = None,
     error_thr: float = 0.03,
     up_thr: float = 1.03,
-    duration: float = 1.0,
+    duration: float = 0.5,
     beta: bool = False,
     log_summary: str | Path = None,
     verify: bool = True,
@@ -458,8 +458,9 @@ def analyze(
             Defaults to 0.03.
         up_thr (float, optional): Minimum performance improvement ratio threshold.
             Defaults to 1.03.
-        duration (float, optional): Benchmark duration in seconds.
-            Defaults to 1.0.
+        duration (float, optional): Measurement time in seconds of each
+            benchmark (adaptive timing is always used).
+            Defaults to 0.5.
         beta (bool, optional): Whether to use non-zero beta values.
             Defaults to False.
         log_summary (str | Path, optional): CSV file with GEMM contribution to

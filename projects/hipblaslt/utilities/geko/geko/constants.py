@@ -72,6 +72,21 @@ GEMM_LOG_FIELDS = (
     "scaleA",
     "scaleB",
 )
+
+# GEMM_FIELDS and GEMM_LOG_FIELDS are the same GEMM identity fields in two
+# namings (lowercase m/n/k for parsed bench-output rows vs uppercase M/N/K
+# for bench input/config dicts). Some callers (e.g. geko.search's
+# _config_to_gemm_key()/_res_row_to_gemm_key()) build a plain positional
+# tuple from each separately and compare/key on them directly, which only
+# works if both tuples share the same field order. Fail fast at import time
+# if that ever breaks, instead of silently mismatching keys at runtime.
+assert [f.lower() for f in GEMM_LOG_FIELDS] == [f.lower() for f in GEMM_FIELDS], (
+    "GEMM_LOG_FIELDS and GEMM_FIELDS must share the same field order "
+    "(case-insensitive) -- some callers build positional identity keys from "
+    "each separately and assume it. Got "
+    f"GEMM_LOG_FIELDS={GEMM_LOG_FIELDS!r} vs GEMM_FIELDS={GEMM_FIELDS!r}."
+)
+
 GEMM_TYPE_FIELDS = (
     "transA",
     "transB",
