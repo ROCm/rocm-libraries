@@ -38,6 +38,11 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd,
                                 bool                      debug         = false,
                                 bool                      captureOutput = false);
 
+// The exit code run() returns on POSIX when it cannot execute cmd at all, because
+// it is missing or not executable: the status POSIX shells report for a command
+// they cannot find. On Windows run() throws instead.
+constexpr int execFailedExitCode = 127;
+
 std::string demangle(const char* name);
 std::string nullDevicePath();
 

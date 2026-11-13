@@ -82,8 +82,8 @@ private:
     // An empty optional identifies a probe to answer in the next batch.
     std::map<Key, std::optional<bool>> answers;
 
-    // 127 means the assembler could not be executed at all (e.g. missing binary),
-    // which is not the same as the assembler rejecting this particular ISA/instruction.
+    // An assembler that could not be executed at all (e.g. a missing binary) is not
+    // the same as one rejecting this particular ISA/instruction.
     static std::pair<int, std::string> runAssembler(std::vector<std::string> cmd,
                                                     const std::string&       source,
                                                     bool                     debug,
@@ -93,7 +93,7 @@ private:
         std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
         args.push_back(nullptr);
         auto result = run(args, source, debug, captureOutput);
-        if(result.first == 127)
+        if(result.first == execFailedExitCode)
             throw std::runtime_error("Assembler not found or not executable: " + cmd[0]);
         return result;
     }

@@ -401,9 +401,9 @@ std::pair<int, std::string>
         }
         execvp(cmd[0], cmd.data());
         perror("execvp");
-        // 127 is the conventional "command not found" status; _exit (not exit) is
-        // required in a forked child to avoid re-running the parent's atexit handlers.
-        _exit(127);
+        // _exit (not exit) is required in a forked child to avoid re-running the
+        // parent's atexit handlers.
+        _exit(execFailedExitCode);
     }
     else
     {
