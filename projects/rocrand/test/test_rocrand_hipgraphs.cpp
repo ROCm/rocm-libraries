@@ -177,14 +177,14 @@ size_t count_mismatches(const std::vector<unsigned int>& a, const std::vector<un
 // ASSERT_EQ-based ROCRAND_CHECK cannot be used in a constructor or destructor
 // (fatal assertions require a void-returning function), so use the same
 // lambda+exit workaround that HIP_CHECK above uses for hipError_t.
-#define ROCRAND_CHECK_CTOR(state)                                                 \
-    {                                                                             \
-        const rocrand_status status_ = (state);                                  \
-        if(status_ != ROCRAND_STATUS_SUCCESS)                                    \
-        {                                                                        \
-            [status_]() { FAIL() << "rocRAND error: " << status_; }();           \
-            exit(status_);                                                       \
-        }                                                                        \
+#define ROCRAND_CHECK_CTOR(state)                                      \
+    {                                                                  \
+        const rocrand_status status_ = (state);                        \
+        if(status_ != ROCRAND_STATUS_SUCCESS)                          \
+        {                                                              \
+            [status_]() { FAIL() << "rocRAND error: " << status_; }(); \
+            exit(status_);                                             \
+        }                                                              \
     }
 
 // Generator, stream and device buffers for the Poisson lambda-change tests.
@@ -225,9 +225,9 @@ public:
         std::vector<unsigned int> result(size);
         HIP_CHECK(hipStreamSynchronize(stream));
         HIP_CHECK(hipMemcpy(result.data(),
-                                     buffers[buffer],
-                                     sizeof(*buffers[buffer]) * size,
-                                     hipMemcpyDeviceToHost));
+                            buffers[buffer],
+                            sizeof(*buffers[buffer]) * size,
+                            hipMemcpyDeviceToHost));
         return result;
     }
 
@@ -237,7 +237,7 @@ public:
 };
 
 // Reference output: the lambdas generated in order, synchronizing after each call.
-std::vector<std::vector<unsigned int>> poisson_synced_reference(const rocrand_rng_type    rng_type,
+std::vector<std::vector<unsigned int>> poisson_synced_reference(const rocrand_rng_type     rng_type,
                                                                 const std::vector<double>& lambdas)
 {
     poisson_lambda_change_fixture          f(rng_type, lambdas.size());
@@ -254,8 +254,8 @@ std::vector<std::vector<unsigned int>> poisson_synced_reference(const rocrand_rn
 // The captured Poisson(B) must not read the table of Poisson(A).
 TEST_P(rocrand_hipgraph_generate_tests, poisson_lambda_change_warmup_capture)
 {
-    constexpr double la = 1000.0;
-    constexpr double lb = 10.0;
+    constexpr double la       = 1000.0;
+    constexpr double lb       = 10.0;
     const auto       expected = poisson_synced_reference(GetParam(), {la, lb, la, lb});
 
     poisson_lambda_change_fixture f(GetParam(), 4);
@@ -278,8 +278,8 @@ TEST_P(rocrand_hipgraph_generate_tests, poisson_lambda_change_warmup_capture)
 // The captured Poisson(A) must not read the table of Poisson(B).
 TEST_P(rocrand_hipgraph_generate_tests, poisson_lambda_change_capture_hit)
 {
-    constexpr double la = 10.0;
-    constexpr double lb = 1000.0;
+    constexpr double la       = 10.0;
+    constexpr double lb       = 1000.0;
     const auto       expected = poisson_synced_reference(GetParam(), {la, lb, la});
 
     poisson_lambda_change_fixture f(GetParam(), 3);

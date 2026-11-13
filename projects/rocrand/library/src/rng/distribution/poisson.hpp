@@ -343,7 +343,7 @@ public:
             lock.lock();
         }
 
-        bool is_capturing;
+        bool                 is_capturing;
         const rocrand_status capture_status = System::is_stream_capturing(m_stream, is_capturing);
         if(capture_status != ROCRAND_STATUS_SUCCESS)
         {
@@ -359,7 +359,7 @@ public:
         {
             // Lambda must be positive, so 0 never matches until the update is fully enqueued.
             m_enqueued_lambda = 0;
-            auto arg = std::make_unique<update_discrete_distribution_arg>(
+            auto arg          = std::make_unique<update_discrete_distribution_arg>(
                 update_discrete_distribution_arg{lambda, this});
             const rocrand_status status
                 = System::launch_host_func(m_stream, update_discrete_distribution, arg.release());
@@ -411,17 +411,17 @@ public:
     }
 
 private:
-    bool                             m_initialized           = false;
-    bool                             m_is_host_func_blocking = true;
-    hipStream_t                      m_stream                = 0;
-    std::mutex                       m_mutex;
-    double*                          m_probability  = nullptr;
-    unsigned int*                    m_alias        = nullptr;
-    double*                          m_cdf          = nullptr;
+    bool          m_initialized           = false;
+    bool          m_is_host_func_blocking = true;
+    hipStream_t   m_stream                = 0;
+    std::mutex    m_mutex;
+    double*       m_probability = nullptr;
+    unsigned int* m_alias       = nullptr;
+    double*       m_cdf         = nullptr;
     // Only accessed from the API thread, never from the host function.
     double                           m_enqueued_lambda   = 0;
     bool                             m_is_cache_disabled = false;
-    rocrand_discrete_distribution_st m_distribution = {};
+    rocrand_discrete_distribution_st m_distribution      = {};
 
     struct update_discrete_distribution_arg
     {

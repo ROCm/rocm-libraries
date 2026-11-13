@@ -73,7 +73,7 @@ inline rocrand_status is_stream_blocking(hipStream_t stream, bool& is_blocking)
 
 inline rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
 {
-    if (!stream)
+    if(!stream)
     {
         is_capturing = false;
     }
