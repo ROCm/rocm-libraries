@@ -1293,12 +1293,10 @@ class GlobalWriteBatchWriter:
           # `overrideAfterPrimerRows=_emitOverrideRows` so the AFTER-primer
           # encodes the NEXT EMITTING elt's rowInc (look-ahead). Non-CLS:
           # `elementIdx` is unused and `_emitOverrideRows`==0 means no override.
-          if self.kernel["GroupLoadStore"]:
-            loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
-                                                          overrideAfterPrimerRows=_emitOverrideRows))
-          else:
-            module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
-                                                  overrideAfterPrimerRows=_emitOverrideRows))
+          loadC = self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                                              overrideAfterPrimerRows=_emitOverrideRows)
+          loadC = self._maskSubtileCLoad(loadC, element)
+          (loadInputCode if self.kernel["GroupLoadStore"] else module).add(loadC)
           self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
       self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
@@ -2927,6 +2925,32 @@ class GlobalWriteBatchWriter:
             and bool(self.kernel.get("UseSubtileImpl"))
             and not self.beta
             and not self.loadE)
+
+  def _maskSubtileCLoad(self, loadCode, element):
+    """Run a NonEdge subtile C load under the exec mask of its block.
+
+    The per-block SrdC gating only skips blocks that are entirely out of range, and the C
+    descriptor is unbounded, so a lane of a partial block would read past the end of C. The D
+    store masks the same lanes. A fully out-of-range block gets a full mask here, which is
+    safe because the SrdC gating above already zeroes its num_records.
+    """
+    states = self.parentWriter.states
+    if (self.edge or not self.kernel.get("UseSubtileImpl") or not states.storeAlign8
+        or self.kernel["_GlobalAccumulation"] in ("MultipleBufferSingleKernel", "MultipleBuffer")
+        or states.subtileM32ValidBlocksSgpr is None or states.subtileN16ValidBlocksSgpr is None
+        or self._fusedFullTileNoGuards()):
+      return loadCode
+    module = Module("maskedCLoad")
+    tmpSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
+    # wave32: 2 LGs x 8 rows/LG -> shift=1; wave64: 4 LGs x 4 rows/LG -> shift=2.
+    rowScaleShift = 1 if self.wavelen == 32 else 2
+    self._emitAlign8ExecMask(module, tmpSgpr, tmpSgpr + self.laneSGPRC, blockIdxM=element[1],
+                             blockIdxN=element[0], mGuardOffset=1, rowScaleShift=rowScaleShift)
+    module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpSgpr, self.laneSGPRC), "mask C load lanes"))
+    self._epilogScratchFree(tmpSgpr)
+    module.add(loadCode)
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
+    return module
 
   def _fusedFullTileNoGuards(self):
     """True inside the branch-free FULL-TILE fused NLL store: every per-store bounds

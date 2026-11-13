@@ -4085,6 +4085,49 @@ Tests:
   unit_check: 0
   fast_check: 1
 
+# Not a 4 GiB-carry test. The generic MXFP8 subtile kernels used to load C for the
+# whole 16-column block of the last wave in the beta epilogue, past column N, because
+# the C buffer descriptor is not bounded to N. The over-read is harmless while mapped
+# pages follow C. Placement maps C in a window rounded up to the mapping granularity
+# with nothing mapped after it, so the over-read faulted and aborted the process. The
+# epilogue now masks those lanes. Beta 0 never loads C and is the control. N = 5 is well
+# below the 32-column macro tile of the kernel the heuristic picks (MT256x32x256), so
+# most of the tile's C columns lie past N; the solution is not pinned.
+# Runtime on gfx950: about 5 s per case.
+- name: matmul_fast_check_placement_mxfp8_c_beta
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 51200, N: 5, K: 5120 }
+  alpha: 1.0
+  beta: 1.0
+  placement: [ c ]
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_placement_mxfp8_c_beta0
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 51200, N: 5, K: 5120 }
+  alpha: 1.0
+  beta: 0.0
+  placement: [ c ]
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
 ###############################################################################
 # fast_check every solution, every iteration (AIHPBLAS-5015).
 #
@@ -5326,6 +5369,30 @@ Tests:
   unit_check: 0
   fast_check: 1
   gpu_arch: '(950|1250)'
+
+# Skinny preswizzled MX GEMMs (scaleA/scaleB 1001) with beta != 0 and N that is not a multiple of
+# 16, each buffer placed so that a read or write past its end faults. The subtile epilogue loads C
+# for the whole 16-column block of the last wave, so it must mask the lanes past N: unmasked, it
+# reads up to 15 columns beyond the end of C, which only faults when C ends the mapping. K is large
+# enough for each scale buffer to span the 4 KiB the placement needs.
+- name: matmul_fast_check_mx_fp8_preswizzled_placement
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M: 3001, N: 3, K: 12288 }
+    - { M: 3008, N: 17, K: 8192 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ scale_a, scale_b, a, b, c, d ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
 
 # Large K, where the scale tensors span many blocks.
 - name: matmul_fast_check_mx_fp8_large_k

@@ -948,25 +948,16 @@ namespace TensileLite
                                m_groupedOffsets,
                                *m_currentGemmProblem,
                                hipMemcpyDeviceToDevice);
-                    // Sync CPU current buffers so the reference matches GPU data.
-                    for(int ti : {ContractionProblemGemm::TENSOR::A,
-                                  ContractionProblemGemm::TENSOR::B,
-                                  ContractionProblemGemm::TENSOR::MXSA,
-                                  ContractionProblemGemm::TENSOR::MXSB})
+                    // Re-copy with the bounds-check layout the CPU reference pointers expect.
+                    if(!m_cpuPtrs.empty())
                     {
-                        auto& desc = m_currentGemmProblem->tensors()[ti];
-                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
-                        if(it == m_vdata[ti].pristine.end())
-                            continue;
-                        auto& p = it->second;
-                        if(p.cpuInput.valid && p.cpuInput.current)
-                        {
-                            size_t bytes = multiplyElementSize(
-                                p.maxElements, desc.elementBytes());
-                            std::memcpy(p.cpuInput.current.get(),
-                                        p.cpuInput.valid.get(),
-                                        bytes);
-                        }
+                        std::vector<void**> bPtr;
+                        copyInputs(m_cpuPtrs,
+                                   bPtr,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   *m_currentGemmProblem,
+                                   hipMemcpyHostToHost);
                     }
                 }
             }

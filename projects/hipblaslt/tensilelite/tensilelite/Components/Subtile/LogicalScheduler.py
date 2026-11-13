@@ -176,6 +176,13 @@ def fmt_mt(mt: int) -> str:
     """Format MT iteration integer as display string: 0 → 'n', 1 → 'n+1', 2 → 'n+2'."""
     return "n" if mt == 0 else f"n+{mt}"
 
+class VgprTileUnrollLimitError(RuntimeError):
+    """The free-list VGPR tile assignment repeats with a period longer than the unroll limit.
+
+    A RuntimeError so per-kernel codegen treats it as a rejected kernel, and the
+    partition search can skip the offending candidate.
+    """
+
 # ── Core primitives ─────────────────────────────────────────
 
 @dataclass
@@ -1323,8 +1330,11 @@ class LogicalScheduler:
     def _assign_vgpr_tiles_free_list(self):
         """Lifetime-based free-list allocator (MX multi-DU path).
 
-        Iterated until convergence (max 8 unroll iterations).  Sets
-        self.tile_peaks, self.needs_unrolling, self.unroll_factor.
+        Iterated until the assignment repeats; only periods up to MAX_UNROLL - 1
+        (7) are detected.  Sets self.tile_peaks, self.needs_unrolling,
+        self.unroll_factor.  Raises VgprTileUnrollLimitError when no repeat is
+        found within the bound (uneven partitions repeat with a period equal to
+        the full partition size).
         """
 
         cfg = self.config
@@ -1464,8 +1474,8 @@ class LogicalScheduler:
             all_next_iters.append(next_iter)
             carry_active = next_iter
         else:
-            assert False, (f"assign_vgpr_tiles did not converge after "
-                           f"{MAX_UNROLL} unroll iterations")
+            raise VgprTileUnrollLimitError(
+                f"assign_vgpr_tiles did not converge after {MAX_UNROLL} unroll iterations")
 
         self.unroll_factor = unroll_iter
         self.needs_unrolling = self.unroll_factor > 1
