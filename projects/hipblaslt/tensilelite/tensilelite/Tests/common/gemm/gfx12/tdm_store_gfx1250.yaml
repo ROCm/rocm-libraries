@@ -2265,3 +2265,63 @@ BenchmarkProblems:
         - Exact: [32, 32, 1, 128]
       - ActivationArgs:
         - - {Enum: Dgelu}
+  ########################################
+  # Develop's CompactLoopStore E setup (bbs_bias_gelu_aux_cls_gfx1250.yaml): every TDM block stores in the
+  # CompactLoopStore loop, on full tiles and on tiles past the M and N edges.
+  ########################################
+  - - OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+      UseE: true
+      UseBias: 1
+      BiasDataTypeList: [s, B]
+      Activation: true
+      ActivationType: hipblaslt_all
+      UseScaleAlphaVec: 1
+      SupportUserArgs: true
+    - InitialSolutionParameters: null
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - MatrixInstruction:
+        - [16, 16, 32, 1, 1, 8, 4, 2, 2]
+      - DepthU: [64]
+      - VectorWidthA: [1]
+      - VectorWidthB: [1]
+      - GlobalReadVectorWidthA: [1]
+      - GlobalReadVectorWidthB: [1]
+      - LocalReadVectorWidth: [8]
+      - PrefetchGlobalRead: [2]
+      - PrefetchLocalRead: [1]
+      - ScheduleIterAlg: [4]
+      - TransposeLDS: [-1]
+      - LDSTrInst: [true]
+      - TDMInst: [3]
+      - ExpandPointerSwap: [false]
+      - StoreVectorWidth: [8]
+      - SourceSwap: [false]
+      - ActivationFuncCall: [true]
+      - LdsPadA: [0]
+      - LdsPadB: [0]
+      - LdsBlockSizePerPadA: [0]
+      - LdsBlockSizePerPadB: [0]
+      - WavefrontSize: [32]
+      - CompactLoopStore: [true]
+      - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkForkParameters: null
+      JoinParameters: null
+      BenchmarkJoinParameters: null
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [513, 257, 1, 64]
+        - Exact: [127, 125, 2, 128, 136, 136, 128, 128]
+      - BiasTypeArgs: [s]
+      - ActivationArgs:
+        - - {Enum: none}
+        - - {Enum: Gelu}
