@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 // CPU (no-Handle) coverage for the conv candidate-selection input path and the precompute
 // selector, across every shipped arch -- including archs with no local hardware (e.g. gfx1250).
@@ -33,8 +10,10 @@
 // config-embedding table stamped with the wrong md5 (rejected at load), and a 2D input encoder
 // whose width disagreed with its metadata (fdeep "Invalid inputs shape"). Both are pure CPU checks.
 //
-// These tests load each arch's models by name via GetSystemDbPath() -- no Handle, no device -- so
-// they exercise gfx1250 on any runner and fail closed when the shipped assets are inconsistent.
+// These tests build no Handle and load each arch's models by name via GetSystemDbPath(), so a
+// gfx942/gfx950 CI runner validates gfx1250's models without gfx1250 hardware. (The shared gtest
+// main still requires some GPU to be present, so the suite runs on any GPU CI runner, not a
+// GPU-less host.) They fail closed when the shipped assets are inconsistent.
 
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
