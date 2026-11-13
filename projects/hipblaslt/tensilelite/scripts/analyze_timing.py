@@ -30,6 +30,9 @@ add up to the wall clock time. The tree as the timers are nested in the code fol
 """
 
 import argparse
+import gzip
+import sys
+import zlib
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
@@ -292,6 +295,10 @@ def _categories_with_children(d, out=None):
     return out
 
 CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
+
+# Timers that wrap other timers are kept separately in aggregate timing trees.
+OVERLAPPING_TOTALS_ORDER = []
+OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
 
 # Named constants for commonly-referenced hierarchy points (used in tests)
 SOLUTION_GENERATION_PARENT = "python_solution_generation"
@@ -688,39 +695,131 @@ def parse_context_line(line: str) -> Optional[Dict[str, str]]:
     return context
 
 
+def _open_log(filepath: str):
+    """Open a timing log as text; ``.gz`` files are decompressed on the fly."""
+    if str(filepath).endswith('.gz'):
+        return gzip.open(filepath, 'rt', errors='replace')
+    return open(filepath, 'r', errors='replace')
+
+
 def analyze_timing_file(filepath: str) -> Tuple[Dict[str, List[float]], List[ProblemTiming]]:
-    """Analyze a file containing timing output and return categorized timings."""
+    """Analyze a file (plain text or ``.gz``) containing timing output and return categorized timings."""
     timings = defaultdict(list)
     problem_timings = []
     current_problem = None
 
-    with open(filepath, 'r') as f:
-        for line in f:
-            line = line.strip()
+    try:
+        with _open_log(filepath) as f:
+            for line in f:
+                line = line.strip()
 
-            context = parse_context_line(line)
-            if context:
-                if current_problem:
-                    problem_timings.append(current_problem)
-                current_problem = ProblemTiming(context=context)
-                continue
+                context = parse_context_line(line)
+                if context:
+                    if current_problem:
+                        problem_timings.append(current_problem)
+                    current_problem = ProblemTiming(context=context)
+                    continue
 
-            record = parse_timing_line(line)
-            if record:
-                timings[record.category].append(record.duration_ms)
+                record = parse_timing_line(line)
+                if record:
+                    timings[record.category].append(record.duration_ms)
 
-                if current_problem:
-                    if record.category == 'cpu_data_init':
-                        current_problem.cpu_data_init_ms = record.duration_ms
-                    elif record.category == 'cpu_reference_gemm':
-                        current_problem.cpu_reference_gemm_ms = record.duration_ms
-                    elif record.category == 'gpu_kernel_execution':
-                        current_problem.gpu_kernel_execution_ms = record.duration_ms
+                    if current_problem:
+                        if record.category == 'cpu_data_init':
+                            current_problem.cpu_data_init_ms = record.duration_ms
+                        elif record.category == 'cpu_reference_gemm':
+                            current_problem.cpu_reference_gemm_ms = record.duration_ms
+                        elif record.category == 'gpu_kernel_execution':
+                            current_problem.gpu_kernel_execution_ms = record.duration_ms
+    except (EOFError, gzip.BadGzipFile, zlib.error) as err:
+        # A truncated or corrupt .gz log (e.g. a run that was killed): keep what was read.
+        print(f"warning: {filepath} ended early ({err}); using the records read before that",
+              file=sys.stderr)
 
     if current_problem:
         problem_timings.append(current_problem)
 
     return timings, problem_timings
+
+
+# ---------------------------------------------------------------------------
+# Tiered (dict) representation of a run's timing results
+# ---------------------------------------------------------------------------
+
+class TimingSeries(list):
+    """A category's timings reduced to (count, total): behaves like the list of durations.
+
+    The report code only ever takes ``len()`` and ``sum()`` of a category's durations, so a
+    series that yields its total once and reports its count as its length is
+    indistinguishable from the full list there. This lets results that were summed across
+    runs go through the unchanged report/hierarchy code.
+    """
+
+    def __init__(self, count: int, total_ms: float):
+        super().__init__([total_ms])
+        self._count = count
+
+    def __len__(self) -> int:
+        return self._count
+
+
+def timings_to_tree(timings: Dict[str, List[float]]) -> dict:
+    """Return a run's timing results as a tiered dict.
+
+    Layout::
+
+        {"phases": {<top-level category>: {"count": int, "total_ms": float,
+                                            "children": {<child category>: {...}, ...}}},
+         "overlapping_totals": {<category>: {"count": int, "total_ms": float}},
+         "unknown_categories": {<category>: {"count": int, "total_ms": float}}}
+
+    ``phases`` mirrors TIMING_HIERARCHY. Totals are the raw sums of the logged durations, so trees
+    from different runs can be added node by node (count and total_ms) and then turned back into
+    timings with ``tree_to_timings``. Categories that were not logged are left out.
+    """
+    def node(name: str, children_dict: Dict) -> Optional[dict]:
+        values = timings.get(name)
+        children = {}
+        for child_name, grandchildren in children_dict.items():
+            child = node(child_name, grandchildren)
+            if child is not None:
+                children[child_name] = child
+        count = len(values) if values else 0
+        if count == 0 and not children:
+            return None
+        return {"count": count, "total_ms": sum(values) if values else 0.0, "children": children}
+
+    phases = {}
+    for phase, children_dict in TIMING_HIERARCHY.items():
+        n = node(phase, children_dict)
+        if n is not None:
+            phases[phase] = n
+
+    def flat(name: str) -> dict:
+        return {"count": len(timings[name]), "total_ms": sum(timings[name])}
+
+    overlapping = {c: flat(c) for c in OVERLAPPING_TOTALS_ORDER if c in timings}
+    unknown = {c: flat(c) for c in sorted(timings)
+               if c not in ALL_KNOWN_CATEGORIES and c not in OVERLAPPING_TOTALS}
+    return {"phases": phases, "overlapping_totals": overlapping, "unknown_categories": unknown}
+
+
+def tree_to_timings(tree: dict) -> Dict[str, TimingSeries]:
+    """Inverse of ``timings_to_tree``: flatten a (possibly summed) tree back into timings."""
+    timings: Dict[str, TimingSeries] = {}
+
+    def walk(name: str, n: dict):
+        if n["count"] > 0:
+            timings[name] = TimingSeries(n["count"], n["total_ms"])
+        for child_name, child in n["children"].items():
+            walk(child_name, child)
+
+    for name, n in tree["phases"].items():
+        walk(name, n)
+    for section in ("overlapping_totals", "unknown_categories"):
+        for name, n in tree[section].items():
+            timings[name] = TimingSeries(n["count"], n["total_ms"])
+    return timings
 
 
 # ---------------------------------------------------------------------------
