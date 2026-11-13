@@ -638,9 +638,15 @@ bool matches(float got, float want, float tolerance)
     return std::fabs(got - want) <= tolerance;
 }
 
+/// Runs every config of @p kernels (default: the shipped catalog) the kernel match admits on
+/// the case, against the CPU reference.
 template <typename T>
-void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infinities = false)
+void runCase(const DeviceCase& deviceCase,
+             Math math = Math::NATIVE,
+             bool infinities = false,
+             const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>* kernels = nullptr)
 {
+    const auto& configs = kernels != nullptr ? *kernels : catalog();
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
     auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
@@ -658,7 +664,7 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
     // Cases only a few configs serve skip before building their (large) tensors.
     if(deviceCase.someArchs
-       && std::none_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+       && std::none_of(configs.begin(), configs.end(), [&](const auto& kernel) {
               return matchesKernel(PACK, fixture.context(), kernel, *bound);
           }))
     {
@@ -705,7 +711,7 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
     const auto& handler = dispatchHandler(PACK);
     int ran = 0;
     int wroteDw = 0;
-    for(const auto& kernel : catalog())
+    for(const auto& kernel : configs)
     {
         if(!matchesKernel(PACK, fixture.context(), kernel, *bound)
            || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
@@ -845,6 +851,59 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvWrw,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
+
+/// gfx950's channels-last ring kept channels-last (loop 1, layout 2) at 128 x 128 tiles, a
+/// geometry the kernel match admits but the catalog does not ship: two k-fragments a wave (w2x4,
+/// 288 accumulators a lane, so it spills) and one (w4x4), 64 positions a step, on 320 channels
+/// (partial k and c tiles: the last tile's second k-wave and last two c-waves hold no channel).
+/// A FlyDSL port of this loop computed wrong dw here; the HIP kernel must not.
+template <typename T>
+void runWideTilesPartialChannels()
+{
+    const std::string atom = std::is_same_v<T, Half> ? "mfma32x16_f16" : "mfma32x16_bf16";
+    const auto base = std::find_if(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+        return kernel.getStringMetadata("atom") == atom
+               && kernel.getIntMetadata("loop") == conv_wrw::LOOP_RING
+               && kernel.getIntMetadata("layout") == conv_wrw::LAYOUT_CHANNELS_LAST_TR
+               && kernel.getIntMetadata("fr") == 3 && kernel.getIntMetadata("s") == 3
+               && kernel.getIntMetadata("dw") == 1 && kernel.getIntMetadata("pb") == 0
+               && kernel.getIntMetadata("math") == 0;
+    });
+    ASSERT_NE(base, catalog().end()) << "no channels-last ring config of " << atom;
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    // (bk, bc, bq, wk, wc)
+    for(const auto& [bk, bc, bq, wk, wc] :
+        std::vector<std::array<int64_t, 5>>{{128, 128, 64, 2, 4}, {128, 128, 64, 4, 4}})
+    {
+        auto kernel = *base;
+        kernel.metadata["bk"] = bk;
+        kernel.metadata["bc"] = bc;
+        kernel.metadata["bq"] = bq;
+        kernel.metadata["wk"] = wk;
+        kernel.metadata["wc"] = wc;
+        kernel.metadata["bpu"] = int64_t{1};
+        kernel.name = "wide." + std::to_string(bk) + "x" + std::to_string(bc) + "x"
+                      + std::to_string(bq) + ".w" + std::to_string(wk) + "x" + std::to_string(wc);
+        kernels.push_back(std::move(kernel));
+    }
+    DeviceCase deviceCase{"WideTiles320",
+                          conv(320, 320, {16, 18}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)};
+    // Admitted on gfx950 only (transpose reads, LDS past 64 KiB): skipped elsewhere.
+    deviceCase.someArchs = true;
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+TEST(TestGpuConvWrwWideTiles, HalfPartialChannelTiles)
+{
+    SKIP_IF_NO_DEVICES();
+    runWideTilesPartialChannels<Half>();
+}
+
+TEST(TestGpuConvWrwWideTiles, BFloat16PartialChannelTiles)
+{
+    SKIP_IF_NO_DEVICES();
+    runWideTilesPartialChannels<BFloat16>();
+}
 
 /// The three-bf16 fp32 configs (TF32 permission): devices with bf16 matrix cores where three
 /// bf16 products beat exact fp32 (gfx90a, gfx942, gfx950, gfx11, gfx12; not gfx908).
