@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE or FlyDSL descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE, FlyDSL or conv descriptor is not pulled" OFF)
 # A TheRock build compiles the committed serialization headers by default.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
     set(_hkp_generate_serialize_default OFF)
@@ -71,6 +71,16 @@ option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 # HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
+# The conv engine group (conv/): HIP convolution kernels compiled at runtime through
+# HIPRTC and served by the kernel ingestor. ON on this UHD training branch so the UHD
+# pipeline's engine images register the group; with HIPDNN_ENABLE_KERNEL_INGESTOR OFF it
+# builds nothing.
+option(HIPKERNELPROVIDER_ENABLE_CONV
+       "Build the conv engine group (naive convolution) for the kernel ingestor" ON)
+# Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
+# targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
+option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
+       "Register the conv RDNA generic-target compile check (CTest label conv_generic_compile)" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -372,9 +382,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) and FlyDSL's
-    # per-target content directories (objects, manifest, KDP) are DVC outputs, each a file
-    # with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each enabled
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models), FlyDSL's
+    # per-target content directories (objects, manifest, KDP) and the conv engine
+    # families' generated instance catalogs (conv/<family>/*.kdp.json) are DVC outputs,
+    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For
+    # each enabled
     # producer, warn when one is missing or differs from its pointer (file size, or folder
     # file count) so the shipped bundle is not silently left out; tests still configure
     # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
@@ -397,6 +409,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
         list(APPEND _dvc_producers FlyDSL)
+    endif()
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        list(APPEND _dvc_producers conv)
     endif()
     foreach(_producer IN LISTS _dvc_producers)
         file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_producer}/*.dvc")
@@ -688,6 +703,16 @@ endforeach()
 set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
     "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
 
+# What src/ gates each conv engine family's registration and device tests on:
+# conv/ConvContent.cmake fills these from the catalogs the production root holds. Reset
+# here so a build with the conv group off carries no stale list.
+set(HIPKERNELPROVIDER_CONV_FAMILIES "" CACHE INTERNAL
+    "Conv engine families whose catalogs this build packs")
+set(HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES "" CACHE INTERNAL
+    "Conv engine families of the source tree whose catalogs this build does not have")
+set(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED FALSE CACHE INTERNAL
+    "Every conv engine family is served")
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
@@ -699,6 +724,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # it OFF the hip producer packs alone, rocKE descriptors prune, and the rocKE
     # wheel toolchain is never asserted. The rocKE block above must still precede
     # this one, since that assertion reads cache variables rocke/ sets.
+    # The conv families whose catalogs were not pulled are withdrawn from every pack
+    # (HKP_WITHDRAWN_FOLDERS), so this must run before hkp_add_packaging() wires them.
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/conv/ConvContent.cmake")
+    endif()
+
     list(APPEND CMAKE_MODULE_PATH
          "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging/cmake")
     include(HkpPackaging)
@@ -833,11 +864,53 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     if(TARGET hkp_packaging_product)
+        # The tree installs wholesale, and install(DIRECTORY) only adds files. A reinstall
+        # into a prefix holding an earlier tree would keep any descriptor this build no
+        # longer produces. A pack that was renamed or split leaves its old file behind, which
+        # declares the same kernel ids as its successor, and the loader then drops the whole
+        # engine. That is how CONV_WRW vanished from a gfx1101 prefix updated across the
+        # wrw pack split.
+        #
+        # So clear, first, exactly the folders this tree is about to install: each
+        # <arch>/<family> directory the build staged (conv/, kpack/, ...). These are
+        # produced whole by this tree's packing and installed right after, so they cannot
+        # hold anything another component installed. Whatever else sits in the prefix
+        # survives, in any install order: other arch or family folders, and other
+        # providers. The suffix check keeps an empty variable from widening the removal.
+        install(CODE "
+            set(_hkp_src \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}\")
+            set(_hkp_tree \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}\")
+            if(_hkp_tree MATCHES \"/arch_content/hip-kernel-provider$\" AND IS_DIRECTORY \"\${_hkp_tree}\")
+                file(GLOB _hkp_archs RELATIVE \"\${_hkp_src}\" \"\${_hkp_src}/*\")
+                foreach(_hkp_arch IN LISTS _hkp_archs)
+                    if(NOT IS_DIRECTORY \"\${_hkp_src}/\${_hkp_arch}\")
+                        continue()
+                    endif()
+                    file(GLOB _hkp_families RELATIVE \"\${_hkp_src}/\${_hkp_arch}\" \"\${_hkp_src}/\${_hkp_arch}/*\")
+                    foreach(_hkp_family IN LISTS _hkp_families)
+                        set(_hkp_old \"\${_hkp_tree}/\${_hkp_arch}/\${_hkp_family}\")
+                        if(IS_DIRECTORY \"\${_hkp_src}/\${_hkp_arch}/\${_hkp_family}\" AND IS_DIRECTORY \"\${_hkp_old}\")
+                            message(STATUS \"Clearing the earlier descriptors: \${_hkp_old}\")
+                            file(REMOVE_RECURSE \"\${_hkp_old}\")
+                        endif()
+                    endforeach()
+                endforeach()
+            endif()")
         # cmake-lint: disable=E1122
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
                 PATTERN "*.provenance.json.gz" EXCLUDE)
+        # UHD training branch only: the UHD pipeline finds an engine's per-arch root as the
+        # directory holding kpack/, and a shard that packs only embedded_source kernels (the
+        # conv group) writes no archive and so no kpack/. Give each installed shard an empty
+        # one; the loader walks it and finds nothing.
+        install(CODE "
+            file(GLOB _hkp_archs RELATIVE \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}\"
+                 \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/gfx*\")
+            foreach(_hkp_arch IN LISTS _hkp_archs)
+                file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/\${_hkp_arch}/kpack\")
+            endforeach()")
 
         # Same relative layout as the runtime tree, so a reader given this folder as its
         # provenance root finds each descriptor's sidecar at the descriptor's own relative

@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "id": "965f0e4d-9f29-5625-a68e-114f31cfe090",
+  "name": "hipkernel:CONV_IGEMM_FWD",
+  "graph_match": {
+    "native": "hipkernel.conv_igemm_fwd.graph_match"
+  },
+  "metadata": "5e114dbb-f0d3-59bf-b91b-7f3629b724db",
+  "knobs": [
+    "atom",
+    "math",
+    "bm",
+    "bn",
+    "bk",
+    "wm",
+    "wn",
+    "threads",
+    "vec",
+    "stages",
+    "xcd",
+    "halo",
+    "wdirect",
+    "pack",
+    "cf",
+    "swz",
+    "dma",
+    "fuse",
+    "large"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

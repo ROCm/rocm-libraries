@@ -26,6 +26,19 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
+# rocBLAS engines: ROCBLAS_MATMUL_ENGINE now, explicit-GEMM convolution later. OFF while the
+# provider grows from a hipBLASLt wrapper into a BLAS provider.
+option(HIPBLASLTPROVIDER_ENABLE_ROCBLAS "Build the rocBLAS engines" OFF)
+# hipBLASLt is not built for every target (TheRock excludes it for gfx906 and gfx103X), so a
+# rocBLAS-only provider must build without it.
+option(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT "Build the hipBLASLt engines" ON)
+# Explicit-GEMM convolution engines, one per enabled backend: HIPBLASLT_CONV_ENGINE and
+# ROCBLAS_CONV_ENGINE. OFF while they are built out.
+option(HIPBLASLTPROVIDER_ENABLE_CONV "Build the explicit-GEMM convolution engines" OFF)
+if(NOT HIPBLASLTPROVIDER_ENABLE_HIPBLASLT AND NOT HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    message(FATAL_ERROR "hipblaslt-provider: enable HIPBLASLTPROVIDER_ENABLE_HIPBLASLT, "
+                        "HIPBLASLTPROVIDER_ENABLE_ROCBLAS or both; with neither it serves nothing")
+endif()
 option(HIPBLASLTPROVIDER_ENABLE_MX_GEMM
     "Enable MX (microscaling) data-type support for GEMM" OFF
 )
@@ -167,27 +180,86 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-find_package(hipblaslt CONFIG REQUIRED)
+if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
+    find_package(hipblaslt CONFIG REQUIRED)
+endif()
+if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    find_package(rocblas CONFIG REQUIRED)
+endif()
 
 add_library(
     hipblaslt_plugin_private
-    engines/HipblasltEngine.cpp
+    engines/PlanBuilderEngine.cpp
     EngineManager.cpp
     HipblasltHandleFactory.cpp
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
-    HipblasltUtils.cpp
-    engines/plans/HipblasltMatmulPlan.cpp
-    engines/plans/HipblasltMatmulPlanBuilder.cpp
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
-    HipblasltMatmulDesc.cpp
-    HipblasltMatrixLayout.cpp
-    HipblasltMatrixTransformDesc.cpp
+)
+if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
+    target_sources(hipblaslt_plugin_private PRIVATE
+        HipblasltUtils.cpp
+        engines/plans/HipblasltMatmulPlan.cpp
+        engines/plans/HipblasltMatmulPlanBuilder.cpp
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+        HipblasltMatmulDesc.cpp
+        HipblasltMatrixLayout.cpp
+        HipblasltMatrixTransformDesc.cpp
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/hipblaslt/HipblasltGemmPlan.cpp>
+    )
+    target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_HIPBLASLT=1)
+endif()
+target_sources(hipblaslt_plugin_private PRIVATE
+    common/GemmFormulation.cpp
+    common/MatmulProblem.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvProblem.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvGemmFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvRepackFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvGemmPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvRepackPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/BenchmarkedPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/RepackProgram.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemmPlan.cpp>
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    target_link_libraries(hipblaslt_plugin_private PUBLIC roc::rocblas)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_ROCBLAS=1)
+endif()
+if(HIPBLASLTPROVIDER_ENABLE_CONV)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_CONV=1)
+    # The convolution repack kernels are compiled at runtime by HIPRTC from source embedded in
+    # the plugin: kernels/ConvRepack.cpp, the argument header it shares with the host, and the
+    # disjoint-tap run kernels' header (its own literal: each stays under 64 KiB).
+    find_package(hiprtc REQUIRED)
+    target_link_libraries(hipblaslt_plugin_private PUBLIC hiprtc::hiprtc)
+    set(_conv_repack_files
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackDisjoint.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in"
+    )
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_conv_repack_files})
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in" _conv_repack_header)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp" _conv_repack_source)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h" _conv_repack_args)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackDisjoint.h" _conv_repack_disjoint)
+    # Plain replacement rather than configure_file: the sources are not CMake templates.
+    string(REPLACE "@CONV_REPACK_SOURCE@" "${_conv_repack_source}" _conv_repack_header "${_conv_repack_header}")
+    string(REPLACE "@CONV_REPACK_ARGS_SOURCE@" "${_conv_repack_args}" _conv_repack_header "${_conv_repack_header}")
+    string(REPLACE "@CONV_REPACK_DISJOINT_SOURCE@" "${_conv_repack_disjoint}" _conv_repack_header "${_conv_repack_header}")
+    # Written through a COPYONLY configure_file, which leaves an unchanged output untouched, so
+    # an unchanged kernel recompiles nothing.
+    set(_conv_repack_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/kernels/ConvRepackSources.hpp")
+    file(WRITE "${_conv_repack_generated}.tmp" "${_conv_repack_header}")
+    configure_file("${_conv_repack_generated}.tmp" "${_conv_repack_generated}" COPYONLY)
+    target_include_directories(hipblaslt_plugin_private PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+endif()
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
+target_link_libraries(hipblaslt_plugin_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 clang_tidy_check(hipblaslt_plugin_private)

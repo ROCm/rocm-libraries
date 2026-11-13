@@ -21,6 +21,7 @@ void HipblasltHandleFactory::createHipblasltHandle(hipdnnEnginePluginHandle_t* h
 
     *handle = new HipdnnEnginePluginHandle();
 
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     hipblasStatus_t const status = hipblasLtCreate(&(*handle)->hipblasltHandle);
 
     if(status != HIPBLAS_STATUS_SUCCESS)
@@ -30,6 +31,7 @@ void HipblasltHandleFactory::createHipblasltHandle(hipdnnEnginePluginHandle_t* h
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                     "Failed to create Hipblaslt handle");
     }
+#endif
 }
 
 void HipblasltHandleFactory::destroyHipblasltHandle(hipdnnEnginePluginHandle_t handle)
@@ -39,6 +41,7 @@ void HipblasltHandleFactory::destroyHipblasltHandle(hipdnnEnginePluginHandle_t h
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, "handle is null");
     }
 
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     hipblasStatus_t const status = hipblasLtDestroy(handle->hipblasltHandle);
 
     if(status != HIPBLAS_STATUS_SUCCESS)
@@ -46,6 +49,7 @@ void HipblasltHandleFactory::destroyHipblasltHandle(hipdnnEnginePluginHandle_t h
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                     "Failed to destroy Hipblaslt handle");
     }
+#endif
 }
 
 } // namespace hipblaslt_plugin

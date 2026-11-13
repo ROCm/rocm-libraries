@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "id": "035d3bf1-2851-5015-9c75-f2613b7d4071",
+  "name": "hipkernel:CONV_GROUP_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_group_bwd.graph_match"
+  },
+  "metadata": "828aab00-518d-5254-aa31-5f5b2635c782",
+  "knobs": [
+    "atom",
+    "t",
+    "r",
+    "s",
+    "stride",
+    "th",
+    "wp",
+    "cb",
+    "cf",
+    "cg",
+    "oc",
+    "px",
+    "pf",
+    "nbi",
+    "nbo",
+    "tw",
+    "bpu",
+    "math"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

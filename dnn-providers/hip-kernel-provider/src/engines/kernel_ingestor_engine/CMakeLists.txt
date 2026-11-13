@@ -233,3 +233,164 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()
+
+# The conv engine group (descriptors/conv/): its packs ride their own gate on top of the
+# ingestor's. Its kernels are compiled at runtime through HIPRTC, so the plugin embeds each
+# source under the key its descriptors name -- the path relative to the descriptor, beside
+# which the source lives -- and each header under its bare file name. The shipped root's
+# conv/ family folder is packed only while the same option is ON (HKP_DESCRIPTOR_FAMILIES).
+if(HIPKERNELPROVIDER_ENABLE_CONV)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuWrwNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseRowsProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseMfmaProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNchwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWrwNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWrwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvStemBwdProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDirectNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvSmallcNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvFftNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvFftProblem.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
+    # One definition per served family (conv/ConvContent.cmake): IngestorPacks.cpp
+    # registers a family's native pack only when its catalogs ship in this build. The
+    # pack sources above still compile for every family, since families share them.
+    foreach(_conv_family IN LISTS HIPKERNELPROVIDER_CONV_FAMILIES)
+        string(TOUPPER "${_conv_family}" _conv_family_upper)
+        target_compile_definitions(hip_kernel_provider_impl
+            PUBLIC HIPDNN_ENGINE_CONV_${_conv_family_upper}=1)
+    endforeach()
+    include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
+    # Embed from the root the production pack packs, so each source sits beside the
+    # descriptor that names it (hkp_verify_embedded_sources). A production root overridden
+    # to a copy holding conv/ (the UHD pipeline's image build) supplies the sources; one
+    # without conv/ falls back to the in-tree folder.
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+       AND IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/conv")
+        set(_hkp_conv_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/conv")
+    else()
+        set(_hkp_conv_root "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv")
+    endif()
+    set(HKP_CONV_KERNEL_SOURCES
+        "${_hkp_conv_root}/naive/kernels/ConvNaive.cpp"
+        "${_hkp_conv_root}/naive/kernels/ConvNaiveArgs.h"
+        "${_hkp_conv_root}/depthwise_valu/kernels/ConvDepthwiseValu.cpp"
+        "${_hkp_conv_root}/depthwise_valu/kernels/ConvDepthwiseValuArgs.h"
+        "${_hkp_conv_root}/depthwise_valu/kernels/ConvDepthwiseValuCores.h"
+        "${_hkp_conv_root}/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrw.cpp"
+        "${_hkp_conv_root}/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
+        "${_hkp_conv_root}/depthwise_valu_wrw/kernels/ConvDepthwiseHankelWrw.h"
+        "${_hkp_conv_root}/depthwise_rows/kernels/ConvDepthwiseRows.cpp"
+        "${_hkp_conv_root}/depthwise_rows/kernels/ConvDepthwiseRowsCores.h"
+        "${_hkp_conv_root}/depthwise_mfma/kernels/ConvDepthwiseMfma.cpp"
+        "${_hkp_conv_root}/depthwise_mfma/kernels/ConvDepthwiseMfmaArgs.h"
+        "${_hkp_conv_root}/group/kernels/ConvGroup.cpp"
+        "${_hkp_conv_root}/group/kernels/ConvGroupArgs.h"
+        "${_hkp_conv_root}/group/kernels/ConvGroupCore.h"
+        "${_hkp_conv_root}/igemm/kernels/ConvIgemm.cpp"
+        "${_hkp_conv_root}/igemm/kernels/ConvIgemmArgs.h"
+        "${_hkp_conv_root}/igemm/kernels/ConvIgemmCore.h"
+        "${_hkp_conv_root}/igemm/kernels/ConvArchFamily.h"
+        "${_hkp_conv_root}/igemm_nchw/kernels/ConvIgemmNchw.cpp"
+        "${_hkp_conv_root}/igemm_nchw/kernels/ConvIgemmNchwArgs.h"
+        "${_hkp_conv_root}/igemm_nchw/kernels/ConvIgemmNchwCore.h"
+        "${_hkp_conv_root}/wrw/kernels/ConvWrw.cpp"
+        "${_hkp_conv_root}/wrw/kernels/ConvWrwArgs.h"
+        "${_hkp_conv_root}/wrw/kernels/ConvWrwCore.h"
+        "${_hkp_conv_root}/wrw/kernels/ConvWrwDirect.h"
+        "${_hkp_conv_root}/wrw/kernels/ConvWrwGeom.h"
+        "${_hkp_conv_root}/stem_bwd/kernels/ConvStemBwd.cpp"
+        "${_hkp_conv_root}/stem_bwd/kernels/ConvStemBwdArgs.h"
+        "${_hkp_conv_root}/stem_bwd/kernels/ConvStemBwdCore.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinograd.cpp"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradArgs.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradCore.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradFused.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradWmma.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradWmmaReg.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradSreg.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradWmmaCoop.h"
+        "${_hkp_conv_root}/winograd/kernels/ConvWinogradWrw.h"
+        "${_hkp_conv_root}/direct/kernels/ConvDirect.cpp"
+        "${_hkp_conv_root}/direct/kernels/ConvDirectArgs.h"
+        "${_hkp_conv_root}/direct/kernels/ConvDirectCore.h"
+        "${_hkp_conv_root}/direct/kernels/ConvDirectRows.h"
+        "${_hkp_conv_root}/smallc/kernels/ConvSmallc.cpp"
+        "${_hkp_conv_root}/smallc/kernels/ConvSmallcArgs.h"
+        "${_hkp_conv_root}/smallc/kernels/ConvSmallcCore.h"
+        "${_hkp_conv_root}/fft/kernels/ConvFft.cpp"
+        "${_hkp_conv_root}/fft/kernels/ConvFftArgs.h"
+        "${_hkp_conv_root}/fft/kernels/ConvFftCore.h"
+        "${_hkp_conv_root}/fft/kernels/ConvFftTwiddles.h"
+        CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
+    set(HKP_CONV_KERNEL_KEYS
+        kernels/ConvNaive.cpp
+        ConvNaiveArgs.h
+        kernels/ConvDepthwiseValu.cpp
+        ConvDepthwiseValuArgs.h
+        ConvDepthwiseValuCores.h
+        kernels/ConvDepthwiseValuWrw.cpp
+        ConvDepthwiseValuWrwArgs.h
+        ConvDepthwiseHankelWrw.h
+        kernels/ConvDepthwiseRows.cpp
+        ConvDepthwiseRowsCores.h
+        kernels/ConvDepthwiseMfma.cpp
+        ConvDepthwiseMfmaArgs.h
+        kernels/ConvGroup.cpp
+        ConvGroupArgs.h
+        ConvGroupCore.h
+        kernels/ConvIgemm.cpp
+        ConvIgemmArgs.h
+        ConvIgemmCore.h
+        ConvArchFamily.h
+        kernels/ConvIgemmNchw.cpp
+        ConvIgemmNchwArgs.h
+        ConvIgemmNchwCore.h
+        kernels/ConvWrw.cpp
+        ConvWrwArgs.h
+        ConvWrwCore.h
+        ConvWrwDirect.h
+        ConvWrwGeom.h
+        kernels/ConvStemBwd.cpp
+        ConvStemBwdArgs.h
+        ConvStemBwdCore.h
+        kernels/ConvWinograd.cpp
+        ConvWinogradArgs.h
+        ConvWinogradCore.h
+        ConvWinogradFused.h
+        ConvWinogradWmma.h
+        ConvWinogradWmmaReg.h
+        ConvWinogradSreg.h
+        ConvWinogradWmmaCoop.h
+        ConvWinogradWrw.h
+        kernels/ConvDirect.cpp
+        ConvDirectArgs.h
+        ConvDirectCore.h
+        ConvDirectRows.h
+        kernels/ConvSmallc.cpp
+        ConvSmallcArgs.h
+        ConvSmallcCore.h
+        kernels/ConvFft.cpp
+        ConvFftArgs.h
+        ConvFftCore.h
+        ConvFftTwiddles.h
+        CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_impl
+        FILES ${HKP_CONV_KERNEL_SOURCES}
+        KEYS ${HKP_CONV_KERNEL_KEYS}
+    )
+endif()

@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "id": "aba729a5-4af9-5967-a66e-9581c18ead4c",
+  "name": "conv_direct config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "kind",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "archs",
+      "type": "string"
+    },
+    {
+      "name": "atom_id",
+      "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
+    },
+    {
+      "name": "kd",
+      "type": "int"
+    },
+    {
+      "name": "r",
+      "type": "int"
+    },
+    {
+      "name": "s",
+      "type": "int"
+    },
+    {
+      "name": "bm",
+      "type": "int"
+    },
+    {
+      "name": "bn",
+      "type": "int"
+    },
+    {
+      "name": "bc",
+      "type": "int"
+    },
+    {
+      "name": "wm",
+      "type": "int"
+    },
+    {
+      "name": "wn",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    },
+    {
+      "name": "ring",
+      "type": "int"
+    },
+    {
+      "name": "bl",
+      "type": "int"
+    },
+    {
+      "name": "split",
+      "type": "int"
+    },
+    {
+      "name": "tm",
+      "type": "int"
+    },
+    {
+      "name": "tn",
+      "type": "int"
+    },
+    {
+      "name": "nt",
+      "type": "int"
+    },
+    {
+      "name": "threads",
+      "type": "int"
+    },
+    {
+      "name": "pipe",
+      "type": "int"
+    },
+    {
+      "name": "rows",
+      "type": "int"
+    },
+    {
+      "name": "pw",
+      "type": "int"
+    },
+    {
+      "name": "fn",
+      "type": "int"
+    },
+    {
+      "name": "wp",
+      "type": "int"
+    },
+    {
+      "name": "wq",
+      "type": "int"
+    },
+    {
+      "name": "wk",
+      "type": "int"
+    },
+    {
+      "name": "pp",
+      "type": "int"
+    },
+    {
+      "name": "epi",
+      "type": "int"
+    }
+  ]
+}

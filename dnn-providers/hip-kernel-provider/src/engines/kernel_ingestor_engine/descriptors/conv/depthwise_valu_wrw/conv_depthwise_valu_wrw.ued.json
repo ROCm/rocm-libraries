@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "5462bae3-cc0b-5f05-a9e7-1275528cfe71",
+  "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
+  "graph_match": {
+    "native": "hipkernel.conv_depthwise_valu_wrw.graph_match"
+  },
+  "metadata": "6f051569-85ed-51fe-9f62-f7aa8406ab2f",
+  "knobs": [
+    "variant",
+    "q",
+    "g",
+    "nwg",
+    "bpc",
+    "mult"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

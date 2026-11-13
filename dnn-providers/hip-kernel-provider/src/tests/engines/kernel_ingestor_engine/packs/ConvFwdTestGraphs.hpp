@@ -59,22 +59,23 @@ constexpr int64_t CONV_Y_UID = 3;
  *        dtype-mismatch refusal.
  * @param xStridesOverride Overrides x's strides away from packed row-major, for the
  *        non-packed-layout refusal; the kernel takes no strides of its own.
+ * @param computeType Overrides the node's compute type away from @p dataType.
  */
-inline flatbuffers::FlatBufferBuilder
-    buildConvFwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-                      = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                      hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode
-                      = hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION,
-                      const std::vector<int64_t>& stride = {1, 1},
-                      const std::vector<int64_t>& dilation = {1, 1},
-                      const std::vector<int64_t>& prePadding = {0, 0},
-                      const std::vector<int64_t>& postPadding = {0, 0},
-                      const std::vector<int64_t>& xDims = {1, 1, 3, 3},
-                      const std::optional<std::vector<int64_t>>& wDims = std::nullopt,
-                      const std::optional<std::vector<int64_t>>& yDims = std::nullopt,
-                      std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> wDataType
-                      = std::nullopt,
-                      const std::optional<std::vector<int64_t>>& xStridesOverride = std::nullopt)
+inline flatbuffers::FlatBufferBuilder buildConvFwdGraph(
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode
+    = hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION,
+    const std::vector<int64_t>& stride = {1, 1},
+    const std::vector<int64_t>& dilation = {1, 1},
+    const std::vector<int64_t>& prePadding = {0, 0},
+    const std::vector<int64_t>& postPadding = {0, 0},
+    const std::vector<int64_t>& xDims = {1, 1, 3, 3},
+    const std::optional<std::vector<int64_t>>& wDims = std::nullopt,
+    const std::optional<std::vector<int64_t>>& yDims = std::nullopt,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> wDataType = std::nullopt,
+    const std::optional<std::vector<int64_t>>& xStridesOverride = std::nullopt,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> computeType = std::nullopt)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -119,7 +120,7 @@ inline flatbuffers::FlatBufferBuilder
     nodes.push_back(
         data_objects::CreateNodeDirect(builder,
                                        "conv_fwd",
-                                       dataType,
+                                       computeType.value_or(dataType),
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        attributes.Union()));
 

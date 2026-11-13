@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "cf726a1f-efa4-5e54-9ed1-49085f943f0a",
+  "name": "kernel direction, dtype, filter, atom (device, ship list) and channel vector match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_direct.kernel_match"
+}

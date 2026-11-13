@@ -31,7 +31,8 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # every root is packed with that folder excluded. A new family is one entry here.
 set(HKP_DESCRIPTOR_FAMILIES
     "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
-    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL")
+    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL"
+    "conv=HIPKERNELPROVIDER_ENABLE_CONV")
 
 include(KpackPython)
 
@@ -439,8 +440,10 @@ endfunction()
 #   does, and a KDP left with no UKD does not ship.
 #
 #   EXCLUDE_FOLDERS names folders of the root the pack does not read at all: the
-#   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF (top-level folders), and for
-#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES (`/`-separated paths).
+#   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF (top-level folders), the
+#   `/`-separated subfolders in the HKP_WITHDRAWN_FOLDERS global property (a conv family
+#   whose DVC-stored catalogs were not pulled), and for the production root the bundles of
+#   HKP_PRODUCT_EXCLUDED_BUNDLES (`/`-separated paths).
 #
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
@@ -1963,6 +1966,11 @@ function(hkp_add_packaging)
             "the hip producer only")
     endif()
     _hkp_disabled_families(_exclude_folders)
+    # Folders below a family that the family's own configure withdrew from this build:
+    # conv/ConvContent.cmake withdraws conv/<family> when the family's DVC-stored
+    # catalogs were not pulled, so its engine descriptors do not ship without kernels.
+    get_property(_withdrawn_folders GLOBAL PROPERTY HKP_WITHDRAWN_FOLDERS)
+    list(APPEND _exclude_folders ${_withdrawn_folders})
     list(APPEND _root_args EXCLUDE_FOLDERS ${_exclude_folders})
 
     _hkp_resolve_product_pack_jobs(_product_jobs_args)

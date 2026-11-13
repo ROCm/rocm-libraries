@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "id": "abbafa58-214d-59ae-a968-0bec9aa15c9c",
+  "name": "hipkernel:CONV_STEM_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_stem_bwd.graph_match"
+  },
+  "metadata": "60108cd8-db86-5c35-bc1d-827c7a5d3153",
+  "knobs": [
+    "atom_id",
+    "layout",
+    "vec",
+    "u",
+    "v",
+    "nb",
+    "kc",
+    "th",
+    "fm",
+    "sh",
+    "sw",
+    "ft",
+    "sd"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

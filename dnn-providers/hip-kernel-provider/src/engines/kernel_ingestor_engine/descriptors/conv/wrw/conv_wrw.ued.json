@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "id": "3b9b941c-fca6-5028-b311-9b0cca026c2b",
+  "name": "hipkernel:CONV_WRW",
+  "graph_match": {
+    "native": "hipkernel.conv_wrw.graph_match"
+  },
+  "metadata": "f3f96d08-aa49-5cd8-a02f-49c7e7b96385",
+  "knobs": [
+    "atom_id",
+    "loop",
+    "layout",
+    "bk",
+    "bc",
+    "bq",
+    "fr",
+    "s",
+    "sw",
+    "dw",
+    "wk",
+    "wc",
+    "tk",
+    "tc",
+    "vec",
+    "xcd",
+    "align",
+    "ns",
+    "bpu",
+    "wq",
+    "dws",
+    "pb",
+    "math"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

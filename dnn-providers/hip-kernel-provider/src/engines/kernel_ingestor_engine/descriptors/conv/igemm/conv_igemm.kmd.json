@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "id": "5e114dbb-f0d3-59bf-b91b-7f3629b724db",
+  "name": "conv_igemm config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "math",
+      "type": "string"
+    },
+    {
+      "name": "bm",
+      "type": "int"
+    },
+    {
+      "name": "bn",
+      "type": "int"
+    },
+    {
+      "name": "bk",
+      "type": "int"
+    },
+    {
+      "name": "wm",
+      "type": "int"
+    },
+    {
+      "name": "wn",
+      "type": "int"
+    },
+    {
+      "name": "threads",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    },
+    {
+      "name": "stages",
+      "type": "int"
+    },
+    {
+      "name": "xcd",
+      "type": "int"
+    },
+    {
+      "name": "halo",
+      "type": "int"
+    },
+    {
+      "name": "wdirect",
+      "type": "int"
+    },
+    {
+      "name": "pack",
+      "type": "int"
+    },
+    {
+      "name": "cf",
+      "type": "int"
+    },
+    {
+      "name": "swz",
+      "type": "int"
+    },
+    {
+      "name": "dma",
+      "type": "int"
+    },
+    {
+      "name": "fuse",
+      "type": "int"
+    },
+    {
+      "name": "large",
+      "type": "int"
+    }
+  ]
+}

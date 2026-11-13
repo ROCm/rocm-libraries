@@ -20,7 +20,9 @@ protected:
 
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, DefaultConstruction)
 {
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     EXPECT_EQ(_handle->hipblasltHandle, nullptr);
+#endif
     EXPECT_EQ(_handle->hipblasltContainer, nullptr);
     EXPECT_EQ(_handle->getStream(), nullptr);
 }

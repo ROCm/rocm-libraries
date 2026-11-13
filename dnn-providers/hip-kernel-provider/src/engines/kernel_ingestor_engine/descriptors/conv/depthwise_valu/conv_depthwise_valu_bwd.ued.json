@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "id": "89ac7ece-615a-5ade-a859-e738f6ee6820",
+  "name": "hipkernel:CONV_DEPTHWISE_VALU_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_depthwise_valu_bwd.graph_match"
+  },
+  "metadata": "12964e65-c44a-5e56-a2d0-2f18b2d5908c",
+  "knobs": [
+    "variant",
+    "kd",
+    "kh",
+    "kw",
+    "wstrip",
+    "th",
+    "tw",
+    "bd",
+    "bh",
+    "bw",
+    "bk",
+    "rd",
+    "rh",
+    "rw",
+    "stride",
+    "vec"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

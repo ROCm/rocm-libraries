@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "a89d7e1e-767e-485a-9164-7a2fe03ded2a",
+  "name": "hipkernel:CONV_NAIVE_WRW",
+  "graph_match": {
+    "native": "hipkernel.conv_naive_wrw.graph_match"
+  },
+  "metadata": "93087dd4-7d8b-43eb-b783-32c178393589",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

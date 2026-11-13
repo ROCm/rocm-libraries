@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "id": "48457d5b-f0a1-552a-a8ef-f732af8052bd",
+  "name": "conv_winograd config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "m",
+      "type": "int"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "arch",
+      "type": "string"
+    },
+    {
+      "name": "llc",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bm",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bn",
+      "type": "int"
+    },
+    {
+      "name": "gemm_bk",
+      "type": "int"
+    },
+    {
+      "name": "bk",
+      "type": "int"
+    },
+    {
+      "name": "bt",
+      "type": "int"
+    },
+    {
+      "name": "ccv",
+      "type": "int"
+    },
+    {
+      "name": "tm",
+      "type": "int"
+    },
+    {
+      "name": "tn",
+      "type": "int"
+    },
+    {
+      "name": "waves",
+      "type": "int"
+    },
+    {
+      "name": "bins",
+      "type": "int"
+    },
+    {
+      "name": "f16math",
+      "type": "int"
+    },
+    {
+      "name": "pf",
+      "type": "int"
+    }
+  ]
+}

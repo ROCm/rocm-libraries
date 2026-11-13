@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "id": "d8d82507-3ff6-5011-9f2d-a0557da9f59b",
+  "name": "hipkernel:CONV_DIRECT_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_direct_bwd.graph_match"
+  },
+  "metadata": "aba729a5-4af9-5967-a66e-9581c18ead4c",
+  "knobs": [
+    "atom_id",
+    "math",
+    "kd",
+    "r",
+    "s",
+    "bm",
+    "bn",
+    "bc",
+    "wm",
+    "wn",
+    "vec",
+    "ring",
+    "bl",
+    "split",
+    "tm",
+    "tn",
+    "nt",
+    "threads",
+    "pipe",
+    "rows",
+    "pw",
+    "fn",
+    "wp",
+    "wq",
+    "wk",
+    "pp",
+    "epi"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

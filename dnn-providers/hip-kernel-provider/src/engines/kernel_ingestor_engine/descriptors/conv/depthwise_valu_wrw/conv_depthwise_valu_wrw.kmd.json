@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "6f051569-85ed-51fe-9f62-f7aa8406ab2f",
+  "name": "conv_depthwise_valu_wrw variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "kd",
+      "type": "int"
+    },
+    {
+      "name": "kh",
+      "type": "int"
+    },
+    {
+      "name": "kw",
+      "type": "int"
+    },
+    {
+      "name": "q",
+      "type": "int"
+    },
+    {
+      "name": "g",
+      "type": "int"
+    },
+    {
+      "name": "nwg",
+      "type": "int"
+    },
+    {
+      "name": "bpc",
+      "type": "int"
+    },
+    {
+      "name": "mult",
+      "type": "int"
+    }
+  ]
+}

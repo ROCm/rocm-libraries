@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "bba1c591-338e-5461-908b-9cba0a054fb4",
+  "name": "conv_depthwise_rows dispatch",
+  "dispatch_symbol": "hipkernel.conv_depthwise_rows.dispatch"
+}

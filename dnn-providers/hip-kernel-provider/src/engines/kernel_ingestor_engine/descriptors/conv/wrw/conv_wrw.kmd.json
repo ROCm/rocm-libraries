@@ -1,0 +1,116 @@
+{
+  "version": "1.0",
+  "id": "f3f96d08-aa49-5cd8-a02f-49c7e7b96385",
+  "name": "conv_wrw config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "atom_id",
+      "type": "int"
+    },
+    {
+      "name": "loop",
+      "type": "int"
+    },
+    {
+      "name": "layout",
+      "type": "int"
+    },
+    {
+      "name": "bk",
+      "type": "int"
+    },
+    {
+      "name": "bc",
+      "type": "int"
+    },
+    {
+      "name": "bq",
+      "type": "int"
+    },
+    {
+      "name": "fr",
+      "type": "int"
+    },
+    {
+      "name": "s",
+      "type": "int"
+    },
+    {
+      "name": "sw",
+      "type": "int"
+    },
+    {
+      "name": "dw",
+      "type": "int"
+    },
+    {
+      "name": "wk",
+      "type": "int"
+    },
+    {
+      "name": "wc",
+      "type": "int"
+    },
+    {
+      "name": "tk",
+      "type": "int"
+    },
+    {
+      "name": "tc",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    },
+    {
+      "name": "xcd",
+      "type": "int"
+    },
+    {
+      "name": "align",
+      "type": "int"
+    },
+    {
+      "name": "ns",
+      "type": "int"
+    },
+    {
+      "name": "bpu",
+      "type": "int"
+    },
+    {
+      "name": "wq",
+      "type": "int"
+    },
+    {
+      "name": "dws",
+      "type": "int"
+    },
+    {
+      "name": "pb",
+      "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
+    },
+    {
+      "name": "spec",
+      "type": "string",
+      "default_value": ""
+    }
+  ]
+}

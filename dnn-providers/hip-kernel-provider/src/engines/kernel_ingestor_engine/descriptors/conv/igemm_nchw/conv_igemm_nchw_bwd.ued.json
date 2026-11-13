@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "id": "c0ba21a8-0fe2-5d0b-9c09-fe129e540ebc",
+  "name": "hipkernel:CONV_IGEMM_NCHW_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_igemm_nchw_bwd.graph_match"
+  },
+  "metadata": "00c14ad8-20af-5a91-b1b9-90dc2576cafa",
+  "knobs": [
+    "atom_id",
+    "bmq",
+    "bn",
+    "bk",
+    "wm",
+    "wn",
+    "wp",
+    "tq",
+    "tc",
+    "vec",
+    "stride",
+    "taps",
+    "stages",
+    "flat",
+    "halo",
+    "math"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

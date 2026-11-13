@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "d674f794-9b4f-5cc8-b8bc-6a72aa7e2eab",
+  "name": "kernel direction, dtype, atom (device), filter (depth, rows, columns), stride, channel tile and LDS match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_group.kernel_match"
+}

@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "id": "12964e65-c44a-5e56-a2d0-2f18b2d5908c",
+  "name": "conv_depthwise_valu variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "ndims",
+      "type": "int"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "kd",
+      "type": "int"
+    },
+    {
+      "name": "kh",
+      "type": "int"
+    },
+    {
+      "name": "kw",
+      "type": "int"
+    },
+    {
+      "name": "wstrip",
+      "type": "int"
+    },
+    {
+      "name": "th",
+      "type": "int"
+    },
+    {
+      "name": "tw",
+      "type": "int"
+    },
+    {
+      "name": "bd",
+      "type": "int"
+    },
+    {
+      "name": "bh",
+      "type": "int"
+    },
+    {
+      "name": "bw",
+      "type": "int"
+    },
+    {
+      "name": "bk",
+      "type": "int"
+    },
+    {
+      "name": "rd",
+      "type": "int"
+    },
+    {
+      "name": "rh",
+      "type": "int"
+    },
+    {
+      "name": "rw",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    }
+  ]
+}

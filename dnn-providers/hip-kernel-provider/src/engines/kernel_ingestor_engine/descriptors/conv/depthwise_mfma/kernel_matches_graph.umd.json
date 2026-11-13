@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "8d9dc150-9c41-5d81-87d1-2ee4e3175dec",
+  "name": "kernel dtype, direction, layout, MFMA (device), filter, waves, depth, fold, rows and LDS match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_depthwise_mfma.kernel_match"
+}

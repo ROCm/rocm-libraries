@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include <HipblasltPlugin.hpp>
@@ -14,6 +17,8 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "engines/conv/ConvReducedPrecision.hpp"
+#include "engines/conv/ConvTf32.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
@@ -35,20 +40,59 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsNull)
 
 TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
 {
-    std::array<int64_t, 1> engineIds = {0};
+    // One engine per enabled backend.
+    std::vector<int64_t> expected;
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+    expected.push_back(HIPBLASLT_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    expected.push_back(ROCBLAS_MATMUL_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+    // The TF32 twins only behind their temporary switch.
+    const bool tf32Engines = hipblaslt_plugin::convTf32EnginesEnabled();
+    const bool rprEngines = hipblaslt_plugin::convReducedPrecisionEnginesEnabled();
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+    expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
+    if(tf32Engines)
+    {
+        expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
+    }
+    if(rprEngines)
+    {
+        expected.push_back(HIPBLASLT_CONV_RPR_ENGINE_ID);
+    }
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    expected.push_back(ROCBLAS_CONV_ENGINE_ID);
+    if(tf32Engines)
+    {
+        expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
+    }
+    if(rprEngines)
+    {
+        expected.push_back(ROCBLAS_CONV_RPR_ENGINE_ID);
+    }
+#endif
+#endif
+
+    std::vector<int64_t> engineIds(expected.size(), 0);
     uint32_t numEngines = 0;
 
-    // get max 1 engine
-    auto status = hipdnnEnginePluginGetAllEngineIdsImpl(engineIds.data(), 1, &numEngines);
+    auto status = hipdnnEnginePluginGetAllEngineIdsImpl(
+        engineIds.data(), static_cast<uint32_t>(engineIds.size()), &numEngines);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(numEngines, 1u);
-    EXPECT_EQ(engineIds[0], HIPBLASLT_ENGINE_ID);
+    EXPECT_EQ(numEngines, expected.size());
+    for(const auto id : expected)
+    {
+        EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), id), engineIds.end());
+    }
 
     status = hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &numEngines);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(numEngines, 1u);
+    EXPECT_EQ(numEngines, expected.size());
 }
 
 TEST(TestHipblasltEnginePluginApi, CreateNullHandle)

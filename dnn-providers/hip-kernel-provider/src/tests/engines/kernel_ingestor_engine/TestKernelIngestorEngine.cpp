@@ -673,6 +673,52 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         // the pack above, the others are probed beside it.
         "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV
+#ifdef HIPDNN_ENGINE_CONV_NAIVE
+        // The conv engine group's packs, compiled in with HIPKERNELPROVIDER_ENABLE_CONV and
+        // registered per family when its catalogs ship (conv/ConvContent.cmake).
+        "hipkernel.conv_naive.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU
+        "hipkernel.conv_depthwise_valu.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU_WRW
+        "hipkernel.conv_depthwise_valu_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_ROWS
+        "hipkernel.conv_depthwise_rows.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_MFMA
+        "hipkernel.conv_depthwise_mfma.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM
+        "hipkernel.conv_igemm.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM_NCHW
+        "hipkernel.conv_igemm_nchw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WRW
+        "hipkernel.conv_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_STEM_BWD
+        "hipkernel.conv_stem_bwd.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD
+        "hipkernel.conv_winograd.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DIRECT
+        "hipkernel.conv_direct.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_SMALLC
+        "hipkernel.conv_smallc.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP
+        "hipkernel.conv_group.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_FFT
+        "hipkernel.conv_fft.dispatch",
+#endif
+#endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";

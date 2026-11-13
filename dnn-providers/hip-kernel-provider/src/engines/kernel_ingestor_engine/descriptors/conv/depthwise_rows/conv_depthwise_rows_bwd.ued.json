@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "id": "48f3d282-ff70-54d5-ac31-240ebedc8c8b",
+  "name": "hipkernel:CONV_DEPTHWISE_ROWS_BWD",
+  "graph_match": {
+    "native": "hipkernel.conv_depthwise_rows_bwd.graph_match"
+  },
+  "metadata": "bfffbadf-4366-555b-8e37-90df8fb60c4b",
+  "knobs": [
+    "variant",
+    "kh",
+    "kw",
+    "tx",
+    "ty",
+    "rw",
+    "rh",
+    "bh",
+    "threads",
+    "stride",
+    "q",
+    "lds",
+    "mmax"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

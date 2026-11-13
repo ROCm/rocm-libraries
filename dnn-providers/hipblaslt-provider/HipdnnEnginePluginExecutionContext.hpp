@@ -30,6 +30,18 @@ public:
         _plan = std::move(plan);
     }
 
+    /// Whether the plan may benchmark its candidates on first execute and keep the fastest:
+    /// the `global.benchmarking` knob, or HIPDNN_FORCE_BENCHMARKING over it.
+    bool benchmarking() const
+    {
+        return _benchmarking;
+    }
+
+    void setBenchmarking(bool benchmarking)
+    {
+        _benchmarking = benchmarking;
+    }
+
     virtual hipblaslt_plugin::IPlan& plan() const
     {
         if(!hasValidPlan())
@@ -43,4 +55,5 @@ public:
 
 private:
     std::unique_ptr<hipblaslt_plugin::IPlan> _plan;
+    bool _benchmarking = false;
 };

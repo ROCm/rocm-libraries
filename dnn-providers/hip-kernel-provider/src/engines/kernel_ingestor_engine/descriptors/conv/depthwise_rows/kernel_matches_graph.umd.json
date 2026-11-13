@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7ebc35b1-943d-574e-9eb8-07f2b261fbc7",
+  "name": "kernel dtype, direction, layout, variant geometry, filter, stride and LDS halo match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_depthwise_rows.kernel_match"
+}

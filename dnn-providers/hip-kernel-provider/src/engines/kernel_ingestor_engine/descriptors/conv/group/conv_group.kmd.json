@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "id": "828aab00-518d-5254-aa31-5f5b2635c782",
+  "name": "conv_group config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "t",
+      "type": "int"
+    },
+    {
+      "name": "r",
+      "type": "int"
+    },
+    {
+      "name": "s",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "th",
+      "type": "int"
+    },
+    {
+      "name": "wp",
+      "type": "int"
+    },
+    {
+      "name": "cb",
+      "type": "int"
+    },
+    {
+      "name": "cf",
+      "type": "int"
+    },
+    {
+      "name": "cg",
+      "type": "int"
+    },
+    {
+      "name": "oc",
+      "type": "int"
+    },
+    {
+      "name": "px",
+      "type": "int"
+    },
+    {
+      "name": "pf",
+      "type": "int"
+    },
+    {
+      "name": "nbi",
+      "type": "int"
+    },
+    {
+      "name": "nbo",
+      "type": "int"
+    },
+    {
+      "name": "tw",
+      "type": "int"
+    },
+    {
+      "name": "bpu",
+      "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
+    }
+  ]
+}
