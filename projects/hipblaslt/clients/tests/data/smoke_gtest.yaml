@@ -20,7 +20,8 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
-# Exercise matmul with multiple worker threads and streams.
+# Leak regression for worker shutdown: under LeakSanitizer the process exits
+# nonzero if workers outlive GoogleTest's thread-local trace storage.
 - name: matmul_thread_trace_cleanup_smoke
   category: smoke
   function:
