@@ -3,16 +3,25 @@
 
 /*! \file
  *  \brief Experimental feature DEMO (spike only): a trivial API that exercises the
- *  experimental-API deadline and version-bump checks. Not for real use.
+ *  experimental-API deadline and revision-bump checks. Not for real use.
  *
  *  Contract tests: clients/tests/src/experimental/contract_demo_gtest.cpp.
  */
 
 #pragma once
 
-#ifndef HIPBLASLT_EXPERIMENTAL_API_VERSION
+#ifndef HIPBLASLT_EXPERIMENTAL_ENUM_BIT
 #error "include <hipblaslt/hipblaslt-experimental.h> instead"
 #endif
+
+/*! \ingroup experimental_module
+ *  \brief Revision of experimental feature DEMO declared in this header.
+ *
+ *  Incremented on every breaking change to the feature: a removed declaration, a function
+ *  replaced by a renamed version, a retired enumerator, or a changed contract test.
+ *  Additions do not increment it. tools/scripts/check_experimental_api.py enforces this.
+ */
+#define HIPBLASLT_EXPERIMENTAL_DEMO 1
 
 #ifdef __cplusplus
 extern "C" {

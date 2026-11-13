@@ -23,3 +23,7 @@ if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-local-kernel.cpp"
     )
 endif()
+
+# hipblaslt-experimental-registry.inc, the generated feature list for
+# hipblasLtExperimentalGetFeatureRevision (see library/experimental/features.cmake).
+target_include_directories(hipblaslt PRIVATE "${PROJECT_BINARY_DIR}/library/src")
