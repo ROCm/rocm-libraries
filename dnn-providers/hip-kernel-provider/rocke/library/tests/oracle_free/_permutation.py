@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 
 import numpy as np
 
@@ -29,6 +30,7 @@ CANONICAL_SPAN = 16
 # Q and K entries are n/8 with |n| <= 24. Every product is then a multiple of
 # 1/64 and every partial sum of a D-term contraction is exact in FP32 while
 # D * 24**2 <= 2**24, so a key's score does not depend on where the key sits.
+_LATTICE_STEPS = 8
 _LATTICE_LIMIT = 24
 _LATTICE_DRAWS = 4
 _LATTICE_DRAW_VALUES = 2 * _LATTICE_LIMIT // _LATTICE_DRAWS + 1
@@ -44,6 +46,20 @@ _FP32_UNIT = 2.0**-23
 # Range of the largest |V| the bound is evaluated for. Inside it no FP32
 # underflow term below is material and no output overflows FP16.
 _VALUE_MAX_RANGE = (2.0**-10, 2.0**10)
+# Products one MFMA call adds to its accumulator.
+_ATOM_PRODUCTS = 8
+# Largest absolute error of an FP32 exponential or product whose exact value is
+# below the normal range, and of an MFMA result that is subnormal.
+_FP32_UNDERFLOW = 2.0**-126
+_ATOM_UNDERFLOW = 2.0**-150
+
+# log2(e) = 1.44269504088896340735992..., rounded up at the sixteenth decimal:
+# an exact rational that is not below it.
+_LOG2E_UPPER = Fraction(14426950408889635, 10**16)
+# Covers the FP32 roundings of the kernel's score scale and of each score.
+_SPREAD_MARGIN = 1 + Fraction(1, 2**20)
+# Fraction bits of the integer square root that encloses a norm from above.
+_ROOT_BITS = 32
 
 
 class TokenMap(str, Enum):
@@ -182,7 +198,7 @@ def _lattice(shape: tuple[int, ...], seed: int) -> np.ndarray:
         draw = (bits >> np.uint64(16 * field)) & np.uint64(0xFFFF)
         scaled = (draw * np.uint64(_LATTICE_DRAW_VALUES)) >> np.uint64(16)
         total += scaled.astype(np.int64)
-    values = (total - _LATTICE_LIMIT).astype(np.float32) / np.float32(8.0)
+    values = (total - _LATTICE_LIMIT).astype(np.float32) / np.float32(_LATTICE_STEPS)
     return values.reshape(shape)
 
 
@@ -295,17 +311,59 @@ def permute_tokens(values: np.ndarray, source: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(values[:, np.asarray(source)])
 
 
+def _lattice_numerators(values: np.ndarray, name: str) -> np.ndarray:
+    """Exact integer numerators ``n`` of lattice values ``n / 8``.
+
+    Fails closed: a value that is not finite, not a multiple of 1/8, or outside
+    the lattice range cannot enter an exact norm, so no spread is certified."""
+    scaled = np.asarray(values, dtype=np.float64) * _LATTICE_STEPS
+    if scaled.size == 0 or not np.all(np.isfinite(scaled)):
+        raise ValueError(f"cannot certify the score spread: {name} is not finite")
+    if (
+        not np.array_equal(scaled, np.rint(scaled))
+        or np.max(np.abs(scaled)) > _LATTICE_LIMIT
+    ):
+        raise ValueError(
+            f"cannot certify the score spread: {name} is not on the lattice "
+            f"n/{_LATTICE_STEPS} with |n| <= {_LATTICE_LIMIT}"
+        )
+    return scaled.astype(np.int64)
+
+
+def _float_not_below(value: Fraction) -> float:
+    """The float nearest ``value``, moved up one step if it lies below it."""
+    nearest = float(value)
+    if Fraction(nearest) >= value:
+        return nearest
+    return math.nextafter(nearest, math.inf)
+
+
 def score_spread_bound(q: np.ndarray, k: np.ndarray, scale: float) -> float:
-    """Bound the spread of one row's log2-domain scores from input norms alone.
+    """Certified upper bound on the spread of one row's log2-domain scores, from
+    input norms alone.
 
     ``|score| <= |q| |k| scale log2(e)`` for every (query, key) pair, so any two
     scores of a row differ by at most twice that. No score is evaluated. The
-    result is inflated to cover the FP32 roundings of the kernel's score scale."""
+    result is inflated to cover the FP32 roundings of the kernel's score scale.
+
+    The tolerance grows with this value, so it must never fall below the
+    mathematical bound. Q and K are on the lattice ``n / 8``: their squared row
+    norms are exact integers, the product of the two largest norms is enclosed
+    from above by an integer square root, the remaining factors are exact
+    rationals (``log2(e)`` by a rational not below it), and the result is the
+    first float not below that rational. Inputs off the lattice are refused."""
     if not 0.0 < scale < math.inf:
         raise ValueError("scale must be positive and finite")
-    q_norm = math.sqrt(float(np.max(np.sum(np.square(q, dtype=np.float64), axis=-1))))
-    k_norm = math.sqrt(float(np.max(np.sum(np.square(k, dtype=np.float64), axis=-1))))
-    return 2.0 * q_norm * k_norm * scale * math.log2(math.e) * (1.0 + 2.0**-20)
+    q_square = int(np.max(np.sum(np.square(_lattice_numerators(q, "Q")), axis=-1)))
+    k_square = int(np.max(np.sum(np.square(_lattice_numerators(k, "K")), axis=-1)))
+    radicand = (q_square * k_square) << (2 * _ROOT_BITS)
+    root = math.isqrt(radicand)
+    if root * root < radicand:
+        root += 1
+    norms = Fraction(root, _LATTICE_STEPS**2 << _ROOT_BITS)
+    return _float_not_below(
+        2 * norms * Fraction(float(scale)) * _LOG2E_UPPER * _SPREAD_MARGIN
+    )
 
 
 @dataclass(frozen=True)
@@ -346,10 +404,11 @@ def permutation_bound(
     ``u = 2**-23`` and ``c = 2**-(p+1)`` for a dtype with ``p`` fraction bits:
 
     - weights: one ``exp2`` within one FP32 unit and one rounded argument per key
-      tile, ``(1 + u)**n_T * 2**(n_T u spread) - 1``;
+      tile, ``F_w - 1`` with ``F_w = (1 + u)**n_T * 2**(n_T u spread)``;
     - probability cast: ``c`` per weight (round-to-nearest-even), because the
       accumulator consumes cast weights and the normalizer uncast ones, plus half
-      the smallest subnormal per key;
+      the smallest subnormal of the dtype per key, both carried through the
+      later rescales by ``F_w``;
     - accumulation across ``n_T`` rescaled tiles, ``gamma(keys + n_T)``: the
       normalizer by FP32 additions in any order, the numerator by MFMA calls of
       eight products, each within eight FP32 units of the summed magnitudes of
@@ -357,12 +416,24 @@ def permutation_bound(
     - the output store: one FP32 product and one round-to-nearest-even
       conversion.
 
+    FP32 results below the normal range carry absolute errors, which are kept
+    apart from the relative terms and from the cast: one budget each for the
+    weights, the accumulator and the normalizer, every one scaled by the
+    rescales and rounded additions it can still pass through.
+
     The bound depends on the inputs only through ``value_max`` and
-    ``score_spread``, never on an observed output."""
+    ``score_spread``, never on an observed output. It is derived for
+    ``value_max > 0``, ``(keys + n_T) u < 1`` and a normalizer error below one,
+    which keeps the computed normalizer positive, and refuses anything else."""
     if dtype not in _DTYPES:
         raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
     if keys < 2:
         raise ValueError("the relation needs at least two keys")
+    if keys % _ATOM_PRODUCTS:
+        raise ValueError(
+            f"keys must be a multiple of {_ATOM_PRODUCTS}, the products of one "
+            "MFMA call"
+        )
     if not 1 <= key_tiles <= keys:
         raise ValueError("key_tiles must lie in [1, keys]")
     low, high = _VALUE_MAX_RANGE
@@ -377,21 +448,30 @@ def permutation_bound(
     cast = 2.0 ** -(fraction_bits + 1)
     subnormal_half = 2.0 ** (min_exponent - fraction_bits - 1)
     steps = (keys + key_tiles) * unit
-    if steps >= 0.5:
+    if steps >= 1.0:
         raise ValueError("too many keys for the FP32 accumulation bound")
     gamma = steps / (1.0 - steps)
-    # FP32 underflow of an exponential, a rescale or a product, per key.
-    underflow = keys * (key_tiles + 1) * 2.0**-115
 
     weight = math.expm1(
         key_tiles * math.log1p(unit) + key_tiles * unit * score_spread * math.log(2.0)
     )
-    weights = weight + underflow
-    cast_error = cast * (1.0 + weights) + keys * subnormal_half * (1.0 + weight)
-    accumulation = gamma * (1.0 + weights + cast_error) + underflow
+    # What a term can still grow by: later rescales, then rounded accumulation.
+    rescaled = 1.0 + weight
+    accumulated = rescaled * (1.0 + gamma)
+    weight_underflow = keys * key_tiles * rescaled * _FP32_UNDERFLOW
+    accumulator_underflow = (
+        accumulated
+        * (keys // _ATOM_PRODUCTS * _ATOM_UNDERFLOW + key_tiles * _FP32_UNDERFLOW)
+        / value_max
+    )
+    normalizer_underflow = accumulated * key_tiles * _FP32_UNDERFLOW
+
+    weights = weight + weight_underflow
+    cast_error = cast * (1.0 + weights) + keys * subnormal_half * rescaled
+    accumulation = gamma * (1.0 + weights + cast_error) + accumulator_underflow
     numerator = weights + cast_error + accumulation
-    normalizer = weights + gamma * (1.0 + weights) + underflow
-    if normalizer >= 0.5:
+    normalizer = weights + gamma * (1.0 + weights) + normalizer_underflow
+    if normalizer >= 1.0:
         raise ValueError("the normalizer error bound left its valid range")
     ratio = (unit + normalizer + numerator * (1.0 + unit)) / (1.0 - normalizer)
 
@@ -427,14 +507,45 @@ def permutation_case_bound(
     key_tiles: int,
     scale: float,
 ) -> PermutationBound:
-    """Evaluate the bound for one case's inputs at the subject's tile count."""
+    """Evaluate the bound for one case's inputs at the subject's tile count.
+
+    Fails closed: inputs that are not finite, or Q and K off the lattice, have
+    no certified statistics and raise ``ValueError``."""
+    value_max = float(np.max(np.abs(v)))
+    if not math.isfinite(value_max):
+        raise ValueError("cannot evaluate the bound: V is not finite")
     return permutation_bound(
         case.dtype,
         keys=case.seqlen_k,
         key_tiles=key_tiles,
-        value_max=float(np.max(np.abs(v))),
+        value_max=value_max,
         score_spread=score_spread_bound(q, k, scale),
     )
+
+
+@dataclass(frozen=True)
+class SliceDiagnostics:
+    """Drift diagnostics of one ``(batch, query head)`` slice of a pair of
+    outputs, as fractions of the derived limits.
+
+    None of them is a verdict: the relation fails on a residual beyond the
+    bound or a magnitude beyond the guard, anywhere. ``max_ratio`` is the
+    largest residual over the bound, ``rms_ratio`` the root mean square
+    residual over the bound, ``guard_ratio`` the largest stored magnitude of
+    either output over the magnitude guard, and ``half_count`` the number of
+    coordinates whose residual exceeds half the bound. A correct kernel sits
+    well inside the bound, so ratios that grow from one release to the next are
+    a signal while the verdict still passes."""
+
+    batch: int
+    head: int
+    max_ratio: float
+    rms_ratio: float
+    guard_ratio: float
+    half_count: int
+    worst_coordinate: tuple[int, int]
+    signed_at_worst: float
+    mean_signed: float
 
 
 @dataclass(frozen=True)
@@ -443,7 +554,8 @@ class PermutationResult:
 
     ``violations`` is the verdict of the relation. ``head_exceed_counts`` holds,
     per ``(batch, query head)``, how many coordinates exceed the bound: a pairing
-    mutation must be visible in every head."""
+    mutation must be visible in every head. ``slices`` holds the drift
+    diagnostics of every ``(batch, query head)``."""
 
     violations: tuple[str, ...]
     invalid_count: int
@@ -456,6 +568,7 @@ class PermutationResult:
     mean_signed: float
     rms: float
     bound: float
+    slices: tuple[SliceDiagnostics, ...] = ()
 
     @property
     def bound_ratio(self) -> float:
@@ -535,6 +648,33 @@ def analyze_permutation(
         else 0.0
     )
 
+    # Per (batch, query head): a coordinate that was not compared counts as a
+    # zero residual and a zero magnitude; it is already an ``invalid`` violation.
+    stored = np.maximum(np.abs(base_values), np.abs(other_values))
+    slice_size = case.seqlen_q * case.head_dim
+    slices = []
+    for batch in range(case.batch):
+        for head in range(case.nhead_q):
+            part = residual[batch, :, head, :]
+            query, dim = np.unravel_index(int(np.argmax(np.abs(part))), part.shape)
+            slices.append(
+                SliceDiagnostics(
+                    batch=batch,
+                    head=head,
+                    max_ratio=float(np.max(np.abs(part))) / bound.residual,
+                    rms_ratio=math.sqrt(float(np.square(part).sum()) / slice_size)
+                    / bound.residual,
+                    guard_ratio=float(np.max(stored[batch, :, head, :]))
+                    / bound.magnitude,
+                    half_count=int(
+                        np.count_nonzero(np.abs(part) > 0.5 * bound.residual)
+                    ),
+                    worst_coordinate=(int(query), int(dim)),
+                    signed_at_worst=float(part[query, dim]),
+                    mean_signed=float(part.sum()) / slice_size,
+                )
+            )
+
     violations: list[str] = []
     if invalid_count:
         violations.append(f"invalid={invalid_count}")
@@ -561,6 +701,7 @@ def analyze_permutation(
         mean_signed=mean_signed,
         rms=rms,
         bound=bound.residual,
+        slices=tuple(slices),
     )
 
 
@@ -577,4 +718,16 @@ def format_permutation_result(result: PermutationResult) -> str:
         f"({result.bound_ratio:.3g} of the bound {result.bound:.9g}) "
         f"at b:q:h:d={coordinate} signed={result.signed_at_worst:.9g}; "
         f"rms={result.rms:.9g}; mean={result.mean_signed:.9g}"
+    )
+
+
+def format_slice_diagnostics(result: PermutationResult) -> str:
+    """Render the drift diagnostics, one line per ``(batch, query head)``."""
+    return "\n".join(
+        f"  b{item.batch}:h{item.head} r_max={item.max_ratio:.3g} "
+        f"r_rms={item.rms_ratio:.3g} r_guard={item.guard_ratio:.3g} "
+        f"n_half={item.half_count} at q:d="
+        f"{item.worst_coordinate[0]}:{item.worst_coordinate[1]} "
+        f"signed={item.signed_at_worst:.9g} mean={item.mean_signed:.9g}"
+        for item in result.slices
     )
