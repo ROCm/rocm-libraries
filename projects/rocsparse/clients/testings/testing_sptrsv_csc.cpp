@@ -264,6 +264,27 @@ void testing_sptrsv_csc(const Arguments& arg)
 
             y.near_check_values(host_symbolic_position, host_numeric_position);
         }
+
+        // In-place solve: x and y are the same vector.
+        if(batch_count_x == batch_count)
+        {
+            rocsparse_clients::dnvec_descr<T> xy(M, batch_count, M);
+            xy.device().transfer_from(x.host());
+            xy.host().transfer_from(y.host());
+            void* alpha = halpha;
+            rocsparse_clients::sptrsv_compute(
+                handle, sptrsv_descr, A, xy, xy, rocsparse_pointer_mode_host, alpha, p_error);
+            host_dense_vector<int64_t> numeric_position(batch_count);
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_sptrsv_get_output(handle,
+                                            sptrsv_descr,
+                                            rocsparse_sptrsv_output_singularity_position,
+                                            numeric_position,
+                                            sizeof(int64_t),
+                                            p_error));
+            xy.near_check_values(host_symbolic_position, numeric_position);
+        }
     }
 
     if(arg.timing)
@@ -343,4 +364,260 @@ INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 
-void testing_sptrsv_csc_extra(const Arguments& arg) {}
+namespace
+{
+    // Small CSC matrix built on the host for the tests of testing_sptrsv_csc_extra.
+    struct csc_case
+    {
+        int32_t                m{};
+        int32_t                n{};
+        std::vector<int32_t>   ptr;
+        std::vector<int32_t>   ind;
+        std::vector<double>    val;
+        rocsparse_index_base   base{rocsparse_index_base_zero};
+        rocsparse_fill_mode    uplo{rocsparse_fill_mode_lower};
+        rocsparse_diag_type    diag{rocsparse_diag_type_non_unit};
+        rocsparse_matrix_type  type{rocsparse_matrix_type_triangular};
+        rocsparse_storage_mode storage{rocsparse_storage_mode_sorted};
+    };
+
+    // Banded m x m matrix with bandwidth 2; the diagonal entry of column missing is left out and
+    // the one of column zero is set to zero (-1: none).
+    csc_case banded_csc(int32_t m, int32_t missing, int32_t zero, rocsparse_index_base base)
+    {
+        csc_case c;
+        c.m    = m;
+        c.n    = m;
+        c.base = base;
+        c.ptr.push_back(base);
+        for(int32_t j = 0; j < m; ++j)
+        {
+            for(int32_t i = std::max(0, j - 2); i <= std::min(m - 1, j + 2); ++i)
+            {
+                if(i == j && j == missing)
+                {
+                    continue;
+                }
+                c.ind.push_back(i + base);
+                c.val.push_back((i == j) ? ((j == zero) ? 0.0 : 4.0) : 1.0 + 0.1 * (i - j));
+            }
+            c.ptr.push_back(static_cast<int32_t>(c.ind.size()) + base);
+        }
+        return c;
+    }
+
+    // Runs the analysis and the solve with x = 1. change_uplo is set on the matrix between the
+    // analysis and the solve. status is the first status that is not success.
+    void sptrsv_csc_run(const Arguments&     arg,
+                        const csc_case&      c,
+                        std::vector<double>& hy,
+                        int64_t&             symbolic,
+                        int64_t&             numeric,
+                        rocsparse_status&    status,
+                        bool                 change_uplo = false)
+    {
+        rocsparse_error*       p_error = nullptr;
+        rocsparse_local_handle handle(arg);
+        const int32_t          nnz = static_cast<int32_t>(c.ind.size());
+
+        device_vector<int32_t> dptr(c.n + 1);
+        device_vector<int32_t> dind(std::max(nnz, 1));
+        device_vector<double>  dval(std::max(nnz, 1));
+        device_vector<double>  dx(std::max(c.m, c.n));
+        device_vector<double>  dy(std::max(c.m, c.n));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dptr, c.ptr.data(), sizeof(int32_t) * (c.n + 1), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dind, c.ind.data(), sizeof(int32_t) * nnz, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dval, c.val.data(), sizeof(double) * nnz, hipMemcpyHostToDevice));
+        const std::vector<double> hx(std::max(c.m, c.n), 1.0);
+        CHECK_HIP_ERROR(
+            hipMemcpy(dx, hx.data(), sizeof(double) * hx.size(), hipMemcpyHostToDevice));
+
+        const rocsparse_datatype ttype = rocsparse_datatype_f64_r;
+        rocsparse_local_spmat    A(c.m,
+                                c.n,
+                                nnz,
+                                dptr,
+                                dind,
+                                dval,
+                                rocsparse_indextype_i32,
+                                rocsparse_indextype_i32,
+                                c.base,
+                                ttype,
+                                true);
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &c.uplo, sizeof(c.uplo)));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &c.diag, sizeof(c.diag)));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &c.type, sizeof(c.type)));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+            A, rocsparse_spmat_storage_mode, &c.storage, sizeof(c.storage)));
+        rocsparse_local_dnvec x(c.m, dx, ttype);
+        rocsparse_local_dnvec y(c.m, dy, ttype);
+
+        const rocsparse_operation       trans = rocsparse_operation_none;
+        const rocsparse_sptrsv_alg      alg   = rocsparse_sptrsv_alg_default;
+        const rocsparse_analysis_policy apol  = rocsparse_analysis_policy_force;
+        rocsparse_sptrsv_descr          descr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsv_descr(&descr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+            handle, descr, rocsparse_sptrsv_input_operation, &trans, sizeof(trans), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+            handle, descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+            handle, descr, rocsparse_sptrsv_input_scalar_datatype, &ttype, sizeof(ttype), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         descr,
+                                                         rocsparse_sptrsv_input_compute_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+            handle, descr, rocsparse_sptrsv_input_analysis_policy, &apol, sizeof(apol), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+        // The descriptor keeps a pointer to alpha until the solve.
+        const double alpha  = 1.0;
+        const void*  palpha = &alpha;
+        status              = rocsparse_status_success;
+        for(auto stage : {rocsparse_sptrsv_stage_analysis, rocsparse_sptrsv_stage_compute})
+        {
+            if(stage == rocsparse_sptrsv_stage_compute)
+            {
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_sptrsv_set_input(handle,
+                                               descr,
+                                               rocsparse_sptrsv_input_scalar_alpha,
+                                               palpha,
+                                               sizeof(palpha),
+                                               p_error));
+                if(change_uplo)
+                {
+                    const rocsparse_fill_mode other = (c.uplo == rocsparse_fill_mode_lower)
+                                                          ? rocsparse_fill_mode_upper
+                                                          : rocsparse_fill_mode_lower;
+                    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+                        A, rocsparse_spmat_fill_mode, &other, sizeof(other)));
+                }
+            }
+            size_t buffer_size{};
+            status = rocsparse_sptrsv_buffer_size(
+                handle, descr, A, x, y, stage, &buffer_size, p_error);
+            if(status != rocsparse_status_success)
+            {
+                break;
+            }
+            device_dense_vector<char> buffer(buffer_size);
+            status = rocsparse_sptrsv(handle, descr, A, x, y, stage, buffer_size, buffer, p_error);
+            if(status != rocsparse_status_success)
+            {
+                break;
+            }
+            CHECK_HIP_ERROR(hipDeviceSynchronize());
+            int64_t& position = (stage == rocsparse_sptrsv_stage_analysis) ? symbolic : numeric;
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_sptrsv_get_output(handle,
+                                            descr,
+                                            rocsparse_sptrsv_output_singularity_position,
+                                            &position,
+                                            sizeof(int64_t),
+                                            p_error));
+        }
+        hy.resize(c.m);
+        CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(double) * c.m, hipMemcpyDeviceToHost));
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(descr));
+    }
+}
+
+// Missing and zero diagonal entries, and the arguments the CSC solve without transpose rejects.
+void testing_sptrsv_csc_extra(const Arguments& arg)
+{
+    const int32_t m = 64;
+    for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        for(auto uplo : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
+        {
+            for(auto diag : {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit})
+            {
+                for(auto [missing, zero] : std::initializer_list<std::pair<int32_t, int32_t>>{
+                        {-1, -1}, {17, -1}, {-1, 41}, {17, 41}})
+                {
+                    csc_case c = banded_csc(m, missing, zero, base);
+                    c.uplo     = uplo;
+                    c.diag     = diag;
+
+                    std::vector<double> hy;
+                    int64_t             symbolic = -2;
+                    int64_t             numeric  = -2;
+                    rocsparse_status    status;
+                    sptrsv_csc_run(arg, c, hy, symbolic, numeric, status);
+                    CHECK_ROCSPARSE_ERROR(status);
+
+                    const std::vector<double> hx(m, 1.0);
+                    std::vector<double>       hy_gold(m);
+                    int32_t                   struct_pivot  = -1;
+                    int32_t                   numeric_pivot = -1;
+                    host_cscsv<int32_t, int32_t, double>(rocsparse_operation_none,
+                                                         m,
+                                                         static_cast<int32_t>(c.ind.size()),
+                                                         1.0,
+                                                         c.ptr.data(),
+                                                         c.ind.data(),
+                                                         c.val.data(),
+                                                         hx.data(),
+                                                         1,
+                                                         hy_gold.data(),
+                                                         diag,
+                                                         uplo,
+                                                         base,
+                                                         &struct_pivot,
+                                                         &numeric_pivot);
+                    unit_check_scalar<int64_t>(struct_pivot, symbolic);
+                    unit_check_scalar<int64_t>(numeric_pivot, numeric);
+                    if(struct_pivot == -1 && numeric_pivot == -1)
+                    {
+                        near_check_segments<double>(m, hy_gold.data(), hy.data());
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<double> hy;
+    int64_t             symbolic = -2;
+    int64_t             numeric  = -2;
+    rocsparse_status    status;
+    {
+        // Not square.
+        csc_case c = banded_csc(8, -1, -1, rocsparse_index_base_zero);
+        c.n        = 7;
+        c.ptr.resize(8);
+        c.ind.resize(c.ptr[7]);
+        c.val.resize(c.ptr[7]);
+        sptrsv_csc_run(arg, c, hy, symbolic, numeric, status);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_size, status);
+    }
+    {
+        csc_case c = banded_csc(8, -1, -1, rocsparse_index_base_zero);
+        c.type     = rocsparse_matrix_type_symmetric;
+        sptrsv_csc_run(arg, c, hy, symbolic, numeric, status);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_status_not_implemented, status);
+        c.type = rocsparse_matrix_type_hermitian;
+        sptrsv_csc_run(arg, c, hy, symbolic, numeric, status);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_status_not_implemented, status);
+    }
+    {
+        csc_case c = banded_csc(8, -1, -1, rocsparse_index_base_zero);
+        c.storage  = rocsparse_storage_mode_unsorted;
+        sptrsv_csc_run(arg, c, hy, symbolic, numeric, status);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_status_requires_sorted_storage, status);
+    }
+    {
+        // The fill mode changes after the analysis: there is no analysis for the solve.
+        csc_case c = banded_csc(8, -1, -1, rocsparse_index_base_zero);
+        sptrsv_csc_run(arg, c, hy, symbolic, numeric, status, true);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_pointer, status);
+    }
+}

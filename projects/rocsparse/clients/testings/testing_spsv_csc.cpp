@@ -265,6 +265,20 @@ void testing_spsv_csc(const Arguments& arg)
             hy_gold.near_check(hy_1);
             hy_gold.near_check(hy_2);
         }
+
+        // In-place solve: x and y are the same vector.
+        device_vector<T> dxy(M);
+        CHECK_HIP_ERROR(hipMemcpy(dxy, hx, sizeof(T) * M, hipMemcpyHostToDevice));
+        rocsparse_local_dnvec xy(M, dxy, ttype);
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
+            handle, trans_A, &halpha, A, xy, xy, ttype, alg, compute, &buffer_size, dbuffer));
+        host_vector<T> hxy(M);
+        CHECK_HIP_ERROR(hipMemcpy(hxy, dxy, sizeof(T) * M, hipMemcpyDeviceToHost));
+        if(analysis_pivot == -1 && solve_pivot == -1)
+        {
+            hy_gold.near_check(hxy);
+        }
     }
 
     if(arg.timing)
@@ -326,4 +340,106 @@ INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-void testing_spsv_csc_extra(const Arguments& arg) {}
+// In-place solve with an arrowhead matrix (diagonal and full first column): the first column is
+// split into more tasks than the device runs at once, so its last tasks start after y_0 is stored.
+template <typename T>
+static void testing_spsv_csc_in_place_arrowhead(const Arguments& arg)
+{
+    const int32_t m   = 4000000;
+    const int32_t nnz = 2 * m - 1;
+
+    host_vector<int32_t> hcol_ptr(m + 1);
+    host_vector<int32_t> hrow_ind(nnz);
+    host_vector<T>       hval(nnz);
+    hcol_ptr[0] = 0;
+    for(int32_t i = 0; i < m; ++i)
+    {
+        hrow_ind[i] = i;
+        hval[i]     = static_cast<T>((i == 0) ? 2 : 1);
+    }
+    hcol_ptr[1] = m;
+    for(int32_t j = 1; j < m; ++j)
+    {
+        hrow_ind[m - 1 + j] = j;
+        hval[m - 1 + j]     = static_cast<T>(2);
+        hcol_ptr[j + 1]     = m + j;
+    }
+
+    host_vector<T> hx(m);
+    host_vector<T> hy_gold(m);
+    rocsparse_init<T>(hx, m, 1, 1);
+    hy_gold[0] = hx[0] / static_cast<T>(2);
+    for(int32_t i = 1; i < m; ++i)
+    {
+        hy_gold[i] = (hx[i] - hy_gold[0]) / static_cast<T>(2);
+    }
+
+    device_vector<int32_t> dcol_ptr(m + 1);
+    device_vector<int32_t> drow_ind(nnz);
+    device_vector<T>       dval(nnz);
+    device_vector<T>       dxy(m);
+    CHECK_HIP_ERROR(
+        hipMemcpy(dcol_ptr, hcol_ptr, sizeof(int32_t) * (m + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(drow_ind, hrow_ind, sizeof(int32_t) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dval, hval, sizeof(T) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dxy, hx, sizeof(T) * m, hipMemcpyHostToDevice));
+
+    rocsparse_local_handle      handle(arg);
+    const rocsparse_datatype    ttype = get_datatype<T>();
+    const rocsparse_fill_mode   uplo  = rocsparse_fill_mode_lower;
+    const rocsparse_diag_type   diag  = rocsparse_diag_type_non_unit;
+    const rocsparse_matrix_type mtype = rocsparse_matrix_type_triangular;
+    rocsparse_local_spmat       A(m,
+                            m,
+                            nnz,
+                            dcol_ptr,
+                            drow_ind,
+                            dval,
+                            rocsparse_indextype_i32,
+                            rocsparse_indextype_i32,
+                            rocsparse_index_base_zero,
+                            ttype,
+                            true);
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mtype, sizeof(mtype)));
+    rocsparse_local_dnvec xy(m, dxy, ttype);
+
+    const T                   alpha = static_cast<T>(1);
+    const rocsparse_operation trans = rocsparse_operation_none;
+    const rocsparse_spsv_alg  alg   = rocsparse_spsv_alg_default;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    size_t buffer_size;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spsv(handle,
+                                         trans,
+                                         &alpha,
+                                         A,
+                                         xy,
+                                         xy,
+                                         ttype,
+                                         alg,
+                                         rocsparse_spsv_stage_buffer_size,
+                                         &buffer_size,
+                                         nullptr));
+    void* dbuffer;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+    for(auto stage : {rocsparse_spsv_stage_preprocess, rocsparse_spsv_stage_compute})
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
+            handle, trans, &alpha, A, xy, xy, ttype, alg, stage, &buffer_size, dbuffer));
+    }
+
+    host_vector<T> hy(m);
+    CHECK_HIP_ERROR(hipMemcpy(hy, dxy, sizeof(T) * m, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+    hy_gold.near_check(hy);
+}
+
+void testing_spsv_csc_extra(const Arguments& arg)
+{
+    testing_spsv_csc_in_place_arrowhead<float>(arg);
+    testing_spsv_csc_in_place_arrowhead<double>(arg);
+}

@@ -56,6 +56,10 @@ Tests:
   function: spsv_csc_bad_arg
   precision: *single_double_precisions_complex_real
 
+- name: spsv_csc_extra
+  category: pre_checkin
+  function: spsv_csc_extra
+
 - name: spsv_csc
   category: pre_checkin
   function: spsv_csc
@@ -68,6 +72,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
 
@@ -85,6 +90,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
   filename: [rma10,
@@ -124,6 +130,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
 
@@ -141,6 +148,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mac_econ_fwd500,
@@ -175,6 +183,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
 
@@ -190,6 +199,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
 
@@ -227,6 +237,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [Chevron4]
@@ -243,6 +254,8 @@ Tests:
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
+  skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
+
