@@ -193,54 +193,28 @@ endif()
 
 # Create rocALUTION hip library
 if(SUPPORT_HIP)
-  # Flag source file as a hip source file
-  if(USE_HIPCXX)
-    set_source_files_properties(${HIP_SOURCES} PROPERTIES LANGUAGE HIP)
+  if(WIN32)
+    add_library(rocalution_hip OBJECT ${HIP_SOURCES})
   else()
-    set_source_files_properties(${HIP_SOURCES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT TRUE)
-  endif()
-
-  # Coverage instruments host code only. Device-side coverage makes the HIP
-  # runtime abort while dumping the profile at process exit (AISPARSE-778).
-  if(USE_HIPCXX)
+    set_source_files_properties(${HIP_SOURCES} PROPERTIES LANGUAGE HIP)
     add_library(rocalution_hip ${HIP_SOURCES})
+    if(GPU_TARGETS)
+      set_target_properties(rocalution_hip PROPERTIES HIP_ARCHITECTURES "${GPU_TARGETS}")
+    endif()
+
     # If CPU optimizations for local machine is actived
     if(BUILD_OPTCPU)
       target_compile_options(rocalution_hip PRIVATE "-march=native")
     endif()
+    target_compile_options(rocalution_hip PRIVATE "-O3")
+
+    # Coverage instruments host code only. Device-side coverage makes the HIP
+    # runtime abort while dumping the profile at process exit (AISPARSE-778).
     if(BUILD_CODE_COVERAGE)
       target_compile_options(rocalution_hip PRIVATE
         -fprofile-instr-generate -fcoverage-mapping
         "SHELL:-Xarch_device -fno-profile-instr-generate"
         "SHELL:-Xarch_device -fno-coverage-mapping")
-    endif()
-  else()
-    # HIP flags workaround while target_compile_options do not work
-
-    # If CPU optimizations for local machine is actived
-    if(BUILD_OPTCPU)
-      list(APPEND HIP_HIPCC_FLAGS "-march=native")
-    endif()
-
-    list(APPEND HIP_HIPCC_FLAGS "-O3 -fPIC -std=c++17")
-    # Use -DNDEBUG compile option for Release and RelWithDebInfo build
-    if((${CMAKE_BUILD_TYPE} MATCHES "Release") OR (${CMAKE_BUILD_TYPE} MATCHES "RelWithDebInfo"))
-      list(APPEND HIP_HIPCC_FLAGS "-DNDEBUG")
-    endif()
-    foreach(target ${GPU_TARGETS})
-      list(APPEND HIP_HIPCC_FLAGS "--offload-arch=${target}")
-    endforeach()
-    if(BUILD_CODE_COVERAGE)
-      list(APPEND HIP_HIPCC_FLAGS "-fprofile-instr-generate -fcoverage-mapping")
-      list(APPEND HIP_HIPCC_FLAGS "-Xarch_device -fno-profile-instr-generate")
-      list(APPEND HIP_HIPCC_FLAGS "-Xarch_device -fno-coverage-mapping")
-    endif()
-
-    # Create rocALUTION HIP library
-    if(WIN32)
-      add_library(rocalution_hip OBJECT ${HIP_SOURCES})
-    else()
-      hip_add_library(rocalution_hip ${HIP_SOURCES})
     endif()
   endif()
 
