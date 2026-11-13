@@ -49,7 +49,7 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
-Two filters decide what a build packs, and both prune exactly as arch pruning does:
+Three filters decide what a build packs, and all prune exactly as arch pruning does:
 
 - **Family folders.** A descriptor family lives in a top-level child folder of a root
   (`rocKE/` and `FlyDSL/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
@@ -60,11 +60,27 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   name deeper in the tree is not a family. A root that is itself placed inside a family
   folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
   pointing a root there is the user's responsibility.
+- **Incomplete bundles.** `--exclude-folder` also takes a `/`-separated path under the
+  root, which excludes that one folder (case-insensitively, like a family). The provider
+  passes `rocKE/<bundle>` to the production root, and to the probes that read it, for
+  every rocKE bundle whose DVC outputs were not pulled (`HKP_PRODUCT_EXCLUDED_BUNDLES`,
+  set by the provider's DVC check): its git-tracked descriptors may name one that lives
+  in the missing output, which the packer would refuse as a dangling reference.
 - **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
   as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
   lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
   `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+- **DVC models.** A UHD whose model file is absent while `<model>.dvc` sits beside it (a
+  `dvc pull` that was not run) is validated, then left out with a warning naming the
+  pointer: neither the UHD nor its model ships, and a UED that names it keeps a dangling
+  UHD id, which the loader reads as that role being off. A model with no pointer is still
+  an error. `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` is passed as `--require-dvc`,
+  which makes the un-pulled model an error too. Each shard that ships beside such a skip
+  holds `hkp-unpulled-models.record` at its root (JSON: `uhd_id`, source-relative `uhd`
+  and `pointer` per skipped UHD), written only when something was skipped. Its extension
+  is not `.json` on purpose, so the loader does not warn about it. A census accepts a
+  bound model's absence only when this record names it.
 
 A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
@@ -100,11 +116,12 @@ too. Two answers decide which engine-pinned tests are registered:
 
 - **Per-arch registrations** (the census, and the external and gpu_ref integration
   checks) install into a gfx-specific shard and are gated on
-  `hkp_gfx950_attention_dense_available()`, which reads what the shard for that arch
-  ships.
-- **Host-side sources that pin an engine**, such as the gfx950 knobs suite, are gated on
-  `hkp_product_offers_engine()`, which reads what the product root carries for any arch
-  under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
+  `hkp_product_ships_engine_for_arch()`, which reads what the shard for that arch
+  ships. The single-arch rocKE attention engines pinned against the SdpaFwd bundles
+  are registered from one table, `HKP_PINNED_ATTENTION_ENGINES` in `src/CMakeLists.txt`.
+- **Host-side sources that pin an engine**, such as the attention knob suites, are gated
+  on `hkp_product_offers_engine()`, which reads what the product root carries for any
+  arch under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
   tests must work with another build's arch content.
 
 A probe that cannot answer leaves the root wired, so the packer reports what is wrong
@@ -540,7 +557,7 @@ Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
 | Variable | Forwarded as | Reaches | Effect |
 |---|---|---|---|
 | `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
-| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`, the gfx1250 dgrad catalog as `llvm24`. The value applies to every catalog the pack step builds, and a catalog refuses an older flavor than its own, so a build that packs both architectures pins `llvm24` (or leaves it derived from an LLVM 24 COMGR). An unrecognized value is only rejected when the pack step runs, not at configure. |
 
 Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
 loss of the forwarding would repack with whatever rocke derives instead, unnoticed.

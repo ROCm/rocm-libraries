@@ -123,8 +123,8 @@ __device__ void conv2d_direct_wgrad_cdna5_nhwc_impl(const ToType<DT>* __restrict
     constexpr auto reg_tiles_k      = cfg.reg_tiles_k();
     constexpr auto block_size_q     = cfg.wmma_size_q;
     constexpr auto block_size_q_pad = block_size_q + (cfg.kw - 1);
-    constexpr auto half_fmt = DT == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10;
-    constexpr auto prefill_factor = divup(cfg.chunk_size_p + (cfg.kh - 1), cfg.chunk_size_p);
+    constexpr auto half_fmt         = bn::fpfmt_of<DT>;
+    constexpr auto prefill_factor   = divup(cfg.chunk_size_p + (cfg.kh - 1), cfg.chunk_size_p);
 
     static_assert(cfg.ring_size_p % cfg.chunk_size_p == 0,
                   "tile_size_h must be divisible by chunk_size_p");
@@ -673,6 +673,7 @@ __launch_bounds__(cfg.tiles() * arch::wave_size, 2) __global__
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const hipconv::Device&,
                  const hipconv::ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -724,7 +725,8 @@ public:
 
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
     {
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
@@ -746,7 +748,8 @@ public:
         return true;
     }
 
-    bool is_valid_config(const hipconv::ConvParams& par) const override
+    bool is_valid_config(const hipconv::Device& /*dev*/,
+                         const hipconv::ConvParams& par) const override
     {
         if(par.kh != cfg_.kh)
             return false;
@@ -755,7 +758,15 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const hipconv::ConvParams& par) const override
+    // Every config adds into dW atomically.
+    bool is_deterministic(const hipconv::Device& /*dev*/,
+                          const hipconv::ConvParams& /*par*/) const override
+    {
+        return false;
+    }
+
+    LaunchParams get_launch_params(const hipconv::Device& /*dev*/,
+                                   const hipconv::ConvParams& par) const override
     {
         constexpr auto NUM_WGP = 256; // hardcoded for now...
 

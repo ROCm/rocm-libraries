@@ -119,6 +119,8 @@ protected:
                 << supportStatus.get_message();
         }
 
+        // This harness does not fill a group-mode graph's offset tables; the group-mode kernels
+        // are checked against the CPU reference in IntegrationGpuSdpaForwardRagged.cpp.
         if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
         {
             GTEST_SKIP() << "Group mode kernels not supported by CPU validation";

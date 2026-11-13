@@ -52,15 +52,20 @@ The following table lists the operations currently executable through the GPU gr
 | Operation | Datatypes | Layouts | Implementation | Notes |
 |-----------|-----------|---------|----------------|-------|
 | Convolution Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | 1D, 2D and 3D spatial; FP32 output with FP16/BFP16 inputs also registered |
+| Convolution Backward Data | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute for all datatypes |
+| Convolution Backward Weights | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute for all datatypes |
 | Matmul | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 inputs with FP16/BFP16 output also registered |
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean and variance are required inputs |
 | BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | Stride-based | GPU Reference | Same signatures as BatchNorm Forward Inference |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/variance outputs optional |
+| BatchNorm Backward | FP16, BFP16, FP32 | Packed channel-first or channel-last | GPU Reference | Saved mean/inv-variance optional; FP32 compute and scale/bias gradients |
 | Layernorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance outputs optional |
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
+| Resample Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL may produce INT32 indices |
+| Resample Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL requires INT32 indices |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, ALiBi; ragged through the dense rewrite. No Philox dropout (the backward node has no `rng_dump`) or sinks (no `dsink` output) |
@@ -71,12 +76,7 @@ The following table lists the operations currently executable through the GPU gr
 
 | Operation | Executor behavior | `gpu-ref` library |
 |-----------|-------------------|-------------------|
-| Convolution Backward Data | `ReferenceCapabilityError` ("GPU plan not yet implemented") | `GpuFpReferenceConvolution::dgrad` exists |
-| Convolution Backward Weights | `ReferenceCapabilityError` | `GpuFpReferenceConvolution::wgrad` exists |
-| BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
-| Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
-| Resample Backward | "Unsupported node type" error | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
 | Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
@@ -91,6 +91,8 @@ but are not reachable through graph-level verification.
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | Convolution Forward | `GpuConvolutionFwdPlanBuilder` | `GpuConvolutionFwdSignatureKey` | Forward convolution |
+| Convolution Backward Data | `GpuConvolutionBwdPlanBuilder` | `GpuConvolutionBwdSignatureKey` | Data gradient (dgrad) |
+| Convolution Backward Weights | `GpuConvolutionWrwPlanBuilder` | `GpuConvolutionWrwSignatureKey` | Weight gradient (wgrad) |
 | Matmul | `GpuMatmulPlanBuilder` | `GpuMatmulSignatureKey` | Generic matrix multiplication |
 
 ### BatchNormalization Operations
@@ -100,6 +102,19 @@ but are not reachable through graph-level verification.
 | BatchNorm Forward Inference | `GpuBatchnormFwdInfPlanBuilder` | `GpuBatchnormFwdInfSignatureKey` | Inference-mode forward pass |
 | BatchNorm Forward Inference with Variance | `GpuBatchnormFwdInfVariancePlanBuilder` | `GpuBatchnormFwdInfVarianceSignatureKey` | Inference-mode with variance forward pass |
 | BatchNorm Forward Training | `GpuBatchnormFwdTrainPlanBuilder` | `GpuBatchnormFwdTrainSignatureKey` | Training-mode forward pass with statistics |
+| BatchNorm Backward | `GpuBatchnormBwdPlanBuilder` | `GpuBatchnormBwdSignatureKey` | Input, scale and bias gradients, with optional saved statistics |
+
+BatchNorm backward registers seven `(dy, x, dx)` combinations: `(FP32, FP32, FP32)`,
+`(FP16, FP16, FP16)`, `(BFP16, BFP16, BFP16)`, `(FP16, FP16, FP32)`,
+`(BFP16, BFP16, FP32)`, `(FP32, BFP16, BFP16)` and `(FP32, FP16, FP16)`.
+Scale, scale/bias gradients, saved statistics and compute use FP32. Without saved statistics,
+the operation computes mean and variance internally. Tensor dimensions and layouts are validated
+by the operation at execution time, not by the graph plan's applicability check.
+
+The direct `GpuFpReferenceBatchnorm::backward` API also supports FP64 data and compute.
+Its compute type defaults to the mean/variance type, as in the other BatchNorm operations.
+Backward compute must be FP32 or FP64; callers using FP16 or BFP16 statistics must explicitly
+select FP32 compute.
 
 ### Normalization Operations
 
@@ -118,6 +133,16 @@ but are not reachable through graph-level verification.
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
 | SDPA Backward | `GpuSdpaBwdPlanBuilder` | `GpuSdpaBwdSignatureKey` | Scaled dot-product attention gradients (dQ, dK, dV, dBias) |
+
+### Resample Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Resample Forward | `GpuResampleFwdPlanBuilder` | `GpuResampleFwdSignatureKey` | Forward resampling with MAXPOOL or AVGPOOL modes |
+| Resample Backward | `GpuResampleBwdPlanBuilder` | `GpuResampleBwdSignatureKey` | Backward resampling with MAXPOOL or AVGPOOL modes |
+
+Both plans support ZERO_PAD and NEG_INF_PAD. Index tensors are supported only for MAXPOOL:
+forward indices are optional, while backward MAXPOOL requires indices. AVGPOOL uses no index tensor.
 
 ### Pointwise Operations
 
@@ -139,7 +164,7 @@ The GPU executor accepts a subset of the pointwise modes the CPU reference imple
 | Ternary | - | BINARY_SELECT |
 
 Pointwise nodes use `FP32` compute and no `BOOLEAN` tensors. A pointwise node with a runtime
-pass-by-value operand is rejected, as are Convolution Forward nodes with such an operand.
+pass-by-value operand is rejected, as are Convolution Forward, Backward Data and Backward Weights nodes with such an operand.
 
 ### Reduction Modes
 
@@ -208,15 +233,15 @@ host validator.
 | BatchNorm Forward Training | Yes | Yes |
 | BatchNorm Backward | Yes | No (library only) |
 | Convolution Forward | Yes | Yes |
-| Convolution Backward Data | Yes | No (library only) |
-| Convolution Backward Weights | Yes | No (library only) |
+| Convolution Backward Data | Yes | Yes |
+| Convolution Backward Weights | Yes | Yes |
 | Matmul | Yes | Yes |
 | MoE Grouped Matmul (forward, backward) | Yes | No |
 | Layernorm Forward / Backward | Yes | Yes |
 | RMSNorm Forward / Backward | Yes | Yes |
 | Reduction | Yes | Yes |
-| Resample Forward | Yes | No (library only) |
-| Resample Backward | Yes | No |
+| Resample Forward | Yes | Yes |
+| Resample Backward | Yes | Yes |
 | SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3 native, other dtypes through the dense rewrite) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |

@@ -49,18 +49,6 @@ def _emit_dual_period_kernel(plr=0):
     if not cxx or not shutil.which(cxx):
         pytest.skip("gfx950 assembly toolchain (amdclang++) unavailable")
 
-    # The stinkytofu rocisa backend is gfx1250-only -- emitting this gfx950
-    # kernel through it raises on SrdUpperValue and codegen returns err=-2.
-    # The unit and coverage-unit tox lanes select it for the whole process, so
-    # skip there; TheRock's gfx94X tensilelite job runs Tests/unit natively and
-    # still executes these.
-    import rocisa
-    backend = (getattr(rocisa, "_BACKEND", "")
-               or os.environ.get("ROCISA_BACKEND", "")).strip().lower()
-    if backend == "stinkytofu":
-        pytest.skip("gfx950 codegen needs the native rocisa backend "
-                    "(ROCISA_BACKEND=stinkytofu is gfx1250-only)")
-
     isa = gfxToIsa("gfx950")
     iim = makeIsaInfoMap([isa], cxx)
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -91,7 +79,7 @@ def _emit_dual_period_kernel(plr=0):
     assert sol.get("Valid"), "dual-period MXFP8 solution did not validate"
     assert sol.get("_DualPeriodMXFP8"), "solution did not take the dual-period path"
 
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions, processKernelSource)
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig

@@ -30,7 +30,7 @@
 //
 // Bank-free status (64 banks * 4 B = 256 B/clock; LDS bank index = (addr/4) %
 // 64). A conflict is decided within the set of lanes serviced in one phase, and
-// the phase structure depends on the read width:
+// the phase structure depends on the read width (docs/hardware/lds-banks.md):
 //   - uint2 via ds_read_b64: 2 phases of 32 consecutive lanes (T0-31, T32-63).
 //     Bank-free needs the 32 uint2 offsets in a phase distinct mod 32.
 //   - uint4 via ds_read_b128: phases of 16 consecutive lanes (T0-15, T16-31,

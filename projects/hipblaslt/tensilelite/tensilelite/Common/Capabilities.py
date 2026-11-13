@@ -27,15 +27,16 @@ import rocisa
 from typing import List, Dict
 
 from .Architectures import (ARCH_CAP_OVERRIDES, baseArchName, capOverrideKeyOf, gfxToIsa,
-                           tuningArchOf, withoutPredicate)
+                           withoutPredicate)
 from .Types import IsaVersion, IsaInfo
 
 
 def _overrideLayers(name: str):
     """The two capability-override layers for a spec, in the order they apply.
 
-    1. Base-name overrides (e.g. gfx1250v0's stepping deltas), keyed on the bare
-       name so gfx1250v0 still picks up the right entry.
+    1. Base-name overrides (e.g. gfx1250-strict's stepping deltas), keyed on the
+       bare name so gfx1250-strict[cu=64] and gfx1250-strict:xnack- still pick up
+       the right entry.
     2. Qualified overrides (e.g. gfx1250:xnack- clearing EnableXnackReplay),
        keyed by ``capOverrideKeyOf`` -- the architecture plus its xnack mode,
        which is what the table is written in terms of. Building the key that way
@@ -49,7 +50,7 @@ def _overrideLayers(name: str):
     Layer 2 wins on any key present in both: the xnack mode is a stronger
     constraint than the stepping default.
     """
-    base = ARCH_CAP_OVERRIDES.get(tuningArchOf(baseArchName(name)), {})
+    base = ARCH_CAP_OVERRIDES.get(baseArchName(name), {})
     full = ARCH_CAP_OVERRIDES.get(capOverrideKeyOf(name), {})
     return base, full
 

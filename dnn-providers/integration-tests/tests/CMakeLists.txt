@@ -28,6 +28,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     ../src/harness/input-init/FillInputs.cpp
+    ../src/harness/input-init/ResampleBackwardInputs.cpp
     ../src/harness/input-init/SdpaBackwardInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
@@ -43,10 +44,16 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBatchnormBwdPlan.cpp
+    TestGpuBatchnormBwdSignatureKey.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
+    TestGpuConvolutionBwdPlan.cpp
+    TestGpuConvolutionBwdSignatureKey.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestGpuConvolutionWrwPlan.cpp
+    TestGpuConvolutionWrwSignatureKey.cpp
     TestGpuLayernormBwdSignatureKey.cpp
     TestGpuLayernormBwdPlan.cpp
     TestGpuLayernormFwdSignatureKey.cpp
@@ -56,6 +63,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaBwdPlan.cpp
     TestGpuSdpaFwdPlan.cpp
+    TestGpuSdpaFwdPlanZeroDropout.cpp
+    TestGpuSdpaFwdPlanVllmForm.cpp
+    TestGpuSdpaFwdPlanSeqLenKvOnly.cpp
     TestGpuSdpaPagedFwdPlan.cpp
     TestGpuRaggedSdpaDensify.cpp
     TestGpuRaggedSdpaMapping.cpp
@@ -77,7 +87,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
+    TestGraphVerificationHarness.cpp
     TestBenchmark.cpp
+    TestCapture.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp

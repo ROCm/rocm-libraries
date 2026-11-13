@@ -495,6 +495,13 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_TILE_GPU_CHECK_FAILED,
 
+    /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
+
+    /* tile.buffer_atomic_fadd_f32 (raw_ptr_buffer_atomic_fadd with a cache
+     * policy). Appended so no existing opcode index shifts. */
+    ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -820,7 +827,9 @@ bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t 
 /* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
  * quoted with ' -- or with " when `s` contains ' and no " -- with the
  * backslash and the quote character escaped, \t \n \r named and every other
- * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex). Writes
+ * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex); NULL
+ * gives "None", Python's repr(None). The IR printer quotes str attrs inside
+ * lists and region labels with it, so this is the engine's one port. Writes
  * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
  * / 0 writes nothing) and returns its full length, like snprintf.
  *
@@ -1306,7 +1315,7 @@ rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
- * (a, b, c) and return <c_frag_len x acc_elem>. The scaled MX atom takes the
+ * (src0, src1, src2) and return <dst_frag_len x result_elem>. The scaled MX atom takes the
  * two extra E8M0 scale operands. */
 rocke_value_t* rocke_b_mfma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
@@ -1575,6 +1584,12 @@ rocke_value_t*
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+
+/* The i64 address of ptr[index] in global memory. The TDM descriptor carries a
+ * raw 57-bit global address rather than a pointer, so the element GEP has to be
+ * materialised as an integer. Mirrors ir.py global_addr_of. */
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,
@@ -1748,6 +1763,22 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate
+ * for a device-scope cascade add, th = TH_ATOMIC_CASCADE (4), scope =
+ * SCOPE_DEV (2) in bits [4:3]. gfx11 and gfx9 read the same bits as
+ * glc/slc/dlc, so only gfx12 targets may carry it. */
+#define ROCKE_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
+/* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
+ * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]).
+ * Callers must guard invalid offsets (e.g. with scf_if) instead of steering
+ * them out of range: unlike a buffer load, which reads 0 there, a buffer
+ * atomic at the out-of-range sentinel offset faults on gfx1250. */
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy);
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1882,8 +1913,26 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
                                        int width_bytes,
                                        int offset_bytes,
                                        int cachepolicy);
+/* gfx1250 TDM LDS padding: the descriptor's pad_interval is 3 bits and
+ * pad_amount 7 bits, both counted in dwords. Must match
+ * rocke.core.ir.TDM_PAD_INTERVAL_MAX / TDM_PAD_AMOUNT_MAX. */
+#define ROCKE_TDM_PAD_INTERVAL_MAX 7
+#define ROCKE_TDM_PAD_AMOUNT_MAX 127
+/* Encode an LDS row pad -- pad_bytes of gap after every interval_bytes of
+ * payload -- as rocke_b_tdm_descriptor_2d's pad_interval / pad_amount (mirrors
+ * rocke.core.ir.encode_tdm_padding). Returns 1, or 0 with the Python
+ * ValueError text in `reason` (when non-NULL) for a pad the fields cannot
+ * express. */
+int rocke_encode_tdm_padding(int64_t interval_bytes,
+                             int64_t pad_bytes,
+                             int* out_pad_interval,
+                             int* out_pad_amount,
+                             char* reason,
+                             size_t reason_cap);
 /* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
- * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * IRBuilder.tdm_descriptor_2d). ``global_ptr`` is a global pointer or the i64
+ * address of one (rocke_b_global_addr_of). ``pad_interval`` < 0 disables LDS
+ * padding.
  * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
  * sets the builder error and returns 0. */
 int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
@@ -1901,10 +1950,10 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 /* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
- * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
- * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
- * returns from the launch on Windows, and stops the wave under a debugger, so
- * it is a last resort. */
+ * as s_trap 2 or, on some processors, as its simulated trap. Which processors,
+ * and what a taken trap does on each host, is stated in the tile.trap section
+ * of dsl_docs/reference/op_vocabulary.md. A taken trap does not let the process
+ * carry on, so it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
