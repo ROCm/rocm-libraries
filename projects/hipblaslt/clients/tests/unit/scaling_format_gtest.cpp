@@ -66,7 +66,8 @@ namespace
     X(Block_128_F16, HIP_R_8F_UE8M0, false, 1, 128, false)         \
     X(Block_32_F16_ZP, HIP_R_8F_UE8M0, false, 1, 32, true)         \
     X(Block_64_F16_ZP, HIP_R_8F_UE8M0, false, 1, 64, true)         \
-    X(Block_128_F16_ZP, HIP_R_8F_UE8M0, false, 1, 128, true)
+    X(Block_128_F16_ZP, HIP_R_8F_UE8M0, false, 1, 128, true)       \
+    X(Block_32_UE8M0_128_4_EXT, HIP_R_8F_UE8M0, true, 32, 0, false)
 
     const std::vector<ScalingFormatExpectation>& known_scaling_formats()
     {

@@ -5,9 +5,7 @@
  * rocke/helpers/layouts.py.
  *
  * SCOPE OF THIS PORT (this phase): TransposeLdsReader (and its bound view
- * _BoundTransposeLdsReader), and ConvKOuterFragmentReader.wave32_lane_offsets
- * (the reader's fragment() itself is rocke_conv_tr_frag in
- * instances/common/conv_implicit_gemm_conv_compute_phase.cpp).
+ * _BoundTransposeLdsReader).
  *
  * TransposeLdsReader mirrors CK Tile's TransposeLDSLayout<M, K, B> lane-address
  * formulas for the ds_read_b64_tr_b16 path on M=16 MFMA tiles (see
@@ -99,28 +97,6 @@ rocke_value_t* rocke_bound_transpose_lds_reader_row(rocke_ir_builder_t* b,
                                                     const rocke_bound_transpose_lds_reader_t* self,
                                                     int k_offset,
                                                     int read);
-
-/* ------------------------------ ConvKOuterFragmentReader.wave32_lane_offsets */
-
-/* The wave32 ds_load_tr16_b128 lane map of a K-outer conv LDS tile:
- *   *col_out  = mn_base + ((lane % 16) / 8) * 8
- *   *row0_out = k_base  + (lane / 16) * n + lane % 8
- * mn_base / k_base may be NULL: the offsets then come back relative to the
- * tile origin (no add emitted), for callers that address a flat LDS buffer.
- * Emits, in this exact order: const 16, const 8, lane % 16, / 8, * 8,
- * [mn_base +], lane / 16, const n, *, lane % 8, +, [k_base +].
- * rocke_conv_tr_frag and the direct wgrad builders call it. The wave32 dgrad
- * WMMA builders still compute the same map inline: conv_direct_dgrad_wmma.cpp,
- * and instance_conv_dgrad_stem_wmma_internal.hpp for the patch and small-C
- * stem builders. Mirrors
- * ConvKOuterFragmentReader.wave32_lane_offsets in rocke/helpers/layouts.py. */
-void rocke_conv_tr_lane_offsets32(rocke_ir_builder_t* b,
-                                  rocke_value_t* lane,
-                                  int n,
-                                  rocke_value_t* mn_base,
-                                  rocke_value_t* k_base,
-                                  rocke_value_t** col_out,
-                                  rocke_value_t** row0_out);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -189,6 +189,7 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, LoadedConfigHasNoGraph)
         = v8::makeLoadedConfigRecord(-31,
                                      2,
                                      {CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION},
+                                     {CUDNN_NUMERICAL_NOTE_TENSOR_CORE},
                                      {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}},
                                      requested,
                                      "x");
@@ -197,6 +198,8 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, LoadedConfigHasNoGraph)
     EXPECT_EQ(loaded->engineIndex(), 2);
     EXPECT_EQ(loaded->engine().name(), std::optional<std::string>("x"));
     EXPECT_TRUE(loaded->engine().knobs().empty());
+    EXPECT_EQ(loaded->engine().numericalNotes(),
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_TENSOR_CORE});
     EXPECT_EQ(loaded->knobChoices(), (v8::KnobChoices{{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}));
     EXPECT_EQ(loaded->requestedChoices(), requested);
     EXPECT_EQ(compatibilityErrorOf([&] { loaded->hipdnnEngineConfig(); }).status(),
@@ -243,6 +246,7 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonRoundTrip)
     installSerializedPlan(payload);
     installEngineName(ENGINE_ID, "mock_engine_seven");
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    installNumericalNotes(ENGINE_ID, {HIPDNN_NUMERICAL_NOTE_FFT, HIPDNN_NUMERICAL_NOTE_WINOGRAD});
     const std::shared_ptr<const v8::ConfigRecord> config
         = v8::makeConfigRecord(engine(), {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}, CHOICES_LABEL);
     const std::shared_ptr<const v8::PlanRecord> built = v8::buildPlan(config);
@@ -259,6 +263,9 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonRoundTrip)
     EXPECT_EQ(parsed->name, std::optional<std::string>("mock_engine_seven"));
     EXPECT_EQ(parsed->behaviorNotes,
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    EXPECT_EQ(parsed->numericalNotes,
+              (std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_FFT,
+                                                        CUDNN_NUMERICAL_NOTE_WINOGRAD}));
     EXPECT_EQ(parsed->knobs, (v8::KnobChoices{{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}));
     // Every requested choice was applied, so the JSON does not repeat them.
     EXPECT_FALSE(parsed->requestedKnobs.has_value());
@@ -274,9 +281,46 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonRoundTrip)
     EXPECT_EQ(loaded->config().requestedChoices(), config->requestedChoices());
     EXPECT_EQ(loaded->config().engine().name(), parsed->name);
     EXPECT_EQ(loaded->config().engine().behaviorNotes(), parsed->behaviorNotes);
+    EXPECT_EQ(loaded->config().engine().numericalNotes(), parsed->numericalNotes);
     EXPECT_EQ(loaded->hipdnnPlan(), created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).back());
     // A restored plan writes the same JSON.
     EXPECT_EQ(loaded->json(), json);
+}
+
+// An explicit empty list is the engine's claim of determinism; it survives the round trip
+// instead of reloading as the {NONDETERMINISTIC} that an absent field means.
+TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonRoundTripsExplicitEmptyNumericalNotes)
+{
+    installSerializedPlan({0x01, 0x02});
+    installNumericalNotes(ENGINE_ID, {});
+    const std::shared_ptr<const v8::PlanRecord> built
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL));
+
+    const std::string json = built->json();
+    EXPECT_NE(json.find(R"("numericalNotes":[])"), std::string::npos) << json;
+    const std::shared_ptr<const v8::PlanRecord> loaded = v8::loadPlan(_handle, json, JSON_LABEL);
+
+    EXPECT_TRUE(loaded->numericalNotes().empty());
+    EXPECT_EQ(loaded->json(), json);
+}
+
+TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonWithoutNumericalNotesLoadsAsNondeterministic)
+{
+    installSerializedPlan({0x01, 0x02});
+    installNumericalNotes(ENGINE_ID, {});
+    std::string json = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL))->json();
+    const std::string field = R"(,"numericalNotes":[])";
+    const std::size_t at = json.find(field);
+    ASSERT_NE(at, std::string::npos) << json;
+    json.erase(at, field.size());
+
+    const std::optional<v8::plan_json::Plan> parsed = v8::plan_json::read(json, "json");
+    ASSERT_TRUE(parsed.has_value()) << json;
+    EXPECT_EQ(parsed->numericalNotes,
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+    const std::shared_ptr<const v8::PlanRecord> loaded = v8::loadPlan(_handle, json, JSON_LABEL);
+    EXPECT_EQ(loaded->numericalNotes(),
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
 }
 
 TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonIdMismatchIsBadParam)
@@ -495,6 +539,12 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, PlanNotesComeFromItsEngine)
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     EXPECT_EQ(plan->numericalNotes(),
               std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+
+    installNumericalNotes(ENGINE_ID, {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE});
+    const std::shared_ptr<const v8::PlanRecord> declared
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL));
+    EXPECT_EQ(declared->numericalNotes(),
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_TENSOR_CORE});
 }
 
 TEST_F(TestCudnnCompatibilityV8CorePlans, PlanJsonOmitsPayloadWhenSerializeFails)
@@ -539,6 +589,7 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, PlanLoadWorkspaceFailureIsReported)
 TEST_F(TestCudnnCompatibilityV8CorePlans, RawConfigNotesReadTheEngine)
 {
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    installNumericalNotes(ENGINE_ID, {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE});
     // Declared first: the destroy action below appends to it until the graph goes.
     std::vector<hipdnnBackendDescriptor_t> destroyed;
     const std::shared_ptr<const v8::GraphCore> core = graph();
@@ -551,8 +602,8 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, RawConfigNotesReadTheEngine)
         });
     const std::size_t engines = created(HIPDNN_BACKEND_ENGINE_DESCRIPTOR).size();
 
-    EXPECT_TRUE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC));
-    EXPECT_FALSE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_TENSOR_CORE));
+    EXPECT_TRUE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_TENSOR_CORE));
+    EXPECT_FALSE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC));
     EXPECT_TRUE(v8::engineConfigHasBehaviorNote(config, CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION));
     EXPECT_FALSE(v8::engineConfigHasBehaviorNote(config, CUDNN_BEHAVIOR_NOTE_CUBLASLT_DEPENDENCY));
 
@@ -563,18 +614,17 @@ TEST_F(TestCudnnCompatibilityV8CorePlans, RawConfigNotesReadTheEngine)
     {
         EXPECT_NE(std::find(destroyed.begin(), destroyed.end(), all[i]), destroyed.end()) << i;
     }
-    const std::vector<hipdnnBackendAttributeName_t> gets = getAttributeNames();
-    EXPECT_EQ(std::find(gets.begin(), gets.end(), HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE), gets.end());
 }
 
-TEST_F(TestCudnnCompatibilityV8CorePlans, RawConfigNotesFailClosed)
+TEST_F(TestCudnnCompatibilityV8CorePlans, RawConfigNumericalNotesAnswerFalseOnFailure)
 {
-    installHeuristicResults({hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID});
     const std::shared_ptr<const v8::GraphCore> core = graph();
-    hipdnnBackendDescriptor_t claimed
-        = core->defaultEngineConfig(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
-    ASSERT_NE(claimed, nullptr);
-    EXPECT_FALSE(v8::engineConfigHasNumericalNote(claimed, CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC));
+    hipdnnBackendDescriptor_t config = core->defaultEngineConfig(ENGINE_ID);
+    ASSERT_NE(config, nullptr);
+    // An engine that declares nothing is reported NONDETERMINISTIC.
+    EXPECT_TRUE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC));
+    failNumericalNoteQueries(HIPDNN_STATUS_INTERNAL_ERROR);
+    EXPECT_FALSE(v8::engineConfigHasNumericalNote(config, CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC));
 
     // Not a config the backend knows: every query answers false.
     hipdnnBackendDescriptor_t foreign = newMockDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);

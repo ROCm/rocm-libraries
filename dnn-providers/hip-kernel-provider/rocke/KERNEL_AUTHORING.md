@@ -67,7 +67,13 @@ The two invariants that gate every process below:
    2D/3D bodies) exactly like every other family, and additionally carries
    `.py`/`.c` emitter pairs under
    [library/tests/parity/](library/tests/parity/) that are byte-compared per
-   config.
+   config. Convolution (`conv_*`, `img2col`, `deep_fused_conv_pool`) keeps its
+   C++ mirror in the library instead: [library/cpp/](library/cpp/)
+   (`rocke_library_core`, bound into `rocke_library_engine`, bridged by
+   `kernels/conv/engine_bridge.py`), gated by the same `check_byte_identity.py`.
+   New library families put theirs there too, so the library owns both halves.
+   Library families' byte-identity golden is
+   [library/tests/parity/golden/](library/tests/parity/golden/).
 2. **One-way dependency.** `library → platform` only. `platform` never imports
    `kernels` / `builders` / `dispatch`, and stays standalone-installable.
    Anything reusable across families belongs in platform (see
@@ -192,6 +198,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
       dashboard, and representative shapes are handed to benchmarking. Publish
       relative evidence only through a policy-qualified PR or result document.
+- [ ] **MMA ops** — an MMA op added, removed or rewired in `core.arch` comes with
+      the tiling package's regenerated backend coverage record
+      ([`extending.md` §5.5](platform/dsl_docs/development/extending.md#55-the-tiling-mma-catalog-and-its-backend-coverage-record)).
 
 ### D. Perf optimization (no new feature)
 
@@ -503,8 +512,12 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
    [test_attention_builds.py](library/tests/test_attention_builds.py) or the
    closest architecture-specific builder test under `library/tests/`.
-5. **Run** `pytest library/tests` (add `platform/tests` if platform was touched);
-   GPU numeric lanes need a HIP-visible device.
+5. **Run** `python library/tests/run_all.py --require-compiler-gate` for the
+   complete required library host verdict (`--pytest-only` is focused iteration);
+   add the platform runner if platform code was touched. Run
+   `python library/tests/run_all.py --gpu-only` for the applicable GPU-marked files,
+   or `python tools/run_checks.py --steps numeric --op <family>` for the
+   standalone differential numeric lane, on a HIP-visible device.
 
 ### F. Parity and golden re-bless
 
@@ -536,7 +549,12 @@ Python emitter and the compiled C emitter for each config index and diffs the
    [rocke_representative_ir_sha256/](platform/tests/golden/rocke_representative_ir_sha256/),
    one `<family>.json` shard per family; `--only <family>[,...]` rewrites just
    those shards, so unrelated changes do not conflict in the golden);
-   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
+   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`
+   (the convolution families -- implicit-GEMM fwd/wgrad/dgrad, deep fused conv,
+   direct conv, Winograd -- live in
+   [test_conv_ir_golden.py](library/tests/test_conv_ir_golden.py) and its
+   [conv_representative_ir/](library/tests/golden/conv_representative_ir/) shards,
+   not the platform harness).
 3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.

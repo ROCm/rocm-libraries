@@ -3456,6 +3456,7 @@ custom.config:
     SupportsGSU: false
   InternalSupportParams:
     KernArgsVersion: 0
+  MXScaleFormat: HostPreSwizzle
   ProblemType:
     OperationType: GEMM
     DataType: F4

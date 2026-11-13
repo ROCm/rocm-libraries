@@ -50,12 +50,15 @@ set(REGRESSION_TESTS
     test_ck_tile_fmha_fwd_fp32
     test_ck_tile_fmha_fwd_bf16
     test_ck_tile_fmha_fwd_fp16
+    test_ck_tile_fmha_fwd_fp8
     test_ck_tile_fmha_fwd_fp8bf16
     test_ck_tile_fmha_fwd_mxfp8
+    test_ck_tile_fmha_fwd_mxfp8bf16
     test_ck_tile_fmha_fwd_mxfp4
     test_ck_tile_streamk_extended
     test_ck_tile_streamk_gfx1250_wmma
     test_ck_tile_streamk_gfx1250_wmma_legacy
+    test_ck_tile_streamk_pc_gfx1250_wmma
     test_amdgcn_mma_layout_gfx1250
     test_gemm_multiply_multiply_wmma
     test_gemm_multiply_multiply_wp_fp8

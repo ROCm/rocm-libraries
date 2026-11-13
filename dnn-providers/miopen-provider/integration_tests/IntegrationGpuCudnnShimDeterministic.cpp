@@ -4,21 +4,18 @@
 // cuDNN-shim deselect_numeric_notes({NONDETERMINISTIC}) must select the deterministic
 // MIOpen engine. That engine's determinism is covered by IntegrationGpuDeterministic.cpp.
 
-#include <array>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "IntegrationCudnnShimFixture.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace test_conv_common;
@@ -33,36 +30,10 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 // Manages the cuDNN-shim handle lifecycle
 // ============================================================================
 
-class CudnnShimDeterministicTestBase : public ::testing::TestWithParam<ConvTestCase>
+class CudnnShimDeterministicTestBase
+    : public miopen_plugin::test_utilities::CudnnShimFixture<::testing::TestWithParam<ConvTestCase>>
 {
 protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        auto pluginPath
-            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
-        const std::string pluginPathStr = pluginPath.string();
-        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(cudnnCreate(&_handle), CUDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            EXPECT_EQ(cudnnDestroy(_handle), CUDNN_STATUS_SUCCESS);
-        }
-    }
-
     static void initGraph(fe::graph::Graph& graph)
     {
         graph.set_io_data_type(fe::DataType_t::FLOAT)
@@ -110,8 +81,6 @@ protected:
         ASSERT_TRUE(graph.get_plan_name(planName).is_good());
         EXPECT_EQ(planName, MIOPEN_ENGINE_DETERMINISTIC_NAME);
     }
-
-    cudnnHandle_t _handle = nullptr;
 };
 
 // ============================================================================

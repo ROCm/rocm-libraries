@@ -174,6 +174,34 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         return sdpa_common::scoreFromDot(args.score, dot, b, h, sq, skv, args.numHeads);
     };
 
+    // Padded query row past liveQ, or (below) a row whose every key is masked: probabilities are
+    // all zero, so the output is zero and LSE is -inf. Matches CpuFpReferenceSdpa (avoids a 0/0
+    // NaN). The padded-row test comes before PASS 1, so a padded row never reads its Q padding
+    // (SEM-008) or any K, bias or sink.
+    long long oIdx
+        = b * args.oStr.s[0] + h * args.oStr.s[1] + sq * args.oStr.s[2] + dv * args.oStr.s[3];
+    O_TYPE* tag = nullptr;
+
+    // LSE is per (b, h, sq); only the dv == 0 thread writes it, so every output
+    // row has exactly one writer and there is no contention.
+    long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
+
+    auto writeEmptyRow = [&]() {
+        o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
+        // CPU writes maxVal + log(sumExp) = -inf + log(0) = -inf for masked rows.
+        if(lse != nullptr && dv == 0)
+        {
+            lse[lseIdx] = negInf;
+        }
+        writeRowStats(args, b, h, sq, dv, negInf, static_cast<COMPUTE_TYPE>(0));
+    };
+
+    if(sq >= liveQ)
+    {
+        writeEmptyRow();
+        return;
+    }
+
     // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
     // An attention sink joins the max and the denominator but has no value row.
     const COMPUTE_TYPE sink
@@ -188,25 +216,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         }
     }
 
-    long long oIdx
-        = b * args.oStr.s[0] + h * args.oStr.s[1] + sq * args.oStr.s[2] + dv * args.oStr.s[3];
-    O_TYPE* tag = nullptr;
-
-    // LSE is per (b, h, sq); only the dv == 0 thread writes it, so every output
-    // row has exactly one writer and there is no contention.
-    long long lseIdx = b * args.lseStr.s[0] + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
-
-    // Fully-masked row, or a padded query row past liveQ: probabilities are all zero, so the
-    // output is zero and LSE is -inf. Matches CpuFpReferenceSdpa (avoids a 0/0 NaN).
-    if(sq >= liveQ || maxVal == negInf)
+    if(maxVal == negInf)
     {
-        o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
-        // CPU writes maxVal + log(sumExp) = -inf + log(0) = -inf for masked rows.
-        if(lse != nullptr && dv == 0)
-        {
-            lse[lseIdx] = negInf;
-        }
-        writeRowStats(args, b, h, sq, dv, negInf, static_cast<COMPUTE_TYPE>(0));
+        writeEmptyRow();
         return;
     }
 
@@ -229,6 +241,14 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     COMPUTE_TYPE rowAmax = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < liveKv; ++skv)
     {
+        // A key the band or block mask removes is never read: its V may hold anything (vLLM's
+        // nulled or stale cache blocks), and 0 * NaN would leak (SEM-027). Its e is 0, so
+        // skipping it changes no other result.
+        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv)
+           || sdpa_common::blockMasked(args.score, b, h, sq, skv))
+        {
+            continue;
+        }
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE e = expf(s - maxVal);
         rowAmax = e > rowAmax ? e : rowAmax;

@@ -51,6 +51,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
+#include "HipdnnBackendNumericalNote.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
@@ -196,10 +197,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
 *
 * @note An engine descriptor validates its graph and engine applicability here, but loads
-* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
-* fetches and validates EngineDetails, including count-only queries. Successful finalization
-* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
-* validation should issue such a query after finalization.
+* plugin metadata lazily. The first engine-name, knob-info, behavior-note, or numerical-note
+* attribute query fetches and validates EngineDetails, including count-only queries. Successful
+* finalization does not guarantee that metadata retrieval will succeed; callers requiring eager
+* metadata validation should issue such a query after finalization.
 *
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
@@ -221,9 +222,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
- * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
- * Retrieval or validation errors are reported by this call, not engine finalization. A failed
- * metadata load publishes no partial result and can be retried by a later attribute query.
+ * @note Engine-name, knob-info, behavior-note, and numerical-note queries lazily fetch plugin
+ * EngineDetails. Retrieval or validation errors are reported by this call, not engine
+ * finalization. A failed metadata load publishes no partial result and can be retried by a later
+ * attribute query.
  *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve

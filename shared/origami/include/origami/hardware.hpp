@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -134,7 +135,6 @@ class ORIGAMI_EXPORT hardware_t {
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
     size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
-
     constexpr architecture_constants(double mem1_perf_ratio,
                                      double mem2_perf_ratio,
                                      double mem3_perf_ratio,
@@ -326,12 +326,19 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
-        // TODO: Update with real gfx1250 constants when available
+        // Measured at a 2.4 GHz engine clock and 1.9 GHz memory clock.  Peak tensor-DMA read
+        // bandwidth: L2 41.93 TB/s, sustained DRAM 17.13 TB/s.  The quadratic is the fraction
+        // of the DRAM peak reached vs active WGPs (fit on 256 WGPs, rescaled to the part's N_CU
+        // by compute_mem_bw_from_occupancy).  mem3 is the DRAM peak scaled by memory/engine
+        // clock, and mem_clock_ratio is engine/memory clock.
         auto c                       = get_gfx950_arch_constants(std::nullopt);
+        c.mem1_perf_ratio            = 41.93;
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
+        c.mem_bw_per_wg_coefficients = std::make_tuple(-1.81e-5, 8.43e-3, -1.42e-3);
+        c.mem_clock_ratio            = 2.4 / 1.9;
         c.simds_per_cu               = 4;
-        c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
+        c.l1_capacity                = 0;  // tensor-DMA loads bypass L1
         return c;
       }
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
@@ -805,7 +812,7 @@ class ORIGAMI_EXPORT hardware_t {
   double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
   double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
 
-  size_t L2_capacity;   ///< Capacity of L2 cache in bytes
+  size_t L2_capacity;   ///< Capacity of one L2 cache (one XCD's on CDNA, one AID's on gfx1250) in bytes
   size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
   size_t CU_per_L2;     ///< Compute units per L2 cache domain (derived: N_CU / NUM_XCD)
 
@@ -1105,6 +1112,40 @@ class ORIGAMI_EXPORT hardware_t {
    * @return true if the architecture has MALL, false otherwise
    */
   bool has_MALL() const;
+
+  /// gfx1250 (CDNA5): the XCDs of an AID share one L2, tensor DMA, no MALL.  Every other
+  /// architecture keeps the CDNA model.
+  bool is_cdna5() const { return arch == architecture_t::gfx1250; }
+
+  /// Number of L2 domains: on gfx1250 one per AID of up to 4 XCDs, assuming a part with fewer
+  /// XCDs spreads them evenly over as few AIDs as hold them; one per XCD on every other
+  /// architecture.
+  size_t num_l2_domains() const {
+    // gfx1250: the XCDs of an AID share one L2.
+    constexpr size_t GFX1250_MAX_XCD_PER_L2 = 4;
+    const size_t per_l2 = is_cdna5() ? GFX1250_MAX_XCD_PER_L2 : 1;
+    return std::max<size_t>((NUM_XCD + per_l2 - 1) / per_l2, 1);
+  }
+
+  /// XCDs that share one L2 (the last domain may hold fewer).
+  size_t xcd_per_l2_domain() const {
+    const size_t domains = num_l2_domains();
+    return std::max<size_t>((NUM_XCD + domains - 1) / domains, 1);
+  }
+
+  /// XCD that runs the workgroup (or whole cluster) with dispatch id `id`.  Dispatch is
+  /// round-robin over the XCDs, starting at XCD 0, or at the last XCD on gfx1250, so id i runs
+  /// on XCD (i + NUM_XCD - 1) % NUM_XCD there.
+  size_t dispatch_xcd(size_t id) const {
+    // Current behaviour: on gfx1250 dispatch id 0 lands on the last XCD (XCC 7 on all GPUs
+    // measured).  To be fixed later with ClusterAIDRemapping.
+    constexpr bool GFX1250_DISPATCH_STARTS_AT_LAST_XCD = true;
+    const size_t n = NUM_XCD > 0 ? NUM_XCD : 1;
+    return (is_cdna5() && GFX1250_DISPATCH_STARTS_AT_LAST_XCD) ? (id + n - 1) % n : id % n;
+  }
+
+  /// Capacity of one L2 domain in bytes (L2_capacity is one L2's, on every architecture).
+  size_t l2_domain_capacity() const { return L2_capacity; }
 
   /**
    * @brief Check if hardware supports native TF32 matrix instructions.
