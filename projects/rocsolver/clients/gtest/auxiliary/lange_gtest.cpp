@@ -95,15 +95,22 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {3000, 3, 3010}};
 
 // for daily_lapack tests
-// (the 1 x 2^24 matrix has enough entries for the sum of squares of the 'T' case to overflow in
-// single precision)
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
-       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
+    = {{192, 192, 192}, {640, 300, 700}, {300, 640, 300}, {1024, 2000, 1024}, {2547, 2547, 2550}};
 
 const vector<vector<int64_t>> large_matrix_size_range_64
-    = {{192, 192, 192},    {640, 300, 700},    {300, 640, 300},
-       {1024, 2000, 1024}, {2547, 2547, 2550}, {1, 16777216, 1}};
+    = {{192, 192, 192}, {640, 300, 700}, {300, 640, 300}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+
+// for weekly_lapack tests with more rows or columns than the grids cover (the blocks loop over
+// them), and with enough entries (2^24) for the sum of squares of the 'T' case to overflow in
+// single precision
+const vector<string> huge_norm_range = {"1N", "IN", "FN", "MN", "FT"};
+
+const vector<vector<int>> huge_matrix_size_range
+    = {{2100000, 1, 2100000}, {1, 2100000, 1}, {1, 16777216, 1}};
+
+const vector<vector<int64_t>> huge_matrix_size_range_64
+    = {{2100000, 1, 2100000}, {1, 2100000, 1}, {1, 16777216, 1}};
 
 template <typename I>
 Arguments lange_setup_arguments(lange_tuple<I> tup)
@@ -211,3 +218,11 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LANGE_64,
                          Combine(ValuesIn(matrix_size_range_64), ValuesIn(norm_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LANGE,
+                         Combine(ValuesIn(huge_matrix_size_range), ValuesIn(huge_norm_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LANGE_64,
+                         Combine(ValuesIn(huge_matrix_size_range_64), ValuesIn(huge_norm_range)));

@@ -77,8 +77,6 @@ static constexpr int LANGE_MIN_CHUNK = 1024;
 static constexpr int LANGE_FINAL_THDS = 1024;
 // elements loaded together by each thread before they are added (see lange_col_rows)
 static constexpr int LANGE_UNROLL = 4;
-// maximum size of the third dimension of the grids (larger batches are launched in chunks)
-static constexpr int LANGE_MAX_BATCH_BLOCKS = 65535;
 
 /** Thresholds and scaling constants of Blue's algorithm (LAPACK's la_constants). **/
 template <typename S>
@@ -162,6 +160,7 @@ __device__ __forceinline__ S lange_ssq_combine(S abig, S amed, S asml)
         {
             amed = sqrt(amed);
             asml = sqrt(asml) / lange_blue<S>::ssml;
+            // (as in LAPACK's xLASSQ; a NaN amed goes to ymax, so that the result is NaN)
             S ymin = asml > amed ? amed : asml;
             S ymax = asml > amed ? asml : amed;
             scl = 1;
@@ -302,7 +301,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_cols_kernel(const I m,
     // threads with tx = 0)
     S cacc = 0, cbig = 0, csml = 0;
 
-    for(int64_t cb = blockIdx.x; cb < ncb; cb += gridDim.x)
+    // first block of columns of this block, and the stride of the loop over the blocks of columns
+    const int64_t cb_start = blockIdx.x;
+    const int64_t cb_inc = gridDim.x;
+
+    for(int64_t cb = cb_start; cb < ncb; cb += cb_inc)
     {
         const int64_t c = cb * BY + ty;
 
@@ -411,7 +414,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_rows_kernel(const I m,
     // the maximum of the row sums of thread (tx, 0)
     S rmax = 0;
 
-    for(int64_t rb = blockIdx.x; rb < nrb; rb += gridDim.x)
+    // first block of rows of this block, and the stride of the loop over the blocks of rows
+    const int64_t rb_start = blockIdx.x;
+    const int64_t rb_inc = gridDim.x;
+
+    for(int64_t rb = rb_start; rb < nrb; rb += rb_inc)
     {
         const int64_t r = rb * BX + tx;
 
@@ -485,7 +492,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_rows_kernel(const I m,
 /** Combines the partial results part[(b * nch + h) * len + k] (h < nch, k < len) into the norm of
     each matrix: the maximum over k of the sums over h (1- and infinity-norms), or the maximum or
     the scaled sum of squares of all of them. Grid (1, 1, nb), block LANGE_FINAL_THDS. The
-    matrices of a launch are b0, b0 + 1, ..., b0 + nb - 1 (nb <= LANGE_MAX_BATCH_BLOCKS), in all the
+    matrices of a launch are b0, b0 + 1, ..., b0 + nb - 1 (nb <= MAX_BATCH_COUNT), in all the
     kernels. **/
 template <int NORM, typename I, typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FINAL_THDS)
@@ -780,12 +787,20 @@ rocblas_status rocsolver_lange_template(rocblas_handle handle,
     // block otherwise
     const I rlen = (ncch > 1) ? m : nrb;
 
-    // (the third dimension of a grid is limited: larger batches are launched in chunks of
-    // matrices b0, b0 + 1, ...)
+    // matrices per launch: at most MAX_BATCH_COUNT in the third dimension of the grids, and at
+    // most INT32_MAX threads in all, the limits of ROCSOLVER_LAUNCH_KERNEL (larger batches are
+    // launched in chunks of matrices b0, b0 + 1, ...)
+    static constexpr int64_t max_blocks = INT32_MAX / LANGE_THDS;
+    const int64_t mat_blocks = std::max(int64_t(ncb) * nrch, int64_t(nrb) * ncch);
+    const int64_t nb_max
+        = std::max<int64_t>(1, std::min<int64_t>(MAX_BATCH_COUNT, max_blocks / mat_blocks));
+    assert(mat_blocks * nb_max <= max_blocks);
+
     const dim3 threadsf(LANGE_FINAL_THDS);
-    for(I b0 = 0; b0 < batch_count; b0 += LANGE_MAX_BATCH_BLOCKS)
+    for(int64_t bb = 0; bb < batch_count; bb += nb_max)
     {
-        const I nb = std::min(batch_count - b0, I(LANGE_MAX_BATCH_BLOCKS));
+        const I b0 = I(bb);
+        const I nb = I(std::min<int64_t>(batch_count - bb, nb_max));
         const dim3 gridc(ncb, nrch, nb);
         const dim3 gridr(nrb, ncch, nb);
         const dim3 gridf(1, 1, nb);

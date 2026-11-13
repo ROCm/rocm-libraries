@@ -50,7 +50,7 @@ S lange_magnitude_scale(const char magnitude, const I m, const I n)
         // entries are at most 16 in absolute value, so that any norm is at most
         // 16 * max(m, n) times the scale, which is less than 2^(max_exponent - 2)
         int log2mn = 0;
-        while((I(1) << log2mn) < std::max(m, n))
+        while((int64_t(1) << log2mn) < int64_t(std::max(m, n)))
             log2mn++;
         return std::ldexp(S(1), std::numeric_limits<S>::max_exponent - 6 - log2mn);
     }
@@ -129,7 +129,8 @@ void testing_lange_bad_arg()
     // check bad arguments
     lange_checkBadArgs(handle, norm_type, m, n, dA.data(), lda, dnorms.data());
 
-    // null pointers with dimensions whose product overflows I
+    // null pointers with dimensions whose product overflows I (big = 2^16 for 32-bit I and 2^32
+    // for 64-bit I, so that big * big = 2^32 or 2^64)
     const I big = I(1) << (4 * sizeof(I));
     EXPECT_ROCBLAS_STATUS(
         rocsolver_lange(handle, norm_type, big, big, (T*)nullptr, big, dnorms.data()),
@@ -164,20 +165,21 @@ void lange_initData(const rocblas_handle handle,
                 if(i < m)
                 {
                     // mix the signs and scale to the requested magnitude
-                    T factor = ((i + 2 * j) % 3 == 1) ? T(-scale) : T(scale);
-                    hA[0][i + j * lda] = (magnitude == 'T') ? factor : hA[0][i + j * lda] * factor;
+                    T factor = ((int64_t(i) + 2 * int64_t(j)) % 3 == 1) ? T(-scale) : T(scale);
+                    const size_t ij = i + size_t(j) * lda;
+                    hA[0][ij] = (magnitude == 'T') ? factor : hA[0][ij] * factor;
                 }
                 else
                 {
                     // the padding rows must not be referenced
-                    hA[0][i + j * lda] = nan;
+                    hA[0][i + size_t(j) * lda] = nan;
                 }
             }
         }
 
         // a NaN in the last column of the last row
         if(magnitude == 'Q' && m > 0 && n > 0)
-            hA[0][(m - 1) + (n - 1) * lda] = nan;
+            hA[0][(m - 1) + size_t(n - 1) * lda] = nan;
     }
 
     if(GPU)
