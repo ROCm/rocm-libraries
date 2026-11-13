@@ -6,7 +6,10 @@
 #   path:     modules/flash/flyc/fmha_abi_gfx1201.py
 #
 # Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_abi_gfx1201.py` in the package imports
-# (`attention_bwd_cdna`) and in `prep_tensors`, which has no `v_heads_own` option (V's heads equal K's).
+# (`attention_bwd_cdna`), in `prep_tensors`, which has no `v_heads_own` option (V's heads equal K's), in `row_tensor_arg`, in `ragged_args`,
+# which only this module has, and in `dropout_args`, whose threshold and scale are this module's float32 `dropout_threshold` and
+# `dropout_scale`. It has none of that copy's varlen LSE layout: no `VARLEN_LSE_LAYOUT_*`, no `lse_layout` or `lse_tokens` parameter and no
+# `lse_args`.
 
 
 """Host side of the gfx1201 attention ABI: the wire spec, and marshalling to it.
@@ -36,10 +39,10 @@ from __future__ import annotations
 
 import contextlib
 import math
+import struct
 import weakref
 
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
-from kernels.attention_bwd_cdna.philox import dropout_scale, dropout_threshold
 
 # `torch` and `torch.float32` are imported lazily, inside the three functions
 # that need them, because the build venv must never have torch and neither use
@@ -56,8 +59,6 @@ __all__ = [
     "VARLEN_POSITION_IMPLIED",
     "VARLEN_POSITION_REUSE",
     "VARLEN_POSITION_ARRAY",
-    "VARLEN_LSE_LAYOUT_HT",
-    "VARLEN_LSE_LAYOUT_TH",
     "VARLEN_DENSE",
     "VARLEN_COMPACT_SIDE",
     "CAUSAL_SENTINEL",
@@ -72,9 +73,10 @@ __all__ = [
     "row_tensor_arg",
     "resolve_scale",
     "prep_tensors",
-    "lse_args",
     "resolve_window",
     "bias_args",
+    "dropout_threshold",
+    "dropout_scale",
     "dropout_args",
     "dropout_outputs",
     "u64_scalar",
@@ -94,9 +96,10 @@ CAUSAL_SENTINEL = {
 
 # ---- VarlenBits, sdpa-varlen-plan.md section 2 ----
 #
-# One byte per side, decoded by the same kernel-side function twice, plus
-# the LSE layout in byte 2. `0` is BHSD / MAX / IMPLIED on both sides with
-# an (H, T) logsumexp -- the conventional dense case, and the default.
+# One byte per side, decoded by the same kernel-side function twice. `0` is
+# BHSD / MAX / IMPLIED on both sides -- the conventional dense case, and the
+# default. The logsumexp is the compact `(z, head, row)` workspace, which
+# carries no layout bits.
 VARLEN_STACKED = 1
 VARLEN_LENGTH_MAX = 0 << 1  # noqa: F841  (the table is the wire spec)
 VARLEN_LENGTH_CUMULATIVE = 1 << 1
@@ -104,13 +107,9 @@ VARLEN_LENGTH_INDIVIDUAL = 2 << 1
 VARLEN_POSITION_IMPLIED = 0 << 3
 VARLEN_POSITION_REUSE = 1 << 3
 VARLEN_POSITION_ARRAY = 2 << 3
-# `_HT` is AOTriton's and this kernel's default: shape (H, T), T
-# contiguous. `_TH` is Transformer Engine's (T, H).
-VARLEN_LSE_LAYOUT_HT = 0 << 16
-VARLEN_LSE_LAYOUT_TH = 1 << 16  # noqa: F841  (ditto)
 
 
-def varlen_bits(q_side=0, k_side=0, lse_layout=VARLEN_LSE_LAYOUT_HT):
+def varlen_bits(q_side=0, k_side=0):
     """Assemble VarlenBits from per-side bytes."""
     for name, b in (("q_side", q_side), ("k_side", k_side)):
         if not 0 <= b <= 0xFF:
@@ -124,7 +123,7 @@ def varlen_bits(q_side=0, k_side=0, lse_layout=VARLEN_LSE_LAYOUT_HT):
             )
         if (b >> 1) & 3 == 3 or (b >> 3) & 3 == 3:
             raise ValueError(f"{name}={b:#04x} uses a reserved code")
-    return q_side | (k_side << 8) | lse_layout
+    return q_side | (k_side << 8)
 
 
 VARLEN_DENSE = 0  # noqa: F841  (ditto)
@@ -148,8 +147,6 @@ def varlen_compact(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-    lse_tokens=None,
-    lse_layout=VARLEN_LSE_LAYOUT_HT,
 ):
     """Classical packed varlen: 1THD tensors, `cu_seqlens` for both roles.
 
@@ -158,14 +155,13 @@ def varlen_compact(
     this configuration reads no position array at all (plan section 1.2).
     """
     return dict(
-        bits=varlen_bits(VARLEN_COMPACT_SIDE, VARLEN_COMPACT_SIDE, lse_layout),
+        bits=varlen_bits(VARLEN_COMPACT_SIDE, VARLEN_COMPACT_SIDE),
         seqinfo_q0=cu_seqlens_q,
         seqinfo_q1=None,
         seqinfo_k0=cu_seqlens_k,
         seqinfo_k1=None,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
-        lse_tokens=lse_tokens,
     )
 
 
@@ -174,19 +170,16 @@ def varlen_padded(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-    lse_tokens=None,
-    lse_layout=VARLEN_LSE_LAYOUT_HT,
 ):
     """BHSD tensors whose sequences are short: lengths only, no positions."""
     return dict(
-        bits=varlen_bits(VARLEN_PADDED_SIDE, VARLEN_PADDED_SIDE, lse_layout),
+        bits=varlen_bits(VARLEN_PADDED_SIDE, VARLEN_PADDED_SIDE),
         seqinfo_q0=cu_seqlens_q,
         seqinfo_q1=None,
         seqinfo_k0=cu_seqlens_k,
         seqinfo_k1=None,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
-        lse_tokens=lse_tokens,
     )
 
 
@@ -197,8 +190,6 @@ def varlen_strided(
     seq_strides_k,
     max_seqlen_q,
     max_seqlen_k,
-    lse_tokens=None,
-    lse_layout=VARLEN_LSE_LAYOUT_HT,
 ):
     """Packed tensors with padding *between* sequences (TE's layout).
 
@@ -209,14 +200,13 @@ def varlen_strided(
     extents, not lengths.
     """
     return dict(
-        bits=varlen_bits(VARLEN_STRIDED_SIDE, VARLEN_STRIDED_SIDE, lse_layout),
+        bits=varlen_bits(VARLEN_STRIDED_SIDE, VARLEN_STRIDED_SIDE),
         seqinfo_q0=cu_seqlens_q,
         seqinfo_q1=seq_strides_q,
         seqinfo_k0=cu_seqlens_k,
         seqinfo_k1=seq_strides_k,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
-        lse_tokens=lse_tokens,
     )
 
 
@@ -227,8 +217,6 @@ def varlen_seqused_k(
     max_seqlen_q,
     max_seqlen_k,
     k_is_cache=False,
-    lse_tokens=None,
-    lse_layout=VARLEN_LSE_LAYOUT_HT,
 ):
     """Packed Q against a KV cache with per-sequence *used* lengths.
 
@@ -243,14 +231,13 @@ def varlen_seqused_k(
     """
     k_side = VARLEN_SEQUSED_CACHE_SIDE if k_is_cache else VARLEN_SEQUSED_PACKED_SIDE
     return dict(
-        bits=varlen_bits(VARLEN_COMPACT_SIDE, k_side, lse_layout),
+        bits=varlen_bits(VARLEN_COMPACT_SIDE, k_side),
         seqinfo_q0=cu_seqlens_q,
         seqinfo_q1=None,
         seqinfo_k0=seqused_k,
         seqinfo_k1=None if k_is_cache else cu_seqlens_k,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
-        lse_tokens=lse_tokens,
     )
 
 
@@ -424,51 +411,6 @@ def row_tensor_arg(t, name, seq_len):
     return ptr_arg(t)
 
 
-def lse_args(lse, seq_len, varlen, num_head_q):
-    """The logsumexp pointer, and a check that its layout matches the bits.
-
-    Returns only a pointer: unlike Q/K/V/O this tensor is always compact,
-    so the kernel derives both pitches from `LSE_LAYOUT`, `num_head_q` and
-    the token count (sdpa-varlen-plan.md section 4.2). Inferring strides
-    here as well would give one fact two sources.
-
-    What the host can do instead -- and could not while it was inferring --
-    is verify the caller's tensor actually has the declared layout.
-    """
-    from torch import float32 as torch_f32  # lazy: the build venv has no torch
-
-    if lse is None:
-        return NULL_PTR
-    if lse.dtype != torch_f32:
-        raise ValueError(f"logsumexp must be float32, got {lse.dtype}")
-    if lse.dim() != 2:
-        raise ValueError(f"logsumexp must be rank 2, got shape {tuple(lse.shape)}")
-    if not lse.is_contiguous():
-        raise ValueError(
-            "logsumexp must be contiguous: the kernel derives its pitches "
-            "from VarlenBits rather than reading strides"
-        )
-    _layout = 0 if varlen is None else (int(varlen["bits"]) >> 16) & 3
-    if _layout == 0:
-        # The token pitch the kernel will derive. Only checkable when the
-        # caller supplies it: under a stacked layout it lives in
-        # `seqinfo[N]` on the device, and reading that back would cost a
-        # sync for a validation.
-        want_last = int(seq_len) if varlen is None else varlen.get("lse_tokens")
-        if want_last is not None and lse.shape[1] != int(want_last):
-            raise ValueError(
-                f"VARLEN_LSE_LAYOUT_HT wants (*, {int(want_last)}), got "
-                f"{tuple(lse.shape)}"
-            )
-    else:
-        if lse.shape[1] != num_head_q:
-            raise ValueError(
-                f"VARLEN_LSE_LAYOUT_TH wants (*, {num_head_q}), got "
-                f"{tuple(lse.shape)}"
-            )
-    return ptr_arg(lse)
-
-
 def resolve_window(causal_type, host_causal_type, window, seqlen_q, seqlen_k):
     """(window_left, window_right), signed, as the kernel wants them.
 
@@ -635,6 +577,42 @@ def bias_args(bias_type, emit_db, bias, dbias, like):
     return ptr_arg(bias), db, sb, sdb
 
 
+def _f32(x: float) -> float:
+    """`x` rounded to the nearest float32."""
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
+def dropout_threshold(p: float) -> int:
+    """The i32 threshold for a drop probability `p`.
+
+    A uniform u32 reinterpreted as i32 is uniform on `[-2**31, 2**31)`, so
+    comparing against `(p - 0.5) * 2**32` (truncated and clamped to the i32
+    range) keeps a `1 - p` fraction and needs no
+    float conversion per element -- one compare instead of a convert and a
+    float compare, on a path that runs once per score.
+
+    The arithmetic is float32 end to end, as `dropoutThreshold` of
+    `FlydslSdpaDropout.hpp` evaluates it, so host launches and the
+    native engine pass the same threshold for the same `p`: `p` is rounded to
+    float32, `p - 0.5` and the scaling by `2**32` (exact) are float32 results,
+    and the product is truncated. `p = 0` gives `-2**31` and `p = 1` gives
+    `2**31 - 1` (keep nothing: no i32 exceeds it).
+    """
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f"dropout p must be in [0, 1], got {p}")
+    scaled = _f32(_f32(p) - 0.5) * 4294967296.0
+    if not scaled < 2147483648.0:
+        return 2**31 - 1
+    if not scaled > -2147483648.0:
+        return -(2**31)
+    return int(scaled)
+
+
+def dropout_scale(p: float) -> float:
+    """`1.0F / (1.0F - p)` in float32: the factor a kept probability takes (`dropoutScale` of `FlydslSdpaDropout.hpp`)."""
+    return _f32(1.0 / _f32(1.0 - _f32(p)))
+
+
 def dropout_args(
     enable_dropout, dropout_p, seed, offset1, offset2, device=None, stream=None
 ):
@@ -656,7 +634,7 @@ def dropout_args(
     the counter is far from the sign bit.
 
     The threshold and the scale are computed here, once per call, rather
-    than per element in the kernel -- `philox.dropout_threshold` turns the
+    than per element in the kernel -- `dropout_threshold` turns the
     probability into an i32 the raw random can be compared against, so the
     hot path never converts a random to a float.
     """

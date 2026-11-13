@@ -13,7 +13,6 @@ nothing is compiled.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -25,6 +24,7 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _sdpa_bwd_cdna_build as build  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators import gen_sdpa_bwd_merged  # noqa: E402
+from generators._manifest import sha256 as _sha  # noqa: E402
 from generators._codeobject import GeneratorError  # noqa: E402
 from generators._instances import instances_for  # noqa: E402
 from generators._sdpa_bwd_spec import to_spec  # noqa: E402
@@ -51,10 +51,6 @@ REBUILT = b"another build of it"
 COMBINED = b"the combined object"
 STORED = b"the stored combined object"
 FUNCTION_VARIANT = "e" * 64
-
-
-def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _rows():

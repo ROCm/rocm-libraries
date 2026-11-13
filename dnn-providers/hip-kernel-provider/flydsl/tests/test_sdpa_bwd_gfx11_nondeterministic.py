@@ -44,7 +44,7 @@ def rig(tmp_path, monkeypatch):
             "hash": spec.hash(),
             "spec": spec.key(),
             "sha256": sha(PIN),
-            **dict.fromkeys(rdna._RESOURCE_COLUMNS, ""),
+            **dict.fromkeys(rdna.RESOURCE_COLUMNS, ""),
         }
     }
     signature, names = cdna._signature(cdna._PARAMS["prep"])

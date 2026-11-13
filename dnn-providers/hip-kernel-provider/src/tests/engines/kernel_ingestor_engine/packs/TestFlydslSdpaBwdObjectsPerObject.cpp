@@ -241,7 +241,7 @@ std::vector<BwdCase>
         {
             // prep has no class: it takes whatever graph the other two run.
             c.mask = intField(kernel, "causal") == 1 ? BwdMask::BOTTOM_RIGHT : BwdMask::NONE;
-            c.dropout = intField(kernel, "dropout") == 1 ? 0.2F : 0.0F;
+            c.dropout = intField(kernel, "has_dropout") == 1 ? 0.2F : 0.0F;
             if(intField(kernel, "has_bias") == 1)
             {
                 c.bias = true;
@@ -320,7 +320,7 @@ const std::vector<const char*>& formFields()
     static const std::vector<const char*> s_fields{"dtype",
                                                    "causal",
                                                    "has_bias",
-                                                   "dropout",
+                                                   "has_dropout",
                                                    "padded",
                                                    "hints",
                                                    "dform",
@@ -444,19 +444,72 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
     return pin;
 }
 
-/// Launches each selected staged object of @p slot on each of its shapes.
-void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection)
+/// Whether an object with these metadata values is a biased dkdv or merged object of the 16-row MFMA
+/// family, which carries its own copy of the biased exponent clamp, without dropout: one whose spec
+/// pins `mfma_rows = 16`, or a `gqa_pack` one (the packed dK/dV role is written for the 16-row family
+/// only, and merged refuses a pack on any other). An object whose geometry the policy picks records
+/// `mfma_rows = -1`, so a policy-picked 16-row object that is not packed cannot be told from a
+/// 32-row one by its descriptor and is not selected here: the `*NanBiasD128*` cases select it by
+/// graph. The `*NanBiasDropout*` cases cover the dropout objects.
+constexpr bool
+    isSixteenRowBias(int64_t hasBias, int64_t mfmaRows, int64_t gqaPack, int64_t hasDropout)
+{
+    return hasBias == 1 && (mfmaRows == 16 || gqaPack == 1) && hasDropout != 1;
+}
+
+bool isSixteenRowBiasObject(const KernelDefinition& kernel)
+{
+    return isSixteenRowBias(intField(kernel, "has_bias"),
+                            intField(kernel, "mfma_rows"),
+                            intField(kernel, "gqa_pack"),
+                            intField(kernel, "has_dropout"));
+}
+
+/// Reports that the build selects no object of the biased 16-row family for a NaN-bias case, and
+/// the caller returns. The shipped gfx950 set has such objects, so there it is a failure; any other
+/// arch ships none and the case skips.
+void reportNoSixteenRowObjects(const std::string& what)
+{
+    const auto arch = packedArchDeviceProperties().gcnArchName;
+    if(arch.rfind("gfx950", 0) == 0)
+    {
+        ADD_FAILURE() << "this gfx950 build selects no " << what
+                      << " objects of the 16-row family (mfma_rows = 16 or gqa_pack)";
+        return;
+    }
+    GTEST_SKIP() << "this build selects no " << what
+                 << " objects of the 16-row family (mfma_rows = 16 or gqa_pack) for " << arch;
+}
+
+/// Launches each selected staged object of @p slot on each of its shapes. With @p nanBias, only
+/// the biased objects of the 16-row family that pin `mfma_rows = 16` or `gqa_pack` run, each with a
+/// NaN in its bias: the objects the shared `nanBiasCase` cases do not select. A device whose build
+/// stages no such object skips, unless it is a gfx950 (reportNoSixteenRowObjects).
+void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool nanBias = false)
 {
     const auto& traits = traitsOfSlot(slot);
     const std::string engineSlot = slotName(traits.engineSlot);
     const auto slotKernels = stagedSlotKernels(SPLIT_ENGINE_NAME, engineSlot);
-    const auto staged = objectsOf(slot, slotKernels);
+    auto staged = objectsOf(slot, slotKernels);
     if(staged.empty())
     {
         reportUnstaged(traits.op,
                        std::string("this build staged no ") + traits.label
                            + " objects for this device");
         return;
+    }
+    if(nanBias)
+    {
+        staged.erase(
+            std::remove_if(staged.begin(),
+                           staged.end(),
+                           [](const auto& kernel) { return !isSixteenRowBiasObject(kernel); }),
+            staged.end());
+        if(staged.empty())
+        {
+            reportNoSixteenRowObjects(std::string("biased ") + traits.label);
+            return;
+        }
     }
 
     const auto& set = loadedSet(SPLIT_ENGINE_NAME);
@@ -465,8 +518,12 @@ void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection)
     int launches = 0;
     for(const auto& kernel : kernels)
     {
-        for(const auto& c : objectCases(slot, kernel, selection))
+        for(auto c : objectCases(slot, kernel, selection))
         {
+            if(nanBias)
+            {
+                c.nanBiasAt = NAN_BIAS_AT;
+            }
             SCOPED_TRACE(kernel.name + ": " + describe(c));
             if(!objectAdmits(slot, c, kernel, device))
             {
@@ -609,6 +666,15 @@ TEST_P(TestGpuFlydslSdpaBwdObjects, DbiasReduceObjectsMatchTheReference)
     expectStagedObjectsMatch(ObjectSlot::DBIAS_REDUCE, GetParam());
 }
 
+/// The biased dkdv objects of the 16-row family that pin `mfma_rows = 16` or `gqa_pack`, each with a
+/// NaN in the bias: a NaN reaches dK and dV at its key, where the reference is NaN. The `*NanBias*`
+/// cases select the 32-row dkdv object and the policy-picked 16-row one at head dim 128.
+TEST(TestGpuFlydslSdpaBwdDkdvNanBias, SixteenRowObjectsPropagateToDkAndDv)
+{
+    SKIP_IF_NO_DEVICES();
+    expectStagedObjectsMatch(ObjectSlot::DKDV, ObjectSelection::EVERY, true);
+}
+
 std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
 {
     return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
@@ -634,10 +700,12 @@ constexpr int MERGED_REPEAT_LAUNCHES = 20;
 /// What the test is named when the build's descriptors list no merged object.
 constexpr const char* NO_MERGED_OBJECTS = "NoMergedObjectsListed";
 
-/// The name of every merged object the build staged, from the descriptor files themselves: a
-/// parameterized suite is instantiated before main() points the descriptor loader at this
-/// binary's trees, so the loaded sets are not there yet.
-std::vector<std::string> listedMergedObjects()
+/// The name of every merged object the build staged, or with @p sixteenRowBiasOnly only the
+/// biased ones of the 16-row family, without dropout (`isSixteenRowBias` over the descriptor's metadata), from
+/// the descriptor files themselves: a parameterized suite is instantiated before main() points
+/// the descriptor loader at this binary's trees, so the loaded sets are not there yet.
+/// NO_MERGED_OBJECTS when none is listed.
+std::vector<std::string> listedMergedObjects(bool sixteenRowBiasOnly = false)
 {
     std::set<std::string> names;
     const auto root = hip_kernel_provider::testing::descriptorSetRoot(
@@ -663,7 +731,15 @@ std::vector<std::string> listedMergedObjects()
         }
         for(const auto& kernel : pack["kernelDescriptors"])
         {
-            names.insert(kernel.value("name", std::string()));
+            const auto metadata = kernel.value("metadata", nlohmann::json::object());
+            if(!sixteenRowBiasOnly
+               || isSixteenRowBias(metadata.value("has_bias", int64_t{0}),
+                                   metadata.value("mfma_rows", int64_t{0}),
+                                   metadata.value("gqa_pack", int64_t{0}),
+                                   metadata.value("has_dropout", int64_t{0})))
+            {
+                names.insert(kernel.value("name", std::string()));
+            }
         }
     }
     names.erase(std::string());
@@ -731,7 +807,7 @@ std::vector<ObjectCell> mergedObjectCells(const KernelDefinition& kernel)
     base.headDim = padded && tile == 32 ? 16 : tile;
     base.batch = 2;
     base.repeatLaunches = MERGED_REPEAT_LAUNCHES;
-    const bool dropout = intField(kernel, "dropout") == 1;
+    const bool dropout = intField(kernel, "has_dropout") == 1;
 
     const bool packed = intField(kernel, "gqa_pack") == 1;
     std::vector<ObjectCell> cells;
@@ -800,15 +876,11 @@ protected:
     }
 };
 
-TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
+/// Runs @p body on the staged merged object @p name and the dispatch handler of its row. A listed
+/// object the build did not stage for this device is a failure.
+template <class Body>
+void withStagedMergedObject(const std::string& name, Body&& body)
 {
-    const auto& name = GetParam();
-    if(name == NO_MERGED_OBJECTS)
-    {
-        ADD_FAILURE() << "this build ships sdpa_bwd_merged for this device but its descriptor "
-                         "tree lists no merged object";
-        return;
-    }
     const auto* kernel = stagedMergedObject(name);
     if(kernel == nullptr)
     {
@@ -819,12 +891,59 @@ TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
     const auto& handler = dispatchHandler(
         kernel->sources.find(REDUCE_LAUNCH_NAME) == kernel->sources.end() ? MERGED_DISPATCH
                                                                           : MERGED_REDUCE_DISPATCH);
-    for(const auto& cell : mergedObjectCells(*kernel))
-    {
-        SCOPED_TRACE(name + ": " + cell.label + " (" + describe(cell.graph) + ")");
-        expectObjectCase(*kernel, handler, cell.graph);
-    }
+    body(*kernel, handler);
 }
+
+TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
+{
+    const auto& name = GetParam();
+    if(name == NO_MERGED_OBJECTS)
+    {
+        ADD_FAILURE() << "this build ships sdpa_bwd_merged for this device but its descriptor "
+                         "tree lists no merged object";
+        return;
+    }
+    withStagedMergedObject(name, [&](const auto& kernel, const auto& handler) {
+        for(const auto& cell : mergedObjectCells(kernel))
+        {
+            SCOPED_TRACE(name + ": " + cell.label + " (" + describe(cell.graph) + ")");
+            expectObjectCase(kernel, handler, cell.graph);
+        }
+    });
+}
+
+/// A NaN in the bias, on the bias cell of each biased merged object of the 16-row family (`mfma_rows
+/// = 16` or `gqa_pack`): it reaches dK and dV at its key, where the reference is NaN. The `*NanBias*`
+/// cases select the merged d64 32-row object and the policy-picked 16-row one at head dim 128.
+class TestGpuFlydslSdpaBwdMergedNanBiasObject : public TestGpuFlydslSdpaBwdMergedObject
+{
+};
+
+TEST_P(TestGpuFlydslSdpaBwdMergedNanBiasObject, PropagatesToDkAndDv)
+{
+    const auto& name = GetParam();
+    if(name == NO_MERGED_OBJECTS)
+    {
+        reportNoSixteenRowObjects("biased merged");
+        return;
+    }
+    withStagedMergedObject(name, [&](const auto& kernel, const auto& handler) {
+        const auto cells = mergedObjectCells(kernel);
+        ASSERT_FALSE(cells.empty());
+        auto graph = cells.front().graph;
+        graph.nanBiasAt = NAN_BIAS_AT;
+        graph.repeatLaunches = 1;
+        SCOPED_TRACE(name + ": " + describe(graph));
+        expectObjectCase(kernel, handler, graph);
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuFlydslSdpaBwdMergedNanBiasObject,
+                         ::testing::ValuesIn(listedMergedObjects(true)),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuFlydslSdpaBwdMergedObject,

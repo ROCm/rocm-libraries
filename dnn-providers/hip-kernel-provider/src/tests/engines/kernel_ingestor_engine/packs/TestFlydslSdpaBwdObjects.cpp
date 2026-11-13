@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -54,7 +55,7 @@ void skipUnlessGfx950()
     const auto arch = packedArchDeviceProperties().gcnArchName;
     if(arch.rfind("gfx950", 0) != 0)
     {
-        GTEST_SKIP() << "the lowest-finite bias cases run on a gfx950 device; " << arch
+        GTEST_SKIP() << "the bias edge-value cases run on a gfx950 device; " << arch
                      << " is covered by the gfx11 parity suite or ships no such engine";
     }
 }
@@ -162,6 +163,25 @@ using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdMerge
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasD128Bfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasD128Fp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasD128Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasD128Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Bfp16
+    = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Fp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Bfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Fp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
@@ -169,6 +189,10 @@ using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
 using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Bfp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Fp16
     = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 
 /// A FLOAT bias beside a 16-bit Q on the split engine, on every device that ships it.
@@ -296,6 +320,43 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
     return c;
 }
 
+/// A NaN in the bias at query row 5, key 7 of every batch and head, over finite scores everywhere
+/// else, with a log-sum-exp and output that come from the clean bias. The NaN must reach P: a
+/// dK/dV exponent clamp that turns a NaN exponent into 0 gives P = 1 there and finite dK and dV
+/// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient);
+/// at head dim 64 it selects the 32-row dK/dV object. The 16-row family carries its own copy of the
+/// clamp: nanBiasHeadDim128Case selects its policy-picked objects (the policy takes 16 rows at head
+/// dim 128), and TestFlydslSdpaBwdObjectsPerObject.cpp runs the NaN on the biased dkdv and merged
+/// objects that pin `mfma_rows = 16` and on the `gqa_pack` objects, which the policy ranks below
+/// their unpacked twins and no graph selects.
+BwdCase nanBiasCase(DataType dtype)
+{
+    BwdCase c = biasCase(dtype);
+    c.nanBiasAt = NAN_BIAS_AT;
+    return c;
+}
+
+/// `nanBiasCase` at head dim 128, where the policy-picked biased dK/dV object (split's, and the
+/// dK/dV role of merged's) is the 16-row family rather than head dim 64's 32-row one.
+BwdCase nanBiasHeadDim128Case(DataType dtype)
+{
+    BwdCase c = nanBiasCase(dtype);
+    c.headDim = 128;
+    return c;
+}
+
+/// `nanBiasCase` over a dropout graph at @p headDim: the compiled-dropout dK/dV objects have their own
+/// copy of the exponent clamp ahead of the keep mask. The reference holds dK non-finite at the key in
+/// every row the NaN covers and dV only where the NaN element is kept, as the kernel's select on the
+/// keep mask does.
+BwdCase nanBiasDropoutCase(DataType dtype, int64_t headDim)
+{
+    BwdCase c = nanBiasCase(dtype);
+    c.headDim = headDim;
+    c.dropout = 0.2F;
+    return c;
+}
+
 /// A bottom-right causal graph with Sq > Skv: query row r sees keys up to r + Skv - Sq, so the first
 /// Sq - Skv = 160 rows (two and a half 64-row tiles) see no key and the next ones see 1..96. The head dim and
 /// class are those of causalCase: the object selection does not depend on the diagonal, so the
@@ -338,6 +399,15 @@ BwdCase f32BiasCase(DataType dtype, bool dbias, BwdBiasFill fill = BwdBiasFill::
     return c;
 }
 
+/// `nanBiasCase` with a FLOAT bias beside the 16-bit Q: the f32-bias dK/dV object carries the same
+/// exponent clamp, so a NaN at query row 5, key 7 must reach dK and dV there.
+BwdCase f32NanBiasCase(DataType dtype)
+{
+    BwdCase c = f32BiasCase(dtype, true);
+    c.nanBiasAt = NAN_BIAS_AT;
+    return c;
+}
+
 /// A bias, without a gradient unless @p dbias, whose rows are @p pitch elements apart (a whole
 /// 16-byte vector when 0) over @p seqKv keys.
 BwdCase pitchedBiasCase(
@@ -372,9 +442,15 @@ BwdCase rowBroadcastBiasCase(DataType dtype, int64_t seqKv)
 /// @p seqQ query rows that are no multiple of any kernel tile. The padded rows of the last tile
 /// read the same bias row beside a log-sum-exp of zero, so a kernel that forms P = exp(bias) there
 /// overflows the 16-bit P (f16 from a bias of about 11, bf16 from about 89) and turns dV NaN.
-BwdCase largeRowBroadcastBiasCase(DataType dtype, double value, int64_t seqQ)
+/// @p biasType FLOAT makes the bias an f32 one beside the 16-bit Q/K/V, which the dK/dV kernel
+/// loads through its own f32-bias path.
+BwdCase largeRowBroadcastBiasCase(DataType dtype,
+                                  double value,
+                                  int64_t seqQ,
+                                  std::optional<DataType> biasType = std::nullopt)
 {
     BwdCase c = rowBroadcastBiasCase(dtype, 64);
+    c.biasType = biasType;
     c.seqQ = seqQ;
     c.biasFill = BwdBiasFill::CONSTANT;
     c.biasValue = value;
@@ -398,12 +474,20 @@ BwdCase zeroScoresBroadcastBiasCase(DataType dtype, double value, int64_t seqKv)
 }
 
 /// Every cell of the large-bias family for @p engine: the merged engine declines a key length of 1.
-void expectLargeRowBroadcastBias(std::string_view engine, DataType dtype, double value)
+void expectLargeRowBroadcastBias(std::string_view engine,
+                                 DataType dtype,
+                                 double value,
+                                 std::optional<DataType> biasType = std::nullopt)
 {
     for(const int64_t seqQ : {100, 1})
     {
         SCOPED_TRACE("Sq " + std::to_string(seqQ));
-        expectCase(engine, largeRowBroadcastBiasCase(dtype, value, seqQ));
+        expectCase(engine, largeRowBroadcastBiasCase(dtype, value, seqQ, biasType));
+    }
+    if(biasType.has_value())
+    {
+        // The zero-scores graph has head dim 16, which no f32-bias object serves.
+        return;
     }
     SCOPED_TRACE("zero scores");
     expectCase(engine, zeroScoresBroadcastBiasCase(dtype, value, engine == SPLIT_ENGINE ? 1 : 64));
@@ -638,6 +722,96 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32, MatchesTheReference)
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
 }
 
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasBfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasFp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasBfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasFp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, f32NanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasF32Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, f32NanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasHeadDim128Case(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasHeadDim128Case(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasHeadDim128Case(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasHeadDim128Case(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutBfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutFp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::HALF, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutBfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutFp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::HALF, 64));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasDropoutD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasDropoutCase(DataType::HALF, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Bfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::BFLOAT16, 128));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasDropoutD128Fp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasDropoutCase(DataType::HALF, 128));
+}
+
 TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
 {
     expectLargeRowBroadcastBias(MERGED_ENGINE, DataType::HALF, 16.0);
@@ -658,6 +832,19 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16, GradientsAreFiniteAnd
 TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16, GradientsAreFiniteAndMatchTheReference)
 {
     expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::BFLOAT16, 90.0);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Fp16,
+       GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 16.0, DataType::FLOAT);
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 64.0, DataType::FLOAT);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Bfp16,
+       GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::BFLOAT16, 90.0, DataType::FLOAT);
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedKeylessRowsBfp16, DqIsZeroAndGradientsMatchTheReference)
@@ -1000,7 +1187,7 @@ TEST(TestFlydslSdpaBwdHarness, PerRowBoundNamesTheWorstRowAndIgnoresElementsOutO
     // zero holds nothing but zeros.
     scope[13] = true;
     EXPECT_EQ(worstGradientMiss(got, expected, scope, TOLERANCE, 4)->index, 13U);
-    std::vector<double> zeros(8, 0.0);
+    const std::vector<double> zeros(8, 0.0);
     auto notZero = zeros;
     notZero[6] = 1e-30;
     EXPECT_EQ(worstGradientMiss(notZero, zeros, std::vector<bool>(8, true), TOLERANCE, 4)->index,

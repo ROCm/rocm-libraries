@@ -21,7 +21,7 @@ batch-major then head: term t = ib * (reduced head count) + ih. No atomics, no c
 geometry, so the result is bitwise identical run to run. The order differs from PyTorch's tree-ish order, so the two agree to fp32
 accumulation (one output rounding apart at worst), not bit for bit.
 
-**ABI** (one object per dtype; every size and stride is a launch value):
+**ABI** (one object per dtype; every size and stride is a launch value; the launcher keeps its gfx950 name, as every gfx11 backward launcher does):
     DB            full-shape workspace in the bias dtype, (B, Hq, Sq, Sk) with strides stride_ws_{batch,head,seq} (elements), unit column stride
     DBias         the user's dBias in the bias dtype, (B or 1, Hq or 1, Sq, Sk) with strides stride_out_{batch,head,seq}, unit column stride
     num_batch, num_head, seqlen_q, seqlen_k   the problem's B, Hq, Sq, Sk
@@ -170,7 +170,6 @@ def build_fmha_bwd_dbias_reduce_gfx11_module_primary(dtype_str):
         if use_vec:
             vt = Vec.make_type(VEC, elem)
             init_args = [Vec.filled(VEC, 0.0, fx.Float32).ir_value()]
-            loop_results = init_args
             for ib, b_args in range(
                 fx.Index(0), n_batch_i, fx.Index(1), init=init_args
             ):

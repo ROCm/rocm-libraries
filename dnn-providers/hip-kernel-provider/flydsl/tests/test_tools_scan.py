@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -111,7 +112,9 @@ def _gate_llvm_bin(**env: str) -> str:
 
 
 def test_the_gate_takes_its_llvm_tools_from_rocm_path() -> None:
-    assert _gate_llvm_bin(ROCM_PATH="/opt/rocm-x") == "/opt/rocm-x/llvm/bin"
+    assert _gate_llvm_bin(ROCM_PATH="/opt/rocm-x") == os.path.join(
+        "/opt/rocm-x", "llvm", "bin"
+    )
 
 
 def test_an_explicit_llvm_bin_wins_over_rocm_path() -> None:

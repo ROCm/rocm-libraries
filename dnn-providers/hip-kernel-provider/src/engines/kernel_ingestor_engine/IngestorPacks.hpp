@@ -93,6 +93,14 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
 
+/// @see packs/FlydslSdpaDropoutMaskNative.cpp
+void registerFlydslSdpaDropoutMaskSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaDropoutMaskModuleCache();
+
+/// @see packs/FlydslSdpaHeadPadNative.cpp
+void registerFlydslSdpaHeadPadSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaHeadPadModuleCache();
+
 /// @see packs/FlydslSdpaBwdMergedNative.cpp
 void registerFlydslSdpaBwdMergedSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaBwdMergedModuleCache();
@@ -252,6 +260,10 @@ void resetGfx950ConvDgradAotModuleCache();
 /// own copy of that inline function's local static never reaches the one the plugin's
 /// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
 void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
+
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made in this
+/// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
+int64_t gfx950ConvDgradAotImplicitLaunchCountForTesting();
 
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases

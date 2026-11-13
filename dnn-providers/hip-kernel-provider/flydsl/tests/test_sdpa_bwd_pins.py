@@ -11,7 +11,6 @@ copies every other pin out of the content (``tools/sdpa_bwd_s1.py --from-content
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import re
 import sys
@@ -26,33 +25,15 @@ import sdpa_bwd_gate  # noqa: E402
 import sdpa_bwd_pins as pins  # noqa: E402
 import sdpa_bwd_s1 as s1  # noqa: E402
 from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
+from generators._manifest import sha256 as _sha  # noqa: E402
+from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
+from test_sdpa_bwd_compare import _pin_metadata  # noqa: E402,F401
 from test_sdpa_bwd_gate import MERGED, MERGED_CODE, _elf  # noqa: E402
-
-
-@pytest.fixture(autouse=True)
-def _pin_metadata(monkeypatch) -> None:
-    """The ELF fixtures carry no AMDGPU metadata note; the pin's only kernel is the merged one."""
-    monkeypatch.setattr(
-        pins.analyze,
-        "amdgpu_metadata",
-        lambda blob: {"amdhsa.kernels": [{".name": MERGED}]},
-    )
 
 
 DATA = FLYDSL / "tests" / "data"
 COMBINED = "merged,bf16,64,bias,bk,0,0,tail,0,1"
 PLAIN = "dkdv,bf16,64,plain,bk,0,0,tail,0,1"
-RESOURCE_COLUMNS = (
-    "vgpr",
-    "agpr",
-    "vgpr_total",
-    "sgpr",
-    "sgpr_spill",
-    "vgpr_spill",
-    "scratch_bytes",
-    "lds_bytes",
-    "occupancy",
-)
 
 
 def _rows(path: Path) -> list[dict]:
@@ -65,10 +46,6 @@ def _write(path: Path, columns: tuple[str, ...], rows: list[dict]) -> None:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         writer.writerows(rows)
-
-
-def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def test_the_digest_file_names_exactly_the_pins_the_content_never_holds() -> None:

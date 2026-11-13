@@ -16,6 +16,18 @@ alone:
   and resource row, which the compare tool and the generators' pin checks read, and for gfx950
   its ``rmir_scan`` (``clean`` or ``exception``, from the S1 manifest; a gfx950 row with neither is refused);
 
+**Tree-built pins.** A row the sweep never built (a catalogue row added in this tree) is installed with
+
+    python tools/sdpa_bwd_tables_from_sweep.py --tree-pins <tree-pins.csv>
+
+``<tree-pins.csv>`` has one row per new pin: ``hash``, ``spec``, ``sha256`` (the tree-built object), the resource columns of the
+object's main kernel, ``rmir_scan`` (``clean``: the fresh build's own R-MIR scan) and, for a row whose pin object the content never
+holds (a combined object, ``sdpa_bwd_pins.holds_no_shipped_object``), its ``function_sha256``. The tool adds the rows to the arch's
+installed pins (the reference CSV is the base), then writes the table block, the reference CSV and the arch's rows of
+``sdpa_bwd_pin_functions.csv`` together, so the three agree. It refuses a hash that is already a pin, a row that is not ``clean``, a
+missing or superfluous function digest and a catalogue in which a floor twin would be dropped; the rows already installed are written back as
+they were.
+
 The nondeterministic list (``tests/data/sdpa_bwd_nondeterministic.csv``) is not installed: the
 in-tree list is the authority (``generators/_sdpa_bwd_cdna_build.py``, "Nondeterministic builds").
 
@@ -33,6 +45,7 @@ the counts describe.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from dataclasses import dataclass
@@ -56,12 +69,14 @@ from generators._sdpa_bwd_spec import (  # noqa: E402
 )
 from gen_descriptors import rne_pin_problem  # noqa: E402
 from sdpa_bwd_s1 import (  # noqa: E402
+    RMIR_CLEAN,
     RMIR_COLUMN,
     RMIR_SCANS,
     pin_columns,
     read_resolved,
     write_csv,
 )
+import sdpa_bwd_pins as pins_data  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -288,17 +303,112 @@ def install(
     return len(pins)
 
 
+def read_tree_pins(path: Path, installed: dict[str, dict]) -> tuple[str, list[dict]]:
+    """(arch, rows) of the tree-built pins in @p path, checked against the @p installed pins (the rows of the arch's reference CSV)."""
+    with path.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    columns = (*pin_columns(GFX950), "function_sha256")
+    if not rows or list(rows[0]) != list(columns):
+        raise SystemExit(f"{path}: the columns must be {', '.join(columns)}")
+    arches = set()
+    seen = set()
+    for row in rows:
+        spec = Spec.parse(row["spec"])
+        if spec.key() != row["spec"] or spec.hash() != row["hash"]:
+            raise SystemExit(f"{row['hash']} is not the hash of {row['spec']!r}")
+        if row["hash"] in installed or row["hash"] in seen:
+            raise SystemExit(f"{row['hash']}: already a pin")
+        seen.add(row["hash"])
+        arches.add(spec.arch)
+        if (problem := rne_pin_problem(spec)) is not None:
+            raise SystemExit(f"{row['hash']}: {problem}")
+        if row[RMIR_COLUMN] != RMIR_CLEAN:
+            raise SystemExit(
+                f"{row['hash']}: a tree-built pin records {RMIR_COLUMN} {RMIR_CLEAN!r}, not {row[RMIR_COLUMN]!r}"
+            )
+        if len(row["sha256"]) != 64:
+            raise SystemExit(f"{row['hash']}: sha256 {row['sha256']!r}")
+        if bool(row["function_sha256"]) != pins_data.holds_no_shipped_object(spec):
+            raise SystemExit(
+                f"{row['hash']}: a function digest is recorded exactly for a pin the content never holds "
+                f"(function_sha256 {row['function_sha256']!r})"
+            )
+    if arches != {GFX950}:
+        raise SystemExit(
+            f"tree-built pins are gfx950 pins; the file names {sorted(arches)}"
+        )
+    return GFX950, rows
+
+
+def install_tree_pins(
+    tree_pins: Path,
+    instances: Path = FLYDSL / "generators" / "_instances.py",
+    data_dir: Path = FLYDSL / "tests" / "data",
+) -> int:
+    """Add the pins of @p tree_pins to the installed gfx950 pins and rewrite the table block, the reference CSV and the pin functions; the rows added."""
+    out = ARCH_OUTPUTS[GFX950]
+    with (data_dir / out.reference_csv).open(newline="", encoding="utf-8") as fh:
+        installed = {row["hash"]: row for row in csv.DictReader(fh)}
+    _, rows = read_tree_pins(tree_pins, installed)
+    pins = {**installed, **{row["hash"]: row for row in rows}}
+    kept, dropped = prune_floor_twins(pins)
+    if dropped:
+        raise SystemExit(
+            f"{len(dropped)} floor twins would be dropped: {[r['hash'] for r, _ in dropped][:6]}"
+        )
+    begin, end = markers(GFX950)
+    text = instances.read_text(encoding="utf-8")
+    head, found, rest = text.partition(begin)
+    _, found_end, tail = rest.partition(end)
+    if not (found and found_end):
+        raise SystemExit(f"{instances}: no {begin!r} / {end!r} markers")
+    instances.write_text(head + render_tables(GFX950, pins) + tail, encoding="utf-8")
+    write_csv(
+        data_dir / out.reference_csv,
+        pin_columns(GFX950),
+        sorted(pins.values(), key=lambda r: r["spec"]),
+    )
+    functions = pins_data.read_pin_functions(
+        data_dir / pins_data.PIN_FUNCTIONS_CSV.name
+    )
+    for row in rows:
+        if row["function_sha256"]:
+            functions[row["hash"]] = {
+                k: row[k] for k in ("hash", "spec", "function_sha256")
+            }
+    write_csv(
+        data_dir / pins_data.PIN_FUNCTIONS_CSV.name,
+        pins_data.PIN_FUNCTION_COLUMNS,
+        sorted(functions.values(), key=lambda r: r["spec"]),
+    )
+    print(f"{len(rows)} tree-built {GFX950} pins added; {len(pins)} pins installed")
+    return len(rows)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "s1", type=Path, help="the S1 directory (tools/sdpa_bwd_s1.py --out)"
+        "s1",
+        nargs="?",
+        type=Path,
+        help="the S1 directory (tools/sdpa_bwd_s1.py --out)",
+    )
+    parser.add_argument(
+        "--tree-pins",
+        type=Path,
+        help="add the tree-built pins of this CSV to the installed gfx950 pins (instead of an S1 directory)",
     )
     parser.add_argument(
         "--instances", type=Path, default=FLYDSL / "generators" / "_instances.py"
     )
     parser.add_argument("--data-dir", type=Path, default=FLYDSL / "tests" / "data")
     args = parser.parse_args(argv)
-    install(args.s1, args.instances, args.data_dir)
+    if (args.s1 is None) == (args.tree_pins is None):
+        parser.error("give an S1 directory or --tree-pins, not both")
+    if args.tree_pins is not None:
+        install_tree_pins(args.tree_pins, args.instances, args.data_dir)
+    else:
+        install(args.s1, args.instances, args.data_dir)
     return 0
 
 

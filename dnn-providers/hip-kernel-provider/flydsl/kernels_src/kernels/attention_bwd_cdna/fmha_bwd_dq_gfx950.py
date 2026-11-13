@@ -135,7 +135,7 @@ is left is exactly the list below, and nothing else.
 
 **16x16x32 is also structurally the cheaper port**, and that is a third
 argument for it: `OPERAND_LANE_ELEMS` stays 8, so `_pack_p_v8_slices`,
-`_bf16_trunc_pack_v8` and the v8 shape of every LDS read are unchanged. At
+`_bf16_rne_pack_v8` and the v8 shape of every LDS read are unchanged. At
 16x16x16 all of them become 4-wide.
 
 What still has to be re-derived, in dependency order:
@@ -182,7 +182,7 @@ matching gfx1201's `assert dtype_str in ("f16", "bf16")`.
 
 **The operand dtype reaches only two places**, and knowing that is what makes
 f16 cheap here: the `dS` pack that feeds GEMM3's B operand
-(`_bf16_trunc_pack_v8`, which already branches on `DTYPE_STR`) and the dQ
+(`_bf16_rne_pack_v8`, which already branches on `DTYPE_STR`) and the dQ
 store. Everything with an exponent in it -- the score, `lse2`, `delta`, the
 softmax, `dP`, the dropout survivor scale, the bias add -- is **f32 in both
 builds**. So f16's narrower range (65504 against bf16's fp32 range) is exposed
@@ -288,8 +288,7 @@ from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_gfx950 import (
 )
 from kernels.attention_bwd_cdna.fmha_tuning_gfx950 import FmhaInputMetadata
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna import philox
-from kernels.attention_bwd_cdna.philox import Philox
+from kernels.attention_rdna4.philox import Philox, default_width
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -1720,7 +1719,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(
             "knobs must be resolved: call `bwd_dq_knobs(arch, ...).resolve(meta)` first"
         )
     traits = knobs.build_traits(meta)
-    if (traits.ENABLE_DROPOUT or "dropout" in runtime_axes) and philox.default_width(
+    if (traits.ENABLE_DROPOUT or "dropout" in runtime_axes) and default_width(
         "gfx950"
     ) != 32:
         raise ValueError(

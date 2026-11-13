@@ -117,28 +117,6 @@ SdpaBwdSpec specOf(const Shape& shape, DataType dtype = DataType::HALF)
     return spec;
 }
 
-SdpaBwdSpec baseSpec()
-{
-    return SdpaBwdSpec{};
-}
-
-SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
-{
-    return spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
-}
-
-/// A bias of the graph's full dims and, with @p withDbias, its gradient.
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
-{
-    return spec.withEdit([=](SdpaBwdGraph& g) {
-        addBias(g, dims);
-        if(withDbias)
-        {
-            addDbias(g);
-        }
-    });
-}
-
 SdpaBwdSpec withDropout(const SdpaBwdSpec& spec,
                         float probability = 0.2F,
                         DataType seedType = DataType::INT64,
@@ -185,7 +163,7 @@ KernelDefinition makeRow(const RowSpec& row)
                        {"head_dim_v", row.tile},
                        {"causal", row.causal},
                        {"has_bias", row.hasBias},
-                       {"dropout", row.dropout},
+                       {"has_dropout", row.dropout},
                        {"padded", row.padded},
                        {"hints", int64_t{1}},
                        {"floor", std::string("tail")},
@@ -286,21 +264,6 @@ bool anyServes(const SdpaBwdSpec& spec, const std::vector<RowSpec>& rows)
 // Launches
 // ---------------------------------------------------------------------------
 
-/// A fake device address per tensor uid, and a workspace base; only ever compared.
-uint64_t ptrOf(int64_t uid)
-{
-    return static_cast<uint64_t>(uid) * 0x100000;
-}
-
-constexpr uint64_t WORKSPACE = 0x70000000;
-
-void* asPointer(uint64_t address)
-{
-    // A fake address, only ever compared and offset into, never dereferenced.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
-}
-
 /// Every uid the test graphs use, and the host address of a runtime scale when one is given.
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor(float* hostScale = nullptr)
 {
@@ -324,20 +287,6 @@ FlydslSdpaBwdMergedLaunchDump dumpOf(const SdpaBwdSpec& spec,
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     return describeFlydslSdpaBwdMergedLaunchForTesting(
         fixture.context(), makeRow(row), buffersFor(hostScale), asPointer(workspace));
-}
-
-void expectBadParam(const std::function<void()>& action)
-{
-    try
-    {
-        action();
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
-    {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
-        return;
-    }
-    FAIL() << "expected a BAD_PARAM exception";
 }
 
 // ---------------------------------------------------------------------------
@@ -862,11 +811,11 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesTheSmallestTilePaddedBelowIt)
 {
     RowSpec padded = plainRow(32);
     padded.padded = 1;
-    Shape small;
-    small.headDimQk = 24;
-    small.headDimV = 24;
-    EXPECT_TRUE(serves(specOf(small), padded));
-    EXPECT_FALSE(serves(specOf(small), plainRow(32)));
+    Shape smallShape;
+    smallShape.headDimQk = 24;
+    smallShape.headDimV = 24;
+    EXPECT_TRUE(serves(specOf(smallShape), padded));
+    EXPECT_FALSE(serves(specOf(smallShape), plainRow(32)));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesNoHeadDimTheCatalogDoesNotCover)
@@ -1177,14 +1126,14 @@ TEST(TestFlydslSdpaBwdMergedKernel,
     // so a row-broadcast bias would let its padded query rows read the real bias beside an LSE of
     // 0. Each accepting control differs from the declined graph in one field.
     RowSpec unclamped = biasRow();
-    unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk";
+    unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk";
     unclamped.dtype = "bf16";
     unclamped.dropout = 1;
     // The shipped geometry: the query tile is block_q (64), not block_m (128).
     unclamped.blockM = 128;
     unclamped.blockQ = 64;
     RowSpec clamped = unclamped;
-    clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk_clamped";
+    clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk_clamped";
 
     const auto graph = [](int64_t seqQ, const std::vector<int64_t>& biasDims) {
         Shape shape;
@@ -1488,12 +1437,12 @@ TEST(TestFlydslSdpaBwdMergedKernarg, EveryRaggedTensorPassesItsOffsetArrayAndMul
     EXPECT_EQ(values.at("varlen_bits"), 0x1515U);
     EXPECT_EQ(values.at("mul_Q"), 8U);
     EXPECT_EQ(values.at("mul_K"), 8U);
-    const std::pair<const char*, int64_t> offsets[] = {{"V", uid::RAGGED_OFFSET_V},
-                                                       {"O", uid::RAGGED_OFFSET_O},
-                                                       {"DO", uid::RAGGED_OFFSET_DO},
-                                                       {"DQ", uid::RAGGED_OFFSET_DQ},
-                                                       {"DK", uid::RAGGED_OFFSET_DK},
-                                                       {"DV", uid::RAGGED_OFFSET_DV}};
+    const std::array<std::pair<const char*, int64_t>, 6> offsets{{{"V", uid::RAGGED_OFFSET_V},
+                                                                  {"O", uid::RAGGED_OFFSET_O},
+                                                                  {"DO", uid::RAGGED_OFFSET_DO},
+                                                                  {"DQ", uid::RAGGED_OFFSET_DQ},
+                                                                  {"DK", uid::RAGGED_OFFSET_DK},
+                                                                  {"DV", uid::RAGGED_OFFSET_DV}}};
     for(const auto& [tensor, id] : offsets)
     {
         SCOPED_TRACE(tensor);
@@ -1622,6 +1571,22 @@ TEST(TestFlydslSdpaBwdMergedKernarg, DropoutWithAPaddedHeadSetsBothRuntimeFlags)
     row.padded = 1;
     const auto dump = dumpOf(withDropout(specOf(shape), 0.2F), row);
     EXPECT_EQ(decode(dump.kernarg, mergedSlots()).at("rt_flags"), 3U);
+}
+
+// The flag is set when either head dim is below the tile, not only when both are.
+TEST(TestFlydslSdpaBwdMergedKernarg, OneHeadDimBelowTheTileSetsThePaddedFlag)
+{
+    RowSpec padded = plainRow(64);
+    padded.padded = 1;
+    for(const auto& [qk, v] : {std::pair<int64_t, int64_t>{64, 40}, {40, 64}})
+    {
+        SCOPED_TRACE(std::to_string(qk) + "x" + std::to_string(v));
+        Shape shape;
+        shape.headDimQk = qk;
+        shape.headDimV = v;
+        const auto dump = dumpOf(specOf(shape), padded);
+        EXPECT_EQ(decode(dump.kernarg, mergedSlots()).at("rt_flags"), 1U);
+    }
 }
 
 TEST(TestFlydslSdpaBwdMergedKernarg, ScaleValue)
@@ -2061,6 +2026,35 @@ TEST(TestFlydslSdpaBwdMergedReduce, ThePlainDispatchRefusesARowThatNamesAReduceK
     EXPECT_TRUE(contains(failure, "merged_reduce handler")) << failure;
 }
 
+// prepare() re-matches the graph under the merged engine's own options (the matcher's defaults,
+// no fp32): a graph the split engine's options accept and the merged engine declined is refused
+// as no longer matching, not planned.
+TEST(TestFlydslSdpaBwdMergedPrepare, RefusesAGraphTheMergedMatchOptionsDecline)
+{
+    const GraphFixture accepted(buildSdpaBwdGraph(baseSpec()));
+    const auto bound = matchesGraph(MERGED, accepted.context());
+    ASSERT_TRUE(bound.has_value());
+
+    const auto fp32 = specOf({}, DataType::FLOAT);
+    ASSERT_FALSE(graphMatch(fp32).has_value());
+    ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(
+        matchSdpaBwdSpec(fp32, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS)));
+
+    const GraphFixture declined(buildSdpaBwdGraph(fp32));
+    std::string failure;
+    try
+    {
+        static_cast<void>(
+            dispatchHandler(MERGED).prepare(declined.context(), *bound, makeRow(plainRow())));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << error.what();
+        failure = error.what();
+    }
+    EXPECT_TRUE(contains(failure, "no longer matches")) << failure;
+}
+
 // ---------------------------------------------------------------------------
 // Seed and offset
 // ---------------------------------------------------------------------------
@@ -2360,7 +2354,7 @@ void expectMergedBroadcastDbias(DataType dtype, const char* rowDtype)
     ASSERT_TRUE(serves(spec, row));
     const auto dump = dumpOf(spec, row, WORKSPACE);
     ASSERT_TRUE(dump.reduces);
-    const size_t workspaceBytes
+    const auto workspaceBytes
         = static_cast<size_t>(graph.batch * graph.heads * graph.seqQ * graph.seqKv * 2);
     EXPECT_EQ(dump.workspaceBytes, workspaceBytes);
     // One grid row per output plane: the bias keeps neither axis.

@@ -71,7 +71,7 @@ object's per-kernel gate (``tools/sdpa_bwd_gate.py``) holds the main kernel's fu
 standalone pin and the reduce kernel's resource row to the reduce pin; the reduce is compiled under the main
 module's LLVM options, so its bytes are not compared. For an fp32 dQ object those options differ from the
 standalone fp32 reduce's, so its reduce is gated against a standalone fp32 reduce built under the dQ module's
-options (``_fp32_reduce_reference``). Every op takes ``--reference-dir``, the directory of the sweep's pins. A row that
+options (``_fp32_reduce_reference``). The four pinned ops (``sdpa_bwd_{prep,dkdv,dq,merged}``) take ``--reference-dir``, the directory of the pinned objects; no other op takes one. A row that
 ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict,
 an object that was not scanned, or a red per-kernel gate stops the run, and nothing is shipped.
 
@@ -1661,7 +1661,8 @@ def _complete_source_md(
             "\n## Pinned objects\n\n"
             "These objects are stored pins, not built with the toolchain above: the sweep's pinned bytes, or for a combined row the combined object\n"
             "of the shipped content it replaces. The rebuild of each is nondeterministic (`flydsl/tests/data/sdpa_bwd_nondeterministic.csv`) or known\n"
-            "bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
+            "bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`). The `rebuilt_sha256` and `gates` (`pin_gate`) of an instance's `manifest.json`\n"
+            "entry describe that rebuild, not the shipped bytes.\n\n"
             "| Instance | Reason | SHA256 |\n| --- | --- | --- |\n"
             + "".join(
                 f"| `{r['name']}` | {r['pin_reason']}{', stored combined object' if r.get('ship') == 'combined' else ''} | `{r['sha256'][:16]}` |\n"

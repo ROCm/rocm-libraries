@@ -40,7 +40,7 @@ the 32-row one anywhere the 32-row one fits. From `SISchedule.td`'s
 This module was first built on `16x16x16` and measured 280 TFLOP/s at head_dim
 64 against the 32-row family's 713 -- half the rate and half the `BLOCK_KV`,
 which is exactly those two factors. `16x16x32` keeps 16 rows at full rate, and
-it keeps the operand eight elements wide, so `_bf16_trunc_pack_v8` and the
+it keeps the operand eight elements wide, so `_bf16_rne_pack_v8` and the
 128-bit LDS reads survive unchanged.
 
 The transpose read serves this shape's A operand end to end at both staging
@@ -291,8 +291,11 @@ class M16ResidentLoader(dualwave.DualwaveKernelContext):
 
     A raw bounded resource rather than the copy-atom `_buffer_load_128` path,
     because that atom is built against the 32-row reader's descriptor. The
-    bound is identical -- `seqlen_kv * stride_seq` elements -- so a KV row past
-    the sequence still reads zero and the ragged tail still needs no mask.
+    bound is identical -- `seqlen_kv * stride_seq` elements. The row it reads
+    is `live_row_in_block`: the wave's own KV row on a build without a causal
+    mask, so a row past the sequence reads zero; on a causal build the row
+    clamped into the sequence's live key interval by `init_kv_row`, so a row
+    past the sequence reads the last live key's K and V, not zero.
     """
 
     def load_resident(self, which, hdim):
@@ -637,7 +640,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         Concatenation, not a shuffle. The row permutation in `row_base16` is
         what makes the two halves land at `k = 8*(lane//16) + 0..3` and
         `+ 4..7`; without it these eight values would be four of this lane's
-        and four of another quarter wave's. `_bf16_trunc_pack_v8` is the 32-row
+        and four of another quarter wave's. `_bf16_rne_pack_v8` is the 32-row
         family's, unchanged -- which is the other reason `16x16x32` is the
         cheaper port.
 
@@ -647,7 +650,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         dropout, matrix bias -- and that docstring has the measurement.
         """
         return mfma_operand_wait_state(
-            dualwave._bf16_trunc_pack_v8(
+            dualwave._bf16_rne_pack_v8(
                 self.traits, list(lo) + list(hi), elem_dtype=self.elem_dtype
             )
         )
@@ -671,7 +674,7 @@ class M16StoreHelper(dualwave.DualwaveKernelContext):
         finite, wrongly scaled by about 2^112, and with no diagnostic. A cast
         that reinterprets rather than converts cannot fail loudly.
 
-        `_o_pack_2dw` and `_bf16_trunc_pack_v8` in the production helpers
+        `_o_pack_2dw` and `_bf16_rne_pack_v8` in the production helpers
         already branch this way; this is the same branch, on the same trait,
         for the accumulator shape this family has. bf16 keeps the packed
         two-at-a-time instruction, so its emitted code is unchanged.

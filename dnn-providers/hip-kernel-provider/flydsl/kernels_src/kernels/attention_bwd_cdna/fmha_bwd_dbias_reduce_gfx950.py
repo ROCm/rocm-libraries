@@ -164,7 +164,6 @@ def build_fmha_bwd_dbias_reduce_gfx950_module_primary(dtype_str):
         if use_vec:
             vt = Vec.make_type(VEC, elem)
             init_args = [Vec.filled(VEC, 0.0, fx.Float32).ir_value()]
-            loop_results = init_args
             for ib, b_args in range(
                 fx.Index(0), n_batch_i, fx.Index(1), init=init_args
             ):

@@ -16,7 +16,7 @@ LDS; owner accumulators in registers; fixed-order fp32 accumulation; `sm_scale` 
 
 Scope: classes `plain`, `causal` and `bias`, each with baked dropout (`bk,1`) or without, exact head dims (hdim_qk = hdim_vo = tile) or padded
 (`padded=1`: the runtime `hdim_qk` / `hdim_vo` <= tile), any sequence lengths (ragged Q and KV tiles), MHA / GQA and varlen addressing through the shared
-decoders (`fmha.decode_addressing`: CUMULATIVE / INDIVIDUAL lengths (`seqused_k`), ARRAY positions); each tensor starts at its own origin (`fmha.tensor_origin`), LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace. Other classes
+decoders (`fmha.decode_addressing`: CUMULATIVE / INDIVIDUAL lengths (`seqused_k`), ARRAY positions); each tensor starts at its own origin (`fmha.tensor_origin_gated`), LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace. Other classes
 and `dform=rt` raise `ValueError`. There is no dump object.
 
 Padded head: a column at or past its runtime extent (Q, K and dK: `hdim_qk`; dO, V and dV: `hdim_vo`) is zero on every load (the address is clamped to
@@ -38,7 +38,7 @@ exponent chain carries no `nnan`/`ninf` (a `-inf` bias, "never attend", must rea
 import math as host_math
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_rdna4.philox import Philox, keep_mask
 from kernels.attention_bwd_rdna import fmha_common_gfx11 as cmn  # noqa: F401
 from kernels.attention_bwd_rdna import fmha_tuning_bwd_dkdv_f32_gfx11 as tun
@@ -228,23 +228,23 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         # MQA/GQA: the KV head is shared by `group` query heads and dK/dV sum over all of them, folded into the Q-tile loop.
         group_i32 = num_head_q // num_head_k
 
-        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin`.
-        _q_origin = fmha.tensor_origin(
+        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin_gated`.
+        _q_origin = fmha.tensor_origin_gated(
             seqinfo_q1, mul_Q, z_i32, stride_q_batch, seqlen_q_i32
         )
-        _do_origin = fmha.tensor_origin(
+        _do_origin = fmha.tensor_origin_gated(
             off_DO, mul_DO, z_i32, stride_do_batch, seqlen_q_i32
         )
-        _k_origin = fmha.tensor_origin(
+        _k_origin = fmha.tensor_origin_gated(
             seqinfo_k1, mul_K, z_i32, stride_k_batch, seqlen_k_i32
         )
-        _v_origin = fmha.tensor_origin(
+        _v_origin = fmha.tensor_origin_gated(
             off_V, mul_V, z_i32, stride_v_batch, seqlen_k_i32
         )
-        _dk_origin = fmha.tensor_origin(
+        _dk_origin = fmha.tensor_origin_gated(
             off_DK, mul_DK, z_i32, stride_dk_batch, seqlen_k_i32
         )
-        _dv_origin = fmha.tensor_origin(
+        _dv_origin = fmha.tensor_origin_gated(
             off_DV, mul_DV, z_i32, stride_dv_batch, seqlen_k_i32
         )
         sm_log2e = sm_scale * fx.Float32(_LOG2E)
@@ -384,7 +384,7 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 fx.Index(stride_k_seq),
                 fx.Index(stride_v_seq),
             )
-            ws_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
+            ws_base = fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q)
             if const_expr(BIAS):
                 # A bias is dense: ragged graphs with a bias decline.
                 bias_base = fx.Index(z_i32) * fx.Index(

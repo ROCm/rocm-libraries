@@ -174,7 +174,7 @@ def _row(op: str, name: str, standalone_reduce: bool = False, **knobs) -> dict:
         padded=0,
         floor="tail",
         dform="bk",
-        dropout=0,
+        has_dropout=0,
         causal=0,
         has_bias=0,
         hints=1,
@@ -215,8 +215,8 @@ def synthetic() -> dict[str, list[dict]]:
             rows += [
                 _row(op, "padded128", head_dim=128, padded=1),
                 _row(op, "g1_128", head_dim=128, padded=1, floor="g1"),
-                _row(op, "rt64", dform="rt", dropout=1),
-                _row(op, "bk64d", dropout=1),
+                _row(op, "rt64", dform="rt", has_dropout=1),
+                _row(op, "bk64d", has_dropout=1),
             ]
         if op in ("sdpa_bwd_dkdv", "sdpa_bwd_merged"):
             rows.append(_row(op, "packed64", gqa_pack=1, block_q=64))
@@ -310,7 +310,7 @@ def test_without_the_promotion_the_synthetic_catalogue_collides(
 
 
 def test_a_feature_field_is_not_an_alternative(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Promoting `dropout` would list a field no two applicable rows differ in."""
+    """Promoting `has_dropout` would list a field no two applicable rows differ in."""
     monkeypatch.setattr(
         gd,
         "ALTERNATIVE_KNOBS",

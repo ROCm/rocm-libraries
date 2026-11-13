@@ -47,6 +47,7 @@
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
@@ -86,14 +87,35 @@ namespace
 {
 
 namespace bwd = flydsl_sdpa_bwd;
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace native = flydsl_sdpa_bwd_native;
+using native::BLOCK_KV_FIELD;
+using native::BLOCK_M_FIELD;
+using native::BLOCK_Q_FIELD;
+using native::BLOCK_THREADS_FIELD;
+using native::CAUSAL_FIELD;
+using native::CLASS_BIAS;
+using native::CLASS_CAUSAL;
+using native::CLASS_PLAIN;
+using native::DROPOUT_FIELD;
+using native::DTYPE_FIELD;
+using native::GQA_PACK_FIELD;
 using native::GRID_YZ_LIMIT;
+using native::HAS_BIAS_FIELD;
+using native::HEAD_DIM_FIELD;
 using native::INT32_LIMIT;
+using native::LADDER;
+using native::PADDED_FIELD;
+using native::REDUCE_LAUNCH;
+using native::REDUCE_SYMBOL_FIELD;
+using native::reducePlanes;
+using native::STORE_DB_FIELD;
+using native::TAILZERO_LAUNCH;
 using native::toInt32;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
+/// Prefixes the message of every BAD_PARAM this engine raises.
+constexpr std::string_view ERROR_SCOPE = "flydsl_sdpa_bwd_merged";
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.score";
@@ -103,34 +125,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.d
 constexpr std::string_view REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch";
 
-/// The launch names of a merged row's `sources`.
+/// The merged kernel's launch name in a row's `sources`.
 constexpr std::string_view MERGED_LAUNCH = "merged";
-constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
-constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
-
-// Kernel metadata fields, declared by the KMD this pack's KDP points at.
-constexpr std::string_view DTYPE_FIELD = "dtype";
-/// The head-dim tile the object is built at.
-constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
-constexpr std::string_view CAUSAL_FIELD = "causal";
-constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
-constexpr std::string_view DROPOUT_FIELD = "dropout";
-/// 0: serves head dims equal to the tile; 1: serves the dims between the rung below and it.
-constexpr std::string_view PADDED_FIELD = "padded";
-/// -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
-constexpr std::string_view STORE_DB_FIELD = "store_db";
-/// 1 packs the GQA group into the dK/dV role's q-tile row axis; -1 leaves it unset.
-constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
-/// The query tile of the dK/dV role; a packed row carries its resolved value, -1 leaves it
-/// unset.
-constexpr std::string_view BLOCK_Q_FIELD = "block_q";
-/// The launch geometry of the build: threads per block, and the key and query tile heights.
-constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
-constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
-constexpr std::string_view BLOCK_M_FIELD = "block_m";
-/// The symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
-/// empty on a row without one.
-constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 
 // What graph_match binds for kernel_match.
 constexpr std::string_view CLASS_TOKEN = "flydsl_sdpa_bwd_merged.class";
@@ -156,26 +152,7 @@ constexpr std::string_view BIAS_ROW_BROADCAST_TOKEN = "flydsl_sdpa_bwd_merged.bi
 /// P = exp(bias) overflows the 16-bit P (dV turns NaN). These objects decline such graphs, which
 /// the split engine serves.
 constexpr std::array<std::string_view, 1> UNCLAMPED_BIAS_OBJECTS{
-    "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk"};
-
-/// The graph classes an object is built for: `causal` serves every masked graph, `bias`
-/// every bias graph (masked graphs with a bias are declined by the matcher), `plain` the rest.
-constexpr int64_t CLASS_PLAIN = 0;
-constexpr int64_t CLASS_CAUSAL = 1;
-constexpr int64_t CLASS_BIAS = 2;
-
-/// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds objects at.
-constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
-
-/// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
-constexpr int32_t RT_FLAG_PADDED = 1;
-constexpr int32_t RT_FLAG_DROPOUT = 2;
-
-[[noreturn]] void failBadParam(const std::string& message)
-{
-    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "flydsl_sdpa_bwd_merged: " + message);
-}
+    "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk"};
 
 // ---------------------------------------------------------------------------
 // Kernel records
@@ -292,28 +269,6 @@ std::optional<int64_t> mergedGridBlocks(int64_t batch,
 // Graph match and kernel match
 // ---------------------------------------------------------------------------
 
-/// The output (batch, head) planes of the dBias reduce launch, one grid row each: the axes
-/// the dBias keeps. 0 when the graph's dBias is not broadcast; int64 max on overflow.
-int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
-{
-    if(problem.dbiasUid == bwd::NO_UID
-       || !(problem.biasBroadcastBatch || problem.biasBroadcastHead))
-    {
-        return 0;
-    }
-    const auto planes
-        = bwd::detail::checkedProduct({problem.biasBroadcastBatch ? int64_t{1} : problem.batch,
-                                       problem.biasBroadcastHead ? int64_t{1} : problem.numHeads});
-    return planes.value_or(std::numeric_limits<int64_t>::max());
-}
-
-/// "<engine> declined the graph [<cause>]: <detail>", at INFO: hipDNN reports a declined
-/// graph to its caller only as "No engine configurations available".
-void logDecline(std::string_view cause, const std::string& detail)
-{
-    HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME << " declined the graph [" << cause << "]: " << detail);
-}
-
 /**
  * @brief Graph-scoped applicability: the shared backward matcher's contract, with what
  *        kernel_match needs bound.
@@ -330,7 +285,7 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     const auto matched = bwd::matchSdpaBackward(context);
     if(const auto* decline = std::get_if<bwd::Decline>(&matched))
     {
-        logDecline(decline->cause, decline->detail);
+        native::logDecline(ENGINE_NAME, decline->cause, decline->detail);
         return std::nullopt;
     }
     const auto& problem = std::get<bwd::SdpaBwdProblem>(matched);
@@ -344,32 +299,37 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                            && largest % 32 == 0;
     if(largest > 32 && !exactTile)
     {
-        logDecline("head_size",
-                   "head dims Qk " + std::to_string(problem.headDimQk) + ", V "
-                       + std::to_string(problem.headDimV)
-                       + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160, "
-                         "192, 224 or 256)");
+        native::logDecline(
+            ENGINE_NAME,
+            "head_size",
+            "head dims Qk " + std::to_string(problem.headDimQk) + ", V "
+                + std::to_string(problem.headDimV)
+                + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160, "
+                  "192, 224 or 256)");
         return std::nullopt;
     }
     // BI-8: every merged bias object stages the bias through LDS.
     if(problem.biasUid != bwd::NO_UID && !native::stagesBias(problem))
     {
-        logDecline("bias",
-                   "the bias layout is outside the LDS staging contract every merged bias object "
-                   "needs (16-byte base, strides multiples of 16 bytes, last row padded to a "
-                   "whole 16-byte chunk)");
+        native::logDecline(
+            ENGINE_NAME,
+            "bias",
+            "the bias layout is outside the LDS staging contract every merged bias object "
+            "needs (16-byte base, strides multiples of 16 bytes, last row padded to a "
+            "whole 16-byte chunk)");
         return std::nullopt;
     }
     if(native::tailzeroMaskOf(problem) != 0 && !native::tailzeroGridOf(problem))
     {
-        logDecline("SP-TZ", "the tail-zero launch grid exceeds its limits");
+        native::logDecline(ENGINE_NAME, "SP-TZ", "the tail-zero launch grid exceeds its limits");
         return std::nullopt;
     }
 
     const auto dtype = flydsl_sdpa::kernelDataTypeName(problem.dtype);
     if(!dtype.has_value())
     {
-        logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
+        native::logDecline(
+            ENGINE_NAME, "data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
     int64_t graphClass = CLASS_PLAIN;
@@ -541,52 +501,16 @@ double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
 // Launch values
 // ---------------------------------------------------------------------------
 
-/// The tensor uids a matched graph binds.
-struct Uids
-{
-    int64_t q = 0;
-    int64_t k = 0;
-    int64_t v = 0;
-    int64_t o = 0;
-    int64_t dO = 0;
-    int64_t dQ = 0;
-    int64_t dK = 0;
-    int64_t dV = 0;
-    int64_t stats = 0;
-};
-
 /// Everything graph- and kernel-derived, resolved once at prepare(). Holds no reference to
 /// the match context.
-struct MergedPlan
+struct MergedPlan : native::BwdPlanCommon
 {
-    bwd::SdpaBwdProblem problem;
-    Uids uids;
-    unsigned int blockThreads = 0;
     unsigned int gridBlocks = 0;
-    native::Window window;
-    int32_t dropoutThreshold = 0;
-    float dropoutScale = 1.0F;
-    int32_t runtimeFlags = 0;
-    int32_t varlenBits = 0;
-    native::WorkspaceLayout workspace;
-    native::ScalarOperands scalars;
-    /// The reduce kernel's symbol and launch, when the graph's dBias is broadcast.
-    std::string reduceSymbol;
-    native::ReduceGrid reduceGrid;
-    /// The tail-zero launch: the outputs it zeroes (`mask`, 0 for no launch) and its grid.
-    int32_t tailzeroMask = 0;
-    native::TailzeroGrid tailzeroGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
 {
-    auto matched = bwd::matchSdpaBackward(context);
-    if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
-    {
-        return *problem;
-    }
-    const auto& decline = std::get<bwd::Decline>(matched);
-    failBadParam("the graph no longer matches [" + decline.cause + "]: " + decline.detail);
+    return native::matchedProblemOf(context, bwd::MatchOptions{}, ERROR_SCOPE);
 }
 
 MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
@@ -598,7 +522,8 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
     const auto row = readRow(kernel);
     if(!row)
     {
-        failBadParam("kernel '" + kernel.name + "' lacks a field of the merged record");
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name + "' lacks a field of the merged record");
     }
     const auto blocks = mergedGridBlocks(problem.batch,
                                          problem.numHeads,
@@ -608,35 +533,13 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
                                          *row);
     if(!blocks)
     {
-        failBadParam("launch grid exceeds int32 for kernel '" + kernel.name + "'");
+        native::failBadParam(ERROR_SCOPE,
+                             "launch grid exceeds int32 for kernel '" + kernel.name + "'");
     }
     plan.blockThreads = static_cast<unsigned int>(row->blockThreads);
     plan.gridBlocks = static_cast<unsigned int>(*blocks);
 
-    const auto& attributes
-        = context.graph.getNodeWrapper(0).attributesAs<data_objects::SdpaBackwardAttributes>();
-    plan.uids = Uids{attributes.q_tensor_uid(),
-                     attributes.k_tensor_uid(),
-                     attributes.v_tensor_uid(),
-                     attributes.o_tensor_uid(),
-                     attributes.do_tensor_uid(),
-                     attributes.dq_tensor_uid(),
-                     attributes.dk_tensor_uid(),
-                     attributes.dv_tensor_uid(),
-                     attributes.stats_tensor_uid()};
-
-    plan.window = native::windowFor(problem);
-    if(problem.dropoutP > 0.0F)
-    {
-        plan.dropoutThreshold = native::dropoutThreshold(problem.dropoutP);
-        plan.dropoutScale = native::dropoutScale(problem.dropoutP);
-    }
-    const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
-    plan.runtimeFlags
-        = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = native::varlenBitsOf(problem);
-
-    plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
+    native::bindGraphOperands(plan, context, row->tile);
 
     plan.workspace = native::workspaceLayout(problem);
     if(plan.workspace.reduces)
@@ -646,8 +549,9 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
             = flydsl_sdpa::stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
         if(plan.reduceSymbol.empty())
         {
-            failBadParam("kernel '" + kernel.name
-                         + "' serves a broadcast dBias but names no reduce kernel");
+            native::failBadParam(ERROR_SCOPE,
+                                 "kernel '" + kernel.name
+                                     + "' serves a broadcast dBias but names no reduce kernel");
         }
         plan.reduceGrid = native::reduceGridOf(problem);
     }
@@ -657,7 +561,7 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
         const auto tailzeroGrid = native::tailzeroGridOf(problem);
         if(!tailzeroGrid)
         {
-            failBadParam("the tail-zero launch grid exceeds its limits");
+            native::failBadParam(ERROR_SCOPE, "the tail-zero launch grid exceeds its limits");
         }
         plan.tailzeroGrid = *tailzeroGrid;
     }
@@ -1065,10 +969,11 @@ public:
             }
             else
             {
-                failBadParam("kernel '" + kernel.name + "' names the reduce kernel '"
-                             + plan.reduceSymbol
-                             + "' but is dispatched by the merged handler, which launches no "
-                               "reduce: the merged_reduce handler does");
+                native::failBadParam(
+                    ERROR_SCOPE,
+                    "kernel '" + kernel.name + "' names the reduce kernel '" + plan.reduceSymbol
+                        + "' but is dispatched by the merged handler, which launches no "
+                          "reduce: the merged_reduce handler does");
             }
         }
         std::optional<KernelDefinition> tailzeroKernel;

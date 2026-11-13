@@ -2,7 +2,7 @@
 """Shared core of the native-f32-MFMA SDPA backward family (gfx950): lane maps, 4-byte LDS tile layout, MFMA issue, 4-byte global addressing.
 
 Used by `fmha_f32_perwave_gfx950` and `fmha_f32_dsplit_gfx950` (the two operand layers) and by the fp32 dK/dV and dQ kernels built on them.
-`Philox` is re-exported from `philox`.
+`Philox` is re-exported from `attention_rdna4/philox.py`.
 
 --- MFMA lane maps (wave64, one fp32 register per lane for A and for B) -----
 
@@ -58,7 +58,7 @@ from kernels.attention_bwd_cdna.gfx950_standalone import (
     buffer_ops,
     dualwave,
 )  # noqa: E402
-from kernels.attention_bwd_cdna.philox import (
+from kernels.attention_rdna4.philox import (
     Philox,
 )  # noqa: E402,F401  re-exported for the kernels
 

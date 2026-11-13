@@ -4,7 +4,7 @@
 
 """FlyDSL backward prep for the fp32 split backward (gfx11-generic): Delta and the workspace LSE'.
 
-The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, same ABI, same addressing, same lane order; no sink twin: fp32 sinks are out of scope). Per query row:
+The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, ABI and lane order, the same addressing arithmetic in another statement order, see the comment at the origins; no sink twin: fp32 sinks are out of scope). Per query row:
 
     Delta[row]  = sum_d O[row, d] * dO[row, d]        fp32 accumulate
     LSE'[row]   = LSE[row] with -inf -> +inf          (NaN and finite values unchanged)
@@ -12,9 +12,9 @@ The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, same ABI, same a
 The dK/dV and dQ kernels read `exp2(s - lse * log2e)`: an empty row (LSE = -inf, what hipDNN writes) would give `exp2(+inf)`, so they
 need +inf. The input LSE is never written; LSE' goes to its own workspace.
 
-**Layout.** As the 16-bit prep: O, dO and the caller's LSE are each addressed from their own origin (`fmha.tensor_origin`: `off[z] * mul` when
+**Layout.** As the 16-bit prep: O, dO and the caller's LSE are each addressed from their own origin (`fmha.tensor_origin_gated`: `off[z] * mul` when
 ragged, `z * stride_batch` when dense; LSE with its three element strides); Delta and LSE' go to the compact `[B, H, max_seqlen_q]` workspace
-(`fmha.ws_row_base`) that the dK/dV and dQ kernels read. Rows past a sequence's length are
+(`fmha.stats_ws_base`) that the dK/dV and dQ kernels read. Rows past a sequence's length are
 neither read nor written; grid = (cdiv(max_seqlen_q, ROWS), num_head_q, num_seqlens or batch_size). O and dO are `(batch, head, row,
 col)` with unit column stride and (batch, head, seq) strides in elements (4-byte elements).
 
@@ -25,7 +25,7 @@ row group. A row owns `TPR = gcd(tile / 4, 16)` lanes (a power of two <= 16, so 
 **Exact vs padded.** An exact build requires hdim_vo == tile and uses 4-element vector loads. A padded build reads `hdim_vo <= tile`
 columns element by element with the tail masked to zero, for any hdim_vo.
 
-ABI (identical to `fmha_bwd_prep_f32_gfx950`; `tools/test_abi_parity.py` enforces it; the launcher keeps its gfx950 name):
+ABI (the argument names, order and annotations of `fmha_bwd_prep_f32_gfx950`; the launcher keeps its gfx950 name):
     O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1,
     off_O, mul_O, off_DO, mul_DO, off_Stats, mul_Stats, stride_stats_{batch,head,token},
     varlen_bits, num_seqlens, max_seqlen_q, num_head_q, hdim_vo, stride_o_{batch,head,seq}, stride_do_{batch,head,seq}
@@ -34,7 +34,7 @@ ABI (identical to `fmha_bwd_prep_f32_gfx950`; `tools/test_abi_parity.py` enforce
 import math
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -114,12 +114,13 @@ def build_fmha_bwd_prep_f32_gfx11_module_primary(dtype_str, tile, padded):
         seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        o_origin = fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
-        do_origin = fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
-        stats_origin = fmha.tensor_origin(
+        # The gfx950 twin computes the workspace base before the Stats origin and takes `fmha.tensor_origin`.
+        o_origin = fmha.tensor_origin_gated(off_O, mul_O, z, stride_o_batch, seqlen)
+        do_origin = fmha.tensor_origin_gated(off_DO, mul_DO, z, stride_do_batch, seqlen)
+        stats_origin = fmha.tensor_origin_gated(
             off_Stats, mul_Stats, z, stride_stats_batch, seqlen
         )
-        ws_base = fmha.ws_row_base(z, head, num_head_q, max_seqlen_q)
+        ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
 
         valid = row < seqlen
         # An out-of-range row reads row 0 of its sequence (always in bounds) and stores nothing.

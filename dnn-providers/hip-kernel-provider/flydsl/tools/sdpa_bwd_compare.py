@@ -57,20 +57,10 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
+from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 import sdpa_bwd_pins as pins  # noqa: E402
 
-RESOURCE_COLUMNS = (
-    "vgpr",
-    "agpr",
-    "vgpr_total",
-    "sgpr",
-    "sgpr_spill",
-    "vgpr_spill",
-    "scratch_bytes",
-    "lds_bytes",
-    "occupancy",
-)
 TARGET = "gfx950"
 
 

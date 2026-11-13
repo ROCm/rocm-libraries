@@ -173,7 +173,8 @@ class BwdDqTraits(ParityDualwaveTraits):
     """The forward's parity traits plus what the dQ kernel alone needs.
 
     A subclass for the same reason `ParityDualwaveTraits` is one: the parent is
-    frozen with no defaulted fields, so added fields need defaults and those
+    frozen and ends in defaulted fields (`RETURN_LSE`, `XCD_SWIZZLE`,
+    `DS_READ_TR_OP`), so added fields need defaults and those
     defaults are the "behave like the forward" values. Nothing that reads the
     parent's fields has to know these exist.
     """

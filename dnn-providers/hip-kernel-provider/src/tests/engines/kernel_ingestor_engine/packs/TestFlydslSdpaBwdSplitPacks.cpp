@@ -32,6 +32,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNoSerialization.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSchemaGate.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdVerdictTable.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -228,14 +229,6 @@ private:
     const SplitContent* _content = nullptr;
 };
 
-/// A metadata field of type @p T, or nullptr when absent or of another type.
-template <typename T>
-const T* tryGetMetadataField(const MetadataValues& values, const char* field)
-{
-    const auto it = values.find(std::string(field));
-    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
-}
-
 const SlotDescriptorSet& slotOf(const DescriptorSet& set, const char* name)
 {
     for(const auto& slot : set.slots)
@@ -416,7 +409,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 EXPECT_EQ(content().dforms.count(text("dform")), 1U) << kernel.name;
                 const auto floorLabel = text("floor");
                 EXPECT_FALSE(floorLabel.empty()) << kernel.name;
-                for(const char* flag : {"causal", "has_bias", "dropout", "padded", "hints"})
+                for(const char* flag : {"causal", "has_bias", "has_dropout", "padded", "hints"})
                 {
                     const auto value = integer(flag);
                     EXPECT_TRUE(value == 0 || value == 1) << kernel.name << " " << flag;
@@ -898,19 +891,10 @@ std::array<std::vector<KernelDefinition>, 3> installedKernels(const DescriptorSe
         {
             for(const auto& kernel : pack.kernels)
             {
-                kernels[slot].push_back(KernelDefinition{kernel.id,
-                                                         pack.id,
-                                                         pack.dispatchId,
-                                                         kernel.source,
-                                                         kernel.metadata,
-                                                         kernel.priority,
-                                                         kernel.arch,
-                                                         kernel.originDirectory,
-                                                         kernel.name,
-                                                         kernel.treeRoot,
-                                                         kernel.sources,
-                                                         nullptr,
-                                                         nullptr});
+                // A kernel with no arch list of its own takes its pack's, so no installed
+                // definition may end up without one.
+                const auto& definition = kernels[slot].emplace_back(definitionOf(pack, kernel));
+                EXPECT_FALSE(definition.arch.empty()) << kernel.name;
             }
         }
     }
@@ -1186,10 +1170,6 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryServedRowsSlotCatalogsHaveUniqueEnrolle
     EXPECT_TRUE(failures.empty()) << failures.size() << " ambiguous slot catalogs:" << report.str();
 }
 
-// The ingestor declines a graph whose schema floor is above the engine's `sdk_version` before
-// the matcher runs. The matcher serves ragged tensors, non-default alignment and ragged offset
-// multipliers, so the engine declares the schema that introduced the last of them: an SDK that
-// raises the multiplier floor again fails here until the matcher has been reviewed for it.
 // ---------------------------------------------------------------------------
 // The probe-graph table, the coverage constants and the chunk contract over the shard
 // ---------------------------------------------------------------------------
@@ -1362,8 +1342,10 @@ std::optional<ManifestHashes> tryLoadManifestHashes(const char* content)
 
 /// The probe graphs of the table, run through graph_match and the slot's kernel_match over the
 /// installed shard: the rows served, ranked by priority (high first) then spec hash, must be
-/// the rows the model names. Where the build stages the manifests that give a row its spec
-/// hash (gfx11), the ranked lists are compared; elsewhere only whether any row serves.
+/// the rows the model names. Where the build stages the manifests that give a row its spec hash
+/// (gfx11), the ranked lists are compared; elsewhere only whether any row serves. The engine
+/// orders equal priorities by descriptor id, so this order agrees with its selection only among
+/// rows whose priorities differ.
 TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelNames)
 {
     const std::string tableArch = arch() == "gfx950" ? "gfx950" : "gfx11-generic";
@@ -1660,6 +1642,10 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShipped
     }
 }
 
+// The ingestor declines a graph whose schema floor is above the engine's `sdk_version` before
+// the matcher runs. The matcher serves ragged tensors, non-default alignment and ragged offset
+// multipliers, so the engine declares the schema that introduced the last of them: an SDK that
+// raises the multiplier floor again fails here until the matcher has been reviewed for it.
 TEST_F(TestFlydslSdpaBwdSplitPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor)
 {
     const auto& set = loadedSet(ENGINE_NAME);
@@ -1668,10 +1654,12 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultipl
     EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
 }
 
-// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder, and
-// the matcher's verdicts hold there: ragged tensors with and without a multiplier and an
-// aligned operand are served; a misaligned operand, ragged stats beside a dense Q, a ragged
-// bias and a multiplier below 1 are declined by the matcher, not by the schema gate.
+// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder and
+// through the provider's ApplicabilityManager, the engine registered at its UED's
+// `sdk_version` as Container does, and the matcher's verdicts hold on both: ragged tensors with
+// and without a multiplier and an aligned operand are served; a misaligned operand, ragged
+// stats beside a dense Q, a ragged bias and a multiplier below 1 are declined by the matcher,
+// not by a schema gate.
 TEST_F(TestFlydslSdpaBwdSplitPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects)
 {
     const auto& set = loadedSet(ENGINE_NAME);
@@ -1682,8 +1670,8 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ServesStampedRaggedGraphsAndDeclinesTheField
         report += "\n  " + failure;
     }
     EXPECT_TRUE(failures.empty()) << report;
-    // The cases only matter if they can see the gate: an engine of the schema these engines
-    // shipped with declines the same graph.
+    // The cases only matter if they can see each gate: an engine of the schema these engines
+    // shipped with, as descriptor and as registration, declines the same graph.
     const auto invisible = schema_gate::gateIsInvisible(set, arch());
     EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");
 }

@@ -2842,14 +2842,14 @@
    "atol_needed": null
   },
   "PRB-R01/bf16": {
-   "fp": "4522f1fe20b3",
+   "fp": "ff5bc6ec2463",
    "lambda": 0.3333333333333334,
    "max_ref": {
     "dQ": 0.08056640625,
     "dK": 0.06494140625,
     "dV": 0.1826171875
    },
-   "atol_needed": null
+   "atol_needed": 0.000718231201171875
   },
   "PRB-R03/bf16": {
    "fp": "e030bf77c230",

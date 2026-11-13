@@ -30,7 +30,7 @@ def test_priority_falls_strictly_with_tile(kind: str) -> None:
             row.dtype,
             knobs["causal"],
             knobs["has_bias"],
-            knobs["dropout"],
+            knobs["has_dropout"],
             knobs.get("bias_f32"),
             knobs.get("u2"),
             knobs.get("store_db"),

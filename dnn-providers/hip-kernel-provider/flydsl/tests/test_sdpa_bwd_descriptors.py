@@ -31,7 +31,7 @@ MERGED_KNOBS = {
     "head_dim_v": 128,
     "causal": 1,
     "has_bias": 1,
-    "dropout": 0,
+    "has_dropout": 0,
     "padded": 0,
     "hints": 1,
     "floor": "tail",
@@ -51,7 +51,7 @@ CONTRACT_FIELDS = {
     "head_dim_v": "int",
     "causal": "int",
     "has_bias": "int",
-    "dropout": "int",
+    "has_dropout": "int",
     "padded": "int",
     "hints": "int",
     "floor": "string",
@@ -144,18 +144,16 @@ def test_ued_knobs_are_the_tuning_fields_and_the_alternatives(documents):
 
 def test_op_level_documents_have_a_sibling_ops_shape(documents):
     merged, sibling = "sdpa_bwd_merged", "sdpa_cdna"
-    # The sibling has trained engine estimates; merged has none yet but keeps the estimate slot
-    # while its first one is trained (gen_descriptors.UHD_BOOTSTRAP_ESTIMATE_ENGINES, working
-    # branch only), so both carry the slot and their UEDs bind `predict_engine`. The dispatch
-    # of the rows that launch the dBias reduce is the one document merged has that the sibling
-    # lacks.
-    assert "sdpa_bwd_merged" in gd.UHD_BOOTSTRAP_ESTIMATE_ENGINES
+    # The dispatch of the rows that launch the dBias reduce is the one document merged has
+    # that the sibling lacks.
     assert set(documents[Path(merged)]) == {
         *(n.replace(sibling, merged) for n in documents[Path(sibling)]),
         "flydsl_sdpa_bwd_merged_reduce.udd.json",
     }
-    assert set(_doc(documents, merged, "uhd")) == set(_doc(documents, sibling, "uhd"))
-    assert set(_doc(documents, merged, "ued")) == set(_doc(documents, sibling, "ued"))
+    for suffix in ("ued", "uhd"):
+        assert set(_doc(documents, merged, suffix)) == set(
+            _doc(documents, sibling, suffix)
+        )
 
     uhd = _doc(documents, merged, "uhd")
     assert uhd["adapter"] == "native"
@@ -164,7 +162,8 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
     assert ued["name"] == "hipkernel:flydsl_sdpa_bwd_merged"
     assert ued["sort_kernel_catalog"] == {"default": uhd["id"]}
     # The backward engines read ragged operands and offset multipliers, so they declare the
-    # schema of the last of them (1.4.0).
+    # schema of the last of them: 1.4.0, the engine's K_MAX_SUPPORTED_API_VERSION, so a
+    # literal, not the generator's table.
     assert ued["sdk_version"] == "1.4.0"
 
 

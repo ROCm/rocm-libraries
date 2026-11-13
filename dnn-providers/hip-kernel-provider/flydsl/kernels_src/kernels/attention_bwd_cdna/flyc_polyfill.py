@@ -270,6 +270,7 @@ class DualwaveSwpTraits:
     LGKMCNT_0_ONLY: int
     RETURN_LSE: bool = False
     XCD_SWIZZLE: bool = False
+    DS_READ_TR_OP: bool = False
 
     @property
     def cache_tag(self):
@@ -301,14 +302,15 @@ def assert_dualwave_swp_traits_equivalent(upstream, local=DualwaveSwpTraits) -> 
     """Fail loudly if the copy above has drifted from ``upstream``'s class.
 
     Compares ``dataclasses.fields()`` -- **names, types and order**. For a
-    79-field dataclass whose every field is supplied by keyword at every
+    80-field dataclass whose every field is supplied by keyword at every
     construction (``fmha_traits_gfx950.make_traits`` passes every one,
-    including the two that carry defaults), that comparison is *total*, not a
+    including the three that carry defaults), that comparison is *total*, not a
     sample: any upstream add, remove, rename, reorder or retype lands here.
 
-    Defaults are deliberately **not** compared. Both defaulted fields are
-    always passed explicitly, so a changed default cannot reach a kernel, and
-    checking it would turn a harmless upstream edit into a failed build.
+    Defaults are deliberately **not** compared. All three defaulted fields
+    (``RETURN_LSE``, ``XCD_SWIZZLE``, ``DS_READ_TR_OP``) are always passed
+    explicitly, so a changed default cannot reach a kernel, and checking it
+    would turn a harmless upstream edit into a failed build.
 
     Same philosophy as ``flyc_compile._verify_elf``: check the assumption
     where it can be checked, and stop the build when it moves.

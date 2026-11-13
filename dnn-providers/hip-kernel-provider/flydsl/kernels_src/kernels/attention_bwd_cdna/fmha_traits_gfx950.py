@@ -39,8 +39,9 @@ class ParityDualwaveTraits(dualwave.DualwaveSwpTraits):
 
     A subclass rather than new fields on `DualwaveSwpTraits`, because that
     dataclass lives in `flash_attn_utils.py` and is shared by four production
-    kernels. Subclassing is free here: the parent is `frozen=True` with no
-    defaulted fields, so added fields need defaults and those defaults are
+    kernels. Subclassing is free here: the parent is `frozen=True` and ends in three
+    defaulted fields (`RETURN_LSE`, `XCD_SWIZZLE`, `DS_READ_TR_OP`), so added
+    fields need defaults and those defaults are
     exactly the "behave like today" values. `assert_matches_production`
     iterates the *parent's* fields, so it keeps pinning family A to production
     without knowing these exist.
@@ -521,6 +522,7 @@ def make_traits(
         LGKMCNT_0_ONLY=0xC07F,
         RETURN_LSE=bool(return_lse),
         XCD_SWIZZLE=bool(xcd_swizzle),
+        DS_READ_TR_OP=False,
     )
 
 

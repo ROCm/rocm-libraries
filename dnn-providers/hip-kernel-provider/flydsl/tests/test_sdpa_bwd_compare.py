@@ -13,7 +13,6 @@ Pure Python.
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -25,6 +24,8 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_compare  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
+from generators._manifest import sha256 as _sha  # noqa: E402
+from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 from test_sdpa_bwd_gate import (
     MERGED,
@@ -34,17 +35,7 @@ from test_sdpa_bwd_gate import (
     _elf,
 )  # noqa: E402
 
-RESOURCES = {
-    "vgpr": 100,
-    "agpr": 0,
-    "vgpr_total": 100,
-    "sgpr": 90,
-    "sgpr_spill": 4,
-    "vgpr_spill": 0,
-    "scratch_bytes": 0,
-    "lds_bytes": 8192,
-    "occupancy": 4,
-}
+RESOURCES = dict(zip(RESOURCE_COLUMNS, (100, 0, 100, 90, 4, 0, 0, 8192, 4)))
 SPECS = {
     "same": "dkdv,bf16,64,plain,bk,0,0,tail,0,1",
     "byte": "dkdv,bf16,64,causal,bk,0,0,tail,0,1",
@@ -52,10 +43,6 @@ SPECS = {
     "absent": "merged,bf16,64,plain,bk,0,0,tail,0,1",
     "flaky": "dq,f16,64,causal,rt,1,0,tail,0,1",
 }
-
-
-def _sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _build_fixture(

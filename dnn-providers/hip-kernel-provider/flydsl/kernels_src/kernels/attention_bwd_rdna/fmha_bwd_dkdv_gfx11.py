@@ -63,7 +63,7 @@ undropped P (the softmax denominator is undropped and baked into LSE'). A GQA gr
 
 GQA / varlen: the workgroup of (kv tile, kv head, sequence) loops over its group's query heads and their Q blocks in one flat
 loop (iteration -> (group member, block)), accumulating dK / dV of the KV head in registers in a fixed order: deterministic, no atomics.
-The Q and K sides take their lengths from `fmha.decode_addressing`; each tensor starts at its own origin (`fmha.tensor_origin`: `off[z] * mul` when ragged, `z * stride_batch` when dense, Q and K reading their offsets from `seqinfo_q1` / `seqinfo_k1`). LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace the prep writes.
+The Q and K sides take their lengths from `fmha.decode_addressing`; each tensor starts at its own origin (`fmha.tensor_origin_gated`: `off[z] * mul` when ragged, `z * stride_batch` when dense, Q and K reading their offsets from `seqinfo_q1` / `seqinfo_k1`). LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace the prep writes.
 
 Class `causal` (compile time) takes the mask at run time through `window_left` / `window_right`, the gfx950 ABI's pair: the causal
 sentinels resolve per sequence (`fmha.resolve_window`: top-left wl = Sq, wr = 0; bottom-right wl = Sq, wr = Sk - Sq), and kv column c is
@@ -104,7 +104,7 @@ import os
 import sys
 
 
-from kernels.attention_bwd_rdna import fmha_common_gfx1201 as fmha
+from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_rdna4.philox import Philox, keep_mask
 from kernels.attention_bwd_rdna import fmha_common_gfx11 as cmn
 from kernels.attention_bwd_rdna import rdna_layout_gfx11 as lay
@@ -517,23 +517,23 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             fx.Index(stride_dv_seq),
         )
 
-        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin`.
-        _q_origin = fmha.tensor_origin(
+        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin_gated`.
+        _q_origin = fmha.tensor_origin_gated(
             seqinfo_q1, mul_Q, z_i32, stride_q_batch, seqlen_q_i32
         )
-        _do_origin = fmha.tensor_origin(
+        _do_origin = fmha.tensor_origin_gated(
             off_DO, mul_DO, z_i32, stride_do_batch, seqlen_q_i32
         )
-        _k_origin = fmha.tensor_origin(
+        _k_origin = fmha.tensor_origin_gated(
             seqinfo_k1, mul_K, z_i32, stride_k_batch, seqlen_k_i32
         )
-        _v_origin = fmha.tensor_origin(
+        _v_origin = fmha.tensor_origin_gated(
             off_V, mul_V, z_i32, stride_v_batch, seqlen_k_i32
         )
-        _dk_origin = fmha.tensor_origin(
+        _dk_origin = fmha.tensor_origin_gated(
             off_DK, mul_DK, z_i32, stride_dk_batch, seqlen_k_i32
         )
-        _dv_origin = fmha.tensor_origin(
+        _dv_origin = fmha.tensor_origin_gated(
             off_DV, mul_DV, z_i32, stride_dv_batch, seqlen_k_i32
         )
 
@@ -994,7 +994,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 ) + head_q * fx.Index(stride_b_head)
 
             # LSE' (premultiplied by log2 e; natural for a bias object) and Delta of this Q block, once per iteration for every wave.
-            _rowq_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
+            _rowq_base = fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q)
             for _rb in range_constexpr(_ROWQ_BATCHES):
                 _r = fx.Int32(tid) + fx.Int32(_rb * BLOCK_SIZE)
                 if _r < fx.Int32(BLOCK_M):

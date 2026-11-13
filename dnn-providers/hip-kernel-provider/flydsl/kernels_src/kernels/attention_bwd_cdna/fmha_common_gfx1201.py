@@ -5,8 +5,14 @@
 #   commit:   b5e8cfb909e554c62081f56055b11d6ba3fd6bfa
 #   path:     modules/flash/flyc/fmha_common_gfx1201.py
 #
-# Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_common_gfx1201.py` only in the package imports
-# (`attention_bwd_cdna`).
+# Reaches this package through the SDPA backward sweep, and serves both backward packages: the gfx950 kernels here and the gfx11
+# kernels of `../attention_bwd_rdna/` import it. Differs from `../attention_rdna4/fmha_common_gfx1201.py` in the package imports
+# (`attention_bwd_cdna`), in the addressing helpers (`decode_addressing` without the INDIVIDUAL-length clamp, `make_addr_pair` with a
+# (batch, head, sequence) strides tuple, `tensor_origin`, `tensor_origin_gated`, `stats_ws_base` and `ptr_is_set`, which replace
+# `lse_row_addressing`, `lse_row_step_per_head` and `lse_token_pitch`), in carrying neither `FastMath.uncontracted` nor
+# `bf16_round_nonan_pack_v8`, and in `_load_u64_or_zero`, which it imports from there.
+# `tensor_origin_gated` is `tensor_origin` with the offset load gated on a non-empty sequence: the two statement orders emit different
+# IR, and each arch's shipped objects were built from its own, so each kernel family keeps its own.
 
 
 """Hardware detail for the gfx1201 (RDNA4) attention kernels.
@@ -87,6 +93,7 @@ from kernels.common import buffer_ops, kernels_common
 # `kernels_common` are NOT rewritten: their symbols are in the released tree.
 from kernels.attention_bwd_cdna import flyc_polyfill as wmma_ops
 from kernels.attention_bwd_cdna import flyc_polyfill as common_utils
+from kernels.attention_rdna4.fmha_common_gfx1201 import _load_u64_or_zero
 
 import flydsl.expr as fx
 from flydsl._mlir import ir
@@ -105,6 +112,8 @@ __all__ = [
     "load_geom",
     "acc_elem_column",
     "stats_ws_base",
+    "ptr_is_set",
+    "tensor_origin_gated",
     "lds_load_v8",
     "lds_store_vx",
     "global_load_tr_v8",
@@ -1259,30 +1268,6 @@ def philox_report(seed_output, offset_output, seed, offset_base):
         _store_u64_if_nonnull(offset_output, offset_base)
 
 
-def _load_u64_or_zero(ptr):
-    """`*ptr` as an i64, or 0 when `ptr` is null.
-
-    The load is *skipped*, not selected away -- `select` evaluates both arms
-    and would fault on the null. Same explicit `IfOp` and the same reason as
-    `cond_load`, at i64: written out rather than as a Python `if` because the
-    rewrite to `scf.if` is lexical per `@flyc.kernel`, and this is module
-    level.
-    """
-    nonnull = fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
-    if_op = _scf.IfOp(fx.as_ir_value(nonnull), results_=[T.i64], has_else=True)
-    with ir.InsertionPoint(if_op.then_block):
-        _scf.YieldOp(
-            [
-                fx.as_ir_value(
-                    fx.ptr_load(fx.recast_iter(_i64_global_ptr_ty(), ptr), fx.Int64)
-                )
-            ]
-        )
-    with ir.InsertionPoint(if_op.else_block):
-        _scf.YieldOp([fx.as_ir_value(fx.Int64(0))])
-    return fx.Int64(if_op.results[0])
-
-
 def _store_u64_if_nonnull(ptr, value):
     nonnull = fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
     with common_utils._if_then(_scf.IfOp(fx.as_ir_value(nonnull))):
@@ -1399,6 +1384,11 @@ def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
     return seqlen, row_off, batch
 
 
+def ptr_is_set(ptr):
+    """True when a pointer kernel argument is bound; an optional input that is off is a null pointer."""
+    return fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
+
+
 def tensor_origin(off, mul, z, s_batch, seqlen):
     """Element origin of sequence `z` in one tensor (or in the caller's Stats).
 
@@ -1417,10 +1407,25 @@ def tensor_origin(off, mul, z, s_batch, seqlen):
 
     The load is skipped for a null `off`, as in `cond_load`.
     """
-    ragged = fx.Int64(fx.ptrtoint(off)) != fx.Int64(0)
+    ragged = ptr_is_set(off)
     pos = cond_load(ragged, seqinfo_addr(off, z), fx.Int32(0))
     start = (seqlen > fx.Int32(0)).select(fx.Index(pos) * fx.Index(mul), fx.Index(0))
     return ragged.select(start, fx.Index(z) * fx.Index(s_batch))
+
+
+def tensor_origin_gated(off, mul, z, s_batch, seqlen):
+    """`tensor_origin` with the offset load itself skipped for an empty ragged sequence.
+
+    The load is gated on `ragged & (seqlen > 0)`, so an empty ragged sequence (whose `off[z]` may be one past
+    the end of the tensor) starts at element 0 without reading `off`; a dense tensor starts at `z * s_batch`.
+    """
+    ragged = ptr_is_set(off)
+    start = cond_load(
+        ragged & (seqlen > fx.Int32(0)), seqinfo_addr(off, z), fx.Int32(0)
+    )
+    return ragged.select(
+        fx.Index(start) * fx.Index(mul), fx.Index(z) * fx.Index(s_batch)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1601,15 +1606,18 @@ def make_addr_pair(strides, head, origin, *, seqlen_k, seq_last, hoist, clamp):
     construction. Assuming one shared layout is not a simplification, it is
     wrong.
 
+    `origin` is `tensor_origin`'s answer for this tensor. It belongs in the
+    **64-bit base** rather than the 32-bit per-lane offset: on a ragged
+    tensor it is a whole-batch quantity and overflows 32 bits at realistic
+    token counts (sdpa-varlen-plan.md section 5).
+
     `hoist` and `clamp` are `const_expr` -- they select which code is emitted,
     not which branch runs.
     """
-    # `origin` is the tensor's own element origin for this sequence
-    # (`tensor_origin`), and it belongs in the **64-bit base** rather than
-    # the 32-bit per-lane offset: on a packed tensor it is a whole-batch
-    # quantity and overflows 32 bits at realistic token counts
-    # (sdpa-varlen-plan.md section 5). `strides` is (head, sequence).
-    s_head, s_seq = strides
+    # BHSD slot order: batch, head, sequence. See `_strides_of` in the kernel
+    # for why the order is the ABI rather than a convenience. The batch stride
+    # is consumed by `tensor_origin`.
+    _, s_head, s_seq = strides
     bh = origin + head * s_head
 
     def tbase(seq_start):

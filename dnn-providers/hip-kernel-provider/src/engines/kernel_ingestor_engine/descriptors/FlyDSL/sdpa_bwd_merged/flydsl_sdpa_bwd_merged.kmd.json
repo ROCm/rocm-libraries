@@ -24,7 +24,7 @@
       "type": "int"
     },
     {
-      "name": "dropout",
+      "name": "has_dropout",
       "type": "int"
     },
     {

@@ -45,7 +45,9 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaPhiloxOracle.hpp"
 
 /**
  * @file FlydslSdpaBwdDeviceHarness.hpp
@@ -179,6 +181,9 @@ enum class BwdPoison
     K_AND_V
 };
 
+/// The (query row, key) of the NaN a NaN-bias launch puts in the bias (BwdCase::nanBiasAt).
+inline constexpr std::pair<int64_t, int64_t> NAN_BIAS_AT{5, 7};
+
 /// What a graph computes: its shape and the features it turns on.
 struct BwdCase
 {
@@ -216,6 +221,15 @@ struct BwdCase
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
     /// The value of a CONSTANT bias.
     double biasValue = 0.0;
+    /// With a bias: the (row, key) whose bias element is NaN in every batch and head the bias
+    /// covers, on the device and in the backward reference, while the forward's output and
+    /// log-sum-exp come from the clean bias (they are finite, as a forward over finite scores
+    /// leaves them). P, dS and so dK and dV at that key, and dQ in that row, are NaN in the
+    /// reference. The comparison holds dK and dV to that pattern: NaN where the reference is
+    /// NaN, finite and matching elsewhere. dQ and dBias are compared on the elements the
+    /// reference leaves finite only, so a NaN in dQ's row or in dBias's element is neither
+    /// required nor refused: no kernel contract says whether those paths propagate it.
+    std::optional<std::pair<int64_t, int64_t>> nanBiasAt;
     BwdData data = BwdData::NOISE;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
@@ -229,9 +243,18 @@ struct BwdCase
     /// Per-batch valid lengths of a padded varlen graph; empty for a dense one.
     std::vector<int32_t> lengthsQ;
     std::vector<int32_t> lengthsKv;
+    /// Packed (THD): sequence b's tokens are stored end to end, lengthsQ[b] query and lengthsKv[b]
+    /// key tokens each, every tensor ragged through its own offset table (multiplier: its own
+    /// sequence stride) and the log-sum-exp packed (H, T). Sequence-major, with per-batch lengths;
+    /// seqQ and seqKv stay the graph's declared extents.
+    bool packed = false;
     float dropout = 0.0F;
     int64_t seed = 0x1234567;
     int64_t offset = 77;
+    /// When set, the keep mask of the reference: 1.0 where the score at (batch, head, row, column)
+    /// is kept, FLOAT [B, H, seqQ, seqKv] row-major (a forward engine's rng_dump), instead of the
+    /// oracle's.
+    std::vector<float> keepMask;
     BwdScale scaleForm = BwdScale::VALUE;
     /// The value of a RUNTIME_TENSOR scale.
     float runtimeScale = 0.07F;
@@ -347,18 +370,57 @@ struct TensorView
     std::array<int64_t, 4> strides{};
     int64_t offset = 0;
     size_t group = 0;
+    /// Packed (THD) views: the elements from `offset` to each batch's first row, and the rows each
+    /// batch holds (its valid length); the batch stride is unused. Empty for a dense view.
+    std::vector<int64_t> batchStart;
+    std::vector<int64_t> batchRows;
+
+    /// Elements from `offset` to batch @p b's first row.
+    int64_t startOf(int64_t b) const
+    {
+        return batchStart.empty() ? b * strides[0] : batchStart[static_cast<size_t>(b)];
+    }
+
+    /// Rows batch @p b holds.
+    int64_t rowsOf(int64_t b) const
+    {
+        return batchRows.empty() ? dims[2] : batchRows[static_cast<size_t>(b)];
+    }
 
     /// Elements from the group's start to one past the last element this view addresses.
     size_t extent() const
     {
         int64_t last = offset;
-        for(size_t axis = 0; axis < 4; ++axis)
+        if(batchStart.empty())
         {
-            last += (dims[axis] - 1) * strides[axis];
+            for(size_t axis = 0; axis < 4; ++axis)
+            {
+                last += (dims[axis] - 1) * strides[axis];
+            }
+            return static_cast<size_t>(last + 1);
         }
+        for(int64_t b = 0; b < dims[0]; ++b)
+        {
+            if(rowsOf(b) > 0)
+            {
+                last = std::max(last, offset + startOf(b) + (rowsOf(b) - 1) * strides[2]);
+            }
+        }
+        last += (dims[1] - 1) * strides[1] + (dims[3] - 1) * strides[3];
         return static_cast<size_t>(last + 1);
     }
 };
+
+/// The ragged-offset table of a packed operand: the cumulative token counts, B + 1 entries.
+inline std::vector<int32_t> packedTable(const std::vector<int32_t>& lengths)
+{
+    std::vector<int32_t> table{0};
+    for(const auto length : lengths)
+    {
+        table.push_back(table.back() + length);
+    }
+    return table;
+}
 
 inline constexpr size_t GROUP_COUNT = 9;
 
@@ -434,6 +496,33 @@ inline BwdViews viewsOf(const BwdCase& c)
     views.stats.dims = {c.batch, c.heads, c.seqQ, 1};
     views.stats.strides = valueSeqMajor ? std::array<int64_t, 4>{c.seqQ * c.heads, 1, c.heads, 1}
                                         : std::array<int64_t, 4>{c.heads * c.seqQ, c.seqQ, 1, 1};
+
+    if(c.packed)
+    {
+        if(c.layout != BwdLayout::SEQ_MAJOR || !c.padded())
+        {
+            throw std::invalid_argument(
+                "a packed (THD) case is sequence-major, with per-batch lengths");
+        }
+        // The log-sum-exp is packed (H, T): the head stride spans the declared tokens.
+        views.stats.strides = {int64_t{1} << 20, c.batch * c.seqQ, 1, 1};
+        const auto raggedBy = [&](TensorView& view, const std::vector<int32_t>& lengths) {
+            const auto table = packedTable(lengths);
+            for(int64_t b = 0; b < c.batch; ++b)
+            {
+                view.batchStart.push_back(int64_t{table[static_cast<size_t>(b)]} * view.strides[2]);
+                view.batchRows.push_back(lengths[static_cast<size_t>(b)]);
+            }
+        };
+        for(auto* view : {&views.q, &views.o, &views.dO, &views.dq, &views.stats})
+        {
+            raggedBy(*view, c.lengthsQ);
+        }
+        for(auto* view : {&views.k, &views.v, &views.dk, &views.dv})
+        {
+            raggedBy(*view, c.lengthsKv);
+        }
+    }
 
     if(c.layout == BwdLayout::PACKED_QKV)
     {
@@ -574,6 +663,25 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
     {
         spec = spec.withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
     }
+    if(c.packed)
+    {
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            const std::array<std::pair<const char*, const TensorView*>, 9> operands{
+                {{"q", &views.q},
+                 {"k", &views.k},
+                 {"v", &views.v},
+                 {"o", &views.o},
+                 {"do", &views.dO},
+                 {"dq", &views.dq},
+                 {"dk", &views.dk},
+                 {"dv", &views.dv},
+                 {"stats", &views.stats}}};
+            for(const auto& [name, view] : operands)
+            {
+                addRagged(g, name, view->strides[2]);
+            }
+        });
+    }
     if(c.dropout > 0.0F)
     {
         const auto probability = c.dropout;
@@ -601,57 +709,38 @@ inline std::vector<double> fillValues(size_t count, uint32_t seed)
     return values;
 }
 
-/// The Philox-4x32-10 block the kernels draw a dropout mask from (Triton's round).
-inline std::array<uint32_t, 4> philox4x32(uint64_t seed, uint64_t offset)
+/// Where score (batch, head, row, column) lives in the Philox stream: a plane per (batch, query
+/// head), `ceil(Skv / 4)` blocks per row, with Sq and Skv the graph's declared extents -- a
+/// padded or packed graph's included, not a batch's valid lengths.
+inline philox_oracle::MaskCoordinates
+    maskCoordinates(const BwdCase& c, int64_t batchIndex, int64_t head, int64_t row, int64_t column)
 {
-    constexpr uint32_t MUL_A = 0xD2511F53U;
-    constexpr uint32_t MUL_B = 0xCD9E8D57U;
-    constexpr uint32_t KEY_A = 0x9E3779B9U;
-    constexpr uint32_t KEY_B = 0xBB67AE85U;
-    auto c0 = static_cast<uint32_t>(offset);
-    auto c1 = static_cast<uint32_t>(offset >> 32U);
-    uint32_t c2 = 0;
-    uint32_t c3 = 0;
-    auto k0 = static_cast<uint32_t>(seed);
-    auto k1 = static_cast<uint32_t>(seed >> 32U);
-    for(int round = 0; round < 10; ++round)
-    {
-        const uint32_t previous0 = c0;
-        const uint32_t previous2 = c2;
-        const uint64_t productB = static_cast<uint64_t>(MUL_B) * previous2;
-        const uint64_t productA = static_cast<uint64_t>(MUL_A) * previous0;
-        c0 = static_cast<uint32_t>(productB >> 32U) ^ c1 ^ k0;
-        c2 = static_cast<uint32_t>(productA >> 32U) ^ c3 ^ k1;
-        c1 = static_cast<uint32_t>(productB);
-        c3 = static_cast<uint32_t>(productA);
-        k0 += KEY_A;
-        k1 += KEY_B;
-    }
-    return {c0, c1, c2, c3};
+    return {batchIndex, head, row, column, c.heads, c.seqQ, c.seqKv};
 }
 
-/// Whether the kernels keep score (batch, head, row, column): one Philox block per four
-/// columns of a row, a plane per (batch, query head), `ceil(Skv / 4)` blocks per row.
+/// Whether the kernels keep score (batch, head, row, column): by the host Philox oracle and the
+/// engines' keep threshold, or by the case's keep mask when it has one.
 inline bool keeps(const BwdCase& c, int64_t batchIndex, int64_t head, int64_t row, int64_t column)
 {
     if(c.dropout <= 0.0F)
     {
         return true;
     }
-    const int64_t rowBlocks = (c.seqKv + 3) / 4;
-    const int64_t plane = batchIndex * c.heads + head;
-    const auto offset
-        = static_cast<uint64_t>(c.offset + (plane * c.seqQ + row) * rowBlocks + column / 4);
-    const auto block = philox4x32(static_cast<uint64_t>(c.seed), offset);
-    const auto draw = static_cast<int32_t>(block[static_cast<size_t>(column % 4)]);
-    // AOTriton's threshold, in f32 and truncated (no p in (0, 1) leaves the int32 range).
-    const float threshold = (c.dropout - 0.5F) * 4294967296.0F;
-    return draw > static_cast<int32_t>(threshold);
+    if(!c.keepMask.empty())
+    {
+        return c.keepMask[static_cast<size_t>(
+                   ((batchIndex * c.heads + head) * c.seqQ + row) * c.seqKv + column)]
+               == 1.0F;
+    }
+    return philox_oracle::keeps(static_cast<uint64_t>(c.seed),
+                                static_cast<uint64_t>(c.offset),
+                                maskCoordinates(c, batchIndex, head, row, column),
+                                flydsl_sdpa::dropoutThreshold(c.dropout));
 }
 
 inline double dropoutScale(const BwdCase& c)
 {
-    return c.dropout > 0.0F ? static_cast<double>(1.0F / (1.0F - c.dropout)) : 1.0;
+    return c.dropout > 0.0F ? static_cast<double>(flydsl_sdpa::dropoutScale(c.dropout)) : 1.0;
 }
 
 /// Every operand the reference and the device share, as the device will read it, in dense
@@ -1022,7 +1111,8 @@ std::vector<double> widened(const std::vector<T>& values)
 }
 
 /// Writes the dense logical tensor @p dense, rounded to @p T, into @p buffer through @p view.
-/// The elements the view does not address keep their value.
+/// The elements the view does not address keep their value, and a packed view has no rows past
+/// a batch's length to write.
 template <typename T>
 void scatter(std::vector<T>& buffer, const std::vector<double>& dense, const TensorView& view)
 {
@@ -1035,9 +1125,14 @@ void scatter(std::vector<T>& buffer, const std::vector<double>& dense, const Ten
             {
                 for(int64_t e = 0; e < view.dims[3]; ++e)
                 {
-                    const auto index = view.offset + b * view.strides[0] + h * view.strides[1]
+                    const auto value = dense[next++];
+                    if(s >= view.rowsOf(b))
+                    {
+                        continue;
+                    }
+                    const auto index = view.offset + view.startOf(b) + h * view.strides[1]
                                        + s * view.strides[2] + e * view.strides[3];
-                    buffer[static_cast<size_t>(index)] = T(static_cast<float>(dense[next++]));
+                    buffer[static_cast<size_t>(index)] = T(static_cast<float>(value));
                 }
             }
         }
@@ -1053,11 +1148,11 @@ void fillRowPadding(std::vector<T>& buffer, const TensorView& view, int64_t pitc
     {
         for(int64_t h = 0; h < view.dims[1]; ++h)
         {
-            for(int64_t s = 0; s < view.dims[2]; ++s)
+            for(int64_t s = 0; s < view.rowsOf(b); ++s)
             {
                 for(int64_t e = view.dims[3]; e < pitch; ++e)
                 {
-                    const auto index = view.offset + b * view.strides[0] + h * view.strides[1]
+                    const auto index = view.offset + view.startOf(b) + h * view.strides[1]
                                        + s * view.strides[2] + e * view.strides[3];
                     buffer[static_cast<size_t>(index)] = T(fill);
                 }
@@ -1066,7 +1161,8 @@ void fillRowPadding(std::vector<T>& buffer, const TensorView& view, int64_t pitc
     }
 }
 
-/// The inverse of scatter: the dense logical tensor @p view addresses in @p buffer, widened.
+/// The inverse of scatter: the dense logical tensor @p view addresses in @p buffer, widened (zero
+/// at the rows a packed view lacks).
 template <typename T>
 std::vector<double> gather(const std::vector<T>& buffer, const TensorView& view)
 {
@@ -1080,7 +1176,13 @@ std::vector<double> gather(const std::vector<T>& buffer, const TensorView& view)
             {
                 for(int64_t e = 0; e < view.dims[3]; ++e)
                 {
-                    const auto index = view.offset + b * view.strides[0] + h * view.strides[1]
+                    if(s >= view.rowsOf(b))
+                    {
+                        // A packed view has no such row: it reads as zero.
+                        dense.push_back(0.0);
+                        continue;
+                    }
+                    const auto index = view.offset + view.startOf(b) + h * view.strides[1]
                                        + s * view.strides[2] + e * view.strides[3];
                     dense.push_back(static_cast<double>(
                         static_cast<float>(buffer[static_cast<size_t>(index)])));
@@ -1186,6 +1288,52 @@ inline std::optional<GradientMiss> worstGradientMiss(const std::vector<double>& 
     return worst;
 }
 
+/// @p inScope narrowed to the elements @p expected holds finite.
+inline std::vector<bool> finiteInScope(const std::vector<double>& expected,
+                                       const std::vector<bool>& inScope)
+{
+    std::vector<bool> finite(inScope);
+    for(size_t i = 0; i < finite.size(); ++i)
+    {
+        finite[i] = inScope[i] && std::isfinite(expected[i]);
+    }
+    return finite;
+}
+
+/// Every in-scope element of @p got is non-finite exactly where @p expected is, and there is such
+/// an element: a kernel that clamps a NaN score away leaves the gradient finite where the
+/// reference is NaN.
+inline void expectNonFiniteWhereTheReferenceIs(const char* name,
+                                               const std::vector<double>& got,
+                                               const std::vector<double>& expected,
+                                               const std::vector<bool>& inScope)
+{
+    ASSERT_EQ(got.size(), expected.size());
+    size_t nonFinite = 0;
+    size_t wrong = 0;
+    size_t first = 0;
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        if(!inScope[i])
+        {
+            continue;
+        }
+        const bool expectedNonFinite = !std::isfinite(expected[i]);
+        nonFinite += expectedNonFinite ? 1U : 0U;
+        if(std::isfinite(got[i]) == expectedNonFinite && wrong++ == 0)
+        {
+            first = i;
+        }
+    }
+    EXPECT_GT(nonFinite, 0U) << name
+                             << ": the reference is finite everywhere, the case checks nothing";
+    EXPECT_EQ(wrong, 0U) << name << ": " << wrong
+                         << " element(s) are non-finite where the reference is finite or finite "
+                            "where it is NaN, the first at "
+                         << first << " (got " << got[first] << ", expected " << expected[first]
+                         << ")";
+}
+
 /// Compares @p got with @p expected over the elements @p inScope names, against
 /// worstGradientMiss()'s bound; an unwritten (NaN) element is a miss.
 inline void expectGradient(const char* name,
@@ -1229,7 +1377,11 @@ std::optional<size_t> firstBitwiseMismatch(const std::vector<V>& first,
     const size_t common = std::min(first.size(), launch.size());
     for(size_t i = 0; i < common; ++i)
     {
-        if(std::memcmp(&first[i], &launch[i], sizeof(V)) != 0)
+        std::array<unsigned char, sizeof(V)> firstBytes{};
+        std::array<unsigned char, sizeof(V)> launchBytes{};
+        std::memcpy(firstBytes.data(), &first[i], sizeof(V));
+        std::memcpy(launchBytes.data(), &launch[i], sizeof(V));
+        if(firstBytes != launchBytes)
         {
             return i;
         }
@@ -1561,6 +1713,19 @@ void expectPlanMatchesReference(const BwdCase& c,
     }
     const auto forward = forwardOf(c, in);
     const auto oRounded = widened(roundedTo<T>(forward.o));
+    if(c.nanBiasAt.has_value())
+    {
+        ASSERT_TRUE(c.bias) << "a NaN bias element needs a bias";
+        for(int64_t b = 0; b < c.biasBatch(); ++b)
+        {
+            for(int64_t h = 0; h < c.biasHeads(); ++h)
+            {
+                const int64_t row = c.biasOverRows ? 0 : c.nanBiasAt->first;
+                in.bias[biasAt(c, b, h, row, c.nanBiasAt->second)]
+                    = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
+    }
     const auto expected = backwardOf(c, in, oRounded, forward.lse);
     // The device's K and V hold the poison at the keys no row sees; the reference above read the
     // clean values.
@@ -1650,9 +1815,13 @@ void expectPlanMatchesReference(const BwdCase& c,
             {
                 for(int64_t s = 0; s < view.dims[2]; ++s)
                 {
-                    statsHost[static_cast<size_t>(b * view.strides[0] + h * view.strides[1]
-                                                  + s * view.strides[2])]
-                        = forward.lse[next++];
+                    const auto lse = forward.lse[next++];
+                    if(s < view.rowsOf(b))
+                    {
+                        statsHost[static_cast<size_t>(view.startOf(b) + h * view.strides[1]
+                                                      + s * view.strides[2])]
+                            = lse;
+                    }
                 }
             }
         }
@@ -1718,6 +1887,32 @@ void expectPlanMatchesReference(const BwdCase& c,
         lengthsKv.upload(c.lengthsKv);
         buffers.push_back({uid::SEQ_LEN_Q, lengthsQ.get()});
         buffers.push_back({uid::SEQ_LEN_KV, lengthsKv.get()});
+    }
+    // A packed graph's offset tables: Q's, O's, dO's, dQ's and the log-sum-exp's count query
+    // tokens; K's, V's, dK's and dV's key tokens.
+    const auto tableQ = packedTable(c.lengthsQ);
+    const auto tableKv = packedTable(c.lengthsKv);
+    DeviceBuffer tablesQ(c.packed ? tableQ.size() * sizeof(int32_t) : 0);
+    DeviceBuffer tablesKv(c.packed ? tableKv.size() * sizeof(int32_t) : 0);
+    if(c.packed)
+    {
+        tablesQ.upload(tableQ);
+        tablesKv.upload(tableKv);
+        for(const auto id : {uid::RAGGED_OFFSET_Q,
+                             uid::RAGGED_OFFSET_O,
+                             uid::RAGGED_OFFSET_DO,
+                             uid::RAGGED_OFFSET_DQ,
+                             uid::RAGGED_OFFSET_STATS})
+        {
+            buffers.push_back({id, tablesQ.get()});
+        }
+        for(const auto id : {uid::RAGGED_OFFSET_K,
+                             uid::RAGGED_OFFSET_V,
+                             uid::RAGGED_OFFSET_DK,
+                             uid::RAGGED_OFFSET_DV})
+        {
+            buffers.push_back({id, tablesKv.get()});
+        }
     }
     DeviceBuffer seed(sizeof(int64_t));
     DeviceBuffer offset(sizeof(int64_t));
@@ -1788,6 +1983,16 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         expectAllZero("dQ", dqGot);
     }
+    else if(c.nanBiasAt.has_value())
+    {
+        // dQ's own NaN row is not held: the finite rows are.
+        expectGradient("dQ",
+                       dqGot,
+                       expected.dq,
+                       finiteInScope(expected.dq, scopeOf(c, true, c.heads, dqk)),
+                       tolerance,
+                       rowOf(dqk));
+    }
     else
     {
         expectGradient(
@@ -1806,14 +2011,35 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         expectAllZero("dK", dkGot);
     }
+    else if(c.nanBiasAt.has_value())
+    {
+        const auto scope = scopeOf(c, false, c.kvHeads, dqk);
+        expectNonFiniteWhereTheReferenceIs("dK", dkGot, expected.dk, scope);
+        expectGradient(
+            "dK", dkGot, expected.dk, finiteInScope(expected.dk, scope), tolerance, rowOf(dqk));
+    }
     else
     {
         expectGradient(
             "dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance, rowOf(dqk));
     }
     const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
-    expectGradient(
-        "dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance, rowOf(dv));
+    if(c.nanBiasAt.has_value())
+    {
+        const auto scope = scopeOf(c, false, c.valueHeadCount(), dv);
+        expectNonFiniteWhereTheReferenceIs("dV", dvGot, expected.dv, scope);
+        expectGradient(
+            "dV", dvGot, expected.dv, finiteInScope(expected.dv, scope), tolerance, rowOf(dv));
+    }
+    else
+    {
+        expectGradient("dV",
+                       dvGot,
+                       expected.dv,
+                       scopeOf(c, false, c.valueHeadCount(), dv),
+                       tolerance,
+                       rowOf(dv));
+    }
     if(c.poison != BwdPoison::NONE)
     {
         const auto nonFinite = [](const std::vector<double>& values) {
@@ -1870,12 +2096,13 @@ void expectPlanMatchesReference(const BwdCase& c,
     }
     if(c.bias && c.dbias)
     {
-        expectGradient("dBias",
-                       gather(dbias->template download<B>(), biasView),
-                       expected.dbias,
-                       std::vector<bool>(expected.dbias.size(), true),
-                       tolerance,
-                       c.perRowTolerance ? static_cast<size_t>(c.seqKv) : 0);
+        expectGradient(
+            "dBias",
+            gather(dbias->template download<B>(), biasView),
+            expected.dbias,
+            finiteInScope(expected.dbias, std::vector<bool>(expected.dbias.size(), true)),
+            tolerance,
+            c.perRowTolerance ? static_cast<size_t>(c.seqKv) : 0);
     }
 
     if(c.repeatLaunches > 1)
@@ -1890,6 +2117,7 @@ void expectPlanMatchesReference(const BwdCase& c,
             }
         }
         std::vector<std::vector<T>> first;
+        first.reserve(groups.size());
         for(const auto group : groups)
         {
             first.push_back(device[group]->template download<T>());

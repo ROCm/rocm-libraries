@@ -140,7 +140,7 @@ def _kdp(folders: dict, op: str) -> dict:
 
 def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
     folders = _split()
-    assert sorted(map(str, folders)) == sorted(
+    assert sorted(folder.as_posix() for folder in folders) == sorted(
         [
             "sdpa_bwd_split",
             *SLOT_OPS,
@@ -199,8 +199,9 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
     }
     for member in FORBIDDEN_UED_MEMBERS:
         assert member not in ued
-    # A slotted engine's plans cannot be saved, so the note is not authored.
-    assert "behavior_notes" not in ued
+    # A slotted engine's plans cannot be saved, so the serialization note is not authored;
+    # graph capture is its only note.
+    assert ued["behavior_notes"] == ["supports_graph_capture"]
     # No ranker at all: the runtime orders a slot by priority, then id.
     assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])
 
@@ -227,7 +228,8 @@ def test_the_engine_estimate_is_engine_level_and_binds_installed_models(
     tmp_path: Path,
 ) -> None:
     # Every engine carries the estimate's `default` slot; a trained whole-program model
-    # installed for an arch binds under that arch beside it (RFC 0021: engine-level).
+    # installed for an arch binds under that arch beside it (RFC 0021: engine-level), as the
+    # list `uhd_gen promote` writes for a key a trained model is bound under.
     folders = _split(content_dir=tmp_path)
     docs = folders[Path("sdpa_bwd_split")]
     estimate = docs["flydsl_sdpa_bwd_split_engine_estimate.uhd.json"]
@@ -236,7 +238,10 @@ def test_the_engine_estimate_is_engine_level_and_binds_installed_models(
 
     _install_estimate(tmp_path, "predict_engine", "gfx950", "model-950")
     ued = _ued(_split(content_dir=tmp_path))
-    assert ued["predict_engine"] == {"default": estimate["id"], "gfx950": "model-950"}
+    assert ued["predict_engine"] == {
+        "default": estimate["id"],
+        "gfx950": ["model-950"],
+    }
     assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])
 
 

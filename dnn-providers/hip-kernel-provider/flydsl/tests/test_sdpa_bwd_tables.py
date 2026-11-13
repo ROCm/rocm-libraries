@@ -26,6 +26,7 @@ import pytest
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
+from generators._sdpa_bwd_cdna_build import read_reference  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
     KERNELS,
     LADDER,
@@ -53,8 +54,7 @@ DOMAIN = {
 
 
 def _reference() -> dict[str, dict]:
-    with (DATA / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
-        return {row["hash"]: row for row in csv.DictReader(fh)}
+    return read_reference(DATA / "sdpa_bwd_reference.csv")
 
 
 @pytest.fixture(scope="module")
@@ -101,9 +101,9 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
             knobs={k: v for k, v in instance.knobs.items() if k != "reduce_symbol"},
         )
         assert to_spec(stripped) == to_spec(instance)
-    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 44
-    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 120
-    assert len(rows) == 309
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 60
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 136
+    assert len(rows) == 325
 
 
 def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
@@ -163,19 +163,60 @@ def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
 ) -> None:
     """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
     in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
-    assert sum(len(rows) for rows in tables.values()) == 2691
+    assert sum(len(rows) for rows in tables.values()) == 2707
     assert {op: len(rows) for op, rows in tables.items()} == {
         "sdpa_bwd_prep": 86,
         "sdpa_bwd_dkdv": 1329,
         "sdpa_bwd_dq": 962,
-        "sdpa_bwd_merged": 309,
+        "sdpa_bwd_merged": 325,
         "sdpa_bwd_dbias_reduce": 3,
         "sdpa_bwd_dsink_reduce": 2,
     }
     for held in (in_tables, _reference().keys()):
-        assert len(held) == 2691
+        assert len(held) == 2707
         assert not held & SUPERSEDED.keys()
         assert set(SUPERSEDED.values()) <= held
+
+
+def test_a_graph_without_dbias_still_takes_the_store_db_0_row_of_a_filled_cell(
+    tables,
+) -> None:
+    """The dB-storing dropout rows of the filled cells rank one below the flat merged tier and no other merged row moves.
+
+    A graph without dBias is served by the `store_db=0` rows and the dB-storing rows alike; the twin of each filled
+    row has the higher priority, so it is the one chosen. A graph with dBias declines every `store_db=0` row.
+    """
+    rows = tables["sdpa_bwd_merged"]
+    cells = {("bf16", 32), ("bf16", 96), ("bf16", 192)} | {
+        ("f16", t) for t in (32, 64, 96, 128, 192)
+    }
+    below = {
+        i.name
+        for i in rows
+        if i.knobs["has_bias"]
+        and i.knobs["has_dropout"]
+        and i.knobs["store_db"] != 0
+        and (i.dtype, i.knobs["head_dim"]) in cells
+    }
+    assert len(below) == 16
+    assert {i.name for i in rows if i.priority != 100} == below
+    assert {i.priority for i in rows if i.name in below} == {99}
+    for row in (i for i in rows if i.name in below):
+        twin = [
+            i
+            for i in rows
+            if i.knobs["store_db"] == 0
+            and i.dtype == row.dtype
+            and i.knobs["has_bias"]
+            and i.knobs["has_dropout"]
+            and i.knobs["padded"] == 0
+            and i.knobs["gqa_pack"] == -1
+            and i.knobs["head_dim"] == row.knobs["head_dim"]
+            and i.knobs["role_order"] == row.knobs["role_order"]
+            and i.knobs["num_waves"] == -1
+        ]
+        assert len(twin) == 1, row.name
+        assert twin[0].priority > row.priority
 
 
 PACKS = FLYDSL.parent / "src/engines/kernel_ingestor_engine/packs"
@@ -200,7 +241,7 @@ def _pack_max_block_q() -> int:
 def _engine_constants() -> tuple[tuple[int, ...], range, int]:
     """(LADDER, the exact-tile head dims, PACK_MAX_BLOCK_Q) as the engine sources spell them."""
     cpp = MERGED_NATIVE.read_text(encoding="utf-8")
-    ladder = re.search(r"LADDER\{([\d, ]+)\}", cpp)
+    ladder = re.search(r"\bLADDER\{([\d, ]+)\}", NATIVE_SHARED.read_text("utf-8"))
     exact = re.search(
         r"largest >= (\d+) && largest <= (\d+)\s*&& largest % (\d+) == 0", cpp
     )
@@ -330,18 +371,17 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
 
 
 def test_the_split_engines_ladders_are_the_generators() -> None:
-    """The split engine restates the 16-bit ladder and the fp32 ladder (no 384) that the padded floors scan."""
+    """The 16-bit ladder (shared header) and the fp32 ladder (no 384; split engine) match the ones the padded floors scan."""
     from generators._sdpa_bwd_spec import FP32_LADDER  # noqa: PLC0415
 
-    cpp = SPLIT_NATIVE.read_text(encoding="utf-8")
-    sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", cpp)
-    thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", cpp)
-    assert (
-        sixteen and thirty_two
-    ), "the split engine's ladders moved; update this reader"
+    shared = NATIVE_SHARED.read_text(encoding="utf-8")
+    split = SPLIT_NATIVE.read_text(encoding="utf-8")
+    sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", shared)
+    thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", split)
+    assert sixteen and thirty_two, "the engines' ladders moved; update this reader"
     assert tuple(int(x) for x in sixteen.group(1).split(",")) == LADDER
     assert tuple(int(x) for x in thirty_two.group(1).split(",")) == FP32_LADDER
-    for ladder in (sixteen, thirty_two):
+    for ladder, cpp in ((sixteen, shared), (thirty_two, split)):
         count = re.search(
             rf"std::array<int64_t, (\d+)> {'FP32_' if ladder is thirty_two else ''}LADDER",
             cpp,
@@ -472,3 +512,120 @@ def test_the_tables_tool_refuses_a_gfx950_row_without_a_scan_record(
         else:
             with pytest.raises(SystemExit, match="no rmir_scan"):
                 tool.read_pins(tmp_path)
+
+
+def _copy_tool_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    instances = tmp_path / "_instances.py"
+    instances.write_text(
+        (FLYDSL / "generators" / "_instances.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    data = tmp_path / "data"
+    data.mkdir()
+    for name in (
+        "sdpa_bwd_reference.csv",
+        "sdpa_bwd_pin_functions.csv",
+    ):
+        (data / name).write_text(
+            (DATA / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    return instances, data
+
+
+def _tree_pin_row(spec: Spec, **override) -> dict:
+    row = {
+        "hash": spec.hash(),
+        "spec": spec.key(),
+        "sha256": "a" * 64,
+        "vgpr": 256,
+        "agpr": 8,
+        "vgpr_total": 264,
+        "sgpr": 106,
+        "sgpr_spill": 100,
+        "vgpr_spill": 0,
+        "scratch_bytes": 0,
+        "lds_bytes": 40000,
+        "occupancy": 1,
+        "rmir_scan": "clean",
+        "function_sha256": "b" * 64,
+    }
+    return {**row, **override}
+
+
+def _write_tree_pins(path: Path, rows: list[dict]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_the_tables_tool_installs_a_tree_built_pin_in_the_table_the_reference_and_the_functions(
+    tmp_path: Path,
+) -> None:
+    """One tree-built combined pin lands in all three outputs, which stay in agreement; every installed row is written back as it was."""
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    spec = Spec.parse("merged,bf16,160,bias,bk,1,0,tail,0,1")
+    before = (data / "sdpa_bwd_reference.csv").read_text(encoding="utf-8")
+    functions_before = (data / "sdpa_bwd_pin_functions.csv").read_text(encoding="utf-8")
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(pins, [_tree_pin_row(spec)])
+    assert tool.install_tree_pins(pins, instances, data) == 1
+
+    after = (data / "sdpa_bwd_reference.csv").read_text(encoding="utf-8")
+    assert sorted(after.splitlines()) == sorted(
+        [
+            *before.splitlines(),
+            f'{spec.hash()},"{spec.key()}",{"a" * 64},256,8,264,106,100,0,0,40000,1,clean',
+        ]
+    )
+    functions = (data / "sdpa_bwd_pin_functions.csv").read_text(encoding="utf-8")
+    assert sorted(functions.splitlines()) == sorted(
+        [*functions_before.splitlines(), f'{spec.hash()},"{spec.key()}",{"b" * 64}']
+    )
+    with (data / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
+        installed = {row["hash"]: row for row in csv.DictReader(fh)}
+    begin, end = tool.markers("gfx950")
+    text = instances.read_text(encoding="utf-8")
+    assert text[text.index(begin) : text.index(end) + len(end)] == tool.render_tables(
+        "gfx950", installed
+    )
+    assert "# 326 rows" in text
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"rmir_scan": "exception"}, "records rmir_scan 'clean'"),
+        ({"rmir_scan": ""}, "records rmir_scan 'clean'"),
+        ({"function_sha256": ""}, "function digest"),
+        ({"sha256": "abc"}, "sha256"),
+    ],
+)
+def test_the_tables_tool_refuses_a_malformed_tree_built_pin(
+    tmp_path: Path, override: dict, message: str
+) -> None:
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(
+        pins,
+        [_tree_pin_row(Spec.parse("merged,bf16,160,bias,bk,1,0,tail,0,1"), **override)],
+    )
+    before = instances.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match=message):
+        tool.install_tree_pins(pins, instances, data)
+    assert instances.read_text(encoding="utf-8") == before
+
+
+def test_the_tables_tool_refuses_a_tree_built_pin_that_is_already_a_pin(
+    tmp_path: Path,
+) -> None:
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(
+        pins, [_tree_pin_row(Spec.parse("merged,bf16,32,bias,bk,1,0,tail,0,1"))]
+    )
+    with pytest.raises(SystemExit, match="already a pin"):
+        tool.install_tree_pins(pins, instances, data)

@@ -22,7 +22,36 @@ from __future__ import annotations
 from ..encoding import WarpDistributionEncoding
 from ..traits import MmaTraits
 
-__all__ = ["a_warp_encoding", "b_warp_encoding", "c_warp_encoding", "canonical_layouts"]
+__all__ = [
+    "a_warp_encoding",
+    "b_warp_encoding",
+    "c_warp_encoding",
+    "canonical_layouts",
+    "encoder_supports_layout",
+]
+
+
+def encoder_supports_layout(traits: MmaTraits) -> tuple[bool, str]:
+    """Say whether the encoder can lay out the instruction ``traits`` describes.
+
+    Returns ``(True, "")``, or ``(False, reason)`` naming the layout feature the encoder lacks:
+    an instruction that computes several independent blocks (``traits.b > 1``).
+    """
+    if traits.b > 1:
+        return False, (
+            f"it computes {traits.b} independent blocks per instruction and the block axis "
+            f"is not modelled"
+        )
+    return True, ""
+
+
+def _require_encodable(traits: MmaTraits) -> None:
+    supported, reason = encoder_supports_layout(traits)
+    if not supported:
+        raise NotImplementedError(
+            f"MMA instruction {traits.op_id!r} cannot be laid out by the tiling encoder: "
+            f"{reason} -- TODO: not implemented yet"
+        )
 
 
 def _require_divisible(numerator: int, denominator: int, what: str, op_id: str) -> int:
@@ -53,8 +82,9 @@ def c_warp_encoding(
             f"m_iter/n_iter must be positive -- op_id={traits.op_id!r}, "
             f"m_iter={m_iter}, n_iter={n_iter}"
         )
-    m_per_lane = traits.c_m_per_lane
-    m_num_access = traits.c_m_num_access
+    _require_encodable(traits)
+    m_per_lane = traits.layout_params.c_m_per_lane
+    m_num_access = traits.layout_params.c_m_num_access
     m_outer = _require_divisible(traits.m, m_per_lane, "M / c_m_per_lane", traits.op_id)
     m_inner = _require_divisible(
         m_per_lane, m_num_access, "c_m_per_lane / c_m_num_access", traits.op_id
@@ -105,10 +135,16 @@ def _ab_strided_k_encoding(
     k_per_lane: int,
     k_dim: int,
     op_id: str,
+    major_register_blocks: int = 1,
     major_iter: int = 1,
     k_iter: int = 1,
 ) -> WarpDistributionEncoding:
     """A/B operand StridedK encoding (CK ABWarpDstrEncStridedK), dense.
+
+    ``major_register_blocks`` = blocks of the major dim one lane holds in its registers (the A
+    operand's ``a_m_register_blocks``): the lanes span ``major_dim_size / major_register_blocks``
+    rows, and each further block of that many rows sits in the atom's most significant registers.
+    At 1 there is no such level and the encoding is CK's.
 
     ``major_iter`` = number of atoms stacked along the major dim (M for A, N for B = the wave
     tile's M/N / atom M/N); ``k_iter`` = number of atoms stacked along K. Each iteration count
@@ -122,6 +158,9 @@ def _ab_strided_k_encoding(
       lane merges {K1, R, major_dim}; registers = {num_access, k_per_lane/num_access}.
     """
     k_outer = _require_divisible(k_dim, k_per_lane, "K / k_ab_per_lane", op_id)
+    lane_major_size = _require_divisible(
+        major_dim_size, major_register_blocks, "major dim / register blocks", op_id
+    )
     k_inner = _require_divisible(
         k_per_lane, num_access, "k_ab_per_lane / num_access", op_id
     )
@@ -131,7 +170,8 @@ def _ab_strided_k_encoding(
             f"major_iter={major_iter}, k_iter={k_iter}"
         )
 
-    # Major axis (X-dim 1): optional atom-index level, then the within-atom major dim (lane).
+    # Major axis (X-dim 1): optional atom-index level, optional register-block level, then the
+    # within-atom major dim (lane).
     major_levels: list[int] = []
     major_reg_major: list[int] = []
     major_reg_minor: list[int] = []
@@ -139,8 +179,14 @@ def _ab_strided_k_encoding(
         major_reg_major.append(1)
         major_reg_minor.append(len(major_levels))
         major_levels.append(major_iter)
+    block_major: list[int] = []
+    block_minor: list[int] = []
+    if major_register_blocks > 1:
+        block_major.append(1)
+        block_minor.append(len(major_levels))
+        major_levels.append(major_register_blocks)
     atom_major_level = len(major_levels)
-    major_levels.append(major_dim_size)
+    major_levels.append(lane_major_size)
 
     # K axis (X-dim 2): optional atom-index level, then num_access / k_outer (lane) / k_inner.
     k_levels: list[int] = []
@@ -163,8 +209,8 @@ def _ab_strided_k_encoding(
     # flag here.
     iter_major = major_reg_major + k_reg_major
     iter_minor = major_reg_minor + k_reg_minor
-    within_major = [2, 2]
-    within_minor = [na_level, kinner_level]
+    within_major = block_major + [2, 2]
+    within_minor = block_minor + [na_level, kinner_level]
     reg_major = iter_major + within_major
     reg_minor = iter_minor + within_minor
     return WarpDistributionEncoding(
@@ -183,13 +229,16 @@ def a_warp_encoding(
     """A operand encoding (dense StridedK). Major dim = M; repeat = a_repeat. A free-contiguous
     (interleaved) operand layout is a :class:`~rocke.helpers.tiling.mma.styles.InterleavedStyle`, not a
     flag here."""
+    _require_encodable(traits)
+    params = traits.layout_params
     return _ab_strided_k_encoding(
         major_dim_size=traits.m,
-        repeat=traits.a_repeat,
-        num_access=traits.a_k_num_access,
-        k_per_lane=traits.k_ab_per_lane,
+        repeat=params.a_repeat,
+        num_access=params.a_k_num_access,
+        k_per_lane=params.k_ab_per_lane,
         k_dim=traits.k,
         op_id=traits.op_id,
+        major_register_blocks=params.a_m_register_blocks,
         major_iter=m_iter,
         k_iter=k_iter,
     )
@@ -201,11 +250,13 @@ def b_warp_encoding(
     """B operand encoding (dense StridedK). Major dim = N; repeat = b_repeat. A free-contiguous
     (interleaved) operand layout is a :class:`~rocke.helpers.tiling.mma.styles.InterleavedStyle`, not a
     flag here."""
+    _require_encodable(traits)
+    params = traits.layout_params
     return _ab_strided_k_encoding(
         major_dim_size=traits.n,
-        repeat=traits.b_repeat,
-        num_access=traits.b_k_num_access,
-        k_per_lane=traits.k_ab_per_lane,
+        repeat=params.b_repeat,
+        num_access=params.b_k_num_access,
+        k_per_lane=params.k_ab_per_lane,
         k_dim=traits.k,
         op_id=traits.op_id,
         major_iter=n_iter,

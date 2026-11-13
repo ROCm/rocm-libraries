@@ -59,7 +59,7 @@ from kernels.attention_bwd_cdna.fmha_common_gfx1201 import MaskedAxis
 from kernels.attention_bwd_cdna.fmha_traits_gfx950 import BF16_BYTES as _ELEM_BYTES
 from kernels.attention_bwd_cdna.fmha_traits_gfx950 import DMA_BYTES as _ACCESS_BYTES
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna.philox import Philox
+from kernels.attention_rdna4.philox import Philox
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -91,8 +91,11 @@ def _fmax(a, b, fm):
 
 
 def _fmin0(x, fm):
-    """`min(x, 0)`: a bias build's `P = exp2(...)` stays <= 1 for an LSE that covers the row."""
-    return arith.MinNumFOp(
+    """`min(x, 0)`: a bias build's `P = exp2(...)` stays <= 1 for an LSE that covers the row.
+
+    NaN-propagating (`arith.minimumf`): a NaN `x` stays NaN, where `minnumf` would return 0 and hide it.
+    """
+    return arith.MinimumFOp(
         as_mlir_value(x), as_mlir_value(fx.Float32(0.0)), fastmath=fm
     ).result
 
@@ -368,7 +371,7 @@ def mfma_operand_wait_state(pack):
     needs two wait states" is not what the hardware does: scanning all 648
     built gfx950 FlyDSL kernels finds ~7500 sites with fewer than two
     vector-pipe instructions in the gap, across 426 kernels that overwhelmingly
-    pass. So this guards one shape -- a `_bf16_trunc_pack_v8` result on its way
+    pass. So this guards one shape -- a `_bf16_rne_pack_v8` result on its way
     into an MFMA operand -- and not the general pattern. The fp16 half of that
     pack goes through it too, for symmetry and because its producer is the same
     class of instruction, though only bf16 has been seen to fail. What separates
@@ -392,7 +395,7 @@ def exp2_wait_state(values):
     the trans unit has only partly written. CDNA requires one wait state there
     and `GCNHazardRecognizer` does not model it for gfx950, so the schedule is
     free to emit `v_exp_f32 vN, ..` immediately before the
-    `v_cvt_pk_bf16_f32 vM, v(N-1), vN` of `_bf16_trunc_pack_v8`. When it does,
+    `v_cvt_pk_bf16_f32 vM, v(N-1), vN` of `_bf16_rne_pack_v8`. When it does,
     that element of the eight-wide B operand carries the *pre-exp* score into
     the MFMA, which is why the symptom is a single wrong element rather than a
     wrong tile.

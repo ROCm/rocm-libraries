@@ -122,11 +122,11 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 810 (90 + 63 + 84 + 72 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
-| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,939 (90 + 63 + 56 + 20 + 24 + 86 + 1,329 + 962 + 309) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,155 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 325) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
 `sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
 inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
@@ -141,7 +141,7 @@ nondeterminism policy below. The rows with separate V heads (`u2`) are their own
 `<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
 
 # The pins of the backward ops: the shipped objects the arch's reference CSV names, copied out of
 # $CONTENT. The directory must not exist (the tool refuses to replace one), so a repeated run removes it first;
@@ -188,11 +188,17 @@ object (a dB-storing bias row; the shipped object also carries the dBias reduce)
 --from-content "$CONTENT" --arch $ARCH --reference-dir <new dir>` copies each pin's object out of the content by sha256 and verifies it. For
 the two exceptions, `tests/data/sdpa_bwd_pin_functions.csv` records the sha256 of the pin's function bytes, which the per-kernel gate and
 `tools/sdpa_bwd_compare.py` read in place of the object. The tool fails on any other pin without an object. The same S1 tool also has a
-sweep mode (`--sweep-repo`, `--selection`), which the sweep's maintainers use to compose a new catalogue from the sweep (an AMD-internal
-repository) and its selection policy; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds, and a
-regeneration needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+sweep mode (`--sweep-repo`, `--selection`) for authoring a new catalogue. That step needs an AMD-internal sweep repository that this
+repository does not include and is not publicly reproducible; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds.
+Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
 
 `tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
+
+**Tree-built pins.** A row added in this tree, with no sweep object, is pinned by its own build: build it in N = 8 fresh processes at the regeneration conditions
+(`FLYDSL_GEN_JOBS=28`; all builds must agree on the object, the main-function digest, the resource row and a clean R-MIR scan), write one row per object (`hash`, `spec`, the object's `sha256`, the main kernel's resource row,
+`rmir_scan` `clean` and, for a combined object, its main-function `function_sha256`) and run `python tools/sdpa_bwd_tables_from_sweep.py --tree-pins <file>`. The tool adds the rows to the installed pins and writes the table block, the reference CSV and
+`tests/data/sdpa_bwd_pin_functions.csv` together; none is edited by hand. The reference `sha256` of a tree-built combined row is the combined object's, and `sdpa_bwd_s1.py --from-content` names such a pin by its function digest rather than copying the object.
+A row that builds differently across the sample is a nondeterministic row: list it by the policy above before it ships.
 
 **Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
 
@@ -269,6 +275,10 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
   [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
+  # The RNG dump's keep-mask writer (COVERAGE.md §5.10), one object per target.
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  # The head-dim padding copy (COVERAGE.md §7.12), one object per target.
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -288,9 +298,16 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done
+
+# (4) No transcendental result read by the very next VALU op on gfx942/gfx950: the
+#     backend adds the wait state for its own instructions but not for inline asm, so
+#     a finding is an inline-asm hazard (CDNA kernel modification 46). Exit 1 on one.
+$PY tools/check_trans_hazards.py --content-dir $CONTENT
 ```
 
 The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)
@@ -477,11 +494,11 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of 24 kernel modules from three upstreams.
-Fourteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
-FlyDSL kernels upstream FlyDSL does not; and nine come from AOTriton: the RDNA4 attention package
-(`attention_rdna4/`, six modules) and three SDPA backward modules
-(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py` and `attention_bwd_rdna/fmha_common_gfx1201.py`). The other files of
+`kernels_src/` is a vendored copy of 27 kernel modules from three upstreams.
+Eighteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+FlyDSL kernels upstream FlyDSL does not; and eight come from AOTriton: the RDNA4 attention package
+(`attention_rdna4/`, six modules) and two SDPA backward modules
+(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py`; the gfx11 kernels import the first). The other files of
 `attention_bwd_cdna/` are written for this provider and say `Not vendored` in their headers. Deliberate modifications are
 recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four),
 `kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two) and
@@ -493,7 +510,7 @@ A modified file's header also names the upstream and path it came from -- the re
 `attention_rdna/` and `attention_cdna/` packages both map back to upstream's
 `kernels/attention/`; the modules of `attention_rdna4/` carry none and inherit their
 package's, which names AOTriton's flat `modules/flash/flyc/` directory, while the
-three `attention_bwd_*` modules carry their own block naming that directory's file -- and the tool
+two `attention_bwd_cdna/` modules carry their own block naming that directory's file -- and the tool
 reads that header to decide what to diff it against. A file with no provenance header
 (the unmodified FlyDSL modules carry only FlyDSL's SPDX and copyright lines) is diffed
 against the same relative path in the FlyDSL checkout. The FlyDSL and AITER commits are
@@ -513,8 +530,6 @@ AOTriton at the pinned commit b5e8cfb909e5
 === kernels/attention_bwd_cdna/fmha_abi_gfx1201.py
   …
 === kernels/attention_bwd_cdna/fmha_common_gfx1201.py
-  …
-=== kernels/attention_bwd_rdna/fmha_common_gfx1201.py
   …
 === kernels/attention_cdna/__init__.py
   …
@@ -542,7 +557,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-8/24 vendored files identical to upstream after normalization; 16 differ, 0 absent upstream, 0 not compared
+12/27 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared

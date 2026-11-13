@@ -32,7 +32,7 @@
  * @brief A census of what hipkernel:flydsl_sdpa_bwd_merged actually loads, read from the shard
  *        the census entry names rather than from anything built in-process.
  *
- * The merged table is 309 objects: 189 without a bias and 120 with one. The 44 bias objects
+ * The merged table is 325 objects: 189 without a bias and 136 with one. The 60 bias objects
  * that store dB carry the dBias reduce kernel as a second symbol of the same code object; a
  * store_db=0 object never writes dB and carries no reduce kernel. Every object is a
  * multi-launch pack: its `sources` hold the merged kernel and the tail-zero kernel, one of
@@ -65,17 +65,9 @@ constexpr const char* MERGED_LAUNCH = "merged";
 constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
 constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
-constexpr size_t MERGED_ROWS = 309;
-constexpr size_t BIAS_ROWS = 120;
-constexpr size_t REDUCE_ROWS = 44;
-
-/// A metadata field of type @p T, or nullptr when absent or of another type.
-template <typename T>
-const T* tryGetMetadataField(const MetadataValues& values, const char* field)
-{
-    const auto it = values.find(std::string(field));
-    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
-}
+constexpr size_t MERGED_ROWS = 325;
+constexpr size_t BIAS_ROWS = 136;
+constexpr size_t REDUCE_ROWS = 60;
 
 TEST(TestFlydslSdpaBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
@@ -165,7 +157,7 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
             EXPECT_EQ(dforms.count(text("dform")), 1U) << kernel.name;
             EXPECT_EQ(roleOrders.count(text("role_order")), 1U) << kernel.name;
             EXPECT_FALSE(text("floor").empty()) << kernel.name;
-            for(const char* flag : {"causal", "has_bias", "dropout", "padded", "hints"})
+            for(const char* flag : {"causal", "has_bias", "has_dropout", "padded", "hints"})
             {
                 const auto value = integer(flag);
                 EXPECT_TRUE(value == 0 || value == 1) << kernel.name << " " << flag;
@@ -313,10 +305,12 @@ TEST(TestFlydslSdpaBwdPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloo
     EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
 }
 
-// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder, and
-// the matcher's verdicts hold there: ragged tensors with and without a multiplier and an
-// aligned operand are served; a misaligned operand, ragged stats beside a dense Q, a ragged
-// bias and a multiplier below 1 are declined by the matcher, not by the schema gate.
+// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder and
+// through the provider's ApplicabilityManager, the engine registered at its UED's
+// `sdk_version` as Container does, and the matcher's verdicts hold on both: ragged tensors with
+// and without a multiplier and an aligned operand are served; a misaligned operand, ragged
+// stats beside a dense Q, a ragged bias and a multiplier below 1 are declined by the matcher,
+// not by a schema gate.
 TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects)
 {
     const auto& set = loadedSet(ENGINE_NAME);
@@ -328,8 +322,8 @@ TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMat
         report += "\n  " + failure;
     }
     EXPECT_TRUE(failures.empty()) << report;
-    // The cases only matter if they can see the gate: an engine of the schema these engines
-    // shipped with declines the same graph.
+    // The cases only matter if they can see each gate: an engine of the schema these engines
+    // shipped with, as descriptor and as registration, declines the same graph.
     const auto invisible = schema_gate::gateIsInvisible(
         set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
     EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");

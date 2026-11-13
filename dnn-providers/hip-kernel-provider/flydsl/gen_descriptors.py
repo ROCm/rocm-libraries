@@ -98,9 +98,18 @@ from generators._sdpa_bwd_spec import U2_SYMBOLS, Spec, knobs_of  # noqa: E402
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
 DESCRIPTOR_VERSION = "1.0"
-# Ops whose engines read a runtime pass-by-value scalar (the SDPA softmax scale, the
-# RMSNorm epsilon), and the graph schema that introduced such tensors
-# (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
+# The graph schema each engine's matcher understands, its UED's `sdk_version`: the ingestor
+# declines a graph whose schema floor (hipDNN's PluginVersionConstants.hpp,
+# computeMinimumEnginePluginApiVersion) is above it before the matcher runs. An op absent
+# here stays at the baseline (1.0.0).
+#
+# * RMSNorm reads a runtime pass-by-value epsilon: K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
+# * The SDPA engines read and gate every field the schema has added through
+#   K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION, 1.4.0, which is K_MAX_SUPPORTED_API_VERSION:
+#   overridable shapes (1.1.0, declined), runtime pass-by-value tensors (1.2.0), ragged
+#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0). COVERAGE.md's
+#   "Graph schema" lists the gate for each; TestFlydslSdpaObjects pins the claim against the
+#   SDK's maximum, so an SDK that adds a version fails it until those fields are reviewed.
 SDPA_OPS = (
     "sdpa_rdna",
     "sdpa_rdna_decode",
@@ -109,15 +118,41 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
 )
-PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
-# The backward engines' matcher reads ragged tensors (1.3.0), non-default tensor alignment
-# (1.3.0) and ragged offset multipliers (1.4.0) straight from the graph, and the ingestor
-# declines a graph whose schema floor is above the engine's before any matcher runs, so both
-# backward engines declare the schema that introduced the last of them
-# (PluginVersionConstants.hpp, K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION).
-SDPA_BWD_SDK_VERSION = "1.4.0"
-SDPA_BWD_OPS = ("sdpa_bwd_merged",)
+SDPA_SDK_VERSION = "1.4.0"
+SDK_VERSION_BY_OP: dict[str, str] = {
+    "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
+    **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
+    # The backward engines read ragged tensors (1.3.0), non-default tensor alignment (1.3.0)
+    # and ragged offset multipliers (1.4.0) straight from the graph, so they declare the
+    # schema that introduced the last of them.
+    "sdpa_bwd_split": SDPA_SDK_VERSION,
+    "sdpa_bwd_merged": SDPA_SDK_VERSION,
+}
+# Ops whose engines carry `supports_graph_capture` (capture-safe with default settings,
+# benchmarking off). Capture and graph replay are bit-exact on gfx950 (CDNA ops), on
+# gfx1152 (sdpa_rdna, sdpa_rdna_decode) and on gfx1201 (the RDNA ops and sdpa_aiw). The
+# note is engine-level: capture legality is a property of the shared host dispatch path
+# (GenericPlan -> pack launch()), so it holds for every target an engine's objects ship
+# for. A launch() enqueues only kernels and async memsets on the handle's stream -- the
+# SDPA head-pad copies, the dropout-mask and RNG-dump kernels, sdpa_aiw's fill kernel and the
+# zero-bias and by-value-seed memsets included -- with no allocation, no synchronization
+# and no host read of device data. The SDPA backward engines (sdpa_bwd_merged,
+# sdpa_bwd_split) enqueue only kernels and async seed-word memsets on the handle's stream;
+# the integration graph-capture lanes verify them on gfx950 (merged, split) and gfx1101
+# (split).
+GRAPH_CAPTURE_OPS: tuple[str, ...] = (
+    "rmsnorm",
+    "rmsnorm_bwd",
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+    "sdpa_bwd_merged",
+    "sdpa_bwd_split",
+)
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
 # slotted; every other document stays at DESCRIPTOR_VERSION.
@@ -214,12 +249,13 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 #
 # Per op: `N` is RMSNorm's row width; `head_dim`, `head_dim_v` and `causal` are what
 # an SDPA graph asks for, and on CDNA so is the kernel family, which the target arch
-# fixes. `has_bias`, `has_sink` and the bias forms (`bias_f32`, `bias_q`,
-# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
+# fixes. `has_bias`, `has_sink`, `has_dropout` and the bias forms (`bias_f32`, `bias_q`,
+# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink, or drops
+# attention probabilities. The
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
-# `kv_align`) say which graphs an object can serve: the matcher gates on them, and
+# `kv_align`, `qk_mask`, `v_mask`) say which graphs an object can serve: the matcher gates on them, and
 # autotune compares the objects they distinguish as separate catalog entries. For the
-# SDPA backward, `dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
+# SDPA backward, `has_dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
 # head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
 # dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
 # `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
@@ -241,6 +277,7 @@ GRAPH_DETERMINED_FIELDS = {
     "head_dim_v",
     "head_dim_max",
     "qk_mask",
+    "v_mask",
     "causal",
     "any_diagonal",
     "kv_align",
@@ -249,9 +286,10 @@ GRAPH_DETERMINED_FIELDS = {
     "bias_q",
     "bias_kstrided",
     "has_sink",
+    "has_dropout",
     "merge_symbol",
+    "fill_symbol",
     "kernel",
-    "dropout",
     "padded",
     "floor",
     "dform",
@@ -331,76 +369,71 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     ]
 
 
-# An engine with a trained estimate carries one (RFC 0019 §3.1 `predict_engine`, L1): the
-# expected tflops of the engine's own pick, which engine selection reads before any
-# catalog is enumerated. An engine without one is ordered by static rules whatever the
-# graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
-# and sdpa_aiw each match nearly every graph of the others' corpora.
+# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1); the slotted
+# split engine's (`sdpa_bwd_split`) is engine-level and models the whole program (RFC 0021),
+# like its UED. The estimate is the expected tflops of the engine's own pick, which engine
+# selection reads before any catalog is enumerated. An engine without one is ordered by
+# static rules whatever the graph, and FlyDSL's engines compete for graphs: on gfx1201
+# sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match nearly every graph of the others'
+# corpora.
 #
 # The estimate's `default` slot. No scorer is registered under its symbol, so the loader
-# disables the estimate (and logs an error) on every arch with no trained model, keeping
-# the engine, exactly as an engine with no estimate behaves; a trained model installed for
-# an arch (below) is bound under that arch's key and takes precedence there. An engine with
-# no trained model installed for any arch has no estimate slot at all: the slot would only
-# be disabled on every arch, and installing a model binds the role and brings the slot back.
+# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
+# estimate behaves; a trained model installed for an arch (below) is bound under that
+# arch's key and takes precedence there.
 ENGINE_ESTIMATE_METRIC = "tflops"
-
-# Working branch only (users/jascampb/flydsl-sdpa-bwd-uhd); drop when the landing branch is
-# rebuilt. The UHD pipeline trains an engine's estimate only when its UED binds
-# `predict_engine`, so an engine whose first estimate is being trained keeps the `default`
-# slot before any model is installed. Once its models are installed the rule above brings
-# the slot back on its own, so the landing branch needs no exception.
-UHD_BOOTSTRAP_ESTIMATE_ENGINES = frozenset({"sdpa_bwd_merged", "sdpa_bwd_split"})
-
-
-def has_estimate_slot(engine: str, installed: dict[str, Any]) -> bool:
-    """Whether @p engine's UED binds `predict_engine` (see above)."""
-    return (
-        bool(installed.get("predict_engine"))
-        or engine in UHD_BOOTSTRAP_ESTIMATE_ENGINES
-    )
 
 
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
-# `heuristics/<ued-id>/<role>/<arch>/<metric>/`, and the UED binds each under its role and
-# arch key. The generator owns the UED, so it derives those bindings from what is
-# installed: a regeneration keeps every trained model, and `--check` accepts a tree with
-# models in it. A model under a gfx key wins over `default` on that arch (RFC 0020 §4.6),
-# so the native ranker and the estimate slot stay the fallback everywhere else.
+# `heuristics/<ued-id>/<role>/<arch>/<metric>/` (a metric-less model directly under
+# `<role>/<arch>/`), and the UED binds each under its role and arch key. The generator owns
+# the UED, so it derives those bindings from what is installed: a regeneration keeps every
+# trained model, and `--check` accepts a tree with models in it. A model under a gfx key
+# wins over `default` on that arch (RFC 0020 §4.6), so the native ranker and the estimate
+# slot stay the fallback everywhere else.
+#
+# `uhd_gen promote` is the reference for every binding: the roles it accepts, where it
+# installs, and the form it writes (uhd_gen/promote.py `_rebind`). Every role binds a list per
+# arch key, one UHD per ranking metric -- `predict_applicable_kernels`, the candidate
+# generators for future JIT spaces, included. The IngestorGenerator emits the same form from
+# its `engine.heuristics` config (#15101).
 HEURISTICS_DIR = "heuristics"
-_SCORING_ROLES = ("sort_kernel_catalog", "predict_engine")
+_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
 
 
 def installed_models(
     op_dir: Path, ued_id: str
-) -> dict[str, dict[str, list[tuple[str, str]]]]:
-    """Role -> arch key -> [(metric, UHD id)] of the trained models installed for an op.
+) -> dict[str, dict[str, list[tuple[str | None, str]]]]:
+    """Role -> arch key -> [(metric or None, UHD id)] of the trained models installed for an op.
 
-    Refuses a model filed anywhere but its own engine's, role's, arch's and metric's
-    folder, one trained against another engine, and two models for one metric on one
-    key -- the loader would disable that metric there (RFC 0019 §3.1).
+    Refuses a model filed anywhere but its own engine's, role's, arch's and (if it has one)
+    metric's folder, one trained against another engine, and two models one key would bind
+    for the same metric -- the loader would disable that metric there (RFC 0019 §3.1).
     """
     root = op_dir / HEURISTICS_DIR
-    installed: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    installed: dict[str, dict[str, list[tuple[str | None, str]]]] = {}
     for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
         parts = path.relative_to(root).parts
-        if len(parts) != 5 or parts[0] != ued_id:
+        if len(parts) not in (4, 5) or parts[0] != ued_id:
             raise HkpPackError(
                 f"{path}: a trained model is installed at "
-                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/<metric>/"
+                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/[<metric>/]"
             )
-        _, role, arch, metric, _ = parts
-        if role not in _SCORING_ROLES or not _ARCH_KEY.fullmatch(arch):
+        role, arch = parts[1], parts[2]
+        folder_metric = parts[3] if len(parts) == 5 else None
+        if role not in _ROLES or not _ARCH_KEY.fullmatch(arch):
             raise HkpPackError(
-                f"{path}: '{role}/{arch}' is not a scoring role and arch key "
-                f"({', '.join(_SCORING_ROLES)}; default or gfx<id>)"
+                f"{path}: '{role}/{arch}' is not a role and arch key uhd_gen promote "
+                f"binds ({', '.join(_ROLES)}; default or gfx<id>)"
             )
         doc = json.loads(path.read_text(encoding="utf-8"))
-        if (doc.get("score") or {}).get("metric") != metric:
+        metric = (doc.get("score") or {}).get("metric")
+        if metric != folder_metric:
             raise HkpPackError(
-                f"{path}: filed under metric '{metric}' but its score.metric is "
-                f"{(doc.get('score') or {}).get('metric')!r}"
+                f"{path}: filed under metric {folder_metric!r} but its score.metric is "
+                f"{metric!r}; promote files a model under its metric, a metric-less one "
+                "directly under the arch"
             )
         trained = ((doc.get("trained_against") or {}).get("ued") or {}).get("id")
         if trained != ued_id:
@@ -410,8 +443,8 @@ def installed_models(
         models = installed.setdefault(role, {}).setdefault(arch, [])
         if any(existing == metric for existing, _ in models):
             raise HkpPackError(
-                f"{path}: a second '{metric}' model for {role}/{arch}; the loader would "
-                "disable that metric on that key"
+                f"{path}: a second {metric or '(metric-less)'} model for {role}/{arch}; "
+                "the loader would disable that metric on that key"
             )
         models.append((metric, doc["id"]))
     return installed
@@ -431,11 +464,32 @@ def bind_installed(roles: RoleMaps, installed: RoleMaps) -> None:
                 slot.append((metric, model_id))
 
 
-def role_maps(roles: RoleMaps) -> dict[str, dict[str, str | list[str]]]:
-    """The UED form of @p roles: `default` first, then arch keys; one id or a list."""
+def role_maps(
+    roles: RoleMaps, installed: RoleMaps
+) -> dict[str, dict[str, str | list[str]]]:
+    """The UED form of @p roles, each value as `uhd_gen promote` writes it.
+
+    Promoting into the UED and regenerating then bind the same values (promote appends a new
+    arch key; this sorts, `default` first): a key a trained model is bound under is a list (one
+    UHD per metric), as promote's rebinding leaves it; a key only the generator fills (the
+    native ranker, the estimate's slot) stays the bare id it writes.
+    """
+    trained = {
+        model
+        for by_arch in installed.values()
+        for models in by_arch.values()
+        for _, model in models
+    }
+
+    def bound(ids: list[tuple[str | None, str]]) -> str | list[str]:
+        models = [model for _, model in ids]
+        if trained.intersection(models):
+            return models
+        return models[0] if len(models) == 1 else models
+
     return {
         role: {
-            arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
+            arch: bound(ids)
             for arch, ids in sorted(
                 by_arch.items(), key=lambda item: (item[0] != "default", item[0])
             )
@@ -799,7 +853,7 @@ class OpDescriptors:
         self,
         op: str,
         fields: dict[str, str],
-        installed: dict[str, dict[str, list[tuple[str, str]]]] | None = None,
+        installed: dict[str, dict[str, list[tuple[str | None, str]]]] | None = None,
     ) -> None:
         self.op = op
         self.slot = slot_of(op)
@@ -839,14 +893,10 @@ class OpDescriptors:
             "id": self.ued_id,
             "name": f"hipkernel:{self.stem}",
         }
-        # The graph schema the engine's matcher understands: the ingestor declines any
-        # graph whose schema floor is above it. Runtime pass-by-value scalars (1.2.0) are
-        # read by the engines whose scale or epsilon may be one; the rest stay at the
-        # baseline.
-        if self.op in SDPA_BWD_OPS:
-            ued["sdk_version"] = SDPA_BWD_SDK_VERSION
-        elif self.op in PASS_BY_VALUE_OPS:
-            ued["sdk_version"] = PASS_BY_VALUE_SDK_VERSION
+        # The graph schema the engine's matcher understands (SDK_VERSION_BY_OP): the
+        # ingestor declines any graph whose schema floor is above it.
+        if self.op in SDK_VERSION_BY_OP:
+            ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
         kmd_fields = []
         for name, type_token in self.fields.items():
             field: dict[str, Any] = {"name": name, "type": type_token}
@@ -875,14 +925,12 @@ class OpDescriptors:
         }
         # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
         # catalog on every arch, and the engine estimate's slot.
-        has_estimate = has_estimate_slot(self.op, self.installed)
         roles: RoleMaps = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
-        }
-        if has_estimate:
-            roles["predict_engine"] = {
+            "predict_engine": {
                 "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            }
+            },
+        }
         bind_installed(roles, self.installed)
         # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
         # an arch, it trains an estimate for that arch only if `predict_engine` binds the
@@ -890,12 +938,11 @@ class OpDescriptors:
         # just as it does under `default`. The ranker map is left alone: it is an input of
         # the selector revision every trained estimate is checked against, and this role
         # is not.
-        if has_estimate:
-            for arch in roles["sort_kernel_catalog"]:
-                roles["predict_engine"].setdefault(
-                    arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-                )
-        engine.update(role_maps(roles))
+        for arch in roles["sort_kernel_catalog"]:
+            roles["predict_engine"].setdefault(
+                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            )
+        engine.update(role_maps(roles, self.installed))
         estimate = {
             f"{self.stem}_engine_estimate.uhd.json": estimate_document(
                 self.estimate_uhd_id, self.op, f"{self.symbols}.engine_estimate"
@@ -903,6 +950,8 @@ class OpDescriptors:
         }
         engine["metadata"] = self.kmd_id
         engine["knobs"] = knob_fields(self.op, self.fields)
+        if self.op in GRAPH_CAPTURE_OPS:
+            engine["behavior_notes"] = ["supports_graph_capture"]
         return {
             **extra_udd,
             f"{self.stem}.kmd.json": {
@@ -928,7 +977,7 @@ class OpDescriptors:
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
             f"{self.stem}.ued.json": engine,
-            **(estimate if has_estimate else {}),
+            **estimate,
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
@@ -1236,8 +1285,8 @@ class SplitEngine:
     top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
     ``predict_applicable_kernels``, and does not author the serialization note: a slotted
     engine's plans cannot be saved. Its estimate is engine-level and models the whole
-    program (RFC 0021), and follows every engine's rule (``has_estimate_slot``): the
-    `default` slot and each trained model installed under ``sdpa_bwd_split/heuristics/``.
+    program (RFC 0021): like every engine's, the `default` slot plus each trained model
+    installed under ``sdpa_bwd_split/heuristics/``.
     """
 
     def __init__(
@@ -1260,39 +1309,38 @@ class SplitEngine:
             )
 
     def documents(self) -> dict[str, dict[str, Any]]:
-        has_estimate = has_estimate_slot(SPLIT_ENGINE, self.installed)
-        roles: RoleMaps = {}
-        if has_estimate:
-            roles["predict_engine"] = {
+        roles: RoleMaps = {
+            "predict_engine": {
                 "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            }
+            },
+        }
         bind_installed(roles, self.installed)
-        estimate = {
+        ued: dict[str, Any] = {
+            "version": SLOTTED_VERSION,
+            "id": self.ued_id,
+            "name": f"hipkernel:{self.stem}",
+            # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
+            # tensors, non-default alignment and ragged offset multipliers.
+            "sdk_version": SDK_VERSION_BY_OP[SPLIT_ENGINE],
+            "graph_match": {"native": f"{self.symbols}.graph_match"},
+            "shared_workspace": SPLIT_SHARED_WORKSPACE,
+            **role_maps(roles, self.installed),
+            "slots": [
+                {
+                    "name": slot.slot,
+                    "metadata": slot.kmd_id,
+                    "knobs": knob_fields(slot.op, slot.fields),
+                }
+                for slot in self.slot_ops.values()
+            ],
+        }
+        if SPLIT_ENGINE in GRAPH_CAPTURE_OPS:
+            ued["behavior_notes"] = ["supports_graph_capture"]
+        return {
+            f"{self.stem}.ued.json": ued,
             f"{self.stem}_engine_estimate.uhd.json": estimate_document(
                 self.estimate_uhd_id, SPLIT_ENGINE, f"{self.symbols}.engine_estimate"
-            )
-        }
-        return {
-            f"{self.stem}.ued.json": {
-                "version": SLOTTED_VERSION,
-                "id": self.ued_id,
-                "name": f"hipkernel:{self.stem}",
-                # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
-                # tensors, non-default alignment and ragged offset multipliers.
-                "sdk_version": SDPA_BWD_SDK_VERSION,
-                "graph_match": {"native": f"{self.symbols}.graph_match"},
-                "shared_workspace": SPLIT_SHARED_WORKSPACE,
-                **role_maps(roles),
-                "slots": [
-                    {
-                        "name": slot.slot,
-                        "metadata": slot.kmd_id,
-                        "knobs": knob_fields(slot.op, slot.fields),
-                    }
-                    for slot in self.slot_ops.values()
-                ],
-            },
-            **(estimate if has_estimate else {}),
+            ),
         }
 
 

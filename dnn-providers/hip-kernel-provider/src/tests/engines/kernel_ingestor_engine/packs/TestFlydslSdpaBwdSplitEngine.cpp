@@ -109,11 +109,6 @@ const std::array<Slot, 3> SLOTS{Slot::PREP, Slot::DKDV, Slot::DQ};
 // Graphs
 // ---------------------------------------------------------------------------
 
-SdpaBwdSpec baseSpec()
-{
-    return SdpaBwdSpec{};
-}
-
 SdpaBwdSpec dimsSpec(int64_t batch, int64_t heads, int64_t seqQ, int64_t seqKv, int64_t headDim)
 {
     SdpaBwdSpec spec;
@@ -127,27 +122,11 @@ SdpaBwdSpec dimsSpec(int64_t batch, int64_t heads, int64_t seqQ, int64_t seqKv, 
     return spec;
 }
 
-SdpaBwdSpec withCausal(const SdpaBwdSpec& spec)
-{
-    return spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
-}
-
 SdpaBwdSpec withWindow(const SdpaBwdSpec& spec)
 {
     return spec.withEdit([](SdpaBwdGraph& g) {
         g.attributes.causalMask = true;
         g.attributes.leftBound = 4;
-    });
-}
-
-SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
-{
-    return spec.withEdit([=](SdpaBwdGraph& g) {
-        addBias(g, dims);
-        if(withDbias)
-        {
-            addDbias(g);
-        }
     });
 }
 
@@ -263,7 +242,7 @@ KernelDefinition makeRow(Slot slot, const RowSpec& row)
     }
     kernel.metadata["causal"] = row.causal;
     kernel.metadata["has_bias"] = row.hasBias;
-    kernel.metadata["dropout"] = row.dropout;
+    kernel.metadata["has_dropout"] = row.dropout;
     kernel.metadata["dform"] = row.dform;
     kernel.metadata["block_threads"] = row.blockThreads;
     kernel.metadata["bias_f32"] = row.biasF32;
@@ -318,7 +297,7 @@ KernelDefinition makeMergedRow(const RowSpec& row)
                        {"head_dim_v", row.tile},
                        {"causal", row.causal},
                        {"has_bias", row.hasBias},
-                       {"dropout", row.dropout},
+                       {"has_dropout", row.dropout},
                        {"padded", row.padded},
                        {"hints", int64_t{1}},
                        {"floor", std::string("tail")},
@@ -359,21 +338,6 @@ bool serves(Slot slot, const SdpaBwdSpec& spec, const RowSpec& row)
 // Launches
 // ---------------------------------------------------------------------------
 
-/// A fake device address per tensor uid, and a workspace base; only ever compared.
-uint64_t ptrOf(int64_t uid)
-{
-    return static_cast<uint64_t>(uid) * 0x100000;
-}
-
-constexpr uint64_t WORKSPACE = 0x70000000;
-
-void* asPointer(uint64_t address)
-{
-    // A fake address, only ever compared and offset into, never dereferenced.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(address));
-}
-
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor()
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers;
@@ -408,20 +372,6 @@ FlydslSdpaBwdMergedLaunchDump mergedDumpOf(const SdpaBwdSpec& spec, const RowSpe
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     return describeFlydslSdpaBwdMergedLaunchForTesting(
         fixture.context(), makeMergedRow(row), buffersFor(), asPointer(WORKSPACE));
-}
-
-void expectBadParam(const std::function<void()>& action)
-{
-    try
-    {
-        action();
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
-    {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
-        return;
-    }
-    FAIL() << "expected a BAD_PARAM exception";
 }
 
 int64_t tokenOf(const BoundTokens& bound, const std::string& name)
@@ -1537,19 +1487,19 @@ TEST(TestFlydslSdpaBwdSplitKernel,
     packed.blockQ = 32;
     auto grouped = baseSpec();
     grouped.kvHeads = 2;
-    const auto far = grouped.withEdit([](SdpaBwdGraph& g) {
+    const auto farStats = grouped.withEdit([](SdpaBwdGraph& g) {
         const int64_t headStride = int64_t{1} << 29;
         g.tensor("stats").strides = {g.heads * headStride, headStride, 1, 1};
     });
     EXPECT_TRUE(serves(Slot::DKDV, grouped, packed));
-    EXPECT_FALSE(serves(Slot::DKDV, far, packed));
-    EXPECT_TRUE(serves(Slot::DKDV, far, plainRow()));
-    EXPECT_TRUE(serves(Slot::PREP, far, plainRow()));
+    EXPECT_FALSE(serves(Slot::DKDV, farStats, packed));
+    EXPECT_TRUE(serves(Slot::DKDV, farStats, plainRow()));
+    EXPECT_TRUE(serves(Slot::PREP, farStats, plainRow()));
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, PackedStatsInEitherOrderPassTheirOwnOffsetAndStrides)
 {
-    const auto packedStats = [](std::vector<int64_t> strides) {
+    const auto packedStats = [](const std::vector<int64_t>& strides) {
         return raggedOf(baseSpec(), {"q", "o", "do", "dq"}).withEdit([strides](SdpaBwdGraph& g) {
             g.tensor("stats").strides = strides;
         });
@@ -1764,6 +1714,22 @@ TEST(TestFlydslSdpaBwdSplitLaunch, HeadDimBelowTheTileSetsThePaddedFlag)
         EXPECT_EQ(values.at("hdim_qk"), 100U);
     }
     EXPECT_EQ(valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, baseSpec(), plainRow())).at("rt_flags"), 0U);
+}
+
+// The flag is set when either head dim is below the tile, not only when both are.
+TEST(TestFlydslSdpaBwdSplitLaunch, OneHeadDimBelowTheTileSetsThePaddedFlag)
+{
+    RowSpec padded = plainRow(128);
+    padded.padded = 1;
+    for(const auto& [qk, v] : {std::pair<int64_t, int64_t>{128, 100}, {100, 128}})
+    {
+        SCOPED_TRACE(std::to_string(qk) + "x" + std::to_string(v));
+        const auto spec = withHeadDims(baseSpec(), qk, v);
+        for(const Slot slot : {Slot::DKDV, Slot::DQ})
+        {
+            EXPECT_EQ(valuesOf(slot, dumpOf(slot, spec, padded)).at("rt_flags"), 1U);
+        }
+    }
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, TheDqReduceRunsOnlyForABroadcastDbiasAndTheScratchIsItsBuffer)

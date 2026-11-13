@@ -1039,7 +1039,7 @@ def probe_items():
         item("PRB-B17", "pr", "probe", "T11 G11", (2, 4, 4, 4, 128, 128, 64, 64),
              bias=P.bias_spec("11"), dbias=True, inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias",
              expected="dBias correct, or typed rejection"),
-        item("PRB-R01", "quick", "probe", "A10", nb, attrs={"dropout_probability": 0.0}, oracle="p0",
+        item("PRB-R01", "quick", "probe", "A10", nb, attrs={"dropout_probability": 0.0},
              expected="same as no dropout, or typed rejection"),
         item("PRB-R03", "notrun", "probe", "A10 T14 S54 DT6", (1, 1, 1, 1, 128, 128),
              attrs={"dropout_probability": 0.1}, topology="Philox", oracle="none",

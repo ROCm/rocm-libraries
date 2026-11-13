@@ -166,8 +166,7 @@ from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_gfx950 import (
     check_launch_limits,
 )
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna import philox
-from kernels.attention_bwd_cdna.philox import Philox, keep_mask
+from kernels.attention_rdna4.philox import Philox, default_width, keep_mask
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -834,8 +833,10 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # Raw bounded resources over the same slabs, for the 16-row
         # family's 64-bit loads and stores. A `_slab_view` carries a copy atom
         # whose width is fixed at 128 bits; these take an element offset and a
-        # width per access, and they bound identically, so a row past the
-        # sequence reads zero and a store to one is dropped.
+        # width per access, and they bound identically, so a store to a row
+        # past the sequence is dropped and a read of one returns zero. A causal
+        # build reads `live_row_in_block` (clamped by `init_kv_row`), so a row
+        # past the sequence there reads the last live key's K and V, not zero.
         self.k_res_rsrc = self._slab_rsrc(
             self.K,
             "K",
@@ -1936,7 +1937,7 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         """
         return [
             mfma_operand_wait_state(
-                dualwave._bf16_trunc_pack_v8(
+                dualwave._bf16_rne_pack_v8(
                     self.traits,
                     [values[p * 8 + s] for s in range_constexpr(8)],
                     elem_dtype=self.elem_dtype,
@@ -2255,7 +2256,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     assert (
         traits.ENABLE_DROPOUT or "dropout" not in runtime_axes
     ), "runtime_axes={'dropout'} needs a build with dropout enabled (meta.dropout=True): the Philox state is built only then"
-    if traits.ENABLE_DROPOUT and philox.default_width("gfx950") != 32:
+    if traits.ENABLE_DROPOUT and default_width("gfx950") != 32:
         raise ValueError(
             "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
         )
