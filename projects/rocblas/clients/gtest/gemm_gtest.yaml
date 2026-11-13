@@ -3801,4 +3801,99 @@ Tests:
   alpha: 1
   beta: 0
   os_flags: LINUX
+
+# hipBLASLt fixed-point emulation through rocBLAS. emulation: 1 sets ROCBLAS_EMULATE_* for the
+# test's handle, and emulation_strategy: 2 (rocblas_emulation_strategy_eager) makes hipBLASLt
+# emulate every call it supports. gfx950 is the architecture hipBLASLt has emulation data for;
+# elsewhere it runs native GEMM. rocblas-test skips these tests in builds that cannot request
+# emulation. Plain gemm reaches hipBLASLt only in builds with Tensile.
+- name: gemm_emulation
+  category: quick
+  function:
+    - gemm: *single_double_precisions
+    - gemm_ex: *single_double_precisions
+  matrix_size:
+    - { M:   16, N:   16, K:   16, lda:   16, ldb:   16, ldc:   16, ldd:   16 }
+    - { M:  128, N:  255, K:  129, lda:  255, ldb:  255, ldc:  128, ldd:  128 }
+    - { M:  512, N:  512, K: 1024, lda: 1024, ldb: 1024, ldc:  512, ldd:  512 }
+    - { M: 1000, N: 1003, K: 1001, lda: 1003, ldb: 1003, ldc: 1000, ldd: 1000 }
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: T, transB: N }
+    - { transA: T, transB: T }
+  alpha_beta:
+    - { alpha: 1, beta: 0 }
+    - { alpha: 2, beta: -3 }
+  emulation: 1
+  emulation_strategy: 2
+  gpu_arch: '950'
+
+# Emulation must not read past the end of an A or B row of odd length k. pad: 0 makes each
+# matrix end exactly at the end of its allocation, so a read of one element past the last row
+# faults. The first case of each block is k-chunked as in gemm_ex_k_chunking_outofplace
+# (lda*K*sizeof(T) exceeds 2^31 - 1, so K=256 is split into 255 and 1); the others are single
+# calls with k = 1 or 3 whose last A (transA: T) or B (transB: N) row ends at the end of a
+# 2 MiB matrix. These blocks run native GEMM on every architecture; the *_emulated copies below
+# repeat them with emulation on.
+- name: gemm_ex_emulation_odd_k_row_end
+  category: nightly
+  function:
+    - gemm_ex: *double_precision
+  arguments:
+    - { transA: N, transB: N, M: 64, N: 1024, K: 256, lda: 1048576, ldb: 256, ldc: 64, ldd: 64 }
+    - { transA: T, transB: N, M: 262144, N: 64, K: 1, lda: 1, ldb: 1, ldc: 262144, ldd: 262144 }
+    - { transA: T, transB: N, M: 262144, N: 64, K: 3, lda: 3, ldb: 3, ldc: 262144, ldd: 262144 }
+    - { transA: N, transB: N, M: 64, N: 262144, K: 1, lda: 64, ldb: 1, ldc: 64, ldd: 64 }
+  alpha: 1
+  beta: [ 0, 2 ]
+  pad: 0
+  os_flags: LINUX
+
+- name: gemm_ex_emulation_odd_k_row_end
+  category: nightly
+  function:
+    - gemm_ex: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 64, N: 2048, K: 256, lda: 2097152, ldb: 256, ldc: 64, ldd: 64 }
+    - { transA: T, transB: N, M: 524288, N: 64, K: 1, lda: 1, ldb: 1, ldc: 524288, ldd: 524288 }
+    - { transA: N, transB: N, M: 64, N: 524288, K: 1, lda: 64, ldb: 1, ldc: 64, ldd: 64 }
+  alpha: 1
+  beta: [ 0, 2 ]
+  pad: 0
+  os_flags: LINUX
+
+- name: gemm_ex_emulation_odd_k_row_end_emulated
+  category: nightly
+  function:
+    - gemm_ex: *double_precision
+  arguments:
+    - { transA: N, transB: N, M: 64, N: 1024, K: 256, lda: 1048576, ldb: 256, ldc: 64, ldd: 64 }
+    - { transA: T, transB: N, M: 262144, N: 64, K: 1, lda: 1, ldb: 1, ldc: 262144, ldd: 262144 }
+    - { transA: T, transB: N, M: 262144, N: 64, K: 3, lda: 3, ldb: 3, ldc: 262144, ldd: 262144 }
+    - { transA: N, transB: N, M: 64, N: 262144, K: 1, lda: 64, ldb: 1, ldc: 64, ldd: 64 }
+  alpha: 1
+  beta: [ 0, 2 ]
+  pad: 0
+  emulation: 1
+  emulation_strategy: 2
+  gpu_arch: '950'
+  os_flags: LINUX
+
+- name: gemm_ex_emulation_odd_k_row_end_emulated
+  category: nightly
+  function:
+    - gemm_ex: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 64, N: 2048, K: 256, lda: 2097152, ldb: 256, ldc: 64, ldd: 64 }
+    - { transA: T, transB: N, M: 524288, N: 64, K: 1, lda: 1, ldb: 1, ldc: 524288, ldd: 524288 }
+    - { transA: N, transB: N, M: 64, N: 524288, K: 1, lda: 64, ldb: 1, ldc: 64, ldd: 64 }
+  alpha: 1
+  beta: [ 0, 2 ]
+  pad: 0
+  emulation: 1
+  emulation_strategy: 2
+  gpu_arch: '950'
+  os_flags: LINUX
+
 ...

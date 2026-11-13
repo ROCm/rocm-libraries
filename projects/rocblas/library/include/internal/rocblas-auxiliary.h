@@ -113,6 +113,44 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_math_mode(rocblas_handle    handle,
 ROCBLAS_EXPORT rocblas_status rocblas_get_math_mode(rocblas_handle     handle,
                                                     rocblas_math_mode* math_mode);
 
+/*! \brief Set the floating-point emulation strategy of the handle.
+ *  \details
+ *  Applies to ``f64_r`` and ``f32_r`` GEMM on the hipBLASLt backend for which fixed-point
+ *  emulation is requested (``ROCBLAS_EMULATE_DOUBLE_PRECISION``,
+ *  ``ROCBLAS_EMULATE_SINGLE_PRECISION``, or hipBLASLt's ``HIPBLAS_EMULATE_*``), including the
+ *  GEMMs used inside other Level 3 functions. ``rocblas_emulation_strategy_performant``
+ *  emulates only when hipBLASLt predicts emulation to be faster, ``rocblas_emulation_strategy_eager``
+ *  whenever emulation is supported, and ``rocblas_emulation_strategy_default`` (the default)
+ *  leaves the choice to hipBLASLt's ``HIPBLAS_EMULATION_STRATEGY`` environment variable.
+ *  ``rocblas_emulation_strategy_performant`` and ``rocblas_emulation_strategy_eager`` override
+ *  that variable for calls on this handle. The strategy does not request emulation by itself.
+ *  It has effect only when rocBLAS is built against hipBLASLt 1.5.1 or later.
+ *
+ *  @param[in]
+ *  handle    [rocblas_handle]
+ *            handle to the rocBLAS library context queue.
+ *  @param[in]
+ *  strategy  [rocblas_emulation_strategy]
+ *            ``rocblas_emulation_strategy_default``, ``rocblas_emulation_strategy_performant``, or
+ *            ``rocblas_emulation_strategy_eager``. Other values return
+ *            ``rocblas_status_invalid_value`` and leave the handle unchanged.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_set_emulation_strategy(rocblas_handle             handle,
+                                                             rocblas_emulation_strategy strategy);
+
+/*! \brief Get the floating-point emulation strategy of the handle.
+ *
+ *  @param[in]
+ *  handle    [rocblas_handle]
+ *            handle to the rocBLAS library context queue.
+ *  @param[out]
+ *  strategy  [rocblas_emulation_strategy*]
+ *            the strategy set by ``rocblas_set_emulation_strategy``, or
+ *            ``rocblas_emulation_strategy_default``.
+ */
+ROCBLAS_EXPORT rocblas_status rocblas_get_emulation_strategy(rocblas_handle              handle,
+                                                             rocblas_emulation_strategy* strategy);
+
 /*! \brief  Indicates whether the pointer is on the host or device.
  */
 ROCBLAS_EXPORT rocblas_pointer_mode rocblas_pointer_to_mode(void* ptr);

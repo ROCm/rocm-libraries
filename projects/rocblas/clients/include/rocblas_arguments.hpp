@@ -158,6 +158,11 @@ struct Arguments
 
     int use_hipblaslt;
 
+    // -1: leave ROCBLAS_EMULATE_* alone; 0 or 1: set both for the test's handle.
+    int emulation;
+    // -1: do not call rocblas_set_emulation_strategy; otherwise the rocblas_emulation_strategy value.
+    int emulation_strategy;
+
     // 16 bit
     uint16_t threads;
     uint16_t streams;
@@ -254,6 +259,8 @@ struct Arguments
     OPER(flush_batch_count) SEP      \
     OPER(flush_memory_size) SEP      \
     OPER(use_hipblaslt) SEP          \
+    OPER(emulation) SEP              \
+    OPER(emulation_strategy) SEP     \
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \

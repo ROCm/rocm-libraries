@@ -1,0 +1,15 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: set_get_emulation_strategy
+  category: quick
+  function: set_get_emulation_strategy
+  precision: *single_precision
+
+- name: emulation_env_per_handle
+  category: quick
+  function: emulation_env_per_handle
+  precision: *single_precision
+...

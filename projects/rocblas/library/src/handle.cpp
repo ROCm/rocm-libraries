@@ -173,6 +173,13 @@ _rocblas_handle::_rocblas_handle()
         hipblasltEnvVar = -1;
     }
 
+    // Exactly "1" requests fixed-point emulation of f64_r / f32_r GEMM for this handle. Compare
+    // each value before the next read_env call: on Windows it returns a shared buffer.
+    const char* emulate_env  = read_env("ROCBLAS_EMULATE_DOUBLE_PRECISION");
+    emulate_double_precision = emulate_env && strcmp(emulate_env, "1") == 0;
+    emulate_env              = read_env("ROCBLAS_EMULATE_SINGLE_PRECISION");
+    emulate_single_precision = emulate_env && strcmp(emulate_env, "1") == 0;
+
     if(isHipBLASLtEnabled())
     {
         hipblasLtHandle                = std::make_shared<hipblasLtHandle_t>();

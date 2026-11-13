@@ -45,6 +45,7 @@ set(rocblas_no_tensile_test_source
     host_alloc_gtest.cpp
     set_get_pointer_mode_gtest.cpp
     set_get_atomics_mode_gtest.cpp
+    set_get_emulation_strategy_gtest.cpp
     set_get_alpha_beta_stride_gtest.cpp
     logging_mode_gtest.cpp
     ostream_threadsafety_gtest.cpp
@@ -144,6 +145,10 @@ apply_omp_settings( rocblas-test )
 target_compile_options(rocblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 
 target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
+# Set by library/CMakeLists.txt when this build can request hipBLASLt fixed-point emulation.
+if( ROCBLAS_HIPBLASLT_FP_EMULATION )
+  target_compile_definitions( rocblas-test PRIVATE ROCBLAS_CLIENTS_FP_EMULATION )
+endif()
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # HIP and tooling (OpenBLAS DLLs come from the same install CMake linked when using ILP64).

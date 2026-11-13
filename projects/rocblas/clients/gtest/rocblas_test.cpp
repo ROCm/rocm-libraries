@@ -238,6 +238,11 @@ bool rocblas_client_global_filters(const Arguments& args)
         return false; // source gemms don't support
 #endif
 
+#ifndef ROCBLAS_CLIENTS_FP_EMULATION
+    if(args.emulation > 0)
+        return false; // this build cannot request hipBLASLt fixed-point emulation
+#endif
+
     return true;
 }
 

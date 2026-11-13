@@ -234,6 +234,26 @@ if (BUILD_WITH_TENSILE)
   endif()
 endif()
 
+# Whether this build can request hipBLASLt fixed-point emulation (the same conditions as in
+# hipblaslt_host.cpp); rocblas-test skips its emulation tests otherwise. Checked on every
+# configure, so a changed hipBLASLt in an existing build directory is not hidden by a cached result.
+include( CheckCXXSourceCompiles )
+include( CMakePushCheckState )
+unset( ROCBLAS_HIPBLASLT_FP_EMULATION CACHE )
+if( BUILD_WITH_HIPBLASLT )
+  cmake_push_check_state( RESET )
+  set( CMAKE_REQUIRED_LIBRARIES roc::hipblaslt hip::host )
+  check_cxx_source_compiles( "
+#include <hipblaslt/hipblaslt.h>
+#define ROCBLAS_HIPBLASLT_1_5_1 (HIPBLASLT_VERSION_MAJOR > 1 || (HIPBLASLT_VERSION_MAJOR == 1 && (HIPBLASLT_VERSION_MINOR > 5 || (HIPBLASLT_VERSION_MINOR == 5 && HIPBLASLT_VERSION_PATCH >= 1))))
+#if !ROCBLAS_HIPBLASLT_1_5_1 || !HIPBLASLT_HAS_HIPBLAS_EMULATION_TYPES
+#error no fixed-point emulation
+#endif
+int main() { hipblasLtEmulationDesc_t d = nullptr; (void)d; return HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT == 0; }"
+    ROCBLAS_HIPBLASLT_FP_EMULATION )
+  cmake_pop_check_state()
+endif()
+
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/internal/rocblas-version.h.in"
 	"${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-version.h" )

@@ -1554,6 +1554,16 @@ try
          value<int32_t>(&arg.use_hipblaslt)->default_value(-1),
          "Whether to use hipblaslt (default: -1, always: 1, never: 0)")
 
+        ("emulation",
+         value<int32_t>(&arg.emulation)->default_value(-1),
+         "Set ROCBLAS_EMULATE_DOUBLE_PRECISION and ROCBLAS_EMULATE_SINGLE_PRECISION for the handle "
+         "(default: -1 = leave the environment alone, 1 = request emulation, 0 = do not)")
+
+        ("emulation_strategy",
+         value<int32_t>(&arg.emulation_strategy)->default_value(-1),
+         "Call rocblas_set_emulation_strategy on the handle (default: -1 = do not call, "
+         "0 = default, 1 = performant, 2 = eager)")
+
         ("function_filter",
          value<std::string>(&filter),
          "Simple strstr filter on function name only without wildcards")

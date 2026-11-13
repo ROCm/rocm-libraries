@@ -230,6 +230,20 @@ typedef enum rocblas_atomics_mode_
     rocblas_atomics_allowed = 1,
 } rocblas_atomics_mode;
 
+/*! \brief Indicates how hipBLASLt chooses between fixed-point emulation and native GEMM for
+*    ``f64_r`` and ``f32_r`` GEMM that requests emulation. The values match hipBLASLt's
+*    ``hipblasEmulationStrategy_t`` and HIP's ``hipEmulationStrategy_t``.
+*    Defaults to ``rocblas_emulation_strategy_default``.  */
+typedef enum rocblas_emulation_strategy_
+{
+    /*! \brief hipBLASLt's ``HIPBLAS_EMULATION_STRATEGY`` environment variable decides */
+    rocblas_emulation_strategy_default = 0,
+    /*! \brief Emulate when hipBLASLt predicts emulation to be faster than native GEMM */
+    rocblas_emulation_strategy_performant = 1,
+    /*! \brief Emulate whenever emulation is supported */
+    rocblas_emulation_strategy_eager = 2,
+} rocblas_emulation_strategy;
+
 /*! \brief Indicates which performance metric Tensile uses when selecting the optimal
 *    solution for gemm problems.  */
 typedef enum rocblas_performance_metric_

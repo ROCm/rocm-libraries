@@ -567,6 +567,8 @@ Arguments:
   - flush_batch_count: c_uint64
   - flush_memory_size: c_uint64
   - use_hipblaslt: c_int32
+  - emulation: c_int32
+  - emulation_strategy: c_int32
   - threads: c_uint16
   - streams: c_uint16
   - devices: c_uint8
@@ -683,5 +685,7 @@ Defaults:
   user_allocated_workspace: 0
   compute_type: -1
   use_hipblaslt: -1
+  emulation: -1
+  emulation_strategy: -1
   cleanup: true
   size_query: false
