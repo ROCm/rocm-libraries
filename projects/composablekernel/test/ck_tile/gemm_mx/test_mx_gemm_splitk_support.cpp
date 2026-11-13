@@ -151,6 +151,50 @@ TEST(MxGemmSplitKSupport, TdmV1V2CShuffleRejectSplitK)
     EXPECT_TRUE(v2(1));
 }
 
+template <typename T>
+using has_tdm_split_k = decltype(T::kSupportsTdmSplitK);
+
+template <template <typename...> class PipelineType>
+constexpr bool declares_tdm_split_k()
+{
+    using Pipeline = PipelineType<typename BuildKernel<2>::Problem>;
+    if constexpr(ck_tile::is_detected<has_tdm_split_k, Pipeline>{})
+        return static_cast<bool>(Pipeline::kSupportsTdmSplitK);
+    else
+        return false;
+}
+
+// The rule behind the cases above, checked against each TDM pipeline's own declaration rather
+// than a list: with CShuffle, MX split-K is accepted exactly when the pipeline declares
+// kSupportsTdmSplitK. Declaring it on another pipeline needs no change here; loosening the
+// kernel's guard fails every pipeline that does not declare it.
+template <template <typename...> class PipelineType>
+void expect_cshuffle_split_k_follows_declaration()
+{
+    constexpr bool declared = declares_tdm_split_k<PipelineType>();
+    const auto supports     = supports_split_k<2, PipelineType, ck_tile::CShuffleEpilogue>;
+    if constexpr(!declared)
+    {
+        EXPECT_FALSE(supports(2));
+    }
+    if(ck_tile::is_gfx125_supported())
+    {
+        EXPECT_TRUE(supports(1));
+        EXPECT_EQ(supports(2), declared);
+    }
+}
+
+TEST(MxGemmSplitKSupport, TdmCShuffleSplitKFollowsTheDeclaration)
+{
+    expect_cshuffle_split_k_follows_declaration<ck_tile::GemmPipelineAgBgCrCompTDMV1>();
+    expect_cshuffle_split_k_follows_declaration<ck_tile::GemmPipelineAgBgCrCompTDMV2>();
+    expect_cshuffle_split_k_follows_declaration<ck_tile::GemmPipelineAgBgCrCompTDMV3>();
+    if(!ck_tile::is_gfx125_supported())
+    {
+        GTEST_SKIP() << "accepting a TDM argument requires a gfx125 device";
+    }
+}
+
 TEST(MxGemmSplitKSupport, PairedPermuteNRetainsSplitK)
 {
     const auto supports =
