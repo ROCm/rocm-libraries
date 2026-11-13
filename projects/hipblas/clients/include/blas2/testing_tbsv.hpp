@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -222,14 +222,31 @@ void testing_tbsv(const Arguments& arg)
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 
+        size_t flush_batch_count
+            = hipblas_flush_batch_count(arg, (dAb.nmemb() + dx_or_b.nmemb()) * sizeof(T));
+        device_rotating_buffer<T> dAb_rot(dAb, dAb.nmemb(), flush_batch_count);
+        device_rotating_buffer<T> dx_or_b_rot(dx_or_b, dx_or_b.nmemb(), flush_batch_count);
+        CHECK_DEVICE_ALLOCATION(dAb_rot.memcheck());
+        CHECK_DEVICE_ALLOCATION(dx_or_b_rot.memcheck());
+
         int runs = arg.cold_iters + arg.iters;
         for(int iter = 0; iter < runs; iter++)
         {
+            size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
 
             DAPI_DISPATCH(hipblasTbsvFn,
-                          (handle, uplo, transA, diag, N, K, dAb, lda, dx_or_b, incx));
+                          (handle,
+                           uplo,
+                           transA,
+                           diag,
+                           N,
+                           K,
+                           dAb_rot[flush_index],
+                           lda,
+                           dx_or_b_rot[flush_index],
+                           incx));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used; // in microseconds
 

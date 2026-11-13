@@ -1,0 +1,22 @@
+---
+include: ../../../../../clients/include/hipblas_common.yaml
+
+Definitions:
+  - &sizes
+    - {N:  67108864 }
+    - {N: 100663296 }
+    - {N: 134217728 }
+    - {N: 201326592 }
+    - {N: 268435456 }
+
+Tests:
+  - name: iamax_bench
+    category: bench
+    function: iamax
+    precision: *single_double_precisions
+    alpha: 1
+    iters: 20
+    matrix_size: *sizes
+    incx: 1
+    incy: 1
+...

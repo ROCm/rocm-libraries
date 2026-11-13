@@ -9,10 +9,42 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
 import yaml
+import sys
 from pathlib import Path
 from typing import List
 
-def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, theo_max, perf_vs_perf, size_arg = 'N', filename_stem=None):
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import perf_model
+
+# A result whose bytes moved are below this many times the L2 size is flagged as cache-resident.
+CACHE_RESIDENT_FACTOR = 4
+
+
+def machine_ceilings(machine_spec_dict):
+    """(bandwidth GB/s, {peak key: GFLOP/s}) after clock and partition scaling."""
+    gbps = machine_spec_dict.get('GBps_effective', machine_spec_dict.get('GBps'))
+    peaks = machine_spec_dict.get('peak_gflops_effective') or None
+    return gbps, peaks
+
+
+def point_ceiling(funcname, prec, function_label, row, machine_spec_dict):
+    """Roofline ceiling for one result; falls back to the per-function constant in machine_spec.yaml."""
+    gbps, peaks = machine_ceilings(machine_spec_dict)
+    if row is not None:
+        ceiling = perf_model.ceiling_gflops(funcname, prec, row, gbps, peaks)
+        if ceiling:
+            return ceiling
+    return machine_spec_dict.get(function_label)
+
+
+def is_cache_resident(funcname, prec, row, machine_spec_dict):
+    l2_mb = machine_spec_dict.get('l2_mb')
+    if not l2_mb or row is None:
+        return False
+    footprint = perf_model.footprint_bytes(funcname, prec, row)
+    return footprint is not None and footprint < CACHE_RESIDENT_FACTOR * l2_mb * 1024 * 1024
+
+def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, theo_max, perf_vs_perf, size_arg = 'N', filename_stem=None, rows_dicts1=None):
     """
     plots gflops data from dictionaries, one plot for each common precision present in all dictionaries.
 
@@ -27,16 +59,21 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         theo_max (string): true for plotting performance versus theoretical maximum performance
         perf_vs_perf (string): true for plotting relative performance of one machine versus another machine
         size_arg (string): x axis title on plot.
+        rows_dicts1 (list[dict{string: dict{int: dict}}]): full CSV rows per precision and size, as given by
+            :func:`get_rows_from_file`; used for per-point theoretical maximum and cache-residency markers.
     """
     if len(gflops_dicts1) == 0:
         return
+    if rows_dicts1 is None:
+        rows_dicts1 = [{} for _ in gflops_dicts1]
 
     gflops_dict0 = gflops_dicts1[0]
     for prec in sorted(gflops_dict0.keys()):
         colors=iter(cm.rainbow(np.linspace(0,1,len(gflops_dicts1))))
         figure, axes = plt.subplots(figsize=(7,7))
 
-        for gflops_dict1, gflops_dict2, funcname, const_args_dict in zip(gflops_dicts1, gflops_dicts2, funcname_list, const_args_dicts):
+        ratio_max = 1.0
+        for gflops_dict1, gflops_dict2, funcname, const_args_dict, rows_dict1 in zip(gflops_dicts1, gflops_dicts2, funcname_list, const_args_dicts, rows_dicts1):
             cur_color = next(colors)
             if prec not in gflops_dict1 or prec not in gflops_dict2:
                 continue
@@ -64,6 +101,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                     else:
                         sorted_gflops1[i] = float("nan")
 
+            function_label = prec + "_" + funcname
             if(prec == "f32_r"):
                 function_label = "s" + funcname
             elif(prec == "f64_r"):
@@ -73,23 +111,48 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
             elif(prec == "f64_c"):
                 function_label = "z" + funcname
 
+            resident = [False] * len(sorted_sizes1)
             if(theo_max == True):
-                theo_max_value = machine_spec_dict[function_label]
-                sorted_gflops1[:] = [gf / theo_max_value for gf in sorted_gflops1]
+                rows = rows_dict1.get(prec, {})
+                ratios = []
+                for size, gf in zip(sorted_sizes1, sorted_gflops1):
+                    if size == 0:
+                        ratios.append(0.0)
+                        continue
+                    ceiling = point_ceiling(funcname, prec, function_label, rows.get(size), machine_spec_dict)
+                    if not ceiling:
+                        ratios = None
+                        break
+                    ratios.append(gf / ceiling)
+                if ratios is None:
+                    print(f"skip {function_label}: no theoretical maximum (missing --gbps / --peak-gflops, or unmodeled function)")
+                    continue
+                sorted_gflops1[:] = ratios
+                resident = [is_cache_resident(funcname, prec, rows.get(size), machine_spec_dict) for size in sorted_sizes1]
+                ratio_max = max([ratio_max] + ratios)
 
             function_label = function_label + " :  " + const_args_dict[prec]
 
-            axes.scatter(sorted_sizes1, sorted_gflops1, color=cur_color, label=function_label)
-            axes.plot(sorted_sizes1, sorted_gflops1, '-o', color=cur_color)
+            axes.plot(sorted_sizes1, sorted_gflops1, '-', color=cur_color, label=function_label)
+            axes.scatter([x for x, r in zip(sorted_sizes1, resident) if not r],
+                         [y for y, r in zip(sorted_gflops1, resident) if not r],
+                         color=cur_color)
+            if any(resident):
+                axes.scatter([x for x, r in zip(sorted_sizes1, resident) if r],
+                             [y for y, r in zip(sorted_gflops1, resident) if r],
+                             facecolors='none', edgecolors=cur_color)
 
         if not axes.has_data():
             plt.close(figure)
             continue
 
         if theo_max == True:
-            axes.set_ylim(0, 1)
+            axes.set_ylim(0, 1.05 * ratio_max)
             axes.axhline(1.0, color='gray', linewidth=1, linestyle='-', zorder=0)
             axes.set_ylabel('gflops / theoretical_maximum_gflops')
+            if machine_spec_dict.get('l2_mb'):
+                axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
+                              xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
         elif perf_vs_perf == True:
             axes.axhline(1.0, color='gray', linewidth=1, linestyle='-', zorder=0)
             axes.set_ylabel('gflops / gflops')
@@ -127,6 +190,123 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         out_dir = savedir if os.path.isabs(savedir) else os.path.join(os.getcwd(), savedir)
         figure.savefig(os.path.join(out_dir, filename), dpi=100)
         plt.close(figure)
+
+
+def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achievable_bw_frac=None):
+    """
+    One log-log roofline per compute_type for the functions in dir1: arithmetic intensity from
+    perf_model on x, measured GFLOP/s on y, under the bandwidth and compute ceilings in
+    machine_spec_dict. Also writes roofline.csv with every plotted point.
+    """
+    gbps, peaks = machine_ceilings(machine_spec_dict)
+    gbps_published = machine_spec_dict.get('GBps')
+    peaks_published = machine_spec_dict.get('peak_gflops') or {}
+    if not gbps and not peaks:
+        raise SystemExit("plot.py --roofline: machine_spec.yaml has neither GBps nor peak_gflops; "
+                         "rerun benchmark.py with --gbps and/or --peak-gflops")
+
+    points = {}
+    for function_name in function_names:
+        csv_file = os.path.join(dir1, function_name + ".csv")
+        if not _csv_has_bench_rows(csv_file):
+            print(f"skip {function_name}: no benchmark rows in {csv_file}")
+            continue
+        funcname = get_function_name(csv_file)
+        if not perf_model.has_model(funcname):
+            print(f"skip {funcname}: no performance model")
+            continue
+        for row in get_all_rows(csv_file):
+            prec = row['compute_type']
+            ai = perf_model.intensity(funcname, prec, row)
+            if ai is None:
+                continue
+            gflops = float(row['hipblas-Gflops'])
+            points.setdefault(prec, []).append({
+                'function': funcname,
+                'compute_type': prec,
+                'M': row.get('M', ''), 'N': row.get('N', ''), 'K': row.get('K', ''),
+                'ai': ai,
+                'gflops': gflops,
+                'ceiling': perf_model.ceiling_gflops(funcname, prec, row, gbps, peaks),
+                'footprint_bytes': perf_model.footprint_bytes(funcname, prec, row),
+                'cache_resident': is_cache_resident(funcname, prec, row, machine_spec_dict),
+            })
+
+    if not points:
+        print("plot.py --roofline: no modeled results to plot")
+        return
+
+    Path(savedir).mkdir(parents=True, exist_ok=True)
+    stem = "_".join(function_names)
+    with open(os.path.join(savedir, f"roofline_{stem}.csv"), 'w') as csv_out:
+        columns = ['function', 'compute_type', 'M', 'N', 'K', 'ai', 'gflops', 'ceiling',
+                   'pct_of_ceiling', 'footprint_bytes', 'cache_resident']
+        csv_out.write(",".join(columns) + "\n")
+        for prec in sorted(points):
+            for pt in points[prec]:
+                pct = 100.0 * pt['gflops'] / pt['ceiling'] if pt['ceiling'] else float('nan')
+                values = dict(pt, pct_of_ceiling=f"{pct:.2f}")
+                csv_out.write(",".join(str(values[c]) for c in columns) + "\n")
+
+    for prec in sorted(points):
+        pts = points[prec]
+        peak_key = perf_model.PRECISIONS[prec][3]
+        peak = (peaks or {}).get(peak_key)
+        peak_published = peaks_published.get(peak_key)
+
+        ai_values = [pt['ai'] for pt in pts]
+        x_lo, x_hi = min(ai_values) / 4, max(ai_values) * 4
+        if gbps and peak:
+            ridge = peak / gbps
+            x_lo, x_hi = min(x_lo, ridge / 4), max(x_hi, ridge * 4)
+        x = np.logspace(np.log10(x_lo), np.log10(x_hi), 200)
+
+        figure, axes = plt.subplots(figsize=(8, 7))
+
+        def roof(bw, pk):
+            y = np.full_like(x, np.inf)
+            if bw:
+                y = np.minimum(y, bw * x)
+            if pk:
+                y = np.minimum(y, pk)
+            return y
+
+        axes.plot(x, roof(gbps, peak), color='black', linewidth=2,
+                  label=f"ceiling ({gbps or '-'} GB/s, {peak or '-'} GFLOP/s)")
+        if (gbps_published and gbps_published != gbps) or (peak_published and peak_published != peak):
+            axes.plot(x, roof(gbps_published, peak_published), color='gray', linestyle='--', linewidth=1,
+                      label="published ceiling (before clock / partition scaling)")
+        if achievable_bw_frac and gbps:
+            axes.plot(x, roof(gbps * achievable_bw_frac, peak), color='gray', linestyle=':', linewidth=1,
+                      label=f"{achievable_bw_frac:.0%} of bandwidth")
+
+        funcs = sorted({pt['function'] for pt in pts})
+        colors = cm.rainbow(np.linspace(0, 1, len(funcs)))
+        for funcname, color in zip(funcs, colors):
+            fpts = [pt for pt in pts if pt['function'] == funcname]
+            label = perf_model.PRECISIONS[prec][0] + funcname
+            solid = [pt for pt in fpts if not pt['cache_resident']]
+            hollow = [pt for pt in fpts if pt['cache_resident']]
+            axes.scatter([pt['ai'] for pt in solid], [pt['gflops'] for pt in solid], color=color, label=label)
+            if hollow:
+                axes.scatter([pt['ai'] for pt in hollow], [pt['gflops'] for pt in hollow],
+                             facecolors='none', edgecolors=color,
+                             label=label if not solid else None)
+
+        axes.set_xscale('log')
+        axes.set_yscale('log')
+        axes.set_xlabel('arithmetic intensity (FLOP / byte)')
+        axes.set_ylabel('GFLOP/s')
+        axes.grid(True, which='both', linewidth=0.3)
+        if machine_spec_dict.get('l2_mb'):
+            axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
+                          xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
+        axes.legend(fontsize=9, loc='lower right')
+        figure.suptitle(f"{title}  {prec}")
+        figure.tight_layout(rect=(0, 0, 1.0, 0.96))
+        figure.savefig(os.path.join(savedir, f"roofline_{stem}_{prec}"), dpi=100)
+        plt.close(figure)
+
 
 def get_function_name(filename):
     function_str = "function"
@@ -191,6 +371,38 @@ def get_data_from_file(
                 cur_dict[precision] = [size_perf_tuple]
 
     return cur_dict
+
+def get_rows_from_file(filename, xaxis_str1='N', xaxis_str2='M', *, trans_a=None, trans_b=None):
+    """Full CSV rows as {compute_type: {size: {column: value}}}, keyed like :func:`get_data_from_file`."""
+    rows = {}
+    for row in get_all_rows(filename, trans_a=trans_a, trans_b=trans_b):
+        if xaxis_str1 in row:
+            size = int(row[xaxis_str1])
+        elif xaxis_str2 in row:
+            size = int(row[xaxis_str2])
+        else:
+            continue
+        rows.setdefault(row['compute_type'], {})[size] = row
+    return rows
+
+
+def get_all_rows(filename, output_param='hipblas-Gflops', *, trans_a=None, trans_b=None):
+    """Every benchmark row in a hipblas-bench CSV as a {column: value} dict."""
+    if not os.path.exists(filename):
+        return []
+    lines = open(filename, 'r').readlines()
+    rows = []
+    for i in range(0, len(lines) - 1):
+        if output_param in lines[i]:
+            arg_line = lines[i].split(",")
+            data_line = re.split(r',\s*(?![^()]*\))', lines[i+1])
+            if not _row_trans_matches(arg_line, data_line, trans_a, trans_b):
+                continue
+            row = {key.strip(): value.strip() for key, value in zip(arg_line, data_line) if key.strip()}
+            if 'compute_type' in row and output_param in row:
+                rows.append(row)
+    return rows
+
 
 tracked_param_list = [ 'transA', 'transB', 'uplo', 'diag', 'side', 'M', 'N', 'K', 'KL', 'KU', 'alpha', 'alphai', 'beta', 'betai',
                        'incx', 'incy', 'lda', 'ldb', 'ldd', 'stride_x', 'stride_y', 'stride_a', 'stride_b', 'stride_c', 'stride_d',
@@ -320,6 +532,7 @@ def plot_gemm_by_trans(
             elif not rest:
                 const_args_dict[prec] = trans_prefix
         stem = f"gemm_{trans_a}{trans_b}"
+        rows_dict1 = get_rows_from_file(csv_a, label1, label2, trans_a=trans_a, trans_b=trans_b)
         plot_data(
             title + f"  transA={trans_a} transB={trans_b}",
             [gflops_dict1],
@@ -332,6 +545,7 @@ def plot_gemm_by_trans(
             perf_vs_perf,
             x_axis_label,
             filename_stem=stem,
+            rows_dicts1=[rows_dict1],
         )
 
 
@@ -426,6 +640,10 @@ if __name__ =='__main__':
     parser.add_argument(     '--no_theo_max',     help="no perf vs theo_max", dest='theo_max', action='store_false')
     parser.add_argument(     '--perf_vs_perf',    help="perf vs perf",        dest='perf_vs_perf', default="false", action='store_true')
     parser.add_argument(     '--no_perf_vs_perf', help="no perf vs perf",     dest='perf_vs_perf', action='store_false')
+    parser.add_argument(     '--roofline',        help="roofline: GFLOP/s vs arithmetic intensity under the machine_spec.yaml ceilings",
+                                                                              dest='roofline', action='store_true')
+    parser.add_argument(     '--achievable-bw-frac', help="roofline: also draw a bandwidth line at this fraction of the ceiling (e.g. a measured achievable fraction)",
+                                                                              dest='achievable_bw_frac', type=float, default=None)
     parser.add_argument(
         '--tag-parent',
         action='store_true',
@@ -493,6 +711,9 @@ if __name__ =='__main__':
 
     args = parser.parse_args()
 
+    if sum([args.theo_max == True, args.perf_vs_perf == True, args.roofline]) > 1:
+        parser.error("select only one of --theo_max, --perf_vs_perf, --roofline")
+
     funcname_list = []
 
     gflops_dicts1 = []
@@ -554,7 +775,10 @@ if __name__ =='__main__':
         label_b=args.label_b,
     )
 
-    if (args.theo_max == True):
+    if args.roofline:
+        savedir = os.path.join(dir1, "plots_roofline")
+        title = "Roofline " + args.tag1
+    elif (args.theo_max == True):
         savedir = os.path.join(dir1, "plots_vs_theo_max")
         title = args.tag1 +  "(  performance / theoretical_maximum_performance )"
     elif (args.perf_vs_perf == True):
@@ -566,7 +790,18 @@ if __name__ =='__main__':
 
     machine_spec_yaml_file = os.path.join(dir1, "machine_spec.yaml")
 
+    if not os.path.isfile(machine_spec_yaml_file):
+        raise SystemExit(f"plot.py: missing {machine_spec_yaml_file}; run benchmark.py first")
     machine_spec_dict = yaml.safe_load(Path(machine_spec_yaml_file).read_text())
+
+    if args.theo_max == True and not (machine_spec_dict.get('GBps') or machine_spec_dict.get('peak_gflops')):
+        raise SystemExit("plot.py --theo_max: machine_spec.yaml has no theoretical maximum; "
+                         "rerun benchmark.py with --gbps and/or --peak-gflops")
+
+    if args.roofline:
+        plot_roofline(dir1, list(args.function_names), machine_spec_dict, savedir, title,
+                      achievable_bw_frac=args.achievable_bw_frac)
+        raise SystemExit(0)
 
     if args.level == "blas1":
         x_axis_label = args.label1
@@ -598,6 +833,7 @@ if __name__ =='__main__':
     gflops_dicts2 = []
     const_args_dicts = []
     funcname_list = []
+    rows_dicts1 = []
 
     for function_name in function_names:
 
@@ -620,6 +856,7 @@ if __name__ =='__main__':
 
         gflops_dicts1.append(gflops_dict1)
         gflops_dicts2.append(gflops_dict2)
+        rows_dicts1.append(get_rows_from_file(output_filename1, args.label1, args.label2))
 
         const_args_dict = get_const_args_dict(output_filename1, "hipblas-Gflops")
 
@@ -631,6 +868,7 @@ if __name__ =='__main__':
             gflops_dicts1.pop()
             gflops_dicts2.pop()
             const_args_dicts.pop()
+            rows_dicts1.pop()
             continue
         funcname_list.append(fn)
 
@@ -641,4 +879,4 @@ if __name__ =='__main__':
         raise SystemExit(1)
 
     print("plotting for: ", funcname_list)
-    plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, args.theo_max, args.perf_vs_perf, x_axis_label)
+    plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, args.theo_max, args.perf_vs_perf, x_axis_label, rows_dicts1=rows_dicts1)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -179,7 +179,8 @@ constexpr double gemv_gbyte_count(rocblas_operation transA, int64_t m, int64_t n
 template <typename T>
 constexpr double ger_gbyte_count(int64_t m, int64_t n)
 {
-    return (sizeof(T) * (m * n + m + n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (2 * m * n + m + n)) / 1e9;
 }
 
 /* \brief byte counts of HEMV */
@@ -201,21 +202,23 @@ constexpr double hbmv_gbyte_count(int64_t n, int64_t k)
 template <typename T>
 constexpr double hpmv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * ((n * (n + 1.0)) / 2.0) + 3.0 * n) / 1e9;
+    return (sizeof(T) * (((n * (n + 1.0)) / 2.0) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of HPR */
 template <typename T>
 constexpr double hpr_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read and write of A + read of x
+    return (sizeof(T) * (tri_count(n) * 2 + n)) / 1e9;
 }
 
 /* \brief byte counts of HPR2 */
 template <typename T>
 constexpr double hpr2_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + 2.0 * n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (tri_count(n) * 2 + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of SYMV */
@@ -244,14 +247,16 @@ constexpr double sbmv_gbyte_count(int64_t n, int64_t k)
 template <typename T>
 constexpr double her_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read and write of A + read of x
+    return (sizeof(T) * (tri_count(n) * 2 + n)) / 1e9;
 }
 
 /* \brief byte counts of HER2 */
 template <typename T>
 constexpr double her2_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + 2 * n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (tri_count(n) * 2 + 2 * n)) / 1e9;
 }
 
 /* \brief byte counts of SPR */

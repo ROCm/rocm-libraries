@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -446,9 +446,19 @@ void testing_gemm(const Arguments& arg)
         // we need to copy alpha and beta to the host.
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
 
+        size_t flush_batch_count
+            = hipblas_flush_batch_count(arg, (dA.nmemb() + dB.nmemb() + dC.nmemb()) * sizeof(T));
+        device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
+        device_rotating_buffer<T> dB_rot(dB, dB.nmemb(), flush_batch_count);
+        device_rotating_buffer<T> dC_rot(dC, dC.nmemb(), flush_batch_count);
+        CHECK_DEVICE_ALLOCATION(dA_rot.memcheck());
+        CHECK_DEVICE_ALLOCATION(dB_rot.memcheck());
+        CHECK_DEVICE_ALLOCATION(dC_rot.memcheck());
+
         int runs = arg.cold_iters + arg.iters;
         for(int iter = 0; iter < runs; iter++)
         {
+            size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
 
@@ -460,12 +470,12 @@ void testing_gemm(const Arguments& arg)
                            N,
                            K,
                            reinterpret_cast<Ts*>(&h_alpha),
-                           dA,
+                           dA_rot[flush_index],
                            lda,
-                           dB,
+                           dB_rot[flush_index],
                            ldb,
                            reinterpret_cast<Ts*>(&h_beta),
-                           dC,
+                           dC_rot[flush_index],
                            ldc));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;

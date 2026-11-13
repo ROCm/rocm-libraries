@@ -18,26 +18,54 @@
 --- for a single architecture with commands like                                                            ---
 ---------------------------------------------------------------------------------------------------------------
 
-     Note that the memory bandwidth in the parameter GBps needs to be defined for the architecture for which
-     you are running in the file benchmark.py. It is defined for the architectures below:
+     The memory bandwidth in GB/s comes from --gbps, from --machine-file, or from GBPS_BY_ARCH in benchmark.py
+     (gfx906, gfx908, gfx90a, gfx942, gfx950). Pass --gbps for any other part. A gfx name can cover several
+     products with different bandwidths, so prefer --gbps with the value for the exact product.
 
-    if machine_spec_dict['arch'] == 'gfx906':
-        GBps = 1000
-    elif machine_spec_dict['arch'] == 'gfx908':
-        GBps = 1100
-    elif machine_spec_dict['arch'] == 'gfx90a':
-        GBps = 1600
-    else:
-        print("do not know GBps memory bandwidth for ", machine_spec_dict['arch'])
-        print("add GBps to", sys.argv[0])
-        print("quitting ", sys.argv[0])
-        quit(
+     The theoretical maximum of each result is min(compute peak, arithmetic intensity x bandwidth), using the
+     FLOP and byte counts in perf_model.py. The compute term is used only when compute peaks are given with
+     --peak-gflops f32=<GFLOP/s>,f64=<GFLOP/s> (also f16, bf16) or with --machine-file. It is what makes BLAS3
+     and, on parts with a low FP64 peak, some FP64 BLAS2 functions compute-bound.
+
+     --machine-file <yaml> holds the same values in one file; command line options override it:
+         gbps: <GB/s>
+         peak_gflops: {f32: <GFLOP/s>, f64: <GFLOP/s>}
+         sclk_peak_mhz: <engine clock the peaks are quoted at>
+         mclk_max_mhz: <maximum memory clock>
+         l2_mb: <L2 size in MiB>
+         partitions: <number of compute partitions>
+
+     Adjusting the ceilings to the clocks the run actually got:
+         --clock-scale <f>    multiplies the compute peaks (sclk during run / sclk_peak_mhz)
+         --mclk-scale <f>     multiplies the bandwidth (mclk during run / mclk_max_mhz)
+         --auto-clock-scale   samples sclk and mclk with amd-smi during the run and uses the medians;
+                              needs sclk_peak_mhz / mclk_max_mhz. Lock the performance level first so idle
+                              periods between kernels do not pull the clocks down.
+         --partitions <n>     divides bandwidth and peaks by n when the GPU is partitioned
+     machine_spec.yaml records the published and the effective values, the clock samples and the perf level.
+
+     Cache residency: with --l2-mb, results whose bytes moved are below 4 x L2 are drawn hollow; they measure
+     cache bandwidth, not memory bandwidth. Use --sizes large (blas1/large, blas2/large; about 0.8 GB and up per
+     call) or --flush-mb <MiB> (hipblas-bench rotates through copies of the inputs so they are evicted between
+     calls) to measure memory bandwidth on parts with a large L2.
 
 # to run benchmarks, no need to run it a second time if you have run it above
 ./benchmark_plot.sh --benchmark true  --plot false --level1 true --level2 false --level3 false --tag1 my_arch
 
 # To plot data in blas1/my_arch/*.csv and blas1/my_arch/machine_spec.yaml files and output in blas1/my_arch/plot_vs_theo_max/*.png
 ./benchmark_plot.sh --benchmark false --plot true  --level1 true --level2 false --level3 false --tag1 my_arch --theo_max true
+
+
+---------------------------------------------------------------------------------
+--- roofline: GFLOP/s against arithmetic intensity under the machine ceilings ---
+---------------------------------------------------------------------------------
+
+# To plot data in blas2/my_arch/*.csv against the ceilings in machine_spec.yaml and output
+# blas2/my_arch/plots_roofline/*.png and a roofline_*.csv with the percentage of the ceiling for every result
+./benchmark_plot.sh --benchmark false --plot true  --level1 false --level2 true --level3 false --tag1 my_arch --roofline true
+
+# --achievable-bw-frac <f> also draws the bandwidth line at a fraction of the ceiling, for example a measured
+# achievable fraction for the part
 
 
 ------------------------------------------------------------
@@ -53,3 +81,11 @@
 # to plot performance of data in blas1/my_arch1/*.csv files relative to blas1/my_arch2/*.csv files and output
 # plots in blas1/my_arch1_my_arch2/plots_perf_vs_perf/*.png
 ./benchmark_plot.sh --benchmark false --plot true  --level1 true --level2 false --level3 false --tag1 my_arch1 --tag2 my_arch2 --perf_vs_perf true
+
+
+-------------
+--- tests ---
+-------------
+
+# host-only tests of perf_model.py, benchmark.py and plot.py (no GPU needed)
+python3 -m pytest tests

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -406,15 +406,37 @@ void testing_gbmv(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
+        size_t flush_batch_count
+            = hipblas_flush_batch_count(arg, (dA.nmemb() + dx.nmemb() + dy.nmemb()) * sizeof(T));
+        device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
+        device_rotating_buffer<T> dx_rot(dx, dx.nmemb(), flush_batch_count);
+        device_rotating_buffer<T> dy_rot(dy, dy.nmemb(), flush_batch_count);
+        CHECK_DEVICE_ALLOCATION(dA_rot.memcheck());
+        CHECK_DEVICE_ALLOCATION(dx_rot.memcheck());
+        CHECK_DEVICE_ALLOCATION(dy_rot.memcheck());
+
         int runs = arg.cold_iters + arg.iters;
         for(int iter = 0; iter < runs; iter++)
         {
+            size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
 
-            DAPI_DISPATCH(
-                hipblasGbmvFn,
-                (handle, transA, M, N, KL, KU, d_alpha, dA, lda, dx, incx, d_beta, dy, incy));
+            DAPI_DISPATCH(hipblasGbmvFn,
+                          (handle,
+                           transA,
+                           M,
+                           N,
+                           KL,
+                           KU,
+                           d_alpha,
+                           dA_rot[flush_index],
+                           lda,
+                           dx_rot[flush_index],
+                           incx,
+                           d_beta,
+                           dy_rot[flush_index],
+                           incy));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 
