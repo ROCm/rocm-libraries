@@ -264,6 +264,20 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForAsymmetricPadding)
     expectDeclined(spec, "asymmetric padding");
 }
 
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForNegativePrePadding)
+{
+    auto spec = defaultSpec();
+    spec.setPadding({-1, -1});
+    expectDeclined(spec, "pre_padding values must be in [0, INT_MAX]");
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForNegativePostPadding)
+{
+    auto spec = defaultSpec();
+    spec.postPadding = std::vector<int64_t>{-1, -1};
+    expectDeclined(spec, "post_padding values must be in [0, INT_MAX]");
+}
+
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPaddingEqualToWindow)
 {
     expectDeclined(
@@ -294,6 +308,41 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForMismatchedPaddingModeWithout
     expectAccepted(spec);
 }
 
+// PADDING_NOT_SET is the frontend's default, so graphs built without a padding mode take this
+// rule; MIOpen still pads max pooling with -inf and average pooling with zeros.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPaddingModeNotSetWithPadding)
+{
+    for(const auto mode : {ResampleMode::MAXPOOL,
+                           ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                           ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameResampleMode(mode));
+        auto spec = defaultSpec(mode);
+        spec.paddingMode = PaddingMode::PADDING_NOT_SET;
+        expectDeclined(spec, "requires all padding to be zero");
+    }
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForAveragePoolingWithNegInfPaddingAndPadding)
+{
+    for(const auto mode :
+        {ResampleMode::AVGPOOL_EXCLUDE_PADDING, ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameResampleMode(mode));
+        auto spec = defaultSpec(mode);
+        spec.paddingMode = PaddingMode::NEG_INF_PAD;
+        expectDeclined(spec, "requires all padding to be zero");
+    }
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPaddingModeNotSetWithoutPadding)
+{
+    auto spec
+        = ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL, {2, 3, 6, 6}, {3, 3}, {2, 2}, {0, 0});
+    spec.paddingMode = PaddingMode::PADDING_NOT_SET;
+    expectAccepted(spec);
+}
+
 // ============================================================================
 // Shape rules.
 // ============================================================================
@@ -303,6 +352,14 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForBatchMismatch)
     auto spec = defaultSpec();
     spec.y.dims = {1, 3, 3, 3};
     spec.y.strides = std::vector<int64_t>{27, 9, 3, 1};
+    expectDeclined(spec, "same batch and channel dimensions");
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelMismatch)
+{
+    auto spec = defaultSpec();
+    spec.y.dims = {2, 4, 3, 3};
+    spec.y.strides = std::vector<int64_t>{36, 9, 3, 1};
     expectDeclined(spec, "same batch and channel dimensions");
 }
 
