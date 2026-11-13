@@ -62,9 +62,12 @@ struct RppCpuFftPlan {
     Rpp32s n = 0;  // transform size (nfft)
     bool isPow2 = false;
 
-    // radix-2 tables for size n (used when isPow2 == true)
-    std::vector<Rpp32u> bitRev;
-    std::vector<RppFftComplex> twiddles;  // twiddles[k] = exp(-2*pi*i*k/n), k in [0, n/2)
+    // radix-2 tables (used when isPow2 == true). A real signal of length n is transformed as
+    // a complex FFT of length n/2, so the permutation and inner twiddles are sized for n/2;
+    // `twiddles` is the n-point table used to recombine the halves.
+    std::vector<Rpp32u> bitRev;               // bit-reversal for length n/2
+    std::vector<RppFftComplex> twiddlesHalf;  // exp(-2*pi*i*k/(n/2)), k in [0, n/4)
+    std::vector<RppFftComplex> twiddles;      // exp(-2*pi*i*k/n), k in [0, n/2)
 
     // Bluestein tables (used when isPow2 == false)
     Rpp32s m = 0;  // convolution length = next power of two >= 2n-1
@@ -106,12 +109,7 @@ inline void rpp_fft_build_twiddles(std::vector<RppFftComplex>& tw, Rpp32s len) {
     }
 }
 
-// Textbook complex multiply on the real/imaginary parts.
-//
-// operator* on std::complex is deliberately avoided in the inner loops: the standard requires the
-// C99 Annex G NaN/infinity fixup, so GCC compiles every complex multiply into an out-of-line
-// libgcc call (__muldc3) rather than inline arithmetic. That call, not the arithmetic, dominates
-// the butterfly. FFT inputs here are always finite, so the fixup is dead weight.
+// Complex multiply on raw parts: std::complex's operator* compiles to an out-of-line libgcc call.
 inline RppFftComplex rpp_fft_cmul(const RppFftComplex& a, const RppFftComplex& b) {
     const Rpp64f ar = a.real(), ai = a.imag(), br = b.real(), bi = b.imag();
     return RppFftComplex(ar * br - ai * bi, ar * bi + ai * br);
@@ -160,7 +158,8 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
     plan.n = nfft;
     plan.isPow2 = rpp_fft_is_pow2(nfft);
     if (plan.isPow2) {
-        rpp_fft_build_bitrev(plan.bitRev, nfft);
+        rpp_fft_build_bitrev(plan.bitRev, nfft / 2);
+        rpp_fft_build_twiddles(plan.twiddlesHalf, nfft / 2);
         rpp_fft_build_twiddles(plan.twiddles, nfft);
         return;
     }
@@ -191,19 +190,51 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
 
 // Forward FFT of a real-valued signal (imaginary part assumed zero). Writes the first
 // numBins = n/2 + 1 complex bins to out. scratch must hold at least:
-//     n  elements when plan.isPow2 == true
-//     m  elements otherwise
-// scratch and out are caller-owned (use one set per thread for concurrent execution).
+//     n/2 elements when plan.isPow2 == true
+//     m   elements otherwise
+// scratch and out are caller-owned, must not alias, and one set is needed per thread.
 inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in, Rpp32s inLen,
                                      RppFftComplex* out, RppFftComplex* scratch) {
     const Rpp32s n = plan.n;
     const Rpp32s numBins = n / 2 + 1;
 
     if (plan.isPow2) {
-        for (Rpp32s i = 0; i < n; i++)
-            scratch[i] = RppFftComplex((i < inLen) ? (Rpp64f)in[i] : 0.0, 0.0);
-        rpp_fft_radix2_forward(scratch, n, plan.bitRev, plan.twiddles);
-        for (Rpp32s i = 0; i < numBins; i++) out[i] = scratch[i];
+        if (n == 1) {
+            out[0] = RppFftComplex((inLen > 0) ? (Rpp64f)in[0] : 0.0, 0.0);
+            return;
+        }
+
+        // Real-input transform. Pack the n real samples into n/2 complex ones,
+        // z[k] = x[2k] + i*x[2k+1], transform those, then recombine. This halves the
+        // transform length versus running a full complex FFT over a zero imaginary part.
+        const Rpp32s h = n / 2;
+        for (Rpp32s k = 0; k < h; k++) {
+            const Rpp32s e = 2 * k, o = e + 1;
+            const Rpp64f re = (e < inLen) ? (Rpp64f)in[e] : 0.0;
+            const Rpp64f im = (o < inLen) ? (Rpp64f)in[o] : 0.0;
+            scratch[k] = RppFftComplex(re, im);
+        }
+        rpp_fft_radix2_forward(scratch, h, plan.bitRev, plan.twiddlesHalf);
+
+        // Z[0] holds both purely real end bins: X[0] = Re+Im and X[n/2] = Re-Im.
+        const Rpp64f z0r = scratch[0].real(), z0i = scratch[0].imag();
+        out[0] = RppFftComplex(z0r + z0i, 0.0);
+        out[h] = RppFftComplex(z0r - z0i, 0.0);
+
+        // For the rest, split Z into the spectra of the even and odd samples and recombine:
+        //     B  = conj(Z[h-k])
+        //     Ze = (Z[k] + B) / 2            (even samples)
+        //     Zo = -i * (Z[k] - B) / 2       (odd samples)
+        //     X[k] = Ze + exp(-2*pi*i*k/n) * Zo
+        for (Rpp32s k = 1; k < h; k++) {
+            const Rpp64f ar = scratch[k].real(), ai = scratch[k].imag();
+            const Rpp64f br = scratch[h - k].real(), bi = -scratch[h - k].imag();
+            const Rpp64f zer = 0.5 * (ar + br), zei = 0.5 * (ai + bi);
+            const Rpp64f dr = 0.5 * (ar - br), di = 0.5 * (ai - bi);
+            const Rpp64f zor = di, zoi = -dr;
+            const Rpp64f wr = plan.twiddles[k].real(), wi = plan.twiddles[k].imag();
+            out[k] = RppFftComplex(zer + wr * zor - wi * zoi, zei + wr * zoi + wi * zor);
+        }
         return;
     }
 
