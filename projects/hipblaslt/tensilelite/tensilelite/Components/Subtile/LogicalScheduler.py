@@ -5848,13 +5848,18 @@ class LogicalScheduler:
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
         if self.halfDisjoint and label.startswith("MAINLOOP"):
+            barrier_gap_reads = (label == "MAINLOOP_C1" and self.config.dualPeriodScale
+                                 and self._mainloopC0Schedule is not None)
+            # The moved read can leave a VALU leading its old gap, so the
+            # VALU-leader pass sees each body after the move.
+            if barrier_gap_reads:
+                readInOpeningBarrierGap(module, lr_reads(is_data_lr))
             issueSaluFirst(module)
             keepValuBehindLeader(module)
             # C1 still places scale refreshes in C0, so C0 is final only here.
-            if (label == "MAINLOOP_C1" and self.config.dualPeriodScale
-                    and self._mainloopC0Schedule is not None):
+            if barrier_gap_reads:
                 readInOpeningBarrierGap(self._mainloopC0Schedule, self._mainloopC0DataReads)
-                readInOpeningBarrierGap(module, lr_reads(is_data_lr))
+                keepValuBehindLeader(self._mainloopC0Schedule)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
