@@ -52,6 +52,7 @@
 #include "utility.hpp"
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/LongPath.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -3696,12 +3697,12 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
         if(relpath)
         {
             auto full_path = p / (*relpath);
-            if(std::filesystem::exists(full_path))
+            if(std::filesystem::exists(TensileLite::longPathSafe(full_path.string())))
                 return full_path;
             return {};
         }
 
-        if(std::filesystem::exists(p))
+        if(std::filesystem::exists(TensileLite::longPathSafe(p.string())))
             return p;
         return {};
     };

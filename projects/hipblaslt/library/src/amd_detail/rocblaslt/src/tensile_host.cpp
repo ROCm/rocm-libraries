@@ -62,6 +62,7 @@
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
+#include <Tensile/LongPath.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
@@ -3414,8 +3415,10 @@ namespace
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
-                       || std::filesystem::exists(mapping_yaml))
+                    if(std::filesystem::exists(TensileLite::longPathSafe(mapping_msgpack.string()))
+                       || std::filesystem::exists(
+                           TensileLite::longPathSafe(mapping_msgpack_gz.string()))
+                       || std::filesystem::exists(TensileLite::longPathSafe(mapping_yaml.string())))
                     {
                         path = std::move(processor_path);
                     }
@@ -3434,7 +3437,8 @@ namespace
             if(!lazyLoad)
             {
                 bool no_match = true;
-                for(const auto& entry : std::filesystem::directory_iterator(path))
+                for(const auto& entry :
+                    std::filesystem::directory_iterator(TensileLite::longPathSafe(path.string())))
                 {
                     auto filename = entry.path().filename();
                     if(codeObjectTargets(filename, processor))
@@ -3491,8 +3495,9 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath)
-                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
+                if(!std::filesystem::exists(TensileLite::longPathSafe(tensileLibPath.string()))
+                   && !std::filesystem::exists(
+                       TensileLite::longPathSafe(tensileLibPath.string() + ".zlib")))
                 {
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
                               << " (or .zlib variant): " << strerror(errno) << std::endl;

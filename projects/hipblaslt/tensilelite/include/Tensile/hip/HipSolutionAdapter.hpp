@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/Tensile.hpp>
 #include <hip/hip_runtime.h>
 #include <unordered_set>
@@ -35,6 +36,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #include <tensilelitehost/export.h>
 
@@ -49,9 +52,14 @@ namespace TensileLite
             // be tested without a GPU or process-wide HIP symbol interposition.
             struct ModuleApi
             {
-                decltype(&hipModuleLoad)   load         = hipModuleLoad;
-                decltype(&hipModuleUnload) unload       = hipModuleUnload;
-                decltype(&hipGetLastError) getLastError = hipGetLastError;
+                decltype(&hipModuleLoad)     load         = hipModuleLoad;
+                decltype(&hipModuleUnload)   unload       = hipModuleUnload;
+                decltype(&hipGetLastError)   getLastError = hipGetLastError;
+                decltype(&hipModuleLoadData) loadData     = hipModuleLoadData;
+                // Gives the path to open a code object with. When it differs
+                // from the path given, hipModuleLoad could not open the file,
+                // so the adapter reads it and calls loadData instead.
+                decltype(&longPathSafe) resolvePath = longPathSafe;
             };
 
             SolutionAdapter();
@@ -164,6 +172,14 @@ namespace TensileLite
 
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
+
+            // Code objects read into memory because their path was too long for
+            // hipModuleLoad. HIP keeps using the buffer passed to
+            // hipModuleLoadData, so each one lives until its module is unloaded.
+            // Shared so the code that loads a module can keep its own reference
+            // until the module is recorded here or unloaded.
+            std::unordered_map<hipModule_t, std::shared_ptr<const std::vector<char>>>
+                m_moduleImages;
 
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds
