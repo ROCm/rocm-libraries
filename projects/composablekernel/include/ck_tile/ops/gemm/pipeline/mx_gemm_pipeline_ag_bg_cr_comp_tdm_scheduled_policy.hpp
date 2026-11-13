@@ -69,11 +69,11 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
 };
 
 /**
- * @brief Problem of MxGemmPipelineAgBgCrCompTDMScheduled: D = alpha * A @ B^T + beta * C.
+ * @brief Problem of MxGemmPipelineAgBgCrCompTDMScheduled: E = A @ B^T.
  *
- * A is M x K and B is N x K, both K-contiguous (RCR); C and D are M x N row-major. A and B are
+ * A is M x K and B is N x K, both K-contiguous (RCR); E is M x N row-major. A and B are
  * pk_fp4_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in the K-major
- * layout [ceil(K / 128)][M or N][4] (see host/mx_scale_kmajor.hpp). ODataType (C and D) is fp8_t
+ * layout [ceil(K / 128)][M or N][4] (see host/mx_scale_kmajor.hpp). ODataType (E) is fp8_t
  * (saturating), half_t or bf16_t.
  *
  * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,

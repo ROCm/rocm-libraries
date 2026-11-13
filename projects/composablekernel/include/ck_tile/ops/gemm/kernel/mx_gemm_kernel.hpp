@@ -63,82 +63,6 @@ struct MxGemmKernelArgs : public UniversalGemmKernelArgs<NumATensor, NumBTensor,
     const std::array<const void*, NumBTensor> bs_scale_ptr;
 };
 
-/**
- * @brief Host arguments of an MxGemmKernel whose epilogue computes E = alpha * acc + beta * C,
- *        with C the single D tensor (MxAlphaBetaEpilogue): MxGemmHostArgs plus alpha and beta.
- *        C is not read when beta == 0 and may be null.
- */
-template <index_t NumATensor = 1, index_t NumBTensor = 1, index_t NumDTensor = 1>
-struct MxGemmAlphaBetaHostArgs : public MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>
-{
-    using BaseHostArgs = MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>;
-
-    CK_TILE_HOST explicit MxGemmAlphaBetaHostArgs(
-        const std::array<const void*, NumATensor>& as_ptr_,
-        const std::array<const void*, NumATensor>& as_scale_ptr_,
-        const std::array<const void*, NumBTensor>& bs_ptr_,
-        const std::array<const void*, NumBTensor>& bs_scale_ptr_,
-        const std::array<const void*, NumDTensor>& ds_ptr_,
-        void* e_ptr_,
-        index_t k_batch_,
-        index_t M_,
-        index_t N_,
-        index_t K_,
-        const std::array<index_t, NumATensor>& stride_As_,
-        const std::array<index_t, NumBTensor>& stride_Bs_,
-        const std::array<index_t, NumDTensor>& stride_Ds_,
-        index_t stride_E_,
-        float alpha_ = 1.0f,
-        float beta_  = 0.0f)
-        : BaseHostArgs(as_ptr_,
-                       as_scale_ptr_,
-                       bs_ptr_,
-                       bs_scale_ptr_,
-                       ds_ptr_,
-                       e_ptr_,
-                       k_batch_,
-                       M_,
-                       N_,
-                       K_,
-                       stride_As_,
-                       stride_Bs_,
-                       stride_Ds_,
-                       stride_E_),
-          alpha(alpha_),
-          beta(beta_)
-    {
-    }
-
-    float alpha;
-    float beta;
-};
-
-/**
- * @brief Kernel arguments of MxGemmAlphaBetaHostArgs. The members UniversalGemmKernel reads are
- *        those of UniversalGemmKernelArgs; the operands, the problem, alpha and beta lead, the
- *        strides and k_batch the raw-operand pipelines do not read on the device trail.
- */
-template <index_t NumATensor = 1, index_t NumBTensor = 1, index_t NumDTensor = 1>
-struct MxGemmAlphaBetaKernelArgs
-{
-    std::array<const void*, NumATensor> as_ptr;
-    std::array<const void*, NumBTensor> bs_ptr;
-    std::array<const void*, NumATensor> as_scale_ptr;
-    std::array<const void*, NumBTensor> bs_scale_ptr;
-    std::array<const void*, NumDTensor> ds_ptr;
-    void* e_ptr;
-    index_t M;
-    index_t N;
-    index_t K;
-    float alpha;
-    float beta;
-    std::array<index_t, NumATensor> stride_As;
-    std::array<index_t, NumBTensor> stride_Bs;
-    std::array<index_t, NumDTensor> stride_Ds;
-    index_t stride_E;
-    index_t k_batch;
-};
-
 namespace detail {
 // The operand types MxGemmKernel takes K tails for on the TDM pipelines in any pair.
 template <typename T>
@@ -373,7 +297,8 @@ struct MxGemmKernel
     template <typename T>
     using has_kernel_name = decltype(T::GetKernelName());
     template <typename T>
-    using has_alpha_beta = decltype(T::kAlphaBeta);
+    using has_unsupported_reason =
+        decltype(T::GetUnsupportedReason(index_t{}, index_t{}, index_t{}));
 
     /// The pipeline reads K-major scales, [ceil(K / 128)][MN] int32 packs (comp_tdm_scheduled): the
     /// scale windows view that layout, and the A pointers are not shifted to the M tile.
@@ -383,14 +308,10 @@ struct MxGemmKernel
         else
             return false;
     }();
-    /// The epilogue stores E = alpha * acc + beta * Ds[0] (MxAlphaBetaEpilogue): the arguments
-    /// carry alpha and beta, at k_batch == 1 on packed operands (IsSupportedArgument).
-    static constexpr bool kAlphaBeta = []() {
-        if constexpr(is_detected<has_alpha_beta, EpiloguePipeline>{})
-            return EpiloguePipeline::kAlphaBeta;
-        else
-            return false;
-    }();
+    /// The pipeline checks a problem itself (GetUnsupportedReason(M, N, K), comp_tdm_scheduled):
+    /// IsSupportedArgument runs that check, with packed operands and E at k_batch == 1, instead of
+    /// the generic MX TDM checks.
+    static constexpr bool kPipelineChecks = is_detected<has_unsupported_reason, MxGemmPipeline>{};
     /// The pipeline sets the launch's threads and cluster (its tuning), not the tile shape.
     static constexpr bool kPipelineLaunch = is_detected<has_launch_threads, MxGemmPipeline>{};
 
@@ -402,6 +323,14 @@ struct MxGemmKernel
                               TilePartitioner::NPerBlock == MxGemmPipeline::kTileN &&
                               TilePartitioner::KPerBlock == MxGemmPipeline::kTileK,
                           "MX GEMM: the tile partitioner's tile must be the pipeline's");
+            static_assert(max(MxGemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()) <=
+                              MxGemmPipeline::kLdsCapacityBytes,
+                          "MX GEMM: the pipeline's and the epilogue's LDS exceed the capacity");
+        }
+        if constexpr(kPipelineChecks)
+        {
+            static_assert(BaseKernel::NumDTensor == 0,
+                          "MX GEMM: the pipeline's epilogues take no Ds tensors");
         }
         if constexpr(is_detected<has_grid_x_walks_n, MxGemmPipeline>{})
         {
@@ -412,11 +341,6 @@ struct MxGemmKernel
                         GemmTile2DNMajorPartitioner<typename TilePartitioner::BlockGemmShape>>,
                 "MX GEMM: the pipeline walks N tiles along grid x and M tiles along grid y, with "
                 "its cluster over both, as GemmTile2DNMajorPartitioner");
-        }
-        if constexpr(kAlphaBeta)
-        {
-            static_assert(std::is_same_v<typename EpiloguePipeline::Pipeline, MxGemmPipeline>,
-                          "MX GEMM: the epilogue must store this pipeline's accumulators");
         }
         return true;
     }
@@ -601,13 +525,8 @@ struct MxGemmKernel
         return integer_divide_ceil(K, BlockScaleSize * KXdlPackEff);
     }
 
-    using HostArgs = std::conditional_t<kAlphaBeta,
-                                        MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>,
-                                        MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>>;
-    using KernelArgs =
-        std::conditional_t<kAlphaBeta,
-                           MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>,
-                           MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>>;
+    using HostArgs   = MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>;
+    using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
     CK_TILE_HOST static constexpr MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>
     MakeKernelArgs(const MxGemmHostArgs<NumATensor, NumBTensor, NumDTensor>& hostArgs)
@@ -630,71 +549,57 @@ struct MxGemmKernel
             hostArgs.bs_scale_ptr};
     }
 
-    CK_TILE_HOST static constexpr MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>
-    MakeKernelArgs(const MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>& hostArgs)
+    /// For a pipeline that checks problems itself (kPipelineChecks): nullptr if this instance runs
+    /// `kargs`, else why not. Its operands and E are packed and it runs at k_batch == 1.
+    CK_TILE_HOST static const char* GetUnsupportedReason(const KernelArgs& kargs)
     {
-        static_assert(kAlphaBeta, "MX GEMM: alpha and beta need an MxAlphaBetaEpilogue");
-        return MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>{hostArgs.as_ptr,
-                                                                             hostArgs.bs_ptr,
-                                                                             hostArgs.as_scale_ptr,
-                                                                             hostArgs.bs_scale_ptr,
-                                                                             hostArgs.ds_ptr,
-                                                                             hostArgs.e_ptr,
-                                                                             hostArgs.M,
-                                                                             hostArgs.N,
-                                                                             hostArgs.K,
-                                                                             hostArgs.alpha,
-                                                                             hostArgs.beta,
-                                                                             hostArgs.stride_As,
-                                                                             hostArgs.stride_Bs,
-                                                                             hostArgs.stride_Ds,
-                                                                             hostArgs.stride_E,
-                                                                             hostArgs.k_batch};
-    }
-
-    /// With alpha and beta: nullptr if this instance runs `kargs`, else why not.
-    CK_TILE_HOST static const char*
-    GetUnsupportedReason(const MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
-    {
-        static_assert(kAlphaBeta, "MX GEMM: GetUnsupportedReason checks alpha / beta arguments");
+        static_assert(kPipelineChecks, "MX GEMM: the pipeline does not check problems itself");
         if(kargs.k_batch != 1)
             return "k_batch must be 1";
         if(kargs.stride_As[0] != kargs.K || kargs.stride_Bs[0] != kargs.K)
             return "A and B must be packed: their strides must be K";
-        if(kargs.stride_E != kargs.N || (kargs.beta != 0.0f && kargs.stride_Ds[0] != kargs.N))
-            return "C and D must be packed: their strides must be N";
+        if(kargs.stride_E != kargs.N)
+            return "E must be packed: its stride must be N";
         if(const char* why = MxGemmPipeline::GetUnsupportedReason(kargs.M, kargs.N, kargs.K))
             return why;
         if(kargs.as_ptr[0] == nullptr || kargs.bs_ptr[0] == nullptr ||
            kargs.as_scale_ptr[0] == nullptr || kargs.bs_scale_ptr[0] == nullptr ||
-           kargs.e_ptr == nullptr || (kargs.beta != 0.0f && kargs.ds_ptr[0] == nullptr))
+           kargs.e_ptr == nullptr)
             return "null operand";
         return nullptr;
     }
 
-    CK_TILE_HOST static const char*
-    GetUnsupportedReason(const MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>& h)
+    CK_TILE_HOST static const char* GetUnsupportedReason(const HostArgs& h)
     {
         return GetUnsupportedReason(MakeKernelArgs(h));
     }
 
-    template <typename Args>
-    CK_TILE_HOST static auto IsSupportedArgument(const Args& args)
-        -> std::enable_if_t<
-            std::is_base_of_v<MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>,
-                              Args> ||
-                std::is_base_of_v<MxGemmAlphaBetaHostArgs<NumATensor, NumBTensor, NumDTensor>,
-                                  Args>,
-            bool>
+    CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        const char* why = GetUnsupportedReason(args);
-        if(why != nullptr && EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-            CK_TILE_ERROR(GetName(), ": ", why);
-        return why == nullptr;
+        if constexpr(kPipelineChecks)
+        {
+            // The pipeline's check covers the shape, the K tail and the 2^31 offsets (its Wide
+            // traits) for its K-major scales; the generic MX TDM shape checks assume MN-major
+            // scale views.
+            if(const char* why = GetUnsupportedReason(kargs))
+            {
+                if(EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    CK_TILE_ERROR(GetName(), ": ", why);
+                return false;
+            }
+            return BaseKernel::IsTdmArgumentSupported("MX GEMM",
+                                                      kargs.k_batch,
+                                                      kargs.K,
+                                                      kargs.as_ptr[0],
+                                                      kargs.bs_ptr[0],
+                                                      kargs.e_ptr) &&
+                   BaseKernel::IsTdmDeviceSupported("MX GEMM");
+        }
+        else
+            return IsGenericArgumentSupported(kargs);
     }
 
-    CK_TILE_HOST static bool
-    IsSupportedArgument(const MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
+    CK_TILE_HOST static bool IsGenericArgumentSupported(const KernelArgs& kargs)
     {
         const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
 
@@ -1060,41 +965,6 @@ struct MxGemmKernel
             number<static_cast<index_t>(NumTensor)>{});
     }
 
-    /// The UniversalGemmKernel arguments of `kargs`, for its window makers.
-    CK_TILE_DEVICE static const typename BaseKernel::KernelArgs&
-    BaseArgs(const MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
-    {
-        return kargs;
-    }
-    CK_TILE_DEVICE static typename BaseKernel::KernelArgs
-    BaseArgs(const MxGemmAlphaBetaKernelArgs<NumATensor, NumBTensor, NumDTensor>& kargs)
-    {
-        return {kargs.as_ptr,
-                kargs.bs_ptr,
-                kargs.ds_ptr,
-                kargs.e_ptr,
-                kargs.M,
-                kargs.N,
-                kargs.K,
-                kargs.stride_As,
-                kargs.stride_Bs,
-                kargs.stride_Ds,
-                kargs.stride_E,
-                kargs.k_batch};
-    }
-
-    /// The epilogue of this launch: with alpha and beta, set from the arguments.
-    CK_TILE_DEVICE static EpiloguePipeline MakeEpilogue([[maybe_unused]] const KernelArgs& kargs)
-    {
-        EpiloguePipeline epilogue{};
-        if constexpr(kAlphaBeta)
-        {
-            epilogue.alpha = kargs.alpha;
-            epilogue.beta  = kargs.beta;
-        }
-        return epilogue;
-    }
-
     template <memory_operation_enum DstInMemOp>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
@@ -1160,13 +1030,12 @@ struct MxGemmKernel
         const auto& as_block_window = [&]() {
             if constexpr(MxGemmPipeline::Preshuffle)
             {
-                return BaseKernel::MakeABlockWindows(
-                    as_ptr_, BaseArgs(kargs), kargs.K, block_idx_m_);
+                return BaseKernel::MakeABlockWindows(as_ptr_, kargs, kargs.K, block_idx_m_);
             }
             else
             {
                 return BaseKernel::MakeABlockWindows(
-                    as_ptr_, BaseArgs(kargs), splitk_batch_offset.splitted_k, block_idx_m_);
+                    as_ptr_, kargs, splitk_batch_offset.splitted_k, block_idx_m_);
             }
         }();
         const auto& bs_block_window = [&]() {
@@ -1177,11 +1046,11 @@ struct MxGemmKernel
             else
             {
                 return BaseKernel::MakeBBlockWindows(
-                    bs_ptr, BaseArgs(kargs), splitk_batch_offset.splitted_k, block_idx_n);
+                    bs_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
             }
         }();
         const auto& ds_block_window =
-            BaseKernel::MakeDBlockWindows(ds_ptr, BaseArgs(kargs), block_idx_m_, block_idx_n);
+            BaseKernel::MakeDBlockWindows(ds_ptr, kargs, block_idx_m_, block_idx_n);
 
         // Create scale block windows. For split-K (k_batch > 1), k_elem_offset advances the
         // scale origin into the correct packed-K slice for this k_id; otherwise it is zero.
@@ -1218,8 +1087,8 @@ struct MxGemmKernel
         // and also rejected up front in IsSupportedArgument.
         // if(k_batch == 1)
         auto c_block_window = BaseKernel::template MakeCBlockWindows<DstInMemOp>(
-            e_ptr, BaseArgs(kargs), block_idx_m_, block_idx_n);
-        MakeEpilogue(kargs)(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            e_ptr, kargs, block_idx_m_, block_idx_n);
+        EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
     }
 
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,

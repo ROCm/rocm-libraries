@@ -62,7 +62,7 @@
         },
         "epilogue": {
             "values": [
-                "alphabeta"
+                "direct"
             ]
         },
         "pad_m": {

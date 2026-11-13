@@ -281,18 +281,16 @@ CK_TILE_HOST void store_out(MxTdmScheduledOutDtype t, void* data, std::size_t i,
 } // namespace mx_tdm_scheduled
 
 /**
- * @brief D = alpha * A @ B^T + beta * C with K-major scales, as
- * MxGemmPipelineAgBgCrCompTDMScheduled.
+ * @brief E = A @ B^T with K-major scales, as MxGemmPipelineAgBgCrCompTDMScheduled.
  *
  * The products are summed in double and rounded once to f32; with inputs whose f32 sums are
  * exact in any order (rocKE's check inputs) this is the kernel's accumulator bit for bit. Then
- * alpha * acc (+ beta * C, two f32 roundings) and the output rounding. With beta == 0 C is not
- * read (C may be null).
+ * the output rounding (FP8 saturating).
  *
  * A and B are M (N) rows of row_bytes(dtype, K) bytes, lda (ldb) bytes apart; the scales are
- * K-major (mx_scale_to_kmajor); C and D are row-major M x N in the output type, ldc / ldd
- * elements apart. With `rows` set only those num_rows rows of D are computed, stored compactly:
- * d's row i is row rows[i] of D.
+ * K-major (mx_scale_to_kmajor); E is row-major M x N in the output type, lde elements apart.
+ * With `rows` set only those num_rows rows of E are computed, stored compactly: e's row i is
+ * row rows[i] of E.
  */
 CK_TILE_HOST void reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype a_dtype,
                                                   MxTdmScheduledDtype b_dtype,
@@ -303,20 +301,15 @@ CK_TILE_HOST void reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype a_dtype,
                                                   long_index_t ldb,
                                                   const uint8_t* a_scale,
                                                   const uint8_t* b_scale,
-                                                  const void* c,
-                                                  long_index_t ldc,
-                                                  void* d,
-                                                  long_index_t ldd,
+                                                  void* e,
+                                                  long_index_t lde,
                                                   index_t M,
                                                   index_t N,
                                                   long_index_t K,
-                                                  float alpha,
-                                                  float beta,
                                                   unsigned threads    = 0,
                                                   const index_t* rows = nullptr,
                                                   index_t num_rows    = 0)
 {
-    const bool read_c      = !(beta == 0.0f);
     const index_t out_rows = rows ? num_rows : M;
     auto scale             = [](const uint8_t* s, index_t extent, index_t r, long_index_t k) {
         return mx_tdm_scheduled::e8m0_to_float(
@@ -338,11 +331,8 @@ CK_TILE_HOST void reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype a_dtype,
                     scale(b_scale, N, n, k);
                 sum += x * y;
             }
-            float v = alpha * static_cast<float>(sum);
-            if(read_c)
-                v = v + beta * mx_tdm_scheduled::load_out(
-                                   out_dtype, c, static_cast<std::size_t>(m) * ldc + n);
-            mx_tdm_scheduled::store_out(out_dtype, d, static_cast<std::size_t>(i) * ldd + n, v);
+            mx_tdm_scheduled::store_out(
+                out_dtype, e, static_cast<std::size_t>(i) * lde + n, static_cast<float>(sum));
         }
     };
     if(threads == 0)

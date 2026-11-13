@@ -11,7 +11,7 @@
 #include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
 #include "ck_tile/ops/epilogue/dynamic_quant_epilogue.hpp"
 #include "ck_tile/ops/epilogue/lds_shuffle_2d_epilogue.hpp"
-#include "ck_tile/ops/epilogue/mx_alpha_beta_epilogue.hpp"
+#include "ck_tile/ops/epilogue/mx_direct_store_epilogue.hpp"
 #include "ck_tile/ops/epilogue/permuten_epilogue.hpp"
 #include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/epilogue/tdm_multi_d_epilogue.hpp"

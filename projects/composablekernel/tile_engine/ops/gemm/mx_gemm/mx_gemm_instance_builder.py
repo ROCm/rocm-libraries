@@ -198,7 +198,8 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             gpu_target=self.gpu_target,
         ):
             raise ValueError(
-                f"{V4_PIPELINE} needs the {_validation_utils.MX_TDM_SCHEDULED_EPILOGUE} epilogue, "
+                f"{V4_PIPELINE} needs an epilogue of "
+                f"{_validation_utils.MX_TDM_SCHEDULED_EPILOGUES}, "
                 "the intrawave scheduler, no padding and no persistence"
             )
         reason = self._v4_reject_reason(tile_config, tuning)
@@ -208,7 +209,9 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         kernel_name = self._format_kernel_name(
             trait_combo, tile_config
         ) + mx_tdm_scheduled.instance_name_suffix(spec, tuning)
-        instance_code = self._v4_instance_code(kernel_name, tile_config, spec, tuning)
+        instance_code = self._v4_instance_code(
+            kernel_name, tile_config, spec, tuning, epilogue
+        )
 
         simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
         header_file = (
@@ -220,8 +223,15 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         print(f"Generated {header_file}")
         return kernel_name, instance_code
 
-    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning):
+    def _v4_instance_code(self, kernel_name, tile_config, spec, tuning, epilogue):
         t = tile_config
+        # direct: MxDirectStoreEpilogue, E from the accumulators; tdm: TdmEpilogue, E through LDS
+        # (the store_width tuning only limits N; take 1 to run any N).
+        epilogue_type = (
+            "ck_tile::MxTdmStoreEpilogue<Pipeline>"
+            if epilogue == "tdm"
+            else "ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<Pipeline>>"
+        )
         return f"""// Generated kernel instance for {kernel_name}
 #pragma once
 
@@ -235,7 +245,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
 // Kernel name for display
 constexpr const char* KERNEL_NAME = "{kernel_name}";
 
-// rocKE's mx_gemm (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, D = A * B^T.
+// rocKE's mx_gemm (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, E = A * B^T.
 struct SelectedKernel {{
     static constexpr ck_tile::index_t BlockSize = 128;
     static constexpr ck_tile::index_t TileM = {t["tile_m"]};
@@ -271,16 +281,15 @@ struct SelectedKernel {{
     using Kernel = ck_tile::MxGemmKernel<
         ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
         Pipeline,
-        ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<Pipeline>>>;
+        {epilogue_type}>;
 
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
-        // D = A @ B^T: alpha 1, beta 0, so no C.
         const typename Kernel::HostArgs host_args{{args.as_ptr,
                                                   args.as_scale_ptr,
                                                   args.bs_ptr,
                                                   args.bs_scale_ptr,
-                                                  {{nullptr}},
+                                                  {{}},
                                                   args.e_ptr,
                                                   args.k_batch,
                                                   args.M,
@@ -288,14 +297,15 @@ struct SelectedKernel {{
                                                   args.K,
                                                   args.stride_As,
                                                   args.stride_Bs,
-                                                  {{args.stride_E}},
-                                                  args.stride_E,
-                                                  1.0f,
-                                                  0.0f}};
-        if(!Kernel::IsSupportedArgument(host_args))
+                                                  {{}},
+                                                  args.stride_E}};
+        const auto kargs = Kernel::MakeKernelArgs(host_args);
+        if(!Kernel::IsSupportedArgument(kargs))
+        {{
+            const char* why = Kernel::GetUnsupportedReason(kargs);
             throw std::runtime_error(std::string("Arguments not supported: ") +
-                                     Kernel::GetUnsupportedReason(host_args));
-        const auto kargs  = Kernel::MakeKernelArgs(host_args);
+                                     (why ? why : "see CK_TILE_LOGGING"));
+        }}
         const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
         const dim3 blocks = Kernel::BlockSize();
         if constexpr(Kernel::ClusterLaunch)

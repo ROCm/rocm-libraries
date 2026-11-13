@@ -343,7 +343,7 @@ else()
     # Create trait-based collection targets
     # These are common trait components used across all MX GEMM kernels
     set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2;comp_tdm_scheduled")
-    set(MX_GEMM_EPILOGUES "cshuffle;tdm;alphabeta")
+    set(MX_GEMM_EPILOGUES "cshuffle;tdm;direct")
     set(MX_GEMM_SCHEDULERS "intrawave")
 
     foreach(pipeline IN LISTS MX_GEMM_PIPELINES)

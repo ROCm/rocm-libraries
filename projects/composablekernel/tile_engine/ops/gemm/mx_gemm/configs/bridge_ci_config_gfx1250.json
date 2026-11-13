@@ -71,7 +71,7 @@
       "values": [
         "tdm",
         "cshuffle",
-        "alphabeta"
+        "direct"
       ]
     },
     "pad_m": {

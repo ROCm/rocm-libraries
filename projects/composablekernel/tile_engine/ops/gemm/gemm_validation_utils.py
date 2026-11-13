@@ -411,9 +411,12 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
-# rocKE's mx_gemm: K-major scales, the alpha/beta epilogue and its own tuning knobs.
+# rocKE's mx_gemm: K-major scales, its own tuning knobs and two epilogues: "direct"
+# (MxDirectStoreEpilogue, E from the accumulators; the default) and "tdm" (TdmEpilogue, E
+# through LDS).
 MX_TDM_SCHEDULED_PIPELINE = "comp_tdm_scheduled"
-MX_TDM_SCHEDULED_EPILOGUE = "alphabeta"
+MX_TDM_SCHEDULED_EPILOGUES = ("direct", "tdm")
+MX_TDM_SCHEDULED_EPILOGUE = MX_TDM_SCHEDULED_EPILOGUES[0]
 
 
 def load_mx_tdm_scheduled():
@@ -451,7 +454,8 @@ def mx_tdm_scheduled_reject_reason(
     tuning=None,
 ) -> str:
     """Why a comp_tdm_scheduled instance is invalid ("" if valid). With tuning None, why the tile is
-    invalid under every schedule (the tuning_config product is checked per instance later)."""
+    invalid under every schedule (the tuning_config product is checked per instance later).
+    """
     if _base_gfx_arch(gpu_target) != "gfx1250":
         return f"{MX_TDM_SCHEDULED_PIPELINE} requires gfx1250"
     sched = load_mx_tdm_scheduled()
@@ -785,7 +789,7 @@ def is_trait_combination_valid(
             )
             or (
                 pipeline == MX_TDM_SCHEDULED_PIPELINE
-                and epilogue == MX_TDM_SCHEDULED_EPILOGUE
+                and epilogue in MX_TDM_SCHEDULED_EPILOGUES
                 and not persistent_or_preshuffle_quant
                 and not any((pad_m, pad_n, pad_k))
             )

@@ -3,8 +3,8 @@
 
 // comp_tdm_scheduled on gfx1250 against reference_mx_gemm_tdm_scheduled, bit for bit on rocKE's
 // sparse check inputs: every type and output, both atoms and wave groups, each schedule variant,
-// clusters, K paths (even and odd tile counts, K tails, K a multiple of 32 only), edges, alpha /
-// beta and FP8 saturation. Needs a gfx1250 device.
+// clusters, K paths (even and odd tile counts, K tails, K a multiple of 32 only), edges, FP8
+// saturation and the TdmEpilogue alternative. Needs a gfx1250 device.
 
 #include "test_mx_gemm_tdm_scheduled_util.hpp"
 
@@ -21,6 +21,8 @@ using ck_tile::pk_fp4_t;
 
 template <typename O, typename Tuning, typename Traits>
 using Fp4Big = Kernel<pk_fp4_t, pk_fp4_t, O, 256, 256, 512, 2, 2, 32, Tuning, Traits>;
+template <typename O, typename Tuning, typename Traits>
+using Fp4BigTdm = TdmKernel<pk_fp4_t, pk_fp4_t, O, 256, 256, 512, 2, 2, 32, Tuning, Traits>;
 
 // The rocKE MAF winner, mx_gemm_mxfp4_t256x256x512_c4x4.
 using Maf         = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0, 0, 8>>;
@@ -231,94 +233,52 @@ TEST(MxGemmTdmScheduled, Edges)
                  Shape<true, true, 0, 0, 1>>>(1024, 1001, 2048);
 }
 
-/// alpha and beta beyond the sparse check: FP8 saturation (+-448, inf to NaN, NaN kept) and inf /
-/// NaN in C.
-TEST(MxGemmTdmScheduled, AlphaBetaAndSaturation)
+/// E past the output range: scales 2^3, 2^8 and 2^14 above the sparse check's on each operand
+/// (rocKE's alpha 1, 2^10 and 2^22) take E past +-448 while the f32 sums stay exact. FP8
+/// saturates to +-448; FP16 rounds without clamping, to inf past 65504.
+TEST(MxGemmTdmScheduled, Fp8Saturation)
 {
-    using K8        = Fp4Big<fp8_t, Tu<1, 1>, Shape<false, false, 0, 0, 8>>;
-    using K16       = Fp4Big<half_t, Tu<1, 1>, Shape<false, false, 0, 0, 8>>;
-    const index_t M = 256, N = 256, Kd = 2048;
-    for(float alpha : {1.0f, -0.25f, 1024.0f, 65536.0f})
-        for(float beta : {0.0f, 1.0f, -2.0f})
-        {
-            SCOPED_TRACE("alpha " + std::to_string(alpha) + " beta " + std::to_string(beta));
-            {
-                auto in = make_inputs(MxTdmScheduledDtype::Fp4,
-                                      MxTdmScheduledDtype::Fp4,
-                                      MxTdmScheduledOutDtype::Fp8E4M3,
-                                      M,
-                                      N,
-                                      Kd,
-                                      512);
-                // fp8 C codes: +inf does not exist in e4m3; NaN (0x7F) and +-448.
-                in.c[3]         = 0x7F;
-                in.c[5]         = 0x7E;
-                in.c[7]         = 0xFE;
-                const auto got  = run_device<K8>(in, M, N, Kd, alpha, beta);
-                const auto want = run_reference(MxTdmScheduledDtype::Fp4,
-                                                MxTdmScheduledDtype::Fp4,
-                                                MxTdmScheduledOutDtype::Fp8E4M3,
-                                                in,
-                                                M,
-                                                N,
-                                                Kd,
-                                                alpha,
-                                                beta);
-                EXPECT_EQ(first_mismatch(got, want, MxTdmScheduledOutDtype::Fp8E4M3, N), "");
-            }
-            {
-                auto in = make_inputs(MxTdmScheduledDtype::Fp4,
-                                      MxTdmScheduledDtype::Fp4,
-                                      MxTdmScheduledOutDtype::Fp16,
-                                      M,
-                                      N,
-                                      Kd,
-                                      512);
-                sched::store_out(MxTdmScheduledOutDtype::Fp16,
-                                 in.c.data(),
-                                 3,
-                                 std::numeric_limits<float>::infinity());
-                sched::store_out(MxTdmScheduledOutDtype::Fp16,
-                                 in.c.data(),
-                                 5,
-                                 std::numeric_limits<float>::quiet_NaN());
-                const auto got  = run_device<K16>(in, M, N, Kd, alpha, beta);
-                const auto want = run_reference(MxTdmScheduledDtype::Fp4,
-                                                MxTdmScheduledDtype::Fp4,
-                                                MxTdmScheduledOutDtype::Fp16,
-                                                in,
-                                                M,
-                                                N,
-                                                Kd,
-                                                alpha,
-                                                beta);
-                EXPECT_EQ(first_mismatch(got, want, MxTdmScheduledOutDtype::Fp16, N), "");
-            }
-        }
+    using S = Shape<false, false, 0, 0, 8>;
+    for(int shift : {0, 5, 11})
+    {
+        check<Fp4Big<fp8_t, Tu<1, 1>, S>>(256, 256, 2048, shift);
+        check<Fp4Big<half_t, Tu<1, 1>, S>>(256, 256, 2048, shift);
+        check<Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<false, false, 0, 0, 1>>>(256, 256, 2048, shift);
+    }
 }
 
-TEST(MxGemmTdmScheduled, BetaZeroDoesNotNeedC)
+/// TdmEpilogue (E through LDS, stored by TDM) instead of the direct store: the MAF and MAB shapes,
+/// FP16 output and edges with N odd.
+TEST(MxGemmTdmScheduled, TdmEpilogue)
 {
-    using K8        = Fp4Big<fp8_t, Tu<1, 1>, Shape<false, false, 0, 0, 8>>;
-    const index_t M = 256, N = 256, Kd = 2048;
-    auto in         = make_inputs(MxTdmScheduledDtype::Fp4,
-                          MxTdmScheduledDtype::Fp4,
-                          MxTdmScheduledOutDtype::Fp8E4M3,
-                          M,
-                          N,
-                          Kd,
-                          512);
-    const auto got  = run_device<K8>(in, M, N, Kd, kSparseAlpha, 0.0f, /*pass_c=*/false);
-    const auto want = run_reference(MxTdmScheduledDtype::Fp4,
-                                    MxTdmScheduledDtype::Fp4,
-                                    MxTdmScheduledOutDtype::Fp8E4M3,
-                                    in,
-                                    M,
-                                    N,
-                                    Kd,
-                                    kSparseAlpha,
-                                    0.0f);
-    EXPECT_EQ(first_mismatch(got, want, MxTdmScheduledOutDtype::Fp8E4M3, N), "");
+    using S = Shape<false, false, 0, 0, 1>;
+    check<Fp4BigTdm<fp8_t, Tu<4, 4>, S>>(1024, 1024, 2048);
+    check<Fp4BigTdm<half_t, Tu<4, 4>, S>>(1024, 1024, 2048);
+    check<TdmKernel<pk_fp4_t,
+                    pk_fp4_t,
+                    fp8_t,
+                    128,
+                    16,
+                    512,
+                    4,
+                    1,
+                    16,
+                    Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                    S>>(2048, 16, 4096);
+    using Edge = Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<true, true, 0, 0, 1>>;
+    check<Edge>(1000, 1001, 2048);
+    check<Edge>(1, 1000, 2048);
+    check<TdmKernel<fp8_t,
+                    bf8_t,
+                    bf16_t,
+                    128,
+                    128,
+                    256,
+                    2,
+                    2,
+                    16,
+                    Tu<1, 1>,
+                    Shape<true, true, 0, 1, 1>>>(1000, 1001, 2048 + 96);
 }
 
 } // namespace

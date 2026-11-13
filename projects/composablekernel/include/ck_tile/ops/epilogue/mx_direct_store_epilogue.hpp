@@ -6,38 +6,41 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled.hpp"
 
 namespace ck_tile {
 
 /**
- * @brief Problem of MxAlphaBetaEpilogue: the pipeline whose C block tile it stores and the D store
- *        width in elements, by default the pipeline's MxTdmScheduledGemmTraits. C is the single D
- * tensor, row-major and of D's type.
+ * @brief Problem of MxDirectStoreEpilogue: the pipeline whose C block tile it stores and the store
+ *        width in elements, by default the pipeline's MxTdmScheduledGemmTraits. E is row-major and
+ *        there are no Ds tensors.
  */
 template <typename Pipeline_, index_t StoreWidth_ = remove_cvref_t<Pipeline_>::Traits::kStoreWidth>
-struct MxAlphaBetaEpilogueProblem
+struct MxDirectStoreEpilogueProblem
 {
     using Pipeline   = remove_cvref_t<Pipeline_>;
     using ODataType  = typename Pipeline::ODataType;
-    using DsDataType = tuple<ODataType>;
-    using DsLayout   = tuple<tensor_layout::gemm::RowMajor>;
+    using DsDataType = tuple<>;
+    using DsLayout   = tuple<>;
     using ELayout    = tensor_layout::gemm::RowMajor;
 
     static constexpr index_t kStoreWidth = StoreWidth_;
 };
 
 /**
- * @brief Epilogue of MxGemmPipelineAgBgCrCompTDMScheduled after rocKE's mx_gemm: D = alpha * acc +
- * beta * C with C the single Ds tensor; the beta == 0 path never reads C.
+ * @brief Epilogue of MxGemmPipelineAgBgCrCompTDMScheduled after rocKE's mx_gemm: E = acc, stored
+ *        from the accumulators without LDS.
  *
  * The C block tile is shuffled to the store distribution (N repeat innermost), so each thread
- * stores and loads vectors of StoreWidth adjacent columns through the D and C windows; their
- * padding masks partial tiles. FP8 saturates as hipBLASLt (+-inf to NaN, NaN kept, finite values
- * clamped to +-448); FP16 and BF16 round to nearest even without clamping.
+ * stores vectors of StoreWidth adjacent columns through E's window, whose padding masks partial
+ * tiles. FP8 saturates as hipBLASLt (+-inf to NaN, NaN kept, finite values clamped to +-448);
+ * FP16 and BF16 round to nearest even without clamping.
  */
 template <typename Problem_>
-struct MxAlphaBetaEpilogue
+struct MxDirectStoreEpilogue
 {
     using Problem    = remove_cvref_t<Problem_>;
     using Pipeline   = typename Problem::Pipeline;
@@ -48,15 +51,10 @@ struct MxAlphaBetaEpilogue
 
     static constexpr index_t kStoreWidth = Problem::kStoreWidth;
 
-    /// D replaces its tile: k_batch > 1 is not supported.
+    /// E replaces its tile: k_batch > 1 is not supported.
     static constexpr bool SupportsSplitK = false;
     CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC() { return kStoreWidth; }
-    template <index_t I>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeD(number<I>)
-    {
-        return kStoreWidth;
-    }
-    /// The stores go from the accumulators straight to D.
+    /// The stores go from the accumulators straight to E.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
     static constexpr MxTdmScheduledSpec kSpec =
         Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
@@ -64,7 +62,6 @@ struct MxAlphaBetaEpilogue
     static constexpr bool kFp16        = kSpec.out == MxTdmScheduledOutDtype::Fp16;
     static constexpr index_t kOutBytes = kSpec.out_bytes();
     static constexpr index_t kFp8Width = kSpec.fp8_convert_width();
-    static constexpr float kFp8Max     = 448.0f;
     /// Rows past M lie past the buffer, which drops or zeroes them; the 64-bit global path and
     /// columns past N (inside the next row) need the windows' checks.
     static constexpr bool kCheckBounds =
@@ -78,7 +75,7 @@ struct MxAlphaBetaEpilogue
     static_assert(
         kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
             Pipeline::kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
-        "comp_tdm_scheduled: the D store width must be a power of 2 dividing the N repeat, "
+        "comp_tdm_scheduled: the E store width must be a power of 2 dividing the N repeat, "
         "<= 16 B");
 
     using Storage = std::conditional_t<kOutBytes == 1, uint8_t, uint16_t>;
@@ -87,13 +84,6 @@ struct MxAlphaBetaEpilogue
     CK_TILE_HOST_DEVICE static constexpr auto MakeStoreDistribution()
     {
         return Pipeline::Policy::template MakeCStoreTileDistribution<typename Pipeline::Problem>();
-    }
-
-    CK_TILE_DEVICE static float Saturate(float v)
-    {
-        // fma(v, 0, v) turns +-inf into NaN, which the NaN-propagating clamp keeps.
-        v = __builtin_fmaf(v, 0.0f, v);
-        return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, -kFp8Max), kFp8Max);
     }
 
     /// kFp8Width values to fp8 e4m3 (no saturation) in kFp8Width bytes of `words`.
@@ -117,7 +107,7 @@ struct MxAlphaBetaEpilogue
 #endif
     }
 
-    /// kStoreWidth values as the bits of D's type.
+    /// kStoreWidth values as the bits of E's type.
     CK_TILE_DEVICE static SVec Pack(const float (&v)[kStoreWidth])
     {
         SVec out{};
@@ -152,23 +142,20 @@ struct MxAlphaBetaEpilogue
     }
 
     /// Stores `acc` through `out_window` one access at a time, each vector's elements v becoming
-    /// D = Pack(op(v, i)) with i the element's index in the thread buffer, after prepare(access)
-    /// has loaded what op reads; each access's accumulators die at its store.
-    template <typename OutWindow, typename AccTile, typename Prepare, typename Op>
-    CK_TILE_DEVICE static void
-    StoreByAccess(const OutWindow& out_window, const AccTile& acc, Prepare prepare, Op op)
+    /// E = Pack(v), saturated for FP8; each access's accumulators die at its store.
+    template <typename OutWindow, typename AccTile>
+    CK_TILE_DEVICE static void StoreByAccess(const OutWindow& out_window, const AccTile& acc)
     {
         using Traits                  = typename OutWindow::Traits;
         using SFC_Ys                  = typename Traits::SFC_Ys;
         constexpr index_t kVector     = Traits::ScalarPerVector;
         constexpr index_t kVectorDimY = Traits::VectorDimY;
         constexpr auto ys_to_d        = MakeStoreDistribution().get_ys_to_d_descriptor();
-        static_assert(kVector % kStoreWidth == 0, "D's vectors hold whole store groups");
+        static_assert(kVector % kStoreWidth == 0, "E's vectors hold whole store groups");
         using OVec = array<ODataType, kStoreWidth>;
 
         auto out = make_static_distributed_tensor<ODataType>(MakeStoreDistribution());
         static_for<0, Traits::NumAccess, 1>{}([&](auto i_access) {
-            prepare(i_access);
             constexpr auto idx_ys_start = SFC_Ys::get_index(i_access);
             static_for<0, kVector / kStoreWidth, 1>{}([&](auto group) {
                 float part[kStoreWidth];
@@ -181,7 +168,11 @@ struct MxAlphaBetaEpilogue
                         },
                         number<AccTile::StaticTileDistribution::get_num_of_dimension_y()>{});
                     constexpr index_t at = ys_to_d.calculate_offset(idx_ys);
-                    part[j]              = op(acc.get_thread_buffer()[number<at>{}], number<at>{});
+                    const float v        = acc.get_thread_buffer()[number<at>{}];
+                    if constexpr(kFp8)
+                        part[j] = element_wise::SaturateFp8E4M3::apply(v);
+                    else
+                        part[j] = v;
                 });
                 constexpr auto idx_ys_group = generate_tuple(
                     [&](auto jj) {
@@ -198,56 +189,48 @@ struct MxAlphaBetaEpilogue
         });
     }
 
-    /// D = alpha * acc + beta * C; MxGemmKernel sets them from its arguments.
-    float alpha                      = 1.0f;
-    float beta                       = 0.0f;
-    static constexpr bool kAlphaBeta = true;
-
-    /// Stores the C block tile through D's tile window, reading C (Ds[0]) only for beta != 0.
+    /// Stores the C block tile through E's tile window.
     template <typename ODramWindow, typename DsDramWindows>
     CK_TILE_DEVICE void operator()(ODramWindow& out_dram_window,
                                    const typename Pipeline::CBlockTile& c_block_tile,
-                                   const DsDramWindows& ds_dram_windows,
+                                   const DsDramWindows& /*ds_dram_windows*/,
                                    void* /*p_smem*/) const
     {
-        // alpha * acc + beta * C rounds twice, as rocKE's (and the host reference's) fmul, fadd.
-#pragma clang fp contract(off)
-        static_assert(std::tuple_size_v<DsDramWindows> == 1, "C is the single Ds tensor");
+        static_assert(std::tuple_size_v<DsDramWindows> == 0, "no Ds tensors");
         auto d = make_static_distributed_tensor<float>(MakeStoreDistribution());
         shuffle_tile(d, c_block_tile);
-        const float a         = alpha;
-        const float b         = beta;
-        const auto out_window = make_tile_window(out_dram_window, MakeStoreDistribution());
-        const auto finish     = [](float v) {
-            if constexpr(kFp8)
-                v = Saturate(v);
-            return v;
-        };
-        // GW_B0 / GW_B1.
-        if(b == 0.0f)
-        {
-            StoreByAccess(out_window, d, [](auto) {}, [&](float v, auto) { return finish(a * v); });
-        }
-        else
-        {
-            const auto c_window =
-                make_tile_window(ds_dram_windows[number<0>{}], MakeStoreDistribution());
-            static_assert(decltype(c_window)::Traits::NumAccess ==
-                              decltype(out_window)::Traits::NumAccess,
-                          "C loads as D stores");
-            auto c = make_static_distributed_tensor<ODataType>(MakeStoreDistribution());
-            StoreByAccess(
-                out_window,
-                d,
-                [&](auto i_access) {
-                    c_window.load(
-                        c, i_access, bool_constant<kCheckBounds>{}, bool_constant<kStaticMoveYs>{});
-                },
-                [&](float v, auto at) {
-                    return finish(a * v + b * type_convert<float>(c.get_thread_buffer()[at]));
-                });
-        }
+        StoreByAccess(make_tile_window(out_dram_window, MakeStoreDistribution()), d);
     }
 };
+
+/**
+ * @brief TdmEpilogue for MxGemmPipelineAgBgCrCompTDMScheduled, the alternative to
+ *        MxDirectStoreEpilogue: E = acc staged in LDS (kTileM * kTileN * sizeof(E) bytes) and
+ *        stored by TDM. FP8 saturates as MxDirectStoreEpilogue. The pipeline's
+ *        MxTdmScheduledGemmTraits should take StoreWidth 1: TDM stores have no vector width.
+ */
+template <typename Pipeline_,
+          typename Pipeline = remove_cvref_t<Pipeline_>,
+          typename Shape    = typename Pipeline::BlockGemmShape>
+using MxTdmStoreEpilogue =
+    TdmEpilogue<CShuffleEpilogueProblem<typename Pipeline::ADataType,
+                                        typename Pipeline::BDataType,
+                                        tuple<>,
+                                        float,
+                                        typename Pipeline::ODataType,
+                                        tuple<>,
+                                        tensor_layout::gemm::RowMajor,
+                                        element_wise::PassThrough,
+                                        Shape::kM,
+                                        Shape::kN,
+                                        Shape::BlockWarps::at(number<0>{}),
+                                        Shape::BlockWarps::at(number<1>{}),
+                                        Shape::WarpTile::at(number<0>{}),
+                                        Shape::WarpTile::at(number<1>{}),
+                                        Shape::WarpTile::at(number<2>{}),
+                                        /*isCTransposed=*/false>,
+                std::conditional_t<std::is_same_v<typename Pipeline::ODataType, fp8_t>,
+                                   element_wise::SaturateFp8E4M3,
+                                   element_wise::PassThrough>>;
 
 } // namespace ck_tile

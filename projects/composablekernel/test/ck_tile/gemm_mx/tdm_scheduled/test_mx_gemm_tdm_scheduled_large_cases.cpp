@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// comp_tdm_scheduled with operands past 2^31 bytes (the wide A / D address paths), checked bit for
+// comp_tdm_scheduled with operands past 2^31 bytes (the wide A / E address paths), checked bit for
 // bit on sampled rows: the first and last tile of rows and random ones. Needs a gfx1250 device with
 // about 8 GB free.
 
@@ -30,19 +30,18 @@ std::vector<index_t> sample_rows(index_t M, index_t tile_m)
 }
 
 template <typename Kernel>
-void check_sampled(index_t M, index_t N, index_t K, float beta)
+void check_sampled(index_t M, index_t N, index_t K)
 {
     constexpr auto s = spec_of<Kernel>();
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
-    const Inputs in = make_inputs(s.a_dtype, s.b_dtype, s.out, M, N, K, s.tile_k);
-    const auto got  = run_device<Kernel>(in, M, N, K, kSparseAlpha, beta);
+    const Inputs in = make_inputs(s.a_dtype, s.b_dtype, M, N, K, s.tile_k);
+    const auto got  = run_device<Kernel>(in, M, N, K);
 #ifdef MX_TDM_SCHEDULED_DRY_RUN
     return;
 #endif
-    const auto rows = sample_rows(M, s.tile_m);
-    const auto want =
-        run_reference(s.a_dtype, s.b_dtype, s.out, in, M, N, K, kSparseAlpha, beta, &rows);
+    const auto rows              = sample_rows(M, s.tile_m);
+    const auto want              = run_reference(s.a_dtype, s.b_dtype, s.out, in, M, N, K, &rows);
     const long_index_t row_bytes = static_cast<long_index_t>(N) * sched::out_bytes(s.out);
     std::vector<uint8_t> got_rows(want.size());
     for(std::size_t i = 0; i < rows.size(); ++i)
@@ -64,10 +63,10 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      16,
                      Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
                      ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 0, 1>>;
-    check_sampled<K>(65536, 16, 81920, 0.5f);
+    check_sampled<K>(65536, 16, 81920);
 }
 
-// D past 2^31 bytes: 33024 x 33024 FP16 (2.03 GiB), with a beta pass reading C as wide.
+// E past 2^31 bytes: 33024 x 33024 FP16 (2.03 GiB), stored by the direct and the TDM epilogue.
 TEST(MxGemmTdmScheduledLargeCases, WideD)
 {
     using K = Kernel<pk_fp4_t,
@@ -81,8 +80,20 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
                      32,
                      Tu<1, 1>,
                      ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 0, 8>>;
-    check_sampled<K>(33024, 33024, 1024, 0.0f);
-    check_sampled<K>(33024, 33024, 1024, 0.5f);
+    check_sampled<K>(33024, 33024, 1024);
+    check_sampled<
+        TdmKernel<pk_fp4_t,
+                  pk_fp4_t,
+                  half_t,
+                  256,
+                  256,
+                  512,
+                  2,
+                  2,
+                  32,
+                  Tu<1, 1>,
+                  ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 0, 1>>>(
+        33024, 33024, 1024);
 }
 
 } // namespace

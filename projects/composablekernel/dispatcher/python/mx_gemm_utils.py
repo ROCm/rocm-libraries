@@ -289,7 +289,7 @@ class MxGemmKernelConfig:
         arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
         if pipeline == "comp_tdm_scheduled":
-            default_epilogue = "alphabeta"
+            default_epilogue = "direct"
         elif pipeline in ("comp_tdm", "comp_tdm_v2"):
             default_epilogue = "tdm"
         else:
@@ -382,14 +382,17 @@ class MxGemmKernelConfig:
             self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
             self.epilogue
             or (
-                "alphabeta"
+                "direct"
                 if self.pipeline == "comp_tdm_scheduled"
-                else "tdm"
-                if (
-                    self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
+                else (
+                    "tdm"
+                    if (
+                        self.pipeline
+                        or ("comp_tdm" if arch == "gfx1250" else "comp_async")
+                    )
+                    in ("comp_tdm", "comp_tdm_v2")
+                    else "cshuffle"
                 )
-                in ("comp_tdm", "comp_tdm_v2")
-                else "cshuffle"
             ),
             self.scheduler,
             str(self.pad_m),

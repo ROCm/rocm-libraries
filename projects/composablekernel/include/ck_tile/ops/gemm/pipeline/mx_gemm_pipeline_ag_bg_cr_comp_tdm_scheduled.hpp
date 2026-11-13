@@ -133,34 +133,36 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr bool kGridXWalksN = true;
 
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
-    static constexpr index_t kThreads         = Policy::template GetBlockSize<Problem>();
-    static constexpr index_t kTileM           = BlockGemmShape::kM;
-    static constexpr index_t kTileN           = BlockGemmShape::kN;
-    static constexpr index_t kTileK           = BlockGemmShape::kK;
-    static constexpr index_t kWarpM           = BlockGemmShape::BlockWarps::at(number<0>{});
-    static constexpr index_t kWarpN           = BlockGemmShape::BlockWarps::at(number<1>{});
-    static constexpr index_t kRm              = Policy::template GetWaveRepeatM<Problem>();
-    static constexpr index_t kRn              = Policy::template GetWaveRepeatN<Problem>();
-    static constexpr index_t kNumAcc          = kRm * kRn;
-    static constexpr index_t kKSteps          = Policy::template GetKSteps<Problem>();
-    static constexpr index_t kAtomM           = BlockGemmShape::WarpTile::at(number<0>{});
-    static constexpr index_t kKPerByte        = Policy::template GetKPerByte<Problem>();
-    static constexpr bool kLocalPrefetch      = Policy::template GetLocalPrefetch<Problem>();
-    static constexpr bool kHalfB              = Policy::template GetHalfB<Problem>();
-    static constexpr bool kHalfBLate          = Policy::template GetHalfBLate<Problem>();
-    static constexpr index_t kHalf            = kRn / 2;
-    static constexpr bool kHasCluster         = Policy::HasCluster();
-    static constexpr index_t kClusterX        = Tuning::kClusterDimX;
-    static constexpr index_t kClusterY        = Tuning::kClusterDimY;
-    static constexpr index_t kClusterZ        = Tuning::kClusterDimZ;
-    static constexpr index_t kSignalWmmas     = Policy::template GetSignalWmmas<Problem>();
-    static constexpr index_t kGl2Distance     = Tuning::kGl2PrefetchDistance;
-    static constexpr index_t kReadsPerStep    = Policy::template GetReadsPerStep<Problem>();
-    static constexpr index_t kLdsRowBytes     = Policy::template GetLdsRowBytes<Problem>();
-    static constexpr index_t kLdsBufferStride = Policy::template GetLdsBufferStride<Problem>();
-    static constexpr index_t kWait0           = Policy::template GetDscntWait<Problem>(0);
-    static constexpr index_t kWait1           = Policy::template GetDscntWait<Problem>(1);
-    static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
+    static constexpr index_t kThreads = Policy::template GetBlockSize<Problem>();
+    /// The LDS the workgroup may take, for the pipeline and the epilogue together.
+    static constexpr index_t kLdsCapacityBytes = mx_tdm_scheduled::kLdsCapacityBytes;
+    static constexpr index_t kTileM            = BlockGemmShape::kM;
+    static constexpr index_t kTileN            = BlockGemmShape::kN;
+    static constexpr index_t kTileK            = BlockGemmShape::kK;
+    static constexpr index_t kWarpM            = BlockGemmShape::BlockWarps::at(number<0>{});
+    static constexpr index_t kWarpN            = BlockGemmShape::BlockWarps::at(number<1>{});
+    static constexpr index_t kRm               = Policy::template GetWaveRepeatM<Problem>();
+    static constexpr index_t kRn               = Policy::template GetWaveRepeatN<Problem>();
+    static constexpr index_t kNumAcc           = kRm * kRn;
+    static constexpr index_t kKSteps           = Policy::template GetKSteps<Problem>();
+    static constexpr index_t kAtomM            = BlockGemmShape::WarpTile::at(number<0>{});
+    static constexpr index_t kKPerByte         = Policy::template GetKPerByte<Problem>();
+    static constexpr bool kLocalPrefetch       = Policy::template GetLocalPrefetch<Problem>();
+    static constexpr bool kHalfB               = Policy::template GetHalfB<Problem>();
+    static constexpr bool kHalfBLate           = Policy::template GetHalfBLate<Problem>();
+    static constexpr index_t kHalf             = kRn / 2;
+    static constexpr bool kHasCluster          = Policy::HasCluster();
+    static constexpr index_t kClusterX         = Tuning::kClusterDimX;
+    static constexpr index_t kClusterY         = Tuning::kClusterDimY;
+    static constexpr index_t kClusterZ         = Tuning::kClusterDimZ;
+    static constexpr index_t kSignalWmmas      = Policy::template GetSignalWmmas<Problem>();
+    static constexpr index_t kGl2Distance      = Tuning::kGl2PrefetchDistance;
+    static constexpr index_t kReadsPerStep     = Policy::template GetReadsPerStep<Problem>();
+    static constexpr index_t kLdsRowBytes      = Policy::template GetLdsRowBytes<Problem>();
+    static constexpr index_t kLdsBufferStride  = Policy::template GetLdsBufferStride<Problem>();
+    static constexpr index_t kWait0            = Policy::template GetDscntWait<Problem>(0);
+    static constexpr index_t kWait1            = Policy::template GetDscntWait<Problem>(1);
+    static constexpr index_t kLatePending      = Policy::template GetLatePendingReads<Problem>();
     /// The sched_fence mask of the pipeline's fences: LDS reads and WMMAs stay put, ALU work may
     /// cross.
     static constexpr int32_t kAluMayCross =

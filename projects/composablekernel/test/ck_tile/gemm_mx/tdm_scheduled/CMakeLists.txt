@@ -33,11 +33,11 @@ if(TARGET test_ck_tile_mx_gemm_tdm_scheduled_cases)
 endif()
 
 # Instances the pipeline must reject at compile time (test_mx_gemm_tdm_scheduled_reject.cpp): half PLR 'b'
-# without local prefetch, 8-bit on the 32x16 atom, a D store wider than the N repeat, GL2 distance 1 and a
+# without local prefetch, 8-bit on the 32x16 atom, an E store wider than the N repeat, GL2 distance 1 and a
 # 32-workgroup cluster.
 set(MX_TDM_SCHEDULED_REJECT_1 "InvalidTuning<ck_tile::MxTdmScheduledReason::HalfPlrB>")
 set(MX_TDM_SCHEDULED_REJECT_2 "InvalidTuning<ck_tile::MxTdmScheduledReason::Mma>")
-set(MX_TDM_SCHEDULED_REJECT_3 "the D store width must be")
+set(MX_TDM_SCHEDULED_REJECT_3 "the E store width must be")
 set(MX_TDM_SCHEDULED_REJECT_4 "InvalidTuning<ck_tile::MxTdmScheduledReason::Gl2Distance>")
 set(MX_TDM_SCHEDULED_REJECT_5 "InvalidTuning<ck_tile::MxTdmScheduledReason::ClusterSize>")
 foreach(reject_case RANGE 1 5)

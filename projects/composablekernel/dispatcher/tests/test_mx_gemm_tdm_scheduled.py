@@ -133,7 +133,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertTrue(
             ok(
                 "comp_tdm_scheduled",
-                "alphabeta",
+                "direct",
                 "intrawave",
                 False,
                 "mx_gemm",
@@ -143,7 +143,7 @@ class TestValidationUtils(unittest.TestCase):
                 False,
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             ok(
                 "comp_tdm_scheduled",
                 "tdm",
@@ -159,7 +159,20 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(
             ok(
                 "comp_tdm_scheduled",
-                "alphabeta",
+                "cshuffle",
+                "intrawave",
+                False,
+                "mx_gemm",
+                "rcr",
+                False,
+                False,
+                False,
+            )
+        )
+        self.assertFalse(
+            ok(
+                "comp_tdm_scheduled",
+                "direct",
                 "intrawave",
                 True,
                 "mx_gemm",
@@ -172,7 +185,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertFalse(
             ok(
                 "comp_tdm_scheduled",
-                "alphabeta",
+                "direct",
                 "intrawave",
                 False,
                 "mx_gemm",
@@ -182,9 +195,7 @@ class TestValidationUtils(unittest.TestCase):
                 False,
             )
         )
-        self.assertFalse(
-            ok("comp_tdm", "alphabeta", "intrawave", False, "mx_gemm", "rcr")
-        )
+        self.assertFalse(ok("comp_tdm", "direct", "intrawave", False, "mx_gemm", "rcr"))
 
     def test_tiles(self):
         def valid(**tile):
@@ -248,7 +259,7 @@ class TestTileEngine(unittest.TestCase):
         self,
         tuning_config=None,
         pipelines=("comp_tdm_scheduled",),
-        epilogues=("alphabeta",),
+        epilogues=("direct",),
     ):
         config = json.loads(
             (_MX / "configs" / "comp_tdm_scheduled_gfx1250.json").read_text()
@@ -290,7 +301,7 @@ class TestTileEngine(unittest.TestCase):
         self.assertEqual(len(set(names)), len(names))
         for name, tile, trait, token, suffix in rows:
             self.assertEqual(
-                trait, "comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False"
+                trait, "comp_tdm_scheduled_direct_intrawave_False_False_False_False"
             )
             self.assertEqual(name, f"mx_gemm_fp4_rcr_{trait}_{tile}{suffix}")
             tuning = sched.decode_tuning(token)
@@ -315,7 +326,7 @@ class TestTileEngine(unittest.TestCase):
 
     def test_mixed_pipelines(self):
         config = self._config(
-            None, ("comp_tdm", "comp_tdm_scheduled"), ("tdm", "alphabeta")
+            None, ("comp_tdm", "comp_tdm_scheduled"), ("tdm", "direct")
         )
         rows = self._list(config)
         self.assertTrue(any(len(r) == 3 and "_comp_tdm_tdm_" in r[0] for r in rows))
@@ -377,7 +388,7 @@ class TestTileEngine(unittest.TestCase):
                 "--tile_config",
                 "256x256x512_2x2x1_32x16x128",
                 "--trait_combo",
-                "comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False",
+                "comp_tdm_scheduled_direct_intrawave_False_False_False_False",
                 "--tuning",
                 sched.encode_tuning({"local_prefetch": 0}),
             )
@@ -406,7 +417,7 @@ def _cfg(**extra):
 
 class TestDispatcher(unittest.TestCase):
     def test_names(self):
-        base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_alphabeta_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
+        base = "mx_gemm_fp4_rcr_comp_tdm_scheduled_direct_intrawave_False_False_False_False_256x256x512_2x2x1_32x16x128"
         self.assertEqual(codegen.kernel_name(_cfg()), base + "_c4x4")
         self.assertEqual(
             codegen.kernel_name(
@@ -421,7 +432,7 @@ class TestDispatcher(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only for comp_tdm_scheduled"):
             codegen.kernel_name(_cfg(pipeline="comp_tdm", cluster_dim=[2, 2]))
         with self.assertRaisesRegex(ValueError, "epilogue"):
-            codegen.kernel_name(_cfg(epilogue="tdm"))
+            codegen.kernel_name(_cfg(epilogue="cshuffle"))
         with self.assertRaisesRegex(ValueError, "gfx950"):
             codegen.kernel_name(_cfg(gpu_target="gfx950"))
 
@@ -432,6 +443,17 @@ class TestDispatcher(unittest.TestCase):
         self.assertTrue(path.name.endswith("_c2x2.hpp"))
         self.assertIn("ck_tile::MxTdmScheduledTuningT<2, 2, 4, -1, 1", header)
         self.assertIn("KMajorScales = true", header)
+        self.assertIn("ck_tile::MxDirectStoreEpilogue<", header)
+
+    def test_tdm_epilogue_header(self):
+        with tempfile.TemporaryDirectory() as out:
+            path = codegen.generate_kernel(
+                Path(out), _cfg(epilogue="tdm", store_width=1)
+            )
+            header = path.read_text()
+        self.assertIn("_comp_tdm_scheduled_tdm_", path.name)
+        self.assertIn("ck_tile::MxTdmStoreEpilogue<Pipeline>", header)
+        self.assertNotIn("MxDirectStoreEpilogue", header)
 
     def test_kernel_config(self):
         cfg = mx.MxGemmKernelConfig(
@@ -445,7 +467,7 @@ class TestDispatcher(unittest.TestCase):
             warp_tile_n=16,
             tuning={"cluster_dim": (2, 2), "half_b_order": "late"},
         ).to_codegen_config()
-        self.assertEqual(cfg["epilogue"], "alphabeta")
+        self.assertEqual(cfg["epilogue"], "direct")
         self.assertEqual(cfg["cluster_dim"], [2, 2])
         self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_hblate"))
 

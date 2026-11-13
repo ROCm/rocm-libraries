@@ -1,18 +1,19 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// MX GEMM on the comp_tdm_scheduled pipeline (the rocKE gfx1250 mx_gemm kernel): D = alpha * A @
-// B^T + beta * C with K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's
-// tuning knobs; -list prints them, -kernel picks one.
+// MX GEMM on the comp_tdm_scheduled pipeline (the rocKE gfx1250 mx_gemm kernel): E = A @ B^T with
+// K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's tuning knobs; -list
+// prints them, -kernel picks one. -epilogue picks how E is stored: direct (from the accumulators,
+// MxDirectStoreEpilogue) or tdm (through LDS, TdmEpilogue).
 //
-//   verify  rocKE's sparse check inputs, D bit for bit against the host reference (sampled rows
+//   verify  rocKE's sparse check inputs, E bit for bit against the host reference (sampled rows
 //           when the problem is large)
 //   bench   timed on rocKE's timing data (-data=tensile, FP4 sin/cos codes) or random finite
 //           inputs (-data=random)
 //   check   whether the instance runs the problem; no device work
-//   file    A, B, scales and C from -load (raw a.bin, b.bin, a_scale.bin, b_scale.bin, c.bin in
-//           the kernel's layouts), D to -save_d: the rocKE cross-check feeds both kernels the
-//           same bytes this way
+//   file    A, B and scales from -load (raw a.bin, b.bin, a_scale.bin, b_scale.bin in the
+//           kernel's layouts), E to -save_d: the rocKE cross-check feeds both kernels the same
+//           bytes this way
 
 #include <cmath>
 #include <cstdio>
@@ -65,32 +66,24 @@ using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         Traits>,
     ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
 
+template <typename P, typename Epilogue>
+using KernelOf = ck_tile::
+    MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>, P, Epilogue>;
 template <typename P>
-using KernelOf =
-    ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
-                          P,
-                          ck_tile::MxAlphaBetaEpilogue<ck_tile::MxAlphaBetaEpilogueProblem<P>>>;
-
-template <typename A,
-          typename B,
-          typename O,
-          index_t TileM,
-          index_t TileN,
-          index_t TileK,
-          index_t WarpM,
-          index_t WarpN,
-          index_t AtomM,
-          typename Tuning,
-          typename Traits>
-using Kernel =
-    KernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
+using DirectKernel =
+    KernelOf<P, ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<P>>>;
+template <typename P>
+using TdmKernel = KernelOf<P, ck_tile::MxTdmStoreEpilogue<P>>;
 
 /// Launches K: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
 template <typename K>
 float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& kargs)
 {
     if(!K::IsSupportedArgument(kargs))
-        throw std::runtime_error(K::GetName() + ": " + K::GetUnsupportedReason(kargs));
+    {
+        const char* why = K::GetUnsupportedReason(kargs);
+        throw std::runtime_error(K::GetName() + ": " + (why ? why : "see CK_TILE_LOGGING"));
+    }
     const dim3 grids  = K::GridSize(kargs.M, kargs.N, kargs.k_batch);
     const dim3 blocks = K::BlockSize();
     if constexpr(K::ClusterLaunch)
@@ -134,8 +127,7 @@ using ck_tile::pk_fp4_t;
 struct Options
 {
     index_t M, N, K;
-    float alpha, beta;
-    std::string mode, load, save_d, data;
+    std::string epilogue, mode, load, save_d, data;
     int warmup, repeat;
     uint32_t seed;
 };
@@ -153,12 +145,13 @@ std::vector<uint8_t> read_file(const std::string& path, std::size_t bytes)
 }
 
 /// rocKE's sparse check inputs (see test_mx_gemm_tdm_scheduled_util.hpp) or random finite ones: FP4
-/// any code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. With `trig` FP4 A and B are rocKE's
-/// timing data instead (the Tensile client's initArrayTrig): the E2M1 code, rounded to nearest
-/// even, of sin (A) or cos (B) of the element's linear index, K fastest.
+/// any code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. The sparse scales carry rocKE's
+/// alpha 2^-6 as 2^-3 on each operand, which keeps E in FP8 range. With `trig` FP4 A and B are
+/// rocKE's timing data instead (the Tensile client's initArrayTrig): the E2M1 code, rounded to
+/// nearest even, of sin (A) or cos (B) of the element's linear index, K fastest.
 struct Host
 {
-    std::vector<uint8_t> a, b, as, bs, c;
+    std::vector<uint8_t> a, b, as, bs;
 };
 
 uint8_t e2m1_rne(float x)
@@ -242,31 +235,26 @@ Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, u
         std::vector<uint8_t> natural(static_cast<std::size_t>(rows) * groups);
         for(auto& x : natural)
             x = static_cast<uint8_t>(!sparse ? 124 + rng() % 7
-                                             : (fp4 ? 125 + rng() % 4 : 126 + rng() % 2));
+                                             : (fp4 ? 122 + rng() % 4 : 123 + rng() % 2));
         return ck_tile::mx_scale_to_kmajor(natural.data(), rows, K, groups);
     };
     h.as = scales(s.M);
     h.bs = scales(s.N);
-    h.c.resize(static_cast<std::size_t>(s.M) * s.N * sched::out_bytes(s.out));
-    std::uniform_real_distribution<float> uniform(-2.0f, 2.0f);
-    for(std::size_t i = 0; i < static_cast<std::size_t>(s.M) * s.N; ++i)
-        sched::store_out(s.out, h.c.data(), i, uniform(rng));
     return h;
 }
 
 template <typename K>
-int run(const Options& o)
+int run_kernel(const Options& o)
 {
-    using P           = typename K::GemmPipeline;
-    const auto s      = P::Policy::template GetSpec<typename P::Problem>(o.M, o.N, o.K);
-    const float alpha = o.mode == "verify" ? 1.0f / 64 : o.alpha;
+    using P      = typename K::GemmPipeline;
+    const auto s = P::Policy::template GetSpec<typename P::Problem>(o.M, o.N, o.K);
     {
         uint8_t dummy = 0;
         const typename K::HostArgs probe{{&dummy},
                                          {&dummy},
                                          {&dummy},
                                          {&dummy},
-                                         {&dummy},
+                                         {},
                                          &dummy,
                                          1,
                                          o.M,
@@ -274,10 +262,8 @@ int run(const Options& o)
                                          o.K,
                                          {o.K},
                                          {o.K},
-                                         {o.N},
-                                         o.N,
-                                         alpha,
-                                         o.beta};
+                                         {},
+                                         o.N};
         if(const char* why = K::GetUnsupportedReason(probe))
         {
             std::cerr << K::GetName() << " does not run M " << o.M << " N " << o.N << " K " << o.K
@@ -297,36 +283,31 @@ int run(const Options& o)
                  read_file(o.load + "/b.bin",
                            static_cast<std::size_t>(o.N) * sched::row_bytes(s.b_dtype, o.K)),
                  read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
-                 read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K)),
-                 read_file(o.load + "/c.bin",
-                           static_cast<std::size_t>(o.M) * o.N * sched::out_bytes(s.out))};
+                 read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K))};
     else
         h = make_inputs(s, o.mode == "verify", o.data == "tensile", o.seed);
 
-    ck_tile::DeviceMem a(h.a.size()), b(h.b.size()), as(h.as.size()), bs(h.bs.size()),
-        c(h.c.size()), d(h.c.size());
+    const std::size_t e_bytes = static_cast<std::size_t>(o.M) * o.N * sched::out_bytes(s.out);
+    ck_tile::DeviceMem a(h.a.size()), b(h.b.size()), as(h.as.size()), bs(h.bs.size()), e(e_bytes);
     a.ToDevice(h.a.data());
     b.ToDevice(h.b.data());
     as.ToDevice(h.as.data());
     bs.ToDevice(h.bs.data());
-    c.ToDevice(h.c.data());
-    d.SetZero();
+    e.SetZero();
     const typename K::HostArgs host_args{{a.GetDeviceBuffer()},
                                          {as.GetDeviceBuffer()},
                                          {b.GetDeviceBuffer()},
                                          {bs.GetDeviceBuffer()},
-                                         {c.GetDeviceBuffer()},
-                                         d.GetDeviceBuffer(),
+                                         {},
+                                         e.GetDeviceBuffer(),
                                          1,
                                          o.M,
                                          o.N,
                                          o.K,
                                          {o.K},
                                          {o.K},
-                                         {o.N},
-                                         o.N,
-                                         alpha,
-                                         o.beta};
+                                         {},
+                                         o.N};
     const auto args = K::MakeKernelArgs(host_args);
 
     if(o.mode == "bench")
@@ -340,14 +321,14 @@ int run(const Options& o)
 
     launch<K>(ck_tile::stream_config{nullptr, false}, args);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
-    std::vector<uint8_t> got(h.c.size());
-    d.FromDevice(got.data());
+    std::vector<uint8_t> got(e_bytes);
+    e.FromDevice(got.data());
     if(o.mode == "file")
     {
         std::ofstream(o.save_d, std::ios::binary)
             .write(reinterpret_cast<const char*>(got.data()),
                    static_cast<std::streamsize>(got.size()));
-        std::cout << "D written to " << o.save_d << "\n";
+        std::cout << "E written to " << o.save_d << "\n";
         return 0;
     }
 
@@ -380,15 +361,11 @@ int run(const Options& o)
                                              sched::row_bytes(s.b_dtype, o.K),
                                              h.as.data(),
                                              h.bs.data(),
-                                             h.c.data(),
-                                             o.N,
                                              want.data(),
                                              o.N,
                                              o.M,
                                              o.N,
                                              o.K,
-                                             alpha,
-                                             o.beta,
                                              0,
                                              rows.data(),
                                              static_cast<index_t>(rows.size()));
@@ -398,7 +375,7 @@ int run(const Options& o)
         {
             const std::size_t g = static_cast<std::size_t>(rows[i]) * o.N + n, w = i * o.N + n;
             if(std::memcmp(got.data() + g * ob, want.data() + w * ob, ob) != 0 && bad++ < 8)
-                std::printf("D(%d, %d): got %g, want %g\n",
+                std::printf("E(%d, %d): got %g, want %g\n",
                             rows[i],
                             n,
                             sched::load_out(s.out, got.data(), g),
@@ -412,6 +389,13 @@ int run(const Options& o)
     return bad ? 1 : 0;
 }
 
+/// Runs pipeline P with the epilogue -epilogue names.
+template <typename P>
+int run(const Options& o)
+{
+    return o.epilogue == "tdm" ? run_kernel<TdmKernel<P>>(o) : run_kernel<DirectKernel<P>>(o);
+}
+
 /// The named instances: rocKE's winners for the ck_backport problems and variants of each knob.
 const std::map<std::string, std::pair<const char*, std::function<int(const Options&)>>>& instances()
 {
@@ -419,16 +403,46 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
         m{
             {"maf",
              {"mxfp4 t256x256x512 c4x4, fp8 out (MAF winner)",
-              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           256,
+                           256,
+                           512,
+                           2,
+                           2,
+                           32,
+                           Tu<4, 4>,
+                           Even<8>>>}},
             {"maf_fp16",
              {"maf with fp16 out",
-              run<Kernel<pk_fp4_t, pk_fp4_t, half_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           half_t,
+                           256,
+                           256,
+                           512,
+                           2,
+                           2,
+                           32,
+                           Tu<4, 4>,
+                           Even<8>>>}},
             {"maf_bf16",
              {"maf with bf16 out",
-              run<Kernel<pk_fp4_t, pk_fp4_t, bf16_t, 256, 256, 512, 2, 2, 32, Tu<4, 4>, Even<8>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           bf16_t,
+                           256,
+                           256,
+                           512,
+                           2,
+                           2,
+                           32,
+                           Tu<4, 4>,
+                           Even<8>>>}},
             {"maf_hblate",
              {"maf, GL2 distance 2, half-B late",
-              run<Kernel<
+              run<Pipeline<
                   pk_fp4_t,
                   pk_fp4_t,
                   fp8_t,
@@ -442,58 +456,78 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                   Even<8>>>}},
             {"maf_c2x2",
              {"maf on a 2x2 cluster",
-              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<2, 2>, Even<8>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           256,
+                           256,
+                           512,
+                           2,
+                           2,
+                           32,
+                           Tu<2, 2>,
+                           Even<8>>>}},
             {"medium_t128",
              {"mxfp4 t128x128x1024 c2x2",
-              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 128, 128, 1024, 2, 2, 32, Tu<2, 2>, Even<4>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           128,
+                           128,
+                           1024,
+                           2,
+                           2,
+                           32,
+                           Tu<2, 2>,
+                           Even<4>>>}},
             {"medium",
              {"mxfp4 t128x128x1024 16x16 atom, c4x4, no half-PLR (medium winner)",
-              run<Kernel<pk_fp4_t,
-                         pk_fp4_t,
-                         fp8_t,
-                         128,
-                         128,
-                         1024,
-                         2,
-                         2,
-                         16,
-                         Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
-                         Even<4>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           128,
+                           128,
+                           1024,
+                           2,
+                           2,
+                           16,
+                           Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
+                           Even<4>>>}},
             {"mab",
              {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
-              run<Kernel<pk_fp4_t,
-                         pk_fp4_t,
-                         fp8_t,
-                         128,
-                         16,
-                         512,
-                         4,
-                         1,
-                         16,
-                         Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                         Even<1>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           128,
+                           16,
+                           512,
+                           4,
+                           1,
+                           16,
+                           Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                           Even<1>>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
-              run<Kernel<pk_fp4_t,
-                         pk_fp4_t,
-                         fp8_t,
-                         256,
-                         16,
-                         512,
-                         4,
-                         1,
-                         16,
-                         Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                         Even<1>>>}},
+              run<Pipeline<pk_fp4_t,
+                           pk_fp4_t,
+                           fp8_t,
+                           256,
+                           16,
+                           512,
+                           4,
+                           1,
+                           16,
+                           Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
+                           Even<1>>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
-              run<Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any<1>>>}},
+              run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any<1>>>}},
             {"fp8",
              {"mxfp8 t128x128x256 16x16 atom c2x2",
-              run<Kernel<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+              run<Pipeline<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
             {"fp8_bf8_bf16",
              {"fp8 x bf8, bf16 out, t128x128x256 c2x2",
-              run<Kernel<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+              run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
         };
     return m;
 }
@@ -508,11 +542,10 @@ int main(int argc, char* argv[])
         .insert("m", "1024", "M")
         .insert("n", "1024", "N")
         .insert("k", "2048", "K (a multiple of 32)")
-        .insert("alpha", "1", "alpha (verify uses rocKE's 2^-6)")
-        .insert("beta", "0", "beta; 0 does not read C")
+        .insert("epilogue", "direct", "direct (from the accumulators) | tdm (through LDS)")
         .insert("mode", "verify", "verify | bench | file | check")
-        .insert("load", "", "file mode: directory of a.bin, b.bin, a_scale.bin, b_scale.bin, c.bin")
-        .insert("save_d", "d.bin", "file mode: where D goes")
+        .insert("load", "", "file mode: directory of a.bin, b.bin, a_scale.bin, b_scale.bin")
+        .insert("save_d", "d.bin", "file mode: where E goes")
         .insert("data",
                 "tensile",
                 "bench data: tensile (rocKE's timing data: FP4 sin/cos codes) | random")
@@ -536,8 +569,7 @@ int main(int argc, char* argv[])
     const Options o{arg.get_int("m"),
                     arg.get_int("n"),
                     arg.get_int("k"),
-                    arg.get_float("alpha"),
-                    arg.get_float("beta"),
+                    arg.get_str("epilogue"),
                     arg.get_str("mode"),
                     arg.get_str("load"),
                     arg.get_str("save_d"),
@@ -548,6 +580,11 @@ int main(int argc, char* argv[])
     if(o.mode != "verify" && o.mode != "bench" && o.mode != "file" && o.mode != "check")
     {
         std::cerr << "-mode must be verify, bench, file or check\n";
+        return 1;
+    }
+    if(o.epilogue != "direct" && o.epilogue != "tdm")
+    {
+        std::cerr << "-epilogue must be direct or tdm\n";
         return 1;
     }
     if(o.data != "tensile" && o.data != "random")

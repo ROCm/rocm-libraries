@@ -29,7 +29,7 @@ import mx_tdm_scheduled  # noqa: E402
 from mx_tdm_scheduled import MxTdmScheduledSpec  # noqa: E402
 
 PIPELINE = "comp_tdm_scheduled"
-EPILOGUE = "alphabeta"
+EPILOGUE = "direct"
 SCHEDULER = "intrawave"
 CK_OUT_DTYPES = ("fp16",)
 

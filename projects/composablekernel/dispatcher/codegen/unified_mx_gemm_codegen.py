@@ -24,7 +24,8 @@ Each header is compiled per-kernel via force-include:
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
 pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue,
-and comp_tdm_scheduled (rocKE's mx_gemm: K-major scales, the alpha/beta epilogue). Only
+and comp_tdm_scheduled (rocKE's mx_gemm: K-major scales, the direct-store epilogue or
+the TDM one). Only
 comp_tdm_scheduled takes tuning keys, at the top level of the config (rocKE's knobs and the
 instance's shape traits; mx_tdm_scheduled.TUNING_DEFAULTS and SHAPE_DEFAULTS).
 Both use intrawave scheduling. The default warp tile is 16x16x128;
@@ -62,6 +63,7 @@ from codegen_common import normalize_gfx_arch  # noqa: E402
 from gemm_validation_utils import (  # noqa: E402
     GEMM_MX_PIPELINES_BY_ARCH,
     MX_TDM_SCHEDULED_EPILOGUE,
+    MX_TDM_SCHEDULED_EPILOGUES,
     MX_TDM_SCHEDULED_PIPELINE,
     is_tile_config_valid,
     load_mx_tdm_scheduled,
@@ -105,6 +107,12 @@ def _default_epilogue(pipeline: str) -> str:
     if pipeline == MX_TDM_SCHEDULED_PIPELINE:
         return MX_TDM_SCHEDULED_EPILOGUE
     return "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
+
+
+def _valid_epilogues(pipeline: str) -> tuple:
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
+        return MX_TDM_SCHEDULED_EPILOGUES
+    return (_default_epilogue(pipeline),)
 
 
 def _tuning_from_cfg(cfg: dict) -> Optional[dict]:
@@ -153,11 +161,11 @@ def _validate(cfg: dict) -> None:
             f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
 
-    valid_epilogue = _default_epilogue(pipeline)
-    epilogue = cfg.get("epilogue", valid_epilogue)
-    if epilogue != valid_epilogue:
+    valid_epilogues = _valid_epilogues(pipeline)
+    epilogue = cfg.get("epilogue", valid_epilogues[0])
+    if epilogue not in valid_epilogues:
         raise ValueError(
-            f"epilogue must be {valid_epilogue!r} for mx_gemm, got {epilogue!r}"
+            f"epilogue must be one of {valid_epilogues} for mx_gemm {pipeline}, got {epilogue!r}"
         )
 
     scheduler = cfg.get("scheduler", VALID_SCHEDULER)

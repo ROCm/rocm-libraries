@@ -20,7 +20,7 @@ on gfx1250 also `comp_tdm_scheduled`, the CK backport of rocKE's `mx_gemm` (see
 | gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
 | gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
 | gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
-| gfx1250 | `comp_tdm_scheduled` | `MxGemmPipelineAgBgCrCompTDMScheduled` (`MxGemmKernel`) | `alphabeta` (`MxAlphaBetaEpilogue`) |
+| gfx1250 | `comp_tdm_scheduled` | `MxGemmPipelineAgBgCrCompTDMScheduled` (`MxGemmKernel`) | `direct` (`MxDirectStoreEpilogue`) or `tdm` (`TdmEpilogue`) |
 
 The first five are the choices in the native `MxGemmPipelineType` selector.
 CK-Tile also has a separate `MXFlatmmKernel` family, including
@@ -82,17 +82,23 @@ Tile Engine build.
 ## comp_tdm_scheduled (rocKE's mx_gemm)
 
 `comp_tdm_scheduled` is rocKE's gfx1250 `mx_gemm` kernel (rocKE commit `b32989439dc`) in
-CK-Tile: `D = alpha * A @ B^T + beta * C`, with FP4, FP8 or BF8 inputs and an FP8,
-FP16 or BF16 D. The bridge and Tile Engine build it with one input type (FP4 or
-FP8), an FP16 D, `alpha = 1` and `beta = 0`. Example 56
+CK-Tile: `E = A @ B^T`, with FP4, FP8 or BF8 inputs and an FP8, FP16 or BF16 E
+(FP8 saturating to ±448). The bridge and Tile Engine build it with one input type
+(FP4 or FP8) and an FP16 E. Example 56
 (`example/ck_tile/56_gemm_comp_tdm_scheduled_mx`) and the C++ tests cover the rest.
+
+It takes two epilogues. `direct` (`MxDirectStoreEpilogue`, the default) stores E from
+the accumulators with no LDS, in vectors of the `store_width` shape trait, so N must
+be a multiple of it. `tdm` (`TdmEpilogue`, as `comp_tdm`) stages the E tile in LDS and
+stores it with TDM; it ignores `store_width`, so a `tdm` instance takes `store_width = 1`
+to run any N.
 
 Scales are K-major, `[ceil(K / 128)][MN][4]` E8M0 bytes. The kernel reads the
 scales of one tile with a single TDM box. Callers pass the natural `[MN][K / 32]`
 scales as for the other pipelines; the bridge and the Tile Engine profiler
 convert them with `ck_tile::mx_scale_to_kmajor` when the generated
 `SelectedKernel` declares `KMajorScales`. The kernel checks the problem itself
-(`IsSupportedArgument` on its `MxGemmAlphaBetaHostArgs`; `GetUnsupportedReason`
+(`IsSupportedArgument` on its `MxGemmKernelArgs`; `GetUnsupportedReason`
 says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 32, and the K tail, the tile parity and partial M and N tiles must match the
 instance's shape traits.
@@ -290,7 +296,7 @@ bridge generator:
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
 | `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
 | `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
-| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `alphabeta` epilogue; rocKE's rules for each tuning |
+| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `direct` or `tdm` epilogue; rocKE's rules for each tuning |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
 `persistent`. Phase 1 prints `Expanded configs: N`, the number of kernels left

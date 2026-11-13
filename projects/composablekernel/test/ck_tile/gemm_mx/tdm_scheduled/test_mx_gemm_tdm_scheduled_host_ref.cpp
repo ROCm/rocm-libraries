@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace {
 
@@ -117,6 +118,37 @@ TEST(MxGemmTdmScheduledHostRef, Fp8SaturatesAsTheEpilogue)
     EXPECT_EQ(d[3], 0x80);
 }
 
+// The epilogues' SaturateFp8E4M3 is the reference's saturate_fp8: +-inf to NaN, NaN kept, finite
+// values clamped to +-448.
+TEST(MxGemmTdmScheduledHostRef, SaturateFp8E4M3IsTheReferenceSaturation)
+{
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for(float v : {0.0f,
+                   -0.0f,
+                   3.0f,
+                   447.9f,
+                   448.0f,
+                   449.0f,
+                   -1000.0f,
+                   1e30f,
+                   -1e30f,
+                   std::numeric_limits<float>::max(),
+                   std::numeric_limits<float>::denorm_min(),
+                   inf,
+                   -inf,
+                   nan,
+                   -nan})
+    {
+        const float got  = ck_tile::element_wise::SaturateFp8E4M3::apply(v);
+        const float want = sched::saturate_fp8(v);
+        if(std::isnan(want))
+            EXPECT_TRUE(std::isnan(got)) << v;
+        else
+            EXPECT_EQ(sched::float_bits(got), sched::float_bits(want)) << v;
+    }
+}
+
 TEST(MxGemmTdmScheduledHostRef, Fp16AndBf16RoundToNearestEven)
 {
     std::mt19937 rng(11);
@@ -201,12 +233,7 @@ TEST(MxGemmTdmScheduledHostRef, KMajorReferenceEqualsThePlainReference)
                 const long_index_t rb     = sched::row_bytes(t, K);
                 const long_index_t groups = (K + 31) / 32;
                 const index_t ob          = sched::out_bytes(out);
-                std::vector<uint8_t> c(M * N * ob), d(M * N * ob), want(M * N * ob);
-                std::mt19937 rng(5);
-                for(index_t i = 0; i < M * N; ++i)
-                    sched::store_out(
-                        out, c.data(), i, static_cast<float>(static_cast<int>(rng() % 9) - 4));
-                const float alpha = 0.5f, beta = -2.0f;
+                std::vector<uint8_t> d(M * N * ob), want(M * N * ob);
                 ck_tile::reference_mx_gemm_tdm_scheduled(t,
                                                          t,
                                                          out,
@@ -216,15 +243,11 @@ TEST(MxGemmTdmScheduledHostRef, KMajorReferenceEqualsThePlainReference)
                                                          rb,
                                                          o.a_scale.data(),
                                                          o.b_scale.data(),
-                                                         c.data(),
-                                                         N,
                                                          d.data(),
                                                          N,
                                                          M,
                                                          N,
                                                          K,
-                                                         alpha,
-                                                         beta,
                                                          4);
                 for(index_t m = 0; m < M; ++m)
                     for(index_t n = 0; n < N; ++n)
@@ -235,97 +258,19 @@ TEST(MxGemmTdmScheduledHostRef, KMajorReferenceEqualsThePlainReference)
                                    sched::e8m0_to_float(o.a_natural[m * groups + k / 32]) *
                                    sched::decode_element(t, &o.b[n * rb], k) *
                                    sched::e8m0_to_float(o.b_natural[n * groups + k / 32]);
-                        const float v =
-                            alpha * acc + beta * sched::load_out(out, c.data(), m * N + n);
-                        sched::store_out(out, want.data(), m * N + n, v);
+                        sched::store_out(out, want.data(), m * N + n, acc);
                     }
                 ASSERT_EQ(d, want);
             }
 }
 
-// With beta == 0 (also -0) the epilogue never reads C: NaN in C does not reach D.
-TEST(MxGemmTdmScheduledHostRef, BetaZeroDoesNotReadC)
-{
-    const index_t M = 8, N = 8;
-    const long_index_t K = 128;
-    const Operands o     = make_operands(MxTdmScheduledDtype::Fp4, M, N, K, 9);
-    std::vector<uint16_t> c(M * N, 0x7E00), d(M * N);
-    for(float beta : {0.0f, -0.0f})
-    {
-        ck_tile::reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype::Fp4,
-                                                 MxTdmScheduledDtype::Fp4,
-                                                 MxTdmScheduledOutDtype::Fp16,
-                                                 o.a.data(),
-                                                 K / 2,
-                                                 o.b.data(),
-                                                 K / 2,
-                                                 o.a_scale.data(),
-                                                 o.b_scale.data(),
-                                                 c.data(),
-                                                 N,
-                                                 d.data(),
-                                                 N,
-                                                 M,
-                                                 N,
-                                                 K,
-                                                 1.0f,
-                                                 beta,
-                                                 1);
-        for(uint16_t x : d)
-            EXPECT_FALSE(std::isnan(sched::fp16_bits_to_float(x)));
-        ck_tile::reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype::Fp4,
-                                                 MxTdmScheduledDtype::Fp4,
-                                                 MxTdmScheduledOutDtype::Fp16,
-                                                 o.a.data(),
-                                                 K / 2,
-                                                 o.b.data(),
-                                                 K / 2,
-                                                 o.a_scale.data(),
-                                                 o.b_scale.data(),
-                                                 nullptr,
-                                                 N,
-                                                 d.data(),
-                                                 N,
-                                                 M,
-                                                 N,
-                                                 K,
-                                                 1.0f,
-                                                 beta,
-                                                 1);
-    }
-    ck_tile::reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype::Fp4,
-                                             MxTdmScheduledDtype::Fp4,
-                                             MxTdmScheduledOutDtype::Fp16,
-                                             o.a.data(),
-                                             K / 2,
-                                             o.b.data(),
-                                             K / 2,
-                                             o.a_scale.data(),
-                                             o.b_scale.data(),
-                                             c.data(),
-                                             N,
-                                             d.data(),
-                                             N,
-                                             M,
-                                             N,
-                                             K,
-                                             1.0f,
-                                             1.0f,
-                                             1);
-    for(uint16_t x : d)
-        EXPECT_TRUE(std::isnan(sched::fp16_bits_to_float(x)));
-}
-
-// A row subset is those rows of the full D, stored compactly.
+// A row subset is those rows of the full E, stored compactly.
 TEST(MxGemmTdmScheduledHostRef, RowSubsetEqualsTheFullRows)
 {
     const index_t M = 41, N = 19;
     const long_index_t K = 256;
     const Operands o     = make_operands(MxTdmScheduledDtype::Fp8, M, N, K, 13);
-    std::vector<uint16_t> c(M * N), full(M * N);
-    std::mt19937 rng(17);
-    for(auto& x : c)
-        x = static_cast<uint16_t>(0x3C00 + rng() % 0x400);
+    std::vector<uint16_t> full(M * N);
     ck_tile::reference_mx_gemm_tdm_scheduled(MxTdmScheduledDtype::Fp8,
                                              MxTdmScheduledDtype::Fp8,
                                              MxTdmScheduledOutDtype::Bf16,
@@ -335,15 +280,11 @@ TEST(MxGemmTdmScheduledHostRef, RowSubsetEqualsTheFullRows)
                                              K,
                                              o.a_scale.data(),
                                              o.b_scale.data(),
-                                             c.data(),
-                                             N,
                                              full.data(),
                                              N,
                                              M,
                                              N,
                                              K,
-                                             0.5f,
-                                             0.25f,
                                              3);
     const std::vector<index_t> rows{0, 7, 8, 40};
     std::vector<uint16_t> part(rows.size() * N);
@@ -356,15 +297,11 @@ TEST(MxGemmTdmScheduledHostRef, RowSubsetEqualsTheFullRows)
                                              K,
                                              o.a_scale.data(),
                                              o.b_scale.data(),
-                                             c.data(),
-                                             N,
                                              part.data(),
                                              N,
                                              M,
                                              N,
                                              K,
-                                             0.5f,
-                                             0.25f,
                                              2,
                                              rows.data(),
                                              static_cast<index_t>(rows.size()));
