@@ -369,14 +369,9 @@ inline bool hasNoDiscoveredBundles(const BundleDiscoveryResult& result)
                           [](const UnparsedSweep& sweep) { return sweep.caseCount == 0; });
 }
 
-// Discovery, shared by both binaries. Returns nullopt when bundles are switched off
-// or there is nothing to discover; the reason is already on stderr.
-//
-// Without `mayParseSuite`, discovery parses every sweep manifest. With it, discovery
-// parses only the sweep roots whose suite name it accepts; see discoverBundles().
-inline std::optional<DiscoveredBundleSet>
-    discoverDataDirBundles(const std::function<bool(const std::string& suiteName)>& mayParseSuite
-                           = {})
+// The bundle root, or nullopt when bundles are switched off or the root does not exist;
+// the reason is already on stderr.
+inline std::optional<std::filesystem::path> enabledDataDir()
 {
     if(!TestConfig::get().allowBundles())
     {
@@ -390,7 +385,18 @@ inline std::optional<DiscoveredBundleSet>
                   << dataDir << "\n";
         return std::nullopt;
     }
+    return dataDir;
+}
 
+// Discovers the bundles under `dataDir`. Returns nullopt when there is nothing to
+// discover; the reason is already on stderr.
+//
+// Without `mayParseSuite`, discovery parses every sweep manifest. With it, discovery
+// parses only the sweep roots whose suite name it accepts; see discoverBundles().
+inline std::optional<DiscoveredBundleSet>
+    discoverBundleSet(std::filesystem::path dataDir,
+                      const std::function<bool(const std::string& suiteName)>& mayParseSuite)
+{
     BundleDiscoveryResult discovered;
     try
     {
@@ -418,6 +424,19 @@ inline std::optional<DiscoveredBundleSet>
 
     return DiscoveredBundleSet{
         std::move(dataDir), std::move(discovered.bundles), std::move(discovered.unparsedSweeps)};
+}
+
+// Discovery for the golden-data binary: every sweep manifest is parsed. Returns nullopt
+// when bundles are switched off or there is nothing to discover; the reason is already
+// on stderr.
+inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
+{
+    auto dataDir = enabledDataDir();
+    if(!dataDir.has_value())
+    {
+        return std::nullopt;
+    }
+    return discoverBundleSet(std::move(*dataDir), {});
 }
 
 // The eager load, shared by both binaries. Returns nullopt when nothing loaded; the
@@ -621,6 +640,43 @@ inline std::vector<DiscoveredBundle>
     return std::move(split.selected);
 }
 
+// Discovery and selection for the engine binary. Discovers the bundles under `dataDir`
+// and keeps the ones selectBundlesToLoad() selects. Returns nullopt when there is
+// nothing to discover; the reason is already on stderr.
+//
+// A run that does not write claims parses only the sweep roots that `filter` can select.
+// A writing run parses every sweep manifest.
+inline std::optional<DiscoveredBundleSet> discoverAndSelectBundles(std::filesystem::path dataDir,
+                                                                   const std::string& filter,
+                                                                   bool writing,
+                                                                   bool observing,
+                                                                   BundleRegistrationStats& stats,
+                                                                   SupportClaimCoverage& coverage)
+{
+    std::function<bool(const std::string&)> mayParseSuite;
+    if(!writing)
+    {
+        mayParseSuite = [&filter](const std::string& suiteName) {
+            return gtestFilterMaySelectSuite(filter, suiteName);
+        };
+    }
+
+    auto discovered = discoverBundleSet(std::move(dataDir), mayParseSuite);
+    if(!discovered.has_value())
+    {
+        return std::nullopt;
+    }
+
+    discovered->bundles = selectBundlesToLoad(std::move(discovered->bundles),
+                                              discovered->unparsedSweeps,
+                                              filter,
+                                              writing,
+                                              observing,
+                                              stats,
+                                              coverage);
+    return discovered;
+}
+
 } // namespace detail
 
 /// Registers the engine-verification suite: one test per bundle, driven against
@@ -647,30 +703,19 @@ inline BundleRegistrationStats
 
     BundleRegistrationStats stats;
 
-    const std::string filter = GTEST_FLAG_GET(filter);
-    std::function<bool(const std::string&)> mayParseSuite;
-    if(!writing)
-    {
-        mayParseSuite = [filter](const std::string& suiteName) {
-            return gtestFilterMaySelectSuite(filter, suiteName);
-        };
-    }
-
-    auto discovered = detail::discoverDataDirBundles(mayParseSuite);
-    if(!discovered.has_value())
+    auto dataDir = detail::enabledDataDir();
+    if(!dataDir.has_value())
     {
         return stats;
     }
 
-    discovered->bundles = detail::selectBundlesToLoad(std::move(discovered->bundles),
-                                                      discovered->unparsedSweeps,
-                                                      filter,
-                                                      writing,
-                                                      observing,
-                                                      stats,
-                                                      supportClaimCoverage());
-
-    if(discovered->bundles.empty())
+    auto discovered = detail::discoverAndSelectBundles(std::move(*dataDir),
+                                                       GTEST_FLAG_GET(filter),
+                                                       writing,
+                                                       observing,
+                                                       stats,
+                                                       supportClaimCoverage());
+    if(!discovered.has_value() || discovered->bundles.empty())
     {
         return stats;
     }

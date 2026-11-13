@@ -2041,6 +2041,106 @@ TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
     EXPECT_TRUE(detail::hasNoDiscoveredBundles(parsed));
 }
 
+// discoverAndSelectBundles() is the discovery and selection step behind
+// registerBundleTests(). A filtered run must count, select and cover exactly what a run
+// over the full discovery would.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesMatchesFullDiscoveryUnderAFilter)
+{
+    createMixedTierTree(_tempDir);
+    const std::string filter = "quick_Matmul_*.*";
+
+    for(const bool observing : {false, true})
+    {
+        BundleRegistrationStats expectedStats;
+        SupportClaimCoverage expectedCoverage;
+        const auto expected = detail::selectBundlesToLoad(discoverBundles(_tempDir),
+                                                          {},
+                                                          filter,
+                                                          /*writing=*/false,
+                                                          observing,
+                                                          expectedStats,
+                                                          expectedCoverage);
+
+        BundleRegistrationStats stats;
+        SupportClaimCoverage coverage;
+        const auto discovered = detail::discoverAndSelectBundles(
+            _tempDir, filter, /*writing=*/false, observing, stats, coverage);
+
+        ASSERT_TRUE(discovered.has_value());
+        EXPECT_EQ(discovered->dataDir, _tempDir);
+        EXPECT_FALSE(discovered->unparsedSweeps.empty());
+        ASSERT_EQ(discovered->bundles.size(), expected.size());
+        for(size_t i = 0; i < expected.size(); ++i)
+        {
+            EXPECT_EQ(discovered->bundles[i].fullName(), expected[i].fullName());
+        }
+        EXPECT_EQ(stats.discovered, 16u);
+        EXPECT_EQ(stats.discovered, expectedStats.discovered);
+        EXPECT_EQ(stats.excludedByFilter, expectedStats.excludedByFilter);
+        EXPECT_EQ(coverage.graphsFound, expectedCoverage.graphsFound);
+        EXPECT_EQ(coverage.graphsWithClaims, expectedCoverage.graphsWithClaims);
+    }
+}
+
+// --write-support-claims needs every sweep manifest parsed, whatever the filter.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesParsesEverySweepWhenWriting)
+{
+    createMixedTierTree(_tempDir);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    std::optional<detail::DiscoveredBundleSet> discovered;
+    ASSERT_NO_THROW(discovered = detail::discoverAndSelectBundles(_tempDir,
+                                                                  "quick_Matmul_*.*",
+                                                                  /*writing=*/true,
+                                                                  /*observing=*/false,
+                                                                  stats,
+                                                                  coverage));
+
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->unparsedSweeps.empty());
+    EXPECT_EQ(discovered->bundles.size(), 16u);
+    EXPECT_EQ(stats.discovered, 16u);
+    EXPECT_EQ(stats.excludedByFilter, 0u);
+}
+
+// A tree of sweeps the filter skips is not "no bundles": the zero-tests diagnostic must
+// report their cases as discovered and excluded.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesCountsSweepsTheFilterSkips)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {"c1", "c2"}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {"c3"}, true);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto discovered = detail::discoverAndSelectBundles(
+        _tempDir, "NoSuchSuite.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->bundles.empty());
+    EXPECT_EQ(discovered->unparsedSweeps.size(), 2u);
+    EXPECT_EQ(stats.discovered, 3u);
+    EXPECT_EQ(stats.excludedByFilter, 3u);
+    EXPECT_EQ(coverage.graphsFound, 3u);
+    EXPECT_EQ(coverage.graphsWithClaims, 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesFindsNothingInATreeWithoutCases)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+
+    for(const auto* filter : {"NoSuchSuite.*", "*"})
+    {
+        BundleRegistrationStats stats;
+        SupportClaimCoverage coverage;
+        EXPECT_FALSE(detail::discoverAndSelectBundles(
+                         _tempDir, filter, /*writing=*/false, /*observing=*/false, stats, coverage)
+                         .has_value())
+            << "filter '" << filter << "'";
+        EXPECT_EQ(stats.discovered, 0u) << "filter '" << filter << "'";
+    }
+}
+
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
 // LoadTemplateSweepCaseWithBakedValueAndRuntimePassByValueIsError: that test
 // confirms loadIntegrationTestBundle() throws RuntimePassByValueInvariantError
