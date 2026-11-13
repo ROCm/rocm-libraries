@@ -284,7 +284,10 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(
             1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
 
-        // The batch counts are checked before the quick return for the same reason.
+        // The batch counts are checked before the quick return for the same reason,
+        // and they must stay in front of it. scale_2d_array in the quick return walks
+        // batch_count_C at batch_stride_C, so an empty product with a batch count other
+        // than 1 would scale C, and a zero stride would let every batch scale the same C.
         ROCSPARSE_CHECKARG(8, batch_count_A, (batch_count_A != 1), rocsparse_status_invalid_value);
         ROCSPARSE_CHECKARG(16, batch_count_B, (batch_count_B != 1), rocsparse_status_invalid_value);
         ROCSPARSE_CHECKARG(22, batch_count_C, (batch_count_C != 1), rocsparse_status_invalid_value);

@@ -226,6 +226,68 @@ TEST_F(ExtraBell, transpose_is_not_implemented_on_every_stage)
     }
 }
 
+TEST_F(ExtraBell, no_stored_blocks_batched_operands_are_rejected)
+{
+    // Blocked ELL spmm is not batched. An empty product with a batch count
+    // other than 1 on A, B or C returns invalid_value from compute and leaves
+    // C unchanged, as a product with stored blocks does. Buffer size and
+    // preprocess do not see the batch counts and succeed for both.
+    enum class Batched
+    {
+        A,
+        B,
+        C_stride0,
+        C_strided
+    };
+    const std::pair<Batched, const char*> cases[] = {{Batched::A, "A"},
+                                                     {Batched::B, "B"},
+                                                     {Batched::C_stride0, "C, stride 0"},
+                                                     {Batched::C_strided, "C, stride ldc * n"}};
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(std::string("batched ") + c.second);
+        BellRun     r;
+        BellProblem p;
+        ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p, 2));
+        // A scaled C would hold -2 with beta = -0.5. With a zero stride both
+        // batches scale the same C.
+        std::fill(p.hC.begin(), p.hC.end(), 4.0f);
+        ASSERT_EQ(
+            hipMemcpy(p.dC.ptr, p.hC.data(), p.hC.size() * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
+        switch(c.first)
+        {
+        case Batched::A:
+            ASSERT_EQ(rocsparse_spmat_set_strided_batch(p.sp.p, 2), rocsparse_status_success);
+            break;
+        case Batched::B:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mB.p, 2, p.ldb * r.n),
+                      rocsparse_status_success);
+            break;
+        case Batched::C_stride0:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mC.p, 2, 0), rocsparse_status_success);
+            break;
+        case Batched::C_strided:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mC.p, 2, p.ldc * r.n),
+                      rocsparse_status_success);
+            break;
+        }
+
+        const float alpha = 2.0f, beta = -0.5f;
+        size_t      bsz  = 0;
+        auto        spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return bell_spmm(handle, r.opA, &alpha, p, &beta, stage, &bsz, buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> buffer(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(buffer.ptr);
+        EXPECT_EQ(spmm(rocsparse_spmm_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        EXPECT_EQ(spmm(rocsparse_spmm_stage_compute, buffer.ptr), rocsparse_status_invalid_value);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(p.dC.host(), p.hC) << "C was written";
+    }
+}
+
 namespace
 {
     // rocsparse_dense_to_sparse into a blocked ELL matrix (not documented as supported,
