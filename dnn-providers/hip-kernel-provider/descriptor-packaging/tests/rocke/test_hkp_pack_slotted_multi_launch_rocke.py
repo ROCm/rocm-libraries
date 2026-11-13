@@ -114,8 +114,9 @@ def _bound_dkdv_root(tmp_path, merge_head_size):
     return root
 
 
-def _pack_root(root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path=None,
-               device_lib_path=None):
+def _pack_root(
+    root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path=None, device_lib_path=None
+):
     run_pipeline(
         source_root=root,
         arches=[ARCH],
@@ -152,4 +153,6 @@ def test_a_slot_pack_launch_that_disagrees_with_the_slot_metadata_fails_the_pack
     root = _bound_dkdv_root(tmp_path, merge_head_size=64)
 
     with pytest.raises(HkpPackError, match=r"launch 'merge'.*disagrees"):
-        _pack_root(root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path, device_lib_path)
+        _pack_root(
+            root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path, device_lib_path
+        )
