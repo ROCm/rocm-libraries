@@ -892,7 +892,23 @@ namespace TensileLite
                                          || tensorIndex == ContractionProblemGemm::TENSOR::SCALEB;
                     bool const   useCos = tensorIndex != ContractionProblemGemm::TENSOR::A;
                     size_t const count  = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for schedule(static)
+                    // Nonzero strides that overlap (in stride order, a stride below the span of
+                    // the smaller ones, e.g. sizes {3, 4, 2} with strides {1, 3, 6}) map several
+                    // indices to one element. Fill those serially in logical order so the last
+                    // index wins every time, as hipBLASLt's maf1_0 fill does.
+                    std::vector<std::pair<size_t, size_t>> dims; // (stride, size)
+                    for(size_t d = 0; d < sizes.size(); d++)
+                        if(sizes[d] > 1 && strides[d] != 0)
+                            dims.emplace_back(strides[d], sizes[d]);
+                    std::sort(dims.begin(), dims.end());
+                    bool   overlap = false;
+                    size_t span    = 1;
+                    for(auto const& [stride, size] : dims)
+                    {
+                        overlap = overlap || stride < span;
+                        span    = std::max(span, stride * size);
+                    }
+#pragma omp parallel for schedule(static) if(!overlap)
                     for(size_t idx = 0; idx < count; idx++)
                     {
                         size_t offset    = 0;
