@@ -194,7 +194,6 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontend
     }
 }
 
-
 // The bias of a [4, 5] output has dims [1, 5]; hipBLASLt reads it as a packed
 // vector of 5 elements. Strides of size-1 dims do not affect the layout.
 struct BiasStridesCase
@@ -211,7 +210,6 @@ class TestHipblasltMatmulPlanBuilderBiasStridesCases
 
 TEST_P(TestHipblasltMatmulPlanBuilderBiasStridesCases, IsApplicableDeclinesNonPackedBias)
 {
-    using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     for(const auto activMode : {PointwiseMode::UNSET, PointwiseMode::RELU_FWD})
     {
         const auto recorder
