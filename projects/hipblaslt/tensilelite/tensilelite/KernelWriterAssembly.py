@@ -92,7 +92,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
-from .Components.TDMStore import tdmStoreBlocks
+from .Components.TDMStore import hasEpilogueSideEffects, tdmStoreBlocks
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -17998,12 +17998,14 @@ class KernelWriterAssembly(KernelWriter):
           else:
             tdmStoreBlock = vectorWidth in tdmVectorWidths
             tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
-            # The TDM block stores the whole tile like the NonEdge path: the widest block, which comes first.
+            # The TDM block stores the whole tile like the NonEdge path: the widest block, which comes first. With
+            # per-element outputs beyond C and D it keeps the masks and the vector width of the edge block.
+            tdmWide = tdmStoreBlock and not hasEpilogueSideEffects(kernel["ProblemType"])
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
-                                          applyAlpha, beta, edge and not tdmStoreBlock, atomic,
-                                          vectorWidths[0] if tdmStoreBlock else vectorWidth,
-                                          elements[0] if tdmStoreBlock else element, activationLabelList,
+                                          applyAlpha, beta, edge and not tdmWide, atomic,
+                                          vectorWidths[0] if tdmWide else vectorWidth,
+                                          elements[0] if tdmWide else element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                           edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,

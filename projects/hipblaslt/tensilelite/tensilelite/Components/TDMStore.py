@@ -68,7 +68,8 @@ STINKY_KEEP = "[stinky-keep]"
 
 def hasEpilogueSideEffects(pt):
   """Whether the epilogue writes or reduces per-element outputs beyond C and D (E, Gradient, gate residual,
-  AmaxD), which the TDM block, computing the elements outside D without masks, cannot bound."""
+  AmaxD). The TDM blocks of the edge paths of such a kernel keep the masks, the vector width and the C loads of
+  the edge block, so the elements outside D reach neither those outputs nor their reductions."""
   return pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["OutputAmaxD"]
 
 
@@ -87,8 +88,9 @@ def tdmStoreRejectReason(state):
   staged tile overwrites nothing it reuses.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
-  M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or
-  reduce per-element outputs (hasEpilogueSideEffects). GroupedGemm sets the sizes, strides and addresses
+  M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD. With per-element
+  outputs beyond C and D (hasEpilogueSideEffects) the TDM blocks of the edge paths are generated as the edge
+  block, with its masks, vector width and C loads, and only stage D in place of its store. GroupedGemm sets the sizes, strides and addresses
   the block reads for each group.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block when
   the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store. The reduced tile of a
@@ -126,9 +128,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support CompactLoopStore"
   if pt["FusedGemmA2A"]:
     return "TDMStoreInst does not support FusedGemmA2A"
-  if hasEpilogueSideEffects(pt):
-    return "TDMStoreInst does not support per-element epilogue side effects beyond C and D " \
-      "(E, Gradient, gate residual, AmaxD)"
   return None
 
 
