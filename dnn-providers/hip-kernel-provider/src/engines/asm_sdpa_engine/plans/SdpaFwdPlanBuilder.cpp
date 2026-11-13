@@ -30,6 +30,7 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
+using hip_kernel_provider::core::utils::Rejection;
 
 constexpr auto SDPA_SEQ_AXIS
     = static_cast<flatbuffers::uoffset_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
@@ -169,33 +170,28 @@ static bool isTokenSeqstartTensor(
 // hipDNN addresses a ragged element at offset[b] * multiplier + strides . (h, s, d), while
 // AITER uses seqstart[b] * seq_stride + strides . (h, s, d) with one seqstart for Q/O and one
 // for K/V. The two agree for any stride permutation under the conditions below.
-static bool hasAiterCompatibleRaggedAddressing(
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
+static Rejection checkAiterRaggedAddressing(
+    const plan_utils::TensorMap& tensorMap,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor)
 {
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
-
     const int64_t qoOffsetUid = qTensor.ragged_offset_tensor_uid().value();
     const int64_t kvOffsetUid = kTensor.ragged_offset_tensor_uid().value();
-    HIP_KERNEL_RETURN_FALSE_IF(oTensor.ragged_offset_tensor_uid().value() != qoOffsetUid,
-                               "Q and O must share a ragged offset tensor");
-    HIP_KERNEL_RETURN_FALSE_IF(vTensor.ragged_offset_tensor_uid().value() != kvOffsetUid,
-                               "K and V must share a ragged offset tensor");
+    HIP_KERNEL_REJECT_IF(oTensor.ragged_offset_tensor_uid().value() != qoOffsetUid,
+                         "Q and O must share a ragged offset tensor");
+    HIP_KERNEL_REJECT_IF(vTensor.ragged_offset_tensor_uid().value() != kvOffsetUid,
+                         "K and V must share a ragged offset tensor");
 
     for(const auto& [label, tensor] : {std::pair{"q", &qTensor},
                                        std::pair{"k", &kTensor},
                                        std::pair{"v", &vTensor},
                                        std::pair{"o", &oTensor}})
     {
-        HIP_KERNEL_RETURN_FALSE_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
-                                   std::string(label) + " tensor must have rank 4 strides");
-        HIP_KERNEL_RETURN_FALSE_IF(
+        HIP_KERNEL_REJECT_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
+                             std::string(label) + " tensor must have rank 4 strides");
+        HIP_KERNEL_REJECT_IF(
             tensor->ragged_offset_multiplier() != tensor->strides()->Get(SDPA_SEQ_AXIS),
             std::string(label) + " tensor ragged_offset_multiplier must equal its sequence "
                 + "stride (Actual multiplier: " + std::to_string(tensor->ragged_offset_multiplier())
@@ -204,11 +200,11 @@ static bool hasAiterCompatibleRaggedAddressing(
     }
 
     const int64_t batch = qTensor.dims()->Get(0);
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         !isTokenSeqstartTensor(tensorMap, qoOffsetUid, batch)
             || !isTokenSeqstartTensor(tensorMap, kvOffsetUid, batch),
         "Ragged offset tensors must be non-virtual INT32 [B+1, 1, 1, 1] device tensors");
-    return true;
+    return std::nullopt;
 }
 
 static bool isMi308Device(hipStream_t stream)
@@ -283,19 +279,19 @@ static bool
     return ok;
 }
 
-// Validate that every forward-pass byte stride fits in uint32_t.  The ASM
-// kernarg struct stores strides as uint32 so values that overflow silently
-// truncate, producing wrong results.  Checked early in isApplicable so the
-// engine declines rather than dispatching with bad strides. `inputBytes` is
-// the resolved Q/K/V element size, so an fp8 descriptor is bounded at the one
-// byte the kernarg builder actually scales by; O stays BF16.
-static bool wouldFwdByteStridesFitUint32(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
-    int64_t inputBytes)
+// Validate that every forward-pass Q/K/V/O byte stride fits in uint32_t. The
+// ASM kernarg struct stores strides as uint32 so values that overflow silently
+// truncate, producing wrong results. Checked in isApplicable so the engine
+// declines rather than dispatching with bad strides. `inputBytes` is the
+// resolved Q/K/V element size, so an fp8 descriptor is bounded at the one byte
+// the kernarg builder actually scales by; O stays BF16. The stats/LSE strides
+// are checked with the rest of the stats tensor (checkStatsTensor).
+static bool
+    wouldFwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                 int64_t inputBytes)
 {
     auto checkTensor = [](const char* prefix,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
@@ -317,15 +313,6 @@ static bool wouldFwdByteStridesFitUint32(
     ok &= checkTensor("v", v, inputBytes);
     ok &= checkTensor("o", o, K_BF16_BYTES);
 
-    if(stats != nullptr)
-    {
-        // LSE/stats: rank 3 [B, H_q, S_q] or rank 4 [B, H_q, S_q, 1] in FP32;
-        // only batch and head strides reach the kernel.
-        const auto* statsStrides = stats->strides();
-        ok &= plan_utils::byteStrideFitsU32("batch_stride_lse", statsStrides->Get(0), K_FP32_BYTES);
-        ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
-    }
-
     return ok;
 }
 
@@ -346,209 +333,140 @@ static std::string getKernelTocKey(std::string coName, const std::string& archId
     return asm_kernels::getAsmKernelTocKey(coName);
 }
 
-bool SdpaFwdPlanBuilder::isApplicable(
-    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+// Group-mode (ragged) layout: only Q/K/V/O may be ragged, all of them or none, and a
+// ragged layout must match AITER's seqstart addressing.
+static Rejection
+    checkRaggedLayout(const plan_utils::TensorMap& tensorMap,
+                      const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor)
+{
+    const auto unsupportedRaggedTensorIds
+        = hipdnn_flatbuffers_sdk::utilities::listUnsupportedRaggedTensorIds(tensorMap,
+                                                                            {attrs.q_tensor_uid(),
+                                                                             attrs.k_tensor_uid(),
+                                                                             attrs.v_tensor_uid(),
+                                                                             attrs.o_tensor_uid()});
+    HIP_KERNEL_REJECT_IF(
+        !unsupportedRaggedTensorIds.empty(),
+        "Only the Q, K, V and O tensors can be ragged. The following tensor uids are ragged "
+        "and not supported: "
+            + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorIds));
+
+    const int numberRagged = static_cast<int>(qTensor.ragged_offset_tensor_uid().has_value())
+                             + static_cast<int>(kTensor.ragged_offset_tensor_uid().has_value())
+                             + static_cast<int>(vTensor.ragged_offset_tensor_uid().has_value())
+                             + static_cast<int>(oTensor.ragged_offset_tensor_uid().has_value());
+    HIP_KERNEL_REJECT_IF(numberRagged != 0 && numberRagged != 4,
+                         "Either all or none of Q, K, V or O must be ragged");
+    if(numberRagged == 0)
+    {
+        return std::nullopt;
+    }
+    return checkAiterRaggedAddressing(tensorMap, qTensor, kTensor, vTensor, oTensor);
+}
+
+// Graph features only the forward attributes carry that the v3 forward kernel does not dispatch.
+static Rejection
+    checkFwdUnsupportedFeatures(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    HIP_KERNEL_REJECT_IF(attrs.page_table_k_tensor_uid(), "page_table_k tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.page_table_v_tensor_uid(), "page_table_v tensor not supported");
+    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
+    HIP_KERNEL_REJECT_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.seq_len_kv_tensor_uid().has_value()
+                             || attrs.seq_len_q_tensor_uid().has_value(),
+                         "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+
+    // Softmax/output (de)quantization is not implemented by the v3 forward kernel
+    // (its argument struct exposes only q/k/v descales).
+    HIP_KERNEL_REJECT_IF(attrs.descale_s_tensor_uid().has_value(),
+                         "descale_s tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.scale_s_tensor_uid().has_value(), "scale_s tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.scale_o_tensor_uid().has_value(), "scale_o tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.amax_s_tensor_uid().has_value(), "amax_s tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.amax_o_tensor_uid().has_value(), "amax_o tensor not supported");
+    return std::nullopt;
+}
+
+// The kernel reads `tensor` through a device pointer as `expectedType`. A virtual
+// tensor has no buffer, a pass-by-value one is delivered as a host pointer (or not
+// at all), and any other dtype would have its bytes reinterpreted.
+static Rejection
+    checkDeviceTensor(const char* label,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType expectedType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    using namespace hipdnn_flatbuffers_sdk::utilities;
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+    HIP_KERNEL_REJECT_IF(
+        tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor),
+        std::string(label) + " tensor must be a non-virtual, non-pass-by-value device tensor");
+    HIP_KERNEL_REJECT_IF(tensor.data_type() != expectedType,
+                         std::string(label) + " tensor must be " + EnumNameDataType(expectedType)
+                             + " (Actual value: " + EnumNameDataType(tensor.data_type()) + ")");
+    return std::nullopt;
+}
 
-    // Execute-time override shapes can diverge from the compile-time dims this
-    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
-    // rather than risk a mismatch (RFC 0008 §4.6).
-    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
-                               "Graph has override shapes enabled");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
-        "All tensors must be aligned to a multiple of 16 bytes");
+// Validates the stats (LSE) output tensor generate_stats requests. Q must already be
+// validated rank 4.
+static Rejection checkStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                  const plan_utils::TensorMap& tensorMap,
+                                  BatchMode batchMode,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    auto& nodeWrappers = opGraph.nodeWrappers();
-
-    std::string deviceString;
-
-    try
-    {
-        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        HIP_KERNEL_RETURN_FALSE_IF(
-            deviceString != "gfx942" && deviceString != "gfx950",
-            "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Could not query device string: " << e.what());
-        return false;
-    }
-
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph has more than one node");
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
-                                   != NodeAttributes::SdpaAttributes,
-                               "Node attribute type is not SdpaAttributes");
-
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
-                               "Compute data type must be FLOAT");
-
-    const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
-                                   && attrs.dropout_probability().value() != 0.f,
-                               "dropout_probability must be unset or zero (Actual value: "
-                                   + std::to_string(attrs.dropout_probability().value()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
-                               "attn_mask tensor not supported");
-
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(),
-                               "page_table_k tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
-                               "page_table_v tensor not supported");
-    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
-
-    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
-    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
-    if(attrs.scale_tensor_uid().has_value())
-    {
-        const auto& tensorMap = opGraph.getTensorMap();
-        const auto scaleIt = tensorMap.find(attrs.scale_tensor_uid().value());
-        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == tensorMap.end(),
-                                   "scale_tensor_uid not found in tensor map");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
-            "scale tensor must be pass-by-value (compile-time constant or runtime)");
-    }
-
-    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
-    {
-        return false;
-    }
-
-    const auto& tensorMap = opGraph.getTensorMap();
-
-    const int64_t qUid = attrs.q_tensor_uid();
-    const int64_t kUid = attrs.k_tensor_uid();
-    const int64_t vUid = attrs.v_tensor_uid();
-    const int64_t oUid = attrs.o_tensor_uid();
-
-    auto* qTensor = tensorMap.at(qUid);
-    auto* kTensor = tensorMap.at(kUid);
-    auto* vTensor = tensorMap.at(vUid);
-    auto* oTensor = tensorMap.at(oUid);
-
-    BatchMode batchMode;
-    {
-        const auto unsupportedRaggedTensorIds
-            = listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid});
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !unsupportedRaggedTensorIds.empty(),
-            "Only the Q, K, V and O tensors can be ragged. The following tensor uids are ragged "
-            "and not supported: "
-                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorIds));
-
-        const int numberRagged
-            = static_cast<int>(qTensor->ragged_offset_tensor_uid().has_value())
-              + static_cast<int>(kTensor->ragged_offset_tensor_uid().has_value())
-              + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
-              + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
-
-        HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
-                                       || attrs.seq_len_q_tensor_uid().has_value(),
-                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
-
-        HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
-                                   "Either all or none of Q, K, V or O must be ragged");
-        batchMode = (numberRagged == 4) ? BatchMode::GROUP : BatchMode::BATCH;
-    }
-
-    // Validate Q/K/V/O ranks before accessing their dims by index.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        qTensor->dims()->size() != 4,
-        "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        vTensor->dims()->size() != 4,
-        "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->size() != 4,
-        "k tensor must be rank 4 (Actual rank: " + std::to_string(kTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        oTensor->dims()->size() != 4,
-        "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
-
-    // Every dimension below is narrowed to 32 bits before it reaches a kernel,
-    // starting with the mask classification and the registry lookup further
-    // down, so the range gate comes first.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
-        "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
-
-    if(batchMode == BatchMode::GROUP
-       && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
-    {
-        return false;
-    }
-
-    // Validate optional stats (LSE) output tensor.
-    // Gate purely on generate_stats; the UID is required when the flag is set.
-    const bool hasStats = hasStatsOutput(attrs);
     // Varlen LSE is [H, total_q] indexed by seqstart, not the dense [B, H, Sq] stats layout.
-    HIP_KERNEL_RETURN_FALSE_IF(hasStats && batchMode == BatchMode::GROUP,
-                               "stats (LSE) output is not supported for ragged tensors");
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statsTensor = nullptr;
-    if(hasStats)
-    {
-        HIP_KERNEL_RETURN_FALSE_IF(!attrs.stats_tensor_uid().has_value(),
-                                   "generate_stats is set but stats_tensor_uid is missing");
+    HIP_KERNEL_REJECT_IF(batchMode == BatchMode::GROUP,
+                         "stats (LSE) output is not supported for ragged tensors");
+    // Gate purely on generate_stats; the UID is required when the flag is set.
+    HIP_KERNEL_REJECT_IF(!attrs.stats_tensor_uid().has_value(),
+                         "generate_stats is set but stats_tensor_uid is missing");
 
-        const auto statsIt = tensorMap.find(attrs.stats_tensor_uid().value());
-        HIP_KERNEL_RETURN_FALSE_IF(statsIt == tensorMap.end(),
-                                   "stats_tensor_uid not found in tensor map");
+    const auto statsIt = tensorMap.find(attrs.stats_tensor_uid().value());
+    HIP_KERNEL_REJECT_IF(statsIt == tensorMap.end(), "stats_tensor_uid not found in tensor map");
+    const auto& stats = *statsIt->second;
 
-        statsTensor = statsIt->second;
+    HIP_KERNEL_RETURN_IF_REJECTED(checkDeviceTensor("stats", stats, DataType::FLOAT));
 
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->virtual_(), "stats tensor must not be virtual");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(statsTensor),
-            "stats tensor must not be pass-by-value");
+    const auto statsRank = stats.dims()->size();
+    HIP_KERNEL_REJECT_IF(statsRank != 3 && statsRank != 4,
+                         "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+                             + std::to_string(statsRank) + ")");
+    HIP_KERNEL_REJECT_IF(statsRank == 4 && stats.dims()->Get(3) != 1,
+                         "stats tensor rank-4 last dim must be 1 (Actual: "
+                             + std::to_string(stats.dims()->Get(3)) + ")");
 
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
-                                   "stats tensor datatype must be FP32 (Actual type: "
-                                       + EnumNameDataType(statsTensor->data_type()) + ")");
+    HIP_KERNEL_REJECT_IF(stats.dims()->Get(0) != q.dims()->Get(0)
+                             || stats.dims()->Get(1) != q.dims()->Get(1)
+                             || stats.dims()->Get(2) != q.dims()->Get(2),
+                         "stats tensor shape [B,H,Sq] must match Q tensor");
 
-        const auto statsRank = statsTensor->dims()->size();
-        HIP_KERNEL_RETURN_FALSE_IF(
-            statsRank != 3 && statsRank != 4,
-            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
-                + std::to_string(statsRank) + ")");
+    // Only the FP32 batch and head strides reach the kernel.
+    const auto* statsStrides = stats.strides();
+    bool ok = plan_utils::byteStrideFitsU32("batch_stride_lse", statsStrides->Get(0), K_FP32_BYTES);
+    ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
+    HIP_KERNEL_REJECT_IF(!ok, "stats byte strides overflow uint32_t kernarg fields");
+    return std::nullopt;
+}
 
-        if(statsRank == 4)
-        {
-            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
-                                       "stats tensor rank-4 last dim must be 1 (Actual: "
-                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
-        }
+// Input/output dtype requirements; `dataTypeId` is getDataTypeIdentifier()'s result.
+static Rejection
+    checkFwdDataTypes(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor,
+                      const std::string& dataTypeId)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        // Shape comparison is safe now — Q rank-4 is validated above.
-        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
-                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
-                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
-                                   "stats tensor shape [B,H,Sq] must match Q tensor");
-    }
-
-    HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
-                                   || qTensor->data_type() != vTensor->data_type(),
-                               "Input tensors must all share a type (q tensor: "
-                                   + EnumNameDataType(qTensor->data_type())
-                                   + ", k tensor: " + EnumNameDataType(kTensor->data_type())
-                                   + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
-
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
-        "k tensor and v tensor must shared the same head count (Actual value: k = "
-            + std::to_string(kTensor->dims()->Get(1))
-            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
-
-    auto dataTypeId = getDataTypeIdentifier(
-        qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
+    HIP_KERNEL_REJECT_IF(
+        qTensor.data_type() != kTensor.data_type() || qTensor.data_type() != vTensor.data_type(),
+        "Input tensors must all share a type (q tensor: " + EnumNameDataType(qTensor.data_type())
+            + ", k tensor: " + EnumNameDataType(kTensor.data_type())
+            + ", v tensor: " + EnumNameDataType(vTensor.data_type()) + ")");
 
     // Targeted diagnostic for the FNUZ/OCP fp8 gotcha: OCP FP8_E4M3 (bias 7, the
     // gfx950/MI350 encoding) is not bit-compatible with the FP8_E4M3_FNUZ (bias 8)
@@ -556,93 +474,158 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // message rather than the generic "unsupported datatype" one below. Inputs are
     // proven same-type above, so checking q is sufficient. Remove once gfx950 OCP
     // fp8 forward kernels are wired in.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        qTensor->data_type() == DataType::FP8_E4M3,
+    HIP_KERNEL_REJECT_IF(
+        qTensor.data_type() == DataType::FP8_E4M3,
         "gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs; OCP FP8_E4M3 (gfx950/MI350) is a "
         "non-bit-compatible encoding and is not yet supported by these kernels");
 
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         dataTypeId.empty(),
         "output tensor must have datatype BFLOAT16 (Actual type: "
-            + EnumNameDataType(oTensor->data_type())
+            + EnumNameDataType(oTensor.data_type())
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
-            + EnumNameDataType(qTensor->data_type()) + ")");
+            + EnumNameDataType(qTensor.data_type()) + ")");
+    return std::nullopt;
+}
 
-    // mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
-    // the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
-    // all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
-    // and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
-    // the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
-    // mode describes, so they still require UNSET. An allow-list, so an enum value
-    // added later declines until judged.
-    const auto mmaCoreMode = attrs.mma_core_mode();
+// mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
+// the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
+// all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
+// and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
+// the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
+// mode describes, so they still require UNSET. An allow-list, so an enum value
+// added later declines until judged.
+static Rejection checkMmaCoreMode(hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode,
+                                  const std::string& dataTypeId,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType inputType)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
     const bool isSixteenBitMmaMode
         = mmaCoreMode == DataType::HALF || mmaCoreMode == DataType::BFLOAT16;
     const bool mmaCoreModeSupported
         = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode);
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         !mmaCoreModeSupported,
         "mma_core_mode must be UNSET, or HALF/BFLOAT16 for bf16 inputs (Actual value: "
-            + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(qTensor->data_type())
-            + ")");
+            + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(inputType) + ")");
+    return std::nullopt;
+}
 
-    // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). Without them
-    // the kernel would read garbage dequantization scales.
+// FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). Without them
+// the kernel would read garbage dequantization scales.
+static Rejection checkFp8Descales(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                  const plan_utils::TensorMap& tensorMap)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    HIP_KERNEL_REJECT_IF(!attrs.descale_q_tensor_uid().has_value()
+                             || !attrs.descale_k_tensor_uid().has_value()
+                             || !attrs.descale_v_tensor_uid().has_value(),
+                         "fp8 inputs require q, k, and v descale tensors");
+
+    // Only per-tensor (scalar) descales are supported: the kernel-arg builder
+    // wires all s_descale_*_Bs/Hs strides to zero, so a non-scalar descale (e.g.
+    // per-[B, H_kv]) would be silently mis-read as descale[0] for every batch and
+    // head. Decline it here rather than miscompute. Per-[B, H_kv] descales are a
+    // future extension (tracked with the gfx950 fp8 path).
+    const auto* qDescale = tensorMap.at(attrs.descale_q_tensor_uid().value());
+    const auto* kDescale = tensorMap.at(attrs.descale_k_tensor_uid().value());
+    const auto* vDescale = tensorMap.at(attrs.descale_v_tensor_uid().value());
+    HIP_KERNEL_REJECT_IF(
+        !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
+        "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
+        "supported");
+
+    // The kernel reads each descale as an FP32 value through a device pointer.
+    for(const auto& [label, tensor] : {std::pair{"descale_q", qDescale},
+                                       std::pair{"descale_k", kDescale},
+                                       std::pair{"descale_v", vDescale}})
+    {
+        HIP_KERNEL_RETURN_IF_REJECTED(checkDeviceTensor(label, *tensor, DataType::FLOAT));
+    }
+    return std::nullopt;
+}
+
+static Rejection
+    checkFwdApplicability(const Handle& handle,
+                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::checkSdpaGraphBasics(opGraph, NodeAttributes::SdpaAttributes));
+
+    const auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "[SdpaFwdPlanBuilder::isApplicable] Could not query device string: ");
+    HIP_KERNEL_REJECT_IF(!deviceStringOpt, "Could not query device string");
+    const std::string& deviceString = *deviceStringOpt;
+    HIP_KERNEL_REJECT_IF(
+        deviceString != "gfx942" && deviceString != "gfx950",
+        "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
+
+    const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaAttributes>();
+    const auto& tensorMap = opGraph.getTensorMap();
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkCommonUnsupportedFeatures(attrs, tensorMap));
+    HIP_KERNEL_RETURN_IF_REJECTED(checkFwdUnsupportedFeatures(attrs));
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkAttnScale(attrs, tensorMap));
+
+    const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
+    const auto* kTensor = tensorMap.at(attrs.k_tensor_uid());
+    const auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
+    const auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
+
+    // Validate Q/K/V/O before accessing their dims by index.
+    for(const auto& [label, tensor] : {std::pair{"q", qTensor},
+                                       std::pair{"k", kTensor},
+                                       std::pair{"v", vTensor},
+                                       std::pair{"o", oTensor}})
+    {
+        HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkRank4DeviceTensor(label, *tensor));
+    }
+
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        checkRaggedLayout(tensorMap, attrs, *qTensor, *kTensor, *vTensor, *oTensor));
+    // All-or-none raggedness was enforced above; the same derivation buildPlan uses.
+    const auto batchMode
+        = qTensor->ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
+
+    // Every dimension below is narrowed to 32 bits before it reaches a kernel,
+    // starting with the mask classification and the registry lookup further
+    // down, so the range gate comes first.
+    HIP_KERNEL_REJECT_IF(!wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
+                         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
+
+    HIP_KERNEL_REJECT_IF(kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
+                         "k tensor and v tensor must shared the same head count (Actual value: k = "
+                             + std::to_string(kTensor->dims()->Get(1))
+                             + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
+
+    const bool hasStats = hasStatsOutput(attrs);
+    if(hasStats)
+    {
+        HIP_KERNEL_RETURN_IF_REJECTED(checkStatsTensor(attrs, tensorMap, batchMode, *qTensor));
+    }
+
+    const auto dataTypeId = getDataTypeIdentifier(
+        qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        checkFwdDataTypes(*qTensor, *kTensor, *vTensor, *oTensor, dataTypeId));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        checkMmaCoreMode(attrs.mma_core_mode(), dataTypeId, qTensor->data_type()));
     if(dataTypeId == "fp8bf16")
     {
-        HIP_KERNEL_RETURN_FALSE_IF(!attrs.descale_q_tensor_uid().has_value()
-                                       || !attrs.descale_k_tensor_uid().has_value()
-                                       || !attrs.descale_v_tensor_uid().has_value(),
-                                   "fp8 inputs require q, k, and v descale tensors");
-
-        // Only per-tensor (scalar) descales are supported: the kernel-arg builder
-        // wires all s_descale_*_Bs/Hs strides to zero, so a non-scalar descale (e.g.
-        // per-[B, H_kv]) would be silently mis-read as descale[0] for every batch and
-        // head. Decline it here rather than miscompute. Per-[B, H_kv] descales are a
-        // future extension (tracked with the gfx950 fp8 path).
-        const auto* qDescale = tensorMap.at(attrs.descale_q_tensor_uid().value());
-        const auto* kDescale = tensorMap.at(attrs.descale_k_tensor_uid().value());
-        const auto* vDescale = tensorMap.at(attrs.descale_v_tensor_uid().value());
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
-            "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
-            "supported");
+        HIP_KERNEL_RETURN_IF_REJECTED(checkFp8Descales(attrs, tensorMap));
     }
 
-    // Softmax/output (de)quantization is not implemented by the v3 forward kernel
-    // (its argument struct exposes only q/k/v descales).
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_s_tensor_uid().has_value(),
-                               "descale_s tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid().has_value(),
-                               "scale_s tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_o_tensor_uid().has_value(),
-                               "scale_o tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid().has_value(),
-                               "amax_s tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_o_tensor_uid().has_value(),
-                               "amax_o tensor not supported");
-
-    // Classify the mask; contradictory mask attributes are an invalid-input
-    // condition the engine declines rather than dispatches.
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    try
-    {
-        const auto band
-            = plan_utils::makeCoveringBoundsUnbound(plan_utils::resolveDiagonalBand(attrs),
-                                                    qTensor->dims()->Get(2),
-                                                    kTensor->dims()->Get(2));
-        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
-        return false;
-    }
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::tryClassifyMask(
+        attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2), maskType));
 
     // The current causal kernel binaries do not compute LSE stats correctly
     // when s_lse=1 is set at runtime. Decline causal+stats until the upstream
     // ASM kernels support this combination.
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         hasStats && maskType != plan_utils::MaskType::NO_MASK,
         "stats (LSE) output is not supported with causal masks on the current ASM kernels");
 
@@ -655,7 +638,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 batchMode,
                                 &cfg_fmha_fwd);
 
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         key.empty(),
         "Could not find matching kernel for parameter combination. dataType = " + dataTypeId
             + " qDim = " + std::to_string(qTensor->dims()->Get(3))
@@ -668,9 +651,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
     const int64_t inputBytes = fwdInputBytesPerElement(dataTypeId);
 
-    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(
-                                   *qTensor, *kTensor, *vTensor, *oTensor, statsTensor, inputBytes),
-                               "Forward byte strides overflow uint32_t kernarg fields");
+    HIP_KERNEL_REJECT_IF(
+        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, inputBytes),
+        "Forward byte strides overflow uint32_t kernarg fields");
 
     // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
     // the one forward kernarg that is a product rather than a single stride, and
@@ -678,12 +661,23 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // per-field check above accepts. The resolved row's ts_qo folds into the
     // element size so the product is never formed outside the predicate.
     // Mirrors the backward Ts check.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
-                                       qTensor->strides()->Get(2),
-                                       inputBytes * cfg_fmha_fwd.at(key).ts_qo),
-        "Forward Ts product overflows the uint32_t s_Ts kernarg field");
+    HIP_KERNEL_REJECT_IF(!plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
+                                                        qTensor->strides()->Get(2),
+                                                        inputBytes * cfg_fmha_fwd.at(key).ts_qo),
+                         "Forward Ts product overflows the uint32_t s_Ts kernarg field");
 
+    return std::nullopt;
+}
+
+bool SdpaFwdPlanBuilder::isApplicable(
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    const auto rejection = checkFwdApplicability(handle, opGraph);
+    if(rejection.has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[SdpaFwdPlanBuilder::isApplicable] " << *rejection);
+        return false;
+    }
     return true;
 }
 
