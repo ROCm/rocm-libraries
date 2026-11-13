@@ -25,11 +25,12 @@ FIELDS = [
     "nwg",
     "bpc",
     "mult",
+    "s",
 ]
 STRINGS = {"dtype", "layout", "variant"}
 # The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
-# wave, bpc blocks per dispatch unit) are 0 for the VALU variants.
-NO_MMA = dict(q=0, g=0, nwg=0, bpc=0)
+# wave, bpc blocks per dispatch unit, s the stride of both axes) are 0 for the VALU variants.
+NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0)
 CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
     dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA, mult=1)
     for kd, kh, kw in (
@@ -57,8 +58,11 @@ HANKEL_SCHEDULES = (
     (16, 2, 2, 1),
     (16, 1, 2, 2),
 )
+# Stride 2 (both axes; EfficientNet / MobileNet downsampling layers) stages each x row as its
+# even and odd columns: the same schedules.
 HANKEL = [
-    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc, mult=1)
+    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc, mult=1, s=s)
+    for s in (1, 2)
     for k in (3, 5, 7)
     for q, g, nwg, bpc in HANKEL_SCHEDULES
 ]
@@ -135,6 +139,7 @@ for layout in ("NHWC", "NCHW"):
 for c in HANKEL:
     for dtype, dt in (("HALF", "f16"), ("BFLOAT16", "bf16")):
         tag = f"hankel_k{c['kh']}x{c['kw']}.q{c['q']}g{c['g']}w{c['nwg']}b{c['bpc']}"
+        tag += f".s{c['s']}" if c["s"] != 1 else ""
         name = f"conv_depthwise_valu_wrw.{dt}.nhwc.{tag}"
         kernels.append(
             {

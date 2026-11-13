@@ -46,6 +46,10 @@
     {
       "name": "mult",
       "type": "int"
+    },
+    {
+      "name": "s",
+      "type": "int"
     }
   ]
 }

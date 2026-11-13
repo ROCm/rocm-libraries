@@ -53,7 +53,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
 /// A kernel config, from its metadata. Variants: "floor" (any problem), "tile" (VALU register
 /// tile of a compile-time kd x kh x kw filter), "hankel" (matrix core, 4x4x4 MFMA: q output
 /// columns a tile, g input rows a step, nwg 16-channel groups a wave, bpc blocks per dispatch
-/// unit the partitions aim for). The hankel fields are 0 for the VALU variants.
+/// unit the partitions aim for, s the stride of both axes, 1 or 2). The hankel fields are 0 for
+/// the VALU variants.
 struct WrwConfig
 {
     std::string variant;
@@ -66,6 +67,7 @@ struct WrwConfig
     int64_t bpc = 0;
     /// The depth multiplier the kernel is compiled for (CONV_DW_MULT); 1 for hankel.
     int64_t mult = 1;
+    int64_t s = 0;
 };
 
 /// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic).
@@ -74,7 +76,8 @@ int64_t hankelLdsBytes(const WrwConfig& config);
 /**
  * @brief Whether the hankel config @p config serves @p problem on @p gcnArchName: 4x4x4 MFMA
  *        (gfx908 for fp16; gfx90a, gfx942, gfx950 for fp16 and bf16); fp16 or bf16; mult 1;
- *        channels-last, 1-D or 2-D; the config's filter; unit stride and dilation; channels a
+ *        channels-last, 1-D or 2-D; the config's filter; the config's stride s (1 or 2) on both
+ *        axes; unit dilation; channels a
  *        whole number of 8-channel vectors; q a multiple of 4 from 4 to 64, g 1 to 4, nwg 1, 2
  *        or 4, bpc 1, 2, 4 or 8; the LDS within the device's (160 KiB on gfx950, else 64 KiB).
  */

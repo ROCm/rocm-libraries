@@ -421,6 +421,14 @@ std::vector<DeviceCase> deviceCases()
     auto stride5 = depthwise(40, {19, 17}, {5, 5}, {2, 2}, true);
     stride5.stride = {2, 2};
     cases.push_back({"Nhwc5x5Stride2C40", stride5});
+    // Stride 2 on the matrix core: a row wider than one 32-column tile (two tiles, odd widths),
+    // and 7x7 (two tap groups a side, the odd one starting two halves into its word).
+    auto stride3 = depthwise(24, {13, 71}, {3, 3}, {1, 1}, true);
+    stride3.stride = {2, 2};
+    cases.push_back({"Nhwc3x3Stride2C24Wide", stride3});
+    auto stride7 = depthwise(16, {18, 21}, {7, 7}, {3, 3}, true);
+    stride7.stride = {2, 2};
+    cases.push_back({"Nhwc7x7Stride2C16", stride7});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
@@ -643,12 +651,15 @@ struct WrwConfig
     int64_t bpc = 0;
     /// The depth multiplier (output channels per input channel).
     int64_t mult = 1;
+    /// The hankel configs' stride (both axes); 0 for the VALU variants.
+    int64_t s = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
-               + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult);
+               + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
+               + std::to_string(s);
     }
 };
 
@@ -685,11 +696,14 @@ const std::vector<WrwConfig>& wrwCatalog()
                 configs.push_back({layout, "tile", 1, k, k, 0, 0, 0, 0, 2});
             }
         }
-        for(const int64_t k : {3, 5, 7})
+        for(const int64_t stride : {1, 2})
         {
-            for(const auto& [q, g, nwg, bpc] : hankelSchedules())
+            for(const int64_t k : {3, 5, 7})
             {
-                configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc});
+                for(const auto& [q, g, nwg, bpc] : hankelSchedules())
+                {
+                    configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride});
+                }
             }
         }
         return configs;
@@ -729,7 +743,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"g", config.g},
            {"nwg", config.nwg},
            {"bpc", config.bpc},
-           {"mult", config.mult}};
+           {"mult", config.mult},
+           {"s", config.s}};
     return kernel;
 }
 
@@ -914,7 +929,7 @@ TEST(TestConvDepthwiseValuWrwMultiplier, KernelsServeTheirOwnMultiplier)
                                countedDevice(64, "gfx942"));
     EXPECT_FALSE(matchesGraph(pack, fixture.context()).has_value());
     // The matrix-core kernel walks input channels: never with a multiplier.
-    const WrwConfig hankel1{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2};
+    const WrwConfig hankel1{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
     WrwConfig hankel2 = hankel1;
     hankel2.mult = 2;
     EXPECT_TRUE(admits(one, hankel1, "gfx942"));
@@ -1466,6 +1481,42 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
          },
          false},
         {"Stride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {2, 2}; }, false},
+        {"Stride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 2};
+             c.s = 2;
+         },
+         true},
+        {"UnitStrideOfAStride2Config",
+         [](ConvShape&, WrwConfig& c, std::string&) { c.s = 2; },
+         false},
+        {"WidthStride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {1, 2};
+             c.s = 2;
+         },
+         false},
+        {"HeightStride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 1};
+             c.s = 2;
+         },
+         false},
+        {"Stride3",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {3, 3};
+             c.s = 3;
+         },
+         false},
+        {"StrideZero", [](ConvShape&, WrwConfig& c, std::string&) { c.s = 0; }, false},
+        {"Stride2Dilation2",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 2};
+             s.dilation = {2, 2};
+             s.prePadding = s.postPadding = {2, 2};
+             c.s = 2;
+         },
+         false},
         {"WidthStride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {1, 2}; }, false},
         {"HeightStride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {2, 1}; }, false},
         {"HeightDilation2",
@@ -1555,14 +1606,14 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
          [](ConvShape& s, WrwConfig& c, std::string&) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1, 1, 1};
          },
          false},
         {"LdsWithinGfx950",
          [](ConvShape& s, WrwConfig& c, std::string& arch) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1, 1, 1};
              arch = "gfx950";
          },
          true},
@@ -1572,6 +1623,12 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         {"ValuTileWithoutThem",
          [](ConvShape&, WrwConfig& c, std::string&) { c = {"NHWC", "tile", 1, 3, 3}; },
          true},
+        {"ValuTileWithAStride",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.s = 1;
+         },
+         false},
     };
     const auto pack = wrwPack();
     for(const auto& c : cases)
@@ -1579,7 +1636,7 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         SCOPED_TRACE(c.name);
         auto shape = base();
         shape.dataType = DataType::HALF;
-        WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2};
+        WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
         std::string arch = "gfx942";
         c.mutate(shape, config, arch);
         const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),

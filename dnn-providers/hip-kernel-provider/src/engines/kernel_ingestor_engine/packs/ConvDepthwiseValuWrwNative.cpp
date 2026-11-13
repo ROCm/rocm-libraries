@@ -46,7 +46,7 @@
  * reduction, folded in a fixed order), reimplemented on vector ALU so it runs on every
  * architecture, both layouts, 1-D to 3-D and every element type in exact fp32 arithmetic. On
  * CDNA the hankel configs run the construction itself on 4x4x4 MFMA (16-bit, channels-last,
- * unit stride; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
+ * stride 1 or 2; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
  * autotune (UHD later) ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -189,16 +189,19 @@ int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
 
 int64_t hankelLdsBytes(const WrwConfig& config)
 {
-    // ConvDepthwiseHankelWrw.h: G x-row buffers of 64 nwg channel rows, and KH + G - 1 ring
-    // slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots over banks).
-    const int64_t rg = divUp(config.kw, 4);
-    const int64_t xWords = divUp(config.q / 4 + rg, 8) * 8;
+    // ConvDepthwiseHankelWrw.h: G x-row buffers (s phase rows each) of 64 nwg channel rows, and
+    // KH + G - 1 ring slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots
+    // over banks).
+    const int64_t sg = divUp(config.kw, 4);
+    const int64_t stride = std::max<int64_t>(config.s, 1);
+    const int64_t xg = stride == 1 ? config.q / 4 + sg : config.q / 4 + (sg - 1) / 2 + 1;
+    const int64_t xWords = divUp(xg, 8) * 8;
     const int64_t dyWords = divUp(config.q / 4, 8) * 8;
     const int64_t channels = 64 * config.nwg;
     const int64_t xPitch = 4 * xWords + 4, dyPitch = 4 * dyWords + 4;
     const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
-    return (config.g * channels * xPitch + (slots + 1) * slot) * 2;
+    return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;
 }
 
 bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName)
@@ -219,7 +222,12 @@ bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::strin
     {
         return false;
     }
-    if(a.sh != 1 || a.sw != 1 || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
+    // Stride 2 reads at most two words a tap group: filters up to 8 wide.
+    if((config.s != 1 && config.s != 2) || (config.s == 2 && config.kw > 8))
+    {
+        return false;
+    }
+    if(a.sh != config.s || a.sw != config.s || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
     {
         return false;
     }
@@ -320,6 +328,7 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.nwg = kernel.getIntMetadata("nwg");
     config.bpc = kernel.getIntMetadata("bpc");
     config.mult = kernel.getIntMetadata("mult");
+    config.s = kernel.getIntMetadata("s");
     return config;
 }
 
@@ -347,7 +356,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
 /// and 2-D); the matrix-core (hankel) configs pass hankelAdmits, and only they may set the
-/// q, g, nwg and bpc fields. The partitions are sized from the device's units, so a device that
+/// q, g, nwg, bpc and s fields. The partitions are sized from the device's units, so a device that
 /// reports none is declined.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -371,7 +380,8 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     // The matrix-core fields are the hankel variant's alone.
-    if(!hankel && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0))
+    if(!hankel
+       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0 || config.s != 0))
     {
         return false;
     }
@@ -521,6 +531,11 @@ public:
             options.add("CONV_DW_Q", std::to_string(config.q));
             options.add("CONV_DW_G", std::to_string(config.g));
             options.add("CONV_DW_NWG", std::to_string(config.nwg));
+            // Defined only for stride 2, so the unit-stride programs compile as before.
+            if(config.s != 1)
+            {
+                options.add("CONV_DW_S", std::to_string(config.s));
+            }
         }
 
         auto partial = buildIngestorKernelCode(
