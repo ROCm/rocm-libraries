@@ -14,7 +14,7 @@ The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBA
 
 ## Note filters
 
-hipDNN has no per-plan numerical-note metadata and reports only its own behavior notes, so the shim triages each note by what ignoring it could do. These tables are canonical; `detail/note_triage.h` and `TestCudnnShimNoteTriageTable` follow them.
+hipDNN engines report numerical notes (in-tree engines report `NONDETERMINISTIC` or none) and their own behavior notes, per engine and not per plan. The shim filters on `NONDETERMINISTIC` and on the behavior notes hipDNN reports, and triages every other note by what ignoring it could do. These tables are canonical; `detail/note_triage.h` and `TestCudnnShimNoteTriageTable` follow them.
 
 | Action | Effect |
 |---|---|
@@ -32,12 +32,23 @@ hipDNN has no per-plan numerical-note metadata and reports only its own behavior
 | `DOWN_CONVERT_INPUTS` | warn | error | excluding it is a precision guarantee the shim cannot check |
 | `REDUCED_PRECISION_REDUCTION` | warn | error | excluding it is a precision guarantee the shim cannot check |
 | `FFT` | warn | warn | algorithm class |
-| `NONDETERMINISTIC` | warn | map | deselect keeps only engines that claim determinism (see [Determinism](#determinism)) |
+| `NONDETERMINISTIC` | map | map | select keeps engines that report it; deselect keeps only engines that do not (see [Determinism](#determinism)) |
 | `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13` | warn | warn | algorithm class |
 | `STRICT_NAN_PROP` | error | warn | selecting it is a NaN-propagation guarantee the shim cannot check; excluding it only relaxes |
 | out-of-range value | error | error | unclassifiable |
 
-Deselecting an out-of-range value is an error here but a no-op in cuDNN: without numerical metadata the shim cannot show the exclusion excludes nothing.
+Deselecting an out-of-range value is an error here but a no-op in cuDNN: the shim filters only on `NONDETERMINISTIC`, so it cannot show the exclusion excludes nothing.
+
+No in-tree engine reports a precision note (`DOWN_CONVERT_INPUTS`, `REDUCED_PRECISION_REDUCTION`), so the numerical-note rows other than `NONDETERMINISTIC` never take effect.
+
+Every engine defaults to `NONDETERMINISTIC`, which means its results are not guaranteed bitwise reproducible, as in cuDNN; a provider reports an empty list only for an engine a test proves reproducible. The native `Graph::get_numerical_notes_for_engine` and the v8 `hasNumericalNote` therefore return `{NONDETERMINISTIC}` for an engine whose provider omitted the field. Both also read `NOT_SUPPORTED` from an older same-major backend, which lacks the attribute, as `{NONDETERMINISTIC}`; so do the v9 filters and the Python binding, which use the native getter. With a newer frontend on an older same-major backend that lacks the attribute, every engine, including `MIOPEN_ENGINE_DETERMINISTIC`, therefore reads `{NONDETERMINISTIC}`, so deselecting `NONDETERMINISTIC` leaves no engine (`GRAPH_NOT_SUPPORTED` in v9, an empty filtered list in v8). The frontend getter and the v8 reader drop note values they do not know, so a list holding only unknown values reads as empty, without `NONDETERMINISTIC`. See [RFC 0025](./rfcs/0025_NumericalNotes.md).
+
+Other differences a cuDNN program can observe:
+
+- A buffer smaller than the note count fails `hipdnnBackendGetAttribute` with `BAD_PARAM`; `cudnnBackendGetAttribute` truncates to the requested count.
+- The note type `hipdnnBackendNumericalNote_t` is an `int32_t`, not a C enum, so a value a newer plugin reports passes through an older backend unchanged.
+- `Graph::get_numerical_notes_for_engine` is a hipDNN extension; cuDNN's graph API has no per-engine numerical-note getter.
+- A UED `numerical_notes` accepts the ten cuDNN note names; a descriptor that names an unknown tag fails to load.
 
 ### Behavior notes
 
@@ -61,7 +72,7 @@ Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_
 
 ### Determinism
 
-`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
+`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines whose reported numerical notes omit `NONDETERMINISTIC`. A provider claims determinism with an explicit empty list; an engine that declares nothing is reported `NONDETERMINISTIC`, so a missing claim proves nothing. A failed note query for an engine fails the filter instead of passing it.
 
 ## Engine filtering
 
@@ -273,13 +284,13 @@ These differ from cuDNN:
 | `EngineHeuristics::getEngineConfig(count)` | returns the first `count` results (at most `getEngineConfigCount()`): objects fixed at `build()`, the same on every call. Upstream also returns at most `count` results, but refills its descriptors from cuDNN on each call. Every result for a given engine of a graph, from any heuristics or fallback list, shares that engine's default hipDNN configuration: their `get_raw_desc()` is equal |
 | Matmul on gfx115x under Windows | hipBLASLt declines every matmul there (a hipBLASLt GEMM crash workaround), and no other provider runs matmul, so a v8 matmul graph has no engine |
 | Engine indices in errata and in consumer code | errata rules and hard-coded engine numbers (for example PyTorch's cuDNN engines 5, 23, 58 and 63) name NVIDIA engines. Under the compatibility layer the same number selects an unrelated hipDNN engine, or none. At `CUDNN_VERSION` 92200 only the 3-D `ConvBwdData` engine-23 rule is active, and it applies only to a graph with more than 23 applicable engines |
-| Numerical notes (`hasNumericalNote`, `ExecutionPlan::getNumericNotes`) | `NONDETERMINISTIC` for every engine except those known to be deterministic (today `MIOPEN_ENGINE_DETERMINISTIC`); no other numerical note is reported, so filters on notes such as `DOWN_CONVERT_INPUTS` or `TENSOR_CORE` never match. Deterministic-only selection keeps only the known-deterministic engines |
+| Numerical notes (`hasNumericalNote`, `ExecutionPlan::getNumericNotes`, `ExecutionPlan::getAllNumericNotes`) | read from the backend's per-engine numerical notes. An engine that declares none is reported `NONDETERMINISTIC`; no in-tree engine reports another numerical note, so filters on notes such as `DOWN_CONVERT_INPUTS` or `TENSOR_CORE` never match. Only `hasNumericalNote` answers false when the query fails; for `getNumericNotes`, `getAllNumericNotes` and the plan build, a failed numerical-note query fails `ExecutionPlanBuilder::build()`, as upstream, except that `NOT_SUPPORTED` from an older same-major backend that lacks the attribute reads as `{NONDETERMINISTIC}`. Deterministic-only selection keeps only the engines that claim determinism |
 | Behavior notes (`hasBehaviorNote`, `ExecutionPlan::getBehaviorNotes`) | hipDNN behavior notes with a cuDNN counterpart, matched by name; others (for example `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`) are not reported |
 | Engine knobs (`Engine::getSupportedKnobs`) | lists only hipDNN knobs that project onto a cuDNN knob type (see [Knobs](#knobs): int64 value, plain minimum/maximum/stride, no list of valid values). A cuDNN type that two of an engine's knobs map onto is not listed (the v9 `get_knobs_for_engine` lists both) |
 | Knob choices (`EngineConfigBuilder`) | checked at `EngineConfigBuilder::build()`: a type the engine does not list is `NOT_SUPPORTED`; a type chosen twice, or a value outside the knob's range or off its stride, is `BAD_PARAM`. The same `build()` creates the hipDNN configuration, so a failure there is also reported by `EngineConfigBuilder::build()`, not by `ExecutionPlanBuilder::build()`. A choice of `-1` means "unset" (upstream's `EngineConfigBuilder` sends `-1` for every knob it was not asked to set once one is set): it is ignored (not checked, not applied, not counted as a repeat, not in the plan JSON `"knobs"`) unless the knob is listed and its range accepts `-1`; the plan tag keeps it, also after a JSON round trip (the plan JSON records it under `"requestedKnobs"`). A configuration whose choices are all ignored uses the engine's default hipDNN configuration |
-| Plan JSON format (`getJsonRepresentation`, `loadFromJson`) | the compatibility layer's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, knob choices, the requested choices when some were ignored (`"requestedKnobs"`) and, when hipDNN can serialize the plan, a base64 payload. Notes and knob types are the compatibility layer's enum values. JSON written by cuDNN or by another tool makes `loadFromJson` fail with `BAD_PARAM` |
+| Plan JSON format (`getJsonRepresentation`, `loadFromJson`) | the compatibility layer's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, numerical notes (always written), knob choices, the requested choices when some were ignored (`"requestedKnobs"`) and, when hipDNN can serialize the plan, a base64 payload. Behavior notes, numerical notes and knob types are all stored as the compatibility layer's own enum values (`detail/c_types.h`; numerical notes are alphabetical, so `NONDETERMINISTIC` is 2), not NVIDIA's numbering; numerical notes map to and from hipDNN's by name. JSON without `numericalNotes` loads as `{NONDETERMINISTIC}`. The format `version` is `1` with `numericalNotes`; a build without that key rejects such a plan (unknown engine key). JSON written by cuDNN or by another tool makes `loadFromJson` fail with `BAD_PARAM` |
 | Loading a plan without `"payload"` | `NOT_SUPPORTED` from `loadFromJson`; engines whose plans hipDNN cannot serialize cannot be reloaded |
-| Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it |
+| Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes, numerical notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it |
 | `ExecutionPlan::getWorkspaceSize()` | can differ between builds of the same engine configuration: with the MIOpen provider it follows MIOpen's user find-db, which executions fill. Allocate each plan's workspace from that plan's `getWorkspaceSize()`, not from a size cached by plan tag or engine configuration |
 | `cudnnBackendExecute` handle | not checked by the compatibility layer: hipDNN runs the plan on the handle it is given, with that handle's stream, including a handle other than the one the plan's graph was built on or, for a loaded plan, the one it was loaded with. A handle on another device than the one the plan was built or loaded on is rejected by hipDNN's `hipdnnBackendExecute` with `BAD_PARAM` before any provider call. `ExecutionPlanBuilder::setHandle` is ignored by `build()`, as upstream never sends it, and required by `loadFromJson` |
 | Variant packs (`VariantPackBuilder::build()`) | the hipDNN variant pack is built here; missing or empty data pointers or UIDs, or the two with different element counts, are `BAD_PARAM` |

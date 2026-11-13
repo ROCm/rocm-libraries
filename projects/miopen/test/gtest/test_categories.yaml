@@ -656,6 +656,13 @@ exclude_gpu:
       # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
       # without models.
       - "GPU_ConvAIModelLoad_FP32*"
+      # Temporary quarantine (ROCm/rocm-libraries#15056): "layernorm.hpp(524) Error dw beyond tolerance
+      # Error:0.01156, Threshold x 2: 0.001953" on Linux+Windows gfx110X and gfx1151. Suspected compiler
+      # regression, gfx120X not affected. Indices are positional into LayerNormTestConfigs() in layernorm.hpp
+      # (N:1 C:2048 D:0 H:4 W:32 dim:3 eps:1e-5 NHWC; /124 ELEMENTWISE_AFFINE, /127 WEIGHT_BIAS); update if configs are reordered.
+      # FP32/BFP16 variants stay enabled. Remove when #15056 is fixed.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"
@@ -678,6 +685,13 @@ exclude_gpu:
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
       # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
       - "GPU_ConvAIModelLoad_FP32*"
+      # Temporary quarantine (ROCm/rocm-libraries#15056): "layernorm.hpp(524) Error dw beyond tolerance
+      # Error:0.01156, Threshold x 2: 0.001953" on Linux+Windows gfx110X and gfx1151. Suspected compiler
+      # regression, gfx120X not affected. Indices are positional into LayerNormTestConfigs() in layernorm.hpp
+      # (N:1 C:2048 D:0 H:4 W:32 dim:3 eps:1e-5 NHWC; /124 ELEMENTWISE_AFFINE, /127 WEIGHT_BIAS); update if configs are reordered.
+      # FP32/BFP16 variants stay enabled. Remove when #15056 is fixed.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"

@@ -152,6 +152,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
 | `IMPACT` | [runtime-impact](lanes/runtime-impact.md) | Kernel ABI and dispatch contracts of the kernel ingestor (kernarg lists, launch surfaces, matchers, descriptors, generic targets) at base, head and the merged tree; which shipped variants change and which device runs would settle it | A file under `dnn-providers/hip-kernel-provider/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/` (any plugin SDK header: the report works out which ones the descriptor loader includes), `projects/hipdnn/tools/IngestorGenerator/`, `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` or `projects/hipdnn/plugin_sdk/cmake/GpuGenericTargets*` changes |
+| `APPL` | [applicability](lanes/applicability.md) | Graphs an engine accepts but cannot serve: reachable properties by version and schema, unread or loose gates, sibling drift, bypass paths, version raises and schema or floor changes, decline tests | A file under `dnn-providers/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/` or `projects/hipdnn/flatbuffers_sdk/schemas/` changes |
 
 `ORCH` (process findings you file), `SCOUT<k>`, `SYNTH` ([orient](lanes/orient.md)) and `VER`
 ([verify](lanes/verify.md)) are not partition choices. Merge two lanes into one agent when the
@@ -168,7 +169,7 @@ ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)'
 
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
 each lane of `owners.tsv` and each concern lane in `--lanes` (changed files in scope with their
-`numstat` rows, areas and Orient paths; BUILD, DEPS and IMPACT scope to their trigger files and print
+`numstat` rows, areas and Orient paths; BUILD, DEPS, IMPACT and APPL scope to their trigger files and print
 `<LANE>: no changed file in scope, N/A` when none; `DRIFT` adds `drift.txt` and prints
 `DRIFT: N/A (<reason>)` when its trigger is `no` (give that reason to `seed` with `--lane`); every other concern lane takes all changed
 files, so name only lanes whose trigger holds; `--parent` is the stack parent). In round 2 on,
@@ -204,9 +205,10 @@ Agents:    <maximum concurrent agents>
 Cores:     <CPU cores for builds and tests>
 Mutation:  <host-provided recipe or wrapper command for mutating a built tree> | none
 Scope:     <user's scope notes, e.g. areas being deprecated; "do not file findings in <area>"> | none
+Hazard knowledge: <directory of engine-applicability hazard notes, distinct from $KNOWLEDGE> | none
 ```
 
-`Agents:`, `Cores:`, `Mutation:` and `Scope:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
+`Agents:`, `Cores:`, `Mutation:`, `Scope:` and `Hazard knowledge:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
 writer as its own fresh agent with shell and write access; fill this template as its first
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
@@ -219,7 +221,7 @@ read `Cores:`: it builds the two sides on two concurrent workers, so count two c
 
 ```markdown
 Role:      <LANE> | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
-Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation, Scope)
+Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, Mutation, Scope, Hazard knowledge)
 Read:      lanes, verifiers: $SKILL/lanes/common.md, findings.md, policy.md, then <brief path>.
            Scouts, SYNTH: lanes/common.md, lanes/orient.md. WRITER: report.md *REPORT.md*, policy.md
 Inputs:    under $EVIDENCE/r<N>/: PIN.md; pr/body.md or intent.md; CONTEXT.md and the area
@@ -248,7 +250,7 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH`, `TESTQ`, `DRIFT` and `IMPACT` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH`, `TESTQ`, `DRIFT`, `IMPACT` and `APPL` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
@@ -358,6 +360,7 @@ Re-run `DRIFT` whenever the round's `drift.txt` says `Trigger: yes`: the target 
 Re-run `IMPACT` whenever the round's pinned `TARGET_TIP` differs from the tip of its last run: its
 merged view is computed against that tip and goes stale with it. Only *Pin and intake* records a
 tip: a round reopened on the same head keeps its pinned tip, so its `IMPACT` re-run does too.
+Re-run `APPL` whenever the round's delta changes a file under its trigger prefixes (an `APPL` lane that was `N/A` runs when a later head adds one).
 Re-verify every affected `OPEN` or `UNVERIFIED` finding. A lane not re-run carries forward
 (Coverage and Lanes rows copied, marked `carried from r<M>`).
 

@@ -86,6 +86,9 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     return &node.attributesAs<data_objects::SdpaAttributes>();
 }
 
+/// Alignment is not FlyDSL-specific, so it lives with the other shared SDPA operand
+/// predicates and the dense packs read it too. Kept visible here so every call site below
+/// is unchanged.
 using sdpa_graph::declaresAlignment;
 
 /// Whether the kernels' arithmetic meets the node's compute type: they compute the softmax,
