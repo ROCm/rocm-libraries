@@ -128,6 +128,21 @@ AREA_ROWS = [
     ),
 ]
 
+# Changes under these trigger the APPL lane (lanes/applicability.md): the code where a solver,
+# a fusion plan or the find and immediate paths decide whether a problem is served.
+APPL_PREFIXES = (
+    "projects/miopen/src/solver/",
+    "projects/miopen/src/solver.cpp",
+    "projects/miopen/src/include/miopen/solver/",
+    "projects/miopen/src/include/miopen/solver.hpp",
+    "projects/miopen/src/include/miopen/conv/",
+    "projects/miopen/src/conv/",
+    "projects/miopen/src/ck_impl/",
+    "projects/miopen/src/fusion/",
+    "projects/miopen/src/include/miopen/fusion/",
+    "projects/miopen/src/hip/convolutionocl.cpp",
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
@@ -147,6 +162,7 @@ CONCERN_LANES = {
     "ARCH",
     "PERF",
     "SEMANTICS",
+    "APPL",
 }
 # Prefixes of every agent that writes a report. PROVISIONAL_ID matches `<prefix><k>-p<n>`
 # and the invalid follow-up form `<prefix><k>-f<j>-p<n>`.
@@ -436,6 +452,8 @@ def concern_scope(lane: str, rows):
             or re.fullmatch(r"(dev-)?requirements.*\.txt", name(r[0]))
             or re.search(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|hip|cu|cuh)$", name(r[0]))
         ]
+    if lane == "APPL":
+        return [r for r in rows if r[0].startswith(APPL_PREFIXES)]
     return rows
 
 
@@ -493,7 +511,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD and DEPS scope to their trigger files, other concern lanes take every
+    scope). BUILD, DEPS and APPL scope to their trigger files, other concern lanes take every
     changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The diff
     is not read."""
     rd = Path(args.round_dir)
