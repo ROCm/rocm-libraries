@@ -399,6 +399,12 @@ void testing_itilu0_convergence_history(Arguments argus)
         GTEST_SKIP() << "ItILU0 records a convergence history only on the accelerator";
     }
 
+    // rocSPARSE has no ItILU0 with 64-bit row offsets, so these builds factorize on the host
+    if(sizeof(PtrType) != sizeof(int))
+    {
+        GTEST_SKIP() << "a 64-bit build factorizes ItILU0 on the host, which records no history";
+    }
+
     LocalMatrix<T> matrix;
     getLaplacianTestMatrix<T>(argus, matrix);
     matrix.MoveToAccelerator();
