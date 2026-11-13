@@ -1464,47 +1464,63 @@ TEST_F(TestPointwisePlan, CompareGreaterProducesBooleanMask)
     }
 }
 
-TEST_F(TestPointwisePlan, CompareGreaterAcceptsInt32Inputs)
+TEST_F(TestPointwisePlan, ComparisonsAcceptInt32Inputs)
 {
-    auto [graph, tensorBundle, variantPack]
-        = buildPointwiseBinaryGraph({1, 1, 1, 4},
-                                    {1, 1, 1, 4},
-                                    {1, 1, 1, 4},
-                                    DataType::INT32,
-                                    DataType::INT32,
-                                    DataType::FLOAT,
-                                    DataType::BOOLEAN,
-                                    hipdnn_frontend::PointwiseMode::CMP_GT);
+    using Mode = hipdnn_frontend::PointwiseMode;
+    // The last pair differs by one above 2^24, which float cannot represent exactly.
+    constexpr std::array<int32_t, 5> INPUT0_VALUES = {-2, 0, 3, 4, 16777217};
+    constexpr std::array<int32_t, 5> INPUT1_VALUES = {-3, 0, 5, 1, 16777216};
 
-    auto [serializedGraph, serErr] = graph->to_binary();
-    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
-    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-    auto* input0
-        = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
-    auto* input1 = static_cast<Tensor<int32_t>*>(
-        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
-    const auto* output
-        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    const std::vector<std::pair<Mode, bool (*)(int32_t, int32_t)>> comparisons = {
+        {Mode::CMP_EQ, [](int32_t a, int32_t b) { return a == b; }},
+        {Mode::CMP_NEQ, [](int32_t a, int32_t b) { return a != b; }},
+        {Mode::CMP_GT, [](int32_t a, int32_t b) { return a > b; }},
+        {Mode::CMP_GE, [](int32_t a, int32_t b) { return a >= b; }},
+        {Mode::CMP_LT, [](int32_t a, int32_t b) { return a < b; }},
+        {Mode::CMP_LE, [](int32_t a, int32_t b) { return a <= b; }},
+    };
 
-    constexpr std::array<int32_t, 4> INPUT0_VALUES = {-2, 0, 3, 4};
-    constexpr std::array<int32_t, 4> INPUT1_VALUES = {-3, 0, 5, 1};
-    constexpr std::array EXPECTED = {true, false, false, true};
-    for(int64_t width = 0; width < 4; ++width)
+    for(const auto& [mode, compare] : comparisons)
     {
-        const auto widthIndex = static_cast<size_t>(width);
-        input0->setHostValue(INPUT0_VALUES[widthIndex], 0, 0, 0, width);
-        input1->setHostValue(INPUT1_VALUES[widthIndex], 0, 0, 0, width);
-    }
-    input0->markHostModified();
-    input1->markHostModified();
+        auto [graph, tensorBundle, variantPack] = buildPointwiseBinaryGraph({1, 1, 1, 5},
+                                                                            {1, 1, 1, 5},
+                                                                            {1, 1, 1, 5},
+                                                                            DataType::INT32,
+                                                                            DataType::INT32,
+                                                                            DataType::FLOAT,
+                                                                            DataType::BOOLEAN,
+                                                                            mode);
 
-    CpuReferenceGraphExecutor{}.execute(
-        serializedGraph.data(), serializedGraph.size(), variantPack);
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+        auto* input0
+            = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+        auto* input1 = static_cast<Tensor<int32_t>*>(
+            &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+        const auto* output
+            = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
 
-    for(int64_t width = 0; width < 4; ++width)
-    {
-        EXPECT_EQ(output->getHostValue(0, 0, 0, width), EXPECTED[static_cast<size_t>(width)]);
+        for(int64_t width = 0; width < 5; ++width)
+        {
+            const auto widthIndex = static_cast<size_t>(width);
+            input0->setHostValue(INPUT0_VALUES[widthIndex], 0, 0, 0, width);
+            input1->setHostValue(INPUT1_VALUES[widthIndex], 0, 0, 0, width);
+        }
+        input0->markHostModified();
+        input1->markHostModified();
+
+        CpuReferenceGraphExecutor{}.execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        for(int64_t width = 0; width < 5; ++width)
+        {
+            const auto widthIndex = static_cast<size_t>(width);
+            EXPECT_EQ(output->getHostValue(0, 0, 0, width),
+                      compare(INPUT0_VALUES[widthIndex], INPUT1_VALUES[widthIndex]))
+                << "mode " << static_cast<int>(mode) << ", width " << width;
+        }
     }
 }
 
@@ -2250,6 +2266,186 @@ TEST_F(TestPointwisePlan, GenIndexProducesCoordinateAlongFirstAndThirdAxis)
                                   static_cast<int32_t>(coordinate[static_cast<size_t>(axis)]))
                             << "axis " << axis;
                     }
+                }
+            }
+        }
+    }
+}
+
+namespace
+{
+// relu_lower_clip, relu_upper_clip, relu_lower_clip_slope, swish_beta, elu_alpha, softplus_beta
+using ScalarAttributes = std::array<std::optional<float>, 6>;
+
+ScalarAttributes onlyScalar(size_t index, float value)
+{
+    ScalarAttributes scalars;
+    scalars[index] = value;
+    return scalars;
+}
+
+float runUnaryOnSingleValue(hipdnn_frontend::PointwiseMode mode,
+                            float x,
+                            const ScalarAttributes& scalars)
+{
+    auto [graph, tensorBundle, variantPack] = buildPointwiseUnaryGraph({1, 1, 1, 1},
+                                                                       {1, 1, 1, 1},
+                                                                       DataType::FLOAT,
+                                                                       DataType::FLOAT,
+                                                                       DataType::FLOAT,
+                                                                       mode,
+                                                                       1,
+                                                                       TensorLayout::NCHW,
+                                                                       scalars[0],
+                                                                       scalars[1],
+                                                                       scalars[2],
+                                                                       scalars[3],
+                                                                       scalars[4],
+                                                                       scalars[5]);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    const auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input->setHostValue(x, 0, 0, 0, 0);
+    input->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    return output->getHostValue(0, 0, 0, 0);
+}
+
+float runBackwardOnSingleValue(hipdnn_frontend::PointwiseMode mode,
+                               float dy,
+                               float x,
+                               const ScalarAttributes& scalars)
+{
+    auto [graph, tensorBundle, variantPack] = buildPointwiseBinaryGraph({1, 1, 1, 1},
+                                                                        {1, 1, 1, 1},
+                                                                        {1, 1, 1, 1},
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        mode,
+                                                                        1,
+                                                                        TensorLayout::NCHW,
+                                                                        scalars[0],
+                                                                        scalars[1],
+                                                                        scalars[2],
+                                                                        scalars[3],
+                                                                        scalars[4],
+                                                                        scalars[5]);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* dyTensor
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* xTensor = static_cast<Tensor<float>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    const auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    dyTensor->setHostValue(dy, 0, 0, 0, 0);
+    xTensor->setHostValue(x, 0, 0, 0, 0);
+    dyTensor->markHostModified();
+    xTensor->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    return output->getHostValue(0, 0, 0, 0);
+}
+} // namespace
+
+TEST_F(TestPointwisePlan, ForeignScalarLeavesTheModeDefaultsInPlace)
+{
+    using Mode = hipdnn_frontend::PointwiseMode;
+    constexpr size_t SWISH_BETA = 3;
+    constexpr size_t ELU_ALPHA = 4;
+    constexpr size_t SOFTPLUS_BETA = 5;
+    constexpr float FOREIGN = 3.0f;
+
+    // Expected values use the default scalar of 1; they were computed independently in double.
+    EXPECT_NEAR(runUnaryOnSingleValue(Mode::ELU_FWD, -1.0f, onlyScalar(SWISH_BETA, FOREIGN)),
+                -0.6321205588f,
+                1e-6f);
+    EXPECT_NEAR(runUnaryOnSingleValue(Mode::SOFTPLUS_FWD, 1.0f, onlyScalar(ELU_ALPHA, FOREIGN)),
+                1.3132616875f,
+                1e-6f);
+    EXPECT_NEAR(runUnaryOnSingleValue(Mode::SWISH_FWD, 1.0f, onlyScalar(SOFTPLUS_BETA, FOREIGN)),
+                0.7310585786f,
+                1e-6f);
+
+    EXPECT_NEAR(
+        runBackwardOnSingleValue(Mode::ELU_BWD, 2.0f, -1.0f, onlyScalar(SWISH_BETA, FOREIGN)),
+        0.7357588823f,
+        1e-6f);
+    EXPECT_NEAR(
+        runBackwardOnSingleValue(Mode::SOFTPLUS_BWD, 2.0f, 1.0f, onlyScalar(ELU_ALPHA, FOREIGN)),
+        1.4621171573f,
+        1e-6f);
+    EXPECT_NEAR(
+        runBackwardOnSingleValue(Mode::SWISH_BWD, 2.0f, 1.0f, onlyScalar(SOFTPLUS_BETA, FOREIGN)),
+        1.8553410237f,
+        1e-6f);
+
+    // RELU_BWD with its default clips (lower 0, upper max, slope 0)
+    EXPECT_FLOAT_EQ(
+        runBackwardOnSingleValue(Mode::RELU_BWD, 2.0f, 1.0f, onlyScalar(SWISH_BETA, FOREIGN)),
+        2.0f);
+    EXPECT_FLOAT_EQ(
+        runBackwardOnSingleValue(Mode::RELU_BWD, 2.0f, -1.0f, onlyScalar(SWISH_BETA, FOREIGN)),
+        0.0f);
+}
+
+TEST_F(TestPointwisePlan, GenIndexIgnoresEveryScalarAttribute)
+{
+    for(size_t scalarIndex = 0; scalarIndex < 6; ++scalarIndex)
+    {
+        const auto scalars = onlyScalar(scalarIndex, 0.5f);
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseUnaryGraph({1, 3, 2, 2},
+                                       {1, 3, 2, 2},
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::INT32,
+                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                       1,
+                                       TensorLayout::NCHW,
+                                       scalars[0],
+                                       scalars[1],
+                                       scalars[2],
+                                       scalars[3],
+                                       scalars[4],
+                                       scalars[5],
+                                       int64_t{1});
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+        const auto* output
+            = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+        CpuReferenceGraphExecutor{}.execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        for(int64_t channel = 0; channel < 3; ++channel)
+        {
+            for(int64_t height = 0; height < 2; ++height)
+            {
+                for(int64_t width = 0; width < 2; ++width)
+                {
+                    EXPECT_EQ(output->getHostValue(0, channel, height, width),
+                              static_cast<int32_t>(channel))
+                        << "scalar " << scalarIndex;
                 }
             }
         }

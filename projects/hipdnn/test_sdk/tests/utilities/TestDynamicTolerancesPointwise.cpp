@@ -452,9 +452,10 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
             << name;
     }
 
-    // The float evaluation of the unary modes with a numerical function (run through the CPU reference with
-    // float compute) must stay within the tolerance of their class relative to the exact (double)
-    // result.
+    // The float evaluation of the unary modes that are not exact (EXP, LOG, SQRT, RSQRT, RECIPROCAL,
+    // SIN, TAN, ERF, ELU_FWD, SOFTPLUS_FWD), run through the CPU reference with float compute, must
+    // stay within the tolerance of their class relative to the exact (double) result. IDENTITY,
+    // CEIL, FLOOR, LOGICAL_NOT and GEN_INDEX are exact and are not part of this table.
     struct UnaryCase
     {
         PointwiseMode mode;
