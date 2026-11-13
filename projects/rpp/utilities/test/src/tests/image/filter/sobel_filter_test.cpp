@@ -95,8 +95,6 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // Known kernel reds: sobelType 2 diverges from the Euclidean magnitude; I8 and HIP F16
-    // gradX/gradY are not clamped to the dtype range.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kSobelFilterTolerance(cfg.dtype)));
 }

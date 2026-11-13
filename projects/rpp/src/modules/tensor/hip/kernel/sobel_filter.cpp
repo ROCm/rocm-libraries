@@ -58,6 +58,21 @@ __device__ __forceinline__ void sobel_filter_bidirection_hip_compute(d_float8* s
     }
 }
 
+template <typename T>
+__device__ __forceinline__ void sobel_filter_hip_clamp_and_store8(T* dstPtr, d_float8* dst_f8) {
+    if constexpr (std::is_same<T, Rpp8u>::value) {
+        rpp_hip_pixel_check_0to255(dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr, dst_f8);
+    } else if constexpr (std::is_same<T, Rpp8s>::value) {
+        // Sobel kernels sum to zero, so this equals the U8 (+128) gradient; shift back as HOST does
+        rpp_hip_math_subtract8_const(dst_f8, dst_f8, FLOAT4_128);
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr, dst_f8);
+    } else {
+        rpp_hip_pixel_check_0to1(dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr, dst_f8);
+    }
+}
+
 template <int filterSize, typename T>
 __device__ void sobel_row_hip_compute(T* srcPtr, d_float8* dst_f8, float* filter) {
 #pragma unroll
@@ -131,19 +146,8 @@ __global__ void sobel_filter_3x3_pln_bidirection_tensor(T* srcPtr, uint3 srcStri
                                  filterRowY2);
         sobel_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8y,
                                  filterRowY3);
-        if constexpr (std::is_same<T, Rpp8u>::value) {
-            rpp_hip_pixel_check_0to255(&sum_f8x);
-            rpp_hip_pixel_check_0to255(&sum_f8y);
-        } else {
-            rpp_hip_pixel_check_0to1(&sum_f8x);
-            rpp_hip_pixel_check_0to1(&sum_f8y);
-        }
         sobel_filter_bidirection_hip_compute(&sum_f8x, &sum_f8y, &sum_f8);
-        if constexpr (std::is_same<T, Rpp32f>::value) rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -220,19 +224,8 @@ __global__ void sobel_filter_5x5_pln_bidirection_tensor(T* srcPtr, uint3 srcStri
                                  filterRowY4);
         sobel_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8y,
                                  filterRowY5);
-        if constexpr (std::is_same<T, Rpp8u>::value) {
-            rpp_hip_pixel_check_0to255(&sum_f8x);
-            rpp_hip_pixel_check_0to255(&sum_f8y);
-        } else {
-            rpp_hip_pixel_check_0to1(&sum_f8x);
-            rpp_hip_pixel_check_0to1(&sum_f8y);
-        }
         sobel_filter_bidirection_hip_compute(&sum_f8x, &sum_f8y, &sum_f8);
-        if constexpr (std::is_same<T, Rpp32f>::value) rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -321,19 +314,8 @@ __global__ void sobel_filter_7x7_pln_bidirection_tensor(T* srcPtr, uint3 srcStri
                                  filterRowY6);
         sobel_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8y,
                                  filterRowY7);
-        if constexpr (std::is_same<T, Rpp8u>::value) {
-            rpp_hip_pixel_check_0to255(&sum_f8x);
-            rpp_hip_pixel_check_0to255(&sum_f8y);
-        } else {
-            rpp_hip_pixel_check_0to1(&sum_f8x);
-            rpp_hip_pixel_check_0to1(&sum_f8y);
-        }
         sobel_filter_bidirection_hip_compute(&sum_f8x, &sum_f8y, &sum_f8);
-        if constexpr (std::is_same<T, Rpp32f>::value) rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -390,14 +372,7 @@ __global__ void sobel_filter_3x3_pln_x_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row2);
         sobel_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8,
                                  filter_row3);
-        if constexpr (std::is_same<T, Rpp8u>::value)
-            rpp_hip_pixel_check_0to255(&sum_f8);
-        else if constexpr (std::is_same<T, Rpp32f>::value)
-            rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -459,14 +434,7 @@ __global__ void sobel_filter_5x5_pln_x_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row4);
         sobel_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8,
                                  filter_row5);
-        if constexpr (std::is_same<T, Rpp8u>::value)
-            rpp_hip_pixel_check_0to255(&sum_f8);
-        else if constexpr (std::is_same<T, Rpp32f>::value)
-            rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -533,14 +501,7 @@ __global__ void sobel_filter_7x7_pln_x_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row6);
         sobel_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8,
                                  filter_row7);
-        if constexpr (std::is_same<T, Rpp8u>::value)
-            rpp_hip_pixel_check_0to255(&sum_f8);
-        else if constexpr (std::is_same<T, Rpp32f>::value)
-            rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -596,12 +557,7 @@ __global__ void sobel_filter_3x3_pln_y_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row2);
         sobel_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8,
                                  filter_row3);
-        if constexpr (std::is_same<T, Rpp8u>::value) rpp_hip_pixel_check_0to255(&sum_f8);
-        if constexpr (std::is_same<T, Rpp32f>::value) rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -662,14 +618,7 @@ __global__ void sobel_filter_5x5_pln_y_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row4);
         sobel_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8,
                                  filter_row5);
-        if constexpr (std::is_same<T, Rpp8u>::value)
-            rpp_hip_pixel_check_0to255(&sum_f8);
-        else if constexpr (std::is_same<T, Rpp32f>::value)
-            rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 
@@ -736,14 +685,7 @@ __global__ void sobel_filter_7x7_pln_y_gradient_tensor(T* srcPtr, uint3 srcStrid
                                  filter_row6);
         sobel_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8,
                                  filter_row7);
-        if constexpr (std::is_same<T, Rpp8u>::value)
-            rpp_hip_pixel_check_0to255(&sum_f8);
-        else if constexpr (std::is_same<T, Rpp32f>::value)
-            rpp_hip_pixel_check_0to1(&sum_f8);
-        if constexpr (std::is_same<T, Rpp8s>::value)
-            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
-        else
-            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &sum_f8);
+        sobel_filter_hip_clamp_and_store8(dstPtr + dstIdx, &sum_f8);
     }
 }
 

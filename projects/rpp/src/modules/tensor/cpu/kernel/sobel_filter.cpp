@@ -96,14 +96,6 @@ inline void sobel_filter_bidirection_generic_tensor(
         }
     }
 
-    if constexpr (std::is_same<T, Rpp8u>::value || std::is_same<T, Rpp8s>::value) {
-        accumX = RPPPIXELCHECK(accumX);
-        accumY = RPPPIXELCHECK(accumY);
-    } else {
-        accumX = RPPPIXELCHECKF32(accumX);
-        accumY = RPPPIXELCHECKF32(accumY);
-    }
-
     Rpp32f accum = std::sqrt(std::fmaf(accumX, accumX, accumY * accumY));
     saturate_pixel(accum, dstPtrTemp);
 }
@@ -231,15 +223,11 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                             permute_blend_add_3x3<1, 3, 0, 1>(pDstY[1], pRow[rowIndex + 1], avx_p0,
                                                               &pFilterY[filterIndex], pxMaskPln);
                         }
-                        pDstX[0] = _mm256_min_ps(_mm256_max_ps(pDstX[0], pMin), pMax);
-                        pDstY[0] = _mm256_min_ps(_mm256_max_ps(pDstY[0], pMin), pMax);
                         pDstX[0] = _mm256_mul_ps(pDstX[0], pDstX[0]);
                         pDstY[0] = _mm256_mul_ps(pDstY[0], pDstY[0]);
                         pDst[0] = _mm256_sqrt_ps(_mm256_add_ps(pDstX[0], pDstY[0]));
                         pDst[0] = _mm256_min_ps(_mm256_max_ps(pDst[0], pMin), pMax);
 
-                        pDstX[1] = _mm256_min_ps(_mm256_max_ps(pDstX[1], pMin), pMax);
-                        pDstY[1] = _mm256_min_ps(_mm256_max_ps(pDstY[1], pMin), pMax);
                         pDstX[1] = _mm256_mul_ps(pDstX[1], pDstX[1]);
                         pDstY[1] = _mm256_mul_ps(pDstY[1], pDstY[1]);
                         pDst[1] = _mm256_sqrt_ps(_mm256_add_ps(pDstX[1], pDstY[1]));
@@ -424,15 +412,11 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                             permute_blend_add_5x5_pln(pDstY[1], pRow[rowIndex + 1], avx_p0,
                                                       &pFilterY[filterIndex]);
                         }
-                        pDstX[0] = _mm256_min_ps(_mm256_max_ps(pDstX[0], pMin), pMax);
-                        pDstY[0] = _mm256_min_ps(_mm256_max_ps(pDstY[0], pMin), pMax);
                         pDstX[0] = _mm256_mul_ps(pDstX[0], pDstX[0]);
                         pDstY[0] = _mm256_mul_ps(pDstY[0], pDstY[0]);
                         pDst[0] = _mm256_sqrt_ps(_mm256_add_ps(pDstX[0], pDstY[0]));
                         pDst[0] = _mm256_min_ps(_mm256_max_ps(pDst[0], pMin), pMax);
 
-                        pDstX[1] = _mm256_min_ps(_mm256_max_ps(pDstX[1], pMin), pMax);
-                        pDstY[1] = _mm256_min_ps(_mm256_max_ps(pDstY[1], pMin), pMax);
                         pDstX[1] = _mm256_mul_ps(pDstX[1], pDstX[1]);
                         pDstY[1] = _mm256_mul_ps(pDstY[1], pDstY[1]);
                         pDst[1] = _mm256_sqrt_ps(_mm256_add_ps(pDstX[1], pDstY[1]));
@@ -608,8 +592,6 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                             permute_blend_add_7x7_pln(pDstY, &pRow[rowIndex],
                                                       &pFilterY[filterIndex]);
                         }
-                        pDstX = _mm256_min_ps(_mm256_max_ps(pDstX, pMin), pMax);
-                        pDstY = _mm256_min_ps(_mm256_max_ps(pDstY, pMin), pMax);
                         pDstX = _mm256_mul_ps(pDstX, pDstX);
                         pDstY = _mm256_mul_ps(pDstY, pDstY);
                         pDst = _mm256_sqrt_ps(_mm256_add_ps(pDstX, pDstY));
