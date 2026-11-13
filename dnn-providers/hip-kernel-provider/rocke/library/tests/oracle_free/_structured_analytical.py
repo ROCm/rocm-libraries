@@ -37,21 +37,19 @@ from types import MappingProxyType
 import numpy as np
 from rocke.numeric.bf16 import f32_to_bf16
 
-from ._p4_shared_analytical import (
-    UNIFORM_BASIS_OFFSETS,
-    UNIFORM_CALIBRATION,
-    UNIFORM_QUICK_CASES,
-    UniformCase,
-    UniformMutation,
-    UniformObservation,
-    UniformSpecFingerprint,
-    _basis_offset,
-    _validate_observation,
+from ._structured_shapes import (
+    BASIS_OFFSETS,
+    QUICK_SHAPES,
+    DenseShape,
+    MaskMutation,
+    Observation,
+    SpecFingerprint,
+    basis_offset,
+    validate_observation,
     decode_bits,
     legal_interval,
     target_bits,
-    uniform_inputs,
-    uniform_inputs_folded,
+    exposure_values,
 )
 
 F32_FRACTION_BITS = 23
@@ -279,7 +277,7 @@ def _exact_target_bits(value: Fraction, dtype: str) -> int:
 # makes the fold require ``contract``. gfx942 has no BF16 form, and no other
 # operation is fused: the denominator combine stays a separate FP32 multiply
 # and add in every inspected code object (the IR contract and the ISA contract
-# in ``test_p4_contracts.py``).
+# in ``test_structured_contracts.py``).
 # ---------------------------------------------------------------------------
 
 EPILOGUE_ASSUMPTION = (
@@ -333,13 +331,12 @@ class EpilogueArtifact:
 # Only an artifact named here is emulated exactly (``artifact_exact``); the
 # verdict never depends on this table: Tier B allows either rounding at every
 # FP16 site.
-P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
+STRUCTURED_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
     {
         "rocm-7.13.0": EpilogueArtifact(
             compiler=(
                 "ROCm 7.13.0 COMGR, AMD clang 23.0.0git ROCm/llvm-project "
                 "43215c73116c407735c85a180d174f718798c328"
-                "+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3"
             ),
             code_objects=(
                 (
@@ -378,7 +375,7 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
 
 def epilogue_artifact_for(dtype: str, code_object_sha256: str) -> str | None:
     """The named artifact whose ``dtype`` code object has this digest, if any."""
-    for name, artifact in P4_EPILOGUE_ARTIFACTS.items():
+    for name, artifact in STRUCTURED_EPILOGUE_ARTIFACTS.items():
         if (dtype, code_object_sha256) in artifact.code_objects:
             return name
     return None
@@ -490,7 +487,7 @@ def exp2_nearest(argument: Fraction) -> Fraction:
     return nearest
 
 
-class P4ScopeError(ArithmeticError):
+class StructuredScopeError(ArithmeticError):
     """A row leaves the domain on which the enclosure is derived.
 
     The enclosure is then undefined rather than widened: the correct quick
@@ -516,12 +513,12 @@ A_DIV_DOMAIN = (Fraction(1, 2), Fraction(1 << 9))  # closed below, open above
 def rcp_a_div(denominator: F32Interval) -> F32Interval:
     """Image of the executed reciprocal ``fdiv 1.0, l`` under A-DIV v1.
 
-    Raises :class:`P4ScopeError` when the denominator interval leaves the
+    Raises :class:`StructuredScopeError` when the denominator interval leaves the
     A-DIV domain, so no reciprocal is modeled where the assumption says
     nothing."""
     low, high = A_DIV_DOMAIN
     if not (low <= denominator.lo and denominator.hi < high):
-        raise P4ScopeError(
+        raise StructuredScopeError(
             f"denominator [{float(denominator.lo)!r}, {float(denominator.hi)!r}] "
             f"is outside the A-DIV domain [{float(low)!r}, {float(high)!r})"
         )
@@ -589,7 +586,7 @@ def ordered_distance(first: tuple[int, int], second: tuple[int, int]) -> int:
 # contraction), so a kernel that reads the wrong Q or K head changes a logit.
 # ---------------------------------------------------------------------------
 
-P4_PERIOD = 64
+STRUCTURED_PERIOD = 64
 # The softmax scale ``1/sqrt(64)`` the subject adapter passes, and ``log2 e``
 # rounded once to FP32 from a 50-digit value. Both come from the definition of
 # attention, not from the kernel: a contract checks the kernel's constant
@@ -605,9 +602,8 @@ SCORE_SCALE = round_f32(f32(_SCALE_ARGUMENT) * LOG2E_F32)
 MASKED_SCORE = f32(-1e30)
 
 
-class P4Fixture(str, Enum):
-    """Structured Q/K profiles; V uses the uniform lane's basis and folded
-    exposures."""
+class StructuredFixture(str, Enum):
+    """Structured Q/K profiles; V is one of the basis or folded exposures."""
 
     IDENTITY = "identity"  # Q and K one-hot at the key's period residue
     CYCLIC = "cyclic"  # K one-hot shifted by r
@@ -616,9 +612,9 @@ class P4Fixture(str, Enum):
 
 
 _FIXTURE_SHIFT = {
-    P4Fixture.IDENTITY: 0,
-    P4Fixture.LATE_MAX: 0,
-    P4Fixture.WALSH: 1,
+    StructuredFixture.IDENTITY: 0,
+    StructuredFixture.LATE_MAX: 0,
+    StructuredFixture.WALSH: 1,
 }
 
 
@@ -644,15 +640,15 @@ def _scale_token(value: Fraction) -> str:
 
 
 @dataclass(frozen=True)
-class P4Case:
+class StructuredCase:
     """One launch configuration: shape, fixture, per-head scales, KV tiling.
 
     ``q_scales[h]`` and ``k_scales[h]`` are ``a_h`` and ``b_h``: zero or signed
     powers of two, exact in FP16 and BF16. ``block_m``/``block_n`` are the
     subject's tile sizes, which fix the KV tiles each row visits."""
 
-    base: UniformCase
-    fixture: P4Fixture
+    base: DenseShape
+    fixture: StructuredFixture
     q_scales: tuple[Fraction, ...]
     k_scales: tuple[Fraction, ...]
     shift: int = 0
@@ -661,12 +657,14 @@ class P4Case:
     block_n: int = 64
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "fixture", P4Fixture(self.fixture))
+        object.__setattr__(self, "fixture", StructuredFixture(self.fixture))
         object.__setattr__(self, "q_scales", tuple(Fraction(v) for v in self.q_scales))
         object.__setattr__(self, "k_scales", tuple(Fraction(v) for v in self.k_scales))
         base = self.base
-        if base.head_dim != P4_PERIOD:
-            raise ValueError(f"structured logits require head_dim == {P4_PERIOD}")
+        if base.head_dim != STRUCTURED_PERIOD:
+            raise ValueError(
+                f"structured logits require head_dim == {STRUCTURED_PERIOD}"
+            )
         if base.nhead_q != base.nhead_k:
             raise ValueError(
                 "structured logits require Hq == Hkv: each head carries its own logit"
@@ -676,14 +674,14 @@ class P4Case:
         for value in (*self.q_scales, *self.k_scales):
             if value != 0 and not _is_signed_power_of_two(value):
                 raise ValueError(f"scale {value} is not zero or a signed power of two")
-        if self.block_n != P4_PERIOD or self.block_m % self.block_n:
+        if self.block_n != STRUCTURED_PERIOD or self.block_m % self.block_n:
             raise ValueError("the tiles require block_n == 64 dividing block_m")
-        if self.fixture is P4Fixture.CYCLIC:
-            if not 0 < self.shift < P4_PERIOD:
+        if self.fixture is StructuredFixture.CYCLIC:
+            if not 0 < self.shift < STRUCTURED_PERIOD:
                 raise ValueError("the cyclic fixture requires 0 < shift < 64")
         elif self.shift:
             raise ValueError("shift applies to the cyclic fixture only")
-        if self.fixture is P4Fixture.LATE_MAX:
+        if self.fixture is StructuredFixture.LATE_MAX:
             if not 0 < self.late < base.seqlen_k:
                 raise ValueError("the late-max fixture requires 0 < late < seqlen_k")
         elif self.late:
@@ -703,25 +701,25 @@ class P4Case:
         ``k + r = q (mod 64)``."""
         return (
             self.shift
-            if self.fixture is P4Fixture.CYCLIC
+            if self.fixture is StructuredFixture.CYCLIC
             else _FIXTURE_SHIFT[self.fixture]
         )
 
     @property
     def case_id(self) -> str:
         detail = self.fixture.value
-        if self.fixture is P4Fixture.CYCLIC:
+        if self.fixture is StructuredFixture.CYCLIC:
             detail += f"-r{self.shift}"
-        if self.fixture is P4Fixture.LATE_MAX:
+        if self.fixture is StructuredFixture.LATE_MAX:
             detail += f"-l{self.late}"
         scales = ",".join(
             f"{_scale_token(a)}x{_scale_token(b)}"
             for a, b in zip(self.q_scales, self.k_scales)
         )
-        return f"{self.base.case_id}-p4{detail}-{scales}"
+        return f"{self.base.case_id}-{detail}-{scales}"
 
 
-class P4Mutation(str, Enum):
+class StructuredMutation(str, Enum):
     """Wrong kernel semantics whose Tier B must be disjoint from the correct one
     at some coordinate. Each is a closed-form change of the score, the
     legal key set or the softmax recurrence; none needs a reference attention."""
@@ -745,39 +743,41 @@ class P4Mutation(str, Enum):
     DENOMINATOR_PLUS_ONE = "denominator_plus_one"  # one phantom logit-0 key in l
 
 
-_K_ROW_OFFSET = {P4Mutation.K_ROW_PLUS_ONE: 1, P4Mutation.K_ROW_MINUS_ONE: -1}
+_K_ROW_OFFSET = {
+    StructuredMutation.K_ROW_PLUS_ONE: 1,
+    StructuredMutation.K_ROW_MINUS_ONE: -1,
+}
 _OMITTED_WALSH_BLOCK = {
-    P4Mutation.OMIT_WALSH_BLOCK_0: 0,
-    P4Mutation.OMIT_WALSH_BLOCK_1: 1,
-    P4Mutation.OMIT_WALSH_BLOCK_3: 3,
+    StructuredMutation.OMIT_WALSH_BLOCK_0: 0,
+    StructuredMutation.OMIT_WALSH_BLOCK_1: 1,
+    StructuredMutation.OMIT_WALSH_BLOCK_3: 3,
 }
 _WALSH_BLOCK = 16
-# The one-key mask-boundary mutations share the uniform lane's legal-interval
-# semantics.
+# The one-key mask-boundary mutations, as changes of the legal key interval.
 _BOUNDARY_MUTATION = {
-    mutation: UniformMutation(mutation.value)
+    mutation: MaskMutation(mutation.value)
     for mutation in (
-        P4Mutation.INCLUDE_FUTURE_KEY,
-        P4Mutation.EXCLUDE_LAST_KEY,
-        P4Mutation.INCLUDE_OLD_WINDOW_KEY,
-        P4Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+        StructuredMutation.INCLUDE_FUTURE_KEY,
+        StructuredMutation.EXCLUDE_LAST_KEY,
+        StructuredMutation.INCLUDE_OLD_WINDOW_KEY,
+        StructuredMutation.EXCLUDE_OLDEST_WINDOW_KEY,
     )
 }
 
 
-def is_distinguished(case: P4Case, query: int, key: int) -> bool:
+def is_distinguished(case: StructuredCase, query: int, key: int) -> bool:
     """Whether ``key`` carries the row's nonzero score (legality aside)."""
-    if (key + case.residue_shift - query) % P4_PERIOD:
+    if (key + case.residue_shift - query) % STRUCTURED_PERIOD:
         return False
-    return not (case.fixture is P4Fixture.LATE_MAX and key < case.late)
+    return not (case.fixture is StructuredFixture.LATE_MAX and key < case.late)
 
 
 def score_numerator(
-    case: P4Case,
+    case: StructuredCase,
     head: int,
     query: int,
     key: int,
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
 ) -> Fraction:
     """The exact QK dot product ``acc`` (every partial sum is exact in FP32).
 
@@ -787,35 +787,39 @@ def score_numerator(
     dot product loses ``sum_{d in block} H[z, d]``, ``z = q ^ (k + 1)``, which is
     ``16 (-1)**popcount(z & 16 b)`` when ``z % 16 == 0`` and zero otherwise."""
     heads = case.base.nhead_q
-    q_head = (head + 1) % heads if mutation is P4Mutation.Q_HEAD_ROTATE else head
-    k_head = (head + 1) % heads if mutation is P4Mutation.K_HEAD_ROTATE else head
+    q_head = (
+        (head + 1) % heads if mutation is StructuredMutation.Q_HEAD_ROTATE else head
+    )
+    k_head = (
+        (head + 1) % heads if mutation is StructuredMutation.K_HEAD_ROTATE else head
+    )
     product = case.q_scales[q_head] * case.k_scales[k_head]
     row = key + _K_ROW_OFFSET.get(mutation, 0)
-    if case.fixture is P4Fixture.WALSH:
-        overlap = (query % P4_PERIOD) ^ ((row + 1) % P4_PERIOD)
-        total = P4_PERIOD if overlap == 0 else 0
+    if case.fixture is StructuredFixture.WALSH:
+        overlap = (query % STRUCTURED_PERIOD) ^ ((row + 1) % STRUCTURED_PERIOD)
+        total = STRUCTURED_PERIOD if overlap == 0 else 0
         block = _OMITTED_WALSH_BLOCK.get(mutation)
         if block is not None and overlap % _WALSH_BLOCK == 0:
             parity = int(overlap & (_WALSH_BLOCK * block)).bit_count() & 1
             total -= _WALSH_BLOCK * (-1 if parity else 1)
-        negative = row & 1 and mutation is not P4Mutation.WALSH_SIGN
+        negative = row & 1 and mutation is not StructuredMutation.WALSH_SIGN
         return product * total * (-1 if negative else 1)
     shift = case.residue_shift
-    if mutation is P4Mutation.INVERSE_SHIFT:
+    if mutation is StructuredMutation.INVERSE_SHIFT:
         shift = -shift
-    if (row + shift - query) % P4_PERIOD:
+    if (row + shift - query) % STRUCTURED_PERIOD:
         return Fraction(0)
-    if case.fixture is P4Fixture.LATE_MAX and row < case.late:
+    if case.fixture is StructuredFixture.LATE_MAX and row < case.late:
         return Fraction(0)
     return product
 
 
-def row_logit(case: P4Case, head: int, query: int) -> Fraction:
+def row_logit(case: StructuredCase, head: int, query: int) -> Fraction:
     """Natural-domain logit ``c`` of the row's distinguished keys."""
     return score_numerator(case, head, query, query - case.residue_shift) / 8
 
 
-def walsh_matrix(size: int = P4_PERIOD) -> np.ndarray:
+def walsh_matrix(size: int = STRUCTURED_PERIOD) -> np.ndarray:
     """``H[x, d] = (-1)**popcount(x & d)``, the Sylvester Hadamard matrix."""
     index = np.arange(size)
     overlap = index[:, None] & index[None, :]
@@ -825,40 +829,43 @@ def walsh_matrix(size: int = P4_PERIOD) -> np.ndarray:
     return np.where(parity, -1.0, 1.0).astype(np.float32)
 
 
-def p4_query_key(case: P4Case) -> tuple[np.ndarray, np.ndarray]:
+def structured_query_key(case: StructuredCase) -> tuple[np.ndarray, np.ndarray]:
     """Build exactly representable Q ``[B,Sq,H,D]`` and K ``[B,Sk,H,D]``."""
     q = np.zeros(case.output_shape, dtype=np.float32)
     k = np.zeros(case.key_shape, dtype=np.float32)
     a = np.array([float(value) for value in case.q_scales], dtype=np.float32)
     b = np.array([float(value) for value in case.k_scales], dtype=np.float32)
-    if case.fixture is P4Fixture.WALSH:
+    if case.fixture is StructuredFixture.WALSH:
         hadamard = walsh_matrix()
         for row in range(case.base.seqlen_q):
-            q[:, row, :, :] = a[:, None] * hadamard[row % P4_PERIOD]
+            q[:, row, :, :] = a[:, None] * hadamard[row % STRUCTURED_PERIOD]
         for key in range(case.base.seqlen_k):
             sign = -1.0 if key & 1 else 1.0
-            k[:, key, :, :] = sign * b[:, None] * hadamard[(key + 1) % P4_PERIOD]
+            k[:, key, :, :] = (
+                sign * b[:, None] * hadamard[(key + 1) % STRUCTURED_PERIOD]
+            )
         return q, k
     for row in range(case.base.seqlen_q):
-        q[:, row, :, row % P4_PERIOD] = a
+        q[:, row, :, row % STRUCTURED_PERIOD] = a
     for key in range(case.base.seqlen_k):
-        k[:, key, :, (key + case.residue_shift) % P4_PERIOD] = b
-    if case.fixture is P4Fixture.LATE_MAX:
+        k[:, key, :, (key + case.residue_shift) % STRUCTURED_PERIOD] = b
+    if case.fixture is StructuredFixture.LATE_MAX:
         k[:, : case.late] = 0.0
     return q, k
 
 
-P4_EXPOSURES = (*(f"basis@{offset}" for offset in UNIFORM_BASIS_OFFSETS), "folded")
+STRUCTURED_EXPOSURES = (
+    *(f"basis@{offset}" for offset in BASIS_OFFSETS),
+    "folded",
+)
 
 
-def p4_inputs(case: P4Case, exposure: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Q, K and the uniform exposure's V (scaled ``2**h`` per KV head)."""
-    q, k = p4_query_key(case)
-    if exposure == "folded":
-        v = uniform_inputs_folded(case.base)[2]
-    else:
-        v = uniform_inputs(case.base, _basis_offset(exposure))[2]
-    return q, k, v
+def structured_inputs(
+    case: StructuredCase, exposure: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Q, K and the exposure's V (scaled ``2**h`` per head)."""
+    q, k = structured_query_key(case)
+    return q, k, exposure_values(case.base, exposure)
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +874,7 @@ def p4_inputs(case: P4Case, exposure: str) -> tuple[np.ndarray, np.ndarray, np.n
 
 
 def visited_tiles(
-    case: P4Case, query: int, mutation: P4Mutation | None = None
+    case: StructuredCase, query: int, mutation: StructuredMutation | None = None
 ) -> tuple[int, ...]:
     """KV tiles the dense kernel visits for ``query``, in loop order.
 
@@ -908,7 +915,7 @@ class TileClass(str, Enum):
 
 @cache
 def tile_classes(
-    case: P4Case, query: int, mutation: P4Mutation | None = None
+    case: StructuredCase, query: int, mutation: StructuredMutation | None = None
 ) -> tuple[TileClass, ...]:
     """The class of every visited tile of ``query``, in loop order, computed
     from the legal key interval of the correct or mutated semantics."""
@@ -928,7 +935,7 @@ def tile_classes(
 
 
 def masked_prefix(
-    case: P4Case, query: int, mutation: P4Mutation | None = None
+    case: StructuredCase, query: int, mutation: StructuredMutation | None = None
 ) -> tuple[int, ...]:
     """The fully masked leading tiles of ``query`` (class M0), in loop order;
     the enclosure is derived for at most one."""
@@ -942,11 +949,11 @@ def masked_prefix(
 
 
 def prefix_selected_keys(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     dim: int,
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
 ) -> int:
     """How many keys the exposed coordinate selects inside the masked prefix of
     ``query``."""
@@ -957,7 +964,7 @@ def prefix_selected_keys(
 
 
 def masked_prefix_scope(
-    case: P4Case, query: int, mutation: P4Mutation | None = None
+    case: StructuredCase, query: int, mutation: StructuredMutation | None = None
 ) -> str | None:
     """Why the masked-prefix argument does not cover ``query``, or ``None`` when
     it does.
@@ -994,7 +1001,7 @@ def tile_sum(
         total = Fraction(0)
         for weight in weights:
             if weight.lo != 0 or weight.hi >= F32_SMALLEST_NORMAL:
-                raise P4ScopeError(
+                raise StructuredScopeError(
                     "a fully masked tile holds a normal-scale weight: "
                     f"[{float(weight.lo)!r}, {float(weight.hi)!r}]"
                 )
@@ -1005,8 +1012,8 @@ def tile_sum(
 
 # ``scale`` is 1 instead of 1/8, or LOG2E is not applied.
 _MUTATED_SCORE_SCALE = {
-    P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * LOG2E_F32),
-    P4Mutation.EXP_ENCODING: f32(_SCALE_ARGUMENT),
+    StructuredMutation.OMIT_SQRT_D: round_f32(f32(1.0) * LOG2E_F32),
+    StructuredMutation.EXP_ENCODING: f32(_SCALE_ARGUMENT),
 }
 
 
@@ -1016,11 +1023,11 @@ def _score_of(numerator: Fraction, scale: Fraction = SCORE_SCALE) -> Fraction:
 
 
 def score(
-    case: P4Case,
+    case: StructuredCase,
     head: int,
     query: int,
     key: int,
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
 ) -> Fraction:
     """The FP32 score in the log2 domain, or the masked value."""
     first, last = legal_interval(case.base, query, _BOUNDARY_MUTATION.get(mutation))
@@ -1056,10 +1063,10 @@ class RowTrace:
 
 @cache
 def row_trace(
-    case: P4Case,
+    case: StructuredCase,
     head: int,
     query: int,
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
     e_ulps: int = 1,
 ) -> RowTrace:
     """Propagate the row's running max, weights and denominator.
@@ -1073,12 +1080,12 @@ def row_trace(
     sum, never to the accumulator. ``e_ulps`` loosens A-E for failure
     attribution only.
 
-    Raises :class:`P4ScopeError` for a row the masked-prefix argument does not
+    Raises :class:`StructuredScopeError` for a row the masked-prefix argument does not
     cover or whose
     denominator leaves the A-DIV domain."""
     outside = masked_prefix_scope(case, query, mutation)
     if outside is not None:
-        raise P4ScopeError(f"{case.case_id}: {outside}")
+        raise StructuredScopeError(f"{case.case_id}: {outside}")
     running_max = MASKED_SCORE
     denominator = F32Interval.point(Fraction(0))
     steps: list[TileStep] = []
@@ -1092,7 +1099,7 @@ def row_trace(
             for key in range(start, start + case.block_n)
         ]
         new_max = max(running_max, max(scores))
-        if mutation is P4Mutation.OMIT_RESCALE:
+        if mutation is StructuredMutation.OMIT_RESCALE:
             alpha = F32Interval.point(Fraction(1))
         else:
             alpha = exp2_interval(round_f32(running_max - new_max, "rn"), e_ulps)
@@ -1100,7 +1107,7 @@ def row_trace(
             exp2_interval(round_f32(value - new_max, "rn"), e_ulps) for value in scores
         )
         phantom: tuple[F32Interval, ...] = ()
-        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
+        if mutation is StructuredMutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
             phantom = (exp2_interval(round_f32(-new_max, "rn"), e_ulps),)
         denominator = add_rn(
             mul_rn(denominator, alpha), tile_sum(tile_class, weights, phantom)
@@ -1113,12 +1120,14 @@ def row_trace(
     )
 
 
-def exposure_key(case: P4Case, exposure: str, dim: int, tile: int) -> int | None:
+def exposure_key(
+    case: StructuredCase, exposure: str, dim: int, tile: int
+) -> int | None:
     """The key in ``tile`` whose V row is nonzero at ``dim``, if any."""
     start = tile * case.block_n
     if exposure == "folded":
         return start + dim
-    key = _basis_offset(exposure) + dim
+    key = basis_offset(exposure) + dim
     return (
         key
         if start <= key < start + case.block_n and key < case.base.seqlen_k
@@ -1141,12 +1150,12 @@ MFMA_ROUNDING = ("faithful", "rn")
 
 @cache
 def _accumulator_steps(
-    case: P4Case,
+    case: StructuredCase,
     head: int,
     query: int,
     products: tuple[F32Interval | None, ...],
     mfma: str,
-    mutation: P4Mutation | None,
+    mutation: StructuredMutation | None,
     e_ulps: int,
 ) -> tuple[tuple[F32Interval, F32Interval], ...]:
     """Per visited tile, the reachable accumulator after the rescale
@@ -1177,7 +1186,7 @@ def _accumulator_steps(
 
 
 def _exposed_products(
-    case: P4Case, exposure: str, dim: int, head: int, trace: RowTrace
+    case: StructuredCase, exposure: str, dim: int, head: int, trace: RowTrace
 ) -> tuple[F32Interval | None, ...]:
     """Per visited tile, the PV product ``q_T(p~) 2**h`` of the key the exposed
     coordinate selects there, or ``None`` when it selects none."""
@@ -1194,14 +1203,14 @@ def _exposed_products(
 
 
 def accumulator_steps(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
     dim: int,
     *,
     mfma: str = "faithful",
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
 ) -> tuple[tuple[F32Interval, F32Interval], ...]:
     """The numerator recurrence of one exposed coordinate, tile by tile: the
     reachable ``RN(o alpha)`` and the reachable ``o`` after the tile."""
@@ -1211,13 +1220,13 @@ def accumulator_steps(
 
 
 def tier_b_row(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
     *,
     mfma: str = "faithful",
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
     e_ulps: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Lowest and highest reachable output bits of one row and query head,
@@ -1237,13 +1246,13 @@ def tier_b_row(
 
 
 def tier_b_bounds(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     *,
     rows: Iterable[int] | None = None,
     heads: Iterable[int] | None = None,
     mfma: str = "faithful",
-    mutation: P4Mutation | None = None,
+    mutation: StructuredMutation | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Tier B for one exposure: every reachable stored value of each coordinate
     lies, in bit order, between the two returned arrays (inclusive)."""
@@ -1294,7 +1303,7 @@ class CoordinateClass:
 
 
 @cache
-def _row_counts(case: P4Case, head: int, query: int) -> tuple[int, int, int]:
+def _row_counts(case: StructuredCase, head: int, query: int) -> tuple[int, int, int]:
     """``(first, last, n_c)``: the legal interval and its distinguished count."""
     first, last = legal_interval(case.base, query)
     distinguished = sum(
@@ -1306,13 +1315,15 @@ def _row_counts(case: P4Case, head: int, query: int) -> tuple[int, int, int]:
 
 
 def coordinate_class(
-    case: P4Case, exposure: str, query: int, head: int, dim: int
+    case: StructuredCase, exposure: str, query: int, head: int, dim: int
 ) -> CoordinateClass:
     first, last, n_c = _row_counts(case, head, query)
     if exposure == "folded":
-        keys = range(first + (dim - first) % P4_PERIOD, last + 1, P4_PERIOD)
+        keys = range(
+            first + (dim - first) % STRUCTURED_PERIOD, last + 1, STRUCTURED_PERIOD
+        )
     else:
-        key = _basis_offset(exposure) + dim
+        key = basis_offset(exposure) + dim
         keys = range(key, key + 1) if first <= key <= last else range(0)
     m_c = sum(1 for key in keys if score_numerator(case, head, query, key) != 0)
     return CoordinateClass(
@@ -1396,7 +1407,7 @@ def certified_target_bits(
 
 
 def tier_a_bounds(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     *,
     rows: Iterable[int] | None = None,
@@ -1455,7 +1466,7 @@ class EmulationMode(str, Enum):
     RANDOMIZED_SEMANTIC = "randomized_semantic"
 
 
-class P4Violation(str, Enum):
+class StructuredViolation(str, Enum):
     """The IR-exact path with exactly one primitive replaced by a value its
     named assumption excludes.
 
@@ -1484,21 +1495,26 @@ class P4Violation(str, Enum):
     MODE_TRUNCATING_CAST = "a_mode_truncating_cast"
 
 
-_EXP2_VIOLATION = {P4Violation.E_LOW: -2, P4Violation.E_HIGH: 2}
-_MFMA_VIOLATION = {P4Violation.MFMA_LOW: ("rd", -2), P4Violation.MFMA_HIGH: ("ru", 2)}
-_QK_VIOLATION = {P4Violation.QK_DOWN: -1, P4Violation.QK_UP: 1}
-_DIV_VIOLATION = {P4Violation.DIV_LOW: -1, P4Violation.DIV_HIGH: 1}
+_EXP2_VIOLATION = {StructuredViolation.E_LOW: -2, StructuredViolation.E_HIGH: 2}
+_MFMA_VIOLATION = {
+    StructuredViolation.MFMA_LOW: ("rd", -2),
+    StructuredViolation.MFMA_HIGH: ("ru", 2),
+}
+_QK_VIOLATION = {StructuredViolation.QK_DOWN: -1, StructuredViolation.QK_UP: 1}
+_DIV_VIOLATION = {StructuredViolation.DIV_LOW: -1, StructuredViolation.DIV_HIGH: 1}
 
 
-def applicable_violations(case: P4Case) -> tuple[P4Violation, ...]:
+def applicable_violations(case: StructuredCase) -> tuple[StructuredViolation, ...]:
     """The violations ``case`` can express: only the Walsh contraction has a
     dense score atom, and only FP16 has the A-F epilogue."""
     return tuple(
         violation
-        for violation in P4Violation
-        if not (violation in _QK_VIOLATION and case.fixture is not P4Fixture.WALSH)
+        for violation in StructuredViolation
+        if not (
+            violation in _QK_VIOLATION and case.fixture is not StructuredFixture.WALSH
+        )
         and not (
-            violation is P4Violation.F_TRUNCATED
+            violation is StructuredViolation.F_TRUNCATED
             and case.dtype not in _SINGLE_ROUNDING_DTYPES
         )
     )
@@ -1520,7 +1536,7 @@ def _truncated_target_bits(value: Fraction, dtype: str) -> int:
 
 
 def emulate_row(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
@@ -1528,14 +1544,14 @@ def emulate_row(
     mode: EmulationMode | str = EmulationMode.IR_EXACT,
     rng: np.random.Generator | None = None,
     artifact: str | None = None,
-    mutation: P4Mutation | None = None,
-    violation: P4Violation | None = None,
+    mutation: StructuredMutation | None = None,
+    violation: StructuredViolation | None = None,
 ) -> np.ndarray:
     """Output bits of one row from an FP32 emulation of the dense path.
 
     ``IR_EXACT`` follows the kernel's IR. ``ARTIFACT_EXACT`` differs only in
     the FP16 stores that the code object ``artifact`` (a key of
-    ``P4_EPILOGUE_ARTIFACTS``) rounds once. ``RANDOMIZED_SEMANTIC`` draws from
+    ``STRUCTURED_EPILOGUE_ARTIFACTS``) rounds once. ``RANDOMIZED_SEMANTIC`` draws from
     ``rng`` a member of the reachable set, used to test that Tier B encloses
     it. ``mutation`` emulates the mutated kernel, whose realizations its own
     Tier B must enclose. ``violation`` breaks one named assumption on a
@@ -1547,12 +1563,14 @@ def emulate_row(
         raise ValueError("rng is required by, and only by, randomized_semantic")
     if (artifact is None) == (mode is EmulationMode.ARTIFACT_EXACT):
         raise ValueError("artifact is required by, and only by, artifact_exact")
-    if artifact is not None and artifact not in P4_EPILOGUE_ARTIFACTS:
+    if artifact is not None and artifact not in STRUCTURED_EPILOGUE_ARTIFACTS:
         raise ValueError(f"no epilogue artifact named {artifact!r}")
     if violation is not None and rng is not None:
         raise ValueError("a violation applies to a deterministic mode only")
     single_lanes = (
-        P4_EPILOGUE_ARTIFACTS[artifact].single_lanes if artifact else frozenset()
+        STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes
+        if artifact
+        else frozenset()
     )
     accumulator, reciprocal = _emulate_path(
         case, exposure, query, head, rng, mutation, violation
@@ -1572,11 +1590,11 @@ def emulate_row(
 
 
 def epilogue_alternatives(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
-    violation: P4Violation | None = None,
+    violation: StructuredViolation | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The IR-exact row's stored bits under double and single epilogue rounding.
 
@@ -1607,17 +1625,17 @@ def _store_bits(
     dtype: str,
     *,
     single: bool,
-    violation: P4Violation | None = None,
+    violation: StructuredViolation | None = None,
 ) -> int:
     """``q_T(RN32(o R))``, or under A-F for FP16 ``q_T(o R)`` when ``single``."""
     exact = Fraction(float(value)) * Fraction(float(reciprocal))
     fused = dtype in _SINGLE_ROUNDING_DTYPES
-    truncating = violation is P4Violation.MODE_TRUNCATING_CAST
-    if fused and (single or violation is P4Violation.F_TRUNCATED):
-        if truncating or violation is P4Violation.F_TRUNCATED:
+    truncating = violation is StructuredViolation.MODE_TRUNCATING_CAST
+    if fused and (single or violation is StructuredViolation.F_TRUNCATED):
+        if truncating or violation is StructuredViolation.F_TRUNCATED:
             return _truncated_target_bits(exact, dtype)
         return _exact_target_bits(exact, dtype)
-    if violation is P4Violation.MODE_RZ_ARITHMETIC:
+    if violation is StructuredViolation.MODE_RZ_ARITHMETIC:
         product = np.float32(float(round_f32(exact, "rz")))
     else:
         product = np.float32(value * reciprocal)
@@ -1636,20 +1654,20 @@ class _EmulatedTile:
 
 
 def _emulate_tiles(
-    case: P4Case,
+    case: StructuredCase,
     query: int,
     head: int,
     rng: np.random.Generator | None,
-    mutation: P4Mutation | None,
-    violation: P4Violation | None,
+    mutation: StructuredMutation | None,
+    violation: StructuredViolation | None,
 ) -> tuple[tuple[_EmulatedTile, ...], np.float32]:
     """The exposure-independent part of the path: each tile's rescale factor
     and weights, and the reciprocal of the final denominator.
 
     Without ``rng``: the documented lane order and ``E = RN(2**x)``. With
     ``rng``: a random summation tree per tile and an ``E`` candidate per call.
-    ``violation`` replaces one primitive (:class:`P4Violation`)."""
-    toward_zero = violation is P4Violation.MODE_RZ_ARITHMETIC
+    ``violation`` replaces one primitive (:class:`StructuredViolation`)."""
+    toward_zero = violation is StructuredViolation.MODE_RZ_ARITHMETIC
 
     def rounded(exact: Fraction) -> np.float32:
         return np.float32(float(round_f32(exact, "rz")))
@@ -1682,7 +1700,11 @@ def _emulate_tiles(
         edge = candidates[0] if exp2_steps < 0 else candidates[-1]
         return np.float32(float(_grid_steps(edge, exp2_steps)))
 
-    qk_steps = _QK_VIOLATION.get(violation, 0) if case.fixture is P4Fixture.WALSH else 0
+    qk_steps = (
+        _QK_VIOLATION.get(violation, 0)
+        if case.fixture is StructuredFixture.WALSH
+        else 0
+    )
 
     def score_of(key: int) -> Fraction:
         value = score(case, head, query, key, mutation)
@@ -1705,13 +1727,13 @@ def _emulate_tiles(
             dtype=np.float32,
         )
         new_max = np.float32(max(running_max, np.max(scores)))
-        if mutation is P4Mutation.OMIT_RESCALE:
+        if mutation is StructuredMutation.OMIT_RESCALE:
             alpha = np.float32(1.0)
         else:
             alpha = exp2(sub(running_max, new_max))
         weights = [exp2(sub(value, new_max)) for value in scores]
         phantom = []
-        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
+        if mutation is StructuredMutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
             phantom.append(exp2(sub(np.float32(0.0), new_max)))
         if rng is None:
             halves = []
@@ -1743,24 +1765,24 @@ def _emulate_tiles(
 
 @cache
 def _emulated_tiles(
-    case: P4Case,
+    case: StructuredCase,
     query: int,
     head: int,
-    mutation: P4Mutation | None,
-    violation: P4Violation | None,
+    mutation: StructuredMutation | None,
+    violation: StructuredViolation | None,
 ) -> tuple[tuple[_EmulatedTile, ...], np.float32]:
     """The deterministic row state, shared by the five exposures of a row."""
     return _emulate_tiles(case, query, head, None, mutation, violation)
 
 
 def _emulate_path(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
     rng: np.random.Generator | None,
-    mutation: P4Mutation | None,
-    violation: P4Violation | None = None,
+    mutation: StructuredMutation | None,
+    violation: StructuredViolation | None = None,
 ) -> tuple[np.ndarray, np.float32]:
     """FP32 accumulator row and reciprocal before the output epilogue.
 
@@ -1771,8 +1793,8 @@ def _emulate_path(
         tiles, reciprocal = _emulated_tiles(case, query, head, mutation, violation)
     else:
         tiles, reciprocal = _emulate_tiles(case, query, head, rng, mutation, None)
-    toward_zero = violation is P4Violation.MODE_RZ_ARITHMETIC
-    truncating = violation is P4Violation.MODE_TRUNCATING_CAST
+    toward_zero = violation is StructuredViolation.MODE_RZ_ARITHMETIC
+    truncating = violation is StructuredViolation.MODE_TRUNCATING_CAST
     mfma_mode, mfma_steps = _MFMA_VIOLATION.get(violation, (None, 0))
     scale = np.float32(2.0 ** case.head_scale_exponents[head])
     accumulator = np.zeros(case.base.head_dim, dtype=np.float32)
@@ -1822,7 +1844,7 @@ def _emulate_path(
 # Head logits per fixture family. Periodic fixtures (identity, cyclic, late
 # max) cover large and moderate logits of both signs; the Walsh row sign
 # alternates, so its magnitudes cover both signs on their own.
-P4_HEAD_LOGITS: Mapping[str, tuple[Fraction, ...]] = MappingProxyType(
+STRUCTURED_HEAD_LOGITS: Mapping[str, tuple[Fraction, ...]] = MappingProxyType(
     {
         "periodic": (Fraction(8), Fraction(-8), Fraction(2), Fraction(-1, 2)),
         "walsh": (Fraction(8), Fraction(2), Fraction(1, 2), Fraction(4)),
@@ -1832,17 +1854,21 @@ P4_HEAD_LOGITS: Mapping[str, tuple[Fraction, ...]] = MappingProxyType(
 _GAP_ROWS = (0, 6, 7, 31, 63, 64, 65, 127, 128, 191, 192, 255)
 
 
-def fixture_family(fixture: P4Fixture) -> str:
-    return "walsh" if P4Fixture(fixture) is P4Fixture.WALSH else "periodic"
+def fixture_family(fixture: StructuredFixture) -> str:
+    return (
+        "walsh" if StructuredFixture(fixture) is StructuredFixture.WALSH else "periodic"
+    )
 
 
 def _logit_case(
-    base: UniformCase, block_m: int, family: str, logits: Sequence[Fraction]
-) -> P4Case:
+    base: DenseShape, block_m: int, family: str, logits: Sequence[Fraction]
+) -> StructuredCase:
     """A case whose head ``h`` has logit ``logits[h]`` with ``b_h = 1``."""
-    fixture = P4Fixture.WALSH if family == "walsh" else P4Fixture.IDENTITY
+    fixture = (
+        StructuredFixture.WALSH if family == "walsh" else StructuredFixture.IDENTITY
+    )
     factor = Fraction(1, 8) if family == "walsh" else Fraction(8)
-    return P4Case(
+    return StructuredCase(
         base,
         fixture,
         tuple(value * factor for value in logits),
@@ -1853,7 +1879,7 @@ def _logit_case(
 
 @cache
 def logit_gap(
-    base: UniformCase,
+    base: DenseShape,
     block_m: int,
     family: str,
     head: int,
@@ -1868,7 +1894,7 @@ def logit_gap(
     logits[head] = other
     mutated = _logit_case(base, block_m, family, logits)
     gap = 0
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         for query in _GAP_ROWS:
             first = tier_b_row(correct, exposure, query, head)
             second = tier_b_row(mutated, exposure, query, head)
@@ -1884,7 +1910,7 @@ def logit_gap(
 
 
 def head_scale_margin(
-    bases: Sequence[tuple[UniformCase, int]],
+    bases: Sequence[tuple[DenseShape, int]],
     family: str,
     q_scales: Sequence[Fraction],
     k_scales: Sequence[Fraction],
@@ -1899,7 +1925,7 @@ def head_scale_margin(
     heads = len(q_scales)
     for base, block_m in bases:
         for head in range(heads):
-            logit = P4_HEAD_LOGITS[family][head]
+            logit = STRUCTURED_HEAD_LOGITS[family][head]
             for other_head in range(heads):
                 if other_head == head:
                     continue
@@ -1913,13 +1939,13 @@ def head_scale_margin(
 
 
 def search_head_scales(
-    bases: Sequence[tuple[UniformCase, int]],
+    bases: Sequence[tuple[DenseShape, int]],
     family: str,
     exponents: Sequence[int] = (-2, -1, 0, 1, 2, 3),
 ) -> tuple[tuple[Fraction, ...], tuple[Fraction, ...], int]:
     """Maximize :func:`head_scale_margin` over signed power-of-two ``a_h``;
     ``b_h`` follows from the head logit. Ties prefer scales nearest one."""
-    logits = P4_HEAD_LOGITS[family]
+    logits = STRUCTURED_HEAD_LOGITS[family]
     choices = [
         Fraction(sign) * Fraction(2) ** power for power in exponents for sign in (1, -1)
     ]
@@ -1954,62 +1980,82 @@ def search_head_scales(
 # The quick matrix.
 # ---------------------------------------------------------------------------
 
-# Chosen by ``search_head_scales(P4_SEARCH_BASES, family)`` with the default
-# exponent range; ``P4_HEAD_SCALE_MARGIN`` is the attained worst-case gap in
+# Chosen by ``search_head_scales(STRUCTURED_SEARCH_BASES, family)`` with the default
+# exponent range; ``STRUCTURED_HEAD_SCALE_MARGIN`` is the attained worst-case gap in
 # target ULPs, recomputed by a CPU contract.
-P4_HEAD_SCALES: Mapping[str, tuple[tuple[Fraction, ...], tuple[Fraction, ...]]] = (
-    MappingProxyType(
-        {
-            "periodic": (
-                (Fraction(1), Fraction(2), Fraction(-4), Fraction(-1)),
-                (Fraction(64), Fraction(-32), Fraction(-4), Fraction(4)),
-            ),
-            "walsh": (
-                (Fraction(1), Fraction(-1, 4), Fraction(1, 4), Fraction(-1)),
-                (Fraction(1), Fraction(-1), Fraction(1, 4), Fraction(-1, 2)),
-            ),
-        }
-    )
+STRUCTURED_HEAD_SCALES: Mapping[
+    str, tuple[tuple[Fraction, ...], tuple[Fraction, ...]]
+] = MappingProxyType(
+    {
+        "periodic": (
+            (Fraction(1), Fraction(2), Fraction(-4), Fraction(-1)),
+            (Fraction(64), Fraction(-32), Fraction(-4), Fraction(4)),
+        ),
+        "walsh": (
+            (Fraction(1), Fraction(-1, 4), Fraction(1, 4), Fraction(-1)),
+            (Fraction(1), Fraction(-1), Fraction(1, 4), Fraction(-1, 2)),
+        ),
+    }
 )
-P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType(
+STRUCTURED_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType(
     {"periodic": 181, "walsh": 181}
 )
-P4_CYCLIC_SHIFT = 37
-P4_LATE_KEYS = 64
-# Tile sizes of the calibrated uniform quick specs (the same dispatch identities).
-_QUICK_BLOCK_M = {
-    dtype: entry.spec.block_m for (_, _, dtype), entry in UNIFORM_CALIBRATION.items()
-}
-P4_SEARCH_BASES = tuple(
-    (base, _QUICK_BLOCK_M[base.dtype]) for base in UNIFORM_QUICK_CASES
+STRUCTURED_CYCLIC_SHIFT = 37
+STRUCTURED_LATE_KEYS = 64
+# What dispatch resolves each quick shape to: the non-persistent dense path with
+# the fast base-2 exponential, no sinks and no LSE, on 64-key KV tiles. Only the
+# query block differs: 128 rows for FP16 causal, 64 for the BF16 window. The
+# calibration entries carry these fingerprints, and the tile sizes fix which KV
+# tiles each row visits.
+STRUCTURED_QUICK_SPECS: Mapping[str, SpecFingerprint] = MappingProxyType(
+    {
+        dtype: SpecFingerprint(
+            path="dense",
+            persistent=False,
+            runtime_shape=True,
+            head_dim=64,
+            block_m=block_m,
+            block_n=64,
+            use_exp2_fast=True,
+            use_sinks=False,
+            emit_lse=False,
+        )
+        for dtype, block_m in (("fp16", 128), ("bf16", 64))
+    }
+)
+_QUICK_BLOCK_M = {dtype: spec.block_m for dtype, spec in STRUCTURED_QUICK_SPECS.items()}
+STRUCTURED_SEARCH_BASES = tuple(
+    (base, _QUICK_BLOCK_M[base.dtype]) for base in QUICK_SHAPES
 )
 
 
-def p4_quick_case(base: UniformCase, fixture: P4Fixture) -> P4Case:
-    """The quick-lane case of one fixture on one uniform quick shape."""
-    fixture = P4Fixture(fixture)
-    q_scales, k_scales = P4_HEAD_SCALES[fixture_family(fixture)]
-    return P4Case(
+def structured_quick_case(
+    base: DenseShape, fixture: StructuredFixture
+) -> StructuredCase:
+    """The quick case of one fixture on one quick shape."""
+    fixture = StructuredFixture(fixture)
+    q_scales, k_scales = STRUCTURED_HEAD_SCALES[fixture_family(fixture)]
+    return StructuredCase(
         base,
         fixture,
         q_scales,
         k_scales,
-        shift=P4_CYCLIC_SHIFT if fixture is P4Fixture.CYCLIC else 0,
-        late=P4_LATE_KEYS if fixture is P4Fixture.LATE_MAX else 0,
+        shift=STRUCTURED_CYCLIC_SHIFT if fixture is StructuredFixture.CYCLIC else 0,
+        late=STRUCTURED_LATE_KEYS if fixture is StructuredFixture.LATE_MAX else 0,
         block_m=_QUICK_BLOCK_M[base.dtype],
     )
 
 
-P4_QUICK_CASES = tuple(
-    p4_quick_case(base, fixture)
-    for base in UNIFORM_QUICK_CASES
-    for fixture in P4Fixture
+STRUCTURED_QUICK_CASES = tuple(
+    structured_quick_case(base, fixture)
+    for base in QUICK_SHAPES
+    for fixture in StructuredFixture
 )
 
 
 @cache
 def tier_b_exposure(
-    case: P4Case, exposure: str, mutation: P4Mutation | None = None
+    case: StructuredCase, exposure: str, mutation: StructuredMutation | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Cached, read-only :func:`tier_b_bounds` for a whole exposure."""
     low, high = tier_b_bounds(case, exposure, mutation=mutation)
@@ -2020,7 +2066,7 @@ def tier_b_exposure(
 
 @cache
 def tier_a_exposure(
-    case: P4Case, exposure: str
+    case: StructuredCase, exposure: str
 ) -> tuple[np.ndarray, np.ndarray, frozenset[tuple[int, CoordinateClass]]]:
     """Cached, read-only :func:`tier_a_bounds` for a whole exposure, with the
     distinct ``(head exponent, class)`` pairs behind its targets."""
@@ -2036,29 +2082,32 @@ def tier_a_exposure(
 # ---------------------------------------------------------------------------
 
 _EVERY_FIXTURE = (
-    P4Mutation.OMIT_SQRT_D,
-    P4Mutation.EXP_ENCODING,
-    P4Mutation.K_ROW_PLUS_ONE,
-    P4Mutation.K_ROW_MINUS_ONE,
-    P4Mutation.Q_HEAD_ROTATE,
-    P4Mutation.K_HEAD_ROTATE,
-    P4Mutation.OMIT_RESCALE,
-    P4Mutation.DENOMINATOR_PLUS_ONE,
+    StructuredMutation.OMIT_SQRT_D,
+    StructuredMutation.EXP_ENCODING,
+    StructuredMutation.K_ROW_PLUS_ONE,
+    StructuredMutation.K_ROW_MINUS_ONE,
+    StructuredMutation.Q_HEAD_ROTATE,
+    StructuredMutation.K_HEAD_ROTATE,
+    StructuredMutation.OMIT_RESCALE,
+    StructuredMutation.DENOMINATOR_PLUS_ONE,
 )
 _FIXTURE_MUTATIONS = {
-    P4Fixture.CYCLIC: (P4Mutation.INVERSE_SHIFT,),
-    P4Fixture.WALSH: (*_OMITTED_WALSH_BLOCK, P4Mutation.WALSH_SIGN),
+    StructuredFixture.CYCLIC: (StructuredMutation.INVERSE_SHIFT,),
+    StructuredFixture.WALSH: (*_OMITTED_WALSH_BLOCK, StructuredMutation.WALSH_SIGN),
 }
 _MASK_MUTATIONS = {
-    "causal": (P4Mutation.INCLUDE_FUTURE_KEY, P4Mutation.EXCLUDE_LAST_KEY),
+    "causal": (
+        StructuredMutation.INCLUDE_FUTURE_KEY,
+        StructuredMutation.EXCLUDE_LAST_KEY,
+    ),
     "window": (
-        P4Mutation.INCLUDE_OLD_WINDOW_KEY,
-        P4Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+        StructuredMutation.INCLUDE_OLD_WINDOW_KEY,
+        StructuredMutation.EXCLUDE_OLDEST_WINDOW_KEY,
     ),
 }
 
 
-def applicable_mutations(case: P4Case) -> tuple[P4Mutation, ...]:
+def applicable_mutations(case: StructuredCase) -> tuple[StructuredMutation, ...]:
     """The mutations ``case`` can express: transposing K is a shift only for the
     cyclic fixture, Walsh blocks and signs exist only in the Walsh fixture, and
     each mask has its own one-key boundary."""
@@ -2075,7 +2124,7 @@ class Separation:
     mutated Tier B over the evaluated coordinates, and where it is attained
     (``exposure`` and ``b:q:h:d``). ``gap > 0`` proves the mutation is caught."""
 
-    mutation: P4Mutation
+    mutation: StructuredMutation
     gap: int
     exposure: str | None
     coordinate: tuple[int, int, int, int] | None
@@ -2084,10 +2133,10 @@ class Separation:
 # Block, tile, window and causal-diagonal edges of both quick kernels. A gap on
 # a subset of rows lower-bounds the full gap, which is enough to prove that the
 # mutation is caught.
-P4_SEPARATION_ROWS = (0, 1, 6, 7, 31, 63, 64, 65, 127, 128, 191, 192, 255)
+STRUCTURED_SEPARATION_ROWS = (0, 1, 6, 7, 31, 63, 64, 65, 127, 128, 191, 192, 255)
 
 SEPARATION_LABELS = (
-    "owned by the uniform lane",
+    "owned by another check",
     "owned by another fixture",
     "needs a stronger fixture",
     "out of scope",
@@ -2098,33 +2147,33 @@ SEPARATION_LABELS = (
 # in the first visited tile, so every later ``alpha = E(0)`` admits 1 and the
 # omitted rescale is a member of the correct reachable set; late max, whose
 # max arrives in a later tile, separates it on the same kernel.
-P4_UNSEPARATED: Mapping[tuple[str, P4Mutation], str] = MappingProxyType(
+STRUCTURED_UNSEPARATED: Mapping[tuple[str, StructuredMutation], str] = MappingProxyType(
     {
-        (case.case_id, P4Mutation.OMIT_RESCALE): "owned by another fixture"
-        for case in P4_QUICK_CASES
-        if case.mask == "causal" and case.fixture is not P4Fixture.LATE_MAX
+        (case.case_id, StructuredMutation.OMIT_RESCALE): "owned by another fixture"
+        for case in STRUCTURED_QUICK_CASES
+        if case.mask == "causal" and case.fixture is not StructuredFixture.LATE_MAX
     }
 )
 
 
 def mutation_separation(
-    case: P4Case,
-    mutation: P4Mutation,
+    case: StructuredCase,
+    mutation: StructuredMutation,
     *,
-    rows: Iterable[int] | None = P4_SEPARATION_ROWS,
+    rows: Iterable[int] | None = STRUCTURED_SEPARATION_ROWS,
 ) -> Separation:
     """Evaluate the separation of one mutation over every exposure; ``rows=None``
     uses every row. A row whose mutated enclosure is not derived proves
     nothing; separation needs one coordinate, so
     leaving it out lower-bounds the gap."""
-    mutation = P4Mutation(mutation)
+    mutation = StructuredMutation(mutation)
     if mutation not in applicable_mutations(case):
         raise ValueError(f"mutation {mutation.value} does not apply to {case.case_id}")
     best = Separation(mutation, 0, None, None)
     queries = derived_rows(
         case, range(case.base.seqlen_q) if rows is None else rows, mutation
     )
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         for query in queries:
             for head in range(case.base.nhead_q):
                 correct = tier_b_row(case, exposure, query, head)
@@ -2140,7 +2189,9 @@ def mutation_separation(
     return best
 
 
-def row_scope(case: P4Case, query: int, mutation: P4Mutation | None) -> str | None:
+def row_scope(
+    case: StructuredCase, query: int, mutation: StructuredMutation | None
+) -> str | None:
     """Why the enclosure of ``query`` is not derived under ``mutation`` for some
     head (more than one fully masked leading tile, no legal tile, or a
     denominator outside the A-DIV domain), or
@@ -2148,13 +2199,13 @@ def row_scope(case: P4Case, query: int, mutation: P4Mutation | None) -> str | No
     try:
         for head in range(case.base.nhead_q):
             row_trace(case, head, query, mutation)
-    except P4ScopeError as error:
+    except StructuredScopeError as error:
         return str(error)
     return None
 
 
 def derived_rows(
-    case: P4Case, rows: Iterable[int], mutation: P4Mutation | None
+    case: StructuredCase, rows: Iterable[int], mutation: StructuredMutation | None
 ) -> tuple[int, ...]:
     """The rows of ``rows`` whose enclosure under ``mutation`` is derived for
     every head (:func:`row_scope`). The correct semantics are never filtered:
@@ -2166,7 +2217,7 @@ def derived_rows(
     return tuple(query for query in rows if row_scope(case, query, mutation) is None)
 
 
-def format_separation(case: P4Case, separation: Separation) -> str:
+def format_separation(case: StructuredCase, separation: Separation) -> str:
     where = (
         "n/a"
         if separation.coordinate is None
@@ -2198,7 +2249,7 @@ MODE_ASSUMPTION = (
 )
 # Every named assumption Tier B is conditional on, in the order of the
 # soundness theorem. A calibration entry lists exactly these versions.
-P4_ASSUMPTION_STATEMENTS = (
+STRUCTURED_ASSUMPTION_STATEMENTS = (
     EXP2_ASSUMPTION,
     MFMA_ASSUMPTION,
     QK_ASSUMPTION,
@@ -2206,23 +2257,23 @@ P4_ASSUMPTION_STATEMENTS = (
     EPILOGUE_ASSUMPTION,
     MODE_ASSUMPTION,
 )
-P4_ASSUMPTIONS = tuple(
-    statement.split(":", 1)[0] for statement in P4_ASSUMPTION_STATEMENTS
+STRUCTURED_ASSUMPTIONS = tuple(
+    statement.split(":", 1)[0] for statement in STRUCTURED_ASSUMPTION_STATEMENTS
 )
 # Looser v_exp_f32 bound used only to attribute a failure to A-E.
 _RELAXED_EXP2_ULPS = 2
 
 
-class P4Label(str, Enum):
+class StructuredLabel(str, Enum):
     """What an observed coordinate is judged to be.
 
     A value outside Tier B that equals the store of a single violated
-    assumption (:class:`P4Violation`) carries that assumption's label. The
+    assumption (:class:`StructuredViolation`) carries that assumption's label. The
     other assumption labels are heuristics, checked in the order below. No
     label is a pass, and none enlarges Tier B.
 
     A zero-gap mutation (the fixture lacks sensitivity) is a CPU-side label,
-    ``P4_UNSEPARATED``, not an output label."""
+    ``STRUCTURED_UNSEPARATED``, not an output label."""
 
     PASS = "pass"
     INVALID = "invalid"  # NaN (including the unwritten prefill) or Inf
@@ -2240,20 +2291,22 @@ class P4Label(str, Enum):
     NUMERICAL = "numerical"  # outside Tier A, or outside a mutated Tier B
 
 
-P4_FAILURE_LABELS = tuple(label for label in P4Label if label is not P4Label.PASS)
-_VIOLATION_LABEL: Mapping[P4Violation, P4Label] = MappingProxyType(
+STRUCTURED_FAILURE_LABELS = tuple(
+    label for label in StructuredLabel if label is not StructuredLabel.PASS
+)
+_VIOLATION_LABEL: Mapping[StructuredViolation, StructuredLabel] = MappingProxyType(
     {
-        P4Violation.E_LOW: P4Label.A_E,
-        P4Violation.E_HIGH: P4Label.A_E,
-        P4Violation.MFMA_LOW: P4Label.A_MFMA,
-        P4Violation.MFMA_HIGH: P4Label.A_MFMA,
-        P4Violation.QK_DOWN: P4Label.A_QK,
-        P4Violation.QK_UP: P4Label.A_QK,
-        P4Violation.DIV_LOW: P4Label.A_DIV,
-        P4Violation.DIV_HIGH: P4Label.A_DIV,
-        P4Violation.F_TRUNCATED: P4Label.A_F,
-        P4Violation.MODE_RZ_ARITHMETIC: P4Label.A_MODE,
-        P4Violation.MODE_TRUNCATING_CAST: P4Label.A_MODE,
+        StructuredViolation.E_LOW: StructuredLabel.A_E,
+        StructuredViolation.E_HIGH: StructuredLabel.A_E,
+        StructuredViolation.MFMA_LOW: StructuredLabel.A_MFMA,
+        StructuredViolation.MFMA_HIGH: StructuredLabel.A_MFMA,
+        StructuredViolation.QK_DOWN: StructuredLabel.A_QK,
+        StructuredViolation.QK_UP: StructuredLabel.A_QK,
+        StructuredViolation.DIV_LOW: StructuredLabel.A_DIV,
+        StructuredViolation.DIV_HIGH: StructuredLabel.A_DIV,
+        StructuredViolation.F_TRUNCATED: StructuredLabel.A_F,
+        StructuredViolation.MODE_RZ_ARITHMETIC: StructuredLabel.A_MODE,
+        StructuredViolation.MODE_TRUNCATING_CAST: StructuredLabel.A_MODE,
     }
 )
 # Violations whose stores stay inside Tier B at every coordinate of the quick
@@ -2261,17 +2314,17 @@ _VIOLATION_LABEL: Mapping[P4Violation, P4Label] = MappingProxyType(
 # the stored bits cannot show them. This records the check's sensitivity to the
 # primitive; it is no evidence for the assumption. The conversions are the
 # observable ones: a truncating cast, and for FP16 a truncated store.
-P4_UNOBSERVED_VIOLATIONS = frozenset(
+STRUCTURED_UNOBSERVED_VIOLATIONS = frozenset(
     {
-        P4Violation.E_LOW,
-        P4Violation.E_HIGH,
-        P4Violation.MFMA_LOW,
-        P4Violation.MFMA_HIGH,
-        P4Violation.QK_DOWN,
-        P4Violation.QK_UP,
-        P4Violation.DIV_LOW,
-        P4Violation.DIV_HIGH,
-        P4Violation.MODE_RZ_ARITHMETIC,
+        StructuredViolation.E_LOW,
+        StructuredViolation.E_HIGH,
+        StructuredViolation.MFMA_LOW,
+        StructuredViolation.MFMA_HIGH,
+        StructuredViolation.QK_DOWN,
+        StructuredViolation.QK_UP,
+        StructuredViolation.DIV_LOW,
+        StructuredViolation.DIV_HIGH,
+        StructuredViolation.MODE_RZ_ARITHMETIC,
     }
 )
 # No violation stores a value farther than this many target ULPs outside
@@ -2281,7 +2334,7 @@ _FP16_SMALLEST_NORMAL_BITS = 0x0400
 
 
 @dataclass(frozen=True)
-class P4GroupStats:
+class StructuredGroupStats:
     """One exposure's evidence for the rows of one legal count and query head.
 
     ``exact`` counts nonstructural coordinates equal to the certified target;
@@ -2301,10 +2354,10 @@ class P4GroupStats:
 
 
 @dataclass(frozen=True)
-class P4Result:
+class StructuredResult:
     """Tier B verdict of one observation, with the taxonomy of every failure."""
 
-    mutation: P4Mutation | None
+    mutation: StructuredMutation | None
     violations: tuple[str, ...]
     labels: Mapping[str, int]
     first: Mapping[str, tuple[str, tuple[int, int, int, int]]]
@@ -2312,14 +2365,14 @@ class P4Result:
     exact: int
     ambiguous: int
     ambiguous_high: int
-    groups: Mapping[str, Mapping[tuple[int, int], P4GroupStats]]
+    groups: Mapping[str, Mapping[tuple[int, int], StructuredGroupStats]]
 
     @property
     def exact_rate(self) -> float:
         return self.exact / self.compared if self.compared else 0.0
 
 
-def _genuine_addition(case: P4Case, query: int, head: int, dim: int) -> bool:
+def _genuine_addition(case: StructuredCase, query: int, head: int, dim: int) -> bool:
     """Whether a folded coordinate's MFMA adds two nonzero values."""
     trace = row_trace(case, head, query)
     exponent = case.head_scale_exponents[head]
@@ -2334,14 +2387,18 @@ def _genuine_addition(case: P4Case, query: int, head: int, dim: int) -> bool:
 
 @cache
 def _violation_alternatives(
-    case: P4Case, exposure: str, query: int, head: int, violation: P4Violation
+    case: StructuredCase,
+    exposure: str,
+    query: int,
+    head: int,
+    violation: StructuredViolation,
 ) -> tuple[np.ndarray, np.ndarray]:
     return epilogue_alternatives(case, exposure, query, head, violation)
 
 
 def matching_violation(
-    case: P4Case, exposure: str, query: int, head: int, dim: int, bits: int
-) -> P4Violation | None:
+    case: StructuredCase, exposure: str, query: int, head: int, dim: int, bits: int
+) -> StructuredViolation | None:
     """The first violation, in declaration order, whose IR-exact path stores
     ``bits`` at this coordinate under either epilogue rounding."""
     for violation in applicable_violations(case):
@@ -2352,7 +2409,7 @@ def matching_violation(
 
 
 def _attribute(
-    case: P4Case,
+    case: StructuredCase,
     exposure: str,
     query: int,
     head: int,
@@ -2363,7 +2420,7 @@ def _attribute(
     radius: int,
     basis_clean: bool,
     relaxed: Callable[[], tuple[np.ndarray, np.ndarray]],
-) -> P4Label:
+) -> StructuredLabel:
     """Label a nonnegative finite value ``outside`` target ULPs outside the
     correct Tier B.
 
@@ -2383,20 +2440,20 @@ def _attribute(
         and 0 < center < _FP16_SMALLEST_NORMAL_BITS
         and (near or bits == 0)
     ):
-        return P4Label.A_MODE
+        return StructuredLabel.A_MODE
     if (
         near
         and exposure == "folded"
         and basis_clean
         and _genuine_addition(case, query, head, dim)
     ):
-        return P4Label.A_MFMA
+        return StructuredLabel.A_MFMA
     low, high = relaxed()
     if low[dim] <= bits <= high[dim]:
-        return P4Label.A_E
+        return StructuredLabel.A_E
     if near:
-        return P4Label.PATH_MODEL
-    return P4Label.NUMERICAL
+        return StructuredLabel.PATH_MODEL
+    return StructuredLabel.NUMERICAL
 
 
 @dataclass
@@ -2411,8 +2468,8 @@ class _GroupBuilder:
     max_row_sum_stored: float = 0.0
     max_row_sum_real: float = 0.0
 
-    def freeze(self) -> P4GroupStats:
-        return P4GroupStats(
+    def freeze(self) -> StructuredGroupStats:
+        return StructuredGroupStats(
             self.coordinates,
             self.structural,
             self.compared,
@@ -2425,19 +2482,19 @@ class _GroupBuilder:
         )
 
 
-def analyze_p4_policy(
-    case: P4Case,
-    observation: UniformObservation,
+def analyze_structured_policy(
+    case: StructuredCase,
+    observation: Observation,
     *,
-    mutation: P4Mutation | str | None = None,
+    mutation: StructuredMutation | str | None = None,
     rows: Iterable[int] | None = None,
     require_complete: bool = True,
-) -> P4Result:
+) -> StructuredResult:
     """Judge raw output bits by Tier B membership, coordinate by coordinate.
 
     A coordinate passes iff its bits lie in Tier B; a structural zero (masked
     key, Tier B ``{+0}``) must store exactly ``+0``. Every other outcome fails
-    and carries the strongest contract it still satisfies (``P4Label``). With
+    and carries the strongest contract it still satisfies (``StructuredLabel``). With
     ``mutation`` the observation is judged against the mutated Tier B and must
     be rejected; failures are then only labeled invalid, negative, structural
     or numerical. ``rows`` restricts the judgment to those query rows; a
@@ -2446,10 +2503,10 @@ def analyze_p4_policy(
 
     Observed values are only compared: nothing here can enlarge Tier B or the
     exponential candidate sets."""
-    selected = None if mutation is None else P4Mutation(mutation)
+    selected = None if mutation is None else StructuredMutation(mutation)
     if selected is not None and selected not in applicable_mutations(case):
         raise ValueError(f"mutation {selected.value} does not apply to {case.case_id}")
-    _validate_observation(case.base, observation, require_complete=require_complete)
+    validate_observation(case.base, observation, require_complete=require_complete)
     every_row = tuple(range(case.base.seqlen_q))
     queries = derived_rows(case, every_row if rows is None else rows, selected)
     if not queries:
@@ -2478,10 +2535,10 @@ def analyze_p4_policy(
             required_zero = (low == 0) & (high == 0)
         valid = finite & ~sign
         inside = valid & ~required_zero & (bits >= low) & (bits <= high)
-        labels = np.full(bits.shape, P4Label.PASS.value, dtype=object)
-        labels[~finite] = P4Label.INVALID.value
-        labels[finite & sign] = P4Label.NEGATIVE.value
-        labels[valid & required_zero & (bits != 0)] = P4Label.STRUCTURAL.value
+        labels = np.full(bits.shape, StructuredLabel.PASS.value, dtype=object)
+        labels[~finite] = StructuredLabel.INVALID.value
+        labels[finite & sign] = StructuredLabel.NEGATIVE.value
+        labels[valid & required_zero & (bits != 0)] = StructuredLabel.STRUCTURAL.value
         outside = valid & ~required_zero & ~inside
         judged[exposure] = (
             bits,
@@ -2497,10 +2554,10 @@ def analyze_p4_policy(
     basis = [name for name in judged if name != "folded"]
 
     def basis_clean(batch: int, row: int, head: int) -> bool:
-        if len(basis) != len(UNIFORM_BASIS_OFFSETS):
+        if len(basis) != len(BASIS_OFFSETS):
             return False
         return all(
-            np.all(judged[name][6][batch, row, head] == P4Label.PASS.value)
+            np.all(judged[name][6][batch, row, head] == StructuredLabel.PASS.value)
             and not np.any(judged[name][7][batch, row, head])
             for name in basis
         )
@@ -2521,7 +2578,7 @@ def analyze_p4_policy(
         for batch, row, head, dim in zip(*np.nonzero(outside)):
             query = queries[row]
             if selected is not None:
-                label = P4Label.NUMERICAL
+                label = StructuredLabel.NUMERICAL
             else:
                 stored = int(bits[batch, row, head, dim])
                 label = _attribute(
@@ -2543,7 +2600,7 @@ def analyze_p4_policy(
             labels[batch, row, head, dim] = label.value
 
     # Pass 3: counts, first failures and per-group evidence.
-    totals: dict[str, int] = {label.value: 0 for label in P4Label}
+    totals: dict[str, int] = {label.value: 0 for label in StructuredLabel}
     first: dict[str, tuple[str, tuple[int, int, int, int]]] = {}
     groups: dict[str, dict[tuple[int, int], _GroupBuilder]] = {}
     compared = exact = ambiguous = ambiguous_high = 0
@@ -2574,7 +2631,7 @@ def analyze_p4_policy(
                 upper = two & (bits[cell] == high[cell])
                 group.ambiguous_high += int(np.count_nonzero(upper))
                 for label in row_labels.ravel():
-                    if label != P4Label.PASS.value:
+                    if label != StructuredLabel.PASS.value:
                         group.labels[label] = group.labels.get(label, 0) + 1
                 if decoded is not None:
                     stored = float(
@@ -2587,11 +2644,11 @@ def analyze_p4_policy(
                     real = float(np.max(np.abs(decoded[cell].sum(axis=-1) - 1.0)))
                     group.max_row_sum_stored = max(group.max_row_sum_stored, stored)
                     group.max_row_sum_real = max(group.max_row_sum_real, real)
-        for label in P4Label:
+        for label in StructuredLabel:
             hits = labels == label.value
             count = int(np.count_nonzero(hits))
             totals[label.value] += count
-            if count and label is not P4Label.PASS and label.value not in first:
+            if count and label is not StructuredLabel.PASS and label.value not in first:
                 batch, row, head, dim = (int(value) for value in np.argwhere(hits)[0])
                 first[label.value] = (exposure, (batch, queries[row], head, dim))
         nonzero = ~zero
@@ -2604,7 +2661,7 @@ def analyze_p4_policy(
     # Most frequent label first: it names the failure; rarer labels at the
     # same time are coordinates another explanation also fits.
     failing = sorted(
-        (label for label in P4_FAILURE_LABELS if totals[label.value]),
+        (label for label in STRUCTURED_FAILURE_LABELS if totals[label.value]),
         key=lambda label: -totals[label.value],
     )
     violations = [
@@ -2614,7 +2671,7 @@ def analyze_p4_policy(
     ]
     if compared == 0:
         violations.append("no_coordinate_compared")
-    return P4Result(
+    return StructuredResult(
         mutation=selected,
         violations=tuple(violations),
         labels=MappingProxyType(totals),
@@ -2634,7 +2691,7 @@ def analyze_p4_policy(
     )
 
 
-def format_p4_result(result: P4Result) -> str:
+def format_structured_result(result: StructuredResult) -> str:
     violations = "; ".join(result.violations) if result.violations else "none"
     return (
         f"violations={violations}; exact={result.exact}/{result.compared} "
@@ -2644,7 +2701,7 @@ def format_p4_result(result: P4Result) -> str:
 
 
 @dataclass(frozen=True)
-class P4Diagnostics:
+class StructuredDiagnostics:
     """Records-only evidence (never a verdict) on sampled rows.
 
     ``ir_exact`` counts coordinates equal to the IR-exact emulation (lane
@@ -2665,18 +2722,18 @@ class P4Diagnostics:
     widths: Mapping[int, int]
 
 
-def p4_diagnostics(
-    case: P4Case,
-    observation: UniformObservation,
+def structured_diagnostics(
+    case: StructuredCase,
+    observation: Observation,
     *,
-    rows: Iterable[int] = P4_SEPARATION_ROWS,
+    rows: Iterable[int] = STRUCTURED_SEPARATION_ROWS,
     artifact: str | None = None,
-) -> P4Diagnostics:
-    if artifact is not None and artifact not in P4_EPILOGUE_ARTIFACTS:
+) -> StructuredDiagnostics:
+    if artifact is not None and artifact not in STRUCTURED_EPILOGUE_ARTIFACTS:
         raise ValueError(f"no epilogue artifact named {artifact!r}")
     lanes = np.arange(case.base.head_dim) % 4
     single_lanes = (
-        np.isin(lanes, sorted(P4_EPILOGUE_ARTIFACTS[artifact].single_lanes))
+        np.isin(lanes, sorted(STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes))
         if artifact
         else None
     )
@@ -2704,7 +2761,7 @@ def p4_diagnostics(
                     if _genuine_addition(case, query, head, dim):
                         additions += 1
                         rn += int(rn_low[dim] <= observed[dim] <= rn_high[dim])
-    return P4Diagnostics(
+    return StructuredDiagnostics(
         ir_exact,
         artifact,
         artifact_exact if artifact else None,
@@ -2715,13 +2772,13 @@ def p4_diagnostics(
     )
 
 
-def p4_records(
-    case: P4Case,
+def structured_records(
+    case: StructuredCase,
     candidate_name: str,
-    results: Mapping[str, P4Result],
+    results: Mapping[str, StructuredResult],
     *,
     deterministic: bool,
-    diagnostics: P4Diagnostics,
+    diagnostics: StructuredDiagnostics,
     separations: Mapping[str, Separation],
     code_object: Mapping[str, str] | None = None,
 ) -> list[dict]:
@@ -2742,7 +2799,7 @@ def p4_records(
             for (legal, head), stats in by_group.items():
                 records.append(
                     {
-                        "record_type": "rocke_p4_group",
+                        "record_type": "rocke_structured_group",
                         **identity,
                         "mutation": name,
                         "exposure": exposure,
@@ -2763,7 +2820,7 @@ def p4_records(
         separation = separations.get(name)
         records.append(
             {
-                "record_type": "rocke_p4_summary",
+                "record_type": "rocke_structured_summary",
                 **identity,
                 "mutation": name,
                 "rejected": bool(result.violations),
@@ -2783,10 +2840,10 @@ def p4_records(
         )
     records.append(
         {
-            "record_type": "rocke_p4_diagnostics",
+            "record_type": "rocke_structured_diagnostics",
             **identity,
             "deterministic": deterministic,
-            "assumptions": list(P4_ASSUMPTIONS),
+            "assumptions": list(STRUCTURED_ASSUMPTIONS),
             "code_object": dict(code_object or {}),
             "ir_exact": diagnostics.ir_exact,
             "epilogue_artifact": diagnostics.artifact,
@@ -2806,11 +2863,11 @@ def p4_records(
 # Calibration: identity and scope only.
 # ---------------------------------------------------------------------------
 
-P4_POLICY = "tier_b"
+STRUCTURED_POLICY = "tier_b"
 
 
 @dataclass(frozen=True)
-class P4CalibrationEntry:
+class StructuredCalibrationEntry:
     """Ratifies that the Tier B contract applies to one kernel identity.
 
     It names the policy, the assumption versions, the case ids and the dispatch
@@ -2822,21 +2879,21 @@ class P4CalibrationEntry:
     policy: str
     assumptions: tuple[str, ...]
     case_ids: tuple[str, ...]
-    spec: UniformSpecFingerprint
+    spec: SpecFingerprint
 
     def __post_init__(self) -> None:
-        if self.policy != P4_POLICY:
-            raise ValueError(f"only policy={P4_POLICY!r} is supported")
-        if tuple(self.assumptions) != P4_ASSUMPTIONS:
-            raise ValueError(f"assumptions must be {P4_ASSUMPTIONS}")
+        if self.policy != STRUCTURED_POLICY:
+            raise ValueError(f"only policy={STRUCTURED_POLICY!r} is supported")
+        if tuple(self.assumptions) != STRUCTURED_ASSUMPTIONS:
+            raise ValueError(f"assumptions must be {STRUCTURED_ASSUMPTIONS}")
         if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
             raise ValueError("case_ids must be nonempty and unique")
 
-    def mismatch(self, case: P4Case, spec: UniformSpecFingerprint) -> tuple[str, ...]:
+    def mismatch(self, case: StructuredCase, spec: SpecFingerprint) -> tuple[str, ...]:
         problems: list[str] = []
         if case.case_id not in self.case_ids:
             problems.append(f"case {case.case_id} not in calibrated {self.case_ids}")
-        for item in fields(UniformSpecFingerprint):
+        for item in fields(SpecFingerprint):
             calibrated = getattr(self.spec, item.name)
             resolved = getattr(spec, item.name)
             if calibrated != resolved:
@@ -2848,65 +2905,69 @@ class P4CalibrationEntry:
 
 # Ratified on gfx942. Case ids are literal, so changing a fixture, its head
 # scales or the quick shapes fails closed instead of following silently. The
-# dispatch fingerprint is the ratified uniform one; a contract checks it.
-P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType(
-    {
-        ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
-            policy=P4_POLICY,
-            assumptions=(
-                "A-E v1",
-                "A-MFMA v1",
-                "A-QK v1",
-                "A-DIV v1",
-                "A-F v1",
-                "A-MODE v1",
+# dispatch fingerprint is the one of ``STRUCTURED_QUICK_SPECS``.
+STRUCTURED_CALIBRATION: Mapping[tuple[str, str, str], StructuredCalibrationEntry] = (
+    MappingProxyType(
+        {
+            ("gfx942", "attention_gfx942_dense", "fp16"): StructuredCalibrationEntry(
+                policy=STRUCTURED_POLICY,
+                assumptions=(
+                    "A-E v1",
+                    "A-MFMA v1",
+                    "A-QK v1",
+                    "A-DIV v1",
+                    "A-F v1",
+                    "A-MODE v1",
+                ),
+                case_ids=(
+                    "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-identity-p0xp6,p1xn5,n2xn2,n0xp2",
+                    "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
+                    "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
+                    "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+                ),
+                spec=STRUCTURED_QUICK_SPECS["fp16"],
             ),
-            case_ids=(
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
-                "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+            ("gfx942", "attention_gfx942_dense", "bf16"): StructuredCalibrationEntry(
+                policy=STRUCTURED_POLICY,
+                assumptions=(
+                    "A-E v1",
+                    "A-MFMA v1",
+                    "A-QK v1",
+                    "A-DIV v1",
+                    "A-F v1",
+                    "A-MODE v1",
+                ),
+                case_ids=(
+                    "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-identity-p0xp6,p1xn5,n2xn2,n0xp2",
+                    "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
+                    "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
+                    "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
+                ),
+                spec=STRUCTURED_QUICK_SPECS["bf16"],
             ),
-            spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].spec,
-        ),
-        ("gfx942", "attention_gfx942_dense", "bf16"): P4CalibrationEntry(
-            policy=P4_POLICY,
-            assumptions=(
-                "A-E v1",
-                "A-MFMA v1",
-                "A-QK v1",
-                "A-DIV v1",
-                "A-F v1",
-                "A-MODE v1",
-            ),
-            case_ids=(
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4walsh-p0xp0,n-2xn0,p-2xp-2,n0xn-1",
-                "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4late_max-l64-p0xp6,p1xn5,n2xn2,n0xp2",
-            ),
-            spec=UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].spec,
-        ),
-    }
+        }
+    )
 )
 
-_P4_RECALIBRATION_REMEDY = (
+_STRUCTURED_RECALIBRATION_REMEDY = (
     "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
     "review the records (zero coordinates outside Tier B, every mutation "
-    "rejected, deterministic), and update P4_CALIBRATION (spec, case_ids) "
+    "rejected, deterministic), and update STRUCTURED_CALIBRATION (spec, case_ids) "
     "deliberately"
 )
 
 
-def require_p4_calibration(
+def require_structured_calibration(
     arch: str,
     candidate_name: str,
-    case: P4Case,
-    spec: UniformSpecFingerprint,
+    case: StructuredCase,
+    spec: SpecFingerprint,
     *,
-    table: Mapping[tuple[str, str, str], P4CalibrationEntry] = P4_CALIBRATION,
+    table: Mapping[
+        tuple[str, str, str], StructuredCalibrationEntry
+    ] = STRUCTURED_CALIBRATION,
     detail: str = "",
-) -> P4CalibrationEntry:
+) -> StructuredCalibrationEntry:
     """Return the entry that authorizes this resolved case, or fail closed."""
     key = (arch, candidate_name, case.dtype)
     suffix = f"; {detail}" if detail else ""
@@ -2914,12 +2975,12 @@ def require_p4_calibration(
     if entry is None:
         raise AssertionError(
             f"no structured-logit calibration for {key}, case={case.case_id}; "
-            f"{_P4_RECALIBRATION_REMEDY}{suffix}"
+            f"{_STRUCTURED_RECALIBRATION_REMEDY}{suffix}"
         )
     problems = entry.mismatch(case, spec)
     if problems:
         raise AssertionError(
             f"structured-logit calibration {key} does not cover case={case.case_id}: "
-            f"{'; '.join(problems)}; {_P4_RECALIBRATION_REMEDY}{suffix}"
+            f"{'; '.join(problems)}; {_STRUCTURED_RECALIBRATION_REMEDY}{suffix}"
         )
     return entry

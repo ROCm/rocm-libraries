@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Narrow uniform-probability subject adapter for the shipped gfx942 dense kernel.
+"""Narrow subject adapter of the structured-logit check for the shipped gfx942
+dense kernel.
 
 Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
 device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
@@ -10,9 +11,8 @@ path kept in this module. Dispatch, the runner and the
 HIP runtime are imported only inside the functions that use them, so CPU
 collection and the analytical contracts need neither a GPU nor ROCm.
 
-The structured-logit lane's own subject adapter: the launch path and the
-Hq = Hkv = 4 quick shapes its enclosures are derived against. The uniform lane
-uses ``_dense_subject.py``.
+It accepts only the two four-head quick shapes the check's predictions are
+derived for.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Protocol
 
 import numpy as np
 
-from ._p4_shared_analytical import UniformSpecFingerprint
+from ._structured_shapes import SpecFingerprint
 
 _POINTER_ALIGNMENT = 16
 # Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
@@ -124,8 +124,8 @@ def launch_attention_dense(
 
 
 class DenseCase(Protocol):
-    """What the adapter reads from a case: the uniform ``UniformCase`` and the
-    structured-logit ``P4Case`` both provide it."""
+    """What the adapter reads from a case: a bare ``DenseShape`` and a
+    ``StructuredCase`` both provide it."""
 
     output_shape: tuple[int, int, int, int]  # [B, Sq, Hq, D]
     key_shape: tuple[int, int, int, int]  # [B, Sk, Hkv, D]
@@ -162,7 +162,7 @@ class ResolvedDenseSubject:
     case_id: str
     tuning_spec: object
     candidate_name: str
-    fingerprint: UniformSpecFingerprint
+    fingerprint: SpecFingerprint
 
 
 def _validate_host_bits(case: DenseCase, q, k, v) -> None:
@@ -214,23 +214,23 @@ def _validate_device_buffers(
 
 
 def _validate_supported_case(case: DenseCase) -> None:
-    """Reject shapes outside the first shipped gfx942 uniform-probability matrix."""
+    """Reject shapes outside the two quick shapes of the structured-logit check."""
     shape = _shape(case)
     if shape.batch != 1:
-        raise ValueError("gfx942 uniform-probability cases require batch 1")
+        raise ValueError("structured-logit cases require batch 1")
     if shape.nhead_q != 4 or shape.nhead_k != 4:
-        raise ValueError("gfx942 uniform-probability cases require Hq=Hkv=4")
+        raise ValueError("structured-logit cases require Hq=Hkv=4")
     if shape.head_dim != 64:
-        raise ValueError("gfx942 uniform-probability cases require D64")
+        raise ValueError("structured-logit cases require D64")
     if shape.seqlen_q != 256:
-        raise ValueError("gfx942 uniform-probability cases require query length 256")
+        raise ValueError("structured-logit cases require query length 256")
     if shape.seqlen_k != 256:
-        raise ValueError("gfx942 uniform-probability cases require key length 256")
+        raise ValueError("structured-logit cases require key length 256")
     if case.mask == "window" and case.window != 64:
-        raise ValueError("gfx942 uniform-probability cases require window 64")
+        raise ValueError("structured-logit cases require window 64")
 
 
-def _verify_resolved_spec(case: DenseCase, tuning_spec) -> UniformSpecFingerprint:
+def _verify_resolved_spec(case: DenseCase, tuning_spec) -> SpecFingerprint:
     """Check what the adapter needs to launch safely and return the fingerprint.
 
     Only preconditions of the launch itself are asserted here: dispatch identity,
@@ -270,29 +270,27 @@ def _verify_resolved_spec(case: DenseCase, tuning_spec) -> UniformSpecFingerprin
     # LSE buffer is outside what it can launch, not a recalibration.
     if spec.use_sinks:
         raise AssertionError(
-            "the uniform-probability check requires attention sinks to be disabled"
+            "the structured-logit check requires attention sinks to be disabled"
         )
     if spec.emit_lse:
         raise AssertionError(
-            "the uniform-probability check requires the direct non-LSE epilogue"
+            "the structured-logit check requires the direct non-LSE epilogue"
         )
     # A KV-segment split combines partial softmax states, ragged padding adds
     # masked tail tiles, and bottom-right shifts the band; the single-pass
     # top-left argument behind the calibration covers none of them.
     if spec.kv_segments != 1:
         raise AssertionError(
-            "the uniform-probability check requires single-pass KV, "
+            "the structured-logit check requires single-pass KV, "
             f"kv_segments={spec.kv_segments}"
         )
     if spec.ragged:
-        raise AssertionError(
-            "the uniform-probability check requires a non-ragged shape"
-        )
+        raise AssertionError("the structured-logit check requires a non-ragged shape")
     if spec.causal_bottom_right:
         raise AssertionError(
-            "the uniform-probability check requires the top-left causal band"
+            "the structured-logit check requires the top-left causal band"
         )
-    return UniformSpecFingerprint(
+    return SpecFingerprint(
         path=tuning_spec.path,
         persistent=bool(spec.persistent),
         runtime_shape=bool(spec.runtime_shape),
