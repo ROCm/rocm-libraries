@@ -3482,9 +3482,10 @@ struct ReductionGraphSpec
     bool overrideShapeEnabled = false;
 };
 
-// Builds a single-node ReductionAttributes graph from `spec`. Graph tensor uids are unique, so an
-// in-place spec (y.uid == x.uid) emits the x tensor only, and the node references it twice.
-inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphSpec& spec)
+// Builds a single-node ReductionAttributes graph from `spec`; the default spec is the valid graph
+// ReductionGraphSpec describes. Graph tensor uids are unique, so an in-place spec
+// (y.uid == x.uid) emits the x tensor only, and the node references it twice.
+inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphSpec& spec = {})
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
