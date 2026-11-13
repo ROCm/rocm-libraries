@@ -105,6 +105,16 @@ class ScaledWmmaOp:
 WMMA_SCALE_F32_32X16X128_F4 = "wmma_scale_f32_32x16x128_f4"
 
 
+def wmma_reuse_flags(attrs: dict) -> tuple[bool, bool]:
+    """The ``reuse_a`` and ``reuse_b`` op attributes (default false): the next
+    WMMA takes the same A (or B) operand, so the hardware may keep it instead
+    of reading it again from VGPRs."""
+    flags = tuple(attrs.get(key, False) for key in ("reuse_a", "reuse_b"))
+    if not all(isinstance(flag, bool) for flag in flags):
+        raise ValueError(f"reuse_a and reuse_b must be bool, got {flags}")
+    return flags
+
+
 def is_wmma_scale_f32_32x16x128_f4(op_id: str) -> bool:
     """The FP4 32x16x128 scaled WMMA, outside the 16x16 ``wmma_scaled`` family."""
     return op_id.removeprefix("tile.") == WMMA_SCALE_F32_32X16X128_F4

@@ -33,6 +33,7 @@ from ..arch import ArchTarget
 from ..arch.wmma_scale import (
     gfx1250_scaled_wmma,
     is_wmma_scale_f32_32x16x128_f4,
+    wmma_reuse_flags,
 )
 from ..ir import I32, Op, VectorType
 from .wmma_scale import ScaledWmmaLLVM
@@ -221,7 +222,8 @@ class ISABackend:
 
         The op lowers on any target whose MMA catalog lists its atom and is
         refused on every other target -- the rule the C++ engine applies too.
-        The intrinsic comes from the resolved operand contract.
+        The intrinsic comes from the resolved operand contract; its reuse
+        flags from the op's ``reuse_a`` / ``reuse_b`` attributes.
         """
         spec = gfx1250_scaled_wmma(op.attrs["op_id"])
         if spec is None:
@@ -250,6 +252,7 @@ class ISABackend:
                 f"{name} expects {scale_ty} scale operands, got "
                 f"{a_scale.type.name}/{b_scale.type.name}"
             )
+        reuse_a, reuse_b = (str(f).lower() for f in wmma_reuse_flags(op.attrs))
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
@@ -258,7 +261,7 @@ class ISABackend:
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
             f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
-            f"i1 false, i1 false)"
+            f"i1 {reuse_a}, i1 {reuse_b})"
         )
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid

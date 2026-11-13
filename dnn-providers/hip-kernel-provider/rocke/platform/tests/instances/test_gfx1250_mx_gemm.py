@@ -8,6 +8,7 @@ import itertools
 import re
 import shutil
 import unittest
+from dataclasses import replace
 
 import numpy as np
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -43,6 +44,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     TILE_K,
     TILE_MN,
     WAVE_GROUPS,
+    WMMA_REUSE,
     IntOps,
     LdsPad,
     MxGemmSpec,
@@ -280,6 +282,28 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertTrue(_spec6().kernel_name().startswith("t_mxfp6_M1024"))
         self.assertNotIn("kcont", _spec6().kernel_name())
         self.assertIn("_kcont", _spec6(k_reads="contiguous").kernel_name())
+
+    def test_wmma_reuse_validates_and_names(self):
+        """B reuse runs with local_prefetch 0 and the 16x16 WMMA, and tags
+        the kernel name."""
+        direct = {"local_prefetch": 0, "half_plr": "none"}
+        self.assertEqual(WMMA_REUSE, ("none", "b"))
+        for spec in (
+            _spec6(wmma_reuse="b", **direct),
+            _spec8(wmma_reuse="b", **direct),
+        ):
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertIn("_rb", spec.kernel_name())
+        self.assertNotIn("_rb", _spec6(**direct).kernel_name())
+        bad = {
+            "value": (_spec6(wmma_reuse="a", **direct), "wmma_reuse must be one of"),
+            "prefetch": (_spec6(wmma_reuse="b"), "needs local_prefetch 0"),
+            "atom": (_spec(wmma_reuse="b", **direct), "is for the 16x16 WMMA"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -824,6 +848,35 @@ class MxGemmIrTest(unittest.TestCase):
                         r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)", llvm
                     )
                     self.assertEqual(len(swaps), groups * (rm + rn))
+
+    def test_wmma_reuse_b_orders_and_flags_the_wmmas(self):
+        """With B reuse each K-step's WMMAs run N-repeat outer; every WMMA
+        but the last of an N-repeat flags B and hands it to the next WMMA,
+        which takes the same B. Without it no WMMA flags an operand."""
+        call = re.compile(
+            _WMMA + r"[^(]*\(i32 \d+, <16 x i32> (%[\w.]+), i32 \d+, "
+            r"<16 x i32> (%[\w.]+),[^\n]*i1 (true|false), i1 (true|false)\)"
+        )
+        direct = {"local_prefetch": 0, "half_plr": "none"}
+        for spec in (
+            _spec6(k_reads="contiguous", wmma_reuse="b", **direct),
+            _spec8(wmma_reuse="b", **direct),
+        ):
+            rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
+            calls = call.findall(_llvm(spec))
+            plain = call.findall(_llvm(replace(spec, wmma_reuse="none")))
+            with self.subTest(spec.kernel_name()):
+                self.assertEqual(len(calls), len(plain))
+                self.assertEqual(len(calls) % (rm * rn), 0)
+                self.assertTrue(all(c[2:] == ("false", "false") for c in plain))
+                self.assertTrue(all(c[2] == "false" for c in calls))
+                flagged = [c[3] == "true" for c in calls]
+                self.assertEqual(sum(flagged), len(calls) // (rm * rn) * (rm - 1) * rn)
+                for i, keep in enumerate(flagged):
+                    if keep:
+                        self.assertEqual(calls[i][1], calls[i + 1][1])
+                for i in range(0, len(calls), rm):
+                    self.assertEqual(flagged[i : i + rm], [True] * (rm - 1) + [False])
 
     def test_fp6_k_tail_and_edge_tiles_build(self):
         """FP6 at tile_k 384 always has a K tail at these K: its GL2 line
@@ -1516,6 +1569,16 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 cluster_dim=(1, 1, 1),
             ),
             _spec6(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, tile_k=384),
+            # B reuse at the MAF/MED tiles.
+            *(
+                make(
+                    *_MAF_MED[0], local_prefetch=0, half_plr="none", wmma_reuse="b", **f
+                )
+                for make, f in (
+                    (_spec6, {"tile_k": 384, "k_reads": "contiguous"}),
+                    (_spec8, {}),
+                )
+            ),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
@@ -1580,6 +1643,7 @@ class MxGemmDeviceTest(unittest.TestCase):
             + [
                 _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
                 _spec8(tile_m=128, out_dtype="bf16"),
+                _spec8(local_prefetch=0, half_plr="none", wmma_reuse="b"),
             ]
             + list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))
             + [
@@ -1591,6 +1655,13 @@ class MxGemmDeviceTest(unittest.TestCase):
                     {"local_prefetch": 0, "half_plr": "none"},
                     {"a_lds_pad": LdsPad(), "b_lds_pad": LdsPad()},
                     {"tile_k": 384, "local_prefetch": 0, "half_plr": "none"},
+                    {
+                        "tile_k": 384,
+                        "local_prefetch": 0,
+                        "half_plr": "none",
+                        "k_reads": "contiguous",
+                        "wmma_reuse": "b",
+                    },
                     {
                         "tile_m": 256,
                         "tile_n": 16,

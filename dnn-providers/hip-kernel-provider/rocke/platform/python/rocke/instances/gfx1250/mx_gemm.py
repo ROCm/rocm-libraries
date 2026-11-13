@@ -8,8 +8,8 @@ parity, scales staged by TDM, padded and segment-interleaved LDS, hoisted
 descriptors, the tile k+2 refill inside tile k, the split cluster barrier,
 coarse LDS waits, a loop unrolled to one tile per LDS buffer and the vector
 epilogue. The tile, wave group, cluster and the scheduling choices below are
-tuning parameters; LDS padding, multicast, convert width, WMMA order, refill
-position and wait counts are derived from them.
+tuning parameters; LDS padding, multicast, convert width, WMMA order (unless
+``wmma_reuse``), refill position and wait counts are derived from them.
 
 A and B are MXFP4 (E2M1), MXFP6 (E2M3), MXFP8 (E4M3) or MXBF8 (E5M2), with
 E8M0 scales per 32 K (``a_dtype`` / ``b_dtype``: ``"fp4"``, ``"fp6"``,
@@ -128,6 +128,7 @@ def _atom(mma: str, a_dtype: str, b_dtype: str) -> _MmaAtom:
 TILE_MN = (16, 32, 64, 128, 256)
 TILE_K = (128, 256, 384, 512, 1024)
 K_READS = ("chunked", "contiguous")
+WMMA_REUSE = ("none", "b")
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -222,6 +223,12 @@ class MxGemmSpec:
     groups 0, 1, 2, 3 of the K-step feed the WMMA's groups 0, 2, 1, 3), which
     leaves the product unchanged once each scale word's bytes 1 and 2 are
     swapped. FP4 and the 8-bit types read their 16 B chunks either way.
+
+    ``wmma_reuse`` ``"b"`` (``local_prefetch`` 0, the 16x16 WMMA) issues each
+    K-step's WMMAs N-repeat outer, M-repeat inner, and flags every WMMA whose
+    next WMMA takes the same B fragment, so the hardware keeps that operand
+    instead of reading it again from VGPRs (it keeps B, not A). ``"none"``
+    issues them M-repeat outer, without flags.
     """
 
     name: str
@@ -247,6 +254,7 @@ class MxGemmSpec:
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
     k_reads: str = "chunked"
+    wmma_reuse: str = "none"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -518,6 +526,7 @@ class MxGemmSpec:
                 "hblate": self.half_b_late,
                 "mma16": self.mma == "16x16",
                 "kcont": self.contiguous_k,
+                "rb": self.wmma_reuse == "b",
             },
         )
 
@@ -767,6 +776,12 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return f"k_reads must be one of {K_READS}"
     if spec.contiguous_k and mx_type.bits != 6:
         return "k_reads 'contiguous' is for FP6 (other types read whole 16 B chunks)"
+    if spec.wmma_reuse not in WMMA_REUSE:
+        return f"wmma_reuse must be one of {WMMA_REUSE}"
+    if spec.wmma_reuse != "none" and spec.local_prefetch != 0:
+        return "wmma_reuse 'b' needs local_prefetch 0"
+    if spec.wmma_reuse != "none" and spec.mma != "16x16":
+        return "wmma_reuse 'b' is for the 16x16 WMMA"
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
@@ -1474,9 +1489,12 @@ class TileCompute:
         rn_count = k.spec.wave_repeat_n
         atom = k.spec.atom
 
-        def mma(rm, rn, a_frag, b_frag, a_scale, b_scale):
+        def mma(rm, rn, a_frag, b_frag, a_scale, b_scale, reuse_b=False):
             index = rm * rn_count + rn
-            out[index] = k.b.mma(atom, a_frag, b_frag, out[index], a_scale, b_scale)
+            attrs = {"reuse_b": True} if reuse_b else None
+            out[index] = k.b.mma(
+                atom, a_frag, b_frag, out[index], a_scale, b_scale, attrs=attrs
+            )
 
         return mma
 
@@ -1711,6 +1729,15 @@ class TileCompute:
         out = list(accumulators)
         mma = self._mma_fn(out)
         late_at = spec.signal_wmmas if spec.has_cluster else 0
+        if spec.wmma_reuse == "b":
+            order = [(rm, rn) for rn in range(rn_count) for rm in range(rm_count)]
+        else:
+            order = [(rm, rn) for rm in range(rm_count) for rn in range(rn_count)]
+        # A WMMA keeps its B for the next one when that takes the same B.
+        keep_b = [
+            spec.wmma_reuse == "b" and i + 1 < len(order) and order[i + 1][1] == rn
+            for i, (_, rn) in enumerate(order)
+        ]
         for step in range(steps):
             last = step + 1 == steps
             a_frags, a_scales, b_scales = reader.head(buffer, step)
@@ -1721,19 +1748,19 @@ class TileCompute:
                 if hooks.signal is not None:
                     hooks.signal()
             issued = 0
-            for rm in range(rm_count):
-                for rn in range(rn_count):
-                    if last and issued == late_at:
-                        hooks.late_refill()
-                    issued += 1
-                    mma(
-                        rm,
-                        rn,
-                        a_frags[rm],
-                        b_frags[rn],
-                        a_scales[rm],
-                        b_scales[rn],
-                    )
+            for (rm, rn), reuse_b in zip(order, keep_b):
+                if last and issued == late_at:
+                    hooks.late_refill()
+                issued += 1
+                mma(
+                    rm,
+                    rn,
+                    a_frags[rm],
+                    b_frags[rn],
+                    a_scales[rm],
+                    b_scales[rn],
+                    reuse_b,
+                )
             if last and issued == late_at:
                 hooks.late_refill()
         return out, None
