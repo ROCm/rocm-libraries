@@ -56,6 +56,17 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// stage then comes one row earlier, and so does the arrive.
     static constexpr bool kStreamARowPrefetch = false;
 
+    /// MX, split barrier only: stage the A/B scales in LDS. The issuers of each LDS stage also
+    /// async-load (128-bit, VGPR-addressed, no TDM descriptor) the scales of the K tile after the
+    /// one they fill (MPerBlock (NPerBlock) * KPerBlock / 128 contiguous int32 per operand) into a
+    /// two-stage scale ring after the A/B buffers; at the top of each K tile every wave reads the
+    /// next tile's scale words with 128-bit LDS loads into a second register buffer. The scale
+    /// buffers need one K tile of padding at their end (the last fill reads past K). Needs the
+    /// scales in the matching layout (see the comp_tdm_v3 MX example: for each MPerBlock-row block
+    /// and K tile, the MIterPerWarp * KPerBlock / 128 words of each scale-distribution base row
+    /// are contiguous), not preShuffleScaleBuffer_gfx1250.
+    static constexpr bool kMxScaleLds = false;
+
     /// MX only, split barrier only: how many K tiles ahead the A/B scales are loaded from global
     /// memory into registers. 1: the scales of tile t + 1 are loaded at the top of tile t into the
     /// other of two register buffers. 2: three register buffers, rotated at the top of every K

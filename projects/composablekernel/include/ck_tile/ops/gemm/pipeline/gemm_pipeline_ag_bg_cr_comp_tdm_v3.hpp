@@ -81,12 +81,36 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
     // both stages, and the other stage's newer fill may stay in flight (1).
     static constexpr index_t kNewerFillsOnWait = Policy::kAlternateIssuers ? 0 : 1;
 
+    // Policy::kMxScaleLds applies where every thread's scale words of one K tile (MIter or NIter
+    // times KPerBlock / 128) come in whole 128-bit groups; other tiles keep the global path.
+    static constexpr index_t kMxScaleWordsPerK =
+        Problem::BlockGemmShape::kK / 128 > 0 ? Problem::BlockGemmShape::kK / 128 : 1;
+    static constexpr index_t kMxScaleThreadWordsA =
+        Problem::BlockGemmShape::kM /
+        (Problem::BlockGemmShape::BlockWarps::at(number<0>{}) *
+         Problem::BlockGemmShape::WarpTile::at(number<0>{})) *
+        kMxScaleWordsPerK;
+    static constexpr index_t kMxScaleThreadWordsB =
+        Problem::BlockGemmShape::kN /
+        (Problem::BlockGemmShape::BlockWarps::at(number<1>{}) *
+         Problem::BlockGemmShape::WarpTile::at(number<1>{})) *
+        kMxScaleWordsPerK;
+    static constexpr bool kMxScaleLdsActive =
+        Policy::kMxScaleLds && kMxScaleThreadWordsA % 4 == 0 && kMxScaleThreadWordsB % 4 == 0;
+
+    // kMxScaleLds: one K tile of scales per operand per stage, KPerBlock / 128 int32 per row.
+    static constexpr index_t kMxScaleRingBytes =
+        kMxScaleLdsActive
+            ? 2 * (Problem::BlockGemmShape::kM + Problem::BlockGemmShape::kN) *
+                  (Problem::BlockGemmShape::kK / 128) * static_cast<index_t>(sizeof(int32_t))
+            : 0;
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
 
-        // two LDS stages
-        return 2 * smem_size;
+        // two LDS stages (plus, with kMxScaleLds, the two-stage scale ring)
+        return 2 * smem_size + kMxScaleRingBytes;
     }
 
     static constexpr bool UseDataCachePrefetch =
@@ -194,6 +218,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             {
                 return {};
             }
+            template <index_t Buf>
+            CK_TILE_DEVICE void read_next()
+            {
+            }
         };
         template <typename AWindow,
                   typename BWindow,
@@ -225,6 +253,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
             {
                 return {a_tile[Buf], b_tile[Buf]};
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE void read_next()
+            {
             }
         };
         // Policy::kMxScalePrefetchDepth == 2: three register buffers used as a queue. Slot 0
@@ -277,6 +309,151 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
             {
                 return {a_tile[0], b_tile[0]};
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE void read_next()
+            {
+            }
+        };
+        // Policy::kMxScaleLds: the scales go through a two-stage LDS ring filled by async loads
+        // (see the policy), one K tile ahead of the data: the fill that brings tile t into LDS
+        // stage S (issue_a<S>() / issue_b<S>(), from its issuers) brings the scales of tile t + 1.
+        // get<S>() returns the register buffer S (tile t's scales, read during tile t - 1);
+        // read_next<S>(), right before tile t's arrive, reads stage S's scale words (tile t + 1)
+        // into buffer 1 - S with 128-bit LDS loads. Tile 0's scales are
+        // read from global memory into buffer 0 when the state is built (load_first()). The last
+        // fill reads one K tile of scales past the operand's last K tile: the scale buffers need
+        // that much padding at their end.
+        template <typename AScaleTile,
+                  typename BScaleTile,
+                  index_t kRowsA,
+                  index_t kRowsB,
+                  index_t kScaleK>
+        struct MxScaleLdsState
+        {
+            static constexpr index_t kWordsA     = kRowsA * kScaleK;
+            static constexpr index_t kWordsB     = kRowsB * kScaleK;
+            static constexpr index_t kStageWords = kWordsA + kWordsB;
+            static constexpr index_t kThreadA    = AScaleTile::get_thread_buffer_size();
+            static constexpr index_t kThreadB    = BScaleTile::get_thread_buffer_size();
+            static_assert(kThreadA % 4 == 0 && kThreadB % 4 == 0,
+                          "kMxScaleLds reads the scale words 128 bits at a time");
+
+            // The scale words of the K tile the next fill loads (A, B). Every wave calls filled()
+            // once per fill and the fills alternate between the two stages, so one running pointer
+            // per operand serves both stages (cheaper in SGPRs than a base plus per-stage tiles).
+            const int32_t* a_glb;
+            const int32_t* b_glb;
+            int32_t* ring;   // LDS: [stage][A words][B words]
+            index_t a_word0; // this thread's first word in a stage's A (B) words
+            index_t b_word0;
+            AScaleTile a_tile[2];
+            BScaleTile b_tile[2];
+
+            CK_TILE_DEVICE void prologue() {}
+            CK_TILE_DEVICE void advance() {}
+            template <index_t Buf>
+            CK_TILE_DEVICE void load()
+            {
+            }
+            // The issuer wave copies kWords contiguous scale words to LDS with 128-bit async loads
+            // (ASYNCcnt; waited with the stage's TENSORcnt before the issuer arrives). VGPR
+            // addresses: unlike a TDM descriptor this costs no SGPRs.
+            template <index_t kWords>
+            CK_TILE_DEVICE static void copy_words(const int32_t* src, CK_TILE_LDS_ADDR int32_t* dst)
+            {
+                constexpr index_t kWave   = get_warp_size();
+                constexpr index_t kChunks = kWords / 4;
+                static_assert(kWords % 4 == 0 && kChunks % kWave == 0,
+                              "kMxScaleLds: a stage's scale words must split into 16-byte chunks "
+                              "evenly over the issuer wave");
+                const index_t c0 = 4 * static_cast<index_t>(get_lane_id());
+                static_for<0, kChunks / kWave, 1>{}([&](auto i) {
+                    const index_t c = c0 + 4 * kWave * i.value;
+#if defined(__gfx125__)
+                    using v4i_t = __attribute__((vector_size(16))) int;
+                    __builtin_amdgcn_global_load_async_to_lds_b128(
+                        to_global(reinterpret_cast<const v4i_t*>(src + c)),
+                        reinterpret_cast<CK_TILE_LDS_ADDR v4i_t*>(dst + c),
+                        0,
+                        0);
+#else
+                    ignore = src;
+                    ignore = dst;
+                    ignore = c;
+#endif
+                });
+            }
+            template <index_t S>
+            CK_TILE_DEVICE void issue_a()
+            {
+                CK_TILE_LDS_ADDR int32_t* dst = ring + S * kStageWords;
+                copy_words<kWordsA>(a_glb, dst);
+            }
+            template <index_t S>
+            CK_TILE_DEVICE void issue_b()
+            {
+                CK_TILE_LDS_ADDR int32_t* dst = ring + S * kStageWords + kWordsA;
+                copy_words<kWordsB>(b_glb, dst);
+            }
+            // after each fill (stage S): the next fill loads the next K tile
+            template <index_t S>
+            CK_TILE_DEVICE void filled()
+            {
+                a_glb += kWordsA;
+                b_glb += kWordsB;
+            }
+            template <typename Tile, index_t kN>
+            CK_TILE_DEVICE static void read_words(Tile& t, const CK_TILE_LDS_ADDR int32_t* src)
+            {
+                using T = typename Tile::DataType;
+                static_assert(sizeof(T) == sizeof(int32_t), "scale packs are 32-bit");
+                static_for<0, kN / 4, 1>{}([&](auto q) {
+                    const int32x4_t v = *static_cast<const CK_TILE_LDS_ADDR int32x4_t*>(
+                        static_cast<const CK_TILE_LDS_ADDR void*>(src + 4 * q.value));
+                    static_for<0, 4, 1>{}([&](auto j) {
+                        t.get_thread_buffer()(number<4 * q.value + j.value>{}) =
+                            bit_cast<T>(v[j.value]);
+                    });
+                });
+            }
+            // tile 0's scales, from global memory (src: the operand's words of tile 0)
+            template <typename Tile, index_t kN>
+            CK_TILE_DEVICE static void read_global_words(Tile& t, const int32_t* src)
+            {
+                using T = typename Tile::DataType;
+                static_for<0, kN / 4, 1>{}([&](auto q) {
+                    int32x4_t v;
+                    __builtin_memcpy(&v, src + 4 * q.value, sizeof(v));
+                    static_for<0, 4, 1>{}([&](auto j) {
+                        t.get_thread_buffer()(number<4 * q.value + j.value>{}) =
+                            bit_cast<T>(v[j.value]);
+                    });
+                });
+            }
+            CK_TILE_DEVICE void load_first(const int32_t* a_src, const int32_t* b_src)
+            {
+                read_global_words<AScaleTile, kThreadA>(a_tile[0], a_src + a_word0);
+                read_global_words<BScaleTile, kThreadB>(b_tile[0], b_src + b_word0);
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
+            {
+                return {a_tile[Buf], b_tile[Buf]};
+            }
+            // right before tile t's arrive (stage Buf): the next tile's scale words of stage Buf
+            // into buffer 1 - Buf. The arrive waits for every LDS read of the wave anyway (the
+            // stage's last data reads), so these ride along and live only into the next tile.
+            template <index_t Buf>
+            CK_TILE_DEVICE void read_next()
+            {
+                // fenced: the scheduler moves nothing across these reads (unfenced, it
+                // interleaves them with the stage's reads and WMMAs, and the kernel spills)
+                __builtin_amdgcn_sched_barrier(0);
+                const CK_TILE_LDS_ADDR int32_t* st = ring + Buf * kStageWords;
+                read_words<AScaleTile, kThreadA>(a_tile[1 - Buf], st + a_word0);
+                read_words<BScaleTile, kThreadB>(b_tile[1 - Buf], st + kWordsA + b_word0);
+                __builtin_amdgcn_sched_barrier(0);
             }
         };
         // The ScaleWindows argument of wave_specialized_func: none, or the kernel's A/B scale
@@ -604,7 +781,57 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     static_assert(Policy::kMxScalePrefetchDepth == 1 ||
                                       (Policy::kMxScalePrefetchDepth == 2 && kSplitBarrier),
                                   "kMxScalePrefetchDepth: 1, or 2 with the split barrier");
-                    if constexpr(Policy::kMxScalePrefetchDepth == 2)
+                    static_assert(!kMxScaleLdsActive || kSplitBarrier,
+                                  "kMxScaleLds needs the split barrier");
+                    if constexpr(kMxScaleLdsActive)
+                    {
+                        using State =
+                            MxScaleLdsState<AScaleTile, BScaleTile, MPerBlock, NPerBlock, kScaleK>;
+                        // the block's scale rows: layout [block][K tile][words of one K tile]
+                        const auto a_org         = a_tmp.get_window_origin();
+                        const auto b_org         = b_tmp.get_window_origin();
+                        const index_t a_kt_total = a_tmp.get_bottom_tensor_view()
+                                                       .get_tensor_descriptor()
+                                                       .get_lengths()[number<1>{}] /
+                                                   kScaleK;
+                        const index_t b_kt_total = b_tmp.get_bottom_tensor_view()
+                                                       .get_tensor_descriptor()
+                                                       .get_lengths()[number<1>{}] /
+                                                   kScaleK;
+                        const auto* a_base =
+                            reinterpret_cast<const int32_t*>(static_cast<const void*>(
+                                a_tmp.get_bottom_tensor_view().get_buffer_view().p_data_));
+                        const auto* b_base =
+                            reinterpret_cast<const int32_t*>(static_cast<const void*>(
+                                b_tmp.get_bottom_tensor_view().get_buffer_view().p_data_));
+                        const index_t kt0 = a_org[number<1>{}] / kScaleK;
+                        const auto a_r0 = Policy::template MakeScaleADramTileDistribution<Problem>()
+                                              .calculate_index()[number<0>{}];
+                        const auto b_r0 = Policy::template MakeScaleBDramTileDistribution<Problem>()
+                                              .calculate_index()[number<0>{}];
+                        State st{};
+                        const int32_t* a_tile0 =
+                            a_base + (static_cast<long_index_t>(a_org[number<0>{}] / MPerBlock) *
+                                          a_kt_total +
+                                      kt0) *
+                                         State::kWordsA;
+                        const int32_t* b_tile0 =
+                            b_base + (static_cast<long_index_t>(b_org[number<0>{}] / NPerBlock) *
+                                          b_kt_total +
+                                      kt0) *
+                                         State::kWordsB;
+                        // the first fill brings tile 1's scales (one K tile ahead of the data)
+                        st.a_glb = a_tile0 + State::kWordsA;
+                        st.b_glb = b_tile0 + State::kWordsB;
+                        st.ring =
+                            reinterpret_cast<int32_t*>(static_cast<char*>(p_smem) +
+                                                       2 * Policy::template GetSmemSize<Problem>());
+                        st.a_word0 = a_r0 * State::kThreadA;
+                        st.b_word0 = b_r0 * State::kThreadB;
+                        st.load_first(a_tile0, b_tile0);
+                        return st;
+                    }
+                    else if constexpr(Policy::kMxScalePrefetchDepth == 2)
                     {
                         return MxScaleQueueState<decltype(a_window),
                                                  decltype(b_window),
@@ -649,13 +876,27 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     auto& b_window      = std::get<s>(std::tie(b_copy_dram_window, b_dram_window1));
                     if(s == 0 ? is_a_issuer0 : is_a_issuer1)
                     {
+                        // the scale words first: small, they land well before the data fill
+                        if constexpr(kMx && kMxScaleLdsActive)
+                        {
+                            scales.template issue_a<s>();
+                        }
                         Base::GlobalPrefetchTDM(tdm_config_a[s], a_copy_lds_windows[f], a_window);
                         move_tile_window(a_window, a_dram_tile_window_step_stride);
                     }
                     if(s == 0 ? is_b_issuer0 : is_b_issuer1)
                     {
+                        // the scale words first: small, they land well before the data fill
+                        if constexpr(kMx && kMxScaleLdsActive)
+                        {
+                            scales.template issue_b<s>();
+                        }
                         Base::GlobalPrefetchTDM(tdm_config_b[s], b_copy_lds_windows[f], b_window);
                         move_tile_window(b_window, b_dram_tile_window_step_stride);
+                    }
+                    if constexpr(kMx && kMxScaleLdsActive)
+                    {
+                        scales.template filled<s>();
                     }
                 };
                 // The waves that fill LDS stage f.
@@ -672,6 +913,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 // Arrive on the split barrier, publishing the fill of LDS stage f: TENSORcnt 0
                 // first, on every wave or only on that stage's issuers.
                 auto arrive_publishing = [&](auto f) {
+                    if constexpr(kMx && kMxScaleLdsActive)
+                    {
+                        // the stage's scale words (async loads of its issuers) land first
+                        if(is_stage_issuer(f))
+                        {
+                            __builtin_amdgcn_s_wait_asynccnt(0);
+                        }
+                    }
                     if constexpr(Policy::kTensorWaitAllWaves)
                     {
                         workgroup_barrier_arrive<0>();
@@ -943,6 +1192,8 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         [&]() {
                             if constexpr(decltype(has_next)::value)
                             {
+                                // MX, kMxScaleLds: the next tile's scales, before the arrive
+                                scales.template read_next<si>();
                                 arrive_publishing(number<1 - si>{});
                             }
                             else
@@ -1006,6 +1257,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 workgroup_barrier_wait();
                 // No fill is in flight here (the last K tile issues none); kept so that every
                 // exit drains TENSORcnt and orders the last LDS reads before LDS is reused.
+                if constexpr(kMx && kMxScaleLdsActive)
+                {
+                    __builtin_amdgcn_s_wait_asynccnt(0);
+                }
                 s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
                 return c_block_tile;
             }

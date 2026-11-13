@@ -80,12 +80,23 @@ using BLayout        = ColumnMajor;
 using CLayout        = RowMajor;
 constexpr int kScale = 32; // K elements per scale
 
-#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH)
-// EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth.
+#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) || \
+    defined(CK_EX55_MX_SCALE_LDS)
+// EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth;
+// -DCK_EX55_A_ROW_PREFETCH=1 sets kStreamARowPrefetch; -DCK_EX55_MX_SCALE_LDS=1 sets kMxScaleLds
+// (and the host lays the scales out for it, see swizzle_scales_for_lds).
 struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 {
+#if defined(CK_EX55_MX_SCALE_LDS)
+    [[maybe_unused]] static constexpr bool kMxScaleLds = CK_EX55_MX_SCALE_LDS != 0;
+#endif
+#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH)
     [[maybe_unused]] static constexpr ck_tile::index_t kMxScalePrefetchDepth =
         CK_EX55_MX_SCALE_PREFETCH_DEPTH;
+#endif
+#if defined(CK_EX55_A_ROW_PREFETCH)
+    [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX55_A_ROW_PREFETCH != 0;
+#endif
 };
 #else
 using Ex55Policy = ck_tile::GemmPipelineAgBgCrCompTDMV3Policy;
@@ -356,6 +367,42 @@ HostOperand make_operand(ck_tile::index_t rows,
     return o;
 }
 
+// EXPERIMENT (kMxScaleLds): scales of `rows` rows (row-major, `ks` E8M0 bytes per row, packed four
+// to an int32 along K) laid out per (block of `tile` rows, K tile of `tile_k`): for each base row
+// r0 = m_warp * warp_tile + lane_m of the scale distribution, its MIterPerWarp * tile_k / 128
+// packs (mIter-major) are contiguous, so a lane reads them with 128-bit LDS loads.
+// Row of pack (r0, mIter, kp) in block blk: blk * tile + mIter * warps * warp_tile + r0.
+[[maybe_unused]] inline bool swizzle_scales_for_lds(const ScaleDataType* src,
+                                                    ScaleDataType* dst,
+                                                    ck_tile::index_t rows,
+                                                    ck_tile::index_t ks,
+                                                    ck_tile::index_t tile,
+                                                    ck_tile::index_t warps,
+                                                    ck_tile::index_t warp_tile,
+                                                    ck_tile::index_t tile_k)
+{
+    const ck_tile::index_t packs   = ks / 4;
+    const ck_tile::index_t kscalek = tile_k / 128;
+    const ck_tile::index_t span    = warps * warp_tile;
+    if(ks % 4 != 0 || rows % tile != 0 || packs % kscalek != 0 || tile % span != 0)
+        return false;
+    const ck_tile::index_t miter = tile / span;
+    const ck_tile::index_t kt_n  = packs / kscalek;
+    size_t o                     = 0;
+    for(ck_tile::index_t blk = 0; blk < rows / tile; ++blk)
+        for(ck_tile::index_t kt = 0; kt < kt_n; ++kt)
+            for(ck_tile::index_t r0 = 0; r0 < span; ++r0)
+                for(ck_tile::index_t mi = 0; mi < miter; ++mi)
+                    for(ck_tile::index_t kp = 0; kp < kscalek; ++kp)
+                    {
+                        const size_t row = static_cast<size_t>(blk) * tile + mi * span + r0;
+                        const size_t col = (static_cast<size_t>(kt) * kscalek + kp) * 4;
+                        for(int j = 0; j < 4; ++j)
+                            dst[o++] = src[row * ks + col + j];
+                    }
+    return true;
+}
+
 template <typename Inst>
 int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
 {
@@ -420,10 +467,41 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     const HostOperand a = make_operand(p.M, pad_m, p.K, sparse, sigma, seed, 0);
     const HostOperand b = make_operand(p.N, pad_n, p.K, sparse, sigma, seed, 1);
     std::vector<ScaleDataType> sa_dev(a.raw.size()), sb_dev(b.raw.size());
-    ck_tile::preShuffleScaleBuffer_gfx1250<ScaleDataType, kScale, true>(
-        a.raw.data(), sa_dev.data(), pad_m, ks, Inst::kWarpM);
-    ck_tile::preShuffleScaleBuffer_gfx1250<ScaleDataType, kScale, true>(
-        b.raw.data(), sb_dev.data(), pad_n, ks, Inst::kWarpN);
+    if constexpr(Inst::Pipeline::kMxScaleLdsActive)
+    {
+        using BW = typename Inst::TileShape::BlockWarps;
+        if(!swizzle_scales_for_lds(a.raw.data(),
+                                   sa_dev.data(),
+                                   pad_m,
+                                   ks,
+                                   Inst::kTileM,
+                                   BW::at(ck_tile::number<0>{}),
+                                   Inst::kWarpM,
+                                   Inst::TileShape::kK) ||
+           !swizzle_scales_for_lds(b.raw.data(),
+                                   sb_dev.data(),
+                                   pad_n,
+                                   ks,
+                                   Inst::kTileN,
+                                   BW::at(ck_tile::number<1>{}),
+                                   Inst::kWarpN,
+                                   Inst::TileShape::kK))
+        {
+            std::printf("kMxScaleLds needs M, N multiples of the tile and K of the K tile\n");
+            return 2;
+        }
+        // the pipeline's last scale fill reads one K tile past K: pad by one K tile of a block
+        const size_t kt_bytes = static_cast<size_t>(Inst::TileShape::kK) / kScale;
+        sa_dev.resize(sa_dev.size() + Inst::kTileM * kt_bytes, ScaleDataType{});
+        sb_dev.resize(sb_dev.size() + Inst::kTileN * kt_bytes, ScaleDataType{});
+    }
+    else
+    {
+        ck_tile::preShuffleScaleBuffer_gfx1250<ScaleDataType, kScale, true>(
+            a.raw.data(), sa_dev.data(), pad_m, ks, Inst::kWarpM);
+        ck_tile::preShuffleScaleBuffer_gfx1250<ScaleDataType, kScale, true>(
+            b.raw.data(), sb_dev.data(), pad_n, ks, Inst::kWarpN);
+    }
     std::printf("host fill (%s, seed %llu): %.1f s\n",
                 sparse ? "sparse" : "rand",
                 static_cast<unsigned long long>(seed),
@@ -691,7 +769,25 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
     {
         const std::string wt    = arg.get_str("wt");
         const std::string place = arg.get_str("place");
-        // B-only multicast (ClusterN == 1) and the XCD-region placement: wt 32 only.
+        // B-only multicast (ClusterN == 1), 8x4 and default placement: wt 16 too (EXPERIMENT).
+        if(tile == "256x256x256" && wt == "16" && (cluster == "4x1" || cluster == "2x1"))
+        {
+            if(place == "8x4")
+                return cluster == "4x1"
+                           ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 4, 1, 8, 4>>(
+                                 arg, name)
+                           : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2, 1, 8, 4>>(
+                                 arg, name);
+            if(place == "default")
+                return cluster == "4x1"
+                           ? run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 4, 1>>(arg,
+                                                                                             name)
+                           : run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2, 1>>(arg,
+                                                                                             name);
+            std::printf("-wt=16 -place=%s: default | 8x4\n", place.c_str());
+            return 2;
+        }
+        // B-only multicast (ClusterN == 1) and the XCD-region placement: wt 32.
         if(tile == "256x256x256" && wt == "32" && (cluster == "4x1" || cluster == "2x1"))
         {
             if(place == "8x4")
@@ -721,15 +817,14 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         }
         if(place != "default")
         {
-            std::printf("-place needs -warps=2x2 -wt=32 -cluster=4x1|2x1\n");
+            std::printf("-place needs -warps=2x2 -wt=32|16 -cluster=4x1|2x1\n");
             return 2;
         }
         if(tile != "256x256x256" || (cluster != "1x1" && cluster != "2x2") ||
            (wt != "32" && wt != "16"))
         {
             std::printf(
-                "-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2 (or 4x1|2x1 with -wt=32), "
-                "-wt=32|16\n");
+                "-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2|4x1|2x1, -wt=32|16\n");
             return 2;
         }
         if(wt == "32")
@@ -774,14 +869,18 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
     return 2;
 }
 
+// EXPERIMENT: -DCK_EX55_BF16_TDM_ONLY builds only the bf16-C, tdm-epilogue instances (about a
+// quarter of the kernels, so a quarter of the build time).
 template <typename CDataType>
 int dispatch_epilogue(const ck_tile::ArgParser& arg, const std::string& name)
 {
     const std::string epi = arg.get_str("epilogue");
     if(epi == "tdm")
         return dispatch_tile<true, CDataType>(arg, name);
+#if !defined(CK_EX55_BF16_TDM_ONLY)
     if(epi == "cshuffle")
         return dispatch_tile<false, CDataType>(arg, name);
+#endif
     std::printf("unknown -epilogue=%s (tdm, cshuffle)\n", epi.c_str());
     return 2;
 }
@@ -800,8 +899,10 @@ int dispatch(const ck_tile::ArgParser& arg)
         (arg.get_str("cluster") != "1x1" ? "_cl" + arg.get_str("cluster") : "") +
         (arg.get_str("place") != "default" ? "_xcd" + arg.get_str("place") : "") +
         (arg.get_int("k_batch") > 1 ? "_kb" + arg.get_str("k_batch") : "");
+#if !defined(CK_EX55_BF16_TDM_ONLY)
     if(c == "fp16")
         return dispatch_epilogue<ck_tile::half_t>(arg, name);
+#endif
     if(c == "bf16")
         return dispatch_epilogue<ck_tile::bf16_t>(arg, name);
     std::printf("unknown -c_dtype=%s (fp16, bf16)\n", c.c_str());
