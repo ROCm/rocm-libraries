@@ -140,6 +140,12 @@ void _rocsparse_mat_info::set_bsrsv_info(rocsparse_operation    operation,
     this->m_trm.create_bsrsv_info()->set(operation, fill_mode, trm);
 }
 
+void _rocsparse_mat_info::detach_borrowed_bsrsv(rocsparse_operation operation,
+                                                rocsparse_fill_mode fill_mode)
+{
+    this->m_trm.detach_borrowed_bsrsv(operation, fill_mode);
+}
+
 void _rocsparse_mat_info::set_bsrilu0_info(rocsparse_operation    operation,
                                            rocsparse_fill_mode    fill_mode,
                                            rocsparse::trm_info_t* trm)

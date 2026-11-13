@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -211,6 +211,34 @@ void rocsparse::trm_t::clear_ellsv_info()
 {
     this->uncouple(this->m_ellsv_info.get());
     this->destroy_ellsv_info();
+}
+
+void rocsparse::trm_t::detach_borrowed_bsrsv(rocsparse_operation operation,
+                                             rocsparse_fill_mode fill_mode)
+{
+    auto* bsrsv = this->m_bsrsv_info.get();
+    if(bsrsv == nullptr)
+    {
+        return;
+    }
+
+    rocsparse::trm_info_t* slot = bsrsv->get(operation, fill_mode);
+    if(slot == nullptr)
+    {
+        return;
+    }
+
+    // Reuse borrows from these three routines only.
+    const rocsparse::trm_data_t* donors[]
+        = {this->m_bsric0_info.get(), this->m_bsrilu0_info.get(), this->m_bsrsm_info.get()};
+    for(const rocsparse::trm_data_t* donor : donors)
+    {
+        if(donor != nullptr && donor->holds(slot))
+        {
+            bsrsv->set(operation, fill_mode, nullptr);
+            return;
+        }
+    }
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)

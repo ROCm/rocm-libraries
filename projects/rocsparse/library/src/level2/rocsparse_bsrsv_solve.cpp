@@ -29,21 +29,34 @@
 #include "rocsparse_utility.hpp"
 
 #include "bsrsv_device.h"
+#include "bsrsv_device_large.h"
+#include "rocsparse_grid.hpp"
+
+#include <limits>
+#include <type_traits>
 
 namespace rocsparse
 {
-#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>), \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                \
-                                       dim3(wfsize, bsize / wfsize),                         \
-                                       0,                                                    \
-                                       stream,                                               \
-                                       dir,                                                  \
-                                       nnzb,                                                 \
-                                       (rocsparse_int*)trm_info->get_transposed_perm(),      \
-                                       bsr_val,                                              \
-                                       bsrt_val,                                             \
-                                       block_dim)
+    // wfsize * nnzb passes INT32_MAX from 33,554,432 non-zero blocks with a 64
+    // wide wavefront, so the grid is formed in 64 bit and clamped.
+    // rocsparse::bsr_gather grid-strides over whatever the clamp leaves.
+    // block_dim is passed as I, the row-pointer index type.
+#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                          \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                              \
+        dim3(rocsparse::get_grid_size_x(                                                   \
+            handle,                                                                        \
+            (static_cast<int64_t>(wfsize) * static_cast<int64_t>(nnzb) - 1) / (bsize) + 1, \
+            static_cast<int64_t>(wfsize))),                                                \
+        dim3(wfsize, bsize / wfsize),                                                      \
+        0,                                                                                 \
+        stream,                                                                            \
+        dir,                                                                               \
+        nnzb,                                                                              \
+        (const I*)trm_info->get_transposed_perm(),                                         \
+        bsr_val,                                                                           \
+        bsrt_val,                                                                          \
+        static_cast<I>(block_dim))
 
 #define LAUNCH_BSRSV_GTHR(bsize, wfsize, dim) \
     if(dim <= 2)                              \
@@ -64,6 +77,7 @@ namespace rocsparse
     }
 
 #define LAUNCH_BSRSV_SHARED(fill, ptr, bsize, wfsize, dim, arch, asic) \
+    LAUNCH_BSRSV_PREPARE(bsize, wfsize);                               \
     switch(fill)                                                       \
     {                                                                  \
     case rocsparse_fill_mode_lower:                                    \
@@ -92,53 +106,132 @@ namespace rocsparse
     }                                                                  \
     }
 
-#define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)           \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
-        (bsrsv_lower_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
-        dim3(bsize),                                                  \
-        0,                                                            \
-        stream,                                                       \
-        mb,                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        local_bsr_row_ptr,                                            \
-        local_bsr_col_ind,                                            \
-        local_bsr_val,                                                \
-        block_dim,                                                    \
-        x,                                                            \
-        y,                                                            \
-        done_array,                                                   \
-        (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
-        descr->base,                                                  \
-        descr->diag_type,                                             \
-        dir,                                                          \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+    // Grid in 64 bit, then the narrow kernel when the legacy 32-bit launch is
+    // still exact and the wide kernel otherwise. bsrsv_legacy_indices is a
+    // constexpr bool in the caller, so the narrow kernel is only instantiated
+    // for rocsparse_int indices.
+#define LAUNCH_BSRSV_PREPARE(bsize, wfsize)                                                       \
+    const int64_t bsrsv_num_blocks = rocsparse::ceil_div(                                         \
+        static_cast<int64_t>(mb) * static_cast<int64_t>(wfsize), static_cast<int64_t>(bsize));    \
+    const uint32_t bsrsv_grid                                                                     \
+        = rocsparse::get_grid_size_x(handle, bsrsv_num_blocks, static_cast<int64_t>(bsize));      \
+    const bool bsrsv_wide = !bsrsv_legacy_indices                                                 \
+                            || rocsparse::bsrsv_solve_needs_wide(static_cast<int64_t>(mb),        \
+                                                                 static_cast<int64_t>(block_dim), \
+                                                                 static_cast<int64_t>(nnzb),      \
+                                                                 bsrsv_num_blocks,                \
+                                                                 static_cast<int64_t>(bsrsv_grid))
 
-#define LAUNCH_BSRSV_UPPER_SHARED(bsize, wfsize, dim, arch)           \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
-        (bsrsv_upper_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
-        dim3(bsize),                                                  \
-        0,                                                            \
-        stream,                                                       \
-        mb,                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        local_bsr_row_ptr,                                            \
-        local_bsr_col_ind,                                            \
-        local_bsr_val,                                                \
-        block_dim,                                                    \
-        x,                                                            \
-        y,                                                            \
-        done_array,                                                   \
-        (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
-        descr->base,                                                  \
-        descr->diag_type,                                             \
-        dir,                                                          \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)                       \
+    do                                                                            \
+    {                                                                             \
+        if constexpr(bsrsv_legacy_indices)                                        \
+        {                                                                         \
+            if(!bsrsv_wide)                                                       \
+            {                                                                     \
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+                    (bsrsv_lower_shared<bsize, wfsize, dim, arch>),               \
+                    dim3(bsrsv_grid),                                             \
+                    dim3(bsize),                                                  \
+                    0,                                                            \
+                    stream,                                                       \
+                    mb,                                                           \
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+                    local_bsr_row_ptr,                                            \
+                    local_bsr_col_ind,                                            \
+                    local_bsr_val,                                                \
+                    block_dim,                                                    \
+                    x,                                                            \
+                    y,                                                            \
+                    done_array,                                                   \
+                    (rocsparse_int*)trm_info->get_row_map(),                      \
+                    zero_pivot,                                                   \
+                    descr->base,                                                  \
+                    descr->diag_type,                                             \
+                    dir,                                                          \
+                    handle->pointer_mode == rocsparse_pointer_mode_host);         \
+                break;                                                            \
+            }                                                                     \
+        }                                                                         \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+            (bsrsv_lower_shared_wide<bsize, wfsize, dim, arch, T, I, J>),         \
+            dim3(bsrsv_grid),                                                     \
+            dim3(bsize),                                                          \
+            0,                                                                    \
+            stream,                                                               \
+            mb,                                                                   \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),         \
+            local_bsr_row_ptr,                                                    \
+            local_bsr_col_ind,                                                    \
+            local_bsr_val,                                                        \
+            block_dim,                                                            \
+            x,                                                                    \
+            y,                                                                    \
+            done_array,                                                           \
+            (const J*)trm_info->get_row_map(),                                    \
+            zero_pivot,                                                           \
+            descr->base,                                                          \
+            descr->diag_type,                                                     \
+            dir,                                                                  \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
+    } while(0)
+
+#define LAUNCH_BSRSV_UPPER_SHARED(bsize, wfsize, dim, arch)                       \
+    do                                                                            \
+    {                                                                             \
+        if constexpr(bsrsv_legacy_indices)                                        \
+        {                                                                         \
+            if(!bsrsv_wide)                                                       \
+            {                                                                     \
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+                    (bsrsv_upper_shared<bsize, wfsize, dim, arch>),               \
+                    dim3(bsrsv_grid),                                             \
+                    dim3(bsize),                                                  \
+                    0,                                                            \
+                    stream,                                                       \
+                    mb,                                                           \
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+                    local_bsr_row_ptr,                                            \
+                    local_bsr_col_ind,                                            \
+                    local_bsr_val,                                                \
+                    block_dim,                                                    \
+                    x,                                                            \
+                    y,                                                            \
+                    done_array,                                                   \
+                    (rocsparse_int*)trm_info->get_row_map(),                      \
+                    zero_pivot,                                                   \
+                    descr->base,                                                  \
+                    descr->diag_type,                                             \
+                    dir,                                                          \
+                    handle->pointer_mode == rocsparse_pointer_mode_host);         \
+                break;                                                            \
+            }                                                                     \
+        }                                                                         \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+            (bsrsv_upper_shared_wide<bsize, wfsize, dim, arch, T, I, J>),         \
+            dim3(bsrsv_grid),                                                     \
+            dim3(bsize),                                                          \
+            0,                                                                    \
+            stream,                                                               \
+            mb,                                                                   \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),         \
+            local_bsr_row_ptr,                                                    \
+            local_bsr_col_ind,                                                    \
+            local_bsr_val,                                                        \
+            block_dim,                                                            \
+            x,                                                                    \
+            y,                                                                    \
+            done_array,                                                           \
+            (const J*)trm_info->get_row_map(),                                    \
+            zero_pivot,                                                           \
+            descr->base,                                                          \
+            descr->diag_type,                                                     \
+            dir,                                                                  \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
+    } while(0)
 
 #define LAUNCH_BSRSV_GENERAL(fill, ptr, bsize, wfsize, arch, asic) \
+    LAUNCH_BSRSV_PREPARE(bsize, wfsize);                           \
     switch(fill)                                                   \
     {                                                              \
     case rocsparse_fill_mode_lower:                                \
@@ -167,51 +260,113 @@ namespace rocsparse
     }                                                              \
     }
 
-#define LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, arch)               \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
-        (bsrsv_lower_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
-        dim3(bsize),                                                  \
-        0,                                                            \
-        stream,                                                       \
-        mb,                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        local_bsr_row_ptr,                                            \
-        local_bsr_col_ind,                                            \
-        local_bsr_val,                                                \
-        block_dim,                                                    \
-        x,                                                            \
-        y,                                                            \
-        done_array,                                                   \
-        (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
-        descr->base,                                                  \
-        descr->diag_type,                                             \
-        dir,                                                          \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, arch)                           \
+    do                                                                            \
+    {                                                                             \
+        if constexpr(bsrsv_legacy_indices)                                        \
+        {                                                                         \
+            if(!bsrsv_wide)                                                       \
+            {                                                                     \
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+                    (bsrsv_lower_general<bsize, wfsize, arch>),                   \
+                    dim3(bsrsv_grid),                                             \
+                    dim3(bsize),                                                  \
+                    0,                                                            \
+                    stream,                                                       \
+                    mb,                                                           \
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+                    local_bsr_row_ptr,                                            \
+                    local_bsr_col_ind,                                            \
+                    local_bsr_val,                                                \
+                    block_dim,                                                    \
+                    x,                                                            \
+                    y,                                                            \
+                    done_array,                                                   \
+                    (rocsparse_int*)trm_info->get_row_map(),                      \
+                    zero_pivot,                                                   \
+                    descr->base,                                                  \
+                    descr->diag_type,                                             \
+                    dir,                                                          \
+                    handle->pointer_mode == rocsparse_pointer_mode_host);         \
+                break;                                                            \
+            }                                                                     \
+        }                                                                         \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+            (bsrsv_lower_general_wide<bsize, wfsize, arch, T, I, J>),             \
+            dim3(bsrsv_grid),                                                     \
+            dim3(bsize),                                                          \
+            0,                                                                    \
+            stream,                                                               \
+            mb,                                                                   \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),         \
+            local_bsr_row_ptr,                                                    \
+            local_bsr_col_ind,                                                    \
+            local_bsr_val,                                                        \
+            block_dim,                                                            \
+            x,                                                                    \
+            y,                                                                    \
+            done_array,                                                           \
+            (const J*)trm_info->get_row_map(),                                    \
+            zero_pivot,                                                           \
+            descr->base,                                                          \
+            descr->diag_type,                                                     \
+            dir,                                                                  \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
+    } while(0)
 
-#define LAUNCH_BSRSV_UPPER_GENERAL(bsize, wfsize, arch)               \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
-        (bsrsv_upper_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
-        dim3(bsize),                                                  \
-        0,                                                            \
-        stream,                                                       \
-        mb,                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
-        local_bsr_row_ptr,                                            \
-        local_bsr_col_ind,                                            \
-        local_bsr_val,                                                \
-        block_dim,                                                    \
-        x,                                                            \
-        y,                                                            \
-        done_array,                                                   \
-        (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_position(),                   \
-        descr->base,                                                  \
-        descr->diag_type,                                             \
-        dir,                                                          \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_BSRSV_UPPER_GENERAL(bsize, wfsize, arch)                           \
+    do                                                                            \
+    {                                                                             \
+        if constexpr(bsrsv_legacy_indices)                                        \
+        {                                                                         \
+            if(!bsrsv_wide)                                                       \
+            {                                                                     \
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+                    (bsrsv_upper_general<bsize, wfsize, arch>),                   \
+                    dim3(bsrsv_grid),                                             \
+                    dim3(bsize),                                                  \
+                    0,                                                            \
+                    stream,                                                       \
+                    mb,                                                           \
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+                    local_bsr_row_ptr,                                            \
+                    local_bsr_col_ind,                                            \
+                    local_bsr_val,                                                \
+                    block_dim,                                                    \
+                    x,                                                            \
+                    y,                                                            \
+                    done_array,                                                   \
+                    (rocsparse_int*)trm_info->get_row_map(),                      \
+                    zero_pivot,                                                   \
+                    descr->base,                                                  \
+                    descr->diag_type,                                             \
+                    dir,                                                          \
+                    handle->pointer_mode == rocsparse_pointer_mode_host);         \
+                break;                                                            \
+            }                                                                     \
+        }                                                                         \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+            (bsrsv_upper_general_wide<bsize, wfsize, arch, T, I, J>),             \
+            dim3(bsrsv_grid),                                                     \
+            dim3(bsize),                                                          \
+            0,                                                                    \
+            stream,                                                               \
+            mb,                                                                   \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),         \
+            local_bsr_row_ptr,                                                    \
+            local_bsr_col_ind,                                                    \
+            local_bsr_val,                                                        \
+            block_dim,                                                            \
+            x,                                                                    \
+            y,                                                                    \
+            done_array,                                                           \
+            (const J*)trm_info->get_row_map(),                                    \
+            zero_pivot,                                                           \
+            descr->base,                                                          \
+            descr->diag_type,                                                     \
+            dir,                                                                  \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
+    } while(0)
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, rocsparse_int BSRDIM, bool SLEEP, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
@@ -353,25 +508,53 @@ namespace rocsparse
                                                                         dir);
     }
 
-    template <typename T>
-    rocsparse_status bsrsv_solve_dispatch(rocsparse_handle          handle,
-                                          rocsparse_direction       dir,
-                                          rocsparse_operation       trans,
-                                          rocsparse_int             mb,
-                                          rocsparse_int             nnzb,
-                                          const T*                  alpha_device_host,
-                                          const rocsparse_mat_descr descr,
-                                          const T*                  bsr_val,
-                                          const rocsparse_int*      bsr_row_ptr,
-                                          const rocsparse_int*      bsr_col_ind,
-                                          rocsparse_int             block_dim,
-                                          rocsparse_mat_info        info,
-                                          const T*                  x,
-                                          T*                        y,
-                                          rocsparse_solve_policy    policy,
-                                          void*                     temp_buffer)
+    // Solve core. The analysis object and the zero-pivot pointer are arguments,
+    // so a caller that owns the analysis (the legacy mat_info path, and later
+    // rocsparse_sptrsv) does not have to read them back out of rocsparse_mat_info.
+    template <typename T, typename I, typename J>
+    rocsparse_status bsrsv_solve_core(rocsparse_handle          handle,
+                                      rocsparse_direction       dir,
+                                      rocsparse_operation       trans,
+                                      J                         mb,
+                                      I                         nnzb,
+                                      const T*                  alpha_device_host,
+                                      const rocsparse_mat_descr descr,
+                                      const T*                  bsr_val,
+                                      const I*                  bsr_row_ptr,
+                                      const J*                  bsr_col_ind,
+                                      rocsparse_int             block_dim,
+                                      rocsparse::trm_info_t*    trm_info,
+                                      rocsparse_indextype       zero_pivot_indextype,
+                                      J*                        zero_pivot,
+                                      const T*                  x,
+                                      T*                        y,
+                                      rocsparse_solve_policy    policy,
+                                      void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
+
+        constexpr bool bsrsv_legacy_indices
+            = std::is_same<I, rocsparse_int>::value && std::is_same<J, rocsparse_int>::value;
+
+        // Validate before any device memory is touched. A future rocsparse_sptrsv
+        // caller reaches this core with other index types, so the analysis must have
+        // been built with the same row-pointer and column-index types.
+        if(trm_info == nullptr || temp_buffer == nullptr || zero_pivot == nullptr)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+        }
+
+        if(!trm_info->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+
+        // The pivot buffer is typed by the analysis that wrote it. A reuse of
+        // another fill mode can leave a different width in the shared pivot.
+        if(zero_pivot_indextype != rocsparse::get_indextype<J>())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
 
         // Stream
         hipStream_t stream = handle->stream;
@@ -381,34 +564,25 @@ namespace rocsparse
 
         ptr += 256;
 
-        // done array
+        // done array. mb is the real index width, so the byte count is 64 bit.
         int* done_array = reinterpret_cast<int*>(ptr);
-        ptr += ((sizeof(int) * mb - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(int) * static_cast<size_t>(mb) - 1) / 256 + 1) * 256;
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
-
-        auto                   bsrsv_info = info->get_bsrsv_info();
-        rocsparse::trm_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);
-        if(trm_info == nullptr)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
-        }
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * static_cast<size_t>(mb), stream));
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
-                1,
-                reinterpret_cast<rocsparse_int*>(bsrsv_info->get_position()),
-                std::numeric_limits<rocsparse_int>::max(),
-                stream));
+                static_cast<int64_t>(1), zero_pivot, std::numeric_limits<J>::max(), stream));
         }
 
         // Pointers to differentiate between transpose mode
-        const rocsparse_int* local_bsr_row_ptr = bsr_row_ptr;
-        const rocsparse_int* local_bsr_col_ind = bsr_col_ind;
-        const T*             local_bsr_val     = bsr_val;
+        const I* local_bsr_row_ptr = bsr_row_ptr;
+        const J* local_bsr_col_ind = bsr_col_ind;
+        const T* local_bsr_val     = bsr_val;
 
         rocsparse_fill_mode fill_mode = descr->fill_mode;
 
@@ -421,8 +595,8 @@ namespace rocsparse
             // Gather transposed values
             LAUNCH_BSRSV_GTHR(256, 64, block_dim);
 
-            local_bsr_row_ptr = (rocsparse_int*)trm_info->get_transposed_row_ptr();
-            local_bsr_col_ind = (rocsparse_int*)trm_info->get_transposed_col_ind();
+            local_bsr_row_ptr = (const I*)trm_info->get_transposed_row_ptr();
+            local_bsr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_bsr_val     = (T*)bsrt_val;
 
             switch(fill_mode)
@@ -483,6 +657,39 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 }
+
+#define ROCSPARSE_BSRSV_CORE_INST(T, I, J)                                                    \
+    template rocsparse_status rocsparse::bsrsv_solve_core<T, I, J>(rocsparse_handle,          \
+                                                                   rocsparse_direction,       \
+                                                                   rocsparse_operation,       \
+                                                                   J,                         \
+                                                                   I,                         \
+                                                                   const T*,                  \
+                                                                   const rocsparse_mat_descr, \
+                                                                   const T*,                  \
+                                                                   const I*,                  \
+                                                                   const J*,                  \
+                                                                   rocsparse_int,             \
+                                                                   rocsparse::trm_info_t*,    \
+                                                                   rocsparse_indextype,       \
+                                                                   J*,                        \
+                                                                   const T*,                  \
+                                                                   T*,                        \
+                                                                   rocsparse_solve_policy,    \
+                                                                   void*)
+
+#define ROCSPARSE_BSRSV_CORE_INST_T(I, J)                     \
+    ROCSPARSE_BSRSV_CORE_INST(float, I, J);                   \
+    ROCSPARSE_BSRSV_CORE_INST(double, I, J);                  \
+    ROCSPARSE_BSRSV_CORE_INST(rocsparse_float_complex, I, J); \
+    ROCSPARSE_BSRSV_CORE_INST(rocsparse_double_complex, I, J)
+
+ROCSPARSE_BSRSV_CORE_INST_T(int32_t, int32_t);
+ROCSPARSE_BSRSV_CORE_INST_T(int64_t, int32_t);
+ROCSPARSE_BSRSV_CORE_INST_T(int64_t, int64_t);
+
+#undef ROCSPARSE_BSRSV_CORE_INST_T
+#undef ROCSPARSE_BSRSV_CORE_INST
 
 template <typename T>
 rocsparse_status rocsparse::bsrsv_solve_template(rocsparse_handle          handle,
@@ -574,22 +781,32 @@ rocsparse_status rocsparse::bsrsv_solve_template(rocsparse_handle          handl
     ROCSPARSE_CHECKARG_ARRAY(7, nnzb, bsr_val);
     ROCSPARSE_CHECKARG_ARRAY(9, nnzb, bsr_col_ind);
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_solve_dispatch(handle,
-                                                              dir,
-                                                              trans,
-                                                              mb,
-                                                              nnzb,
-                                                              alpha_device_host,
-                                                              descr,
-                                                              bsr_val,
-                                                              bsr_row_ptr,
-                                                              bsr_col_ind,
-                                                              block_dim,
-                                                              info,
-                                                              x,
-                                                              y,
-                                                              policy,
-                                                              temp_buffer));
+    auto                   bsrsv_info = info->get_bsrsv_info();
+    rocsparse::trm_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);
+    if(trm_info == nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+    }
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrsv_solve_core<T, rocsparse_int, rocsparse_int>(
+        handle,
+        dir,
+        trans,
+        mb,
+        nnzb,
+        alpha_device_host,
+        descr,
+        bsr_val,
+        bsr_row_ptr,
+        bsr_col_ind,
+        block_dim,
+        trm_info,
+        bsrsv_info->get_indextype(),
+        reinterpret_cast<rocsparse_int*>(bsrsv_info->get_position()),
+        x,
+        y,
+        policy,
+        temp_buffer)));
 
     return rocsparse_status_success;
 }
