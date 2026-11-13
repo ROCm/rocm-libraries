@@ -102,6 +102,16 @@ const vector<vector<int>> large_matrix_size_range
 const vector<vector<int64_t>> large_matrix_size_range_64
     = {{300, 2000, 300}, {2000, 300, 2048}, {1000, 1000, 1000}, {2000, 2000, 2000}};
 
+// for weekly_lapack tests with more rows or columns than the grids cover (the blocks loop over
+// them), and with more columns than one launch could cover with at most INT32_MAX threads
+const vector<char> huge_case_range = {'N', 'B'};
+
+const vector<vector<int>> huge_matrix_size_range
+    = {{2100000, 1, 2100000}, {1, 2100000, 1}, {1, 33554436, 1}};
+
+const vector<vector<int64_t>> huge_matrix_size_range_64
+    = {{2100000, 1, 2100000}, {1, 2100000, 1}, {1, 33554436, 1}};
+
 template <typename I>
 Arguments geequ_setup_arguments(geequ_tuple<I> tup)
 {
@@ -291,3 +301,19 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEEQUB_64,
                          Combine(ValuesIn(matrix_size_range_64), ValuesIn(case_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GEEQU,
+                         Combine(ValuesIn(huge_matrix_size_range), ValuesIn(huge_case_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GEEQUB,
+                         Combine(ValuesIn(huge_matrix_size_range), ValuesIn(huge_case_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GEEQU_64,
+                         Combine(ValuesIn(huge_matrix_size_range_64), ValuesIn(huge_case_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GEEQUB_64,
+                         Combine(ValuesIn(huge_matrix_size_range_64), ValuesIn(huge_case_range)));

@@ -57,8 +57,9 @@ static constexpr int EQU_TARGET_BLOCKS = 2048;
 // minimum length of the chunks of rows of equ_cols_kernel
 static constexpr int EQU_MIN_CHUNK = 1024;
 static constexpr int EQU_FINAL_THDS = 1024;
-// maximum size of the third dimension of the grids (larger batches are launched in chunks)
-static constexpr int EQU_MAX_BATCH_BLOCKS = 65535;
+// maximum number of blocks of rows (equ_rows_kernel) or columns (equ_cols_kernel) of a matrix in
+// the grid, which is enough to fill the device (the blocks loop over the rest)
+static constexpr int EQU_MAX_BLOCKS = 8192;
 
 /** Absolute value used by LAPACK's equilibration routines: |re| + |im| for complex numbers. **/
 template <typename T>
@@ -136,7 +137,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(EQU_BX* EQU_BY) equ_rows_kernel(const I 
     const int64_t cs = int64_t(h) * cchunk;
     const int64_t ce = std::min<int64_t>(cs + cchunk, n);
 
-    for(int64_t rb = blockIdx.x; rb < nrb; rb += gridDim.x)
+    // first block of rows of this block, and the stride of the loop over the blocks of rows
+    const int64_t rb_start = blockIdx.x;
+    const int64_t rb_inc = gridDim.x;
+
+    // partial maxima of the chunk h of columns of matrix b
+    S* const part_h = part + (rocblas_stride(b) * ncch + h) * m;
+
+    for(int64_t rb = rb_start; rb < nrb; rb += rb_inc)
     {
         const int64_t r = rb * EQU_BX + tx;
 
@@ -167,7 +175,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(EQU_BX* EQU_BY) equ_rows_kernel(const I 
         {
             for(I k = 1; k < EQU_BY; k++)
                 v = std::max(v, smax[k][tx]);
-            part[(rocblas_stride(b) * ncch + h) * m + r] = v;
+            part_h[r] = v;
         }
         __syncthreads();
     }
@@ -300,7 +308,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(EQU_BX* EQU_BY) equ_cols_kernel(const I 
     const int64_t rs = int64_t(h) * rchunk;
     const int64_t re = std::min<int64_t>(rs + rchunk, m);
 
-    for(int64_t cb = blockIdx.x; cb < ncb; cb += gridDim.x)
+    // first block of columns of this block, and the stride of the loop over the blocks of columns
+    const int64_t cb_start = blockIdx.x;
+    const int64_t cb_inc = gridDim.x;
+
+    // partial maxima of the chunk h of rows of matrix b
+    S* const part_h = part + (rocblas_stride(b) * nrch + h) * n;
+
+    for(int64_t cb = cb_start; cb < ncb; cb += cb_inc)
     {
         const int64_t c = cb * EQU_BY + ty;
 
@@ -337,7 +352,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(EQU_BX* EQU_BY) equ_cols_kernel(const I 
         }
 
         if(tx == 0 && c < n)
-            part[(rocblas_stride(b) * nrch + h) * n + c] = smax[ty][0];
+            part_h[c] = smax[ty][0];
         __syncthreads();
     }
 }
@@ -458,40 +473,43 @@ rocblas_status rocsolver_geequ_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
-    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
-    const int64_t maxgrid = props->maxGridSize[0];
-
     I cchunk, ncch, rchunk, nrch;
     rocsolver_geequ_chunks(m, n, &cchunk, &ncch, &rchunk, &nrch);
     S* rowpart = work;
     S* colpart = work + size_t(ncch) * m * batch_count;
 
     dim3 threads(EQU_BX, EQU_BY, 1);
-    // the kernels loop over the blocks beyond the grid; the number of threads in each dimension
-    // of the grid must be less than 2^32
-    const int64_t maxblocks = std::min<int64_t>(maxgrid, ((int64_t(1) << 32) - 1) / EQU_BX);
-    const I nrb = I(std::min<int64_t>(ceildiv(int64_t(m), EQU_BX), maxblocks));
-    const I ncb = I(std::min<int64_t>(ceildiv(int64_t(n), EQU_BY), maxblocks));
+    // blocks of rows and of columns of a matrix in the grids (the kernels loop over the rest)
+    const I nrb = I(std::min<int64_t>(ceildiv(int64_t(m), EQU_BX), EQU_MAX_BLOCKS));
+    const I ncb = I(std::min<int64_t>(ceildiv(int64_t(n), EQU_BY), EQU_MAX_BLOCKS));
 
-    // (the third dimension of a grid is limited: larger batches are launched in chunks of
-    // matrices b0, b0 + 1, ...)
-    for(I b0 = 0; b0 < batch_count; b0 += EQU_MAX_BATCH_BLOCKS)
+    // matrices per launch: at most MAX_BATCH_COUNT in the third dimension of the grids, and at
+    // most INT32_MAX threads in all, the limits of ROCSOLVER_LAUNCH_KERNEL (larger batches are
+    // launched in chunks of matrices b0, b0 + 1, ...)
+    static constexpr int64_t max_blocks = INT32_MAX / (EQU_BX * EQU_BY);
+    const int64_t mat_blocks = std::max(int64_t(nrb) * ncch, int64_t(ncb) * nrch);
+    const int64_t nb_max
+        = std::max<int64_t>(1, std::min<int64_t>(MAX_BATCH_COUNT, max_blocks / mat_blocks));
+    assert(mat_blocks * nb_max <= max_blocks);
+
+    for(int64_t b0 = 0; b0 < batch_count; b0 += nb_max)
     {
-        const I nb = std::min(batch_count - b0, I(EQU_MAX_BATCH_BLOCKS));
+        const I nb = I(std::min<int64_t>(batch_count - b0, nb_max));
 
         // row scale factors, rowcnd, amax, info (zero rows)
         ROCSOLVER_LAUNCH_KERNEL((equ_rows_kernel<T>), dim3(nrb, ncch, nb), threads, 0, stream, m, n,
-                                A, shiftA, lda, strideA, cchunk, ncch, rowpart, b0);
+                                A, shiftA, lda, strideA, cchunk, ncch, rowpart, I(b0));
         ROCSOLVER_LAUNCH_KERNEL((equ_final_kernel<true, POW2, I, S>), dim3(1, 1, nb),
                                 dim3(EQU_FINAL_THDS), 0, stream, m, n, ncch, rowpart, R, strideR,
-                                rowcnd, amax, info, b0);
+                                rowcnd, amax, info, I(b0));
 
         // column scale factors, colcnd, info (zero columns)
         ROCSOLVER_LAUNCH_KERNEL((equ_cols_kernel<T>), dim3(ncb, nrch, nb), threads, 0, stream, m, n,
-                                A, shiftA, lda, strideA, R, strideR, info, rchunk, nrch, colpart, b0);
+                                A, shiftA, lda, strideA, R, strideR, info, rchunk, nrch, colpart,
+                                I(b0));
         ROCSOLVER_LAUNCH_KERNEL((equ_final_kernel<false, POW2, I, S>), dim3(1, 1, nb),
                                 dim3(EQU_FINAL_THDS), 0, stream, m, n, nrch, colpart, C, strideC,
-                                colcnd, amax, info, b0);
+                                colcnd, amax, info, I(b0));
     }
 
     return rocblas_status_success;
