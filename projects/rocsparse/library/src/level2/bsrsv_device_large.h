@@ -769,3 +769,5 @@ namespace rocsparse
                 dir)));
     }
 }
+
+#undef BSRSV_WIDE_FOR_EACH
