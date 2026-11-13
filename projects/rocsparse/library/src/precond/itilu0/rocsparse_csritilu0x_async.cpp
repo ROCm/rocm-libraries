@@ -529,6 +529,7 @@ public:
             //
             //
             size_t buffer_size = 0;
+            size_t datasizeof  = 0;
 
             size_t size_convergence_info;
             switch(datatype_)
@@ -536,6 +537,9 @@ public:
             case rocsparse_datatype_f32_c:
             case rocsparse_datatype_f32_r:
             {
+                datasizeof = (datatype_ == rocsparse_datatype_f32_c)
+                                 ? sizeof(rocsparse_float_complex)
+                                 : sizeof(float);
                 size_convergence_info
                     = rocsparse::itilu0x_convergence_info_t<float, J>::size(nmaxiter_, options_);
                 break;
@@ -543,6 +547,9 @@ public:
             case rocsparse_datatype_f64_c:
             case rocsparse_datatype_f64_r:
             {
+                datasizeof = (datatype_ == rocsparse_datatype_f64_c)
+                                 ? sizeof(rocsparse_double_complex)
+                                 : sizeof(double);
                 size_convergence_info
                     = rocsparse::itilu0x_convergence_info_t<double, J>::size(nmaxiter_, options_);
                 break;
@@ -558,6 +565,16 @@ public:
             }
             }
             buffer_size += size_convergence_info;
+
+            //
+            // The sweep updates L, U and D in place: the correction norm needs a copy of
+            // them from before the sweep (L and U are strictly triangular parts of A).
+            //
+            if((options_ & rocsparse_itilu0_option_compute_nrm_correction) > 0)
+            {
+                buffer_size = rocsparse::align_size(buffer_size);
+                buffer_size += datasizeof * (static_cast<size_t>(nnz_) + m_);
+            }
 
             *buffer_size_ = buffer_size;
             return rocsparse_status_success;
@@ -638,7 +655,9 @@ public:
         {
             hipStream_t stream  = handle_->stream;
             const bool  verbose = (options_ & rocsparse_itilu0_option_verbose) > 0;
-            const bool  compute_nrm_residual
+            const bool  compute_nrm_corr
+                = (options_ & rocsparse_itilu0_option_compute_nrm_correction) > 0;
+            const bool compute_nrm_residual
                 = (options_ & rocsparse_itilu0_option_compute_nrm_residual) > 0;
             const bool stopping_criteria
                 = (options_ & rocsparse_itilu0_option_stopping_criteria) > 0;
@@ -658,14 +677,38 @@ public:
             buffer = setup.init(handle_, buffer, nmaxiter, options_);
 
             floating_data_t<T>* p_nrm_matrix
-                = (compute_nrm_residual) ? setup.info.nrm_matrix : nullptr;
+                = (compute_nrm_residual || compute_nrm_corr) ? setup.info.nrm_matrix : nullptr;
             floating_data_t<T>* p_nrm_residual
                 = (compute_nrm_residual) ? setup.info.nrm_residual : nullptr;
-            J*                  p_iter = setup.info.iter;
+            floating_data_t<T>* p_nrm_corr = (compute_nrm_corr) ? setup.info.nrm_corr : nullptr;
+            J*                  p_iter     = setup.info.iter;
+            floating_data_t<T>* log_mxcorr = (compute_nrm_corr) ? setup.log_mxcorr : nullptr;
             floating_data_t<T>* log_mxresidual
                 = (compute_nrm_residual) ? setup.log_mxresidual : nullptr;
 
-            if(compute_nrm_residual)
+            //
+            // L, U and D before the sweep, for the correction norm.
+            //
+            T* lval_prev = nullptr;
+            T* uval_prev = nullptr;
+            T* dval_prev = nullptr;
+            if(compute_nrm_corr)
+            {
+                const size_t offset = rocsparse::align_size(
+                    static_cast<size_t>(static_cast<char*>(buffer) - static_cast<char*>(buffer_)));
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    (buffer_size_ < offset + sizeof(T) * (static_cast<size_t>(lnnz_) + unnz_ + m_))
+                        ? rocsparse_status_invalid_size
+                        : rocsparse_status_success,
+                    "the buffer is too small for rocsparse_itilu0_option_compute_nrm_correction; "
+                    "query the buffer size with the same options");
+
+                lval_prev = reinterpret_cast<T*>(static_cast<char*>(buffer_) + offset);
+                uval_prev = lval_prev + lnnz_;
+                dval_prev = uval_prev + unnz_;
+            }
+
+            if(compute_nrm_residual || compute_nrm_corr)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::nrminf<BLOCKSIZE>(
                     handle_, nnz_, val_, p_nrm_matrix, nullptr, false));
@@ -674,8 +717,8 @@ public:
             //
             // Loop over.
             //
-            floating_data_t<T> nrm_residual_previous = static_cast<floating_data_t<T>>(0);
-            bool               converged             = false;
+            floating_data_t<T> nrm_indicator_previous = static_cast<floating_data_t<T>>(0);
+            bool               converged              = false;
             for(J iter = 0; iter < nmaxiter; ++iter)
             {
 
@@ -709,7 +752,18 @@ public:
                         dval_);
                 }
 
+                floating_data_t<T> nrm_corr     = static_cast<floating_data_t<T>>(0);
                 floating_data_t<T> nrm_residual = static_cast<floating_data_t<T>>(0);
+
+                if(compute_nrm_corr)
+                {
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                        lval_prev, lval_, sizeof(T) * lnnz_, hipMemcpyDeviceToDevice, stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                        uval_prev, uval_, sizeof(T) * unnz_, hipMemcpyDeviceToDevice, stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                        dval_prev, dval_, sizeof(T) * m_, hipMemcpyDeviceToDevice, stream));
+                }
 
                 //
                 // CALCULATE CORRECTION.
@@ -784,8 +838,37 @@ public:
                         dval_);
                 }
 
-                if(stopping_criteria)
+                if(compute_nrm_corr)
                 {
+                    //
+                    // Calculate the norm of the correction.
+                    //
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::nrminf_diff<BLOCKSIZE>(
+                        handle_, unnz_, uval_prev, uval_, p_nrm_corr, p_nrm_matrix, false));
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::nrminf_diff<BLOCKSIZE>(
+                        handle_, lnnz_, lval_prev, lval_, p_nrm_corr, p_nrm_matrix, true));
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::nrminf_diff<BLOCKSIZE>(
+                        handle_, m_, dval_prev, dval_, p_nrm_corr, p_nrm_matrix, true));
+
+                    if(convergence_history)
+                    {
+                        //
+                        // Log the norm of the correction.
+                        //
+                        RETURN_IF_HIP_ERROR(
+                            rocsparse::stay_on_device(&log_mxcorr[iter], p_nrm_corr, stream));
+                    }
+                }
+
+                if(stopping_criteria || verbose)
+                {
+                    if(compute_nrm_corr)
+                    {
+                        //
+                        // EXTRACT NORM.
+                        //
+                        RETURN_IF_HIP_ERROR(rocsparse::on_host(&nrm_corr, p_nrm_corr, stream));
+                    }
 
                     if(compute_nrm_residual)
                     {
@@ -794,8 +877,23 @@ public:
                         //
                         RETURN_IF_HIP_ERROR(
                             rocsparse::on_host(&nrm_residual, p_nrm_residual, stream));
-                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                     }
+
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+                }
+
+                floating_data_t<T> nrm_indicator;
+                if(compute_nrm_residual && compute_nrm_corr)
+                {
+                    nrm_indicator = rocsparse::max(nrm_residual, nrm_corr);
+                }
+                else if(compute_nrm_corr)
+                {
+                    nrm_indicator = nrm_corr;
+                }
+                else
+                {
+                    nrm_indicator = nrm_residual;
                 }
 
                 //
@@ -804,24 +902,41 @@ public:
                 if(verbose)
                 {
                     std::cout << std::setw(16) << "iter";
+                    if(compute_nrm_corr)
+                    {
+                        std::cout << std::setw(16) << "corr";
+                    }
                     if(compute_nrm_residual)
                     {
-                        std::cout << std::setw(16) << "residual" << std::setw(16) << "rate";
+                        std::cout << std::setw(16) << "residual";
+                    }
+                    if(compute_nrm_residual || compute_nrm_corr)
+                    {
+                        std::cout << std::setw(16) << "rate";
                     }
                     std::cout << std::endl;
 
                     std::cout << std::setw(16) << iter;
+                    if(compute_nrm_corr)
+                    {
+                        std::cout << std::setw(16) << nrm_corr;
+                    }
                     if(compute_nrm_residual)
                     {
-                        std::cout << std::setw(16) << nrm_residual << std::setw(16)
-                                  << std::abs(nrm_residual - nrm_residual_previous) / nrm_residual;
+                        std::cout << std::setw(16) << nrm_residual;
+                    }
+                    if(compute_nrm_residual || compute_nrm_corr)
+                    {
+                        const floating_data_t<T> rate
+                            = std::abs(nrm_indicator - nrm_indicator_previous) / nrm_indicator;
+                        std::cout << std::setw(16) << rate;
                     }
                     std::cout << std::endl;
                 }
 
                 if(stopping_criteria)
                 {
-                    if(std::isinf(nrm_residual))
+                    if(std::isinf(nrm_indicator))
                     {
 
                         nmaxiter_[0] = iter + 1;
@@ -832,7 +947,7 @@ public:
                     }
                     else
                     {
-                        if((nrm_residual <= tol_))
+                        if((nrm_indicator <= tol_))
                         {
                             nmaxiter_[0] = iter + 1;
                             converged    = true;
@@ -850,12 +965,12 @@ public:
                         static constexpr floating_data_t<T> tol_increment
                             = (sizeof(floating_data_t<T>) == sizeof(float)) ? 1.0e-5 : 1.0e-15;
 
-                        if(compute_nrm_residual)
+                        if(compute_nrm_residual || compute_nrm_corr)
                         {
                             if((iter > 3)
-                               && (std::abs(nrm_residual - nrm_residual_previous)
-                                   <= tol_increment * nrm_residual)
-                               && nrm_residual <= tol_ * 10)
+                               && (std::abs(nrm_indicator - nrm_indicator_previous)
+                                   <= tol_increment * nrm_indicator)
+                               && nrm_indicator <= tol_ * 10)
                             {
                                 nmaxiter_[0] = iter + 1;
                                 converged    = true;
@@ -865,10 +980,7 @@ public:
                     }
                 }
 
-                if(compute_nrm_residual)
-                {
-                    nrm_residual_previous = nrm_residual;
-                }
+                nrm_indicator_previous = nrm_indicator;
             }
 
             RETURN_IF_HIP_ERROR(

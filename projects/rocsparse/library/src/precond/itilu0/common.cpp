@@ -252,6 +252,14 @@ rocsparse_status rocsparse::nrminf_diff(rocsparse_handle          handle_,
             rocsparse_hipMemsetAsync(nrm_, 0, sizeof(floating_data_t<T>), handle_->stream));
     }
 
+    //
+    // Nothing to reduce: an empty part contributes zero (after the reset above).
+    //
+    if(nitems_ == 0)
+    {
+        return rocsparse_status_success;
+    }
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_nrminf_diff<BLOCKSIZE, T>),
                                        blocks,
                                        threads,
