@@ -3,9 +3,10 @@
 
 // Argument validation of HIPBLASLT_ORDER_COL256_R128_EXT and
 // HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT through the C, ext and grouped ext
-// APIs. Nothing is launched: an invalid combination is refused before solution
-// selection on every architecture, and a valid one is accepted whether or not a kernel
-// exists. The C heuristic searches for a valid one, so those cases run on gfx950 only.
+// APIs. An invalid combination is refused before solution selection on every
+// architecture. A valid one is accepted whether or not a kernel exists: hipblasLtMatmul
+// without an algo runs one or reports none. That searches for a solution, so the valid
+// cases run on gfx950 only.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -35,6 +36,7 @@ namespace
         hipDataType                  typeA  = HIP_R_6F_E2M3;
         hipDataType                  typeB  = HIP_R_6F_E2M3;
         hipblasOperation_t           opA    = HIPBLAS_OP_T;
+        hipblasOperation_t           opB    = HIPBLAS_OP_N;
         int64_t                      m      = 256;
         int64_t                      n      = 256;
         int64_t                      k      = 128;
@@ -47,7 +49,11 @@ namespace
         }
         int64_t ldb() const
         {
-            return k + ldbPad;
+            return (opB == HIPBLAS_OP_N ? k : n) + ldbPad;
+        }
+        int64_t strideB() const
+        {
+            return ldb() * (opB == HIPBLAS_OP_N ? n : k);
         }
     };
 
@@ -85,14 +91,19 @@ namespace
         v.back().orderA = v.back().orderB = kCol;
         v.push_back(make("scale_a_only", false));
         v.back().scaleB = kBlk32;
-        // Refused by the row-major order handling before this validation.
-        v.push_back(make("b_row_order", false));
+        // Every API refuses a row-major B with these scales before the order and scale
+        // validation runs, so this covers that refusal, not the validation.
+        v.push_back(make("b_row_order_refused_as_row_major", false));
         v.back().orderB     = HIPBLASLT_ORDER_ROW;
         v.back().rejectedAs = HIPBLAS_STATUS_NOT_SUPPORTED;
         v.push_back(make("fp8", false));
         v.back().typeA = v.back().typeB = HIP_R_8F_E4M3;
+        v.push_back(make("fp8_b", false));
+        v.back().typeB = HIP_R_8F_E4M3;
         v.push_back(make("op_a_n", false));
         v.back().opA = HIPBLAS_OP_N;
+        v.push_back(make("op_b_t", false));
+        v.back().opB = HIPBLAS_OP_T;
         v.push_back(make("other_fp6_swizzle_order", false));
         v.back().orderA = HIPBLASLT_ORDER_COL16_4R16;
         v.back().orderB = kCol;
@@ -120,6 +131,9 @@ namespace
     class Fp6Tile128x4Args_smoke : public ::testing::TestWithParam<Fp6Case>
     {
     protected:
+        // Holds A, B, D and the scales of every valid case, so a launch stays inside it.
+        static constexpr size_t kStorageBytes = 256 * 1024;
+
         hipblasLtHandle_t handle  = nullptr;
         void*             storage = nullptr;
         const float       alpha   = 1.0f;
@@ -135,7 +149,7 @@ namespace
             if(GetParam().valid && std::string(props.gcnArchName).rfind("gfx950", 0) != 0)
                 GTEST_SKIP() << "A valid problem reaches solution selection, which these "
                                 "tests cover on gfx950 only";
-            ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
+            ASSERT_EQ(hipMalloc(&storage, kStorageBytes), hipSuccess);
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
         }
 
@@ -156,7 +170,7 @@ namespace
         {
             const Fp6Case&                 c = GetParam();
             hipblaslt_ext::GemmProblemType p(
-                c.opA, HIPBLAS_OP_N, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+                c.opA, c.opB, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
             p.setOrderA(c.orderA);
             p.setOrderB(c.orderB);
             return p;
@@ -190,6 +204,8 @@ namespace
         const Fp6Case& c = GetParam();
         const int64_t  rowsA = c.opA == HIPBLAS_OP_N ? c.m : c.k;
         const int64_t  colsA = c.opA == HIPBLAS_OP_N ? c.k : c.m;
+        const int64_t  rowsB = c.opB == HIPBLAS_OP_N ? c.k : c.n;
+        const int64_t  colsB = c.opB == HIPBLAS_OP_N ? c.n : c.k;
 
         hipblasLtMatmulDesc_t       desc = nullptr;
         hipblasLtMatmulPreference_t pref = nullptr;
@@ -199,7 +215,7 @@ namespace
         ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&a, c.typeA, rowsA, colsA, c.lda()),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&b, c.typeB, c.k, c.n, c.ldb()),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&b, c.typeB, rowsB, colsB, c.ldb()),
                   HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&cl, HIP_R_16BF, c.m, c.n, c.m),
                   HIPBLAS_STATUS_SUCCESS);
@@ -213,13 +229,12 @@ namespace
         ASSERT_EQ(
             hipblasLtMatrixLayoutSetAttribute(b, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)),
             HIPBLAS_STATUS_SUCCESS);
-        const hipblasOperation_t opB    = HIPBLAS_OP_N;
         const uint32_t           scaleA = c.scaleA;
         const uint32_t           scaleB = c.scaleB;
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                       desc, HIPBLASLT_MATMUL_DESC_TRANSA, &c.opA, sizeof(c.opA)),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB)),
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &c.opB, sizeof(c.opB)),
                   HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                       desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleA, sizeof(scaleA)),
@@ -234,34 +249,41 @@ namespace
                       desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &storage, sizeof(storage)),
                   HIPBLAS_STATUS_SUCCESS);
 
-        // The C heuristic answers invalid arguments with no solution; hipblasLtMatmul
-        // rejects them during argument validation, before any algo or launch.
+        // The C heuristic answers invalid arguments with no solution, as it answers a
+        // valid problem no kernel supports; hipblasLtMatmul without an algo tells them
+        // apart. It rejects invalid arguments during argument validation, before any
+        // solution selection, and for a valid problem runs a kernel or reports none
+        // (HIPBLAS_STATUS_INTERNAL_ERROR), never HIPBLAS_STATUS_INVALID_VALUE.
         hipblasLtMatmulHeuristicResult_t result;
         int                              count = -1;
         const hipblasStatus_t            heuristic
             = hipblasLtMatmulAlgoGetHeuristic(handle, desc, a, b, cl, d, pref, 1, &result, &count);
+        const hipblasStatus_t run = hipblasLtMatmul(handle,
+                                                    desc,
+                                                    &alpha,
+                                                    storage,
+                                                    a,
+                                                    storage,
+                                                    b,
+                                                    &beta,
+                                                    storage,
+                                                    cl,
+                                                    storage,
+                                                    d,
+                                                    nullptr,
+                                                    nullptr,
+                                                    0,
+                                                    nullptr);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
         if(c.valid)
+        {
             EXPECT_EQ(heuristic, HIPBLAS_STATUS_SUCCESS);
+            EXPECT_NE(run, HIPBLAS_STATUS_INVALID_VALUE);
+        }
         else
         {
             EXPECT_EQ(count, 0);
-            EXPECT_EQ(hipblasLtMatmul(handle,
-                                      desc,
-                                      &alpha,
-                                      storage,
-                                      a,
-                                      storage,
-                                      b,
-                                      &beta,
-                                      storage,
-                                      cl,
-                                      storage,
-                                      d,
-                                      nullptr,
-                                      nullptr,
-                                      0,
-                                      nullptr),
-                      c.rejectedAs);
+            EXPECT_EQ(run, c.rejectedAs);
         }
 
         for(auto* layout : {a, b, cl, d})
@@ -277,7 +299,7 @@ namespace
         hipblaslt_ext::GemmEpilogue    ep = epilogue();
         hipblaslt_ext::GemmInputs      in = inputs();
         hipblaslt_ext::Gemm            gemm(
-            handle, c.opA, HIPBLAS_OP_N, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+            handle, c.opA, c.opB, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
         EXPECT_EQ(gemm.setProblem(c.m,
                                   c.n,
                                   c.k,
@@ -287,7 +309,7 @@ namespace
                                   c.m,
                                   c.m,
                                   c.lda() * (c.opA == HIPBLAS_OP_N ? c.k : c.m),
-                                  c.ldb() * c.n,
+                                  c.strideB(),
                                   c.m * c.n,
                                   c.m * c.n,
                                   ep,
@@ -301,12 +323,12 @@ namespace
         const Fp6Case&                 c  = GetParam();
         hipblaslt_ext::GemmProblemType pt = problemType();
         hipblaslt_ext::GroupedGemm     grouped(
-            handle, c.opA, HIPBLAS_OP_N, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+            handle, c.opA, c.opB, c.typeA, c.typeB, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
         std::vector<int64_t> m{c.m, c.m}, n{c.n, c.n}, k{c.k, c.k}, batch{1, 1};
         std::vector<int64_t> lda{c.lda(), c.lda()}, ldb{c.ldb(), c.ldb()}, ldc{c.m, c.m},
             ldd{c.m, c.m};
         const int64_t        strideA = c.lda() * (c.opA == HIPBLAS_OP_N ? c.k : c.m);
-        std::vector<int64_t> sa{strideA, strideA}, sb{c.ldb() * c.n, c.ldb() * c.n},
+        std::vector<int64_t> sa{strideA, strideA}, sb{c.strideB(), c.strideB()},
             sc{c.m * c.n, c.m * c.n}, sd{c.m * c.n, c.m * c.n};
         std::vector<hipblaslt_ext::GemmEpilogue> ep{epilogue(), epilogue()};
         std::vector<hipblaslt_ext::GemmInputs>   in{inputs(), inputs()};
