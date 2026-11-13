@@ -125,7 +125,12 @@ def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
 
 
 def test_regenerate_uid_for_solution_inplace_keeps_key_order(tmp_path: Path) -> None:
-    """``--inplace`` keeps the file's key order instead of sorting keys.
+    """``--inplace`` writes the canonical solution order and does not sort the file.
+
+    The input solution is deliberately out of order. After rewrite,
+    ``SolutionIndex``, ``SolutionUID``, ``KernelNameMin``, and
+    ``SolutionNameMin`` lead the solution, and top-level keys stay in the
+    order they were written.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
@@ -134,7 +139,7 @@ def test_regenerate_uid_for_solution_inplace_keeps_key_order(tmp_path: Path) -> 
         None.
 
     Raises:
-        AssertionError: If the rewritten file sorts top-level or solution keys.
+        AssertionError: If the solution is not reordered or other keys are sorted.
     """
     yaml_path = tmp_path / "logic.yaml"
     data = {
@@ -143,11 +148,12 @@ def test_regenerate_uid_for_solution_inplace_keeps_key_order(tmp_path: Path) -> 
         "ProblemType": {"OperationType": "GEMM"},
         "Solutions": [
             {
-                "SolutionIndex": 0,
-                "SolutionUID": "0u1c",
-                "KernelNameMin": "kern0",
-                "SolutionNameMin": "sol0",
                 "NumThreads": 256,
+                "SolutionNameMin": "sol0",
+                "MacroTile0": 32,
+                "KernelNameMin": "kern0",
+                "SolutionUID": "0u1c",
+                "SolutionIndex": 0,
             }
         ],
     }
@@ -164,6 +170,7 @@ def test_regenerate_uid_for_solution_inplace_keeps_key_order(tmp_path: Path) -> 
         "KernelNameMin",
         "SolutionNameMin",
         "NumThreads",
+        "MacroTile0",
     ]
     assert solution["SolutionUID"] == encode_solution_uid(new_uid)
 
