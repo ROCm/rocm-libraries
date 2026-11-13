@@ -4948,6 +4948,40 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: false
     tailLoopOptB: false
+  - 1LDSBuffer: 1
+    ClusterLocalRead: 0
+    DepthU: 32
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: false
+    ISA: [11, 5, 1]
+    LdsPadA: 8
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 16
+    MFMA_BF16_1K: 0
+    MIBlock: [16, 16, 16, 1, 1, 1]
+    MIInputPerThread: 16
+    MIWaveGroup: [2, 2]
+    MIWaveTile: [5, 3]
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 16
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 16, 1]
+    MaxOccupancy: 40
+    PrefetchLocalRead: 0
+    SolutionIndex: 16
+    SolutionUID: 0uVjkrgTm0CW
+    SourceSwap: true
+    StaggerUMapping: 1
+    StreamK: 3
+    StreamKForceDPOnly: 1
+    ThreadTile: [1, 1]
+    TransposeLDSMetadata: 1
+    Valid: true
+    WavefrontSize: 32
+    WorkGroup: [32, 4, 1]
 - [2, 3, 0, 1]
 - - - [1024, 1568, 1, 4096]
     - [0, 63]
@@ -4968,7 +5002,7 @@
   - - [3584, 128, 1, 18944]
     - [7, 86.2]
   - - [4096, 280, 1, 4096]
-    - [8, 52]
+    - [16, 75.1]
   - - [9216, 1214, 1, 3072]
     - [9, 82]
   - - [12288, 280, 1, 4096]
