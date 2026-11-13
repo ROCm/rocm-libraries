@@ -722,9 +722,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 TEST_CONFIG    "${_hkp_bwd_toml}"
                 ${_hkp_bwd_shard_args}
                 GTEST_FILTER   "quick_SdpaBackward_*:standard_SdpaBackward_*:comprehensive_SdpaBackward_*:full_SdpaBackward_*:-*_fwd_pair*"
-                # Diagnostic: Windows gfx110X CI reports this engine "not loaded" on the
-                # non-native shards only (PR 15643); the info log names what dropped it.
-                ENVIRONMENT    ${TEST_ENVIRONMENT} HIPDNN_LOG_LEVEL=info
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
                 ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                 ${_hkp_bwd_category_args}
             )
