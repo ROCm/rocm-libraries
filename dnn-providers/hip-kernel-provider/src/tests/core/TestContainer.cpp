@@ -586,7 +586,7 @@ TEST(TestContainer, GetAllEngineIds)
 }
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
-// The provider at engine plugin API 1.4.0 with its schema guard (core/GraphSchema.hpp): a packed
+// The provider at engine plugin API 1.6.0 with its schema guard (core/GraphSchema.hpp): a packed
 // (THD) SDPA graph, schema 1.4.0 through its ragged offset multipliers, reaches the FlyDSL SDPA
 // engines, which opted in, and no other engine claims it.
 TEST(TestContainer, RoutesAPackedSdpaGraphOnlyToTheFlydslEngines)
