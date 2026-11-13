@@ -6,12 +6,18 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 
-from hkp_pack.descriptors import HkpPackError, load_flat_input
+from hkp_pack.descriptors import (
+    _BEHAVIOR_NOTES,
+    _NUMERICAL_NOTES,
+    HkpPackError,
+    load_flat_input,
+)
 from hkp_pack.pipeline import compile_intermediate
 from pack_helpers import GENERIC_TARGETS
 
@@ -1174,13 +1180,70 @@ def _drop(key):
     return lambda doc: doc.pop(key)
 
 
+def test_packaging_admits_an_authored_empty_numerical_notes_list(
+    tmp_path, main_fixture
+):
+    """`[]` is an explicit claim of no notes, not an absent field."""
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+@pytest.mark.parametrize("note", _NUMERICAL_NOTES)
+def test_packaging_admits_every_numerical_note_name(tmp_path, main_fixture, note):
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[note])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+def test_numerical_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same names, in enum order."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("numericalNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'\{"([a-z_0-9]+)", HIPDNN_NUMERICAL_NOTE_([A-Za-z_0-9]+)\}', body
+    )
+    assert [name for name, _ in pairs] == list(_NUMERICAL_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
+def test_behavior_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same behavior-note names."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("behaviorNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'text == "([a-z_0-9]+)"\)\s*\{\s*return HIPDNN_BEHAVIOR_NOTE_([A-Za-z_0-9]+);',
+        body,
+    )
+    assert [name for name, _ in pairs] == list(_BEHAVIOR_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
 def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixture):
     """The control for the rejections below: each field, well formed, loads."""
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
         ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
-        ued["numerical_notes"] = ["ftz"]
+        ued["numerical_notes"] = ["nondeterministic"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}
         ued["revision"] = "999999999.999999999"
@@ -1218,14 +1281,39 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
             id="behavior_note_unknown",
         ),
         pytest.param(
+            _set("behavior_notes", ["RUNTIME_COMPILATION"]),
+            "unknown note",
+            id="behavior_note_wrong_case",
+        ),
+        pytest.param(
+            _set("behavior_notes", ["nondeterministic"]),
+            "unknown note",
+            id="behavior_note_numerical_name",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["runtime_compilation"]),
+            "unknown note",
+            id="numerical_note_behavior_name",
+        ),
+        pytest.param(
             _set("behavior_notes", "runtime_compilation"),
             "array of strings",
             id="behavior_notes_not_array",
         ),
         pytest.param(
-            _set("numerical_notes", ["ftz", "ftz"]),
+            _set("numerical_notes", ["nondeterministic", "nondeterministic"]),
             "twice",
             id="numerical_note_repeated",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["ftz"]),
+            "unknown note",
+            id="numerical_note_unknown",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["NONDETERMINISTIC"]),
+            "unknown note",
+            id="numerical_note_wrong_case",
         ),
         pytest.param(
             _set("sdk_version", "1.2"), "MAJOR.MINOR.PATCH", id="sdk_version_short"

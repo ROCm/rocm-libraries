@@ -143,6 +143,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
     message(STATUS "Enabling compile flags for coverage-mapping")
@@ -556,3 +557,4 @@ if(MIOPENPROVIDER_ENABLE_COVERAGE)
     add_custom_coverage_target(current-coverage "")
 
 endif()
+hipdnn_apply_long_path_manifest()

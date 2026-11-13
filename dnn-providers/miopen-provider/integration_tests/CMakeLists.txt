@@ -27,7 +27,8 @@ add_executable(
 
 # Superbuild: the hipDNN option; standalone: the installed frontend's cudnn_compatibility component.
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY OR hipdnn_frontend_cudnn_compatibility_FOUND)
-    target_sources(miopen_plugin_integration_tests PRIVATE IntegrationGpuCudnnShimDeterministic.cpp)
+    target_sources(miopen_plugin_integration_tests PRIVATE IntegrationGpuCudnnShimDeterministic.cpp
+                                                           IntegrationGpuCudnnV8ShimDeterministic.cpp)
 endif()
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})

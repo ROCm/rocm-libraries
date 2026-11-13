@@ -24,7 +24,8 @@ include(HostNumericsTestDependencies)
 add_executable(hostnumerics-embedded-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp"
     "${HOSTNUMERICS_SOURCE_DIR}/tests/expected_test.cpp"
     "${HOSTNUMERICS_SOURCE_DIR}/tests/integer_conversion_test.cpp"
-    "${HOSTNUMERICS_SOURCE_DIR}/tests/scalar_storage_test.cpp")
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/scalar_storage_test.cpp"
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/reshape_permutation_test.cpp")
 target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics GTest::gtest_main)
 
 enable_testing()

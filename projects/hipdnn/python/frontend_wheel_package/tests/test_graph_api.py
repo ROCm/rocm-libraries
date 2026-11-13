@@ -12,7 +12,7 @@ import pytest
 import hipdnn_frontend as hipdnn
 
 from .graph_builders import build_pointwise_add_graph
-from .helpers import build_all_plans
+from .helpers import NullHandle, build_all_plans
 
 
 class TestGraphConfiguration:
@@ -147,26 +147,60 @@ def _workspace_ptr(graph):
     return buf, buf.ptr()
 
 
-class _NullHandle:
-    """Stand-in for a Handle whose get() yields a null pointer.
-
-    execute_timed_ext() must reject a graph with no compiled plan before it ever
-    dereferences the handle, so this path needs no real device or backend.
-    """
-
-    def get(self):
-        return 0
-
-
 def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
     """No compiled plan -> the same failure execute() would report; timing stays empty."""
     graph = hipdnn.Graph()
 
-    err, timing = graph.execute_timed_ext(_NullHandle(), {}, 0)
+    err, timing = graph.execute_timed_ext(NullHandle(), {}, 0)
     assert err.is_bad()
     assert not timing.timed_out
     assert timing.elapsed_ms is None
     assert timing.quality == hipdnn.TimingQuality.INVALID
+
+
+def test_numerical_note_enum_exposes_the_ten_notes_without_not_set():
+    """NumericalNote mirrors the frontend enum; NOT_SET is not a reportable note."""
+    expected = {
+        "TENSOR_CORE",
+        "DOWN_CONVERT_INPUTS",
+        "REDUCED_PRECISION_REDUCTION",
+        "FFT",
+        "NONDETERMINISTIC",
+        "WINOGRAD",
+        "WINOGRAD_TILE_4x4",
+        "WINOGRAD_TILE_6x6",
+        "WINOGRAD_TILE_13x13",
+        "STRICT_NAN_PROP",
+    }
+    assert {member.name for member in hipdnn.NumericalNote} == expected
+
+
+def test_numerical_note_is_cudnns_spelling_of_the_enum():
+    """cuDNN's Python frontend spells the enum numerical_note."""
+    assert hipdnn.numerical_note is hipdnn.NumericalNote
+
+
+def test_numerical_notes_for_engine_on_unbuilt_graph_raises():
+    """The graph must be built before engine notes can be queried."""
+    graph = hipdnn.Graph()
+
+    with pytest.raises(RuntimeError):
+        graph.get_numerical_notes_for_engine(0)
+
+
+@pytest.mark.gpu
+def test_numerical_notes_for_engine_reports_the_engines_notes():
+    """The stub engine declares no numerical notes, so the backend reports NONDETERMINISTIC."""
+    graph, _, _, _ = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+    handle = hipdnn.create_handle()
+    assert graph.validate().is_good()
+    assert graph.build_operation_graph(handle).is_good()
+
+    engine_ids = graph.get_ranked_engine_ids()
+    assert engine_ids
+    for engine_id in engine_ids:
+        notes = graph.get_numerical_notes_for_engine(engine_id)
+        assert notes == [hipdnn.NumericalNote.NONDETERMINISTIC]
 
 
 @pytest.mark.gpu

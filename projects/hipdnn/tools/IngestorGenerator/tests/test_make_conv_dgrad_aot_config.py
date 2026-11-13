@@ -1,10 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for tools/make_conv_dgrad_aot_config.py and the shipped hipkernel:Gfx950ConvDgradAot bundle."""
+"""Tests for tools/make_conv_dgrad_aot_config.py and the shipped dgrad AOT bundles.
+
+The bundle and catalog tests run for every engine (the ``arch`` fixture: the
+adapter's ``TARGETS``); the rest pin hipkernel:Gfx950ConvDgradAot. Cases only
+hipkernel:Gfx1250ConvDgradAot has are test_make_gfx1250_conv_dgrad_aot_config.py's,
+which reuses the loaders here."""
 
 import collections
 import copy
+import functools
 import json
 import os
 import sys
@@ -22,6 +28,7 @@ pytest.importorskip("numpy", reason="the rocKE builders need numpy")
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
+import enumerate_conv_dgrad_aot_instances as enumerate_tool  # noqa: E402
 import launch_surface  # noqa: E402
 import conv_aot_common  # noqa: E402
 import make_conv_dgrad_aot_config as tool  # noqa: E402
@@ -32,22 +39,92 @@ _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
 _PROVIDER = (
     _REPO / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
 )
-_SHIPPED_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_dgrad_aot"
 _FWD_DIRS = (
     _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot",
     _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed",
 )
-_CENSUS = (
-    _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
-    "/kernel_ingestor_engine/packs/TestGfx950ConvDgradAotPacks.cpp"
-)
-_INSTANCES = [
-    _CONFIGS / f"gfx950_conv_dgrad_aot_{dtype}.instances.json"
-    for dtype in ("bf16", "fp16")
-]
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
 _JOBS = min(32, os.cpu_count() or 1)
-_SLUG = "gfx950_conv_dgrad_aot"
+
+
+def _adapter_arches():
+    """The adapter's ``TARGETS``, read at collection (pytest parametrizes before any
+    fixture can bind rocKE), leaving ``sys.path`` as it was."""
+    before = list(sys.path)
+    try:
+        tool._bind_rocke(_ROCKE)
+        return tool.arches()
+    finally:
+        sys.path[:] = before
+
+
+#: The engines these tests cover: every one the adapter packages.
+ARCHES = _adapter_arches()
+#: Per engine, the implicit-GEMM pipelines its shards are named for.
+_PIPELINES = {
+    "gfx950": ("mem", "compv3", "compv4"),
+    "gfx1250": ("mem", "wavelet"),
+}
+#: Per engine, the (dtype, family, capability) partitions its matched kernels span,
+#: and its implicit-GEMM kernels per dtype.
+_PARTITIONS = {"gfx950": 34, "gfx1250": 46}
+_IMPLICIT_PER_DTYPE = {"gfx950": 141, "gfx1250": 25}
+
+
+def slug(arch):
+    return f"{arch}_conv_dgrad_aot"
+
+
+def shipped_dir(arch):
+    return _PROVIDER / "descriptors/rocKE" / slug(arch)
+
+
+def census(arch):
+    return (
+        _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
+        f"/kernel_ingestor_engine/packs/Test{arch.capitalize()}ConvDgradAotPacks.cpp"
+    )
+
+
+def instance_lists(arch):
+    return [
+        _CONFIGS / enumerate_tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
+        for dtype in ("bf16", "fp16")
+    ]
+
+
+@functools.cache
+def load_identities(arch):
+    return tuple(
+        i for path in instance_lists(arch) for i in json.loads(path.read_text())
+    )
+
+
+@functools.cache
+def load_specs(arch):
+    """The converted catalog of ``arch``; rocKE must be bound."""
+    out = []
+    for spec, reason in tool.instance_specs(list(load_identities(arch)), _JOBS):
+        assert spec is not None, reason
+        out.append(spec)
+    return tuple(sorted(out, key=lambda s: (s.dtype, s.instance_id)))
+
+
+@functools.cache
+def load_shipped(arch):
+    """instance_id -> (shard, kernel descriptor) of ``arch``'s shipped bundle."""
+    out = {}
+    for kdp in sorted((shipped_dir(arch) / "artifacts").glob("*.kdp.json")):
+        document = json.loads(kdp.read_text())
+        shard = kdp.name[: -len(".kdp.json")][len(slug(arch)) + 1 :]
+        assert document["name"] == f"hipkernel:{slug(arch)}_{shard}"
+        for kernel in document["kernelDescriptors"]:
+            out[kernel["metadata"]["instance_id"]] = (shard, kernel)
+    return out
+
+
+def document(arch, kind):
+    return json.loads((shipped_dir(arch) / f"{slug(arch)}.{kind}.json").read_text())
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -58,43 +135,53 @@ def _rocke_on_path():
     sys.path[:] = before
 
 
-@pytest.fixture(scope="module")
-def identities():
-    return [i for path in _INSTANCES for i in json.loads(path.read_text())]
+@pytest.fixture(scope="module", params=ARCHES)
+def arch(request):
+    return request.param
 
 
 @pytest.fixture(scope="module")
-def specs(identities):
-    out = []
-    for spec, reason in tool.instance_specs(identities, _JOBS):
-        assert spec is not None, reason
-        out.append(spec)
-    return sorted(out, key=lambda s: (s.dtype, s.instance_id))
+def identities(arch):
+    return list(load_identities(arch))
 
 
 @pytest.fixture(scope="module")
-def shipped():
-    """instance_id -> (shard, kernel descriptor) of the shipped bundle."""
-    out = {}
-    for kdp in sorted((_SHIPPED_DIR / "artifacts").glob("*.kdp.json")):
-        document = json.loads(kdp.read_text())
-        shard = kdp.name[: -len(".kdp.json")][len(_SLUG) + 1 :]
-        assert document["name"] == f"hipkernel:{_SLUG}_{shard}"
-        for kernel in document["kernelDescriptors"]:
-            out[kernel["metadata"]["instance_id"]] = (shard, kernel)
-    return out
+def specs(arch):
+    return list(load_specs(arch))
 
 
-def _document(kind):
-    return json.loads((_SHIPPED_DIR / f"{_SLUG}.{kind}.json").read_text())
+@pytest.fixture(scope="module")
+def shipped(arch):
+    return load_shipped(arch)
 
 
-def test_the_catalog_is_203_selectable_kernels_and_4_helpers_per_dtype(specs):
+@pytest.fixture(scope="module")
+def gfx950_identities():
+    return list(load_identities("gfx950"))
+
+
+@pytest.fixture(scope="module")
+def gfx950_specs():
+    return list(load_specs("gfx950"))
+
+
+@pytest.fixture(scope="module")
+def gfx950_shipped():
+    return load_shipped("gfx950")
+
+
+def test_every_engine_states_its_expectations():
+    """A dgrad engine the adapter gains fails here until its expectations are stated."""
+    for table in (_PIPELINES, _PARTITIONS, _IMPLICIT_PER_DTYPE):
+        assert set(table) == set(ARCHES)
+
+
+def test_the_catalog_is_203_selectable_kernels_and_4_helpers_per_dtype(gfx950_specs):
     """203 (141 implicit-GEMM + 62 direct) selectable kernels and 4 helpers per dtype:
     the deliverable set for the gfx950 dgrad AOT catalog, one count per (kernel_family,
     direct_variant) pair."""
     by_dtype = collections.defaultdict(collections.Counter)
-    for spec in specs:
+    for spec in gfx950_specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
     for dtype in ("bf16", "fp16"):
         assert by_dtype[dtype] == {
@@ -110,8 +197,8 @@ def test_the_catalog_is_203_selectable_kernels_and_4_helpers_per_dtype(specs):
             (2, "transpose_rtc"): 1,
             (2, "reorganize_rtc"): 1,
         }
-    assert sum(1 for s in specs if not s.is_helper) == 406
-    assert len(specs) == 414
+    assert sum(1 for s in gfx950_specs if not s.is_helper) == 406
+    assert len(gfx950_specs) == 414
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -122,23 +209,26 @@ def test_instance_id_is_the_identity_stable_hash(identities):
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
 
 
-def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, shipped):
+def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(
+    arch, specs, shipped
+):
     """Every shard holds exactly the lists' instances of that shard; spec and metadata
     are the instance's fields in its variant's order; ids are uuid5(NS, instance_id)
     because this engine is its own product engine."""
     assert sorted(shipped) == sorted(s.instance_id for s in specs)
     for spec in specs:
+        assert spec.ARCH == arch
         shard, kernel = shipped[spec.instance_id]
         assert shard == tool.shard_name(spec)
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
         assert kernel["kernel_source"]["source"] == tool.ADAPTER_SOURCE
-        assert kernel["kernel_source"]["builder"] == tool.ADAPTER_BUILDER
+        assert kernel["kernel_source"]["builder"] == tool.adapter_builder(arch)
         assert kernel["id"] == str(
             uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, spec.instance_id)
         )
-        assert kernel["id"] == tool.kernel_uuid(spec.instance_id)
+        assert kernel["id"] == tool.kernel_uuid(spec.instance_id, arch=arch)
         # The tool's own templates, not a second copy of them: a variant this engine
         # gains is named once.
         template = (
@@ -147,27 +237,28 @@ def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, ship
             else tool._DIRECT_VARIANT_NAMES[spec.direct_variant]
         )
         assert kernel["name"] == template.format(
-            dtype=spec.dtype, instance_id=spec.instance_id
+            arch=arch, dtype=spec.dtype, instance_id=spec.instance_id
         )
 
 
-def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
+def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(arch, specs):
     # The generated KDPs (one per shard) and a promoted model packet's heuristics/
     # both live under DVC, each pinned by its own top-level pointer; the bundle's
     # directly-committed files are the small, hand-authored ones beside them.
+    folder = shipped_dir(arch)
     names = sorted(
         path.name
-        for path in _SHIPPED_DIR.iterdir()
+        for path in folder.iterdir()
         if path.name not in ("artifacts", "heuristics")
     )
     shards = {tool.shard_name(spec) for spec in specs}
     assert shards == {
         f"{dtype}_{p}"
         for dtype in ("bf16", "fp16")
-        for p in ("mem", "compv3", "compv4", "direct")
+        for p in _PIPELINES[arch] + ("direct",)
     }
     assert names == sorted(
-        [f"{_SLUG}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
+        [f"{slug(arch)}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
         + [
             "kernel_dtype_matches_graph.umd.json",
             "artifacts.dvc",
@@ -175,29 +266,28 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
             ".gitignore",
         ]
     )
-    matcher = json.loads(
-        (_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text()
-    )
-    top_level = [path for path in _SHIPPED_DIR.iterdir() if path.is_file()]
-    for path in top_level + _INSTANCES + [_CENSUS]:
+    matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
+    top_level = [path for path in folder.iterdir() if path.is_file()]
+    for path in top_level + instance_lists(arch) + [census(arch)]:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
-    for kdp in (_SHIPPED_DIR / "artifacts").glob("*.kdp.json"):
-        document = json.loads(kdp.read_text())
-        assert document["matchers"] == [matcher["id"]]
-        assert document["engine"] == _document("ued")["id"]
-        assert document["dispatch"] == _document("udd")["id"]
+    for kdp in (folder / "artifacts").glob("*.kdp.json"):
+        kdp_document = json.loads(kdp.read_text())
+        assert kdp_document["matchers"] == [matcher["id"]]
+        assert kdp_document["engine"] == document(arch, "ued")["id"]
+        assert kdp_document["dispatch"] == document(arch, "udd")["id"]
 
 
-def test_the_bundle_names_its_own_native_symbols():
-    ued, udd, uhd, kmd = (_document(k) for k in ("ued", "udd", "uhd", "kmd"))
-    umd = json.loads((_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text())
-    assert ued["name"] == tool.PRODUCT_ENGINE
-    assert ued["graph_match"] == {
-        "native": "hipkernel.gfx950_conv_dgrad_aot.graph_match"
-    }
-    assert udd["dispatch_symbol"] == "hipkernel.gfx950_conv_dgrad_aot.dispatch"
-    assert uhd["native"] == {"symbol": "hipkernel.gfx950_conv_dgrad_aot.score"}
-    assert umd["match_symbol"] == "hipkernel.gfx950_conv_dgrad_aot.kernel_match"
+def test_the_bundle_names_its_own_native_symbols(arch):
+    ued, udd, uhd, kmd = (document(arch, k) for k in ("ued", "udd", "uhd", "kmd"))
+    umd = json.loads(
+        (shipped_dir(arch) / "kernel_dtype_matches_graph.umd.json").read_text()
+    )
+    symbol = f"hipkernel.{slug(arch)}"
+    assert ued["name"] == tool.product_engine(arch)
+    assert ued["graph_match"] == {"native": f"{symbol}.graph_match"}
+    assert udd["dispatch_symbol"] == f"{symbol}.dispatch"
+    assert uhd["native"] == {"symbol": f"{symbol}.score"}
+    assert umd["match_symbol"] == f"{symbol}.kernel_match"
     assert ued["metadata"] == kmd["id"]
     # The native fallback scorer comes first; a promoted model packet appends its own
     # id after it instead of replacing it, so "default" is a list once one ships.
@@ -205,58 +295,61 @@ def test_the_bundle_names_its_own_native_symbols():
     default = ued["sort_kernel_catalog"]["default"]
     assert isinstance(default, list) and default[0] == uhd["id"]
     assert all(isinstance(i, str) for i in default)
-    assert ued["knobs"] == list(tool.engine_knobs())
+    assert ued["knobs"] == list(tool.engine_knobs(arch))
     kmd_names = [f["name"] for f in kmd["fields"]]
-    assert kmd_names == [f["name"] for f in tool.kmd_fields()]
+    assert kmd_names == [f["name"] for f in tool.kmd_fields(arch)]
     assert set(ued["knobs"]) <= set(kmd_names)
     assert "instance_id" not in ued["knobs"] and "max_sub_gemms" not in ued["knobs"]
 
 
-def test_the_config_borrows_no_native_symbols(tmp_path, specs):
+def test_the_config_borrows_no_native_symbols(arch, tmp_path, specs):
+    product = tool.product_engine(arch)
     config = tool.build_config(specs)
+    assert config["engine"]["name"] == product
     assert "native_symbols_from" not in config["engine"]
     assert config["workspace_policy"] == "derived"
-    other = tool.build_config(specs[:3], "hipkernel:Gfx950ConvDgradAotSeed")
-    assert other["engine"]["native_symbols_from"] == tool.PRODUCT_NATIVE_NAMESPACE
+    other = tool.build_config(specs[:3], f"{product}Seed")
+    namespace = tool.product_native_namespace(arch)
+    assert other["engine"]["native_symbols_from"] == namespace
     # The stated namespace is the one the product engine registers.
     path = tmp_path / "dgrad.yaml"
     path.write_text(tool.dump_config(tool.build_config(specs[:3])))
-    product = load_config(path)
-    assert product.native_symbol_namespace == tool.PRODUCT_NATIVE_NAMESPACE
-    assert tool.PRODUCT_NATIVE_NAMESPACE == (
-        EngineSpec(name=tool.PRODUCT_ENGINE).own_native_symbol_namespace
-    )
-    assert tool.kernel_uuid(specs[0].instance_id, "hipkernel:X") != tool.kernel_uuid(
-        specs[0].instance_id
-    )
+    assert load_config(path).native_symbol_namespace == namespace
+    assert namespace == EngineSpec(name=product).own_native_symbol_namespace
+    assert tool.kernel_uuid(
+        specs[0].instance_id, "hipkernel:X", arch=arch
+    ) != tool.kernel_uuid(specs[0].instance_id, arch=arch)
 
 
-def test_generated_config_expands_to_one_kernel_per_instance(tmp_path, specs):
+def test_generated_config_expands_to_one_kernel_per_instance(tmp_path, arch, specs):
     path = tmp_path / "dgrad.yaml"
     path.write_text(tool.dump_config(tool.build_config(specs)))
     config = load_config(path)
-    assert config.engine.name == tool.PRODUCT_ENGINE
+    assert config.engine.name == tool.product_engine(arch)
     assert config.is_multi_pack and not config.has_operation_matchers
     assert sum(len(pack.kernels) for pack in config.packs) == len(specs)
 
 
 def test_bundle_ids_are_unique_across_the_conv_aot_bundles():
-    """The fwd, seed and dgrad bundles load into one process: no document or kernel id
-    may repeat across them."""
+    """The fwd, seed and every dgrad bundle load into one process: no document or
+    kernel id may repeat across them, KDPs included."""
+    dgrad = [shipped_dir(arch) for arch in ARCHES]
+    for folder in dgrad:
+        assert any((folder / "artifacts").glob("*.kdp.json")), folder
     ids = {}
-    for folder in (*_FWD_DIRS, _SHIPPED_DIR):
-        for path in folder.glob("*.json"):
-            document = json.loads(path.read_text())
-            found = [document["id"]] + [
-                kernel["id"] for kernel in document.get("kernelDescriptors", [])
+    for folder in (*_FWD_DIRS, *dgrad):
+        for path in (*folder.glob("*.json"), *folder.glob("artifacts/*.json")):
+            found = json.loads(path.read_text())
+            values = [found["id"]] + [
+                kernel["id"] for kernel in found.get("kernelDescriptors", [])
             ]
-            for value in found:
+            for value in values:
                 assert ids.setdefault(value, path) == path, value
 
 
-def _knob_tuple(kernel, kmd_defaults):
+def _knob_tuple(kernel, kmd_defaults, arch="gfx950"):
     values = dict(kmd_defaults, **kernel["metadata"])
-    return tuple(values[k] for k in tool.engine_knobs())
+    return tuple(values[k] for k in tool.engine_knobs(arch))
 
 
 def _capability(kernel, kmd_defaults):
@@ -280,19 +373,23 @@ def _capability(kernel, kmd_defaults):
     )
 
 
-def test_knob_tuples_are_unique_within_every_dtype_family_and_capability(shipped):
+def test_knob_tuples_are_unique_within_every_dtype_family_and_capability(arch, shipped):
     """GenericPlanBuilder refuses a graph whose matched catalog repeats a UED knob
     tuple. The matcher pins dtype and every direct capability exactly, so instances
     that can meet in one graph share a (dtype, family, capability) partition."""
-    defaults = {f["name"]: f.get("default_value") for f in _document("kmd")["fields"]}
+    defaults = {
+        f["name"]: f.get("default_value") for f in document(arch, "kmd")["fields"]
+    }
     partitions = collections.defaultdict(list)
     for _, kernel in shipped.values():
         if kernel["metadata"].get("kernel_family") == 2:
             continue  # helpers are never matched
-        partitions[_capability(kernel, defaults)].append(_knob_tuple(kernel, defaults))
+        partitions[_capability(kernel, defaults)].append(
+            _knob_tuple(kernel, defaults, arch)
+        )
     # Two dtypes x the capability sets the implicit, direct and helper families
     # span, which grew with the pipelines the sweep now enumerates.
-    assert len(partitions) == 34
+    assert len(partitions) == _PARTITIONS[arch]
     for key, tuples in partitions.items():
         assert len(tuples) == len(set(tuples)), key
     # Implicit GEMM and the direct kernels can meet in one graph too. Uniqueness is
@@ -305,15 +402,17 @@ def test_knob_tuples_are_unique_within_every_dtype_family_and_capability(shipped
             if kernel["metadata"]["dtype"] == dtype
             and kernel["metadata"].get("kernel_family", 0) == 0
         ]
-        assert len(implicit) == 141
+        assert len(implicit) == _IMPLICIT_PER_DTYPE[arch]
 
 
-def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(identities, specs):
-    by_id = {s.instance_id: s for s in specs}
+def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(
+    gfx950_identities, gfx950_specs
+):
+    by_id = {s.instance_id: s for s in gfx950_specs}
     from benchmarks.common.kernel_cache import KernelIdentity
 
     seen = set()
-    for identity in identities:
+    for identity in gfx950_identities:
         ident = KernelIdentity.from_dict(identity)
         if ident.algorithm != "direct_grouped_dgrad_mfma":
             continue
@@ -324,14 +423,17 @@ def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(identities, 
     assert seen == {8, 16}
 
 
-def test_every_mfma_instance_finds_its_helpers_in_the_bundle(shipped):
+def test_every_mfma_instance_finds_its_helpers_in_the_bundle(gfx950_shipped):
     """The MFMA dispatch looks its helpers up by KMD field values; each lookup finds
     exactly one helper kernel of the same shard."""
     from builders.common.convolution_backward_data import (
         gfx950_conv_dgrad_aot_helper_fields,
     )
 
-    defaults = {f["name"]: f.get("default_value") for f in _document("kmd")["fields"]}
+    shipped = gfx950_shipped
+    defaults = {
+        f["name"]: f.get("default_value") for f in document("gfx950", "kmd")["fields"]
+    }
     # Every helper states each lookup field itself (fold_k32 included, 0 for the
     # transpose), so the lookup does not depend on KMD defaults being applied.
     for _, kernel in shipped.values():
@@ -371,15 +473,15 @@ def _specs_of(shipped):
     ]
 
 
-def test_the_census_names_every_pack_and_kernel(shipped):
-    text = _CENSUS.read_text()
+def test_the_census_names_every_pack_and_kernel(arch, shipped):
+    text = census(arch).read_text()
     for _, kernel in shipped.values():
         assert f'"{kernel["name"]}"' in text
-    for kdp in (_SHIPPED_DIR / "artifacts").glob("*.kdp.json"):
+    for kdp in (shipped_dir(arch) / "artifacts").glob("*.kdp.json"):
         assert f'"{json.loads(kdp.read_text())["name"]}"' in text
-    assert '"hipkernel:Gfx950ConvDgradAot"' in text
-    assert "hipkernel.gfx950_conv_dgrad_aot.score" in text
-    assert f"knobs.size(), {len(tool.engine_knobs())}U" in text
+    assert f'"{tool.product_engine(arch)}"' in text
+    assert f"hipkernel.{slug(arch)}.score" in text
+    assert f"knobs.size(), {len(tool.engine_knobs(arch))}U" in text
 
 
 @pytest.mark.parametrize(
@@ -387,7 +489,7 @@ def test_the_census_names_every_pack_and_kernel(shipped):
     [
         ({"direction": "fwd"}, "dgrad implicit-GEMM"),
         ({"direction": "wgrad"}, "dgrad implicit-GEMM"),
-        ({"arch": "gfx942"}, "dgrad implicit-GEMM"),
+        ({"arch": "gfx942"}, "no packaged dgrad engine"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
         # Padding stays runtime-only: the tilde records carry it, and nothing bakes it.
@@ -397,9 +499,9 @@ def test_the_census_names_every_pack_and_kernel(shipped):
     ],
 )
 def test_unsupported_implicit_identities_are_named_with_their_reason(
-    identities, change, reason
+    gfx950_identities, change, reason
 ):
-    identity = copy.deepcopy(identities[0])
+    identity = copy.deepcopy(gfx950_identities[0])
     assert identity["algorithm"] == "implicit_gemm"
     identity.update(change)
     spec, why = tool.instance_spec(identity)
@@ -479,19 +581,23 @@ def test_an_implicit_identity_without_baked_geometry_stays_runtime(
     ],
 )
 def test_unsupported_direct_identities_are_named_with_their_reason(
-    identities, algorithm, change, reason
+    gfx950_identities, algorithm, change, reason
 ):
-    identity = copy.deepcopy(next(i for i in identities if i["algorithm"] == algorithm))
+    identity = copy.deepcopy(
+        next(i for i in gfx950_identities if i["algorithm"] == algorithm)
+    )
     identity.update(change)
     spec, why = tool.instance_spec(identity)
     assert spec is None and reason in why, why
 
 
-def test_a_variant_may_state_only_the_knobs_its_mode_uses(identities):
+def test_a_variant_may_state_only_the_knobs_its_mode_uses(gfx950_identities):
     """A variant's knobs are what it may set, not what it must: the windowed
     depthwise has a dot2 and an MFMA mode taking different ones, and the sweep
     states only the mode's. An omitted knob keeps rocKE's own default."""
-    windowed = [i for i in identities if i["algorithm"] == "direct_depthwise_dgrad_win"]
+    windowed = [
+        i for i in gfx950_identities if i["algorithm"] == "direct_depthwise_dgrad_win"
+    ]
     assert windowed, "the catalog must carry the windowed depthwise pipeline"
 
     modes = {("mfma" in i["knobs"], "dot2" in i["knobs"]) for i in windowed}
@@ -501,13 +607,17 @@ def test_a_variant_may_state_only_the_knobs_its_mode_uses(identities):
         assert spec is not None, why
 
 
-def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, capsys):
+def test_main_dedups_and_refuses_unsupported_unless_asked(
+    tmp_path, arch, identities, capsys
+):
     unsupported = dict(identities[0], split_k=2)
     entries = [identities[0], {"identity": identities[0]}, unsupported]
     instances = tmp_path / "instances.json"
     instances.write_text(json.dumps(entries))
     out = tmp_path / "out.yaml"
     argv = [
+        "--arch",
+        arch,
         "--rocke-root",
         str(_ROCKE),
         "--instances",
@@ -522,24 +632,64 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, 
     assert "1 instance(s)" in capsys.readouterr().out
 
 
-def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(tmp_path):
-    shipped = sorted((_SHIPPED_DIR / "artifacts").glob("*_direct.kdp.json"))[0]
-    document = json.loads(shipped.read_text())
-    for kernel in document["kernelDescriptors"]:
+def test_main_refuses_an_arch_the_adapter_does_not_package(capsys):
+    with pytest.raises(SystemExit):
+        tool.main(["--arch", "gfx942", "--stabilize-ids", "x.kdp.json"])
+    assert "invalid choice: 'gfx942'" in capsys.readouterr().err
+
+
+def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(
+    tmp_path, arch, capsys
+):
+    shipped = sorted((shipped_dir(arch) / "artifacts").glob("*_direct.kdp.json"))[0]
+    scrambled = json.loads(shipped.read_text())
+    for kernel in scrambled["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
     kdp = tmp_path / "x.kdp.json"
-    kdp.write_text(json.dumps(document, indent=2) + "\n")
-    assert tool.stabilize_ids(kdp) == len(document["kernelDescriptors"])
+    kdp.write_text(json.dumps(scrambled, indent=2) + "\n")
+    assert tool.stabilize_ids(kdp, arch=arch) == len(scrambled["kernelDescriptors"])
     assert json.loads(kdp.read_text()) == json.loads(shipped.read_text())
+    # The command line does the same, reading the engine from the in-repo rocKE.
+    kdp.write_text(json.dumps(scrambled, indent=2) + "\n")
+    assert tool.main(["--arch", arch, "--stabilize-ids", str(kdp)]) == 0
+    assert json.loads(kdp.read_text()) == json.loads(shipped.read_text())
+    capsys.readouterr()
     # Another product engine (the forward one) would derive other ids.
-    for kernel in document["kernelDescriptors"]:
+    for kernel in scrambled["kernelDescriptors"]:
         assert conv_aot_common.kernel_uuid(
             kernel["metadata"]["instance_id"],
-            tool.PRODUCT_ENGINE,
+            tool.product_engine(arch),
             "hipkernel:Gfx950ConvFwdAot",
-        ) != tool.kernel_uuid(kernel["metadata"]["instance_id"])
+        ) != tool.kernel_uuid(kernel["metadata"]["instance_id"], arch=arch)
 
 
 def test_dumped_config_loads_back(specs):
     text = tool.dump_config(tool.build_config(specs))
     assert yaml.safe_load(text) == tool.build_config(specs)
+
+
+class _Bound(Exception):
+    """Raised by a stand-in _bind_rocke to stop a tool where it binds rocKE."""
+
+
+def _bound_root(monkeypatch, module, attribute, argv, binder=None):
+    """The rocKE root ``module.main(argv)`` binds, by way of ``<attribute>`` of
+    ``binder`` (default: ``module``)."""
+
+    def bind(root):
+        raise _Bound(root)
+
+    monkeypatch.setattr(binder or module, attribute, bind)
+    with pytest.raises(_Bound) as bound:
+        module.main(argv)
+    return Path(bound.value.args[0])
+
+
+def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatch):
+    assert tool.DEFAULT_ROCKE_ROOT.resolve() == _ROCKE.resolve()
+    argv = ["--instances", str(tmp_path / "x.json"), "--output", str(tmp_path / "o")]
+    root = _bound_root(monkeypatch, tool, "_bind_rocke", argv)
+    assert root.resolve() == _ROCKE.resolve()
+    # An explicit root wins.
+    other = _bound_root(monkeypatch, tool, "_bind_rocke", argv + ["--rocke-root", "/x"])
+    assert other == Path("/x")
