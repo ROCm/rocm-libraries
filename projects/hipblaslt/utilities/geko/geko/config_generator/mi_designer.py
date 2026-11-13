@@ -190,8 +190,9 @@ class MIDesign:
           generate = (f"python3 scripts/generate_buildable_mis.py --arch {library_logic_architecture(arch)} "
                       f"--types {gt.data_type}:{gt.dest_data_type}:{gt.compute_data_type} --layouts {layout}")
           if gemm_name != gt.gemm_name:
-              logger.warning(" Buildable-MI lists do not cover MX formats (%s on %s): using every candidate MI.",
-                             gemm_name, arch)
+              logger.warning(" No buildable-MI list applies to %s on %s: lists are generated per GEMM type (%s), "
+                             "and this GEMM's name adds more (e.g. an MX format): using every candidate MI.",
+                             gemm_name, arch, gt.gemm_name)
           elif not path.exists():
               logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
                              "TensileLite cannot build. Generate it (CPU only) with: %s", gemm_name, arch, generate)
