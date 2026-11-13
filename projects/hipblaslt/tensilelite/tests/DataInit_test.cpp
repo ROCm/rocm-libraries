@@ -4,6 +4,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationHelpers.hpp"
+#include "DeviceTestUtils.hpp"
 #include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -461,6 +462,7 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
 {
+    SKIP_IF_NO_DEVICE();
     hipDeviceProp_t prop{};
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
     if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
@@ -485,6 +487,7 @@ TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeFor
 
 TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
 {
+    SKIP_IF_NO_DEVICE();
     hipDeviceProp_t prop{};
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
     if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
@@ -1110,6 +1113,7 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
 // =============================================================================
 TEST(CopyTensorVoid, CopiesSource)
 {
+    SKIP_IF_NO_DEVICE();
     TensorDescriptor   desc("t", rocisa::DataType::Float, {3, 2});
     std::vector<float> src(desc.totalAllocatedElements());
     std::iota(src.begin(), src.end(), 1.0f);

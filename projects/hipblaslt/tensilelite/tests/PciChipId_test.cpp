@@ -17,6 +17,7 @@
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include "DeviceTestUtils.hpp"
 #include "FallbackTestUtils.hpp"
 
 using namespace TensileLite;
@@ -26,10 +27,7 @@ using namespace TensileLite::testing;
 // a known chip ID.
 TEST(PciChipIdTest, QueryDeviceChipId)
 {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    ASSERT_EQ(err, hipSuccess) << "Failed to get device count";
-    ASSERT_GT(deviceCount, 0) << "No HIP devices available";
+    SKIP_IF_NO_DEVICE();
 
     hipDeviceProp_t prop;
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess) << "Failed to get device properties";
@@ -39,7 +37,7 @@ TEST(PciChipIdTest, QueryDeviceChipId)
 
     // Query PCI Chip ID using hipDeviceGetAttribute directly
     int pciChipId = 0;
-    err = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, 0);
+    hipError_t err = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, 0);
     ASSERT_EQ(err, hipSuccess) << "Failed to get PCI Chip ID attribute";
 
     auto isKnownChipId = ChipIdRegistry::isKnownChipId(pciChipId);
@@ -50,10 +48,7 @@ TEST(PciChipIdTest, QueryDeviceChipId)
 // and matches a known chip ID.
 TEST(PciChipIdTest, HipHardwarePopulatesPciChipId)
 {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    ASSERT_EQ(err, hipSuccess) << "Failed to get device count";
-    ASSERT_GT(deviceCount, 0) << "No HIP devices available";
+    SKIP_IF_NO_DEVICE();
 
     // Get the current device using Tensile's hip::GetCurrentDevice()
     auto hardware = hip::GetCurrentDevice();
@@ -99,10 +94,7 @@ TEST(PciChipIdTest, HipHardwarePopulatesPciChipId)
 // Verify PciChipIdEqual predicate matches the correct device
 TEST(PciChipIdTest, PciChipIdEqualPredicate)
 {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    ASSERT_EQ(err, hipSuccess) << "Failed to get device count";
-    ASSERT_GT(deviceCount, 0) << "No HIP devices available";
+    SKIP_IF_NO_DEVICE();
 
     // Get the current device
     auto hardware = hip::GetCurrentDevice();
@@ -175,10 +167,7 @@ TEST(PciChipIdTest, OrPciChipIdPredicateExactForAllTargets)
 // Test: Hardware selection with PciChipIdEqual in a library hierarchy
 TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
 {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    ASSERT_EQ(err, hipSuccess) << "Failed to get device count";
-    ASSERT_GT(deviceCount, 0) << "No HIP devices available";
+    SKIP_IF_NO_DEVICE();
 
     // Get the current device
     auto hardware = hip::GetCurrentDevice();
@@ -275,10 +264,7 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
 // Test: findAllSolutions with hardware containing pciChipId
 TEST(PciChipIdTest, FindAllSolutionsWithPciChipId)
 {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    ASSERT_EQ(err, hipSuccess);
-    ASSERT_GT(deviceCount, 0);
+    SKIP_IF_NO_DEVICE();
 
     auto hardware = hip::GetCurrentDevice();
     ASSERT_NE(hardware, nullptr);

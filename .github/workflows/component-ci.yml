@@ -25,6 +25,8 @@ jobs:
       geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
+      tensilelite-unit: ${{ steps.configure.outputs.tensilelite_unit }}
+      tensilelite-gtest: ${{ steps.configure.outputs.tensilelite_gtest }}
       logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
       hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
       docker-image: ${{ steps.env.outputs.docker-image }}
@@ -93,6 +95,24 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  tensilelite-unit:
+    name: "TensileLite unit"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-unit == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-unit.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
+  tensilelite-gtest:
+    name: "TensileLite gtest"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-gtest == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-gtest.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   logic-corpus:
     name: "hipBLASLt logic corpus"
     needs: changes
@@ -114,6 +134,8 @@ jobs:
       - geko
       - miopen
       - tensilelite-coverage
+      - tensilelite-unit
+      - tensilelite-gtest
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
     runs-on: ubuntu-24.04

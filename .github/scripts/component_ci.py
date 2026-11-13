@@ -7,6 +7,8 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
+  - tensilelite_unit=true/false
+  - tensilelite_gtest=true/false
   - hipblaslt_logic_corpus=true/false
   - hipblaslt_rocjitsu_scripts=true/false
 
@@ -46,6 +48,24 @@ COMPONENTS = {
     "tensilelite_coverage": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
+    ],
+    "tensilelite_unit": [
+        "projects/hipblaslt/tensilelite/**",
+        # rocisa, which the unit tests build, includes these.
+        "shared/origami/**",
+        "shared/stinkytofu/**",
+        "cmake/**",
+        ".github/workflows/component-ci-tensilelite-unit.yml",
+    ],
+    "tensilelite_gtest": [
+        "projects/hipblaslt/tensilelite/**",
+        # Built into tensilelite-tests (see the workflow's sparse checkout).
+        "shared/origami/**",
+        "shared/rocroller/**",
+        "shared/mxdatagenerator/**",
+        "shared/stinkytofu/**",
+        "cmake/**",
+        ".github/workflows/component-ci-tensilelite-gtest.yml",
     ],
     # The logic corpus is tuning data outside tensilelite/, so a change to it
     # alone triggers no TensileLite lane. This one validates the whole corpus

@@ -571,6 +571,13 @@ gfx950 and why it takes hours rather than minutes. It reports a check, but that 
 required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
 than the commit you are looking at.
 
+**The C++ gtest suite has a CPU-only lane.** `Component CI: TensileLite gtest`
+([`component-ci-tensilelite-gtest.yml`](../../../.github/workflows/component-ci-tensilelite-gtest.yml))
+builds `tensilelite-tests` ([`tests/`](tests/)) and runs `ctest --no-tests=error`, gating through the
+required `Component CI Summary`. Tests that need a HIP device call `SKIP_IF_NO_DEVICE()`
+([`tests/include/DeviceTestUtils.hpp`](tests/include/DeviceTestUtils.hpp)) and skip there; they run on a
+GPU in TheRock's `standard` tier.
+
 ### How Multi-Arch CI decides whether TensileLite runs at all
 
 The narrowing conditions above are specific to Math CI's `preliminary`. TheRock/GitHub Actions'
@@ -619,13 +626,14 @@ change; see the corrected rows in Known Risks and Gaps below.
 ### Where these tests actually run
 
 The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six
-thousand tests) executes in four separate CI lanes. They are easy to confuse with each other, and
+thousand tests) executes in five separate CI lanes. They are easy to confuse with each other, and
 with three adjacent lanes that sound like them but run none of these tests, so the whole set is worth
 laying out once.
 
 | Lane | Where defined | Hardware | Gates? |
 | --- | --- | --- | --- |
 | `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | **Yes**, via the required `Component CI Summary` |
+| `Component CI: TensileLite unit` | [`component-ci-tensilelite-unit.yml`](../../../.github/workflows/component-ci-tensilelite-unit.yml) (`tox -e unit-host`: tests not marked `gpu`) | CPU only | **Yes**, via the required `Component CI Summary` |
 | `preliminary` | Math CI (internal) | gfx12, gfx90a, gfx942, gfx950 | **Yes**, via the required `Math CI Summary` |
 | TheRock `Test tensilelite` | [`pytest_runner.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/pytest_runner.py) in TheRock, driven by [`test_categories.yaml`](test_categories.yaml) | GPU runner, Linux | **Yes**, via the required `Multi-Arch CI Summary` |
 | `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
@@ -640,30 +648,30 @@ backwards in review:
 
 **The tests gate, and so does the coverage floor.** All three required checks (`Math CI Summary`
 through `preliminary`, `Multi-Arch CI Summary` through the TensileLite job, and
-`Component CI Summary` through the coverage lane) execute the unit and characterization suites, so
+`Component CI Summary` through the coverage and unit lanes) execute the unit and characterization suites, so
 a broken test blocks a merge. The coverage lane also runs the whole-project floor and the per-file
 ratchet, so a coverage regression in a pull request that touches `tensilelite/` blocks a merge too.
 What stays advisory is the characterization-versus-unit split card and the codecov numbers.
 
-**Three of the four lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
+**Three of the five lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
 is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
 `-m common` GEMM stage and the unit tests share the node because they run in the same job.
 `tensilelite-unit-codecov` needs gfx950 for its C++ half only; the Python coverage run is along for
 the ride, which is most of why that job takes about two and a half hours where the CPU-only GitHub
 Actions lane takes seven minutes.
 
-**Every one of these lanes is fail-fast, and that erases signal.** In each case one stage runs first
+**Every multi-stage lane here is fail-fast, and that erases signal.** In each case one stage runs first
 and everything after it is conditional on it passing: the two coverage lanes through the ordering of
 tox `commands`, `preliminary` through an explicit exit-code guard between its two stages (see
 [Pre-submit / CI Gates](#pre-submit--ci-gates) above for which stage now runs first), TheRock's
 through plain sequential ordering. One early failure means you get no information at all from the
 stages behind it, which is why a red run so often says less than it appears to.
 
-**The goldens are asserted in all four lanes.** Every tox environment involved inherits syrupy from
+**The goldens are asserted in all five lanes.** Every tox environment involved inherits syrupy from
 the base `[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
 [`requirements-test.txt`](requirements-test.txt)
 ([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
-[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Three of those lanes gate, so a stale
+[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Four of those lanes gate, so a stale
 golden fails a required check. The CPU-only GitHub Actions lane is fast enough that it is usually
 where a stale golden surfaces first.
 

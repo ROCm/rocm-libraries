@@ -6,6 +6,8 @@
 // and the reloaded library must hold the same solutions and tree and select
 // the same solutions.
 
+#include "DeviceTestUtils.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -650,6 +652,8 @@ TEST(MessagePackWritingTest, FixtureRoundTripIsStable)
     EXPECT_NE(row.find("Problem[EqualityMatching"), std::string::npos) << row;
     EXPECT_NE(row.find("Equality)["), std::string::npos) << row;
 
+    // Selection evaluates WorkgroupMappingXCCCheck, which queries the current device.
+    SKIP_IF_NO_DEVICE();
     auto hardware = mi300();
     int  selected = 0;
     for(size_t n : {16, 2048, 8192})
