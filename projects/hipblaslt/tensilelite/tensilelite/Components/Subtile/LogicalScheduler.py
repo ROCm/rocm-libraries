@@ -5812,10 +5812,8 @@ class LogicalScheduler:
         if label.startswith("NGLL") or label.startswith("NLL"):
             module = guardExitOverwriteReread(
                 module, getattr(self, "_earlyOverwriteVgprs", ()))
-        if (label.startswith("MAINLOOP")
-                and self.config.uniformPgrEpoch
-                and self.config.dualPeriodScale):
-            dropDominatedLgkmWaits(module)
+        # The deferral removes a drain and moves reads behind it, so it runs
+        # before dropDominatedLgkmWaits proves drops against the final order.
         if self.halfDisjoint and label.startswith("MAINLOOP"):
             balanced_reads = [
                 inst
@@ -5830,6 +5828,11 @@ class LogicalScheduler:
                 raise RuntimeError(
                     f"{label}: the balanced current-cell reads could not leave "
                     "partition 0's prefix (deferBalancedCurrentCellWait refused)")
+        if (label.startswith("MAINLOOP")
+                and self.config.uniformPgrEpoch
+                and self.config.dualPeriodScale):
+            dropDominatedLgkmWaits(module)
+        if self.halfDisjoint and label.startswith("MAINLOOP"):
             issueSaluFirst(module)
             keepValuBehindLeader(module)
             # C1 still places scale refreshes in C0, so C0 is final only here.
