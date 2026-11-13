@@ -301,13 +301,13 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPool3dWritesInt32Indices)
     // the 4x4x4 input: d * 16 + h * 4 + w.
     std::vector<float> x(64, 0.0f);
     float next = 10.0f;
-    for(int d = 1; d <= 2; ++d)
+    for(size_t d = 1; d <= 2; ++d)
     {
-        for(int h = 1; h <= 2; ++h)
+        for(size_t h = 1; h <= 2; ++h)
         {
-            for(int w = 1; w <= 2; ++w)
+            for(size_t w = 1; w <= 2; ++w)
             {
-                x.at(static_cast<size_t>(d * 16 + h * 4 + w)) = next++;
+                x.at(d * 16 + h * 4 + w) = next++;
             }
         }
     }
