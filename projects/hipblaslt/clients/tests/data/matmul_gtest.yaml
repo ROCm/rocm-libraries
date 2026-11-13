@@ -3150,9 +3150,10 @@ Tests:
 # swizzle_b is set, to HIPBLASLT_ORDER_COL256_R128_EXT and its 128x4 scale shuffle, at
 # their registered sizes (one kernel per K and B order). They need beta == 0, which the C
 # heuristic never assumes, so the ext API only. Their logic is registered for chips 0x75a0
-# and 0x75a3: on either a missing solution fails, and other parts decline. The K = 131584
-# entries are nightly: their CPU reference is about 2.2e12 multiply-adds.
-# RowUniformityMXFp6_smoke and RowUniformityMXFp6_pre_checkin cover both K before check-in.
+# and 0x75a3: on either a missing solution fails, and other parts decline. The K = 65536
+# entries are pre_checkin. The K = 131584 entries are nightly: their CPU reference is about
+# 2.2e12 multiply-adds over HOSTMEM of host memory. RowUniformityMXFp6_smoke runs every
+# kernel at the quick tier.
 - name: matmul_mx_fp6_tile128x4
   category: pre_checkin
   function:
@@ -3219,7 +3220,8 @@ Tests:
   gpu_arch: '950'
 
 # rand_int E3M2 data reaches |D| ~ 3.5e7 > 2^24 at this K, where fp32 sums depend on
-# their order, so the exact unit_check against the fp32 CPU reference does not apply.
+# their order, so the exact unit_check against the fp32 CPU reference does not apply;
+# norm_check and the elementwise allclose_check bound the error instead.
 - name: matmul_mx_bf6_tile128x4_k131584
   category: nightly
   function:
@@ -3237,6 +3239,7 @@ Tests:
   initialization: trig_float
   unit_check: 0
   norm_check: 1
+  allclose_check: 1
   allow_no_solution: 1
   require_solution_chip_ids: [0x75a0, 0x75a3]
   gpu_arch: '950'

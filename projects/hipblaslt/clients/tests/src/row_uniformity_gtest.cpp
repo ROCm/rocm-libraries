@@ -1191,17 +1191,7 @@ namespace
     constexpr const char* kMXFp6ChipSkip
         = "The MXFP6 128x4 kernels are registered for gfx950 chips 0x75a0 and 0x75a3 only";
 
-    class RowUniformityMXFp6 : public ::testing::TestWithParam<MXFp6Case>
-    {
-    protected:
-        void checkDefaultPick();
-    };
-
-    class RowUniformityMXFp6_smoke : public RowUniformityMXFp6
-    {
-    };
-
-    class RowUniformityMXFp6_pre_checkin : public RowUniformityMXFp6
+    class RowUniformityMXFp6_smoke : public ::testing::TestWithParam<MXFp6Case>
     {
     };
 
@@ -1233,7 +1223,7 @@ namespace
     // A second run on the same data lowers those two blocks' scales into the small
     // range. Every partial sum is then exact in fp32 in any order, so sampled D must
     // equal the exact dot product rounded to bf16.
-    void RowUniformityMXFp6::checkDefaultPick()
+    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
     {
         const MXFp6Case&  c       = GetParam();
         const bool        e3m2    = c.type == HIP_R_6F_E3M2;
@@ -1602,33 +1592,15 @@ namespace
         EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
     }
 
-    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
-    {
-        checkDefaultPick();
-    }
-
-    TEST_P(RowUniformityMXFp6_pre_checkin, DefaultPickIsExactAndRowUniform)
-    {
-        checkDefaultPick();
-    }
-
-    // One E2M3 case per B order in the quick tier, so every pull request on a registered
-    // chip runs a kernel of each order; the other cases run before check-in.
+    // Every kernel in the quick tier, so every pull request on a registered chip runs
+    // each of them.
     INSTANTIATE_TEST_SUITE_P(
         RowUniformity,
         RowUniformityMXFp6_smoke,
         ::testing::Values(
             MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{
-                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false}),
-        [](const ::testing::TestParamInfo<MXFp6Case>& info) {
-            return std::string(info.param.name);
-        });
-
-    INSTANTIATE_TEST_SUITE_P(
-        RowUniformity,
-        RowUniformityMXFp6_pre_checkin,
-        ::testing::Values(
+                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
             MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
             MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true}),
@@ -1647,7 +1619,7 @@ namespace
         bool        hasKernel;
     };
 
-    class RowUniformityMXFp6Selection_pre_checkin
+    class RowUniformityMXFp6Selection_smoke
         : public ::testing::TestWithParam<MXFp6SelectionCase>
     {
     };
@@ -1655,7 +1627,7 @@ namespace
     // The kernels do not bound their loads and stores, so only their predicates keep
     // another problem away from them: a problem one predicate rejects gets no solution.
     // Nothing is launched.
-    TEST_P(RowUniformityMXFp6Selection_pre_checkin, OnlyRegisteredProblemsHaveASolution)
+    TEST_P(RowUniformityMXFp6Selection_smoke, OnlyRegisteredProblemsHaveASolution)
     {
         const MXFp6SelectionCase& c = GetParam();
         constexpr int64_t         m = 4096;
@@ -1730,7 +1702,7 @@ namespace
 
     INSTANTIATE_TEST_SUITE_P(
         RowUniformity,
-        RowUniformityMXFp6Selection_pre_checkin,
+        RowUniformityMXFp6Selection_smoke,
         ::testing::Values(
             MXFp6SelectionCase{"E2M3_K65536", HIP_R_6F_E2M3, 65536, true, 1.0f, 0.0f, true},
             MXFp6SelectionCase{"E2M3_K131072", HIP_R_6F_E2M3, 131072, true, 1.0f, 0.0f, false},
@@ -1748,7 +1720,7 @@ namespace
     // The algo of the registered E2M3 kernel at K = 65536, reused for a problem one of
     // its predicates rejects (another K, alpha != 1), is refused by the ext and the C
     // API before anything launches.
-    class RowUniformityMXFp6AlgoReuse_pre_checkin : public ::testing::Test
+    class RowUniformityMXFp6AlgoReuse_smoke : public ::testing::Test
     {
     protected:
         static constexpr int64_t m           = 4096;
@@ -1935,7 +1907,7 @@ namespace
         }
     };
 
-    TEST_F(RowUniformityMXFp6AlgoReuse_pre_checkin, ExtApiRefusesAlgoForAnotherProblem)
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, ExtApiRefusesAlgoForAnotherProblem)
     {
         const hipblasLtMatmulAlgo_t algo = registeredAlgo();
         if(HasFailure())
@@ -1954,7 +1926,7 @@ namespace
         EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
-    TEST_F(RowUniformityMXFp6AlgoReuse_pre_checkin, CApiRefusesAlgoForAnotherProblem)
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, CApiRefusesAlgoForAnotherProblem)
     {
         const hipblasLtMatmulAlgo_t algo = registeredAlgo();
         if(HasFailure())
