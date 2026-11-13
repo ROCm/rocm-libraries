@@ -255,10 +255,13 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
         };
         static_assert(TN % VL == 0 && KA % VL == 0, "rows pre-pass vectors");
         constexpr int UPT = TILE / VL; // gathers per tile
-        for(int t0 = static_cast<int>(blockIdx.x) * TB; t0 < tiles;
-            t0 += static_cast<int>(gridDim.x) * TB)
+        // Tiles per block step: up to TB, fewer when the grid has a block for fewer tiles (small
+        // filters keep one tile per block, so every unit gets work).
+        const int grid = static_cast<int>(gridDim.x);
+        const int tbr = (tiles + grid - 1) / grid < TB ? (tiles + grid - 1) / grid : TB;
+        for(int t0 = static_cast<int>(blockIdx.x) * tbr; t0 < tiles; t0 += grid * tbr)
         {
-            const int nt = tiles - t0 < TB ? tiles - t0 : TB;
+            const int nt = tiles - t0 < tbr ? tiles - t0 : tbr;
             // All of a thread's gathers (PT per pass at the 256-thread block size) go out before
             // its LDS writes.
             constexpr int PT = (TB * UPT + 255) / 256;
