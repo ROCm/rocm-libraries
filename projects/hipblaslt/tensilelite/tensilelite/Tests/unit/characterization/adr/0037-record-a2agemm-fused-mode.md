@@ -1,4 +1,4 @@
-# ADR 0036: Record the A2AGemm fused all-to-all mode
+# ADR 0037: Record the A2AGemm fused all-to-all mode
 
 Status:  Accepted
 Defect:  none — behavior is intended

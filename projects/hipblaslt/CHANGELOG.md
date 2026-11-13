@@ -14,6 +14,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 * `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A, and optionally B, is pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both scale modes are set together with the order on A, with `opA = T` and `opB = N`; B uses the same order or `HIPBLASLT_ORDER_COL`.
 * rocKE MXFP6 GEMM kernels for that scale mode and order, registered for gfx950 PCI chip IDs `0x75a0` and `0x75a3`: E2M3 and E3M2, TN, `m = n = 4096` with `K = 65536` or `131584`, bf16 C and D, alpha `1` and beta `0`; with B in `HIPBLASLT_ORDER_COL`, E2M3 at `K = 65536` only. `hipblasLtMatmulAlgoGetHeuristic` does not return them; the extension API's heuristic does, and `hipblasLtMatmul` runs the algo it returns.
+* `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (TensileLite only, bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
+
+### Changed
+
+* The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
+* `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 
 ### Resolved issues
 
@@ -23,7 +29,6 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (TensileLite only, bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
 * `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
   dirty-buffer check for the handle's inter-workgroup flag buffers, which their
   kernels must leave at zero (`1`, `on` or `true` to enable; anything else
@@ -50,7 +55,6 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Non-grouped `hipblasLtMatmul` calls using `HIPBLASLT_POINTER_MODE_DEVICE` now return `HIPBLAS_STATUS_INTERNAL_ERROR` instead of proceeding without support for device alpha and device beta.
 * Uniform summation order is temporarily off by default on RDNA (gfx11, gfx120x), where it disables StaggerU and slows some GEMMs. It stays on by default elsewhere, and explicit settings still override it.
-* The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A`, which takes `Disabled` (default), `GemmA2A` (the former `FusedGemmA2A: 1`) or `A2AGemm`. Device libraries built before this change fail to load (hipBLASLt reports `Could not load <path>`; `TENSILE_DB=0x1000` prints the cause) and must be rebuilt.
 * Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
 * A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
 * Extension API `initialize` compares against the size set with `setMaxWorkspaceBytes` on the `Gemm` or `GroupedGemm` instance, which defaults to 0. A caller that passes a large enough buffer without setting it is now rejected with `HIPBLAS_STATUS_INVALID_VALUE` for solutions with a fixed workspace requirement, such as GSU. Stream-K and zero-workspace solutions are unaffected.
