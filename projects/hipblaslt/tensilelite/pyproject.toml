@@ -81,13 +81,9 @@ dependencies = [
     "ujson",
     "orjson",
     "yappi",
-    "setuptools",
-    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
-    "cmake",
-    "invoke",
-    "filelock",
-    "numpy",
-    "hip-python",
+    "filelock>=3.0.0",
+    "numpy>=1.26.0",
+    "hip-python; sys_platform != 'win32'",
 ]
 
 [project.scripts]
@@ -99,15 +95,45 @@ TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
 TensileRetuneLibrary = "tensilelite.retune_library:main"
 
 [dependency-groups]
-dev = [
-    "rocisa",
+test = [
     "pytest>=5.4.1",
+    "pytest-timeout",
     "pytest-xdist>=3.2",
-    "pytest-cov",
     "syrupy",
-    "filelock",
+]
+# Tools for source linting, security checks, and formatting.
+lint = ["flake8", "bandit", "black", "isort"]
+# Tools for building the core Python package and native extension.
+build = [
+    "setuptools",
+    "scikit-build-core>=1.0",
+    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
+    "cmake",
+    # Source builds use Invoke's rocisa and build-client tasks.
     "invoke",
+]
+# Minimal tools for inspecting coverage reports and enforcing coverage floors.
+coverage = ["coverage[toml]>=7.0.0"]
+# Tools that launch tox.
+tox = ["tox>=4.28"]
+# Full contributor environment for core builds, tests, linting, formatting,
+# and coverage; selected by plain uv sync.
+dev = [
+    { include-group = "test" },
+    { include-group = "build" },
+    { include-group = "coverage" },
+    { include-group = "lint" },
+    { include-group = "tox" },
+    # Install local rocisa for source development and tests. Native builds and
+    # prebuilt test artifacts supply it for the other requirements profiles.
+    "rocisa",
+    "ninja",
+    "pytest-cov>=4.0.0",
+    "lcov-cobertura",
+    "pycobertura",
     "pre-commit",
+    "mutmut>=3.6",
+    "memory-profiler",
 ]
 
 [build-system]
