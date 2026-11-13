@@ -1,9 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// In-tree tests always track the current experimental API version; external
-// consumers must pin the literal version they have reviewed instead.
-#define HIPBLASLT_ENABLE_EXPERIMENTAL_API HIPBLASLT_EXPERIMENTAL_API_VERSION
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
 #include <hipblaslt/hipblaslt-experimental.h>
 
 #include <gtest/gtest.h>
@@ -18,9 +16,19 @@ namespace
                       && HIPBLASLT_EXPERIMENTAL_ENUM_BIT <= std::numeric_limits<int>::max(),
                   "HIPBLASLT_EXPERIMENTAL_ENUM_BIT must fit in a positive int");
 
-    TEST(ExperimentalApiSmoke, RuntimeVersionMatchesHeader)
+    TEST(ExperimentalApiSmoke, RuntimeRevisionMatchesHeader)
     {
-        EXPECT_EQ(hipblasLtExperimentalGetApiVersion(), HIPBLASLT_EXPERIMENTAL_API_VERSION);
+        // In-tree tests always track the current revision; consumers compare against the
+        // literal revision they wrote their code for.
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("DEMO"), HIPBLASLT_EXPERIMENTAL_DEMO);
+    }
+
+    TEST(ExperimentalApiSmoke, UnknownFeatureHasRevisionZero)
+    {
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("NO_SUCH_FEATURE"), 0);
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("demo"), 0);
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision(""), 0);
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision(nullptr), 0);
     }
 
     TEST(ExperimentalApiSmoke, StableEpiloguesDoNotUseExperimentalBit)

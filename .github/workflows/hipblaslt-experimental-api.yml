@@ -1,7 +1,8 @@
 name: hipBLASLt Experimental API
 
-# Fails a PR that breaks the hipBLASLt experimental API without bumping
-# HIPBLASLT_EXPERIMENTAL_API_VERSION, and tests the feature-deadline registry.
+# Fails a PR that changes a hipBLASLt experimental function or enumerator in place, or
+# breaks an experimental feature without bumping its revision macro, and tests the
+# feature-deadline registry.
 # Policy: projects/hipblaslt/docs/reference/experimental-api.rst.
 
 on:
@@ -15,6 +16,7 @@ on:
       - "projects/hipblaslt/library/include/hipblaslt-experimental-features.h.in"
       - "projects/hipblaslt/library/experimental/**"
       - "projects/hipblaslt/cmake/hipblaslt_experimental.cmake"
+      - "projects/hipblaslt/cmake/rocm_feature_releases.cmake"
       - "projects/hipblaslt/clients/tests/src/experimental/**"
       - "projects/hipblaslt/tools/scripts/check_experimental_api.py"
       - "projects/hipblaslt/tools/scripts/tests/test_check_experimental_api.py"
@@ -55,6 +57,6 @@ jobs:
       - name: Test the checker and the deadline registry
         run: python3 -m pytest -v tools/scripts/tests/test_check_experimental_api.py tools/scripts/tests/test_experimental_registry.py
 
-      - name: Does this PR need an experimental API bump?
+      - name: Does this PR need an experimental revision bump?
         if: github.event_name == 'pull_request'
         run: python3 tools/scripts/check_experimental_api.py --base ${{ github.event.pull_request.base.sha }}

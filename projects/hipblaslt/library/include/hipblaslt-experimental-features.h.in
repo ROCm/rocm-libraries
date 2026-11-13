@@ -3,13 +3,13 @@
 
 // Generated from library/experimental/features.cmake; do not edit.
 //
-// Experimental features in this build (each may change or be removed in any release):
+// Experimental features in this build (each may change or be removed in any ROCm release):
 /*
 @HIPBLASLT_EXPERIMENTAL_BANNER@ */
 
 #pragma once
 
-#ifndef HIPBLASLT_EXPERIMENTAL_API_VERSION
+#ifndef HIPBLASLT_EXPERIMENTAL_ENUM_BIT
 #error "include <hipblaslt/hipblaslt-experimental.h> instead"
 #endif
 

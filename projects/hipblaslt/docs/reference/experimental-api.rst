@@ -16,43 +16,60 @@ is still being refined.
 .. warning::
 
    The experimental API is not covered by the hipBLASLt backward compatibility guarantees. Any
-   experimental function, type, or enumerator can change or be removed in any release, including
-   minor and patch releases. Do not build production integrations on the experimental API.
+   experimental function, type, or enumerator can change or be removed in any ROCm release,
+   including patch releases. Code that uses it must keep a working path without it.
 
 Enabling the experimental API
 =============================
 
 The experimental API is declared in ``hipblaslt/hipblaslt-experimental.h``, which is installed
-with every hipBLASLt build but is not included by ``hipblaslt/hipblaslt.h``. To use it, define
-``HIPBLASLT_ENABLE_EXPERIMENTAL_API`` to the experimental API version you have reviewed before
-including the header:
+with every hipBLASLt build but is not included by ``hipblaslt/hipblaslt.h``. The header declares
+nothing unless the consumer defines ``ROCM_ENABLE_EXPERIMENTAL_APIS`` to a nonzero value before
+including it. The same switch enables the experimental APIs of every ROCm library; there is no
+per-library switch.
 
 .. code-block:: c
 
-   #define HIPBLASLT_ENABLE_EXPERIMENTAL_API 1
+   #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
    #include <hipblaslt/hipblaslt-experimental.h>
 
 Alternatively, set the define from your build system, for example with CMake:
 
 .. code-block:: cmake
 
-   target_compile_definitions(my_target PRIVATE HIPBLASLT_ENABLE_EXPERIMENTAL_API=1)
+   target_compile_definitions(my_target PRIVATE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
 
-The header fails to compile if ``HIPBLASLT_ENABLE_EXPERIMENTAL_API`` is not defined, or if its
-value does not match ``HIPBLASLT_EXPERIMENTAL_API_VERSION``. The version is incremented whenever
-the experimental API changes in a way that can break existing callers, so upgrading hipBLASLt
-intentionally breaks the build of code that uses the experimental API until the changes listed in
-the CHANGELOG are reviewed and the define is updated. Additions do not increment the version.
+Defining it to ``0`` turns the experimental API off explicitly. Including the header without the
+switch is not an error, so code that checks for features (below) builds either way.
+
+Checking for a feature
+======================
+
+Each experimental feature defines a revision macro, ``HIPBLASLT_EXPERIMENTAL_<FEATURE>``, set to
+the feature's current revision. The revision starts at 1 and increases only when the feature
+changes in a way that can break existing callers. Additions don't change it.
 
 Because the shared library version does not track experimental changes, also check at runtime
-that the loaded library implements the version you compiled against:
+that the loaded library implements the revision you compiled against.
+``hipblasLtExperimentalGetFeatureRevision`` returns the loaded library's revision of a feature, or
+0 if it doesn't have the feature. Code that uses a feature should check both and fall back when
+either doesn't match:
 
 .. code-block:: c
 
-   if(hipblasLtExperimentalGetApiVersion() != HIPBLASLT_EXPERIMENTAL_API_VERSION)
-   {
-       /* Fall back to the stable API. */
-   }
+   #if defined(HIPBLASLT_EXPERIMENTAL_DEMO) && HIPBLASLT_EXPERIMENTAL_DEMO == 1
+       if(hipblasLtExperimentalGetFeatureRevision("DEMO") == 1)
+       {
+           /* Use the experimental feature. */
+       }
+       else
+   #endif
+       {
+           /* Stable path. */
+       }
+
+Code that cannot work without a feature can report an error instead of falling back. Framework
+code, which is built both with and without the switch, must keep the fallback.
 
 Experimental enumerators
 ========================
@@ -62,19 +79,26 @@ are declared in ``hipblaslt-experimental.h`` with ``HIPBLASLT_EXPERIMENTAL_ENUM_
 passed to the existing stable functions, for example ``hipblasLtMatmulDescSetAttribute``. When an
 experimental enumerator graduates, it is assigned a new value in the stable enum.
 
+Experimental enumerator values are never renumbered or reused, even after the enumerator is
+removed. ``HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER`` records the highest value ever assigned and
+only increases. A removed value is rejected with ``HIPBLAS_STATUS_INVALID_VALUE``.
+
 Lifecycle
 =========
 
-* ``HIPBLASLT_EXPERIMENTAL_API_VERSION`` is incremented by any breaking change: removing or
-  renaming a declaration, changing a signature or enumerator value, changing documented
-  behavior, or graduating a feature. Each increment is listed under an ``Experimental`` heading
-  in the CHANGELOG. Adding a feature, function, or enumerator does not increment the version.
-* An experimental feature ships in at most four hipBLASLt releases (counted in minor versions;
-  patch releases don't count). By then it either graduates to the stable API or is removed. A
-  feature can be extended by one release, once, with an approver recorded in the registry.
+* A breaking change never changes a declaration in place. A function whose signature or
+  documented behavior changes gets a new name (for example with a ``_v2`` suffix) and the old name
+  is removed, so a program built against the old revision fails to load or falls back instead of
+  calling the new code with old arguments. Each breaking change increments the feature's revision
+  and is listed under an ``Experimental`` heading in the CHANGELOG.
+* An experimental feature ships in at most four ROCm releases, counted from the release that
+  introduced it (patch releases don't count). Revision increments don't reset this. By then it
+  either graduates to the stable API or is removed. A feature can be extended by one release,
+  once, with an approver recorded in the registry.
 * At most three experimental features exist at a time.
 * When a feature graduates, the stable declaration is added under a new name and the
-  experimental declaration is removed in the same release, which increments the version.
+  experimental feature, including its revision macro, is removed in the same release. After that,
+  ``hipblasLtExperimentalGetFeatureRevision`` returns 0 for it.
 
 Adding or changing an experimental feature
 ==========================================
@@ -82,19 +106,29 @@ Adding or changing an experimental feature
 These rules are checked automatically, so they cannot be forgotten.
 
 * Each feature has its own header, ``library/include/hipblaslt/hipblaslt-experimental-<feature>.h``,
-  which ``hipblaslt-experimental.h`` includes. Enumerators must have explicit values.
+  which ``hipblaslt-experimental.h`` includes and which defines the feature's revision macro.
+  Enumerators must have explicit integer values.
 * Each feature is registered in ``library/experimental/features.cmake`` with an owner, a tracking
-  issue, the release that introduced it, and the last release that may ship it. CMake configure
-  warns in the last release and fails after it, so the version bump that starts the next release
-  cannot merge until the feature graduates, is removed, or is extended. Configure also fails if
-  a feature header is not registered or if there are too many features.
-* Each feature has contract tests in ``clients/tests/src/experimental/contract_<feature>_gtest.cpp``.
+  issue, the ROCm release that introduced it, and the last ROCm release that may ship it. Releases
+  are counted on the ordered list in ``cmake/rocm_feature_releases.cmake``, and the release being
+  built is ``HIPBLASLT_ROCM_RELEASE``. CMake configure warns in the last release and fails after
+  it, so the change that starts the next release cannot merge until the feature graduates, is
+  removed, or is extended. Configure also fails if a feature header is not registered, is
+  missing its revision macro, or if there are too many features.
+* Each feature has contract tests in ``clients/tests/src/experimental/contract_<feature>*_gtest.cpp``.
   They define the feature's promised behavior. Adding a contract test is free; changing or
   deleting one is a breaking change.
 * ``tools/scripts/check_experimental_api.py`` runs on every pull request that touches the
   experimental API. It compares the declarations and contract tests with the target branch and
-  fails if anything was removed or changed without incrementing
-  ``HIPBLASLT_EXPERIMENTAL_API_VERSION``. Run it locally with:
+  fails if:
+
+  * a function or enumerator was changed in place, an enumerator value was reused, or
+    ``HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER`` went down or is too low;
+  * a declaration or contract test was removed or changed without incrementing that feature's
+    revision;
+  * a revision went backwards, or a new feature doesn't start at revision 1 or higher.
+
+  It warns when a revision was incremented with no breaking change. Run it locally with:
 
   .. code-block:: shell
 
@@ -106,16 +140,18 @@ These rules are checked automatically, so they cannot be forgotten.
 Experimental API reference
 ==========================
 
-.. doxygendefine:: HIPBLASLT_EXPERIMENTAL_API_VERSION
-
 .. doxygendefine:: HIPBLASLT_EXPERIMENTAL_ENUM_BIT
 
-hipblasLtExperimentalGetApiVersion()
-------------------------------------
-.. doxygenfunction:: hipblasLtExperimentalGetApiVersion
+.. doxygendefine:: HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER
+
+hipblasLtExperimentalGetFeatureRevision()
+-----------------------------------------
+.. doxygenfunction:: hipblasLtExperimentalGetFeatureRevision
 
 Experimental feature DEMO
 -------------------------
+.. doxygendefine:: HIPBLASLT_EXPERIMENTAL_DEMO
+
 .. doxygenfunction:: hipblasLtExperimentalDemoAlignSize
 
 .. doxygenenum:: hipblasLtExperimentalDemoRounding_t

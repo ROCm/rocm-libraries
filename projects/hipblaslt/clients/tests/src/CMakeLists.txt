@@ -36,6 +36,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_off_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/experimental/contract_demo_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp

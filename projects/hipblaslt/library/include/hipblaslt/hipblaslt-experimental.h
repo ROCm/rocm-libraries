@@ -6,21 +6,29 @@
  *
  *  Everything declared here ships in every hipBLASLt build but is NOT covered
  *  by the stability guarantees of hipblaslt.h or hipblaslt-ext.hpp. Any
- *  declaration in this file may change or be removed in any release, including
- *  minor and patch releases.
+ *  experimental feature may change or be removed in any ROCm release.
  *
- *  This header is not included by hipblaslt.h. To use it, define
- *  ``HIPBLASLT_ENABLE_EXPERIMENTAL_API`` to the experimental API version you
- *  have reviewed, before including this header:
+ *  This header is not included by hipblaslt.h, and it declares nothing unless
+ *  the consumer defines ``ROCM_ENABLE_EXPERIMENTAL_APIS`` to 1 before including
+ *  it. The switch is ROCm-wide: it enables the experimental headers of every
+ *  ROCm library the consumer includes.
+ *
+ *  Each feature defines ``HIPBLASLT_EXPERIMENTAL_<FEATURE>`` to its revision.
+ *  Check that it has the revision your code was written for, and check the
+ *  loaded library with hipblasLtExperimentalGetFeatureRevision(); on a
+ *  mismatch, either fall back to the stable API or fail:
  *
  *  \code{.c}
- *  #define HIPBLASLT_ENABLE_EXPERIMENTAL_API 1
+ *  #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
  *  #include <hipblaslt/hipblaslt-experimental.h>
- *  \endcode
  *
- *  Compilation fails if the value does not match
- *  ``HIPBLASLT_EXPERIMENTAL_API_VERSION``, so any breaking change to the
- *  experimental surface forces every consumer to re-review and opt in again.
+ *  #if defined(HIPBLASLT_EXPERIMENTAL_DEMO) && HIPBLASLT_EXPERIMENTAL_DEMO == 1
+ *      if(hipblasLtExperimentalGetFeatureRevision("DEMO") == 1) { ... }
+ *      else { ... fallback ... }
+ *  #else
+ *      ... fallback ...
+ *  #endif
+ *  \endcode
  *
  *  \defgroup experimental_module Experimental API
  *  Unstable APIs that are shipped for evaluation and may change or be removed
@@ -31,30 +39,17 @@
 #ifndef _HIPBLASLT_EXPERIMENTAL_H_
 #define _HIPBLASLT_EXPERIMENTAL_H_
 
-/*! \ingroup experimental_module
- *  \brief Version of the experimental API surface declared in this header.
- *
- *  Incremented on every breaking change to the experimental API: removal,
- *  graduation, or a change to a signature, enum value, or documented behavior.
- *  Additions do not increment it. tools/scripts/check_experimental_api.py
- *  enforces this in CI. Unrelated to the hipBLASLt library version.
- */
-#define HIPBLASLT_EXPERIMENTAL_API_VERSION 1
+// Without the switch (or with it set to 0), this header declares nothing, so consumers can
+// include it unconditionally and their feature checks take the fallback path.
+#if defined(ROCM_ENABLE_EXPERIMENTAL_APIS) && ROCM_ENABLE_EXPERIMENTAL_APIS
 
-#ifndef HIPBLASLT_ENABLE_EXPERIMENTAL_API
-#error "hipblaslt-experimental.h: define HIPBLASLT_ENABLE_EXPERIMENTAL_API to the experimental API version you have reviewed (see HIPBLASLT_EXPERIMENTAL_API_VERSION). These APIs may change or be removed in any release."
-#elif HIPBLASLT_ENABLE_EXPERIMENTAL_API != HIPBLASLT_EXPERIMENTAL_API_VERSION
-#error "hipblaslt-experimental.h: HIPBLASLT_ENABLE_EXPERIMENTAL_API does not match HIPBLASLT_EXPERIMENTAL_API_VERSION. The experimental API has changed; review the hipBLASLt CHANGELOG and update your code and the define."
-#endif
-
-// Checked before including hipblaslt.h so a missing or stale opt-in fails fast.
 #include "hipblaslt/hipblaslt.h"
 
 /*! \ingroup experimental_module
  *  \brief Marker bit for experimental values of stable enum types.
  *
  *  Experimental enumerators for stable enums (for example, new epilogues or
- *  descriptor attributes) are declared in this header as
+ *  descriptor attributes) are declared in the feature headers as
  *  ``(EnumType)(HIPBLASLT_EXPERIMENTAL_ENUM_BIT | n)``, so they can be passed to
  *  the existing stable entry points (such as hipblasLtMatmulDescSetAttribute)
  *  without adding enumerators to hipblaslt.h. Stable enums must never use this
@@ -63,24 +58,40 @@
  */
 #define HIPBLASLT_EXPERIMENTAL_ENUM_BIT 0x40000000
 
+/*! \ingroup experimental_module
+ *  \brief Highest experimental enumerator value ever used, ignoring
+ *  HIPBLASLT_EXPERIMENTAL_ENUM_BIT.
+ *
+ *  Experimental enumerator values are never reused, so a binary built against
+ *  a retired value cannot silently get a different meaning. A new experimental
+ *  enumerator, in any experimental enum, takes a value above this mark, and
+ *  the mark is raised to match. It never goes down.
+ *  tools/scripts/check_experimental_api.py enforces this.
+ */
+#define HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*! \ingroup experimental_module
- *  \brief Returns the experimental API version implemented by the loaded
+ *  \brief Returns the revision of an experimental feature in the loaded
  *  hipBLASLt library.
  *
  *  \details
- *  The shared-library version does not protect the experimental ABI. Callers
- *  should check at runtime that this matches the
- *  ``HIPBLASLT_EXPERIMENTAL_API_VERSION`` they compiled against before calling
- *  any other experimental function.
+ *  The shared-library version does not track experimental changes. Before
+ *  calling a feature's functions, check that this returns the revision your
+ *  code was compiled against (``HIPBLASLT_EXPERIMENTAL_<FEATURE>``).
  *
- *  @retval int The experimental API version of the loaded library.
+ *  This function never changes and is never removed.
+ *
+ *  @param[in] feature The feature name without the prefix, for example "DEMO".
+ *
+ *  @retval int The feature's revision, or 0 if the library does not have the
+ *  feature or \p feature is null.
  */
 HIPBLASLT_EXPORT
-int hipblasLtExperimentalGetApiVersion(void);
+int hipblasLtExperimentalGetFeatureRevision(const char* feature);
 
 #ifdef __cplusplus
 }
@@ -88,5 +99,7 @@ int hipblasLtExperimentalGetApiVersion(void);
 
 // One header per experimental feature, generated from library/experimental/features.cmake.
 #include "hipblaslt/hipblaslt-experimental-features.h"
+
+#endif // ROCM_ENABLE_EXPERIMENTAL_APIS
 
 #endif // _HIPBLASLT_EXPERIMENTAL_H_
