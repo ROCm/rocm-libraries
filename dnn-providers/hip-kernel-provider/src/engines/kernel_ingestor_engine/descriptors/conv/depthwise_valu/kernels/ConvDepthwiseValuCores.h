@@ -20,9 +20,19 @@
 //     together; a branch per load waits for each one alone. The LDS staging loops run a
 //     compile-time trip count (the block size is the config's), fully unrolled, so a thread's
 //     halo loads issue back to back.
-//   - Index math is 32-bit when the tensors (the one-thread-per-output floors) or the images
-//     (the block-staged cores, with a 64-bit image base) have fewer than 2^31 elements, with
-//     the thread decode by unsigned 32-bit division; larger tensors take the same code in 64-bit.
+//   - Index math is 32-bit when x and y are below 2^31 bytes (and the launched threads below
+//     2^31), with the thread decode by unsigned 32-bit division; larger tensors run the same
+//     cores with 64-bit indices, clamped global loads and guarded stores.
+//   - In the 32-bit form the tile cores (microtile, fused, LDS) read x and write y through
+//     whole-tensor buffer resources (DwX, DwY) at 32-bit byte offsets: an element outside the
+//     image reads hardware zero and an output past the edge is stored past the end and dropped,
+//     so neither needs a select, a 64-bit address or a branch, and no output's FMA chain is
+//     pulled into an exec-masked store block. The floors keep global loads and guarded stores
+//     (measured slower through buffers).
+//   - The channels-last LDS stage moves 16-byte channel vectors when C and the block's
+//     channels hold whole vectors (one load per 8 f16 channels instead of 8).
+//   - Values the compiler cannot prove wave-uniform but that are (tid / BK with BK a multiple
+//     of the wave size) are made scalar with readfirstlane (dwWaveUniformDiv).
 //   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
 //
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
@@ -136,19 +146,177 @@ struct DwDivider<int>
     }
 };
 
-/// Whole-tensor 32-bit indexing: x, y and the launched threads below 2^31.
+/// The 32-bit form when x and y are below 2^31 bytes and the launched threads below 2^31.
+template <typename T>
 __device__ inline bool dwTensorsFit32(const ValuParams& p)
 {
     const long lim = 0x7fffffffL;
-    return (long)p.N * p.C * p.Di * p.Hi * p.Wi < lim && (long)p.N * p.C * p.Do * p.Ho * p.Wo < lim
-           && (long)gridDim.x * blockDim.x < lim;
+    const long eb = static_cast<long>(sizeof(T));
+    return (long)p.N * p.C * p.Di * p.Hi * p.Wi * eb < lim
+           && (long)p.N * p.C * p.Do * p.Ho * p.Wo * eb < lim
+           && (long)gridDim.x * gridDim.y * gridDim.z * blockDim.x < lim;
 }
-
-/// Per-image 32-bit indexing (64-bit image base): one image of x and of y below 2^31 elements.
+template <typename T>
 __device__ inline bool dwImagesFit32(const ValuParams& p)
 {
-    const long lim = 0x7fffffffL;
-    return (long)p.C * p.Di * p.Hi * p.Wi < lim && (long)p.C * p.Do * p.Ho * p.Wo < lim;
+    return dwTensorsFit32<T>(p);
+}
+
+#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
+#define DW_RSRC_FLAGS 0x31004000
+#elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
+#define DW_RSRC_FLAGS 0x31014000
+#else
+#define DW_RSRC_FLAGS 0x00020000
+#endif
+#define DW_OOB 0x80000000u
+/// A buffer resource over a whole tensor from its (uniform, kernarg) base.
+__device__ inline __amdgpu_buffer_rsrc_t dwRsrc(const void* base, long bytes)
+{
+    const int records = bytes < 0x7fffffffL ? static_cast<int>(bytes) : 0x7fffffff;
+    const unsigned long long a = reinterpret_cast<unsigned long long>(base);
+    const unsigned lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(a));
+    const unsigned hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(a >> 32));
+    return __builtin_amdgcn_make_buffer_rsrc(
+        reinterpret_cast<void*>((static_cast<unsigned long long>(hi) << 32) | lo),
+        static_cast<short>(0),
+        __builtin_amdgcn_readfirstlane(records),
+        DW_RSRC_FLAGS);
+}
+
+typedef unsigned int __attribute__((ext_vector_type(4))) DwU4;
+
+/// x reads. Buffer form (BUF, 32-bit indices): a buffer load at a byte offset; an element that
+/// is not valid (v false) reads zero from the hardware (offset past the end): no select, no
+/// 64-bit address. Global form (64-bit indices, or BUF false): the load of a clamped address
+/// and a select.
+template <typename T, typename I, bool BUF = true>
+struct DwX
+{
+    const T* a;
+    __device__ DwX(const T* x, const ValuParams&)
+        : a(x)
+    {
+    }
+    __device__ float f32(I i, bool v) const
+    {
+        const float e = valu_to_f32(a[v ? i : (I)0]);
+        return v ? e : 0.0f;
+    }
+    /// The element at i when v, else some element of x: for a caller that masks its use.
+    __device__ float f32Unmasked(I i, bool v) const
+    {
+        return valu_to_f32(a[v ? i : (I)0]);
+    }
+    __device__ T raw(I i, bool v) const
+    {
+        T z;
+        valu_from_f32(0.0f, z);
+        const T e = a[v ? i : (I)0];
+        return v ? e : z;
+    }
+    __device__ DwU4 vec16(I i, bool v) const
+    {
+        const DwU4 e = *reinterpret_cast<const DwU4*>(a + (v ? i : (I)0));
+        const DwU4 z = {0u, 0u, 0u, 0u};
+        return v ? e : z;
+    }
+};
+template <typename T>
+struct DwX<T, int, true>
+{
+    __amdgpu_buffer_rsrc_t r;
+    __device__ DwX(const T* x, const ValuParams& p)
+        : r(dwRsrc(x, (long)p.N * p.C * p.Di * p.Hi * p.Wi * (long)sizeof(T)))
+    {
+    }
+    __device__ static unsigned off(int i, bool v)
+    {
+        return v ? static_cast<unsigned>(i) * static_cast<unsigned>(sizeof(T)) : DW_OOB;
+    }
+    __device__ unsigned bits(int i, bool v) const
+    {
+        if constexpr(sizeof(T) == 4)
+            return __builtin_amdgcn_raw_buffer_load_b32(r, off(i, v), 0, 0);
+        else
+            return __builtin_amdgcn_raw_buffer_load_b16(r, off(i, v), 0, 0);
+    }
+    __device__ float f32(int i, bool v) const
+    {
+        const unsigned u = bits(i, v);
+        if constexpr(sizeof(T) == 4)
+            return __builtin_bit_cast(float, u);
+        else if constexpr(__is_same(T, _Float16))
+            return static_cast<float>(__builtin_bit_cast(_Float16, static_cast<unsigned short>(u)));
+        else
+            return __builtin_bit_cast(float, u << 16);
+    }
+    __device__ T raw(int i, bool v) const
+    {
+        const unsigned u = bits(i, v);
+        if constexpr(sizeof(T) == 4)
+            return __builtin_bit_cast(T, u);
+        else
+            return __builtin_bit_cast(T, static_cast<unsigned short>(u));
+    }
+    __device__ DwU4 vec16(int i, bool v) const
+    {
+        return __builtin_bit_cast(DwU4, __builtin_amdgcn_raw_buffer_load_b128(r, off(i, v), 0, 0));
+    }
+};
+
+/// y writes. Buffer form: an unconditional buffer store; an output that is not valid goes past
+/// the end and is dropped (no exec-masked store block that would pull the output's whole FMA
+/// chain into it). Global form: the guarded store.
+template <typename T, typename I, bool BUF = true>
+struct DwY
+{
+    T* d;
+    __device__ DwY(T* y, const ValuParams&)
+        : d(y)
+    {
+    }
+    __device__ void store(I i, bool v, float val) const
+    {
+        if(v)
+            valu_from_f32(val, d[i]);
+    }
+};
+template <typename T>
+struct DwY<T, int, true>
+{
+    __amdgpu_buffer_rsrc_t r;
+    __device__ DwY(T* y, const ValuParams& p)
+        : r(dwRsrc(y, (long)p.N * p.C * p.Do * p.Ho * p.Wo * (long)sizeof(T)))
+    {
+    }
+    __device__ void store(int i, bool v, float val) const
+    {
+        const unsigned o = v ? static_cast<unsigned>(i) * static_cast<unsigned>(sizeof(T)) : DW_OOB;
+        T e;
+        valu_from_f32(val, e);
+        if constexpr(sizeof(T) == 4)
+            __builtin_amdgcn_raw_buffer_store_b32(__builtin_bit_cast(unsigned, e), r, o, 0, 0);
+        else
+            __builtin_amdgcn_raw_buffer_store_b16(
+                __builtin_bit_cast(unsigned short, e), r, o, 0, 0);
+    }
+};
+
+/// A value the compiler cannot prove wave-uniform but that is (tid / BK with BK a multiple of
+/// the wave size), made scalar. HIP has no reqd_work_group_size to let the compiler prove it.
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+#define DW_WAVE 32
+#else
+#define DW_WAVE 64
+#endif
+template <int BK>
+__device__ inline int dwWaveUniformDiv(int tid)
+{
+    if constexpr(BK % DW_WAVE == 0)
+        return __builtin_amdgcn_readfirstlane(tid / BK);
+    else
+        return tid / BK;
 }
 
 // ---- v2 — register W-strip: WSTRIP output columns per thread; k innermost ----
@@ -181,6 +349,9 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
         acc[j] = 0.0f;
 
     const T* wbase = Wt + (long)k * p.kh * p.kw;
+    // The floors keep global loads and guarded stores (buffers measured 2-9% slower here).
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int ky = 0; ky < p.kh; ++ky)
     {
@@ -196,7 +367,7 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
                 const int wo = wo_base + j;
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
-                const float a = valu_to_f32(A[a_row + (I)(v ? iw : 0) * p.C]);
+                const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
                 const float t = acc[j] + w * a;
                 acc[j] = v ? t : acc[j];
             }
@@ -207,10 +378,8 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
     for(int j = 0; j < WSTRIP; ++j)
     {
         const int wo = wo_base + j;
-        if(wo >= p.Wo)
-            continue;
         const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-        valu_from_f32(acc[j], D[o]);
+        Y.store(o, wo < p.Wo, acc[j]);
     }
 }
 
@@ -220,7 +389,7 @@ __device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
                                            T* __restrict__ D,
                                            ValuParams p)
 {
-    if(dwTensorsFit32(p))
+    if(dwTensorsFit32<T>(p))
         v2_wstrip_nhwc_body<T, WSTRIP, int>(A, Wt, D, p);
     else
         v2_wstrip_nhwc_body<T, WSTRIP, long>(A, Wt, D, p);
@@ -258,6 +427,8 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
     float acc = 0.0f;
     const T* wbase = Wt + (long)k * p.kh * p.kw;
     const I a_chanrow = ((I)n * p.C + k) * p.Hi; // ((n*C+k)*Hi)
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int ky = 0; ky < p.kh; ++ky)
     {
@@ -268,21 +439,21 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
         {
             const int iw = wo * p.sw - p.pw + kx * p.dw;
             const bool v = vy & dwIn(iw, p.Wi);
-            const float a = valu_to_f32(A[a_row + (v ? iw : 0)]);
+            const float a = X.f32Unmasked(a_row + iw, v);
             const float t = acc + valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * a;
             acc = v ? t : acc;
         }
     }
 
     const I o = (((I)n * p.C + k) * p.Ho + ho) * p.Wo + wo;
-    valu_from_f32(acc, D[o]);
+    Y.store(o, true, acc);
 }
 
 template <typename T>
 __device__ inline void
     v2_core_nchw(const T* __restrict__ A, const T* __restrict__ Wt, T* __restrict__ D, ValuParams p)
 {
-    if(dwTensorsFit32(p))
+    if(dwTensorsFit32<T>(p))
         v2_nchw_body<T, int>(A, Wt, D, p);
     else
         v2_nchw_body<T, long>(A, Wt, D, p);
@@ -324,6 +495,8 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
         acc[j] = 0.0f;
 
     const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int kz = 0; kz < p.kd; ++kz)
     {
@@ -344,7 +517,7 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
                     const int wo = wo_base + j;
                     const int iw = wo * p.sw - p.pw + kx * p.dw;
                     const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
-                    const float a = valu_to_f32(A[a_row + (I)(v ? iw : 0) * p.C]);
+                    const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
                     const float t = acc[j] + w * a;
                     acc[j] = v ? t : acc[j];
                 }
@@ -356,10 +529,8 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
     for(int j = 0; j < WSTRIP; ++j)
     {
         const int wo = wo_base + j;
-        if(wo >= p.Wo)
-            continue;
         const I o = ((((I)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
-        valu_from_f32(acc[j], D[o]);
+        Y.store(o, wo < p.Wo, acc[j]);
     }
 }
 
@@ -369,7 +540,7 @@ __device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
                                             T* __restrict__ D,
                                             ValuParams p)
 {
-    if(dwTensorsFit32(p))
+    if(dwTensorsFit32<T>(p))
         v2_wstrip_ndhwc_body<T, WSTRIP, int>(A, Wt, D, p);
     else
         v2_wstrip_ndhwc_body<T, WSTRIP, long>(A, Wt, D, p);
@@ -406,6 +577,8 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
     float acc = 0.0f;
     const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
     const I a_chan = (I)n * p.C + k; // (n*C+k) — channel plane base
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int kz = 0; kz < p.kd; ++kz)
     {
@@ -420,7 +593,7 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
             {
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & dwIn(iw, p.Wi);
-                const float a = valu_to_f32(A[a_row + (v ? iw : 0)]);
+                const float a = X.f32Unmasked(a_row + iw, v);
                 const float t = acc + valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * a;
                 acc = v ? t : acc;
             }
@@ -428,7 +601,7 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
     }
 
     const I o = ((((I)n * p.C + k) * p.Do + do_) * p.Ho + ho) * p.Wo + wo;
-    valu_from_f32(acc, D[o]);
+    Y.store(o, true, acc);
 }
 
 template <typename T>
@@ -437,7 +610,7 @@ __device__ inline void v2_core_ncdhw(const T* __restrict__ A,
                                      T* __restrict__ D,
                                      ValuParams p)
 {
-    if(dwTensorsFit32(p))
+    if(dwTensorsFit32<T>(p))
         v2_ncdhw_body<T, int>(A, Wt, D, p);
     else
         v2_ncdhw_body<T, long>(A, Wt, D, p);
@@ -472,9 +645,11 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
     const int ih0 = ho0 - p.ph, iw0 = wo0 - p.pw; // s=d=1
     const int PH = TH + KH - 1, PW = TW + KW - 1;
 
-    // register input patch, loaded once per thread per channel; every load issued (an element
-    // outside the image reads the image's first one) and its value masked
+    // register input patch, loaded once per thread per channel; every load issued, an element
+    // outside the image reading zero (DwX)
     const I image = (I)n * p.Hi * p.Wi;
+    const DwX<T, I> X(A, p);
+    const DwY<T, I> Y(D, p);
     float patch[PH][PW];
 #pragma unroll
     for(int py = 0; py < PH; ++py)
@@ -486,8 +661,7 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
         {
             const int iw = iw0 + px;
             const bool v = ihv & dwIn(iw, p.Wi);
-            const float a = valu_to_f32(A[(image + (v ? ih * p.Wi + iw : 0)) * p.C + k]);
-            patch[py][px] = v ? a : 0.0f;
+            patch[py][px] = X.f32((image + ih * p.Wi + iw) * p.C + k, v);
         }
     }
 
@@ -521,16 +695,12 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
     for(int ty = 0; ty < TH; ++ty)
     {
         const int ho = ho0 + ty;
-        if(ho >= p.Ho)
-            continue;
 #pragma unroll
         for(int tx = 0; tx < TW; ++tx)
         {
             const int wo = wo0 + tx;
-            if(wo >= p.Wo)
-                continue;
             const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-            valu_from_f32(acc[ty][tx], D[o]);
+            Y.store(o, (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
         }
     }
 }
@@ -541,24 +711,75 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
                                                T* __restrict__ D,
                                                ValuParams p)
 {
-    if(dwTensorsFit32(p))
+    if(dwTensorsFit32<T>(p))
         v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
     else
         v3a_microtile_nhwc_body<T, KH, KW, TH, TW, long>(A, Wt, D, p);
 }
 
-// Stages the halo'd [LD][LH][LW][BK] channels-last block (LD = 1 in 2-D) of image An into LDS,
-// padding and the channel tail as zeros: NT threads, a compile-time trip count, fully unrolled,
-// every load issued (an element outside the image reads its first one) and its value selected.
+// Stages the halo'd [LD][LH][LW][BK] channels-last block (LD = 1 in 2-D) of the image starting at
+// x element nBase into LDS, padding and the channel tail as zeros: NT threads, a compile-time trip
+// count, fully unrolled, every load issued (an element outside the image or past the last channel
+// reads zero, DwX), all of a thread's loads before its LDS stores.
 template <typename T, int LD, int LH, int LW, int BK, int NT, typename I>
 __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
-                                           const T* __restrict__ An,
+                                           const DwX<T, I>& X,
+                                           const T* __restrict__ A, // x (gfx94x element stage)
+                                           I nBase, // the image's first element
                                            const ValuParams& p,
                                            int id0,
                                            int ih0,
                                            int iw0,
                                            int k_base)
 {
+    // 16-byte channel vectors when C and BK hold whole vectors (a uniform branch). On gfx94x a
+    // block of one vector per pixel (16-bit, BK 8: the 3-D LDS config) keeps the element stage
+    // with global loads, as before the buffer accessors: on MI325X that config stages 12-18 %
+    // slower as vectors and 26 % slower as buffer element loads (lang-compare shape 10; gfx950
+    // is neutral, gfx1201 1.4-1.5x faster with vectors).
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+    constexpr int MIN_VECS_PER_PIXEL = 2;
+    constexpr bool GLOBAL_ELEMENTS = true;
+#else
+    constexpr int MIN_VECS_PER_PIXEL = 1;
+    constexpr bool GLOBAL_ELEMENTS = false;
+#endif
+    if constexpr(BK % VEC == 0 && BK / VEC >= MIN_VECS_PER_PIXEL)
+    {
+        if(p.C % VEC == 0)
+        {
+            typedef unsigned int __attribute__((ext_vector_type(4))) U4;
+            constexpr int BV = BK / VEC;
+            constexpr int G = LD * LH * LW * BV;
+            constexpr int GITERS = (G + NT - 1) / NT;
+            const int tid = static_cast<int>(threadIdx.x);
+            U4 v[GITERS];
+            bool in[GITERS];
+#pragma unroll
+            for(int it = 0; it < GITERS; ++it)
+            {
+                const int g = tid + it * NT;
+                const int kv = g % BV;
+                int t = g / BV;
+                const int px = t % LW;
+                t /= LW;
+                const int py = t % LH;
+                const int pz = t / LH;
+                const int id = id0 + pz, ih = ih0 + py, iw = iw0 + px, kk = k_base + kv * VEC;
+                in[it] = dwIn(id, p.Di) & dwIn(ih, p.Hi) & dwIn(iw, p.Wi) & (kk < p.C);
+                v[it] = X.vec16(nBase + (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk, in[it]);
+            }
+#pragma unroll
+            for(int it = 0; it < GITERS; ++it)
+            {
+                const int g = tid + it * NT;
+                if(G % NT == 0 || it < GITERS - 1 || g < G)
+                    *reinterpret_cast<U4*>(tile + g * VEC) = v[it];
+            }
+            return;
+        }
+    }
     constexpr int TOTAL = LD * LH * LW * BK;
     constexpr int ITERS = (TOTAL + NT - 1) / NT;
     T zero;
@@ -579,15 +800,20 @@ __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
         const int pz = t / LH;
         const int id = id0 + pz, ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
         in[it] = dwIn(id, p.Di) & dwIn(ih, p.Hi) & dwIn(iw, p.Wi) & (kk < p.C);
-        v[it] = An[in[it] ? (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk : 0];
+        const I e = nBase + (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk;
+        if constexpr(GLOBAL_ELEMENTS)
+            v[it] = DwX<T, I, false>(A, p).raw(e, in[it]);
+        else
+            v[it] = X.raw(e, in[it]);
     }
 #pragma unroll
     for(int it = 0; it < ITERS; ++it)
     {
         const int idx = tid + it * NT;
         if(TOTAL % NT == 0 || it < ITERS - 1 || idx < TOTAL)
-            tile[idx] = in[it] ? v[it] : zero;
+            tile[idx] = v[it];
     }
+    (void)zero;
 }
 
 // ---- v4 fused: LDS block stage + register micro-tile ----
@@ -619,14 +845,15 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
     const int ih0 = ho_base - p.ph, iw0 = wo_base - p.pw; // s=d=1
 
     // cooperative halo stage into LDS
-    const T* An = A + (long)n * p.Hi * p.Wi * p.C;
+    const DwX<T, I> X(A, p);
+    const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
-        tile, An, p, 0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
     const int klocal = tid % BK;
-    int rest = tid / BK;
+    int rest = dwWaveUniformDiv<BK>(tid);
     const int wtile = rest % (BW / RW);
     const int htile = rest / (BW / RW);
     const int oy = htile * RH, ox = wtile * RW;
@@ -666,23 +893,18 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
                 for(int tx = 0; tx < RW; ++tx)
                     acc[ty][tx] += w[ky][kx] * patch[ty + ky][tx + kx];
 
-    if(k >= p.C)
-        return;
-    T* Dn = D + (long)n * p.Ho * p.Wo * p.C;
+    const I nOut = (I)n * p.Ho * p.Wo * p.C;
+    const bool kv = k < p.C;
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
         const int ho = ho_base + oy + ty;
-        if(ho >= p.Ho)
-            continue;
 #pragma unroll
         for(int tx = 0; tx < RW; ++tx)
         {
             const int wo = wo_base + ox + tx;
-            if(wo >= p.Wo)
-                continue;
-            const I o = ((I)ho * p.Wo + wo) * p.C + k;
-            valu_from_f32(acc[ty][tx], Dn[o]);
+            const I o = nOut + ((I)ho * p.Wo + wo) * p.C + k;
+            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
         }
     }
 }
@@ -700,8 +922,8 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v4_fused: LDS tile exceeds 64 KB");
     // One LDS tile for both index widths (a __shared__ array per instantiation would be two).
-    __shared__ T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32(p))
+    __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32<T>(p))
         v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
     else
         v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
@@ -735,14 +957,15 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
     const int ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
     const int ih0 = ho_base - p.ph, iw0 = wo_base - p.pw;
 
-    const T* An = A + (long)n * p.Hi * p.Wi * p.C;
+    const DwX<T, I> X(A, p);
+    const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
-        tile, An, p, 0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
     const int klocal = tid % BK;
-    int rest = tid / BK;
+    int rest = dwWaveUniformDiv<BK>(tid);
     const int wtile = rest % (BW / RW);
     const int htile = rest / (BW / RW);
     const int oy = htile * RH, ox = wtile * RW;
@@ -773,23 +996,18 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
                                tile[(((oy + ty + ky) * LW) + (ox + tx + kx)) * BK + klocal]);
         }
 
-    if(k >= p.C)
-        return;
-    T* Dn = D + (long)n * p.Ho * p.Wo * p.C;
+    const I nOut = (I)n * p.Ho * p.Wo * p.C;
+    const bool kv = k < p.C;
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
         const int ho = ho_base + oy + ty;
-        if(ho >= p.Ho)
-            continue;
 #pragma unroll
         for(int tx = 0; tx < RW; ++tx)
         {
             const int wo = wo_base + ox + tx;
-            if(wo >= p.Wo)
-                continue;
-            const I o = ((I)ho * p.Wo + wo) * p.C + k;
-            valu_from_f32(acc[ty][tx], Dn[o]);
+            const I o = nOut + ((I)ho * p.Wo + wo) * p.C + k;
+            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
         }
     }
 }
@@ -804,8 +1022,8 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
     static_assert(BW % RW == 0, "v3b_lds: BW must be divisible by RW");
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v3b_lds: LDS tile exceeds 64 KB");
-    __shared__ T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32(p))
+    __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32<T>(p))
         v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
     else
         v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
@@ -858,14 +1076,15 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
     const int do_base = db * BD, ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
     const int id0 = do_base - p.pd, ih0 = ho_base - p.ph, iw0 = wo_base - p.pw; // s=d=1
 
-    const T* An = A + (long)n * p.Di * p.Hi * p.Wi * p.C;
+    const DwX<T, I> X(A, p);
+    const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, LD, LH, LW, BK, (BD / RD) * (BH / RH) * (BW / RW) * BK, I>(
-        tile, An, p, id0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Di * p.Hi * p.Wi * p.C, p, id0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
     const int klocal = tid % BK;
-    int rest = tid / BK;
+    int rest = dwWaveUniformDiv<BK>(tid);
     const int wtile = rest % (BW / RW);
     rest /= (BW / RW);
     const int htile = rest % (BH / RH);
@@ -906,29 +1125,22 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
                                                       + klocal]);
             }
 
-    if(k >= p.C)
-        return;
-    T* Dn = D + (long)n * p.Do * p.Ho * p.Wo * p.C;
+    const I nOut = (I)n * p.Do * p.Ho * p.Wo * p.C;
+    const bool kv = k < p.C;
 #pragma unroll
     for(int tz = 0; tz < RD; ++tz)
     {
         const int do_ = do_base + oz + tz;
-        if(do_ >= p.Do)
-            continue;
 #pragma unroll
         for(int ty = 0; ty < RH; ++ty)
         {
             const int ho = ho_base + oy + ty;
-            if(ho >= p.Ho)
-                continue;
 #pragma unroll
             for(int tx = 0; tx < RW; ++tx)
             {
                 const int wo = wo_base + ox + tx;
-                if(wo >= p.Wo)
-                    continue;
-                const I o = (((I)do_ * p.Ho + ho) * p.Wo + wo) * p.C + k;
-                valu_from_f32(acc[tz][ty][tx], Dn[o]);
+                const I o = nOut + (((I)do_ * p.Ho + ho) * p.Wo + wo) * p.C + k;
+                Y.store(o, kv & (do_ < p.Do) & (ho < p.Ho) & (wo < p.Wo), acc[tz][ty][tx]);
             }
         }
     }
@@ -956,8 +1168,9 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
     static_assert((BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T))
                       <= 65536,
                   "v3b_lds_3d: LDS tile exceeds 64 KB");
-    __shared__ T tile[(BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32(p))
+    __shared__
+        __attribute__((aligned(16))) T tile[(BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32<T>(p))
         v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
     else
         v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, long>(A, Wt, D, p, tile);
@@ -1005,11 +1218,12 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
     const int tid = static_cast<int>(threadIdx.x);
 
     // Compile-time trip count, fully unrolled; every load issued (outside the image or past
-    // the last channel: the image's first element) and its value selected. All of the thread's
-    // loads first, then the LDS stores: the loads stay in flight together.
-    const T* An = A + (long)n * p.C * p.Hi * p.Wi;
-    T v[ITERS];
-    bool in[ITERS];
+    // the last channel: zero, DwX). All of the thread's loads first, then the LDS stores: the
+    // loads stay in flight together.
+    const DwX<T, I> X(A, p);
+    const DwY<T, I> Y(D, p);
+    const I nBase = (I)n * p.C * p.Hi * p.Wi;
+    float v[ITERS];
 #pragma unroll
     for(int it = 0; it < ITERS; ++it)
     {
@@ -1020,8 +1234,8 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
         const int c = c0 + rest / HH;
         const int iy = iy0 + row;
         const int ix = ix0 + col;
-        in[it] = (c < p.C) & dwIn(iy, p.Hi) & dwIn(ix, p.Wi);
-        v[it] = An[in[it] ? ((I)c * p.Hi + iy) * p.Wi + ix : 0];
+        const bool in = (c < p.C) & dwIn(iy, p.Hi) & dwIn(ix, p.Wi);
+        v[it] = X.f32(nBase + ((I)c * p.Hi + iy) * p.Wi + ix, in);
     }
 #pragma unroll
     for(int it = 0; it < ITERS; ++it)
@@ -1031,14 +1245,14 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
         {
             const int col = i % HW;
             const int rest = i / HW;
-            tile[rest / HH][rest % HH][col] = in[it] ? valu_to_f32(v[it]) : 0.0f;
+            tile[rest / HH][rest % HH][col] = v[it];
         }
     }
     dwLdsBarrier();
 
     const int tx = tid % TX;
     const int ty = (tid / TX) % TY;
-    const int kc = tid / (TX * TY);
+    const int kc = dwWaveUniformDiv<TX * TY>(tid);
     const int c = c0 + kc;
     if(c >= p.C)
     {
@@ -1088,24 +1302,17 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
             }
         }
     }
-    T* Dn = D + (long)n * p.C * p.Ho * p.Wo;
+    const I nOut = (I)n * p.C * p.Ho * p.Wo;
 #pragma unroll
     for(int r = 0; r < RH; ++r)
     {
         const int oy = oy0 + ty * RH + r;
-        if(oy >= p.Ho)
-        {
-            continue;
-        }
-        T* out = Dn + ((I)c * p.Ho + oy) * p.Wo;
+        const I orow = nOut + ((I)c * p.Ho + oy) * p.Wo;
 #pragma unroll
         for(int j = 0; j < RW; ++j)
         {
             const int ox = ox0 + tx * RW + j;
-            if(ox < p.Wo)
-            {
-                valu_from_f32(acc[r][j], out[ox]);
-            }
+            Y.store(orow + ox, (oy < p.Ho) & (ox < p.Wo), acc[r][j]);
         }
     }
 }
@@ -1118,7 +1325,7 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
 {
     static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
     __shared__ float tile[BK][BH + KH - 1][BW + KW]; // a pad column: HW + 1
-    if(dwImagesFit32(p))
+    if(dwImagesFit32<T>(p))
         v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
     else
         v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
