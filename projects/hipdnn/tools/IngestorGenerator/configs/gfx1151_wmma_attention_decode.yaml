@@ -26,7 +26,11 @@ engine:
   # 1.2.0: graphs with a runtime pass-by-value scale tensor require it. The
   # native matcher declines override-shape graphs (1.1.0).
   sdk_version: 1.2.0
-  knobs: []
+  behavior_notes: [supports_graph_capture]
+  # The decode matcher admits one object per graph, the bucket of the graph's
+  # widths, so head_size is enough for a distinct knob tuple (the D256 objects'
+  # dv_split differs by arch, and a device holds one arch).
+  knobs: [head_size]
   heuristic: native
 
 kmd_fields:

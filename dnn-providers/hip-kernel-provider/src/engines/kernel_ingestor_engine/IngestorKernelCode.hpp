@@ -94,6 +94,7 @@ compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache();
+compilation::KpackModuleCache& gfx1250ConvDgradAotKpackModuleCache();
 compilation::KpackModuleCache& gfx942AttentionUnified3dKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionUnified3DKpackModuleCache();

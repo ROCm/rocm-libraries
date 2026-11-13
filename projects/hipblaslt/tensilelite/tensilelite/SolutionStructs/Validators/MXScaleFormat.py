@@ -22,13 +22,14 @@
 #
 ################################################################################
 
-"""MX scale-format combination validator for gfx1250's
-``v_wmma_scale_f32_16x16x128_f8f6f4`` MX path.
+"""MX scale-format validators.
 
 Lives under ``tensilelite/SolutionStructs/Validators/`` so other Solution-level
 validators can join it.
 
-Public entry point: :func:`validateMXScaleFormatCombination`.
+Public entry points: :func:`validateMXScaleFormatCombination` (gfx1250's
+``v_wmma_scale_f32_16x16x128_f8f6f4`` MX path) and
+:func:`validateHostPreSwizzle128x4`.
 """
 
 from rocisa.enum import DataTypeEnum
@@ -78,6 +79,33 @@ _FP4_SCALES   = frozenset({
     DataTypeEnum.E5M3.value,
     DataTypeEnum.Float8.value,  # E4M3 byte
 })
+
+
+def validateHostPreSwizzle128x4(state, isHandwrittenCustomKernel, printRejectionReason):
+    """Reject ``MXScaleFormat="HostPreSwizzle128x4"`` outside a handwritten gfx950
+    custom kernel.
+
+    The kernel writer has no load path for the 128-row by 4-K-block scale tiles,
+    and the host produces them only for gfx950, so a generated kernel or another
+    ISA cannot declare the format.
+
+    Returns:
+        ``True`` if the state is valid; ``False`` after a reject, in which case
+        ``state["Valid"]`` is also ``False``.
+    """
+    if state.get("MXScaleFormat") != "HostPreSwizzle128x4":
+        return True
+    if not isHandwrittenCustomKernel:
+        reject(state, printRejectionReason,
+               "MXScaleFormat=HostPreSwizzle128x4 is only implemented by handwritten "
+               "custom kernels")
+        return False
+    if tuple(state["ISA"]) != (9, 5, 0):
+        reject(state, printRejectionReason,
+               "MXScaleFormat=HostPreSwizzle128x4 is only supported on gfx950, got ISA %s"
+               % ".".join(str(v) for v in state["ISA"]))
+        return False
+    return True
 
 
 def _mxMatrixLabel(dtValue):

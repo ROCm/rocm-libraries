@@ -35,7 +35,7 @@ from dispatch.attention.axes import (
     KNOWN_WRONG_KNOBS,
     tuning_axes,
 )
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from dispatch.attention.dense_rules import (
     dense_axes_for,
     resolve_dense_num_persistent,
@@ -250,7 +250,7 @@ class TestTuningSpace(unittest.TestCase):
                     seqlen_k=seqlen_k,
                     num_cus=cus[arch],
                 )
-                problem = _problem(_request(**kw))
+                problem = attention_problem(_request(**kw))
                 want = _tiled_3d_spec_from_problem(problem, arch)
                 tile = want.tile_size // problem.block_size
                 prefix = f"attention_{arch}_u3d_splitkv_segauto_t{tile}xb"
@@ -262,7 +262,7 @@ class TestTuningSpace(unittest.TestCase):
         prefix = "attention_gfx950_u3d_splitkv_segauto_t1xb"
         kw = dict(batch=16, seqlen_q=1, seqlen_k=8192, num_cus=256)
         candidate, req, _ = _specs_for(prefix, n=1, **kw)
-        rule = _num_segments(_problem(req), "gfx950")
+        rule = _num_segments(attention_problem(req), "gfx950")
         default = tuning_spec_with_knobs(req, candidate.spec_id, {})
         self.assertEqual(dict(default.knobs)["num_segments"], rule)
         self.assertEqual(default.kernel_spec.num_segments, rule)
@@ -276,7 +276,7 @@ class TestTuningSpace(unittest.TestCase):
             )
         # The same knobs on a device where the rule splits differently.
         _c, smaller, _ = _specs_for(prefix, n=1, **{**kw, "num_cus": 128})
-        self.assertNotEqual(_num_segments(_problem(smaller), "gfx950"), rule)
+        self.assertNotEqual(_num_segments(attention_problem(smaller), "gfx950"), rule)
         with self.assertRaisesRegex(ValueError, "split rule"):
             tuning_spec_with_knobs(smaller, candidate.spec_id, dict(default.knobs))
 
@@ -578,7 +578,7 @@ class TestBandTuning(unittest.TestCase):
             else dict(seqlen_q=2, seqlen_k=8192)
         )
         req = _request(**shape, **kw)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return problem, list(islice(iter_tuning_specs(req, variant), 3))
 
     def test_specs_carry_the_requested_band(self):
@@ -652,7 +652,7 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
         au._RESOLVED_ATTENTION_ARCH = "gfx950"  # conftest restores it
         for spec_id, shape, knobs in cases:
             with self.subTest(spec_id=spec_id, knobs=knobs):
-                problem = _problem(_request(**shape))
+                problem = attention_problem(_request(**shape))
                 space = unified_space(_gfx950_variant(spec_id))
                 spec = space.build(problem, {**space.fixed(problem), **knobs})
                 ir = lower_kernel_to_llvm(
@@ -670,7 +670,7 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
             nhead_q=16, nhead_k=2, seqlen_q=1, seqlen_k=8192, kv_block_size=64
         )
         variant = _gfx950_variant("gfx950_u2d_narrow_nw1_mw16_t4xb_llvm")
-        spec, why = canonicalize_tuning_spec(_problem(req), variant, {})
+        spec, why = canonicalize_tuning_spec(attention_problem(req), variant, {})
         self.assertIsNone(spec)
         self.assertIn("LDS budget", why)
         auto = attention_tuning_spec(req, variant.spec_id)
@@ -692,11 +692,11 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
     def test_a_pad_the_kernel_lays_out_as_none_names_the_unpadded_spec(self):
         req = _request(mask_type=1, kv_block_size=64)
         variant = _gfx950_variant("gfx950_u2d_transposed32_nw2_mw32_t2xb_hipcc")
-        unpadded, _why = canonicalize_tuning_spec(_problem(req), variant, {})
+        unpadded, _why = canonicalize_tuning_spec(attention_problem(req), variant, {})
         for halves in (8, 16, 24, 32):
             with self.subTest(halves=halves):
                 padded, why = canonicalize_tuning_spec(
-                    _problem(req),
+                    attention_problem(req),
                     variant,
                     {"use_kq_lds_pad": True, "kq_lds_pad_halves": halves},
                 )

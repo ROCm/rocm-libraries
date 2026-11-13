@@ -378,6 +378,7 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
     // that only some APIs accept.
     for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
                          int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL256_R128_EXT),
                          int32_t(HIPBLASLT_ORDER_COL)})
     {
         EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
@@ -879,6 +880,20 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                                                               &sizeWritten),
                               HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(modeGot == modeSet);
+    }
+
+    for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+    {
+        uint32_t modeSet = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+        uint32_t modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul, attr, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(
+                matmul, attr, &modeGot, sizeof(uint32_t), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(modeGot, modeSet);
     }
 
     hipStream_t stream;
@@ -3983,34 +3998,8 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, arg.a_type, m, n, m));
     hipDataType a_type, b_type, c_type, d_type;
 
-    const int                        request_solutions = 1;
-    hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
-    int                              returnedAlgoCount  = 0;
-    size_t                           max_workspace_size = 128 * 1024 * 1024;
-    hipblasLtMatmulPreference_t      pref;
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
-    CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatmulPreferenceSetAttribute(pref,
-                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                              &max_workspace_size,
-                                              sizeof(max_workspace_size)));
+    size_t max_workspace_size = 128 * 1024 * 1024;
 
-    void* d_workspace;
-    if(max_workspace_size > 0)
-        CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                          matmul,
-                                                          matA,
-                                                          matB,
-                                                          matC,
-                                                          matD,
-                                                          pref,
-                                                          request_solutions,
-                                                          heuristicResult,
-                                                          &returnedAlgoCount));
-
-    CHECK_SOLUTION_FOUND(returnedAlgoCount);
     rocblaslt_matmul_desc matmul_descr = (rocblaslt_matmul_desc)matmul;
     int64_t               batch_count  = 1;
     void *                A, *B, *C, *D, *E, *d_alphaVec; // device
@@ -4148,18 +4137,59 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         batchMode,
                                         0}; // bias_stride
 
-    const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
-    const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;
-
     ASSERT_TRUE(runRocRollerContractionProblem(roc_handle, nullptr, problem)
                 != rocblaslt_status_success);
-    ASSERT_TRUE(runRocRollerContractionProblem(roc_handle, roc_algo, problem)
-                != rocblaslt_status_success);
+    EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, problem, nullptr, &max_workspace_size),
+              rocblaslt_status_invalid_pointer);
 
-    hipblasLtMatmulAlgo_t* hip_algo2 = &heuristicResult[0].algo;
-    rocblaslt_matmul_algo* roc_algo2 = (rocblaslt_matmul_algo*)hip_algo;
-    ASSERT_TRUE(isRocRollerSolutionSupported(roc_handle, problem, roc_algo2, &max_workspace_size)
-                != rocblaslt_status_success);
+    auto algo_with_index = [](int index) {
+        rocblaslt_matmul_algo algo{};
+        memcpy(algo.data, &index, sizeof(index));
+        return algo;
+    };
+
+    // Indices without the rocRoller marker bit: Tensile indices (80950 decodes to a
+    // 32x1920x1728 tile) and the -1 "no solution" sentinel. Neither entry point may build
+    // or launch a kernel for them.
+    for(int index : {0, 80950, -1})
+    {
+        SCOPED_TRACE(index);
+        auto algo = algo_with_index(index);
+        EXPECT_EQ(runRocRollerContractionProblem(roc_handle, &algo, problem),
+                  rocblaslt_status_invalid_value);
+        EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, problem, &algo, &max_workspace_size),
+                  rocblaslt_status_invalid_value);
+    }
+
+    // Clearing only the marker bit of a real rocRoller index leaves a non-negative index that
+    // decodes to the same kernel, so only the marker check can reject it. No rocRoller tile
+    // divides a 1x1x1 problem, so this needs a larger one; nothing is launched.
+    RocblasltContractionProblem tiled = problem;
+    tiled.m = tiled.n = tiled.k = 256;
+    tiled.col_stride_a = tiled.col_stride_b = tiled.col_stride_c = tiled.col_stride_d
+        = tiled.col_stride_e                                     = 256;
+
+    rocblaslt_matmul_heuristic_result rocroller_result{};
+    int                               rocroller_count = 0;
+    ASSERT_EQ(getRocRollerBestSolutions(
+                  roc_handle, tiled, 1, &rocroller_result, max_workspace_size, &rocroller_count),
+              rocblaslt_status_success);
+    EXPECT_GT(rocroller_count, 0);
+    if(rocroller_count > 0)
+    {
+        int index;
+        memcpy(&index, rocroller_result.algo.data, sizeof(index));
+        EXPECT_LT(index, 0);
+
+        size_t workspace = 0;
+        EXPECT_EQ(
+            isRocRollerSolutionSupported(roc_handle, tiled, &rocroller_result.algo, &workspace),
+            rocblaslt_status_success);
+
+        auto unmarked = algo_with_index(index & 0x7fffffff);
+        EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, tiled, &unmarked, &workspace),
+                  rocblaslt_status_invalid_value);
+    }
 
     // Free GPU memory allocations
     CHECK_HIP_ERROR(hipFree(A));
@@ -4167,12 +4197,6 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(C));
     CHECK_HIP_ERROR(hipFree(D));
     CHECK_HIP_ERROR(hipFree(E));
-
-    // Free workspace
-    CHECK_HIP_ERROR(hipFree(d_workspace));
-
-    // Destroy preference object
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
 
     // Destroy handles
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));

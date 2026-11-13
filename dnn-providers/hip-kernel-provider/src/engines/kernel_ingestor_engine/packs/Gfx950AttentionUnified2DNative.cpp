@@ -93,6 +93,8 @@ constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
 constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
+/// 1 for an LSE-on kernel, which also writes the stats output head-major ([B, Hq, Sq, 1]).
+constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
 /// The geometry cold selection prefers: narrow 16x16, 4 warps x 16 rows, a 64-token KV tile.
 constexpr int64_t BASELINE_TILE_SIZE = 64;
@@ -110,6 +112,8 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+/// The stats output's uid, or NO_STATS for a graph that asks for none.
+constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -152,6 +156,7 @@ constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
                                                          MASK_TOKEN,
                                                          SLIDING_WINDOW_TOKEN,
                                                          SCALE_BITS_TOKEN,
+                                                         STATS_TOKEN,
                                                          "gfx950 attention_unified_2d"};
 
 /**
@@ -222,7 +227,7 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     }
 
     const auto matched = unified_attention::matchAttributes(
-        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+        context, *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
     if(!matched.has_value())
     {
         return std::nullopt;
@@ -231,7 +236,7 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     // coincide only at Sq == Skv, but they are distinct kernel bodies and the catalog carries
     // both.
     return unified_attention::bindGraph(
-        *operands->attributes, matched->mask, matched->scale, TOKEN_NAMES);
+        *operands->attributes, matched->mask, matched->scale, matched->stats, TOKEN_NAMES);
 }
 
 /// What a candidate bakes, read from its completed metadata and judged buildable.
@@ -248,6 +253,8 @@ struct AttentionUnified2DCandidate
     int64_t blockMPerWarp = 0;
     bool useMfma32x32 = false;
     bool useTransposedQk32x32 = false;
+    /// Also writes the stats output; its kernarg list ends in lse_ptr.
+    bool emitLse = false;
 };
 
 /**
@@ -272,8 +279,14 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
+    const auto emitLse = integerMetadata(kernel, EMIT_LSE_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32)
+       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32
+       || !emitLse)
+    {
+        return std::nullopt;
+    }
+    if(*emitLse != 0 && *emitLse != 1)
     {
         return std::nullopt;
     }
@@ -319,7 +332,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *numWarps,
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
-                                       *useTransposedQk32x32 != 0};
+                                       *useTransposedQk32x32 != 0,
+                                       *emitLse != 0};
 }
 
 /**
@@ -386,6 +400,14 @@ bool kernelMatches(const MatchContext& context,
     const auto slidingWindow
         = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SLIDING_WINDOW_TOKEN);
     if(!slidingWindow.has_value() || candidate->slidingWindow != *slidingWindow)
+    {
+        return false;
+    }
+
+    // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
+    // LSE store is baked in, with its trailing lse_ptr.
+    const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, STATS_TOKEN);
+    if(!stats.has_value() || candidate->emitLse != (*stats != unified_attention::NO_STATS))
     {
         return false;
     }
@@ -602,6 +624,16 @@ public:
         }
 
         const auto candidate = requireCandidate(kernel);
+        // kernelMatches pairs them; a caller that skipped it would launch the wrong kernarg
+        // list.
+        if(candidate.emitLse != (binding.stats != unified_attention::NO_STATS))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_unified_2d: kernel '" + toString(kernel.kernelId)
+                    + (candidate.emitLse ? "' writes stats, but the graph asks for none"
+                                         : "' writes no stats, but the graph asks for them"));
+        }
         const auto problem = boundProblem(context, binding);
         const auto layout = requireLayout(candidate, problem, kernel);
 
@@ -617,8 +649,8 @@ public:
                     + "' cannot stage paged-KV metadata for this graph");
         }
 
-        auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, tiled2DKernelSignature());
+        auto code = buildIngestorKernelCode(
+            _kpackLoader, context, kernel, tiled2DKernelSignature(candidate.emitLse));
 
         // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
         // descriptor shape metadata: the binary takes its shape at runtime.
@@ -693,6 +725,37 @@ public:
         const int32_t noQqBiasStride = 0;
 
         const auto& p = preparedUnified.problem();
+        if(binding.stats != unified_attention::NO_STATS)
+        {
+            // The LSE-on kernel: the same arguments, then the stats output.
+            const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.stats, deviceBuffers, numDeviceBuffers);
+            preparedUnified.kernelForStream(stream).launch(
+                stream,
+                o.ptr,
+                q.ptr,
+                k.ptr,
+                v.ptr,
+                unused,
+                blockTables,
+                seqLens,
+                unused,
+                unused,
+                queryStartLen,
+                binding.scale,
+                neutralScale,
+                neutralScale,
+                neutralScale,
+                noSoftcap,
+                static_cast<int32_t>(p.batch),
+                static_cast<int32_t>(layout.blocksPerSeq),
+                noQqBiasStride,
+                static_cast<int32_t>(p.numQueryHeads),
+                static_cast<int32_t>(p.numKvHeads),
+                static_cast<int32_t>(preparedUnified.slidingWindow()),
+                stats.ptr);
+            return;
+        }
         preparedUnified.kernelForStream(stream).launch(
             stream,
             o.ptr,

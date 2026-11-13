@@ -47,11 +47,12 @@ namespace TensileLite
             int    gridbasedTopSols    = Debug::Instance().getGridbasedTopSols();
             bool   printWinnerOnly     = args["PrintWinnersOnly"].as<bool>();
             double predictionThreshold = args["prediction-threshold"].as<double>();
+            bool   requireSelectedSolution = args["require-selected-solution"].as<bool>();
 
             if(bestSolution)
             {
                 return std::make_shared<TopSolutionIterator>(
-                    library, hardware, predictionThreshold, gridbasedTopSols, printWinnerOnly);
+                    library, hardware, predictionThreshold, gridbasedTopSols, requireSelectedSolution, printWinnerOnly);
             }
             else
             {
@@ -609,10 +610,12 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      hardware,
             double                                                         predictionThreshold,
             int                                                            numSolutions,
+            bool                                                           requireSelectedSolution,
             bool                                                           printWinnerOnly)
             : SolutionIterator(library, hardware, printWinnerOnly)
             , m_numSolutions(numSolutions)
             , m_predictionThreshold(predictionThreshold)
+            , m_requireSelectedSolution(requireSelectedSolution)
         {
         }
 
@@ -647,6 +650,27 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
+                if(m_requireSelectedSolution)
+                {
+                    // No fallback: report it, count it as an error and skip the problem
+                    // (moreSolutionsInProblem() is false with no solution and an empty queue).
+                    m_problemsWithoutSelection++;
+                    m_currentSolutionIdx = 0;
+                    auto const* gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem);
+                    if(auto groupedProblem
+                       = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
+                        gemmProblem = &groupedProblem->gemms[0];
+                    std::ostringstream msg;
+                    msg << "[TopSolutionIterator] No solution selected for problem "
+                        << gemmProblem->operationIdentifier() << " sizes";
+                    for(auto size : gemmProblem->problemSizes())
+                        msg << " " << size;
+                    msg << ": the library returned no solution and --require-selected-solution"
+                           " is set, so library solution 0 is not used instead."
+                        << std::endl;
+                    m_reporter->log(LogLevel::Error, msg.str());
+                    return;
+                }
                 // See the note in BestSolutionIterator::preProblem.
                 if(auto fallback = m_library->resolveSolutionByIndex(0))
                     m_solutions.push_back(fallback);
@@ -735,6 +759,11 @@ namespace TensileLite
                 }
             }
 
+        }
+
+        int TopSolutionIterator::error() const
+        {
+            return m_problemsWithoutSelection;
         }
 
         bool TopSolutionIterator::moreSolutionsInProblem() const

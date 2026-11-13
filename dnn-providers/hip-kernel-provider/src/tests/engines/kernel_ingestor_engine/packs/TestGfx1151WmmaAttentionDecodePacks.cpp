@@ -449,7 +449,9 @@ TEST_F(TestGfx1151WmmaAttentionDecodePacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx1151WmmaAttentionDecodePacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 0U);
+    ASSERT_EQ(_set->engine.knobs.size(), 1U);
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "head_size"),
+              _set->engine.knobs.end());
 }
 
 /// The engine ships a ranking model, so its score symbol must be REGISTERED, not merely
@@ -483,6 +485,15 @@ TEST_F(TestGfx1151WmmaAttentionDecodePacks, CarriesExactlyOneSharedKernelScopedM
               return matcher.scope == ingestor::MatchScope::KERNEL;
           });
     EXPECT_EQ(kernelScoped, 1);
+}
+
+TEST_F(TestGfx1151WmmaAttentionDecodePacks, DeclaresItsConfiguredBehaviorNotes)
+{
+    const auto& notes = _set->engine.behaviorNotes;
+    EXPECT_NE(std::find(notes.begin(),
+                        notes.end(),
+                        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)),
+              notes.end());
 }
 
 } // namespace

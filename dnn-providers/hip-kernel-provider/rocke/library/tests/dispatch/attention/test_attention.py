@@ -279,6 +279,106 @@ class TestAttentionMaskType(unittest.TestCase):
                     dispatch_attention(_attn(mask_type=value))
 
 
+class TestAttentionPublicSurface(unittest.TestCase):
+    def test_every_all_entry_resolves(self):
+        import dispatch.attention as attention
+
+        missing = [n for n in attention.__all__ if not hasattr(attention, n)]
+        self.assertEqual(missing, [])
+        self.assertEqual(len(attention.__all__), len(set(attention.__all__)))
+
+    def test_star_import_succeeds(self):
+        namespace: dict = {}
+        exec("from dispatch.attention import *", namespace)
+        import dispatch.attention as attention
+
+        for name in attention.__all__:
+            self.assertIn(name, namespace)
+
+    def test_all_is_exactly_the_public_api(self):
+        # The full ``dispatch.attention.__all__``: a name added to (or dropped
+        # from) ``__all__`` fails here until it is listed below, so the public
+        # surface only grows on purpose and a module-level helper cannot slip in.
+        import dispatch.attention as attention
+
+        self.assertEqual(set(attention.__all__), _ATTENTION_PUBLIC_API)
+
+    def test_all_exports_no_private_name_or_submodule(self):
+        import types
+
+        import dispatch.attention as attention
+
+        private = [n for n in attention.__all__ if n.startswith("_")]
+        modules = [
+            n
+            for n in attention.__all__
+            if isinstance(getattr(attention, n), types.ModuleType)
+        ]
+        self.assertEqual(private, [])
+        self.assertEqual(modules, [])
+
+    def test_exported_algorithm_names_are_registered(self):
+        # Each exported ``*_ALGORITHM`` names a registered candidate, and each
+        # ``*_ALGORITHMS`` set holds only such names.
+        import dispatch.attention as attention
+
+        registered = {c.algorithm for c in attention.ATTENTION_REGISTRY.candidates()}
+        singles = [n for n in attention.__all__ if n.endswith("_ALGORITHM")]
+        self.assertTrue(singles)
+        for name in singles:
+            with self.subTest(name=name):
+                self.assertIsInstance(getattr(attention, name), str)
+                self.assertIn(getattr(attention, name), registered)
+        for name in ("DENSE_ALGORITHMS", "UNIFIED_ALGORITHMS"):
+            with self.subTest(name=name):
+                self.assertLessEqual(set(getattr(attention, name)), registered)
+
+
+# The complete public surface of ``dispatch.attention`` (its ``__all__``).
+_ATTENTION_PUBLIC_API = frozenset(
+    {
+        "ATTENTION_ABI_VERSION",
+        "ATTENTION_DIM_VOCABULARY",
+        "ATTENTION_EXECUTION_REGISTRY",
+        "ATTENTION_FEATURES",
+        "ATTENTION_REGISTRY",
+        "ATTENTION_ROUTE_REGISTRY",
+        "AttentionMaskType",
+        "AttentionRequest",
+        "AttentionSpec",
+        "AttentionTuningSpec",
+        "D256_DECODE_ALGORITHM",
+        "D256_GFX950_ALGORITHM",
+        "DENSE_ALGORITHM",
+        "DENSE_ALGORITHMS",
+        "DENSE_GRID_ALGORITHM",
+        "DENSE_PERSIST_ALGORITHM",
+        "GFX942_DENSE_PIPE_ALGORITHM",
+        "UNIFIED_2D_ALGORITHM",
+        "UNIFIED_3D_ALGORITHM",
+        "UNIFIED_ALGORITHMS",
+        "UNIFIED_BLOCK_SIZES",
+        "UNIFIED_HEAD_SIZES",
+        "attention_band",
+        "attention_candidates",
+        "attention_dispatch_result",
+        "attention_execution_candidates",
+        "attention_problem",
+        "attention_sweep_space",
+        "attention_tuning_spec",
+        "dense_scale_range",
+        "dispatch_attention",
+        "dispatch_attention_all",
+        "dispatch_for_arches",
+        "iter_dispatch_attention_all",
+        "iter_registered_attention_combos",
+        "priority_ranker",
+        "registered_attention_combos",
+        "tuning_spec_with_knobs",
+    }
+)
+
+
 class TestAttentionBottomRightRouting(unittest.TestCase):
     def test_moving_bottom_right_is_a_distinct_request_feature(self):
         moving = _attn(

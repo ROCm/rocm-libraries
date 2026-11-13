@@ -39,6 +39,11 @@ import os
 from typing import ClassVar, Optional, Tuple
 
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._attention_runtime_layout import (
+    RUNTIME_LAYOUT_EXTRA_ARGS,
+    declare_runtime_layout_params,
+    sink_logit,
+)
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
@@ -1158,33 +1163,8 @@ _RTL_INCOMPATIBLE_FLAGS = (
 # (an i32 kernarg), so the buffer range check returns 0 without a memory access.
 _RTL_KV_OOB_VOFF = 0x7FFFFFF0
 
-# Kernargs appended after the fixed ones and the runtime shape kernargs
-# (``RUNTIME_KERNARG_FIELDS``: num_query_heads, num_kv_heads, sliding_window),
-# as (name, type) in ABI order. ``block_tables_v_ptr`` is V's block table; it
-# shares ``block_table_stride`` with ``block_tables_ptr`` (K's table) and may be
-# the same pointer. ``q_uniform_len`` is L > 0 for a dense Q (L rows per
-# sequence) and 0 for a ragged one, whose offsets must be non-decreasing with
-# off[b+1] - off[b] >= seq_lens_q[b] and off[B] the end of the last block.
-# ``sink_is_f32`` nonzero: ``sink_ptr`` holds Hq fp32 logits, else Hq logits in
-# the Q dtype (ignored without sinks).
-RUNTIME_LAYOUT_EXTRA_ARGS = (
-    ("block_tables_v_ptr", "ptr<i32>"),
-    ("seq_lens_q_ptr", "ptr<i32>"),
-    ("has_seq_lens_q", "i32"),
-    ("q_uniform_len", "i32"),
-    ("q_seq_stride", "i32"),
-    ("q_tok_stride", "i32"),
-    ("q_head_stride", "i32"),
-    ("o_seq_stride", "i32"),
-    ("o_tok_stride", "i32"),
-    ("o_head_stride", "i32"),
-    ("kv_block_stride", "i32"),
-    ("kv_tok_stride", "i32"),
-    ("kv_head_stride", "i32"),
-    ("kv_block_span_bytes", "i32"),
-    ("q_block_grid", "i32"),
-    ("sink_is_f32", "i32"),
-)
+# The kernargs appended in runtime_layout mode are RUNTIME_LAYOUT_EXTRA_ARGS
+# (kernels/common/_attention_runtime_layout.py), shared with the gfx950 builder.
 
 
 def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Optional[str]:
@@ -1891,14 +1871,7 @@ def build_unified_attention_2d_tiled(
     SW_ACTIVE = SLIDING_WINDOW > 0 or RTL
     if RTL:
         # Appended runtime-layout kernargs (ABI order: RUNTIME_LAYOUT_EXTRA_ARGS).
-        rtl_p = {}
-        for _rtl_name, _rtl_ty in RUNTIME_LAYOUT_EXTRA_ARGS:
-            if _rtl_ty == "ptr<i32>":
-                rtl_p[_rtl_name] = b.param(
-                    _rtl_name, PtrType(I32, "global"), readonly=True, align=4
-                )
-            else:
-                rtl_p[_rtl_name] = b.param(_rtl_name, I32)
+        rtl_p = declare_runtime_layout_params(b)
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -2810,28 +2783,10 @@ def build_unified_attention_2d_tiled(
         return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
 
     def _sink_logit(qh, qh_in):
-        # Query head ``qh``'s sink logit in f32. Runtime-layout kernels read
-        # ``sink_is_f32``: nonzero means ``sink_ptr`` holds Hq fp32 logits,
-        # else Hq logits in the Q dtype. The fp32 form is read as two 16-bit
-        # halves and both forms mask on their own flag, so neither reads past
-        # the other's buffer (2*Hq halves vs Hq).
-        if not RTL:
-            return b.cast_to_f32(b.global_load(sinks, qh, dtype, align=2))
-        is_f32 = b.cmp_ne(rtl_p["sink_is_f32"], b.const_i32(0))
-        is_q = b.cmp_eq(rtl_p["sink_is_f32"], b.const_i32(0))
-        f32_in = b.land(qh_in, is_f32)
-        qh2 = b.mul(qh, b.const_i32(2))
-        lo_idx = b.select(f32_in, qh2, b.const_i32(0))
-        lo = b.global_load(sinks, lo_idx, I16, align=2)
-        hi_idx = b.select(f32_in, b.add(qh2, b.const_i32(1)), b.const_i32(0))
-        hi = b.global_load(sinks, hi_idx, I16, align=2)
-        lo32 = b.zext(lo, I32)
-        hi32 = b.zext(hi, I32)
-        word = b.add(lo32, b.shl(hi32, b.const_i32(16)))
-        sink_w = b.bitcast(word, F32)
-        q_idx = b.select(b.land(qh_in, is_q), qh, b.const_i32(0))
-        sink_h = b.global_load(sinks, q_idx, dtype, align=2)
-        return b.select(is_f32, sink_w, b.cast_to_f32(sink_h))
+        # Query head ``qh``'s sink logit in f32 (see ``sink_logit``).
+        return sink_logit(
+            b, sinks, dtype, qh, qh_in, rtl_p["sink_is_f32"] if RTL else None
+        )
 
     if USE_SINKS:
         m_inits = []
@@ -6771,7 +6726,11 @@ def _build_gfx942_4warp_gqa_lean(
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
             oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
@@ -7372,7 +7331,11 @@ def build_gfx942_4warp_gqa(
             else:
                 q_inseq = b.add(qbase, b.add(wq, c))
                 oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()

@@ -47,8 +47,18 @@ from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import (
+    UNIFIED_LSE_LAYOUTS,
+    lse_row_has_mass,
+    lse_store,
+    unified_lse_offset,
+)
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._attention_runtime_layout import (
+    RUNTIME_LAYOUT_EXTRA_ARGS,
+    declare_runtime_layout_params,
+    sink_logit,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -542,12 +552,24 @@ class UnifiedAttention2DTiledSpec:
     # block).
     # Default False leaves the kernel unchanged.
     runtime_layout: bool = False
+    # lse_layout: "token_major" is the [total_q, num_query_heads, 1] order above.
+    #   "head_major" stores each sequence as [num_query_heads, q_len] from element
+    #   cu_q_start * num_query_heads, i.e. [B, Hq, S, 1] for equal-length
+    #   sequences (the hipDNN SDPA stats tensor). Needs emit_lse.
+    lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
         if type(self.emit_lse) is not bool:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
+            raise ValueError(
+                f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
+                f"got {self.lse_layout!r}"
+            )
+        if self.lse_layout != "token_major" and not self.emit_lse:
+            raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -1029,40 +1051,21 @@ class UnifiedAttention2DTiledSpec:
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
             "qrev" if self.use_qblock_reverse else "",
-            "lse" if self.emit_lse else "",
+            (
+                ("lsehm" if self.lse_layout == "head_major" else "lse")
+                if self.emit_lse
+                else ""
+            ),
             "rtl" if self.runtime_layout else "",
         )
 
 
 # Kernel arguments appended after the fixed ones and the runtime shape kernargs
 # (``RUNTIME_KERNARG_FIELDS``: num_query_heads, num_kv_heads, sliding_window)
-# when ``runtime_layout`` is set, in order. All i32 except the ``_ptr`` ones (ptr<i32>). Strides are in
-# elements; ``kv_block_span_bytes`` is the per-block buffer-resource size.
-# ``block_tables_v_ptr`` is V's block table; it shares ``block_table_stride``
-# with ``block_tables_ptr`` (K's table) and may be the same pointer.
-# ``q_uniform_len`` is L > 0 for a dense Q (L rows per sequence) and 0 for a
-# ragged one, whose offsets must be non-decreasing with off[b+1] - off[b] >=
-# seq_lens_q[b] and off[B] the end of the last block. ``sink_is_f32`` nonzero:
-# ``sink_ptr`` holds Hq fp32 logits, else Hq logits in the Q dtype (ignored
-# without sinks).
-_RTL_PARAMS = (
-    "block_tables_v_ptr",
-    "seq_lens_q_ptr",
-    "has_seq_lens_q",
-    "q_uniform_len",
-    "q_seq_stride",
-    "q_tok_stride",
-    "q_head_stride",
-    "o_seq_stride",
-    "o_tok_stride",
-    "o_head_stride",
-    "kv_block_stride",
-    "kv_tok_stride",
-    "kv_head_stride",
-    "kv_block_span_bytes",
-    "q_block_grid",
-    "sink_is_f32",
-)
+# when ``runtime_layout`` is set, in order: the names of
+# ``RUNTIME_LAYOUT_EXTRA_ARGS`` (kernels/common/_attention_runtime_layout.py),
+# shared with the gfx942 builder.
+_RTL_PARAMS = tuple(name for name, _ in RUNTIME_LAYOUT_EXTRA_ARGS)
 
 
 def _runtime_layout_wave_size() -> int:
@@ -1556,15 +1559,7 @@ def build_unified_attention_2d_tiled(
         if spec.emit_lse
         else None
     )
-    rtl = {}
-    if RTL:
-        for rtl_name in _RTL_PARAMS:
-            if rtl_name.endswith("_ptr"):
-                rtl[rtl_name] = b.param(
-                    rtl_name, PtrType(I32, "global"), readonly=True, align=4
-                )
-            else:
-                rtl[rtl_name] = b.param(rtl_name, I32)
+    rtl = declare_runtime_layout_params(b) if RTL else {}
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
@@ -2286,28 +2281,8 @@ def build_unified_attention_2d_tiled(
         return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
 
     def _sink_logit(qh, qh_in):
-        # Query head ``qh``'s sink logit in f32. Runtime-layout kernels read
-        # ``sink_is_f32``: nonzero means ``sink_ptr`` holds Hq fp32 logits,
-        # else Hq logits in the Q dtype. The fp32 form is read as two 16-bit
-        # halves and both forms mask on their own flag, so neither reads past
-        # the other's buffer (2*Hq halves vs Hq).
-        if not RTL:
-            return b.cast_to_f32(b.global_load(sinks, qh, dtype, align=2))
-        is_f32 = b.cmp_ne(rtl["sink_is_f32"], b.const_i32(0))
-        is_q = b.cmp_eq(rtl["sink_is_f32"], b.const_i32(0))
-        f32_in = b.land(qh_in, is_f32)
-        qh2 = b.mul(qh, b.const_i32(2))
-        lo_idx = b.select(f32_in, qh2, b.const_i32(0))
-        lo = b.global_load(sinks, lo_idx, I16, align=2)
-        hi_idx = b.select(f32_in, b.add(qh2, b.const_i32(1)), b.const_i32(0))
-        hi = b.global_load(sinks, hi_idx, I16, align=2)
-        lo32 = b.zext(lo, I32)
-        hi32 = b.zext(hi, I32)
-        word = b.add(lo32, b.shl(hi32, b.const_i32(16)))
-        sink_w = b.bitcast(word, F32)
-        q_idx = b.select(b.land(qh_in, is_q), qh, b.const_i32(0))
-        sink_h = b.global_load(sinks, q_idx, dtype, align=2)
-        return b.select(is_f32, sink_w, b.cast_to_f32(sink_h))
+        # Query head ``qh``'s sink logit in f32 (see ``sink_logit``).
+        return sink_logit(b, sinks, dtype, qh, qh_in, rtl["sink_is_f32"] if RTL else None)
 
     if USE_SINKS:
         m_inits = []
@@ -5227,9 +5202,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(b.add(cu_q_start, op_pos_t), num_qh_p),
-                            op_qh_t,
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=op_pos_t,
+                            head=op_qh_t,
+                            num_heads=num_qh_p,
                         ),
                         m_final[0],
                         l_final[0],
@@ -5296,12 +5276,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(
-                                b.add(cu_q_start, hoist_qp_r[reg]),
-                                num_qh_p,
-                            ),
-                            hoist_qh_r[reg],
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=hoist_qp_r[reg],
+                            head=hoist_qh_r[reg],
+                            num_heads=num_qh_p,
                         ),
                         m_final[reg],
                         l_final[reg],
@@ -5454,12 +5436,14 @@ def build_unified_attention_2d_tiled(
                 lse_store(
                     b,
                     lse,
-                    b.add(
-                        b.mul(
-                            b.add(cu_q_start, hoist_qp_r[reg]),
-                            num_qh_p,
-                        ),
-                        hoist_qh_r[reg],
+                    unified_lse_offset(
+                        b,
+                        spec.lse_layout,
+                        cu_q_start=cu_q_start,
+                        q_len=cur_batch_q_len,
+                        pos=hoist_qp_r[reg],
+                        head=hoist_qh_r[reg],
+                        num_heads=num_qh_p,
                     ),
                     m_final[reg],
                     l_final[reg],

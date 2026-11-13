@@ -157,7 +157,8 @@ The ops that are signed by definition -- `smax`, `smin`, `sext` and their
 vector forms -- refuse a `u8` operand (`smax treats its operands as signed, but
 u8 is unsigned -- use umax`). Native `u16`/`u32` types remain absent.
 A single `u8` can be loaded from and stored to global memory and stored to
-LDS. The vector memory builders refuse `u8`: the global pair, and the LDS pair
+LDS, and `zero_vec` builds a `u8` zero vector. The vector memory builders
+refuse `u8`: the global pair, and the LDS pair
 `smem_load_vN` / `smem_store_vN`, which admit one shared element list (so an
 LDS load of `u8`, which `smem_load_vN` also serves for one element, is refused
 too). `u4`, like `i4`, is packed-only: the IR builder of both engines refuses
@@ -695,7 +696,7 @@ scheduled to gain.
 
 | Family | Supported | Not supported |
 |---|---|---|
-| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx90a, gfx942 and gfx950 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines) | **fp8/bf8** — rejected (only f16, bf16 and fp64 are accepted); **fp64** with split-K, fused epilogues, `direct_to_lds` with `pad_k`, `direct_to_lds` on gfx90a, or on other targets |
+| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx90a, gfx942 and gfx950 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines); fp8 x fp8 or bf8 x bf8 A/B with a bf16 or fp16 C on gfx1250 (f32 accum; fp8 on the 16x16x64 and 16x16x128 WMMA atoms, bf8 on 16x16x64) | **fp8/bf8** on other targets, mixed fp8 x bf8, and bf8 on the 16x16x128 atom; no dispatch route selects an fp8 GEMM yet; **fp64** with split-K, fused epilogues, `direct_to_lds` with `pad_k`, `direct_to_lds` on gfx90a, or on other targets |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 (`_SUPPORTED_DTYPES`, `:178`) | **fp8/bf8** — rejected at `:192-195`; `:62-65` records the missing lane-decode and byte-wise A/B loads, but that docstring is itself stale (it still calls `f16` "the only shipped option" after bf16 landed) |
 | Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
 | Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |

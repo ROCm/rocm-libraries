@@ -70,6 +70,7 @@ function(hipconv_add_arch_lib name)
         "direct/direct/*.cpp"
         "direct/direct_wgrad/*.cpp"
         "direct/patch_embed/*.cpp"
+        "direct/direct_flex/*.cpp"
     )
     list(APPEND sources "${variant_sources}")
     add_library(hipconv_arch_${name} OBJECT ${sources})
@@ -78,7 +79,7 @@ function(hipconv_add_arch_lib name)
         "${HIPCONV_ROOT}/src"
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
+    target_link_libraries(hipconv_arch_${name} PRIVATE hipconv_headers hip::device)
     target_compile_options(hipconv_arch_${name} PRIVATE ${HIPCONV_DEVICE_COMPILE_OPTIONS})
     # Position-independent so the objects can link into libMIOpen.so.
     #
@@ -140,8 +141,8 @@ endfunction()
 function(hipconv_autoshard)
     cmake_parse_arguments(ARG
         ""
-        "ARCH;NAMESPACE;KERNEL_CLASS;CONFIG_TABLE;KERNEL;NUM_SHARDS;EXTRA_HIP_FLAGS"
-        ""
+        "ARCH;NAMESPACE;KERNEL_CLASS;CONFIG_TABLE;KERNEL;MATCHER_HPP;MATCHER_CPP;NUM_SHARDS"
+        "EXTRA_HIP_FLAGS"
         ${ARGN})
     set(target hipconv_arch_${ARG_ARCH})
     # An NPI architecture the build serves no GPU for has no target to shard into.
@@ -153,6 +154,13 @@ function(hipconv_autoshard)
     set(autogen_target ${autoshard_target}_generate)
     set(autogen_dir ${CMAKE_CURRENT_BINARY_DIR}/autoshard)
     set(prefix ${autogen_dir}/${ARG_NAMESPACE}_)
+    set(libautoshard_sources
+        ${HIPCONV_ROOT}/cmake/libautoshard.cpp
+        ${HIPCONV_ROOT}/src/conv_params.cpp
+        ${HIPCONV_ROOT}/src/data_type_field.cpp
+        ${HIPCONV_ROOT}/src/direction_field.cpp
+        ${HIPCONV_ROOT}/src/kv_descriptor.cpp
+    )
 
     file(MAKE_DIRECTORY ${autogen_dir})
 
@@ -162,8 +170,9 @@ function(hipconv_autoshard)
         # Without a type this follows BUILD_SHARED_LIBS, which MIOpen sets. A Windows DLL
         # exports no symbols without dllexport, so the generators fail to link against
         # make_autoshard.
-        add_library(libautoshard STATIC ${HIPCONV_ROOT}/cmake/libautoshard.cpp)
-        target_include_directories(libautoshard PUBLIC ${HIPCONV_ROOT}/cmake/)
+        add_library(libautoshard STATIC ${libautoshard_sources})
+        target_include_directories(libautoshard PUBLIC ${HIPCONV_ROOT}/cmake/ ${HIPCONV_ROOT}/include/ ${HIPCONV_ROOT}/src/)
+        target_link_libraries(libautoshard PUBLIC hipconv_headers)
         target_compile_options(libautoshard PRIVATE ${HIPCONV_HOST_WARNING_FLAGS})
     endif()
 
@@ -172,7 +181,16 @@ function(hipconv_autoshard)
         ${autoshard_cpp}
         @ONLY
     )
-    add_executable(${autoshard_target} ${autoshard_cpp})
+    # Compile the matcher as C++ through a wrapper that includes it.
+    #
+    # hipconv_add_arch_lib marks the matcher LANGUAGE HIP in this directory. Listing it here
+    # would make CMake link the generator as HIP, whose link line omits CMAKE_CXX_FLAGS_<CONFIG>
+    # and so drops a sanitizer runtime that the C++ objects need.
+    set(matcher_cpp ${ARG_NAMESPACE}_matcher.cpp)
+    cmake_path(ABSOLUTE_PATH ARG_MATCHER_CPP OUTPUT_VARIABLE matcher_cpp_path)
+    file(CONFIGURE OUTPUT ${matcher_cpp}
+         CONTENT "#include \"${matcher_cpp_path}\"\n")
+    add_executable(${autoshard_target} ${autoshard_cpp} ${matcher_cpp})
     target_link_libraries(${autoshard_target} libautoshard)
     target_include_directories(${autoshard_target} PRIVATE
         "${HIPCONV_ROOT}/src"

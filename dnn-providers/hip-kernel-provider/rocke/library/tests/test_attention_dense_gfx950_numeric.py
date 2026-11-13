@@ -1777,6 +1777,104 @@ class TestDenseLseNumeric:
         assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
 
     @pytest.mark.parametrize(
+        "shape",
+        [("fp16", 128, 2), ("bf16", 64, 1)],
+        ids=["fp16-d128-kv2", "bf16-d64-kv1"],
+    )
+    @pytest.mark.parametrize(
+        "window,q_lens,kv_lens,emit_lse,keyless",
+        [
+            (0, (256, 256), (192, 64), False, False),
+            (0, (256, 256), (192, 64), True, False),
+            (256, (512, 256), (512, 64), False, False),
+            (256, (512, 256), (512, 64), True, False),
+            (64, (256, 512), (256, 64), True, True),
+        ],
+        ids=["plain", "plain-lse", "window", "window-lse", "window-keyless-lse"],
+    )
+    def test_packed_dense_short_last_sequence(
+        self, shape, window, q_lens, kv_lens, emit_lse, keyless
+    ):
+        """Packed varlen whose last sequence has far fewer keys than ``seqlen_kv``.
+
+        The kernel bounds each workgroup's K/V buffers by the end of its own
+        sequence, so the loads past it (the last sequence's one-tile-ahead prefetch,
+        and a sliding-window start tile past the sequence's keys) are dropped by the
+        hardware instead of reading past the allocation. Every row that has keys must
+        still match the fp32 reference: a bound too tight by a row or a tile zeroes
+        consumed K/V and fails, while the over-read itself is not observable in the
+        output (a too-loose bound passes unless the read faults). In
+        ``window-keyless-lse`` the last sequence has a q-block whose window starts
+        past its keys; its rows are 0 with LSE -inf. Without LSE the launcher rejects
+        keyless rows, so only the LSE case has them.
+        """
+        dtype, head_size, kv_heads = shape
+        q_offsets = [0, q_lens[0], q_lens[0] + q_lens[1]]
+        k_offsets = [0, kv_lens[0], kv_lens[0] + kv_lens[1]]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=4,
+            num_kv_heads=kv_heads,
+            head_size=head_size,
+            dtype=dtype,
+            varlen=True,
+            emit_lse=emit_lse,
+            sliding_window=window,
+        )
+        torch.manual_seed(31)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(q_offsets[-1], 4, head_size, device="cuda", dtype=tdt)
+        k = torch.randn(k_offsets[-1], kv_heads, head_size, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse_out = torch.full(
+            (q_offsets[-1], 4, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        scale = 0.5
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse_out if emit_lse else None,
+            scale=scale,
+            cu_seqlens_q=torch.tensor(q_offsets, device=q.device, dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(k_offsets, device=q.device, dtype=torch.int32),
+        )
+        torch.cuda.synchronize()
+        expected_out = torch.empty_like(out, dtype=torch.float32)
+        expected_lse = torch.empty_like(lse_out)
+        for seq in range(2):
+            q0, q1 = q_offsets[seq : seq + 2]
+            k0, k1 = k_offsets[seq : seq + 2]
+            ref, lse_ref = _lse_reference(
+                q[q0:q1].unsqueeze(0),
+                k[k0:k1].unsqueeze(0),
+                v[k0:k1].unsqueeze(0),
+                scale,
+                causal=True,
+                window=window,
+            )
+            expected_out[q0:q1] = ref[0]
+            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
+        has_key = torch.isfinite(expected_lse)
+        # The case must have the rows it claims: the launcher rejects keyless rows
+        # without LSE, and the keyless case is only worth running with some.
+        assert bool((~has_key).any()) == keyless
+        tol = _tolerance(dtype)
+        # NaN anywhere in ``out`` (a row never stored) fails the comparison.
+        assert (out.float() - expected_out).abs().max().item() < tol
+        if emit_lse:
+            assert torch.equal(torch.isfinite(lse_out), has_key)
+            assert (lse_out[has_key] - expected_lse[has_key]).abs().max().item() < tol
+            assert bool((lse_out[~has_key] == float("-inf")).all())
+            keyless_out = out[~has_key.squeeze(-1)]
+            assert torch.equal(keyless_out, torch.zeros_like(keyless_out))
+
+    @pytest.mark.parametrize(
         "failure",
         [
             "q_tail",

@@ -79,7 +79,9 @@ using SRowLoader = RowLoader<SRowLayout<cfg>,
                              cfg.waves_q,
                              S_LANE_BYTES,
                              (cfg.rows_per_tile > 0),
-                             cfg.is_tf32()>;
+                             cfg.is_tf32(),
+                             cfg.row_segments,
+                             cfg.exchange_hw>;
 template <Config cfg, hipconv::DataType DT>
 using DeltaRowLoader = RowLoader<DeltaRowLayout<cfg>,
                                  LdsType<DT>,
@@ -87,7 +89,9 @@ using DeltaRowLoader = RowLoader<DeltaRowLayout<cfg>,
                                  cfg.waves_q,
                                  DELTA_LANE_BYTES,
                                  (cfg.rows_per_tile > 0),
-                                 cfg.is_tf32()>;
+                                 cfg.is_tf32(),
+                                 cfg.row_segments,
+                                 cfg.exchange_hw>;
 
 template <Config cfg, hipconv::DataType DT>
 using SRing = RowRing<LdsType<DT>, cfg.row_buffers()>;

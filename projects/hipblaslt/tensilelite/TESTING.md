@@ -223,7 +223,7 @@ validate tuning data rather than code, and where each one lives follows from tha
 outside `tensilelite/`, so a unit test that reads it fails on tuning PRs whose diff it cannot see,
 runs only when `tensilelite/` changes, and skips in every lane that installs TensileLite rather than
 checking it out. A check about code uses a fixture; a cross-file fact about the shipped data goes in
-`tensilelite.TensileLogic.ValidCorpusConsistency`, whose `check_corpus_invariants` runs inside
+`tensilelite.logic.valid_corpus_consistency`, whose `check_corpus_invariants` runs inside
 `TensileLogic --check-all` in every kernel-generating build (see
 [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic)).
 [`test_no_logic_corpus_paths.py`](tensilelite/Tests/unit/test_no_logic_corpus_paths.py) fails any test
@@ -240,8 +240,8 @@ Where each corpus check lives:
 
 | Check | Lives in | Runs |
 | --- | --- | --- |
-| Sibling logic files declare the same `DeviceNames` | `ValidCorpusConsistency.find_sibling_device_names_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
-| A Range file matches its same-basename Equality sibling's header and effective `ProblemType` (same placeholder) | `ValidCorpusConsistency.find_range_sibling_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
+| Sibling logic files declare the same `DeviceNames` | `valid_corpus_consistency.find_sibling_device_names_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
+| A Range file matches its same-basename Equality sibling's header and effective `ProblemType` (same placeholder) | `valid_corpus_consistency.find_range_sibling_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
 | `SolutionUID` is unique across the corpus | [`test_solution_uid_uniqueness.py`](tensilelite/Tests/unit/test_solution_uid_uniqueness.py), `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
 | The skinny TN Range files wire the right kernels, without overlap, inside their predicates | `test_CustomKernelMetadata.py::test_skinny_tn_range_logic`, `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
 | Shipped gfx1250 device-scalar-alpha logic advertises the capability through `UseScaleAlphaVec` | `test_DeviceScalarAlpha.py::test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250`, `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
@@ -254,7 +254,7 @@ builds over files no one meant to compare. (A check on the shape of the gfx1250v
 retired together with that overlay in [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).)
 The hermetic suite
 [`test_valid_corpus_consistency.py`](tensilelite/Tests/unit/test_valid_corpus_consistency.py) tests the
-`ValidCorpusConsistency` checks themselves against synthetic corpora.
+`valid_corpus_consistency` checks themselves against synthetic corpora.
 
 **The logic-corpus lane.** The corpus is tuning data outside `tensilelite/`, so a pull request that
 changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
@@ -478,7 +478,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/logic/known_bugs.yaml`](tensilelite/logic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a
@@ -720,7 +720,7 @@ it is further along than it is.
 | TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. The lane rolls up to the required `Component CI Summary`, so a regression blocks a merge |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
 | TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on ten files |
-| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
+| TensileLite C++: `tensilelite-host`, the client and rocisa, `.cpp` files only | `llvm-cov` via `tox -e coverage-cpp` | Math CI | Reported to codecov as `TensileLite-CPP`, not enforced |
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
 characterization suite and the pure unit suite once each under coverage, keeping the two selections
@@ -772,10 +772,21 @@ they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
 including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
-**No C++ coverage target exists** for the reasons given under
+**C++ coverage** (`coverage-cpp`) counts `.cpp` files from three places: `tensilelite-host`
+(`src/`, exported from `libtensilelite-host.so`), the client (`client/src/`, including the CPU
+reference in `Reference.cpp`) and rocisa (`rocisa/rocisa/src/`, exported from `_rocisa.so`). Test
+sources and `.hpp` headers are excluded, so templates and inline functions in headers are not
+counted. The job log also prints a per-directory table with headers included; that table is
+advisory and is not uploaded. The counts come from `tensilelite-tests` (`ctest`) and `rocisa/test`
+(`pytest`). The GPU `-m common` suite is what drives most of the client, and it does not run under
+coverage, which is why most of `client/src/` reads low.
+
+**No enforced C++ coverage floor exists.** `codecov.yml` sets the same 80% target for
+`TensileLite-CPP` as for the other flags (see [Targets](#targets)), but the job that uploads it is
+not a required check. Enforcing it before the host-side code is linkable in isolation would produce a
+number nobody could act on, for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
-structural blockers). Setting one before the host-side code is linkable in isolation would produce a
-number nobody could act on.
+structural blockers).
 
 ## Improvement Roadmap
 

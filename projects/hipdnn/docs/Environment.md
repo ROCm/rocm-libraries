@@ -136,6 +136,7 @@ export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptor
 
 **Notes:**
 - On Linux, all three variables are ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`: a descriptor can name a shared library (`custom_library`) that the provider then loads. Windows has no equivalent execution mode, so they are always honored there.
+- A descriptor directory that cannot be read is skipped and logged at `ERROR`, which appears only when `HIPDNN_LOG_LEVEL` enables errors.
 
 #### HIPDNN_DISABLE_ENGINES
 
@@ -285,6 +286,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 ```
 
 **Notes:**
+- With benchmarking on, the first `execute()` of a plan cannot be captured into a hipGraph: the plan times its candidates and synchronizes streams and events, which breaks the capture. Run the plan once eagerly before the capture. Later executes use the chosen candidate and can be captured. See [Capture hipDNN graphs in a hipGraph](./user-guides/how-to/capture-hipgraph.rst).
 - With benchmarking on, the kernel ingestor prepares every candidate kernel left after the knob filter and `global.workspace_size_limit` at plan build and samples them on the plan's first `execute()`, so plan-build cost grows with the candidate count and the first `execute()` is slower than subsequent calls. With `HIPDNN_LOG_LEVEL=info` it logs the count as `ingestor: engine '<name>' will benchmark N candidate(s) (M before knob filtering), ranked front <id>`, where N is counted after both filters. The line is absent when a benchmarked record is served. The ingestor memoizes the ranking (a benchmarked record) per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
 - A benchmarked record is served only when it covers every kernel that applies to the graph on that device, before any filtering. A run records only the candidates it measured that sampled successfully, and the write-back appends that record without merging it into an earlier one. When the knob filter or workspace limit removes a kernel, or a candidate cannot be built or fails sampling, the record misses that kernel: it is written but never served, and every later plan build for that graph and device benchmarks again.
 - A covering record is served whether or not benchmarking is on. The build prepares only the highest-ranked entry that passes the current filters, moving to the next ranked entry if that kernel cannot be built, and falls back to normal selection if none can. Without a covering record and with benchmarking off, the build stops at the first buildable candidate.

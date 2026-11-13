@@ -33,6 +33,7 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import enum
+import math
 import os
 import warnings
 from collections.abc import Iterator
@@ -668,6 +669,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.atomic.fadd.f32": (
+        "declare float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+        "float, ptr addrspace(8) nocapture, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.v2i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.v2i32("
@@ -1373,6 +1378,50 @@ def _escape_llvm_asm_string(s: str) -> str:
         else:
             out.append(f"\\{o:02X}")
     return "".join(out)
+
+
+# Bytes per element for LDS vector alignment. Shared by the smem load and
+# store handlers so the two cannot drift: they did, and the load's copy was
+# missing the 8-bit floats.
+_SMEM_ELEM_BYTES = {
+    "i8": 1,
+    "u8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "tf32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _smem_vec_align(t: SmemType, vec: int, elem_bytes: int) -> int:
+    """Alignment an LDS vector access can actually guarantee, in bytes.
+
+    The natural alignment of a ``vec``-wide access is ``vec * elem_bytes``, but
+    that only holds if every address the access can land on is that aligned.
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
+    ``vec``, so the address advances by the innermost dimension per row. When
+    that dimension is not a multiple of ``vec`` -- which is exactly what a
+    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary.
+
+    ``gcd(vec, innermost)`` is the largest element count every row start is
+    guaranteed to be a multiple of, so it bounds the claim. Outer strides are
+    products that include the innermost dimension, so they never bind tighter
+    and do not need to be considered.
+
+    An alignment attribute is an assertion to LLVM, not a formatting detail:
+    overstating it is undefined behaviour even where the hardware tolerates the
+    access. Understating it only costs instruction selection.
+    """
+    shape = getattr(t, "shape", None)
+    if not shape:
+        return vec * elem_bytes
+    return math.gcd(int(vec), int(shape[-1])) * elem_bytes
 
 
 def _smem_storage_type(t: SmemType) -> str:
@@ -3919,23 +3968,18 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
         # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes.
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
+        # (i64 / f64): 8 bytes; the 8-bit floats are 1 byte each. fp8e4m3/bf8e5m2
+        # were missing from this map, so they fell to the default of 2 and a
+        # 16-element fp8 read claimed `align 32` for a 16-byte access -- an
+        # overclaim no padding choice could avoid.
+        elem_bytes = _SMEM_ELEM_BYTES.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
         )
         # New 96-bit widths guarantee only element alignment, including FP8.
-        align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
+        align = (
+            12 // vec if vec in (3, 6, 12) else _smem_vec_align(stype, vec, elem_bytes)
+        )
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
@@ -5474,6 +5518,23 @@ class _Lowerer:
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Not `inbounds`: the address feeds a TDM descriptor, and a clipped fill
+        # can legitimately point past the allocation -- early refill's second
+        # prologue fill does when K < tile_k, with a zero extent. An inbounds
+        # GEP past the object is poison, which the mover's clipping cannot undo;
+        # a plain GEP is defined for any index.
+        ptr, index = op.operands
+        elem_ty = _llvm_type(ptr.type.pointee)  # type: ignore[attr-defined]
+        gep = self._fresh("gaddr_gep")
+        self._current().emit(
+            f"  {gep} = getelementptr {elem_ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, {_llvm_type(index.type)} {self._operand(index)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {gep} to i64"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         if base.name in self._lds_prov:
@@ -6068,9 +6129,10 @@ class _Lowerer:
 
     def _op_tile_gpu_check_failed(self, op: Op) -> None:
         """Store 1 to the kernel's GPU-check word, then return from the kernel,
-        which ends the block like ``cf.return``. Not a trap: on Windows the
-        trap handler parks a trapped wave and the launch never returns, while
-        a returned lane lets the launch complete."""
+        which ends the block like ``cf.return``. Not a trap: a taken trap does
+        not let the process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete."""
         error = _gpu_check_failed_op_error(op)
         if error:
             raise ValueError(error)
@@ -6476,6 +6538,31 @@ class _Lowerer:
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
             f"i32 0)"
+        )
+
+    def _op_tile_buffer_atomic_fadd_f32(self, op: Op) -> None:
+        """f32 buffer atomic add; the pre-add result is unused (no-return form).
+
+        The ``cachepolicy`` attr is the intrinsic's immediate and must be an
+        integer in 0..31 (the builder always sets it); a missing, non-integer
+        or out-of-range value from hand-built or imported IR is rejected rather
+        than coerced.
+        """
+        rsrc, voffset, soffset, val = op.operands
+        cp = op.attrs.get("cachepolicy")
+        if isinstance(cp, bool) or not isinstance(cp, int) or not 0 <= cp <= 0x1F:
+            raise ValueError(
+                f"{op.name}: cachepolicy attr must be an integer in 0..31, got {cp!r}"
+            )
+        self._need("raw.ptr.buffer.atomic.fadd.f32")
+        r = self._fresh("bafadd")
+        self._current().emit(
+            f"  {r} = call float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+            f"float {self._operand(val)}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 {cp})"
         )
 
     def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:

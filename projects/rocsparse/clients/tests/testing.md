@@ -171,9 +171,10 @@ selection, and device-side conversions — these require a GPU and are exercised
 paths; this is not mandated initially and will be pursued in phases. The Codecov `rocSPARSE-unit`
 flag is held to 80% (see [Coverage](#coverage)). A useful property of the unit
 layer is that library sources compiled into the two binaries are instrumented under
-`BUILD_CODE_COVERAGE` (`-fprofile-instr-generate -fcoverage-mapping`), so device kernels and internal
-primitives exercised by `rocsparse-unit-test-device` begin to emit LLVM profile data that the
-integration suite's host-side instrumentation cannot capture. See [Coverage](#coverage).
+`BUILD_CODE_COVERAGE` (`-Xarch_host -fprofile-instr-generate -fcoverage-mapping`). That instruments
+host code only, including internal primitives and the host side of the translation units compiled
+into `rocsparse-unit-test-device`. The device kernels themselves are not instrumented. See
+[Coverage](#coverage).
 
 ---
 
@@ -376,7 +377,7 @@ owner or ticket per case — a tracked quarantine list with expiry remains a gap
 
 ## Coverage
 
-**Tool:** LLVM source-based coverage (`-fprofile-instr-generate -fcoverage-mapping`), enabled with
+**Tool:** LLVM source-based coverage on host code (`-Xarch_host -fprofile-instr-generate -fcoverage-mapping`), enabled with
 `-DBUILD_CODE_COVERAGE=ON` (via `install.sh --codecoverage`, which requires a Debug `-g` or
 RelWithDebInfo `-k` build). `lcov`/`gcovr` are explicitly not used because they do not work with LLVM
 coverage.
@@ -414,8 +415,9 @@ failure when either flag is under 80%. TheRock does not run these statuses. Bran
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
   platforms). Host-side instrumentation of `rocsparse-test` still misses most device kernels.
-  `rocsparse-unit-test-device` is instrumented under `BUILD_CODE_COVERAGE` and compiles library
-  device sources directly in, so those paths can emit LLVM profile data. Inventory is incomplete
+  `rocsparse-unit-test-device` is instrumented under `BUILD_CODE_COVERAGE` with `-Xarch_host` and
+  compiles library device sources directly in. Host code in those translation units emits LLVM
+  profile data; the device kernels do not. Inventory is incomplete
   (not every kernel is unit-tested) and a coverage run still sees only one wavefront size (see
   below).
 

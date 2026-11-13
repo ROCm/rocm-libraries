@@ -170,7 +170,16 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### cuDNN compatibility
 - Continued cuDNN v9 frontend compatibility, including a user guide and samples ⏳
-- cuDNN v8 frontend compatibility ⏳
+- cuDNN v8 frontend compatibility ⏳ ([RFC 0024](./rfcs/0024_CuDNN_V8_Compatibility.md))
+  - Compatibility layer (POC) behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` ✅
+  - The cuDNN frontend v0.x builders (cuDNN v8 API), ported from cudnn-frontend v1.24.0, build hipDNN graphs, plans and variant packs directly; `cudnnBackendExecute` passes straight through to hipDNN. Graphs a hipDNN engine supports execute; anything else either fails to build with `CUDNN_STATUS_NOT_SUPPORTED` or `CUDNN_STATUS_BAD_PARAM`, or builds and finds no engine (an empty heuristics list). The raw cuDNN backend descriptor C API (`cudnnBackendCreateDescriptor`, `…SetAttribute`, `…GetAttribute`, `…Finalize`, `…DestroyDescriptor`) is not provided, so code that calls it directly, such as XLA's autotune persistence, does not compile. Covered by mock-backend unit tests, integration tests against test plugins, GPU samples (convolution forward, backward data and backward filter, fused convolution, matmul, pointwise, batch norm, layer norm, reduction and resample), and a compile-and-run harness over NVIDIA's legacy v8 samples. Building PyTorch's v8 consumers against the compatibility layer is left to TheRock's PyTorch CI. Behavior differences are listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#cudnn-v8-api).
+  - Remaining gaps:
+    - CI runs the v8 GPU samples numerically only for convolution (forward, backward data and backward filter, and fused with bias and ReLU), pointwise ReLU and batch norm: TheRock's hipdnn-samples job loads only the MIOpen provider, and the superbuild CI runners have no GPU. The matmul (hipBLASLt), layer-norm and resample (hip-kernel provider) samples therefore report Skipped in CI; their numerical evidence today comes from manual gfx942 runs with those providers installed (matmul with plain ReLU needs rocm-libraries#14363). A TheRock change ([ROCm/TheRock#9611](https://github.com/ROCm/TheRock/pull/9611)) makes the hipdnn-samples job load the hipBLASLt and hip-kernel providers; once this repository's TheRock pin includes it, those samples' `--require-ran` floors (0 today) rise, so losing their engines fails CI. hipBLASLt declines matmul on gfx115x under Windows
+    - Pointwise modes other than add, ReLU, tanh-approximated GELU and Swish have no GPU sample
+    - No int8 or fp8 engine: PyTorch's quantized operations and the legacy int8 samples find no engine, and the legacy fp8 samples stop at their own NVIDIA-architecture check
+    - Tensors aligned below 16 bytes find no engine: they need engine-plugin API 1.3.0, which the MIOpen and hipBLASLt providers do not report, and hip-kernel-provider's engines decline them
+    - No provider runs the reduction operation, so its GPU sample can only report Skipped
+    - `samples/cudnn_shim/ConvFpropV8.cpp --overhead` reports `VariantPackBuilder::build()` plus `cudnnBackendExecute` against a 5 µs budget over the hipDNN equivalent, and `cudnnBackendExecute` alone against 1 µs; its ctest (label `perf`) reports a budget miss without failing, and `--enforce-budget` makes a miss fail
 
 ### Heuristics
 - Learned engine and kernel ranking via Universal Heuristic Descriptors, with shipped trained models ⏳
@@ -235,6 +244,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
+  - Stream capture of hipDNN execution landed for engines that report the `SUPPORTS_GRAPH_CAPTURE` behavior note; see [Capture hipDNN graphs in a hipGraph](./user-guides/how-to/capture-hipgraph.rst). A native graph API (the equivalent of cuDNN's `populate_cuda_graph`) and MIOpen capture without workarounds are tracked here
 - Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
   - Save/Load Execution plans (binary serialize/deserialize of graph + execution plan landed in Q2; full save/load across dynamic linking tracked here)
 - Non-standard tensor support (non-packed, vectorized)

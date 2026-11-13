@@ -652,6 +652,15 @@ class MmaOp:
             raise ValueError("MMA sources do not have a shared scale block size")
         return a.block_size
 
+    def has_ab_layouts(self) -> bool:
+        """Whether both operand maps are registered, so a kernel can load A and B.
+
+        A catalog row can name an instruction before its lane maps are verified;
+        a validator that admits such an atom hands the builder an op it cannot
+        consume.
+        """
+        return self.srcs[0].layout is not None and self.srcs[1].layout is not None
+
     @property
     def a_scale_frag_len(self) -> int:
         return self.srcs[0].scale.frag_len if self.srcs[0].scale else 0
@@ -1017,6 +1026,71 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     col = builder.mod(lane, c16)
     k_half = builder.div(lane, c16)
     k = builder.add(builder.mul(k_half, builder.const_i32(16)), builder.const_i32(slot))
+    return k, col
+
+
+def _wmma_gfx1250_a_16x16x64_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x64 fp8/bf8 A operand (wave32): lane ``l`` holds row
+    ``l % 16``; the ``<8 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 32 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Same lane math as the K=32 f16/bf16 map with the per-lane K span doubled
+    from 16 elements to 32. Returns ``(row, k)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(32)), builder.const_i32(slot * 4)
+    )
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x64_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x64 fp8/bf8 B operand (wave32): lane ``l`` holds col
+    ``l % 16``; the ``<8 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 32 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Returns ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(32)), builder.const_i32(slot * 4)
+    )
+    return k, col
+
+
+def _wmma_gfx1250_a_16x16x128_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 8-bit A operand (wave32): lane ``l`` holds row
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four bytes per slot, K-contiguous). Same lane
+    math as the K=64 fp8 map with the per-lane K span doubled from 32 bytes to
+    64. Returns ``(row, k)``.
+
+    The K order is the GEMM's, not necessarily the instruction's: A and B share
+    it, and a dot product is the same under any K permutation applied to both,
+    so a GEMM only needs the two maps to agree. Verified that way on gfx1250
+    silicon (random asymmetric integer A/B reproduce ``C = A @ B.T`` exactly in
+    all 256 accumulator cells, which a row/col swap would fail). Do not reuse
+    it where the K order itself matters (mixed formats, block scales)."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x128_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 8-bit B operand (wave32): lane ``l`` holds col
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Returns ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
     return k, col
 
 
@@ -1466,16 +1540,18 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     ),
     # gfx1250 FP8/BF8 K=64 WMMA. A/B carry 32 low-bit bytes per lane presented
     # as <8 x i32>; accumulator is the same 16x16 column-distributed <8 x float>
-    # as the f16/bf16 K=32 atom. The block-scaled GEMM kernel computes operand
-    # offsets directly (no LayoutMap), so only frag lengths + wave size are
-    # registered here; the accumulator map is shared with the f16 path.
+    # as the f16/bf16 K=32 atom, so the accumulator map is shared with the f16
+    # path. The A/B maps are slot-granular over the <8 x i32> carrier: slot i is
+    # the dword holding K .. K+3, so a frag_len-slot walk spans 32 K-elements.
+    # The block-scaled GEMM kernel predates these maps and still computes its
+    # operand offsets directly; it is unaffected by their presence.
     "wmma_gfx1250_f32_16x16x64_fp8_fp8": _shared_src2_dst_frag_info(
         8,
         8,
         8,
         32,
-        None,
-        None,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
         _wmma_gfx12_row_col_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_fp8_bf8": _shared_src2_dst_frag_info(
@@ -1483,8 +1559,8 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8,
         8,
         32,
-        None,
-        None,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
         _wmma_gfx12_row_col_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_bf8_fp8": _shared_src2_dst_frag_info(
@@ -1492,8 +1568,8 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8,
         8,
         32,
-        None,
-        None,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
         _wmma_gfx12_row_col_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_bf8_bf8": _shared_src2_dst_frag_info(
@@ -1501,8 +1577,8 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8,
         8,
         32,
-        None,
-        None,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
         _wmma_gfx12_row_col_16x16,
     ),
     # The same fp8 / bf8 pairs at K 128: 64 values of A and of B per lane,
@@ -1515,6 +1591,18 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         for a in ("fp8", "bf8")
         for b in ("fp8", "bf8")
     },
+    # Except fp8 x fp8, which the gfx1250 fp8 GEMM runs on: it carries the
+    # GEMM's A/B maps (see _wmma_gfx1250_a_16x16x128_f8), so like the K=64 rows
+    # it counts the dword slots of its <16 x i32> carrier, 16 per lane.
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8": _shared_src2_dst_frag_info(
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x128_f8,
+        _wmma_gfx1250_b_16x16x128_f8,
+        _wmma_gfx12_row_col_16x16,
+    ),
     "wmma_gfx1250_f32_16x16x32_bf16": _shared_src2_dst_frag_info(
         16,
         16,
@@ -2457,15 +2545,74 @@ def target_id_from_isa(isa: str) -> str:
     It also accepts a target ID without the ISA prefix.
 
     The result starts at the last ``gfx`` in the input. If there is no
-    ``gfx``, the input is returned unchanged. This does not validate the name.
+    ``gfx``, the input is returned unchanged. This does not validate the name;
+    :func:`parse_target_id` does.
     """
 
     start = isa.rfind("gfx")
     return isa[start:] if start >= 0 else isa
 
 
-def _processor_from_target_id(target_id: str) -> str:
-    """Extract the processor token before any profile or feature suffix."""
+# The whole of a value parse_target_id accepts: an optional AMDHSA triple with an
+# empty or "unknown" environment field, a processor, then feature suffixes.
+_TARGET_ID = re.compile(
+    r"(?:amdgcn-amd-amdhsa-(?:unknown)?-)?"
+    r"(gfx[0-9a-z]+(?:-[0-9a-z]+)*(?::[0-9a-z_]+[+-])*)"
+)
+
+
+def parse_target_id(value: str) -> str:
+    """Return the target ID that ``value`` names, refusing any other form.
+
+    ``value`` is either an AMDHSA ISA name, as a code object's ``amdhsa.target``
+    note records it, or a bare target ID. All of it must be, in order:
+
+    - optionally the triple ``amdgcn-amd-amdhsa-`` with an empty or ``unknown``
+      environment field and its closing ``-`` (``amdgcn-amd-amdhsa--`` or
+      ``amdgcn-amd-amdhsa-unknown-``; compilers write either);
+    - a processor: ``gfx`` then lower-case letters and digits, with ``-``
+      separated parts for names such as ``gfx11-generic`` or ``gfx9-4-generic``;
+    - zero or more feature suffixes, each ``:`` then a name then ``+`` or ``-``
+      (``:sramecc+:xnack-``).
+
+    Returns the target ID with its feature suffixes, without the triple:
+    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` gives ``gfx942:xnack-``.
+    :func:`processor_from_target_id` then gives the processor.
+
+    Raises ``ValueError`` naming the value for anything else: an empty value, an
+    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), a processor
+    name in the wrong place (``notgfx950``, ``amdgcn-amd-amdhsa-unknown-:gfx950``)
+    or a feature without its sign (``gfx950:xnack``). Unlike
+    :func:`target_id_from_isa`, it never guesses a processor out of a malformed
+    value. It does not check that rocKE, the compiler or a device supports the
+    target.
+    """
+
+    match = _TARGET_ID.fullmatch(value)
+    if match is None:
+        # The value is quoted by hand, not with !r, so rocke_parse_target_id in
+        # the C++ engine writes the same text byte for byte.
+        raise ValueError(
+            f"'{value}' is not a target ID: expected an optional "
+            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix, a processor "
+            "such as gfx942 or gfx11-generic, then any :feature+ or :feature- "
+            "suffixes"
+        )
+    return match.group(1)
+
+
+def processor_from_target_id(target_id: str) -> str:
+    """Return the processor of a target ID, without profile or feature suffixes.
+
+    ``gfx942:sramecc+:xnack-`` gives ``gfx942`` and ``gfx1250-strict`` gives
+    ``gfx1250``; catalog names such as ``gfx11-generic`` stay whole, and a
+    member of a generic target stays itself (``gfx1100`` stays ``gfx1100``;
+    :func:`generic_arch_from_target_id` gives its generic). Any other name is
+    cut to its leading ``gfx`` token of lower-case letters and digits; a name
+    that does not start with ``gfx`` is returned up to its first ``:``. This
+    does not validate the name; validate it first with :func:`parse_target_id`
+    when it comes from outside rocKE.
+    """
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -2502,7 +2649,7 @@ def base_arch_from_target_id(target_id: str) -> str:
     """
 
     target_without_features = target_id.split(":", 1)[0]
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
     for generic, members in _load_generic_targets().items():
@@ -2528,7 +2675,7 @@ def compiler_target_from_target_id(target_id: str) -> str:
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if target_without_features.startswith(f"{processor}-"):
         target_without_features = processor
     if separator:

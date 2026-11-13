@@ -183,6 +183,10 @@ typedef struct rocke_attention_tiled_2d_spec
      * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
      * no new IR; on appends the "lse" kernel-name token. */
     bool emit_lse; /* False (Python kw_only) */
+    /* gfx950 lse_layout == "head_major" (Python kw_only, default "token_major"):
+     * each sequence's LSE is a [num_query_heads, q_len] block; the kernel name's
+     * "lse" token becomes "lsehm". Needs emit_lse. */
+    bool lse_head_major; /* False */
     /* Runtime-layout mode (hipDNN paged/ragged SDPA): the Q/O/KV strides and a
      * dense-or-ragged Q become 16 appended kernel arguments (after the runtime
      * head counts and window),

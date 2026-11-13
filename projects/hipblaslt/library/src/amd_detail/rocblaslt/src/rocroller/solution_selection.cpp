@@ -337,6 +337,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount)
 {
     std::vector<SolutionIndexParameters> params;
+    std::vector<SolutionIndexParameters> deferredParams;
     std::vector<SolutionIndexParameters> lastParams;
 
     std::vector<origami::config_t> origami_config_list = getTileListForKernelType(kernelType);
@@ -499,6 +500,35 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         if(useStreamK && wgt.m == 64 && wgt.n == 256)
             continue;
 
+        // origami does not model the LDS transpose loads of the operands that are not
+        // K-contiguous (A when transA = N, B when transB = T). Measured on gfx950, these tiles
+        // rank first but run slower than candidates ranked after them, so they are tried last:
+        // - 6-bit data cannot use StreamK, so tiles that leave more than half of the CUs idle;
+        // - large 6- and 8-bit TT tiles that are wider than tall;
+        // - large 8-bit NT tiles, and large 8-bit NN tiles that are taller than wide or that are
+        //   not square and fit in a single wave (128x256 loses to 128x128 at M=1024).
+        bool transposeLoadA = !kernelType.transA;
+        bool transposeLoadB = kernelType.transB;
+        bool sixBit         = elementSizeA_bits == 6 && elementSizeB_bits == 6;
+        bool eightBit       = elementSizeA_bits == 8 && elementSizeB_bits == 8;
+        bool deferTile      = false;
+        if(transposeLoadA || transposeLoadB)
+        {
+            bool largeTile  = wgt.m + wgt.n > 256;
+            bool singleWave = numTiles <= usableCUs;
+            if(sixBit && numTiles * 2 < usableCUs)
+                deferTile = true;
+            else if((sixBit || eightBit) && largeTile)
+            {
+                if(transposeLoadA && transposeLoadB)
+                    deferTile = eightBit;
+                else if(transposeLoadA)
+                    deferTile = eightBit && (wgt.m > wgt.n || (wgt.m != wgt.n && singleWave));
+                else
+                    deferTile = wgt.n > wgt.m;
+            }
+        }
+
         // Extract nontemporal hints from the config
         bool useNonTemporalA = (result.config.cache_hints_a != 0);
         bool useNonTemporalB = (result.config.cache_hints_b != 0);
@@ -509,10 +539,13 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                                                     (wgt.m == 64 && wgt.n == 64) ||
                                                     (wgt.m == 128 && wgt.n == 32)))
             lastParams.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops, useNonTemporalA, useNonTemporalB});
+        else if(deferTile)
+            deferredParams.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops, useNonTemporalA, useNonTemporalB});
         else
             params.push_back({wgt, useWorkgroupMapping, useStreamK, useTailLoops, useNonTemporalA, useNonTemporalB});
     }
 
+    params.insert(params.end(), deferredParams.begin(), deferredParams.end());
     // Append lastParams to params so that assembly kernel tile sizes are included as fallback options
     params.insert(params.end(), lastParams.begin(), lastParams.end());
 
@@ -578,6 +611,23 @@ SolutionIndexParameters indexToParameters(int index)
     result.nonTemporalB = (index >> pos) & 1;
 
     return result;
+}
+
+/**
+ * Whether an index could have come from parametersToIndex: the top bit is set and no bit
+ * between the last field and the top bit is. Tensile indices are non-negative, so they fail.
+ */
+bool isRocRollerSolutionIndex(int index)
+{
+    // workgroupMapping, streamK, tailLoops, nonTemporalA, nonTemporalB
+    constexpr unsigned int flagBits = 5;
+    constexpr unsigned int fieldBits
+        = MAX_BITS_WORKGROUPTILE_K + MAX_BITS_WORKGROUPTILE_N + MAX_BITS_WORKGROUPTILE_M + flagBits;
+    constexpr unsigned int marker   = 1u << 31;
+    constexpr unsigned int reserved = ~((1u << fieldBits) - 1) & ~marker;
+
+    auto bits = static_cast<unsigned int>(index);
+    return (bits & marker) != 0 && (bits & reserved) == 0;
 }
 
 std::string shortRocRollerKernelNameFromSolutionIndex(const SolutionIndexParameters& p)

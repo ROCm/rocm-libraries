@@ -7,7 +7,7 @@
 // GENERATED test data, do not edit: projects/hipdnn/tools/IngestorGenerator/tools/
 // make_conv_dgrad_aot_test_vectors.py. The shipped catalog's KMD metadata, and the
 // launch plans of the rocKE adapter rocke/library/builders/common/
-// convolution_backward_data.py (gfx950_conv_dgrad_aot_plan) on synthetic problems.
+// convolution_backward_data.py (conv_dgrad_aot_plan) on synthetic problems.
 
 #include <array>
 #include <cstdint>
@@ -875,7 +875,7 @@ inline const std::vector<ServedRow>& servedMatrix()
     return s_rows;
 }
 
-/// A plan in full (Gfx950ConvDgradPlan.serialize): servedMatrix()[row] with the
+/// A plan in full (ConvDgradAotPlan.serialize): servedMatrix()[row] with the
 /// instance-th catalog instance of the row's dtype.
 struct FullPlan
 {

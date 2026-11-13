@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -269,6 +270,95 @@ namespace
             ::testing::ExitedWithCode(0),
             "");
     }
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    // HIPBLASLT_USE_ROCROLLER=1 sends every problem down the rocRoller path, whose indices have
+    // the top bit set. A non-negative index there belongs to a Tensile algo; decoded as a
+    // rocRoller index it names an arbitrary tile, and building that kernel can take minutes.
+    TEST_F(AlgoErrors, smoke_RocRollerHandleRejectsNonRocRollerIndex)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        using HandlePtr = std::unique_ptr<void, decltype(&hipblasLtDestroy)>;
+        auto createWith = [](const char* useRocRoller) {
+            ScopedEnv         use("HIPBLASLT_USE_ROCROLLER", useRocRoller);
+            hipblasLtHandle_t h = nullptr;
+            EXPECT_EQ(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+            return HandlePtr(h, &hipblasLtDestroy);
+        };
+        HandlePtr         rocrollerOwner = createWith("1");
+        HandlePtr         tensileOwner   = createWith("0");
+        hipblasLtHandle_t rocroller      = rocrollerOwner.get();
+        ASSERT_NE(rocroller, nullptr);
+        ASSERT_NE(tensileOwner.get(), nullptr);
+
+        auto isSupported = [&](hipblasLtMatmulAlgo_t algo) {
+            size_t workspace = 0;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, layout, layout, &beta, layout, layout, algo, workspace);
+        };
+
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              count = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      rocroller, desc, layout, layout, layout, layout, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        if(count == 0)
+            GTEST_SKIP() << "rocRoller has no kernel for this problem on " << props.gcnArchName;
+
+        int index = 0;
+        std::memcpy(&index, result.algo.data, sizeof(index));
+        ASSERT_LT(index, 0);
+        EXPECT_EQ(isSupported(result.algo), HIPBLAS_STATUS_SUCCESS);
+
+        // Clearing only the top bit leaves an index that decodes to the same kernel, so only
+        // the top-bit check can refuse it.
+        hipblasLtMatmulAlgo_t unmarked = result.algo;
+        const int             cleared  = index & std::numeric_limits<int>::max();
+        std::memcpy(unmarked.data, &cleared, sizeof(cleared));
+        EXPECT_EQ(isSupported(unmarked), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatmul(rocroller,
+                                  desc,
+                                  &alpha,
+                                  a,
+                                  layout,
+                                  b,
+                                  layout,
+                                  &beta,
+                                  c,
+                                  layout,
+                                  d,
+                                  layout,
+                                  &unmarked,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+
+        // The case from the field: an algo a Tensile handle chose, passed to a rocRoller handle.
+        hipblasLtMatmulHeuristicResult_t tensile{};
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(tensileOwner.get(),
+                                                  desc,
+                                                  layout,
+                                                  layout,
+                                                  layout,
+                                                  layout,
+                                                  pref,
+                                                  1,
+                                                  &tensile,
+                                                  &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(count, 0);
+        std::memcpy(&index, tensile.algo.data, sizeof(index));
+        ASSERT_GE(index, 0);
+        EXPECT_EQ(isSupported(tensile.algo), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+#endif
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.
     TEST_F(AlgoErrors, smoke_AuxScaleIsRefused)

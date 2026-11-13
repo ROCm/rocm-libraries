@@ -32,9 +32,10 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
-and a sliding window that leaves query rows no key (the last query block's window past
-`seqlen_kv` without sinks, or `seqlen_q - seqlen_kv >= W` without sinks or LSE).
+Still rejected with a structured reason by `supports_attention_dense`: varlen and ragged.
+A sliding window that leaves query rows no key (`seqlen_q - seqlen_kv >= W`, or a last
+query block whose window starts past `seqlen_kv`) is supported: those rows write O = 0,
+with or without sinks or the LSE output.
 Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
 online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
 loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
@@ -124,7 +125,8 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=128*
 
 Values are natural-log FP32. A row with no allowed key (only possible with a sliding
 window shorter than the distance to the last key) writes exact-zero output and
-`LSE=-inf`. With the flag off the emitted kernel is unchanged. The LSE buffer must not
+`LSE=-inf`. With the flag off such a row also writes exact-zero output, and the kernel
+carries no LSE stores. The LSE buffer must not
 overlap any input or the output; supplying it with the flag off is an error. The
 dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
 with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.

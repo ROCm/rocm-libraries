@@ -85,7 +85,7 @@ def get_gpu_arch(c):
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "static": "Build rocisa's source StinkyTofu dependency static instead of shared.",
         "rebuild_on_import": "Deprecated compatibility default: rebuild editable rocisa on its first import. Pass --no-rebuild-on-import to disable it.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (the ROCISA_BACKEND=stinkytofu / gfx1250 backend). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
+        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
         "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
     }
 )
@@ -107,9 +107,9 @@ def rocisa(c, rocisa_dir=None, static=False, rebuild_on_import=True,
     future release.
 
     On gfx1250 this also builds and installs the standalone stinkytofu Python
-    binding so `import rocisa` can route through the stinkytofu backend instead
-    of silently falling back to native rocisa (control with
-    --stinkytofu=auto|on|off).
+    binding, which provides `import stinkytofu` for the logical-IR tooling
+    (control with --stinkytofu=auto|on|off). `import rocisa` itself is always
+    the native backend.
     """
     _pip_install_rocisa(
         c,
@@ -188,14 +188,12 @@ def _want_stinkytofu(stinkytofu, targets=None):
 def _pip_install_stinkytofu(c, force=False):
     """Build and install the standalone stinkytofu Python binding into the venv.
 
-    On gfx1250 (or with ``ROCISA_BACKEND=stinkytofu``), ``import rocisa`` routes
-    through the ``rocisa_stinkytofu_adaptor`` facade, which requires
-    ``import stinkytofu`` to resolve the standalone ``_stinkytofu.so`` built from
-    ``shared/stinkytofu/python_module``. Neither ``invoke rocisa`` (which only
-    builds rocisa's *in-process* libstinkytofu, linked into ``_rocisa.so``) nor
-    ``invoke build-client`` produces that standalone binding, so without this
-    step ``_stinkytofu_available()`` fails and rocisa silently falls back to the
-    native backend at kernel-build time.
+    This provides ``import stinkytofu`` (the standalone ``_stinkytofu.so`` built
+    from ``shared/stinkytofu/python_module``) for the logical-IR tooling. Neither
+    ``invoke rocisa`` (which only builds rocisa's *in-process* libstinkytofu,
+    linked into ``_rocisa.so``) nor ``invoke build-client`` produces that
+    standalone binding, so this step installs it explicitly. ``import rocisa``
+    always uses the native backend and does not depend on this binding.
 
     Build isolation is used on purpose: the binding's build backend
     (scikit-build-core / nanobind / cmake / ninja) is often absent from the
@@ -236,27 +234,6 @@ def _pip_install_stinkytofu(c, force=False):
     print("Building and installing the standalone stinkytofu Python binding "
           "(rocisa stinkytofu backend)...")
     c.run(f"pip install {force_flag}{shlex.quote(str(src))}", env=env)
-    _pip_install_adaptor(c)
-
-
-def _pip_install_adaptor(c):
-    """Install the pure-Python rocisa_stinkytofu_adaptor package into the venv.
-
-    ``import rocisa`` on gfx1250 switches to this package after ``stinkytofu``
-    itself is importable. The source tree keeps it one directory deeper than
-    the import name, and it is not part of the rocisa wheel, so pip must
-    install that inner package explicitly.
-    """
-    src = _TASKS_DIR / "rocisa_stinkytofu_adaptor"
-    if not (src / "pyproject.toml").is_file():
-        print(
-            f"warning: {src / 'pyproject.toml'} not found; skipping "
-            "rocisa_stinkytofu_adaptor install.",
-            file=sys.stderr,
-        )
-        return
-    print("Installing rocisa_stinkytofu_adaptor (rocisa stinkytofu backend)...")
-    c.run(f"pip install --no-deps --disable-pip-version-check {shlex.quote(str(src))}")
 
 
 def _maybe_rebuild_rocisa(c, rocisa_dir=None):
@@ -307,7 +284,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (the ROCISA_BACKEND=stinkytofu / gfx1250 backend). One of auto|on|off (default auto: install when gfx1250 is among the GPU targets).",
+        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when gfx1250 is among the GPU targets).",
         "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
         "enable_asan": "Enable AddressSanitizer.",
         "enable_tsan": "Enable ThreadSanitizer.",
@@ -367,10 +344,9 @@ def build_client(
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
 
-    # On gfx1250 the client's generated kernels drive rocisa through the
-    # stinkytofu backend, which needs the standalone stinkytofu binding to be
-    # importable; install it here so kernel generation does not silently fall
-    # back to native rocisa.
+    # Optionally install the standalone stinkytofu binding (`import stinkytofu`)
+    # for the logical-IR tooling. Kernel generation itself uses native rocisa and
+    # does not require this binding.
     if _want_stinkytofu(stinkytofu, targets=gpu_targets):
         _pip_install_stinkytofu(c, force=rebuild_stinkytofu)
 

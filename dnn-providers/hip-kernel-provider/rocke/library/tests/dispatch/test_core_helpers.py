@@ -128,6 +128,20 @@ def test_pin_is_case_and_whitespace_insensitive():
     assert ok
 
 
+def test_a_candidate_with_an_upper_case_spec_id_matches_its_own_pin():
+    # A lossless label keeps %-escapes upper case (sched=iterative%2Dilp), and a pin
+    # copied from it is normalized: the candidate side must be normalized too, as
+    # select() does, or the instance can never be pinned.
+    label = "sched=iterative%2Dilp"
+    ok, why = selector_matches(_request(spec_id=label), _candidate(spec_id=label))
+    assert ok, why
+    ok, why = selector_matches(
+        _request(algorithm="Direct_Dgrad_Wmma"),
+        _candidate(algorithm="Direct_Dgrad_Wmma"),
+    )
+    assert ok, why
+
+
 def test_gemm_request_hashing_uses_the_core_normalizer():
     """GEMM matching and request identity bind the same normalizer."""
     gemm_common = importlib.import_module("rocke.dispatch.gemm.common")

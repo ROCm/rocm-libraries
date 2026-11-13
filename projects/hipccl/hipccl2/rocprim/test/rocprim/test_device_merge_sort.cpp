@@ -324,9 +324,9 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     rocprim::detail::target_arch arch;
     HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
 
-    // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
+    // This test currently fails on gfx950 with key types of custom_type when ROCPRIM_ENABLE_COVERAGE=ON.
     // Temporarily skip these cases while we investigate.
-#if defined(CODE_COVERAGE)
+#if defined(ROCPRIM_ENABLE_COVERAGE)
     if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
     {
         std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;

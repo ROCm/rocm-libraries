@@ -85,6 +85,24 @@ def make_request(
     return replace(base, **overrides) if overrides else base
 
 
+def paged(req: SdpaRequest, block_size: int = 4) -> SdpaRequest:
+    """``req`` with K/V moved into a paged cache: ``[num_blocks, H, block_size,
+    D]`` containers, each batch's keys addressed through its own page-table
+    entries."""
+    b, h_k, s_kv, d = req.k.dims
+    pages = -(-s_kv // block_size)
+    seq_lens = packed((b, 1, 1, 1), "int32")
+    table = packed((b, 1, pages, 1), "int32")
+    return replace(
+        req,
+        k=bshd(b * pages, h_k, block_size, d, req.k.dtype),
+        v=bshd(b * pages, req.v.dims[1], block_size, req.v.dims[3], req.v.dtype),
+        seq_len_q=seq_lens,
+        seq_len_kv=seq_lens,
+        paged=SdpaPaged(table, table, s_kv),
+    )
+
+
 def _scalar(dtype: str = "fp32") -> SdpaTensor:
     return packed((1,), dtype)
 

@@ -350,7 +350,7 @@ class TestPatchIdentity(unittest.TestCase):
 
         ident = replace(KernelIdentity.from_label(self.LABEL), patch=False)
         fields = asdict(ident)
-        for name in ("ws_replicas", "prefetch_addr", "patch"):
+        for name in ("ws_replicas", "prefetch_addr", "prefetch_global_regs", "patch"):
             if not fields[name]:
                 del fields[name]
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:

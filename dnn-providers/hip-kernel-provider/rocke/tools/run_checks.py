@@ -45,6 +45,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import subprocess
 import sys
@@ -57,12 +58,28 @@ PLATFORM = ROCKE / "platform"
 LIBRARY = ROCKE / "library"
 PLATFORM_PYROOT = PLATFORM / "python"
 EMIT_COMMON_DIR = PLATFORM / "tests" / "instances" / "parity"
+LIBRARY_RUN_ALL = LIBRARY / "tests" / "run_all.py"
 
 # The lowerer's compiler-lane registry is the source of truth. Importing it here
 # prevents a newly qualified lane from being silently omitted by the top-level
 # gate or rejected by --flavor.
 sys.path.insert(0, str(PLATFORM_PYROOT))
 from rocke.core.llvm_profile import LLVM_FLAVORS as FLAVORS  # noqa: E402
+
+
+def _library_ir_corpora() -> tuple[Path, ...]:
+    """The library's representative-IR corpora (e.g. the conv cases), which the
+    IR-validity and arch-domain gates walk through --cases. The list lives in
+    library/tests/run_all.py, so both runners gate the same corpora."""
+    if not LIBRARY_RUN_ALL.is_file():
+        return ()
+    spec = importlib.util.spec_from_file_location(
+        "_rocke_library_run_all", LIBRARY_RUN_ALL
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.IR_CORPORA)
+
 
 STAGES = (
     "guard",
@@ -275,21 +292,22 @@ def main() -> int:
     # Corpus gates -- these used to ride on run_all.py's default-on behavior in
     # the guard stage. Keep guard cheap without silently deleting either check
     # from the default complete host gate.
-    if "ir-validity" in steps:
-        status |= _run(
-            "emitted-IR validity gate",
-            [sys.executable, str(PLATFORM / "tools" / "check_ir_validity.py")],
-            env,
-            cwd=PLATFORM,
-        )
-
-    if "arch-domain" in steps:
-        status |= _run(
-            "arch-domain warning gate",
-            [sys.executable, str(PLATFORM / "tools" / "check_arch_domain.py")],
-            env,
-            cwd=PLATFORM,
-        )
+    # Each gate walks the platform harness, then every library corpus: the
+    # library's cases left the platform harness, not the gates.
+    corpora = [None, *_library_ir_corpora()]
+    for step, title, tool in (
+        ("ir-validity", "emitted-IR validity gate", "check_ir_validity.py"),
+        ("arch-domain", "arch-domain warning gate", "check_arch_domain.py"),
+    ):
+        if step not in steps:
+            continue
+        for corpus in corpora:
+            cmd = [sys.executable, str(PLATFORM / "tools" / tool)]
+            label = title
+            if corpus is not None:
+                cmd += ["--cases", str(corpus)]
+                label = f"{title} [{corpus.name}]"
+            status |= _run(label, cmd, env, cwd=PLATFORM)
 
     # Artifact reproduction owns external compiler processes, a long timeout,
     # serial execution, and an explicit CTest skip result. Configure its real

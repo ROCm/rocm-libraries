@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from rocke.core.ir import F16, F32, FP4E2M1
 from rocke.helpers.tiling.mma.styles import CanonicalStyle, InterleavedStyle
 from rocke.helpers.tiling.traits import load_mma_traits
 
@@ -62,13 +63,42 @@ def test_shipped_styles_build_a_plan_without_raising() -> None:
         for shape, tiling in configs:
             TileMmaPlan(
                 shape,
-                a="f16",
-                b="f16",
-                c="f32",
+                a=F16,
+                b=F16,
+                c=F32,
                 target="gfx90a",
                 style=style,
                 tiling=tiling,
             )
+
+
+def test_a_operand_with_several_m_blocks_builds_canonical_and_refuses_interleaved() -> (
+    None
+):
+    # wmma_f32_32x16x128_f4: each lane holds 2 M blocks of A in its registers. The canonical
+    # encoding models that level, so a canonical plan builds; the interleaved construction does not,
+    # so it refuses the atom by name instead of building a wrong layout.
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan
+
+    def plan(style):
+        return TileMmaPlan(
+            (32, 16, 128),
+            a=FP4E2M1,
+            b=FP4E2M1,
+            c=F32,
+            target="gfx1250",
+            style=style,
+            atom_override="wmma_f32_32x16x128_f4",
+        )
+
+    assert plan(CanonicalStyle()).op_id == "wmma_f32_32x16x128_f4"
+    with pytest.raises(NotImplementedError) as excinfo:
+        plan(InterleavedStyle())
+    assert str(excinfo.value) == (
+        "InterleavedStyle cannot lay out 'wmma_f32_32x16x128_f4': each lane holds 2 M blocks of "
+        "A in registers, which the interleaved construction does not model -- TODO: not "
+        "implemented yet; use the canonical style"
+    )
 
 
 def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
@@ -84,4 +114,4 @@ def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
         lambda *a, **k: Diagnostic("error", "forced-unsound (test)"),
     )
     with pytest.raises(ValueError, match="not sound"):
-        TileMmaPlan((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+        TileMmaPlan((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")

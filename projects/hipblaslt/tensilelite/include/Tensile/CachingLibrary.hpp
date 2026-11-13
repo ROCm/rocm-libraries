@@ -212,15 +212,14 @@ namespace TensileLite
             }
         };
 
-        using Caches = CacheMap<TopSolutionsEntry, AMDGPU, MyProblem>;
-        using CachesGroupedGemm
-            = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
+        using Caches            = CacheMap<TopSolutionsEntry, AMDGPU, MyProblem>;
+        using CachesGroupedGemm = CacheMap<TopSolutionsEntry, AMDGPU, std::vector<MyProblem>>;
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
             : m_subLibrary(subLibrary)
             , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max()))
             , m_caches(TopSolutionsEntry{})
-            , m_cachesGroupedGemm(SolutionVector<MySolution>{})
+            , m_cachesGroupedGemm(TopSolutionsEntry{})
         {
         }
 
@@ -316,19 +315,11 @@ namespace TensileLite
                 auto solutions = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
                 if(solutions.size() != 0)
                 {
-                    // A shorter list must not replace a longer one for this problem.
-                    // For equal-length lists, keep the incoming one only if it upgrades
-                    // alreadyRetAll from false to true to avoid repeated top-up rescans.
                     const bool alreadyRetAll = solutions.size() < numSolutions;
-                    m_caches.addIfPreferred(
-                        TopSolutionsEntry{solutions, alreadyRetAll},
-                        [](TopSolutionsEntry const& existing, TopSolutionsEntry const& incoming) {
-                            return incoming.solutions.size() > existing.solutions.size()
-                                   || (incoming.solutions.size() == existing.solutions.size()
-                                       && incoming.alreadyRetAll && !existing.alreadyRetAll);
-                        },
-                        problem,
-                        amdgpu);
+                    m_caches.addIfPreferred(TopSolutionsEntry{solutions, alreadyRetAll},
+                                            preferIncoming,
+                                            problem,
+                                            amdgpu);
                 }
 
                 return solutions;
@@ -348,17 +339,26 @@ namespace TensileLite
         {
             try
             {
-                auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
-                SolutionVector<MySolution> solutions;
-                solutions = m_cachesGroupedGemm.find(problems, amdgpu);
+                auto const& amdgpu = dynamic_cast<AMDGPU const&>(hardware);
 
-                if(solutions.size() != 0)
-                    return solutions;
+                // As for a single GEMM: a cached list shorter than the request is
+                // served only if the sub-library had no more to give.
+                auto cached = m_cachesGroupedGemm.find(problems, amdgpu);
+                if(!cached.solutions.empty()
+                   && (cached.solutions.size() >= static_cast<size_t>(numSolutions)
+                       || cached.alreadyRetAll))
+                    return std::move(cached.solutions);
 
-                solutions
+                auto solutions
                     = m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
                 if(solutions.size() != 0)
-                    m_cachesGroupedGemm.add(solutions, problems, amdgpu);
+                {
+                    const bool alreadyRetAll = solutions.size() < static_cast<size_t>(numSolutions);
+                    m_cachesGroupedGemm.addIfPreferred(TopSolutionsEntry{solutions, alreadyRetAll},
+                                                       preferIncoming,
+                                                       problems,
+                                                       amdgpu);
+                }
 
                 return solutions;
             }
@@ -370,6 +370,17 @@ namespace TensileLite
         }
 
     private:
+        // A shorter list must not replace a longer one for these problems. For
+        // equal-length lists, keep the incoming one only if it upgrades
+        // alreadyRetAll from false to true to avoid repeated top-up rescans.
+        static bool preferIncoming(TopSolutionsEntry const& existing,
+                                   TopSolutionsEntry const& incoming)
+        {
+            return incoming.solutions.size() > existing.solutions.size()
+                   || (incoming.solutions.size() == existing.solutions.size()
+                       && incoming.alreadyRetAll && !existing.alreadyRetAll);
+        }
+
         std::shared_ptr<Library>  m_subLibrary;
         mutable Cache             m_cache;
         mutable Caches            m_caches;

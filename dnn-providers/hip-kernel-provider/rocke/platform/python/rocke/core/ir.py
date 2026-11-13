@@ -28,6 +28,7 @@ import enum
 import os
 import sys
 from dataclasses import dataclass, field
+from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
@@ -44,6 +45,7 @@ from .param_facts import (
     stored_int,
     two_bounds_refusals,
 )
+from .storage import SCALE_ENCODINGS
 from .value_sources import (
     ARITHMETIC,
     ASSUME_RANGE_OP,
@@ -743,6 +745,14 @@ def _check_i32(op: str, field: str, value: int) -> int:
     return v
 
 
+# gfx12+ atomic cache-policy immediate (bits [2:0] th, [4:3] scope) for a
+# device-scope cascade add: th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2).
+# The WGP and L2 caches accumulate the adds locally and write the sum back
+# once, which sheds most of the global RMW traffic of a cross-workgroup
+# reduction. The destination must be pre-zeroed.
+CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3)
+
+
 def _check_cachepolicy(op: str, value: int) -> int:
     """Validate the gfx12+ five-bit cache-policy immediate."""
     v = int(value)
@@ -830,6 +840,58 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
             f"hwreg size must be in 1..{32 - offset} for offset {offset}, got {size}"
         )
     return reg_id | (offset << 6) | ((size - 1) << 11)
+
+
+# gfx1250 TDM LDS padding: the descriptor's ``pad_interval`` is 3 bits and
+# ``pad_amount`` 7 bits, both counted in dwords. Mirrored by
+# ROCKE_TDM_PAD_INTERVAL_MAX / ROCKE_TDM_PAD_AMOUNT_MAX in rocke/ir.h.
+TDM_PAD_INTERVAL_MAX = 7
+TDM_PAD_AMOUNT_MAX = 127
+
+
+def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
+    """Encode an LDS row pad as :meth:`IRBuilder.tdm_descriptor_2d`'s
+    ``(pad_interval, pad_amount)``.
+
+    The mover inserts ``pad_bytes`` of gap into the LDS destination after every
+    ``interval_bytes`` of payload. Both are counted in dwords, and the interval
+    is a log2 biased by one:
+
+        ``pad_interval = log2(interval_bytes / 4) - 1``
+        ``pad_amount   = pad_bytes / 4 - 1``
+
+    Raises ``ValueError`` for a pad the fields cannot express. The error
+    messages are mirrored by ``rocke_encode_tdm_padding``.
+    """
+    interval_bytes = int(interval_bytes)
+    pad_bytes = int(pad_bytes)
+    if pad_bytes <= 0:
+        raise ValueError(
+            "encode_tdm_padding needs a positive pad; pass no pad_interval for an "
+            "unpadded tile"
+        )
+    if interval_bytes % 4 or pad_bytes % 4:
+        raise ValueError(
+            f"TDM padding is dword-granular, got interval={interval_bytes}B pad={pad_bytes}B"
+        )
+    interval_dwords = interval_bytes // 4
+    if interval_dwords < 2 or interval_dwords & (interval_dwords - 1):
+        raise ValueError(
+            f"TDM pad interval must be a power-of-two dword count >= 2, got {interval_dwords}"
+        )
+    pad_interval = interval_dwords.bit_length() - 2
+    pad_amount = pad_bytes // 4 - 1
+    if pad_interval > TDM_PAD_INTERVAL_MAX:
+        raise ValueError(
+            f"TDM pad_interval {pad_interval} exceeds {TDM_PAD_INTERVAL_MAX} "
+            f"(interval {interval_bytes}B too large)"
+        )
+    if pad_amount > TDM_PAD_AMOUNT_MAX:
+        raise ValueError(
+            f"TDM pad_amount {pad_amount} exceeds {TDM_PAD_AMOUNT_MAX} "
+            f"(pad {pad_bytes}B too large)"
+        )
+    return pad_interval, pad_amount
 
 
 def _mma_dst_frag_len(op_id: str) -> int:
@@ -1068,18 +1130,14 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 # narrow forms are the ones that keep a byte-exact last element.
 _BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
 
-# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
-# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
-# vector of them. Their bytes move as u8.
-_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
-
 
 def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
     """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
 
     The element is any scalar whose width is whole bytes and that has a value
-    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
-    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    form (not one of ``core.storage.SCALE_ENCODINGS``, the MMA scale encodings,
+    whose bytes move as u8); ``count`` is an int and ``count`` elements together
+    must make one of :data:`_BUFFER_ACCESS_BYTES`.
     The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
     refuses with the same texts.
     """
@@ -1087,7 +1145,7 @@ def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
         raise TypeError(
             f"{op_name}: the element type must be a scalar, got {elem.name}"
         )
-    if elem.name in _SCALE_ENCODING_SCALARS:
+    if elem.name in SCALE_ENCODINGS:
         raise TypeError(
             f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
             "move its bytes as u8"
@@ -2442,8 +2500,10 @@ class IRBuilder:
         captured into a graph (``GpuCheckCaptureRefused``): nothing reads the
         word after a replay.
 
-        The check does not trap (:meth:`trap`): on Windows the trap handler
-        parks a trapped wave and the launch never returns.
+        The check does not trap (:meth:`trap`): a taken trap does not let the
+        process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete.
 
         So the check is a last line of defence for a value the host cannot
         see, not a way to reject input; make bad input impossible upstream.
@@ -3375,7 +3435,7 @@ class IRBuilder:
         _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, U8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -3871,6 +3931,16 @@ class IRBuilder:
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
+        # The natural alignment is n * elem_bytes, but that only holds if every
+        # address the store can land on is that aligned. An LDS tile advances by
+        # its innermost dimension per row, so a pad that makes that dimension a
+        # non-multiple of n -- lds_k_pad's whole purpose -- leaves alternate rows
+        # off the natural boundary. gcd bounds the claim to what every row start
+        # actually guarantees. Overstating alignment is undefined behaviour even
+        # where the hardware tolerates the access; understating it only affects
+        # instruction selection.
+        shape = getattr(smem.type, "shape", None)
+        align_elems = _gcd(n, int(shape[-1])) if shape else n
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -3878,7 +3948,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": n * elem_bytes,
+                "align": align_elems * elem_bytes,
             },
         )
 
@@ -5652,6 +5722,19 @@ class IRBuilder:
             result_name_hint="lds_addr",
         ).result
 
+    def global_addr_of(self, ptr: Value, index: Value) -> Value:
+        """The i64 address of ``ptr[index]`` in global memory.
+
+        The TDM descriptor carries a raw 57-bit global address rather than a
+        pointer, so the element GEP has to be materialised as an integer.
+        """
+        return self._op(
+            "tile.global_addr_of",
+            [ptr, index],
+            [I64],
+            result_name_hint="gaddr",
+        ).result
+
     def smem_ptr_add(self, lds_addr: Value, byte_off: Value) -> Value:
         """Compute `lds_addr + byte_off` and return an i64 LDS address.
 
@@ -6212,14 +6295,17 @@ class IRBuilder:
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
-        Dimension 0 is the contiguous one. ``tensor_dim0`` / ``tensor_dim1``
-        are the extents (in elements) left from ``global_ptr`` — the hardware
+        ``global_ptr`` is a global pointer, or the i64 address of one (as
+        ``global_addr_of`` returns, for an origin that may lie past the end of
+        the buffer). Dimension 0 is the contiguous one. ``tensor_dim0`` /
+        ``tensor_dim1`` are the extents (in elements) left from it -- the hardware
         clips the tile against them. ``row_stride`` is the element distance
         between consecutive dimension-1 rows. The tile is
         ``tile_dim1 x tile_dim0`` elements, packed row-major at ``lds_addr``
         (an i64 from ``smem_addr_of`` or an i32 LDS byte address) unless
         ``pad_interval`` is given, which enables LDS padding with the raw
-        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
+        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields;
+        :func:`encode_tdm_padding` derives them from a row pad in bytes.
         ``workgroup_mask`` selects the cluster workgroups that receive the
         tile (0 = only the issuing workgroup).
 
@@ -6229,12 +6315,13 @@ class IRBuilder:
         matches CK Tile's ``TDM_GROUP0`` / ``TDM_GROUP1``.
         """
         name = "tdm_descriptor_2d"
-        if (
-            not isinstance(global_ptr.type, PtrType)
-            or global_ptr.type.space != "global"
-        ):
+        is_global_ptr = (
+            isinstance(global_ptr.type, PtrType) and global_ptr.type.space == "global"
+        )
+        if not is_global_ptr and global_ptr.type is not I64:
             raise TypeError(
-                f"{name} global_ptr must be a global pointer, got {global_ptr.type}"
+                f"{name} global_ptr must be a global pointer or an i64 global "
+                f"address, got {global_ptr.type}"
             )
         if lds_addr.type is not I64 and lds_addr.type is not I32:
             raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
@@ -6257,13 +6344,15 @@ class IRBuilder:
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
             )
         pad_enable = pad_interval is not None
-        if pad_enable and not 0 <= pad_interval <= 7:
+        if pad_enable and not 0 <= pad_interval <= TDM_PAD_INTERVAL_MAX:
             raise ValueError(
-                f"{name} pad_interval must be in 0..7 (got {pad_interval})"
+                f"{name} pad_interval must be in 0..{TDM_PAD_INTERVAL_MAX} "
+                f"(got {pad_interval})"
             )
-        if not 0 <= pad_amount <= 0x7F or (pad_amount and not pad_enable):
+        if not 0 <= pad_amount <= TDM_PAD_AMOUNT_MAX or (pad_amount and not pad_enable):
             raise ValueError(
-                f"{name} pad_amount must be in 0..127 and needs pad_interval (got {pad_amount})"
+                f"{name} pad_amount must be in 0..{TDM_PAD_AMOUNT_MAX} and needs "
+                f"pad_interval (got {pad_amount})"
             )
 
         def word(value: int) -> Value:
@@ -6273,7 +6362,7 @@ class IRBuilder:
         c16 = self.const_i32(16)
         # Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2.
         lds32 = lds_addr if lds_addr.type is I32 else self.trunc(lds_addr, I32)
-        gaddr = self.global_ptr_to_i64(global_ptr)
+        gaddr = self.global_ptr_to_i64(global_ptr) if is_global_ptr else global_ptr
         g_hi = self.trunc(self.lshr(gaddr, self.const_i64(32)), I32)
         group0 = (
             self.const_i32(1),
@@ -6354,19 +6443,16 @@ class IRBuilder:
 
     def trap(self) -> None:
         """Abort the kernel: ``call void @llvm.trap()`` (HIP
-        ``__builtin_trap()``). The AMDGPU backend emits ``s_trap 2``; on gfx11
-        it emits its simulated trap instead: ``s_trap 2``, then ``s_sendmsg``,
-        then an ``s_sethalt`` loop.
+        ``__builtin_trap()``), which the AMDGPU backend emits as ``s_trap 2``
+        or, on some processors, as its simulated trap. Which processors, and
+        what a taken trap does on each host, is stated in the ``tile.trap``
+        section of ``dsl_docs/reference/op_vocabulary.md``.
 
-        What a taken trap does depends on the host. On Linux (ROCr) the queue
-        reports an error and the runtime aborts the process. On Windows the
-        HIP runtime never turns the trap into an error: the launch never
-        returns. Under a debugger the wave stops at the trap. None of these
-        lets the process carry on, so a trap is the last resort, for a
-        condition the host checks before the launch and that must still never
-        reach a memory access on the device. Put it under a branch on that
-        condition (``scf_if``). A check the process must survive belongs on
-        the host, before the launch, not in a trap.
+        A taken trap does not let the process carry on, so a trap is the last
+        resort, for a condition the host checks before the launch and that
+        must still never reach a memory access on the device. Put it under a
+        branch on that condition (``scf_if``). A check the process must
+        survive belongs on the host, before the launch, not in a trap.
         """
         self._op("tile.trap")
 
@@ -6697,6 +6783,38 @@ class IRBuilder:
         """
         _buffer_vector_bytes("buffer_store_vN", "value", value.type)
         self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
+
+    def buffer_atomic_fadd_f32(
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """f32 atomic add through a buffer resource (``raw_ptr_buffer_atomic_fadd``).
+
+        ``voffset`` / ``soffset`` are byte offsets. Callers must guard invalid
+        offsets (e.g. with ``scf_if``) instead of steering them out of range:
+        unlike a buffer load, which reads 0 there, a buffer atomic at the
+        out-of-range sentinel offset faults on gfx1250. ``cachepolicy`` is the raw
+        immediate the intrinsic takes -- on gfx12+ bits [2:0] are th and [4:3]
+        scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
+        is discarded, so the backend selects the no-return form.
+        """
+        # _check_cachepolicy coerces with int(); refuse what it would round.
+        if isinstance(cachepolicy, bool) or not isinstance(cachepolicy, int):
+            raise ValueError(
+                f"buffer_atomic_fadd_f32 cachepolicy must be an int, got {cachepolicy!r}"
+            )
+        self._op(
+            "tile.buffer_atomic_fadd_f32",
+            [rsrc, voffset, soffset, value],
+            attrs={
+                "cachepolicy": _check_cachepolicy("buffer_atomic_fadd_f32", cachepolicy)
+            },
+        )
 
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
@@ -7334,6 +7452,7 @@ PURE_OP_NAMES = {
     "tile.wave_ballot",
     "tile.sync_half_block",
     "tile.smem_addr_of",
+    "tile.global_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
     "tile.global_ptr_offset",

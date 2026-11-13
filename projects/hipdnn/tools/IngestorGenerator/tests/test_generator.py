@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -967,7 +968,7 @@ class TestBorrowedNativeSymbols:
     def test_every_symbol_reference_names_the_other_engine(self):
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel.test"
             )
         )
         ids = mint_ids(config)
@@ -3667,6 +3668,7 @@ class TestHeuristicBindings:
             "predict_applicable_kernels",
         ]
         assert ued["predict_engine"] == {"gfx950": [self.MODEL, self.OTHER]}
+        assert ued["predict_applicable_kernels"] == {"default": [self.OTHER]}
         assert ued["sort_kernel_catalog"] == {
             "default": ued["sort_kernel_catalog"]["default"]
         }
@@ -3695,6 +3697,51 @@ class TestHeuristicBindings:
             "uhd": doc["sort_kernel_catalog"]["default"],
         }
         assert _dump(build_ued(config, ids)) == promoted
+
+    @staticmethod
+    def _promote():
+        """uhd_gen's promote module, so a binding is checked against promote itself and not
+        a copy of its output: a change in what promote writes fails here. Skips without
+        uhd_gen's requirements unless the build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS),
+        as uhd_gen's own suites do."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+            from uhd_gen import promote
+
+            return promote
+        return pytest.importorskip("uhd_gen.promote")
+
+    @pytest.mark.parametrize(
+        "role, arch, metric",
+        [
+            ("sort_kernel_catalog", "gfx942", "tflops"),
+            ("predict_engine", "gfx950", "tflops"),
+            ("predict_engine", "default", "tflops"),
+            ("predict_applicable_kernels", "default", None),
+        ],
+    )
+    def test_a_binding_is_what_promote_writes(
+        self, tmp_path, configs_dir, role, arch, metric
+    ):
+        """The README's flow end to end: promote binds a model, its binding is recorded in
+        the config as written, and loading and regenerating gives back the same value.
+        """
+        import yaml
+
+        from codegen.config_loader import load_config
+
+        promote = self._promote()
+        raw = yaml.safe_load((configs_dir / "scale_add.yaml").read_text())
+        path = tmp_path / "scale_add.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        config = load_config(path)
+        ids = mint_ids(config)
+        written, _ = promote._rebind(
+            build_ued(config, ids), role, arch, self.MODEL, metric, {}
+        )
+        raw["engine"]["heuristics"] = {role: {arch: written}}
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        assert build_ued(load_config(path), ids)[role][arch] == written
 
     def test_regeneration_keeps_bytes_and_ids_around_a_heuristics_tree(
         self, generator, scale_add_config, tmp_path

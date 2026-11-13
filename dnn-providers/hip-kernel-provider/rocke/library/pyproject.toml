@@ -1,4 +1,5 @@
-# rocke library: the SDPA/MHA authoring tree (kernels / builders / dispatch).
+# rocke library: the kernel authoring tree (SDPA/MHA, conv, ...; kernels /
+# builders / dispatch).
 #
 # This declares the build-time Python packages so they can be editable-installed:
 #     pip install -e .            (run from rocke/library/)
@@ -8,7 +9,10 @@
 #
 # This tree is BUILD-TIME ONLY: it is editable-installed into the dev/build
 # environment but is intentionally NOT packaged or installed by CMake into the
-# product (only the platform `rocke` package and the C-api plugin ship).
+# product (only the platform `rocke` package, the C-api plugin and the
+# library's compiled C++ ship: the `ckc::rocke_library` archive with its
+# headers, and the `rocke_library_engine` pybind module installed beside
+# `rocke_engine`).
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

@@ -129,7 +129,7 @@ consumer for `predict_applicable_kernels`.
 UED (engine)
  ├── sort_kernel_catalog:       {arch → [UHD id]} ← kernel-selection heuristics (the main UHD), one per metric
  ├── predict_engine:            {arch → [UHD id]} ← optional: cheap engine-level estimates, one per metric
- ├── predict_applicable_kernels:{arch → UHD id}   ← optional, future: candidate generator
+ ├── predict_applicable_kernels:{arch → [UHD id]} ← optional, future: candidate generators (JIT)
  ├── metadata:  KMD id          ← one metadata schema per engine
  └── knobs: [...]               ← user-facing runtime parameters (= sort_kernel_catalog's $kernel.* axes)
 
@@ -231,8 +231,10 @@ each UHD declares in its own `score.metric`:
   request names a metric. Every `predict_engine` UHD must declare a metric
   ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
-`predict_applicable_kernels` stays single-valued: it generates the candidate set rather than scoring
-it, so it has no metric to key on.
+`predict_applicable_kernels` is a list per architecture too, for the JIT spaces that will consume it.
+It generates the candidate set rather than scoring it, and its UHDs are usually metric-less; the
+same rule applies, so at most one metric-less UHD per architecture key. A single id is still a
+one-element list.
 
 ### 3.2 KMD Fields, and Knobs as the Heuristic's Feature Axes
 

@@ -321,7 +321,8 @@ and the sinks / softcap options compose; ALiBi and QQ-bias are only defined for
 causal masks. At `seqlen_q == 1` top-left attends only key 0, which is the
 definition of top-left, not a bug. A row whose band holds no key outputs zeros (the
 same in the unified and dense kernels, and what PyTorch SDPA returns for a fully
-masked row).
+masked row), except in packed varlen dense launches without LSE: the launcher rejects
+a keyless-window or empty-KV sequence on the host there instead of zeroing it.
 
 The standalone dense kernel (`algorithm="attention_dense_grid"` / `"attention_dense_persist"`) implements the same band
 on the top-left diagonal -- full attention (including ragged cross-attention

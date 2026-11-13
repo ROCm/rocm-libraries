@@ -49,9 +49,11 @@ inline void
 
 /// The arguments every tiled 2D body takes: 10 pointers, 6 scalars, the two strides
 /// (`_attn_signature(include_bt_stride=True, include_qq_bias_stride=True)`) and the runtime
-/// shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window). A runtime_layout
-/// kernel appends its own arguments after these.
-inline std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> tiled2DKernelSignature()
+/// shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window). An LSE-on kernel
+/// (@p emitLse) appends lse_ptr, 8-byte aligned after the runtime kernargs (read off the
+/// compiled LSE kernel). A runtime_layout kernel appends its own arguments after these.
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>
+    tiled2DKernelSignature(bool emitLse = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
@@ -83,6 +85,10 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> tiled2DKernelSig
                             "sliding_window"})
     {
         appendKernelArgument(signature, "by_value", I32, name);
+    }
+    if(emitLse)
+    {
+        appendKernelArgument(signature, "global_buffer", PTR, "lse_ptr");
     }
     return signature;
 }

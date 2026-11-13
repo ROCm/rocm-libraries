@@ -18,19 +18,28 @@ const char* direction_tag(Direction d)
     case Direction::Wgrad:
         return "wgrad";
     case Direction::Fprop:
-    default:
         return "fprop";
     }
+    return "unknown";
 }
 
 bool parse_direction_tag(std::string_view s, Direction& out)
 {
     if(s == "fprop")
-        return out = Direction::Fprop, true;
+    {
+        out = Direction::Fprop;
+        return true;
+    }
     if(s == "dgrad")
-        return out = Direction::Dgrad, true;
+    {
+        out = Direction::Dgrad;
+        return true;
+    }
     if(s == "wgrad")
-        return out = Direction::Wgrad, true;
+    {
+        out = Direction::Wgrad;
+        return true;
+    }
     return false;
 }
 

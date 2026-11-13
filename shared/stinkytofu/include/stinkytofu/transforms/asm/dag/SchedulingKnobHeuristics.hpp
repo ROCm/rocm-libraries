@@ -82,6 +82,9 @@ struct ResolvedSchedulingKnobs {
     /// First trigger of each enclosing loop only. False handshakes every trigger.
     bool reduceClusterBarrierPerLoop = kStaticDefaultReduceClusterBarrierPerLoop;
     SchedulingKnobSource reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    /// Extra cycle slack after the critical ds_load returns and before its first matrix consumer.
+    int queueFillSafetyMarginCycles = 0;
+    SchedulingKnobSource queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).

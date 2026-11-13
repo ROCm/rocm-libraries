@@ -1369,6 +1369,18 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
+        // MXScaleFormat id of the host scale layout (see Contractions.py).
+        // 0 for every layout the host does not tell apart.
+        int mxScaleFormat() const
+        {
+            return m_mxScaleFormat;
+        }
+
+        void setMXScaleFormat(int format)
+        {
+            m_mxScaleFormat = format;
+        }
+
         bool fusedGemmA2A() const
         {
             return m_fusedGemmA2A;
@@ -1722,6 +1734,7 @@ namespace TensileLite
         bool             m_outputAmaxD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
+        int              m_mxScaleFormat           = 0;
         bool             m_fusedGemmA2A            = false;
         int64_t          m_fusedA2AExtent          = 0;
         int              m_useBias                 = 0;

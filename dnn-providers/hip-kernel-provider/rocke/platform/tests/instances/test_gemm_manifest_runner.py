@@ -23,12 +23,26 @@ fp16 correct
 
 args_signature dtype
     ``gemm_args_signature`` emits ``ptr<bf16, global>`` for dtype="bf16"
-    and ``ptr<f16, global>`` for dtype="fp16", and rejects unknown dtypes.
+    and ``ptr<f16, global>`` for dtype="fp16", rejects unknown dtypes, and
+    -- for the 8-bit GEMMs -- carries a C dtype wider than A/B.  C defaults
+    to the operand dtype, which every pre-existing fp16/bf16 caller relies
+    on: a changed default would silently rewrite their manifests.
 
 ``_gemm_is_bf16``
     Reads the A-pointer type from args_signature; returns True for bf16,
     False for fp16, False when the key is absent.
 
+e4m3 codec
+    Tested in tests/numeric/test_fp8_codec.py, the codec's one home; this file
+    checks only what the runner does with it.
+
+fp8 runner body
+    ``run_gemm_fp8_manifest_problem`` over the same 24x128x3072 problem:
+    the e4m3 bytes it pushes to the device decode back to the seeded
+    integers exactly, exact output verifies clean, one corrupted element
+    is caught, and the K guard that protects the exact-accumulate argument
+    fires.  The fp8 path compares exactly rather than within a tolerance,
+    so a round-off anywhere in it would surface as a nonzero bad count.
 gfx1201 WMMA probe launch grid
     The grid the runner launches from the probe's manifest is the grid the
     gfx1201 WMMA GEMM kernel indexes (``wmma_gemm_grid``) on non-square shapes,
@@ -45,12 +59,15 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric.fp8 import fp8e4m3_decode_table
 from rocke.examples.gfx1201.wmma_probe import probe_manifest
 from rocke.helpers.compile import KernelArtifact
 from rocke.helpers.manifest import gemm_args_signature
 from rocke.instances.common.manifest_runner.gemm import (
     _gemm_is_bf16,
+    _gemm_c_dtype,
+    run_gemm_fp8_manifest_problem,
     run_gemm_manifest_problem,
 )
 from rocke.instances.gfx1201.wmma_gemm import (
@@ -109,6 +126,48 @@ def _make_manifest(dtype: str = "fp16") -> dict:
     }
 
 
+def _make_fp8_manifest(
+    shape: Optional[Tuple[int, int, int]] = None, c_dtype: str = "bf16"
+) -> dict:
+    """fp8e4m3 A/B -> 16-bit C manifest, the gfx1250 Phase 0 shape."""
+    M, N, K = shape or _SHAPE
+    return {
+        "kind": "gemm_fp8",
+        "block_m": M,
+        "block_n": N,
+        "block_k": K,
+        "threads_per_block": 256,
+        "default_shape": [M, N, K],
+        "grid_order": "NM",
+        "args_signature": gemm_args_signature(dtype="fp8e4m3", c_dtype=c_dtype),
+    }
+
+
+def _run_fp8(shape: Optional[Tuple[int, int, int]] = None, c_dtype: str = "bf16"):
+    """Build the fp8 problem on a fake runtime.
+
+    Returns (rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr).  The device pointers
+    come back so a test can read what ``make_args`` actually pushed.
+    """
+    manifest = _make_fp8_manifest(shape, c_dtype)
+    make_args_fn, _grid, _block, _flop, _bw, check_fn = run_gemm_fp8_manifest_problem(
+        manifest, shape or _SHAPE, verify=True
+    )
+    rt = _FakeRuntime()
+    packed_args, ptrs = make_args_fn(rt)
+    a_ptr, b_ptr, c_ptr = struct.unpack_from("<QQQ", packed_args)
+    return rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr
+
+
+def _fp8_operands(rt: _FakeRuntime, a_ptr: int, b_ptr: int, shape):
+    """Decode the e4m3 bytes sitting in the fake device buffers back to f32."""
+    M, N, K = shape
+    table = fp8e4m3_decode_table()
+    a_raw = np.frombuffer(bytes(rt._store[a_ptr]), dtype=np.uint8)[: M * K]
+    b_raw = np.frombuffer(bytes(rt._store[b_ptr]), dtype=np.uint8)[: N * K]
+    return table[a_raw.reshape(M, K)], table[b_raw.reshape(N, K)]
+
+
 def _run_and_check(
     dtype: str,
     corrupt_fn=None,
@@ -152,13 +211,13 @@ class TestGemmManifestRunnerBf16(unittest.TestCase):
         B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
 
         # Correct output: fp32 matmul -> RNE -> bf16 raw bytes
-        ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
+        ref_u16 = f32_to_bf16(A_f32 @ B_f32.T)  # (M, N) uint16
 
         # Verify the reviewer-cited -871 -> -872 rounding is present.
         dot = A_f32 @ B_f32.T
         self.assertTrue(np.any(dot.ravel() == -871), "-871 not in seeded inputs")
-        minus871_u16 = _bf16_from_f32(np, np.array([-871.0], dtype=np.float32))[0]
-        minus872_f32 = _f32_from_bf16(np, np.array([minus871_u16], dtype=np.uint16))[0]
+        minus871_u16 = f32_to_bf16(np.array([-871.0], dtype=np.float32))[0]
+        minus872_f32 = bf16_to_f32(np.array([minus871_u16], dtype=np.uint16))[0]
         self.assertEqual(float(minus872_f32), -872.0, "-871 must RNE to -872")
 
         def inject_correct(rt: _FakeRuntime, c_ptr: int) -> None:
@@ -179,17 +238,15 @@ class TestGemmManifestRunnerBf16(unittest.TestCase):
         A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
         B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
 
-        ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
+        ref_u16 = f32_to_bf16(A_f32 @ B_f32.T)  # (M, N) uint16
         # Confirm 292 is present in the reference (reviewer-cited).
-        ref_vals = _f32_from_bf16(np, ref_u16)
+        ref_vals = bf16_to_f32(ref_u16)
         self.assertTrue(np.any(ref_vals == 292.0), "292 not in reference")
 
         corrupted_u16 = ref_u16.copy()
         idx = np.argwhere(ref_vals == 292.0)[0]  # first occurrence
         # Replace 292 with 300 (nearest representable bf16).
-        corrupted_u16[tuple(idx)] = _bf16_from_f32(
-            np, np.array([300.0], dtype=np.float32)
-        )[0]
+        corrupted_u16[tuple(idx)] = f32_to_bf16(np.array([300.0], dtype=np.float32))[0]
 
         def inject_corrupted(rt: _FakeRuntime, c_ptr: int) -> None:
             raw = corrupted_u16.view(np.uint8).tobytes()
@@ -240,6 +297,31 @@ class TestGemmArgSignatureDtype(unittest.TestCase):
         with self.assertRaises(ValueError):
             gemm_args_signature(dtype="fp32")
 
+    def test_c_defaults_to_the_operand_dtype(self):
+        # Every pre-existing fp16/bf16 caller omits c_dtype, so the default must
+        # reproduce the old signature byte for byte or their manifests change.
+        for dtype in ("fp16", "bf16"):
+            with self.subTest(dtype=dtype):
+                sig = gemm_args_signature(dtype=dtype)
+                types = [a["type"] for a in sig[:3]]
+                self.assertEqual(len(set(types)), 1)
+
+    def test_eight_bit_operands_can_carry_a_wider_c(self):
+        # The 8-bit GEMMs read fp8 A/B but write bf16 C; the runner sniffs the A
+        # pointer type to pick its reference dtype, so this signature is the
+        # single place the mixed ABI is stated.
+        sig = gemm_args_signature(dtype="fp8e4m3", c_dtype="bf16")
+        self.assertEqual(sig[0]["type"], "ptr<fp8e4m3, global>")
+        self.assertEqual(sig[1]["type"], "ptr<fp8e4m3, global>")
+        self.assertEqual(sig[2]["type"], "ptr<bf16, global>")
+
+    def test_unsupported_dtypes_are_named_in_the_error(self):
+        for kwargs in ({"dtype": "fp4"}, {"dtype": "fp16", "c_dtype": "fp4"}):
+            with self.subTest(**kwargs):
+                with self.assertRaises(ValueError) as ctx:
+                    gemm_args_signature(**kwargs)
+                self.assertIn("fp4", str(ctx.exception))
+
 
 class TestGemmIsBf16(unittest.TestCase):
     """``_gemm_is_bf16`` reads element type from args_signature."""
@@ -254,6 +336,105 @@ class TestGemmIsBf16(unittest.TestCase):
 
     def test_missing_signature_returns_false(self):
         self.assertFalse(_gemm_is_bf16({}))
+
+
+class TestGemmFp8ManifestRunner(unittest.TestCase):
+    """fp8e4m3 A/B -> bf16 C runner body, launch stubbed out."""
+
+    def test_device_operands_decode_back_exactly(self):
+        """The e4m3 bytes pushed to the device decode to the seeded integers.
+
+        This is the load-bearing property behind the exact (tolerance-free)
+        comparison: the encode must be lossless for inputs in -5..5, or the
+        reference and the kernel would be multiplying different numbers.
+        """
+        M, N, K = _SHAPE
+        rt, _ptrs, _check, a_ptr, b_ptr, _c = _run_fp8()
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+
+        rng = np.random.default_rng(0xC0FFEE)
+        A_ref = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
+        B_ref = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
+
+        self.assertTrue(np.array_equal(A, A_ref), "A did not round-trip through e4m3")
+        self.assertTrue(np.array_equal(B, B_ref), "B did not round-trip through e4m3")
+
+    def test_fp8_correct_output_passes(self):
+        """Exact kernel output (including -871 -> -872 RNE) gives zero error."""
+        M, N, _K = _SHAPE
+        rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8()
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+
+        dot = A @ B.T
+        # Same RNE landmark the bf16 case uses; it survives the fp8 operands.
+        self.assertEqual(float(dot[0, 0]), -871.0, "seeded fp8 dot[0,0] != -871")
+        ref_u16 = f32_to_bf16(dot)
+        self.assertEqual(float(bf16_to_f32(ref_u16)[0, 0]), -872.0)
+
+        raw = ref_u16.view(np.uint8).tobytes()
+        rt.memcpy_h2d(c_ptr, memoryview(bytearray(raw)), len(raw))
+
+        max_err, bad, total = check_fn(rt, ptrs)
+        self.assertEqual(max_err, 0.0, f"expected zero error, got {max_err}")
+        self.assertEqual(bad, 0, f"expected zero bad elements, got {bad}")
+        self.assertEqual(total, M * N)
+
+    def test_fp8_corrupted_output_detected(self):
+        """One element shifted by 8 gives abs_err=8 and exactly one bad."""
+        rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8()
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+
+        corrupted = f32_to_bf16(A @ B.T)
+        orig = float(bf16_to_f32(corrupted[:1, :1])[0, 0])
+        corrupted[0, 0] = f32_to_bf16(np.array([orig + 8.0], dtype=np.float32))[0]
+
+        raw = corrupted.view(np.uint8).tobytes()
+        rt.memcpy_h2d(c_ptr, memoryview(bytearray(raw)), len(raw))
+
+        max_err, bad, _total = check_fn(rt, ptrs)
+        self.assertAlmostEqual(max_err, 8.0, places=3, msg="expected abs_err=8")
+        self.assertEqual(bad, 1, f"expected exactly 1 bad element, got {bad}")
+
+    def test_fp8_verify_disabled_short_circuits(self):
+        """verify=False reports clean without reading the device buffer."""
+        manifest = _make_fp8_manifest()
+        make_args_fn, _g, _b, _f, _bw, check_fn = run_gemm_fp8_manifest_problem(
+            manifest, _SHAPE, verify=False
+        )
+        rt = _FakeRuntime()
+        _packed, ptrs = make_args_fn(rt)
+        self.assertEqual(check_fn(rt, ptrs), (0.0, 0, _SHAPE[0] * _SHAPE[1]))
+
+    def test_large_k_rejected(self):
+        """K large enough to break the exact-accumulate argument is refused."""
+        manifest = _make_fp8_manifest()
+        with self.assertRaises(ValueError) as cm:
+            run_gemm_fp8_manifest_problem(manifest, (8, 8, 1 << 20), verify=True)
+        self.assertIn("25*K", str(cm.exception))
+
+    def test_largest_exact_k_accepted(self):
+        """The largest K the exact-accumulate argument allows is not refused.
+
+        Pins the bound itself: a guard tightened past 25*K rejects this K,
+        which is the mutation ``test_large_k_rejected`` alone cannot see.
+        """
+        k_max = ((1 << 24) - 1) // 25  # largest K with 25*K < 2**24
+        self.assertLess(25 * k_max, 1 << 24)
+        manifest = _make_fp8_manifest()
+        run_gemm_fp8_manifest_problem(manifest, (8, 8, k_max), verify=False)
+
+    def test_grid_order_flips_axes(self):
+        """grid_order="MN" swaps gx/gy relative to the default "NM"."""
+        shape = (48, 128, 256)
+        manifest = _make_fp8_manifest(shape)
+        manifest["block_m"], manifest["block_n"] = 16, 32
+
+        _mk, grid_nm, *_ = run_gemm_fp8_manifest_problem(manifest, shape, verify=False)
+        manifest["grid_order"] = "MN"
+        _mk, grid_mn, *_ = run_gemm_fp8_manifest_problem(manifest, shape, verify=False)
+
+        self.assertEqual(grid_nm, (4, 3, 1))  # gx over N, gy over M
+        self.assertEqual(grid_mn, (3, 4, 1))
 
 
 class TestGfx1201WmmaProbeLaunchGrid(unittest.TestCase):
@@ -281,3 +462,69 @@ class TestGfx1201WmmaProbeLaunchGrid(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def _put_c(rt: _FakeRuntime, c_ptr: int, raw_u16) -> None:
+    raw = np.ascontiguousarray(raw_u16, dtype=np.uint16).view(np.uint8).tobytes()
+    rt.memcpy_h2d(c_ptr, memoryview(bytearray(raw)), len(raw))
+
+
+class TestGemmFp8ManifestRunnerCDtype(unittest.TestCase):
+    """The fp8 runner's C dtype (bf16 or f16), read from the C pointer type."""
+
+    def test_c_dtype_is_read_from_the_c_pointer(self):
+        # "bf16" contains "f16": a substring test in the wrong order would
+        # decode every bf16 kernel as f16.
+        self.assertEqual(_gemm_c_dtype(_make_fp8_manifest(c_dtype="bf16")), "bf16")
+        self.assertEqual(_gemm_c_dtype(_make_fp8_manifest(c_dtype="fp16")), "fp16")
+
+    def test_unknown_c_pointer_is_refused(self):
+        manifest = _make_fp8_manifest()
+        manifest["args_signature"][2]["type"] = "ptr<f32, global>"
+        with self.assertRaises(ValueError):
+            run_gemm_fp8_manifest_problem(manifest, _SHAPE, verify=True)
+
+    def test_fp16_correct_output_passes(self):
+        M, N, _K = _SHAPE
+        rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8(c_dtype="fp16")
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+        _put_c(rt, c_ptr, (A @ B.T).astype(np.float16).view(np.uint16))
+        self.assertEqual(check_fn(rt, ptrs), (0.0, 0, M * N))
+
+    def test_fp16_output_decoded_as_bf16_fails(self):
+        # The counterfactual for the C-pointer sniff: the same f16 bytes checked
+        # by a bf16-C runner must not pass.
+        rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8(c_dtype="bf16")
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+        _put_c(rt, c_ptr, (A @ B.T).astype(np.float16).view(np.uint16))
+        _max_err, bad, _total = check_fn(rt, ptrs)
+        self.assertGreater(bad, 0)
+
+    def test_fp16_corrupted_output_detected(self):
+        rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8(c_dtype="fp16")
+        A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+        out = (A @ B.T).astype(np.float16)
+        out[0, 0] = np.float16(float(out[0, 0]) + 8.0)
+        _put_c(rt, c_ptr, out.view(np.uint16))
+        max_err, bad, _total = check_fn(rt, ptrs)
+        self.assertEqual(bad, 1)
+        self.assertAlmostEqual(max_err, 8.0, places=3)
+
+    def test_nan_output_is_a_mismatch(self):
+        # err = |NaN - ref| is NaN, and NaN > 0.0 is false: a plain threshold
+        # would count a NaN output as correct.
+        for c_dtype in ("bf16", "fp16"):
+            with self.subTest(c_dtype=c_dtype):
+                rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8(c_dtype=c_dtype)
+                A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
+                dot = A @ B.T
+                if c_dtype == "fp16":
+                    out = dot.astype(np.float16).view(np.uint16).copy()
+                    out[0, 0] = 0x7E00  # f16 quiet NaN
+                else:
+                    out = f32_to_bf16(dot).copy()
+                    out[0, 0] = 0x7FC0  # bf16 quiet NaN
+                _put_c(rt, c_ptr, out)
+                max_err, bad, _total = check_fn(rt, ptrs)
+                self.assertEqual(bad, 1)
+                self.assertEqual(max_err, float("inf"))

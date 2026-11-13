@@ -149,6 +149,7 @@ class WorkerSession:
         env: dict[str, str],
         *,
         module: str | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Reuse only workers with the same role and selected import roots."""
         module = module or self.module
@@ -156,7 +157,9 @@ class WorkerSession:
         if key not in self.workers:
             self.workers[key] = _Worker(env, module, mode)
         try:
-            self.workers[key].execute(request, timeout=self.timeout)
+            self.workers[key].execute(
+                request, timeout=self.timeout if timeout is None else timeout
+            )
         except BaseException:
             self.workers.pop(key).close()
             raise

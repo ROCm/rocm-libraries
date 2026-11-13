@@ -297,6 +297,7 @@ def test_store_datum_does_not_let_the_second_instruction_overwrite_the_first():
     ], "phase 0..n must still be the FIRST instruction, as the renderer assumes"
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_analyze_store_and_the_figure_carry_the_multi_op_result(tmp_path):
     """End to end on a two-op store: the report's conflicts/access is the per-instruction one (the
     number the corpus validates), the report says how many instructions it summed, and the figure --
@@ -330,6 +331,7 @@ def test_analyze_store_and_the_figure_carry_the_multi_op_result(tmp_path):
     assert png.exists() and png.stat().st_size > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     """FIX 1 + FIX 2 together, on the exact tripping geometry, CPU-only: a stub `measure` returns the
     simulator's own prediction so the HW gate passes trivially, exercising recommend_pad + the render's
@@ -366,6 +368,7 @@ def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     assert pathlib.Path(rep.png).exists() and pathlib.Path(rep.png).stat().st_size > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_simulate_mode_needs_no_hardware_and_labels_itself(tmp_path):
     """SIMULATE mode on the same geometry: no `measure`, no GPU. It still runs both model gates and
     produces the same conflicts/access -- but the verdict says SIMULATED, so the number can never be
@@ -478,6 +481,7 @@ def test_render_refuses_a_measured_figure_without_a_measurement(tmp_path):
         )
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_render_simulated_is_watermarked_and_needs_no_hardware(tmp_path):
     """SIMULATE mode: no measured number at all, gated only on selftest(arch), and the figure carries
     the SIMULATED watermark so a stray PNG can never be read as a hardware result."""

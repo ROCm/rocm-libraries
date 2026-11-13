@@ -602,9 +602,6 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--wmma-queue-depth=")) {
-            passFeatureConfig.dagFeatures.wmmaQueueDepth =
-                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
@@ -612,6 +609,9 @@ int main(int argc, char** argv) {
                    a.starts_with("--wmma-barrier-cover-cycles=")) {
             std::cerr << "warning: --wmma-barrier-cover-cycles was removed; a barrier issues "
                       << "when its threshold is met, and the flag is ignored\n";
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            std::cerr << "warning: --wmma-queue-depth was removed; the WMMA queue depth is the "
+                      << "hardware's (5 for v_wmma_scale*, 8 otherwise), and the flag is ignored\n";
         } else if (a == "--ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = true;
         } else if (a == "--no-ds-spread") {

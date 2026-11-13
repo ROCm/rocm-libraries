@@ -867,23 +867,31 @@ namespace TensileLite
                 }
             }
 
+            // A zero-stride (broadcast) dimension is filled from its coordinate 0 only, so shared
+            // storage is written once rather than raced by elements with different values.
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, TensorDescriptor const& tensor)
+            static void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                const auto& sizes = tensor.sizes();
-                const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
+                const auto& sizes   = tensor.sizes();
+                const auto& strides = tensor.strides();
+                const auto  count   = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, strides, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                    bool broadcast = false;
+                    for(size_t d = 0; d < coord.size(); d++)
+                        broadcast = broadcast || (strides[d] == 0 && coord[d] != 0);
+                    if(broadcast)
+                        continue;
                     size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
                     array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
                 }
             }
 
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, size_t elements)
+            static void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
@@ -3292,9 +3300,10 @@ namespace TensileLite
             rocm_random_common<BFloat16>::signsig_exp(FP_PARAM<BFloat16>::UINT_T signsig,
                                                       FP_PARAM<BFloat16>::UINT_T exp)
         {
-            FP_PARAM<BFloat16>::UINT_T u;
-            u = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
-            return static_cast<BFloat16>(u);
+            // Store u as the raw bits; static_cast<BFloat16>(u) would convert it as a number.
+            BFloat16 r;
+            r.data = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
+            return r;
         }
 
         template <typename T, int LOW_EXP, int HIGH_EXP>

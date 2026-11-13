@@ -59,7 +59,7 @@ struct InputLdsLayout
     //
     // Same formula as InputLoader::rows_per_step; recomputed so the pad below can
     // keep those rows clear of the writer's staging region.
-    static constexpr int rows_per_step = divup(block_size_h, cfg.kw * 2);
+    static constexpr int rows_per_step = divup(block_size_h, cfg.num_steps());
 
     // uint4 the writer stages at the TOP of the dead (tic) buffer.
     //

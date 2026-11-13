@@ -29,8 +29,10 @@ namespace hipconv::cdna4::direct_l1
 struct RoundInvariantContext
 {
     // XCD/workgroup-derived (no kernarg backing).
-    int x_begin;
-    int x_count;
+    //
+    // The segment counts X items under BalancedL2Grid, (X, K) pairs under RaggedL2Grid.
+    int seg_begin;
+    int seg_count;
     int round_count;
     int wg_id;
     // Per-XCD K-slice geometry: per_xcd blocks starting at global block kslice*per_xcd.
@@ -48,8 +50,8 @@ struct RoundInvariantContext
     {
         if(threadIdx.x == 0)
         {
-            lds[0]  = x_begin;
-            lds[1]  = x_count;
+            lds[0]  = seg_begin;
+            lds[1]  = seg_count;
             lds[2]  = round_count;
             lds[3]  = wg_id;
             lds[4]  = per_xcd;
@@ -67,8 +69,8 @@ struct RoundInvariantContext
     {
         auto rfl = [](int v) { return __builtin_amdgcn_readfirstlane(v); };
         RoundInvariantContext c;
-        c.x_begin            = rfl(lds[0]);
-        c.x_count            = rfl(lds[1]);
+        c.seg_begin          = rfl(lds[0]);
+        c.seg_count          = rfl(lds[1]);
         c.round_count        = rfl(lds[2]);
         c.wg_id              = rfl(lds[3]);
         c.per_xcd            = rfl(lds[4]);

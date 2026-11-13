@@ -132,6 +132,69 @@ TEST_F(CheckMatrixCsc, bad_args)
         rocsparse_status_invalid_pointer);
 }
 
+// check_matrix_csc with an empty dimension. csc_col_ptr has n + 1 entries, so a null
+// csc_col_ptr is rejected for m = 0 and n > 0. A matrix with n = 0 has no columns to check,
+// and one with m = 0 and empty columns is valid.
+TEST_F(CheckMatrixCsc, empty_dimensions)
+{
+    size_t                bs = 0;
+    rocsparse_data_status ds;
+    device_vector<char>   tmp{size_t(1024)};
+    ASSERT_TRUE(tmp.ptr);
+
+    EXPECT_EQ(rocsparse_scheck_matrix_csc_buffer_size(
+                  handle, 0, 2, 0, nullptr, nullptr, nullptr, BASE, GENERAL, LOWER, SORTED, &bs),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_scheck_matrix_csc(
+            handle, 0, 2, 0, nullptr, nullptr, nullptr, BASE, GENERAL, LOWER, SORTED, &ds, tmp.ptr),
+        rocsparse_status_invalid_pointer);
+
+    device_vector<rocsparse_int> col_ptr{std::vector<rocsparse_int>{0, 0, 0}};
+    ASSERT_TRUE(col_ptr.ptr);
+    for(rocsparse_storage_mode storage : {SORTED, rocsparse_storage_mode_unsorted})
+    {
+        for(const auto& mn :
+            std::vector<std::pair<rocsparse_int, rocsparse_int>>{{0, 2}, {2, 0}, {0, 0}})
+        {
+            SCOPED_TRACE("m " + std::to_string(mn.first) + " n " + std::to_string(mn.second)
+                         + " storage " + std::to_string(storage));
+            bs = 0;
+            ASSERT_EQ(rocsparse_scheck_matrix_csc_buffer_size(handle,
+                                                              mn.first,
+                                                              mn.second,
+                                                              0,
+                                                              nullptr,
+                                                              col_ptr,
+                                                              nullptr,
+                                                              BASE,
+                                                              GENERAL,
+                                                              LOWER,
+                                                              storage,
+                                                              &bs),
+                      rocsparse_status_success);
+            device_vector<char> buffer{bs ? bs : size_t(1)};
+            ASSERT_TRUE(buffer.ptr);
+            ds = rocsparse_data_status_invalid_fill;
+            EXPECT_EQ(rocsparse_scheck_matrix_csc(handle,
+                                                  mn.first,
+                                                  mn.second,
+                                                  0,
+                                                  nullptr,
+                                                  col_ptr,
+                                                  nullptr,
+                                                  BASE,
+                                                  GENERAL,
+                                                  LOWER,
+                                                  storage,
+                                                  &ds,
+                                                  buffer.ptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(ds, rocsparse_data_status_success);
+        }
+    }
+}
+
 // ===========================================================================
 // check_matrix_ell  (own device validation kernel)
 // ===========================================================================

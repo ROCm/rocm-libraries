@@ -40,6 +40,12 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaDropoutMask",
+         &registerFlydslSdpaDropoutMaskSymbols,
+         &resetFlydslSdpaDropoutMaskModuleCache},
+        {"hipkernel:FlydslSdpaHeadPad",
+         &registerFlydslSdpaHeadPadSymbols,
+         &resetFlydslSdpaHeadPadModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
@@ -68,6 +74,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {ATTENTION_PAGED_UNIFIED_ENGINE_NAME,
          &registerAttentionPagedUnifiedSymbols,
          &resetAttentionPagedUnifiedModuleCache},
+        {"hipkernel:Gfx1250ConvDgradAot",
+         &registerGfx1250ConvDgradAotSymbols,
+         &resetGfx1250ConvDgradAotModuleCache},
     };
     return s_packs;
 }

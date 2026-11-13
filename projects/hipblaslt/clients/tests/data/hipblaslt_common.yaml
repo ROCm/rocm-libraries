@@ -658,6 +658,7 @@ Arguments:
   - skip_launch_solution: c_int32
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
+  - require_solution_chip_ids: c_int32*4
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -738,6 +739,7 @@ Dictionary lists to expand:
 # cases with each of its elements.
 Lists to not expand:
   - e.g., an array argument not to be expanded
+  - require_solution_chip_ids
 
 # Defaults
 Defaults:
@@ -778,6 +780,7 @@ Defaults:
   skip_launch_solution: -1
   integer_exact_pattern: ''
   allow_no_solution: 0
+  require_solution_chip_ids: 0
   timing: 0
   iters: 10
   cold_iters: 2
@@ -797,7 +800,6 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
-  workspace_size: 0
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''
