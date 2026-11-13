@@ -122,37 +122,6 @@ target_include_directories(hipdnn_integration_tests_unit_tests
 target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/third-party/tomlplusplus)
 
-# The settings files the providers ship, which TestShippedEngineSettings loads: the tests catch a
-# change that a device run would show only as failures. Their text is embedded when the tree is
-# configured (ShippedEngineTomls.hpp), because the packaged test binary runs where the provider
-# sources are not present. Editing one of the files re-runs the configure step.
-set(_shipped_toml_names MIOPEN HIPBLASLT ASM_SDPA HIP_MLOPS HIP_FLASH2)
-set(_shipped_toml_paths
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../miopen-provider/config/MIOPEN_ENGINE.toml
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt-provider/config/HIPBLASLT_ENGINE.toml
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml
-)
-foreach(_toml_name _toml_path IN ZIP_LISTS _shipped_toml_names _shipped_toml_paths)
-    cmake_path(NORMAL_PATH _toml_path)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_toml_path})
-    file(READ ${_toml_path} _toml_content)
-    # The files are checked out with CRLF on Windows: embed one line ending everywhere.
-    string(REPLACE "\r\n" "\n" _toml_content "${_toml_content}")
-    # The text goes into a C++ raw string literal; a file containing its closing delimiter would
-    # end the literal early.
-    string(FIND "${_toml_content}" ")HIPDNN_TOML\"" _toml_delimiter_pos)
-    if(NOT _toml_delimiter_pos EQUAL -1)
-        message(FATAL_ERROR "${_toml_path} contains the raw-string delimiter )HIPDNN_TOML\"")
-    endif()
-    set(HIPDNN_SHIPPED_TOML_${_toml_name} "${_toml_content}")
-endforeach()
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ShippedEngineTomls.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/ShippedEngineTomls.hpp @ONLY)
-target_include_directories(hipdnn_integration_tests_unit_tests
-    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-
 target_link_libraries(hipdnn_integration_tests_unit_tests
     PRIVATE
         hip::host

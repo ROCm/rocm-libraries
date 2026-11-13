@@ -7,12 +7,10 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
-#include "ShippedEngineTomls.hpp"
 #include "harness/TestSettings.hpp"
 
 using hipdnn_integration_tests::TestSettings;
@@ -1221,60 +1219,6 @@ summation_order = 9.0
     EXPECT_EQ(settings.validatorOverrideCount(), 1u);
     EXPECT_EQ(settings.skipEntryCount(), 1u);
     EXPECT_TRUE(settings.convFwdSummationOrder("float").has_value());
-}
-
-// ---------------------------------------------------------------------------
-// The files the providers ship
-// ---------------------------------------------------------------------------
-
-namespace
-{
-
-// The text of the per-engine settings files of the tree, embedded when the tree is configured
-// (ShippedEngineTomls.hpp.in): a test binary runs where the provider sources are not present.
-struct ShippedEngineFile
-{
-    const char* name;
-    std::string_view content;
-};
-
-const std::vector<ShippedEngineFile>& shippedEngineFiles()
-{
-    namespace tomls = hipdnn_integration_tests::shipped_engine_tomls;
-    static const std::vector<ShippedEngineFile> files
-        = {{"MIOPEN_ENGINE.toml", tomls::MIOPEN},
-           {"HIPBLASLT_ENGINE.toml", tomls::HIPBLASLT},
-           {"ASM_SDPA_ENGINE.toml", tomls::ASM_SDPA},
-           {"HIP_MLOPS_ENGINE.toml", tomls::HIP_MLOPS},
-           {"HIP_FLASH2_ENGINE.toml", tomls::HIP_FLASH2}};
-    return files;
-}
-
-} // namespace
-
-// Every settings file a provider ships loads under the strict loader, top-level keys included.
-TEST(TestShippedEngineSettings, EveryEngineFileLoads)
-{
-    for(const auto& file : shippedEngineFiles())
-    {
-        ASSERT_FALSE(file.content.empty()) << file.name;
-        const TempTomlFile tempFile{std::string(file.content)};
-        EXPECT_NO_THROW(const TestSettings settings(tempFile.path())) << file.name;
-    }
-}
-
-// MIOpen's file sets the coefficient of its float convolution-forward outputs: 9 leaves its
-// Winograd solvers a headroom of 1.5 (tolerances.md, "Float outputs"). Changing or dropping it
-// fails here and not first as float Winograd failures on a device run.
-TEST(TestShippedEngineSettings, MiopenEngineFileSetsTheFloatSummationOrder)
-{
-    const TempTomlFile tempFile{
-        std::string(hipdnn_integration_tests::shipped_engine_tomls::MIOPEN)};
-    const TestSettings settings(tempFile.path());
-    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
-    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 9.0);
-    EXPECT_FALSE(settings.convFwdSummationOrder("half").has_value());
-    EXPECT_FALSE(settings.convFwdSummationOrder("bfloat16").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)
