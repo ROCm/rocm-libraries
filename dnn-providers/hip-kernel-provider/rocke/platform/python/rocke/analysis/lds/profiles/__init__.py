@@ -21,4 +21,6 @@ __all__ = [
 ]
 
 
+# The C++ engine keeps a twin of this tuple (cpp/analysis/lds/profiles.cpp);
+# the CTest rocke_lds_profile_engine_parity fails until it follows a change.
 BUILTIN_PROFILES = (GFX90A_PROFILE, GFX942_PROFILE, GFX950_PROFILE, GFX1201_PROFILE)

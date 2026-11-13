@@ -244,6 +244,26 @@ if(BUILD_TESTING)
                    "${CMAKE_CURRENT_SOURCE_DIR}/../python/rocke/core/arch/data")
   set_tests_properties(rocke_arch_data_mirror PROPERTIES LABELS "ckc;unit;host")
 
+  # The C++ twin of rocke.analysis.lds (cpp/analysis/lds) against the Python
+  # registry: the pytest reads cpp/analysis/lds/profiles.cpp as text and drives
+  # rocke_lds_profile_dump with requests whose answers it computes in Python.
+  # It reads the source tree, so it runs from the build tree only and is not
+  # installed.
+  add_executable(rocke_lds_profile_dump analysis/lds_profile_dump.cpp)
+  target_link_libraries(rocke_lds_profile_dump PRIVATE rocke_core)
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_lds_profile_engine_parity
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/analysis/test_lds_profile_engine_parity.py" -q)
+    set_tests_properties(
+      rocke_lds_profile_engine_parity
+      PROPERTIES
+        LABELS "ckc;python;host"
+        ENVIRONMENT
+          "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python;ROCKE_LDS_PROFILE_DUMP=$<TARGET_FILE:rocke_lds_profile_dump>")
+  endif()
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.
