@@ -1,5 +1,5 @@
 outs:
-- md5: d0e44d0b5a4b00e8849434d3d411dea4
+- md5: 2a08a8512d0f017581349f4896394504
   size: 65846
   hash: md5
   path: conv_wrw_bf16_generic.kdp.json
