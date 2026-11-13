@@ -291,8 +291,9 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPaddingOneBelowWindow)
         ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL, {1, 1, 4, 4}, {3, 3}, {1, 1}, {2, 2}));
 }
 
-// MIOpen pads max pooling with -inf and average pooling with zeros. Any other padding_mode is only
-// equivalent when no position is padded.
+// For FP32 and FP16, MIOpen's max pooling does not select padded positions, as NEG_INF_PAD would
+// not, and its average pooling counts them as zero (BFLOAT16: ALMIOPEN-3295). Any other
+// padding_mode is only equivalent when no position is padded.
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForMismatchedPaddingModeWithPadding)
 {
     auto spec = defaultSpec(ResampleMode::MAXPOOL);
@@ -309,7 +310,7 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForMismatchedPaddingModeWithout
 }
 
 // PADDING_NOT_SET is the frontend's default, so graphs built without a padding mode take this
-// rule; MIOpen still pads max pooling with -inf and average pooling with zeros.
+// rule; MIOpen still pools as NEG_INF_PAD for max pooling and ZERO_PAD for average pooling.
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPaddingModeNotSetWithPadding)
 {
     for(const auto mode : {ResampleMode::MAXPOOL,

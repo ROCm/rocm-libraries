@@ -101,13 +101,16 @@ The following table lists all operations currently supported in hipDNN:
 > layout, and an FP32 compute type. Padding must be symmetric and smaller than the window; unless
 > it is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD. Y must have the
 > floor-mode output size. The index output (`generate_index`) is supported for MAXPOOL in
-> NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128. The
-> index tensor needs `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not
-> alias X or Y. On channels-last tensors, graphs whose window, stride, datatype and rank need a
-> per-thread tile above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not
-> supported. In-place execution and override-shape graphs are not supported. Max pooling ignores
-> NaN inputs; a window with no finite input (all NaN or -inf) gives the datatype's lowest finite
-> value and index 0.
+> NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128, and on
+> BFLOAT16 tensors the padding must be zero (a known MIOpen limitation). The index tensor needs
+> `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y. On
+> channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile
+> above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not supported. In-place
+> execution and override-shape graphs are not supported. Max pooling ignores NaN inputs. A window
+> with no finite input (all NaN or -inf) gives index 0, even when the window does not hold element
+> 0, and Y equal to the datatype's lowest finite value for FP32 and FP16, or -inf for BFLOAT16 (a
+> known MIOpen limitation). For such a window the HIP MLops engine writes index -1, and the CPU
+> reference writes the first in-bounds value and its index.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
