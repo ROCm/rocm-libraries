@@ -22,7 +22,7 @@
 //     halo loads issue back to back.
 //   - Index math is 32-bit when the tensors (the one-thread-per-output floors) or the images
 //     (the block-staged cores, with a 64-bit image base) have fewer than 2^31 elements, with
-//     the thread decode by unsigned magic division; larger tensors take the same code in 64-bit.
+//     the thread decode by unsigned 32-bit division; larger tensors take the same code in 64-bit.
 //   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
 //
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
@@ -105,9 +105,10 @@ __device__ inline bool dwIn(int a, int bound)
     return static_cast<unsigned>(a) < static_cast<unsigned>(bound);
 }
 
-/// Division by a uniform runtime divisor. Index type int: unsigned magic division (multiplier
-/// and shift from the divisor, once per thread; exact for a dividend and divisor in [0, 2^31)).
-/// Index type long: the plain 64-bit division.
+/// Division by a uniform runtime divisor. Index type int: unsigned 32-bit division (the
+/// divisor's reciprocal is uniform, so a lane pays a multiply-high and a correction). Magic
+/// numbers computed in the kernel cost a 64-bit division each per thread, more than a
+/// one-output-per-thread floor saves with them. Index type long: the plain 64-bit division.
 template <typename I>
 struct DwDivider
 {
@@ -124,21 +125,14 @@ struct DwDivider
 template <>
 struct DwDivider<int>
 {
-    int d;
-    unsigned mul, sh;
+    unsigned d;
     __device__ explicit DwDivider(int divisor)
-        : d(divisor)
+        : d(static_cast<unsigned>(divisor))
     {
-        const unsigned ud = static_cast<unsigned>(divisor);
-        sh = ud > 1 ? 32u - static_cast<unsigned>(__builtin_clz(ud - 1)) : 0u;
-        mul = static_cast<unsigned>(((((1ull << sh) - ud) << 32) / ud) + 1);
     }
     __device__ int div(int n) const
     {
-        const unsigned un = static_cast<unsigned>(n);
-        const unsigned hi
-            = static_cast<unsigned>((static_cast<unsigned long long>(un) * mul) >> 32);
-        return static_cast<int>((hi + un) >> sh);
+        return static_cast<int>(static_cast<unsigned>(n) / d);
     }
 };
 
