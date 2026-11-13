@@ -213,8 +213,22 @@ to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restri
 *  ``m`` must be a multiple of 256 and ``K`` a multiple of 128. ``n`` must be a multiple of 256 with ``B`` in
    ``HIPBLASLT_ORDER_COL256_R128_EXT``, and a multiple of 128 with ``B`` in ``HIPBLASLT_ORDER_COL``.
 *  ``lda`` and ``ldb`` must be equal to ``K``.
-*  A problem finds a solution only on a device for which a kernel that reads these layouts is registered.
-   Otherwise the heuristic returns no solution.
+
+The solutions for this scale mode are rocKE GEMM kernels, which add these restrictions:
+
+*  Atype and Btype must be the same type.
+*  Ctype and Dtype must be ``HIP_R_16BF``, and the compute type must be ``HIPBLAS_COMPUTE_32F``.
+*  ``ldd`` must be equal to ``m``.
+*  The batch count must be equal to ``1``.
+*  Epilogues are not supported.
+*  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
+*  Solutions are registered for gfx950 PCI chip IDs ``0x75a0`` and ``0x75a3``, at ``m = n = 4096`` with
+   ``K = 65536`` or ``K = 131584``. With ``B`` in ``HIPBLASLT_ORDER_COL``, they exist only for
+   ``HIP_R_6F_E2M3`` at ``K = 65536``.
+*  ``hipblasLtMatmulAlgoGetHeuristic`` does not return these solutions, because it does not assume
+   ``beta = 0``. Query them through the extension API (``hipblaslt_ext::Gemm::setProblem`` with ``beta = 0``,
+   then ``algoGetHeuristic``), and run the returned algorithm with ``hipblaslt_ext::Gemm::run`` or
+   ``hipblasLtMatmul``.
 
 hipblasLtMatrixTransformDescCreate()
 ------------------------------------------
