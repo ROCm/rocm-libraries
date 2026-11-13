@@ -300,7 +300,7 @@ def write_signature(out):
             for i in range(0, member.offset - last_ofs):
                 byt.append(0)
             for i in range(0, member.size):
-                byt.append(sig ^ i)
+                byt.append((sig ^ i) & 0xFF)
             sig = (sig + 89) % 256
             last_ofs = member.offset + member.size
         for i in range(0, ctypes.sizeof(param['Arguments']) - last_ofs):

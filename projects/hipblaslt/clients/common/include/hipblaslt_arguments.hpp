@@ -60,7 +60,7 @@ constexpr bool arg_is_complex_v = arg_is_complex_t<T>::value;
  * WARNING: If this data is changed, then hipblaslt_common.yaml must also be *
  * changed.                                                                *
  ***************************************************************************/
-constexpr std::size_t MAX_SUPPORTED_NUM_PROBLEMS{32};
+constexpr std::size_t MAX_SUPPORTED_NUM_PROBLEMS{256};
 struct Arguments
 {
     enum ScalingFormat

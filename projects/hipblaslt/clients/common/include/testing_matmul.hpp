@@ -1903,16 +1903,18 @@ void testing_matmul(const Arguments& arg)
             why = "requires C and D to have B's type";
         else if(arg.transA != 'T' || arg.transB != 'N')
             why = "requires TN (--transA T --transB N)";
-        else if(arg.grouped_gemm > 0)
-            why = "does not support grouped GEMM";
         else if(arg.batch_count > 1)
             why = "does not support batch_count > 1 (the scale tensor has no batch dimension)";
-        else if(arg.lda[0] < arg.K[0] || arg.lda[0] % 8 != 0)
-            why = "requires lda >= K and lda % 8 == 0";
-        else if(arg.K[0] % groupSize != 0)
-            why = "requires K to be a multiple of the scale group size";
-        else if(arg.K[0] % 8 != 0)
-            why = "requires K to be a multiple of 8 (one dword of int4 per global load)";
+        // Grouped GEMM: every group has its own A and scale/zero-point buffers.
+        for(int i = 0; !why && i < std::max(1, int(arg.grouped_gemm)); i++)
+        {
+            if(arg.lda[i] < arg.K[i] || arg.lda[i] % 8 != 0)
+                why = "requires lda >= K and lda % 8 == 0";
+            else if(arg.K[i] % groupSize != 0)
+                why = "requires K to be a multiple of the scale group size";
+            else if(arg.K[i] % 8 != 0)
+                why = "requires K to be a multiple of 8 (one dword of int4 per global load)";
+        }
         if(why)
         {
 #ifdef GOOGLE_TEST

@@ -591,20 +591,20 @@ Arguments:
   - alphai: c_double
   - beta: c_double
   - betai: c_double
-  - stride_a: c_int64*32
-  - stride_b: c_int64*32
-  - stride_c: c_int64*32
-  - stride_d: c_int64*32
-  - stride_e: c_int64*32
+  - stride_a: c_int64*256
+  - stride_b: c_int64*256
+  - stride_c: c_int64*256
+  - stride_d: c_int64*256
+  - stride_e: c_int64*256
   - user_allocated_workspace: c_size_t
-  - M: c_int64*32
-  - N: c_int64*32
-  - K: c_int64*32
-  - lda: c_int64*32
-  - ldb: c_int64*32
-  - ldc: c_int64*32
-  - ldd: c_int64*32
-  - lde: c_int64*32
+  - M: c_int64*256
+  - N: c_int64*256
+  - K: c_int64*256
+  - lda: c_int64*256
+  - ldb: c_int64*256
+  - ldc: c_int64*256
+  - ldd: c_int64*256
+  - lde: c_int64*256
   - a2a_extent: c_int64
   - batch_count: c_int32
   - batch_mode: c_int32
@@ -694,8 +694,8 @@ Arguments:
   - rotating: c_int32
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
-  - gsu_vector: c_int32*32
-  - wgm_vector: c_int32*32
+  - gsu_vector: c_int32*256
+  - wgm_vector: c_int32*256
   - print_solution_found: c_bool
   - print_kernel_info: c_bool
   - flush: c_bool
