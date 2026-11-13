@@ -743,6 +743,17 @@ class TestSpecializationContractEmission:
             pytest.skip("hkp_pack is not importable from this checkout")
         config = gfx950_attention_dense_config
         generator.render(config, tmp_path)
+        # The UED binds the trained models `engine.heuristics` names; they ship beside the
+        # generated files in the bundle's `heuristics/` subtree, which the generator
+        # never writes.
+        installed = (
+            Path(__file__).resolve().parents[5]
+            / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+            / config.descriptor_dir
+            / "heuristics"
+        )
+        if config.engine.heuristics:
+            shutil.copytree(installed, tmp_path / config.descriptor_dir / "heuristics")
         # The shipped generic target table, as the packer loads it at pack time.
         flat = descriptors.load_flat_input(
             tmp_path / config.descriptor_dir,

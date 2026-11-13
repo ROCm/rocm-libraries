@@ -49,6 +49,7 @@ from .features import (
 from .dataset.training_table import best_per_shape, slot_training_rows
 from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
+from .physics import derived_features
 from .immediate import (
     LABEL_STATISTIC,
     ROLE,
@@ -1640,6 +1641,51 @@ def withheld_kernel_fields(
     return withheld
 
 
+#: The value a defaulted feature takes on a graph whose operation has no such field. Outside
+#: every real extent, stride and padding, so a tree can tell "not this kind of operation" apart.
+ABSENT_FIELD_VALUE = -1
+
+
+def _operation_fields(train_frame: pd.DataFrame, published: set[str]) -> list[str]:
+    """Numeric problem fields some operations publish and others lack (a convolution's stride
+    beside a batchnorm): present in every row of each operation that has them, absent from
+    every row of each that does not. A field missing at random is not one of them.
+
+    An operation is the corpus's `regime.operation` where rows carry it, else the graph's node
+    types, which every collected row publishes."""
+    if "regime.operation" in train_frame.columns:
+        operations = train_frame["regime.operation"].astype(str)
+    else:
+        node_types = [
+            name
+            for name in sorted(train_frame.columns)
+            if name.startswith("graph.nodes[") and name.endswith("].type")
+        ]
+        if not node_types:
+            return []
+        types = train_frame[node_types].fillna("").astype(str)
+        operations = types[node_types[0]]
+        for name in node_types[1:]:
+            operations = operations + "|" + types[name]
+    fields = []
+    for name in sorted(published):
+        if name.startswith(("kernel.", "device.")):
+            continue
+        present = train_frame[name].notna()
+        if present.all() or not present.any():
+            continue
+        by_operation = present.groupby(operations)
+        if not (by_operation.all() == by_operation.any()).all():
+            continue
+        values = train_frame.loc[present, name]
+        if values.map(
+            lambda value: isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ).all():
+            fields.append(name)
+    return fields
+
+
 def feature_recipe(
     train_frame: pd.DataFrame,
     published: set[str],
@@ -1652,6 +1698,12 @@ def feature_recipe(
 
     `kmd_fields` is None for an engine-level run. For a catalog run, `$kernel.*` axes must
     be shipping UED knobs, checked here before training rather than at promotion.
+
+    A proposed recipe reads every field all rows publish, plus each field only some
+    operations publish as `value_or_default` with `ABSENT_FIELD_VALUE`: dropping those would
+    take a convolution's geometry out of a model trained beside batchnorms. It then adds the
+    derived features (`physics.derived_features`) of each operation the corpus holds. An
+    authored recipe is taken as written.
     """
     omitted = []
     if authored is not None:
@@ -1672,6 +1724,11 @@ def feature_recipe(
         signature, omitted = propose_features(
             train_frame[scalar_columns], legal_kernel_fields, pairs
         )
+        signature.extend(
+            {"value_or_default": ["$" + name, ABSENT_FIELD_VALUE]}
+            for name in _operation_fields(train_frame, published)
+        )
+        signature.extend(derived_features(train_frame).values())
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:
