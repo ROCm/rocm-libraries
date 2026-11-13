@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -34,6 +35,18 @@ namespace detail
 {
 
 namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
+
+/// Reports why a tree_data artifact is refused and returns nullptr. ERROR, not WARN (RFC 0019
+/// §12): this log is the only trace of the fallback. Wording matches the sibling checks so one
+/// search finds them all.
+inline std::nullptr_t refuseArtifact(const std::string& reason)
+{
+    HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: " << reason
+                                             << "; the model is not used -- ranking degrades to "
+                                                "static_order and an engine estimate is "
+                                                "reported as 0");
+    return nullptr;
+}
 
 /// Calls @p f with @p table as the IntegerArray member @p type names. False, calling
 /// nothing, for NONE or a tag this runtime does not know: the one list of members it reads.
@@ -406,20 +419,22 @@ inline std::unique_ptr<TreeDataAdapter>
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
     {
-        return nullptr;
+        return detail::refuseArtifact("cannot open model artifact '" + modelPath + "'");
     }
 
     auto size = file.tellg();
     if(size <= 0 || size > static_cast<std::streamoff>(256 * 1024 * 1024))
     {
-        return nullptr;
+        return detail::refuseArtifact("model artifact '" + modelPath + "' is "
+                                      + std::to_string(static_cast<long long>(size))
+                                      + " bytes, which is empty or over the 256 MiB limit");
     }
 
     std::vector<uint8_t> buffer(static_cast<size_t>(size));
     file.seekg(0);
     if(!file.read(reinterpret_cast<char*>(buffer.data()), size))
     {
-        return nullptr;
+        return detail::refuseArtifact("cannot read model artifact '" + modelPath + "'");
     }
 
     return loadFromBuffer(buffer.data(),
@@ -443,7 +458,8 @@ inline std::unique_ptr<TreeDataAdapter>
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4
        || size > size_t{256} * 1024 * 1024)
     {
-        return nullptr;
+        return detail::refuseArtifact("model buffer of " + std::to_string(size)
+                                      + " bytes is missing, too small or over the 256 MiB limit");
     }
 
     // RFC 0019 §9.2 integrity check. ERROR, not WARN (§12): this log is the only trace of the
@@ -464,19 +480,21 @@ inline std::unique_ptr<TreeDataAdapter>
 
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::GbdtModelIdentifier()))
     {
-        return nullptr;
+        return detail::refuseArtifact(std::string("model buffer does not carry the '")
+                                      + fb::GbdtModelIdentifier() + "' file identifier");
     }
 
     flatbuffers::Verifier verifier(buffer, size);
     if(!fb::VerifyGbdtModelBuffer(verifier))
     {
-        return nullptr;
+        return detail::refuseArtifact("model buffer fails FlatBuffers verification (corrupt, "
+                                      "truncated, or written by an incompatible uhd_gen)");
     }
 
     const auto* model = fb::GetGbdtModel(buffer);
     if(model == nullptr)
     {
-        return nullptr;
+        return detail::refuseArtifact("model buffer has no root table");
     }
 
     // RFC 0019 §6.3 check 3. ERROR for the reason given above.
@@ -498,7 +516,7 @@ inline std::unique_ptr<TreeDataAdapter>
     }
     if(!std::isfinite(model->base_score()))
     {
-        return nullptr;
+        return detail::refuseArtifact("model base_score is not finite");
     }
 
     // Split/leaf-encoded trees index one table of distinct thresholds, stored in whichever

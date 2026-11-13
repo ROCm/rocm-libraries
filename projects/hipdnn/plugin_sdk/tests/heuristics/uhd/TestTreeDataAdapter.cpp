@@ -9,6 +9,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
 
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
@@ -18,9 +19,13 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -240,6 +245,133 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
+}
+
+/// RFC 0019 §12: a refused artifact is only traceable through its log, since the caller can
+/// say no more than that no scorer was built. Each refusal below reports once, at ERROR, with
+/// its reason.
+TEST_F(TestTreeDataAdapter, ARefusedBufferSizeReportsWhy)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto good = GbdtModelBuilder()
+                          .setNumFeatures(2)
+                          .setFeaturesHash(TEST_HASH)
+                          .addTree(makeLeafTree(1.0))
+                          .build();
+    // The control: the untouched buffer loads without an error.
+    ASSERT_NE(TreeDataAdapter::loadFromBuffer(good.data(), good.size(), TEST_HASH), nullptr);
+    ASSERT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0U)
+        << recorder.getRecordedLogsAsString();
+
+    const std::vector<uint8_t> tooSmall = {0x00, 0x00, 0x00, 0x04};
+    constexpr size_t OVER_LIMIT = size_t{256} * 1024 * 1024 + 1;
+    // The size is checked before any byte is read, so the claim needs no backing storage.
+    const std::vector<std::pair<const char*, std::pair<const uint8_t*, size_t>>> refused
+        = {{"null", {nullptr, 100}},
+           {"empty", {good.data(), 0}},
+           {"too small", {tooSmall.data(), tooSmall.size()}},
+           {"over 256 MiB", {good.data(), OVER_LIMIT}}};
+    for(const auto& [what, buffer] : refused)
+    {
+        recorder.clearLogs();
+        EXPECT_EQ(TreeDataAdapter::loadFromBuffer(buffer.first, buffer.second, TEST_HASH), nullptr)
+            << what;
+        EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << what << " must report at ERROR:\n"
+            << recorder.getRecordedLogsAsString();
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "is missing, too small or over"))
+            << what << ":\n"
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+TEST_F(TestTreeDataAdapter, AWrongFileIdentifierReportsWhy)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(2)
+                      .setFeaturesHash(TEST_HASH)
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+    ASSERT_GE(buffer.size(), 8U);
+    buffer[4] = 'X';
+
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "file identifier"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestTreeDataAdapter, ABufferThatFailsVerificationReportsWhy)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto good = GbdtModelBuilder()
+                          .setNumFeatures(2)
+                          .setFeaturesHash(TEST_HASH)
+                          .addTree(makeLeafTree(1.0))
+                          .build();
+    // Keeps the identifier but cuts off the tables the root offset points into.
+    ASSERT_GT(good.size(), 12U);
+    const std::vector<uint8_t> truncated(good.begin(), good.begin() + 12);
+
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(truncated.data(), truncated.size(), TEST_HASH),
+              nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "FlatBuffers verification"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestTreeDataAdapter, ANonFiniteBaseScoreReportsWhy)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto buffer = GbdtModelBuilder()
+                            .setNumFeatures(2)
+                            .setFeaturesHash(TEST_HASH)
+                            .setBaseScore(std::numeric_limits<double>::infinity())
+                            .addTree(makeLeafTree(1.0))
+                            .build();
+
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "base_score is not finite"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestTreeDataAdapter, AnArtifactFileThatCannotBeLoadedReportsWhy)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path()
+        / ("tree_data_adapter_load_"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+
+    const auto missing = (dir.path() / "missing.fb").string();
+    EXPECT_EQ(TreeDataAdapter::load(missing, TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot open model artifact"))
+        << recorder.getRecordedLogsAsString();
+
+    recorder.clearLogs();
+    const auto empty = (dir.path() / "empty.fb").string();
+    std::ofstream(empty, std::ios::binary).close();
+    EXPECT_EQ(TreeDataAdapter::load(empty, TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "empty or over the 256 MiB limit"))
+        << recorder.getRecordedLogsAsString();
 }
 
 // ========== Single Tree Scoring Tests ==========
