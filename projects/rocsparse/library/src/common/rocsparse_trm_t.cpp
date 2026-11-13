@@ -157,6 +157,18 @@ rocsparse_ellsv_info rocsparse::trm_t::create_ellsv_info()
     return this->m_ellsv_info.get();
 }
 
+// The CSC analysis keeps its transposed analysis in the CSR triangular solve info.
+rocsparse_cscsv_info rocsparse::trm_t::create_cscsv_info()
+{
+    if(this->m_cscsv_info.get() == nullptr)
+    {
+        this->m_cscsv_info = std::shared_ptr<_rocsparse_cscsv_info>(new _rocsparse_cscsv_info());
+    }
+    this->create_csrsv_info();
+    this->m_cscsv_info->set_shared_csrsv_info(this->m_csrsv_info);
+    return this->m_cscsv_info.get();
+}
+
 void rocsparse::trm_t::clear_csrsv_info()
 {
     this->uncouple(this->m_csrsv_info.get());
@@ -292,6 +304,14 @@ void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
             this->create_ellsv_info()->copy(p, stream);
         }
     }
+
+    {
+        auto p = that.m_cscsv_info.get();
+        if(p != nullptr)
+        {
+            this->create_cscsv_info()->copy(p, stream);
+        }
+    }
 }
 
 rocsparse::trm_t::~trm_t()
@@ -326,6 +346,9 @@ rocsparse::trm_t::~trm_t()
 
     this->uncouple(m_ellsv_info.get());
     m_ellsv_info.reset();
+
+    this->uncouple(m_cscsv_info.get());
+    m_cscsv_info.reset();
 }
 
 #define GET_SHARED_INFO(TOKEN)                                                               \
@@ -361,5 +384,6 @@ void rocsparse::trm_t::uncouple(rocsparse::trm_data_t* p)
         p->uncouple(this->m_bsrilu0_info.get());
         p->uncouple(this->m_bsric0_info.get());
         p->uncouple(this->m_ellsv_info.get());
+        p->uncouple(this->m_cscsv_info.get());
     }
 }
