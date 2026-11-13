@@ -154,8 +154,8 @@ def test_disabled_is_not_validated():
   assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
-_OUTPUT = "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
-  "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
+_OUTPUT = "TDMStoreInst supports fp32 D, fp64, complex float and complex double D from accumulators of their type, " \
+  "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
 
@@ -167,6 +167,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("i8")}, _OUTPUT),
   ({"DestDataType": DataType("d")}, _OUTPUT),
   ({"DestDataType": DataType("c")}, _OUTPUT),
+  ({"DestDataType": DataType("z")}, _OUTPUT),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
@@ -701,6 +702,31 @@ def test_eight_byte_d_stages_two_registers_per_element(gp_gfx1250, gfx1250_iim, 
   pairs = [re.search(r"v\[vgprValuC\+(\d+):vgprValuC\+(\d+)\+1\]", line) for line in staged]
   assert pairs and all(p for p in pairs), staged[:3]
   assert all(p.group(1) == p.group(2) and int(p.group(1)) % 2 == 0 for p in pairs), staged[:3]
+
+
+_ZGEMM = {"OperationType": "GEMM", "DataType": "Z", "DestDataType": "Z", "ComputeDataType": "Z",
+          "HighPrecisionAccumulate": False, "TransposeA": True, "TransposeB": False, "UseBeta": True, "Batched": True}
+
+
+@pytest.mark.parametrize("level", _LEVELS)
+def test_complex_double_descriptor_uses_8_byte_units(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """Complex double D on a VALU kernel: TDM data_size is at most 8 bytes, so every descriptor of D and C counts
+  8-byte units, two per element, with data_size 3 and tensor_dim0, tile0 and the stride doubled. At store vector
+  width 1 every D element is one ds_store_b128 of its four registers, ValuC + 4*sumIdx as addStore stores it, into a
+  staged tile of 16 bytes per element, and with beta != 0 every C element is read back with one ds_load_b128."""
+  sol, asm = emit_asm(gfx1250_iim, assembler, _fp64_params(TDMStoreInst=level, StoreVectorWidth=1, ProblemType=_ZGEMM))
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 16
+  descriptors = asm.count("tensor_dim0 = SizeI - wg0*MT0")
+  assert descriptors and set(re.findall(r"Set data_size to (\d+)", asm)) == {"3"}
+  assert re.findall(r"set tile0 to (\d+)", asm) == [str(2 * sol["MacroTile0"])] * descriptors
+  assert asm.count("tensor_dim0 in 8-byte units") == descriptors
+  assert len(re.findall(r"Stride[CD] in 8-byte units", asm)) == descriptors
+  for tag, op in (("stage D element", "ds_store_b128"), ("load C element", "ds_load_b128")):
+    assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
+  staged = [re.search(r"v\[vgprValuC\+(\d+):vgprValuC\+(\d+)\+3\]", line) for line in asm.splitlines()
+            if "stage D element" in line]
+  assert staged and all(m and m.group(1) == m.group(2) and int(m.group(1)) % 4 == 0 for m in staged), staged[:3]
 
 
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
