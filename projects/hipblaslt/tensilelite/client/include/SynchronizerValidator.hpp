@@ -162,20 +162,54 @@ namespace TensileLite
             }
 
         private:
+            // Each enclosing phase needs its own family. TimingRec retains the name pointer,
+            // so all names have static storage rather than being assembled during the check.
+            struct CheckTimers
+            {
+                char const* check;
+                char const* readback;
+                char const* scan;
+                char const* inactive;
+                char const* noBuffer;
+            };
+            inline static constexpr CheckTimers runIterationTimers{"synchronizer_check",
+                                                                   "synchronizer_readback",
+                                                                   "synchronizer_scan",
+                                                                   "synchronizer_inactive",
+                                                                   "synchronizer_no_buffer"};
+            inline static constexpr CheckTimers afterEnqueuesTimers{
+                "synchronizer_check_after_enqueues",
+                "synchronizer_readback_after_enqueues",
+                "synchronizer_scan_after_enqueues",
+                "synchronizer_inactive_after_enqueues",
+                "synchronizer_no_buffer_after_enqueues"};
+            inline static constexpr CheckTimers postSolutionTimers{
+                "synchronizer_check_post_solution",
+                "synchronizer_readback_post_solution",
+                "synchronizer_scan_post_solution",
+                "synchronizer_inactive_post_solution",
+                "synchronizer_no_buffer_post_solution"};
+            inline static constexpr CheckTimers flagBlockTimers{
+                "synchronizer_flag_check_post_solution",
+                "synchronizer_flag_readback_post_solution",
+                "synchronizer_flag_scan_post_solution",
+                nullptr,
+                nullptr};
+
             /// Checks the launches since the last check, if any (with the
             /// iteration's inputs); marks the solution failed if dirty or if
             /// the check throws, and rethrows.
-            void checkLaunches(char const* stage);
+            void checkLaunches(char const* stage, CheckTimers const& timers);
 
             /// Checks the iteration's inputs after launches, marking the solution
             /// failed and rethrowing if the check throws. A launch with no captured
             /// inputs is an error: beginRunIteration() was not called.
-            void checkAfterLaunch(char const* stage);
+            void checkAfterLaunch(char const* stage, CheckTimers const& timers);
 
             /// Checks every distinct Synchronizer buffer reachable from the
             /// iteration's inputs (rotating buffers may share it or not).
             /// `stage` names the launch phase, for the diagnostic.
-            void checkInputs(char const* stage);
+            void checkInputs(char const* stage, CheckTimers const& timers);
 
             /// Reads back one buffer, re-zeroing it only when dirty.
             /// Returns false when dirty.
@@ -183,11 +217,16 @@ namespace TensileLite
                              ContractionProblemGemm const& problem,
                              void*                         deviceSynchronizer,
                              char const*                   stage,
-                             size_t                        gemmIdx);
+                             size_t                        gemmIdx,
+                             CheckTimers const&            timers);
 
             /// Reads back *bytes* at *device*, re-zeroing them only when dirty.
             /// Returns false when dirty.
-            bool checkRegion(int deviceId, void* device, size_t bytes, std::string const& what);
+            bool checkRegion(int                deviceId,
+                             void*              device,
+                             size_t             bytes,
+                             std::string const& what,
+                             CheckTimers const& timers);
 
             /// Pinned host staging buffer of at least *bytes*, grown on demand
             /// and reused across launches.

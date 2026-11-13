@@ -46,6 +46,14 @@ from typing import List, Dict, Optional, Tuple
 TIMING_HIERARCHY = {
     "python_benchmark_problems": {
         "python_cache_check": {},
+        # DuctileBackend (GA): evaluation pieces outside benchmark_runner, plus the GA's own time.
+        "python_ductile_setup": {},
+        "python_ductile_generate_solutions": {},
+        "python_ductile_clear_artifacts": {},
+        "python_ductile_read_scores": {},
+        "python_ductile_initial_sampling": {},
+        "python_ductile_ga_between_evaluations": {},
+        "python_ductile_verification": {},
         "python_solution_generation": {
             "python_solgen_fork_permutations": {},
             "python_solgen_forked_solutions": {},
@@ -86,6 +94,8 @@ TIMING_HIERARCHY = {
             "python_wsol_dump": {},
         },
         "python_client_execution": {
+            "python_client_write_run_script": {},
+            "process_startup": {},
             "hip_initialization": {},
             "library_loading": {},
             "code_object_loading": {},
@@ -94,6 +104,11 @@ TIMING_HIERARCHY = {
             "solution_iterator_setup": {},
             "listener_setup": {},
             "reporter_setup": {},
+            "main_parse_args": {},
+            "main_timing_calibration": {},
+            "main_problem_factory": {
+                "factory_hip_get_device_properties": {},
+            },
             "pre_problem": {
                 "cpu_data_init": {},
                 "cpu_reference_gemm": {
@@ -102,22 +117,134 @@ TIMING_HIERARCHY = {
                 },
             },
             "validate_warmups": {
-                "validate_gpu_sync": {},
-                "validate_gpu_readback": {},
-                "validate_element_comparison": {},
-                "validate_mismatch_printing": {},
+                # validate_warmups runs every listener's validateWarmups(); one row per listener.
+                "validate_warmups_listener.ReferenceValidator": {
+                    "validate_inputs_copy": {},
+                    "validate_setup": {},
+                    "validate_result_buffer_alloc": {},
+                    "validate_gpu_readback": {},
+                    "validate_element_comparison": {},
+                    "validate_mismatch_printing": {},
+                    "validate_report": {},
+                },
+                "validate_warmups_listener.SynchronizerValidator": {},
+                "validate_warmups_listener.BenchmarkTimer": {
+                    "validate_gpu_sync": {},
+                },
+                "validate_warmups_listener.DataInitialization": {},
+                "validate_warmups_listener.MetaResultReporter": {},
+                "validate_warmups_listener.AllSolutionsIterator": {},
+                "validate_warmups_listener.ProgressListener": {},
+                "validate_warmups_listener.HardwareMonitorListener": {},
             },
-            "gpu_input_preparation": {},
-            "gpu_input_reset": {},
+            "gpu_input_preparation": {
+                "gpu_input_prep_fast_reset_output": {},
+                "gpu_input_prep_slow_path": {},
+                "gpu_input_prep_init_cpu_inputs": {},
+                "gpu_input_prep_copy_valid_to_gpu": {},
+                "gpu_input_prep_copy_swizzled": {},
+                "gpu_input_prep_copy_inputs_d2d": {},
+                "gpu_input_prep_rotating_init": {},
+                "gpu_input_prep_batched_inputs": {},
+                "gpu_input_prep_constant_inputs": {},
+                "gpu_input_prep_convert_to_inputs": {},
+            },
+            "gpu_input_reset": {
+                "gpu_input_reset_fast_reset_output": {},
+                "gpu_input_reset_slow_path": {},
+                "gpu_input_reset_init_cpu_inputs": {},
+                "gpu_input_reset_copy_valid_to_gpu": {},
+                "gpu_input_reset_copy_swizzled": {},
+                "gpu_input_reset_copy_inputs_d2d": {},
+                "gpu_input_reset_rotating_init": {},
+                "gpu_input_reset_batched_inputs": {},
+                "gpu_input_reset_constant_inputs": {},
+                "gpu_input_reset_convert_to_inputs": {},
+            },
             "rotating_buffer_preparation": {},
             "solution_selection": {},
-            "pre_solution": {},
+            "pre_solution": {
+                "pre_solution_listener.ReferenceValidator": {
+                    "cpu_reference_gemm_per_solution": {
+                        "solve_cpu_fast_per_solution": {},
+                        "solve_cpu_slow_per_solution": {},
+                    },
+                },
+                "pre_solution_listener.DataInitialization": {
+                    "pre_solution_mx_check": {},
+                    "pre_solution_mx_init_data": {},
+                    "pre_solution_mx_copy_valid_to_gpu": {},
+                    "pre_solution_mx_copy_inputs_d2d": {},
+                    "pre_solution_mx_cpu_sync": {},
+                },
+                "pre_solution_listener.BenchmarkTimer": {},
+                "pre_solution_listener.MetaResultReporter": {},
+                "pre_solution_listener.AllSolutionsIterator": {},
+                "pre_solution_listener.ProgressListener": {},
+                "pre_solution_listener.SynchronizerValidator": {},
+                "pre_solution_listener.HardwareMonitorListener": {},
+            },
+            "run_current_solution_check": {},
             "kernel_solving": {},
+            "warmup_events_setup": {},
             "warmup_runs": {},
+            # Attribution syncs (timing instrumentation only): the wait for warmup 0 before the
+            # validators run, and the wait for everything a run iteration queued (e.g. warmups
+            # 1..N-1 with SyncsPerBenchmark: 0) at the end of the iteration.
+            "warmup_first_sync": {},
+            "run_iteration_sync": {},
+            # Per run iteration that launched: read the Synchronizer buffer back and scan it for
+            # residue. Checks inside other phases have distinct timer families below. Only solutions
+            # that may use the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) do the
+            # readback and scan; the rest are "inactive".
+            "synchronizer_check": {
+                "synchronizer_readback": {},
+                "synchronizer_scan": {},
+                "synchronizer_inactive": {},
+                "synchronizer_no_buffer": {},
+            },
             "benchmark_runs": {
+                "benchmark_pre_syncs": {},
+                "benchmark_events_setup": {},
                 "gpu_kernel_execution": {},
+                # One row per listener's validateEnqueues(). BenchmarkTimer is where the GPU timing
+                # is read (event sync / elapsed time) and where --sleep-percent idles on purpose.
+                "benchmark_validate_enqueues": {
+                    "validate_enqueues_listener.BenchmarkTimer": {
+                        "benchmark_event_sync": {},
+                        "benchmark_event_elapsed_time": {},
+                        "benchmark_event_destroy": {},
+                        "benchmark_sleep": {},
+                    },
+                    "validate_enqueues_listener.ProgressListener": {},
+                    "validate_enqueues_listener.SynchronizerValidator": {
+                        "synchronizer_check_after_enqueues": {
+                            "synchronizer_readback_after_enqueues": {},
+                            "synchronizer_scan_after_enqueues": {},
+                            "synchronizer_inactive_after_enqueues": {},
+                            "synchronizer_no_buffer_after_enqueues": {},
+                        },
+                    },
+                    "validate_enqueues_listener.ReferenceValidator": {},
+                    "validate_enqueues_listener.MetaResultReporter": {},
+                    "validate_enqueues_listener.HardwareMonitorListener": {},
+                    "validate_enqueues_listener.DataInitialization": {},
+                    "validate_enqueues_listener.AllSolutionsIterator": {},
+                },
+                "benchmark_events_teardown": {},
+                "benchmark_post_syncs": {},
             },
             "post_solution": {
+                "synchronizer_check_post_solution": {
+                    "synchronizer_readback_post_solution": {},
+                    "synchronizer_scan_post_solution": {},
+                    "synchronizer_inactive_post_solution": {},
+                    "synchronizer_no_buffer_post_solution": {},
+                },
+                "synchronizer_flag_check_post_solution": {
+                    "synchronizer_flag_readback_post_solution": {},
+                    "synchronizer_flag_scan_post_solution": {},
+                },
                 "post_solution_perf_calc": {},
                 "post_solution_reporting": {},
                 "post_solution_validation": {},
@@ -128,9 +255,15 @@ TIMING_HIERARCHY = {
                 "post_solution_sol_advance": {},
             },
             "post_problem": {},
+            "problem_report_index": {},
+            "problem_teardown": {},
+            "solution_teardown": {},
+            "run_iteration_teardown": {},
             "finalize_report": {},
             "timing_overhead": {},
             "flush_timing_buffer": {},
+            "main_teardown_locals": {},
+            "process_exit": {},
         },
     },
     "python_library_logic": {
@@ -138,14 +271,36 @@ TIMING_HIERARCHY = {
         "python_logic_analyze": {},
         "python_logic_write": {},
     },
-    "python_client_writer": {},
+    "python_client_writer": {
+        "python_library_client_setup": {},
+        # TensileCreateLibrary subprocess that builds the library client's library/code objects.
+        "python_library_client_create_library": {},
+        "python_library_client_write_configs": {},
+        # The library-client launch has its own timer names (it runs without C++ timing).
+        "python_library_client_execution": {
+            "python_library_client_write_run_script": {},
+            "python_library_client_subprocess": {},
+        },
+    },
+    # Test harness (Tests/common), outside the Tensile invocation: packing the build's output into
+    # the per-config .tar.gz artifact (--build-only) and unpacking it before the run (--use-cache).
+    "python_artifact_compress": {},
+    "python_artifact_extract": {},
 }
 
 # Display grouping for C++ phases (rendering concern only).
 # Under python_client_execution, children are grouped into these display
 # categories instead of being shown individually.
 CPP_PHASE_GROUPS = {
-    "C++ Client Setup": [
+    # Everything paid once per client launch, independent of how many problems/solutions run:
+    # process startup, in-process setup, and teardown/exit. process_startup, main_teardown_locals
+    # and process_exit come from wall-clock stamps (they fall outside the client's own timers).
+    "C++ Client Setup & Teardown": [
+        "python_client_write_run_script",
+        "process_startup",
+        "main_parse_args",
+        "main_timing_calibration",
+        "main_problem_factory",
         "hip_initialization",
         "library_loading",
         "code_object_loading",
@@ -154,6 +309,8 @@ CPP_PHASE_GROUPS = {
         "solution_iterator_setup",
         "listener_setup",
         "reporter_setup",
+        "main_teardown_locals",
+        "process_exit",
     ],
     "Data Preparation": [
         "pre_problem",
@@ -163,15 +320,27 @@ CPP_PHASE_GROUPS = {
     ],
     "Reference Computation": [
         "validate_warmups",
+        "synchronizer_check",
+        "synchronizer_check_after_enqueues",
+        "synchronizer_check_post_solution",
+        "synchronizer_flag_check_post_solution",
     ],
     "Kernel Execution": [
         "solution_selection",
         "pre_solution",
+        "run_current_solution_check",
         "kernel_solving",
+        "warmup_events_setup",
         "warmup_runs",
+        "warmup_first_sync",
+        "run_iteration_sync",
         "benchmark_runs",
         "post_solution",
         "post_problem",
+        "problem_report_index",
+        "problem_teardown",
+        "solution_teardown",
+        "run_iteration_teardown",
         "finalize_report",
     ],
     "Timing Overhead": [
@@ -202,8 +371,11 @@ G_LAUNCH = "Client launch (startup, setup & teardown)"
 G_INSTRUMENTATION = "MEASUREMENT OVERHEAD (instrumentation)"
 G_BUILD = "Solution generation & build (Python)"
 G_PY_BOOKKEEPING = "SHARED: cache & solution files"
+G_DUCTILE = "Ductile GA search (Python)"
 G_LIBRARY_CLIENT = "Library client (Python)"
 G_LIBRARY_LOGIC = "Library logic (Python)"
+G_ARTIFACT_PACK = "Artifact packing (test harness, .tar.gz)"
+G_ARTIFACT_UNPACK = "Artifact extraction (test harness, .tar.gz)"
 G_UNATTRIBUTED = "UNATTRIBUTED (untracked time & timer overhead)"
 
 PURPOSE_OF = {
@@ -213,10 +385,21 @@ PURPOSE_OF = {
     "python_write_cache": G_PY_BOOKKEEPING,
     "python_solution_indexing": G_PY_BOOKKEEPING,
     "python_write_solutions": G_PY_BOOKKEEPING,
+    "python_ductile_setup": G_DUCTILE,
+    "python_ductile_generate_solutions": G_DUCTILE,
+    "python_ductile_clear_artifacts": G_DUCTILE,
+    "python_ductile_read_scores": G_DUCTILE,
+    "python_ductile_initial_sampling": G_DUCTILE,
+    "python_ductile_ga_between_evaluations": G_DUCTILE,
+    "python_ductile_verification": G_DUCTILE,
     "python_library_logic": G_LIBRARY_LOGIC,
     "python_client_writer": G_LIBRARY_CLIENT,
+    "python_artifact_compress": G_ARTIFACT_PACK,
+    "python_artifact_extract": G_ARTIFACT_UNPACK,
     # C++ client: one launch's setup and teardown
     "python_client_execution": G_BOOKKEEPING,
+    "python_client_write_run_script": G_LAUNCH,
+    "process_startup": G_LAUNCH,
     "hip_initialization": G_LAUNCH,
     "library_loading": G_LAUNCH,
     "code_object_loading": G_LAUNCH,
@@ -225,27 +408,47 @@ PURPOSE_OF = {
     "solution_iterator_setup": G_LAUNCH,
     "listener_setup": G_LAUNCH,
     "reporter_setup": G_LAUNCH,
+    "main_parse_args": G_LAUNCH,
+    "main_problem_factory": G_LAUNCH,
+    "main_teardown_locals": G_LAUNCH,
+    "process_exit": G_LAUNCH,
     # Cost of the measurement itself
+    "main_timing_calibration": G_INSTRUMENTATION,
     "timing_overhead": G_INSTRUMENTATION,
     "flush_timing_buffer": G_INSTRUMENTATION,
     # Reference GEMM
     "cpu_reference_gemm": G_REFERENCE,
+    "pre_solution_listener.ReferenceValidator": G_REFERENCE,
     # Preparing the inputs
     "pre_problem": G_INPUT,
     "gpu_input_preparation": G_INPUT,
     "gpu_input_reset": G_INPUT,
     "rotating_buffer_preparation": G_INPUT,
+    "pre_solution_listener.DataInitialization": G_INPUT,
     # Checking the results
     "validate_warmups": G_VALIDATION,
+    "synchronizer_check": G_VALIDATION,
+    "synchronizer_check_after_enqueues": G_VALIDATION,
+    "synchronizer_check_post_solution": G_VALIDATION,
+    "synchronizer_flag_check_post_solution": G_VALIDATION,
     # Running the kernels
     "kernel_solving": G_KERNEL,
+    "warmup_events_setup": G_KERNEL,
     "warmup_runs": G_KERNEL,
+    "warmup_first_sync": G_KERNEL,
+    "run_iteration_sync": G_KERNEL,
     "benchmark_runs": G_KERNEL,
+    "validate_warmups_listener.BenchmarkTimer": G_KERNEL,  # waits for the warmup kernel to finish
     # Everything else that happens around each solution / problem
     "solution_selection": G_BOOKKEEPING,
     "pre_solution": G_BOOKKEEPING,
+    "run_current_solution_check": G_BOOKKEEPING,
     "post_solution": G_BOOKKEEPING,
     "post_problem": G_BOOKKEEPING,
+    "problem_report_index": G_BOOKKEEPING,
+    "problem_teardown": G_BOOKKEEPING,
+    "solution_teardown": G_BOOKKEEPING,
+    "run_iteration_teardown": G_BOOKKEEPING,
     "finalize_report": G_BOOKKEEPING,
 }
 
@@ -270,8 +473,8 @@ PURPOSE_TRANSPARENT = {
 STAGES = [
     ("RUN: benchmark client",
      [G_REFERENCE, G_INPUT, G_VALIDATION, G_KERNEL, G_BOOKKEEPING, G_LAUNCH,
-      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC]),
-    ("BUILD: solution generation & compile", [G_BUILD]),
+      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC, G_ARTIFACT_UNPACK]),
+    ("BUILD: solution generation & compile", [G_BUILD, G_DUCTILE, G_ARTIFACT_PACK]),
 ]
 ROOT_NAME = "TOTAL RUNTIME"
 
@@ -296,8 +499,21 @@ def _categories_with_children(d, out=None):
 
 CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
 
-# Timers that wrap other timers are kept separately in aggregate timing trees.
-OVERLAPPING_TOTALS_ORDER = []
+# Timers that wrap other timers (diagnostics added to localize untracked time).
+# python_client_subprocess = process_startup + main_total + flush + main_teardown_locals + process_exit
+# main_total              = parse_args + calibration + factory + setup + problem_total + finalize
+# problem_total           = problem children + solution_total
+# solution_total          = solution children + run_iteration_total
+OVERLAPPING_TOTALS_ORDER = [
+    "python_client_subprocess",
+    "main_total",
+    "problem_total",
+    "solution_total",
+    "run_iteration_total",
+    # ReferenceValidator's validateSolution(): wraps the per-tensor timers below it.
+    "validate_total",
+    "validate_check_results_typed",
+]
 OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
 
 # Named constants for commonly-referenced hierarchy points (used in tests)
@@ -667,12 +883,27 @@ def build_staged_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     return [PhaseNode(ROOT_NAME, None, sum(n.total_ms for n in top), None, top)]
 
 
+# pytest's log-capture format ("%(levelname)-8s %(name)s:%(filename)s:%(lineno)d %(message)s").
+_LOG_CAPTURE_PREFIXES = tuple(f"{level:<8} " for level in
+                              ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"))
+
+
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
-    """Parse a TIMING: line and return a TimingRecord."""
+    """Parse a TIMING: line and return a TimingRecord.
+
+    The record may follow other text after whitespace: with ``pytest -v -s`` the records the test
+    harness prints before the Tensile invocation (python_artifact_extract) land on the line of the
+    test id. pytest's log capture (``-rP``, failure reports) repeats every record as
+    ``INFO     tensile.timing:<file>:<line> TIMING:...`` next to the captured stderr copy; those
+    lines are ignored so a record is counted once.
+    """
     start_sentinel = 'TIMING:'
-    if not line.startswith(start_sentinel):
+    if line.startswith(_LOG_CAPTURE_PREFIXES):
         return None
-    parts = line.split(':', 2)
+    idx = line.find(start_sentinel)
+    if idx < 0 or (idx > 0 and not line[idx - 1].isspace()):
+        return None
+    parts = line[idx:].split(':', 2)
     if len(parts) != 3:
         return None
     try:
@@ -707,11 +938,17 @@ def analyze_timing_file(filepath: str) -> Tuple[Dict[str, List[float]], List[Pro
     timings = defaultdict(list)
     problem_timings = []
     current_problem = None
+    ts = {}  # wall-clock stamps (ns) of the current client invocation
 
     try:
         with _open_log(filepath) as f:
             for line in f:
                 line = line.strip()
+
+                stamp = parse_timestamp_line(line)
+                if stamp:
+                    _handle_timestamp(stamp[0], stamp[1], ts, timings)
+                    continue
 
                 context = parse_context_line(line)
                 if context:
@@ -822,6 +1059,40 @@ def tree_to_timings(tree: dict) -> Dict[str, TimingSeries]:
     return timings
 
 
+def parse_timestamp_line(line: str) -> Optional[Tuple[str, int]]:
+    """Parse a TIMING_TS:<name>:<epoch_ns> line."""
+    sentinel = 'TIMING_TS:'
+    if not line.startswith(sentinel):
+        return None
+    parts = line.split(':', 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return parts[1], int(parts[2])
+    except ValueError:
+        return None
+
+
+def _handle_timestamp(name: str, ns: int, ts: Dict[str, int], timings: Dict[str, List[float]]):
+    """Turn the per-invocation wall-clock stamps into process-level durations.
+
+    Sequence per client invocation:
+      py_popen_start -> main_start -> ... -> main_end -> main_locals_destroyed -> py_communicate_end
+    """
+    ts[name] = ns
+    ms = lambda a, b: (ts[b] - ts[a]) / 1e6
+    if name == 'main_start' and 'py_popen_start' in ts:
+        timings['process_startup'].append(ms('py_popen_start', 'main_start'))
+        # One Popen can run several clients (the run script starts one per pass): only the first
+        # client's start-up follows the Popen, a later main_start would count the earlier runs.
+        del ts['py_popen_start']
+    elif name == 'main_locals_destroyed' and 'main_end' in ts:
+        timings['main_teardown_locals'].append(ms('main_end', 'main_locals_destroyed'))
+    elif name == 'py_communicate_end' and 'main_locals_destroyed' in ts:
+        timings['process_exit'].append(ms('main_locals_destroyed', 'py_communicate_end'))
+        ts.clear()
+
+
 # ---------------------------------------------------------------------------
 # Hierarchical visual bar chart
 # ---------------------------------------------------------------------------
@@ -924,13 +1195,14 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         mean_ms = total_ms / count if count > 0 else 0
         return (cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms))
 
-    # Rows shown below the trees: categories the hierarchy does not know.
+    # Rows shown below the trees: categories the hierarchy does not know, and the overlapping totals.
     unknown_rows = [extra_row(c) for c in sorted(
-        set(timings.keys()) - ALL_KNOWN_CATEGORIES)]
+        set(timings.keys()) - ALL_KNOWN_CATEGORIES - OVERLAPPING_TOTALS)]
+    overlapping_rows = [extra_row(c) for c in OVERLAPPING_TOTALS_ORDER if c in timings]
 
     # One layout for every table so their columns line up.
     layout = _table_layout([n for _, tree, _ in tables for n in tree],
-                           unknown_rows, wall_clock_ms)
+                           unknown_rows + overlapping_rows, wall_clock_ms)
     COL_CAT = layout["cat"]
     TABLE_WIDTH = layout["table"]
 
@@ -1028,6 +1300,15 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         print("  Unknown Categories")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
         for cat, count, total_ms, mean_ms, pct in unknown_rows:
+            fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
+
+    # Overlapping totals: wrap other timers, so they are not part of the tree (they would be
+    # double counted) but are useful to check that the tree accounts for all the time.
+    if overlapping_rows:
+        print()
+        print("  Overlapping Totals (wrap other timers; not summed into the tree)")
+        print(f"  {'-' * (TABLE_WIDTH - 2)}")
+        for cat, count, total_ms, mean_ms, pct in overlapping_rows:
             fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
     print()

@@ -33,12 +33,16 @@ from analyze_timing import (
     TimingSeries,
     build_purpose_hierarchy,
     build_staged_hierarchy,
+    STAGES,
     ROOT_NAME,
     TIMING_HIERARCHY,
     PURPOSE_OF,
     G_REFERENCE,
     G_INPUT,
+    G_VALIDATION,
+    G_KERNEL,
     G_LAUNCH,
+    G_UNATTRIBUTED,
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
@@ -74,6 +78,25 @@ Some trailing output
 
 
 class TestParseTimingLine:
+    def test_record_after_a_pytest_test_id(self):
+        line = ("tensilelite/Tests/common/test_config_run.py::test_config_run[x.yaml] "
+                "TIMING:python_artifact_extract:735.372\n")
+        rec = parse_timing_line(line)
+        assert rec is not None
+        assert rec.category == "python_artifact_extract"
+        assert rec.duration_ms == pytest.approx(735.372)
+
+    def test_record_glued_to_other_text_is_ignored(self):
+        assert parse_timing_line("fooTIMING:x:1.0\n") is None
+
+    def test_pytest_captured_log_copy_is_ignored(self):
+        # With -rP pytest prints each record twice: the captured stderr line (counted) and the
+        # captured log line (ignored), so the record is counted once.
+        line = "INFO     tensile.timing:TimingInstrumentation.py:88 TIMING:python_artifact_compress:12.5\n"
+        assert parse_timing_line(line) is None
+        assert parse_timing_line("TIMING:python_artifact_compress:12.5\n") is not None
+
+
     """Tests for parse_timing_line function."""
 
     def test_valid_timing_line(self):
@@ -116,8 +139,11 @@ class TestParseTimingLine:
         assert record.duration_ms == pytest.approx(0.00032)
 
     def test_timing_line_with_surrounding_text(self):
-        # Should not match if TIMING is not at start
-        assert parse_timing_line("prefix TIMING:category:123.0") is None
+        # A record after other text matches only when whitespace separates them (pytest -v puts
+        # the test id before the first record, see test_record_after_a_pytest_test_id); trailing
+        # text after the value does not match.
+        assert parse_timing_line("prefixTIMING:category:123.0") is None
+        assert parse_timing_line("TIMING:category:123.0 trailing") is None
 
 
 class TestParseContextLine:
@@ -419,6 +445,65 @@ class TestGzipLogs:
             assert not problems
 
 
+class TestClientStamps:
+    """TIMING_TS stamps turn into process_startup / main_teardown_locals / process_exit."""
+
+    @staticmethod
+    def _analyze(tmp_path, stamps):
+        log = tmp_path / "run.log"
+        log.write_text("".join(f"TIMING_TS:{name}:{int(ms * 1e6)}\n" for name, ms in stamps))
+        timings, _ = analyze_timing_file(str(log))
+        return timings
+
+    def test_one_client(self, tmp_path):
+        timings = self._analyze(tmp_path, [
+            ("py_popen_start", 0), ("main_start", 30), ("main_end", 130),
+            ("main_locals_destroyed", 140), ("py_communicate_end", 150)])
+        assert timings["process_startup"] == [30.0]
+        assert timings["main_teardown_locals"] == [10.0]
+        assert timings["process_exit"] == [10.0]
+
+    def test_second_client_of_one_popen_does_not_recount_the_first_run(self, tmp_path):
+        # One Popen, two clients (the run script starts one per pass).
+        timings = self._analyze(tmp_path, [
+            ("py_popen_start", 0),
+            ("main_start", 30), ("main_end", 130), ("main_locals_destroyed", 140),
+            ("main_start", 200), ("main_end", 300), ("main_locals_destroyed", 310),
+            ("py_communicate_end", 320)])
+        assert timings["process_startup"] == [30.0]
+        assert timings["main_teardown_locals"] == [10.0, 10.0]
+        assert timings["process_exit"] == [10.0]
+
+
+@pytest.mark.parametrize("parent_path, check, readback, scan", [
+    (("synchronizer_check",), "synchronizer_check", "synchronizer_readback", "synchronizer_scan"),
+    (("benchmark_runs", "benchmark_validate_enqueues", "validate_enqueues_listener.SynchronizerValidator", "synchronizer_check_after_enqueues"),
+     "synchronizer_check_after_enqueues", "synchronizer_readback_after_enqueues", "synchronizer_scan_after_enqueues"),
+    (("post_solution", "synchronizer_check_post_solution"),
+     "synchronizer_check_post_solution", "synchronizer_readback_post_solution", "synchronizer_scan_post_solution"),
+    (("post_solution", "synchronizer_flag_check_post_solution"),
+     "synchronizer_flag_check_post_solution", "synchronizer_flag_readback_post_solution", "synchronizer_flag_scan_post_solution"),
+])
+def test_synchronizer_contexts_have_one_parent_and_valid_reports(
+    parent_path, check, readback, scan, capsys
+):
+    hierarchy = TIMING_HIERARCHY["python_benchmark_problems"]["python_client_execution"]
+    for category in parent_path:
+        assert category in hierarchy
+        hierarchy = hierarchy[category]
+    assert readback in hierarchy and scan in hierarchy
+
+    timings = {"python_benchmark_problems": [10.0], "python_client_execution": [10.0]}
+    timings.update({category: [10.0] for category in parent_path[:-1]})
+    timings.update({check: [6.0], readback: [5.0], scan: [1.0]})
+    print_summary(timings, [])
+    report = capsys.readouterr().out
+    assert "HIERARCHY VALIDATION: OK" in report
+    assert "Unknown Categories" not in report
+    assert "children exceed" not in report
+    assert sum(group.total_ms for group in build_purpose_hierarchy(timings)) == pytest.approx(10.0)
+
+
 class TestTimingTree:
     """timings_to_tree / tree_to_timings: the tiered dict of a run's results."""
 
@@ -515,7 +600,13 @@ class TestPurposeHierarchy:
         "cpu_reference_gemm": [150.0],
         "solve_cpu_fast": [140.0],
         "pre_solution": [200.0],
+        "pre_solution_listener.ReferenceValidator": [120.0],
+        "cpu_reference_gemm_per_solution": [110.0],
+        "solve_cpu_fast_per_solution": [105.0],
+        "pre_solution_listener.DataInitialization": [60.0],
         "validate_warmups": [180.0],
+        "validate_warmups_listener.SynchronizerValidator": [100.0],
+        "validate_warmups_listener.BenchmarkTimer": [20.0],
         "validate_gpu_sync": [15.0],
     }
 
@@ -533,13 +624,54 @@ class TestPurposeHierarchy:
     def test_categories_move_to_their_purpose_group(self):
         groups = self._groups()
 
+        # The reference GEMM is one group even though it is called from two different places.
+        assert {"cpu_reference_gemm", "solve_cpu_fast", "pre_solution_listener.ReferenceValidator",
+                "cpu_reference_gemm_per_solution"} <= self._names(groups[G_REFERENCE])
         assert "cpu_data_init" in self._names(groups[G_INPUT])
+        assert "pre_solution_listener.DataInitialization" in self._names(groups[G_INPUT])
+        assert "validate_warmups_listener.SynchronizerValidator" in self._names(groups[G_VALIDATION])
+        # The warmup sync wait belongs to kernel execution, although it is called from validation.
+        assert "validate_warmups_listener.BenchmarkTimer" in self._names(groups[G_KERNEL])
         assert "hip_initialization" in self._names(groups[G_LAUNCH])
+
+    def test_containers_get_no_row_and_every_category_is_shown_once(self):
+        groups = self._groups()
+        shown = [n for g in groups.values() for n in self._names(g) if not n.startswith("(")]
+        assert len(shown) == len(set(shown))
+        for container in ("python_benchmark_problems", "python_client_execution", "pre_problem",
+                          "pre_solution", "validate_warmups"):
+            assert container not in shown
 
     def test_groups_add_up_to_the_nesting_tree(self):
         nesting_total = sum(n.total_ms for n in build_hierarchy(dict(self.TIMINGS)))
         purpose_total = sum(g.total_ms for g in self._groups().values())
         assert purpose_total == pytest.approx(nesting_total, abs=0.05)
+
+    def test_containers_report_what_is_left_over_as_unattributed(self):
+        timings = {
+            "python_benchmark_problems": [100.0], "python_client_execution": [100.0],
+            "validate_warmups": [100.0],
+            "validate_warmups_listener.BenchmarkTimer": [30.0], "validate_gpu_sync": [30.0],
+            "validate_warmups_listener.SynchronizerValidator": [60.0],
+        }
+        groups = {g.name: g for g in build_purpose_hierarchy(timings)}
+        assert groups[G_VALIDATION].total_ms == pytest.approx(60.0)
+        assert groups[G_KERNEL].total_ms == pytest.approx(30.0)
+        # validate_warmups itself accounted for 10 ms that no sub-timer covers: reported, not lost.
+        assert groups[G_UNATTRIBUTED].total_ms == pytest.approx(10.0)
+
+    def test_a_row_loses_the_time_of_children_that_moved_elsewhere(self, monkeypatch):
+        # benchmark_runs is a row of the kernel group; move one of its timers to another group.
+        monkeypatch.setitem(PURPOSE_OF, "benchmark_pre_syncs", G_LAUNCH)
+        timings = {
+            "python_benchmark_problems": [100.0], "python_client_execution": [100.0],
+            "benchmark_runs": [100.0], "benchmark_pre_syncs": [25.0], "benchmark_post_syncs": [5.0],
+        }
+        groups = {g.name: g for g in build_purpose_hierarchy(timings)}
+        runs = next(c for c in groups[G_KERNEL].children if c.name == "benchmark_runs")
+        assert runs.total_ms == pytest.approx(75.0)                   # 100 - the 25 that moved
+        assert groups[G_LAUNCH].total_ms == pytest.approx(25.0)
+        assert sum(g.total_ms for g in groups.values()) == pytest.approx(100.0)
 
     def test_every_direct_child_of_a_phase_has_an_explicit_purpose(self):
         # A new timer under these must be given a purpose on purpose, not by inheriting.
@@ -616,3 +748,23 @@ class TestStagedHierarchy:
         _, top = self._tree(dict(self.RUN))
         assert {c.name for c in top["RUN: benchmark client"].children} >= {G_REFERENCE, G_LAUNCH}
         assert G_REFERENCE not in top        # nested under the stage, not next to it
+
+    def test_every_stage_group_is_a_known_purpose_group(self):
+        known = set(PURPOSE_OF.values())
+        for _stage, members in STAGES:
+            assert set(members) <= known
+
+    def test_artifact_packing_is_build_time_in_the_total(self):
+        # Packing runs after the Tensile invocation, so it is a top-level phase of its own.
+        timings = dict(self.BUILD, python_artifact_compress=[250.0])
+        root, top = self._tree(timings)
+        assert root.total_ms == pytest.approx(1250.0, abs=0.05)
+        build = top["BUILD: solution generation & compile"]
+        assert "Artifact packing (test harness, .tar.gz)" in {c.name for c in build.children}
+
+    def test_artifact_extraction_is_run_time_in_the_total(self):
+        timings = dict(self.RUN, python_artifact_extract=[40.0])
+        root, top = self._tree(timings)
+        assert root.total_ms == pytest.approx(540.0, abs=0.05)
+        run = top["RUN: benchmark client"]
+        assert "Artifact extraction (test harness, .tar.gz)" in {c.name for c in run.children}
