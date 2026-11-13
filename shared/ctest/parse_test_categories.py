@@ -63,6 +63,14 @@ def _dedupe_preserve_order(values):
     return result
 
 
+def flatten_patterns(patterns):
+    """Expand one nested pattern-list level used by YAML list anchors."""
+    result = []
+    for pattern in patterns or []:
+        result.extend(pattern if isinstance(pattern, list) else [pattern])
+    return result
+
+
 def _rtest_script_basename(name_prefix: str) -> str:
     """Basename of the rtest driver script next to the gtest binary.
 
@@ -230,12 +238,12 @@ def validate_config(categories, exclude_gpu_config, is_windows, is_linux):
                 )
                 continue
 
-            patterns = category_info.get("test_patterns", []) or []
-            exclude = category_info.get("exclude", []) or []
+            patterns = flatten_patterns(category_info.get("test_patterns", []))
+            exclude = flatten_patterns(category_info.get("exclude", []))
             if is_windows:
-                exclude = exclude + (category_info.get("exclude_windows", []) or [])
+                exclude += flatten_patterns(category_info.get("exclude_windows", []))
             if is_linux:
-                exclude = exclude + (category_info.get("exclude_linux", []) or [])
+                exclude += flatten_patterns(category_info.get("exclude_linux", []))
 
             for p in patterns:
                 err = validate_gtest_pattern(p)
@@ -281,13 +289,10 @@ def validate_config(categories, exclude_gpu_config, is_windows, is_linux):
             )
             continue
 
-        for p in gpu_config.get("test_patterns", []) or []:
-            # test_patterns may be either a flat list or list-of-lists.
-            sub_patterns = p if isinstance(p, list) else [p]
-            for sp in sub_patterns:
-                err = validate_gtest_pattern(sp)
-                if err is not None:
-                    errors.append(f"exclude_gpu {gpu_key!r} test_patterns: {err}")
+        for p in flatten_patterns(gpu_config.get("test_patterns", [])):
+            err = validate_gtest_pattern(p)
+            if err is not None:
+                errors.append(f"exclude_gpu {gpu_key!r} test_patterns: {err}")
 
         for label in gpu_config.get("labels", []) or []:
             err = validate_identifier(label)
@@ -591,7 +596,7 @@ def main():
         category_data = {}
 
         for category_name, category_info in categories.items():
-            patterns = category_info.get("test_patterns", []) or []
+            patterns = flatten_patterns(category_info.get("test_patterns", []))
             test_yaml = category_info.get("test_yaml")
             if not patterns and not test_yaml:
                 print(
@@ -600,19 +605,19 @@ def main():
                 )
                 continue
             labels = category_info.get("labels", [])
-            exclude = category_info.get("exclude", [])
-            if exclude is None:
-                exclude = []
+            exclude = flatten_patterns(category_info.get("exclude", []))
             extra_args = category_info.get("extra_args", []) or []
 
             # Add OS-specific exclusions
             if is_windows:
-                exclude_windows = category_info.get("exclude_windows", [])
+                exclude_windows = flatten_patterns(
+                    category_info.get("exclude_windows", [])
+                )
                 if exclude_windows:
                     exclude.extend(exclude_windows)
 
             if is_linux:
-                exclude_linux = category_info.get("exclude_linux", [])
+                exclude_linux = flatten_patterns(category_info.get("exclude_linux", []))
                 if exclude_linux:
                     exclude.extend(exclude_linux)
 
@@ -777,13 +782,9 @@ def main():
 
                 # Check if this config applies to our target GPU architecture
                 if gpu_arch_matches(gpu_arch, config_arch):
-                    # test_patterns may be a flat list or a list-of-lists.
-                    flat_patterns = []
-                    for p in gpu_config.get("test_patterns", []) or []:
-                        if isinstance(p, list):
-                            flat_patterns.extend(p)
-                        else:
-                            flat_patterns.append(p)
+                    flat_patterns = flatten_patterns(
+                        gpu_config.get("test_patterns", [])
+                    )
                     all_applicable_patterns.extend(flat_patterns)
 
                     excludes_everything = any(

@@ -4,6 +4,111 @@ Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTe
 (`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
 suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
 
+## rocjitsu quick category
+
+`test_categories.yaml` owns the `rocjitsu-quick` selection. It shares the FFM
+positive-pattern baseline, adds ordinary Smoke/CPU coverage, and declares both
+static exclusions and `representative_cases`. The installed MIOpen selector applies
+the inventory-derived reorder/reference reductions; generated parameter names are
+not pinned in YAML. Ordinary hardware quick and FFM categories remain unchanged.
+
+The category excludes expensive fusion/forward/loss/FindDb/BN parameter stress
+while retaining smaller cases and applicable directions, datatypes and layouts.
+Find2 keeps no-tuning, unlimited-workspace representatives in each direction.
+TensorReorder keeps singleton, nondegenerate, per-axis tail, all-large and plane
+shapes for every permutation/datatype. Reference kernels retain semantic classes
+and interactions per fixture; the FFM FP32/FP16 NCDHW forward fixtures stay complete.
+These are representative paths, not numerical coverage of every hardware-quick
+parameter. The detailed exclusions and their rationale live in the YAML policy.
+
+GPU HipConv suites are temporarily ignored because gfx1250 kernel-image loading
+fails in both rocjitsu and native B0 hardware. Remove that YAML exclusion once the
+HipConv image-loading fix lands. HipConv host checks remain selected.
+
+### PR CI and ownership
+
+The single TheRock component `miopen-rocjitsu` invokes the installed MIOpen runner
+from the current PR build. MIOpen owns the category, target/profile map, runtime
+discovery, execution and validation. Existing MIOpen and CK downstream selection
+schedule this CPU-only component through `base_project=miopen`; no per-architecture
+component names, labels or generic CI registry imports are required.
+
+TheRock's normal emulation **build** stage supplies rocjitsu. Artifact installation
+uses `--rocjitsu`, providing `bin/rocjitsu`, `lib/librocjitsu.so`, its memory helper
+and `share/rocjitsu/configs`. No source checkout, dependency installation or compiler
+invocation occurs in the numerical test job. MIOpen/CK and all runtime artifacts
+come from the build under test.
+The component is omitted when `compiler-runtime`, `math-libs`, `ml-libs` or
+`emulation` is excluded from the build. Reused stages still provide artifacts.
+
+Only gfx1250 is enabled for PR execution. The component uses the validated medium
+CPU pool, not a GPU runner, and excludes unqualified sanitizer variants.
+Use the existing `test:miopen` selection; there are no new rocjitsu-specific labels.
+Parent tiers do not widen `rocjitsu-quick`. Existing dbsync behavior is unchanged.
+
+### Adding and testing an architecture
+
+Target selection is declared alongside the category in
+`test_categories.yaml:test_categories.rocjitsu-quick.targets`. An additional entry
+after qualification can look like:
+
+```yaml
+gfx950:
+  family: gfx950-dcgpu
+  profile: gfx950_mi355x_kmd.json
+```
+
+The installed runner selects exactly one supported `AMDGPU_TARGETS` entry, or maps
+`AMDGPU_FAMILIES` when targets are unset. An explicit `--arch` disambiguates local
+execution. Profiles come from the built rocjitsu artifact; their version and the
+actual HSA target must match. Strict variants are not silently collapsed into base
+targets. The runner normalizes one emulated GPU while preserving SKU CU topology.
+
+To enable a qualified target in PR CI, also add its architecture to the thin
+TheRock component's `include_family` allowlist and select that family for building.
+No additional runner script or workflow is needed. gfx950 remains deferred after
+numerical failures and a runtime-budget overrun during its initial experiment.
+
+With complete current artifacts installed under `./build`:
+
+```sh
+export OUTPUT_ARTIFACTS_DIR=./build
+export THEROCK_BIN_DIR="${OUTPUT_ARTIFACTS_DIR}/bin"
+export AMDGPU_FAMILIES=gfx125X-dcgpu
+export AMDGPU_TARGETS=gfx1250
+python "${OUTPUT_ARTIFACTS_DIR}/share/miopen/rocjitsu/run_rocjitsu.py"
+```
+
+Without CI environment inputs, pass `--arch gfx1250`. Paired `--rocjitsu-bin PATH`
+and `--rocjitsu-config PATH` remain available for experiments with another real
+prebuilt runtime/profile. There is no source-build or obsolete prepared-tree fallback.
+Missing installed category, exported policy, matching CK plugin, runtime or profile
+fails rather than selecting an older artifact's ordinary quick category.
+Inherited architecture/strict overrides are removed; memory-wait diagnostics remain
+enabled and distinct from numerical-test success.
+
+### Execution and reports
+
+CPU checks run first in up to eight isolated GTest shards, each with up to four
+simulator dispatch workers and a disjoint CPU mask. GPU execution defaults to up
+to sixteen dispatch workers. Defaults are 600 seconds per CPU shard and 2400 seconds
+for the GPU phase; the workflow Test step allows 55 minutes. Writable DBs/caches
+are isolated outside the artifact prefix. `addkernels` ships beside `miopen_gtest`
+for CPU inliner checks.
+
+Reports live under `rocjitsu-work/ARCH/reports/`: `selection.json`,
+`gtest-filter.txt`, per-phase logs/XML, and `miopen_gtest_rocjitsu-quick.xml`.
+The runner passes phase filters through native GoogleTest flag files to avoid Linux
+argument-size limits. Reports remain local with console/step summaries; richer
+generic S3 report publishing is separate infrastructure work, not a new GitHub
+artifact-storage path in this integration.
+For an exact CLI/CI target, a prior merged verdict is removed before loading the
+exported policy, so a failed configuration attempt cannot leave a stale pass.
+Every selected identity must be accounted for; missing/duplicate executions and
+failed tests fail the job. Discovery listings are not verdicts, and skips/disabled
+cases are not numerical coverage. Emulator warnings remain visible and are distinct
+from GTest/process failure.
+
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the

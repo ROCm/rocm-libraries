@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import json
+from fnmatch import fnmatchcase
 import re
 import shlex
 import shutil
@@ -364,6 +365,62 @@ class TestCliIntegration(unittest.TestCase):
                 install_path.read_text(encoding="utf-8") if install_path else None
             )
             return result, install_contents
+
+    def test_yaml_pattern_anchors_preserve_selection_and_exclusion_boundaries(self):
+        yaml_text = """
+baseline: &baseline
+  - "FFM/*"
+negatives: &negatives
+  - "*/GPU_Bug*"
+test_categories:
+  emulated:
+    test_patterns:
+      - *baseline
+      - "Smoke/*"
+      - "CPU_*"
+    exclude:
+      - *negatives
+      - "CPU_Costly_NONE.*"
+    labels: [emulated]
+"""
+        result, installed = self._run_parser(
+            yaml_text, install_file="CTestTestfile.cmake"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inventory = [
+            "FFM/GPU_Keep_FP32.Run",
+            "Smoke/GPU_Keep_FP32.Run",
+            "CPU_Keep_NONE.Run",
+            "FFM/GPU_Bug_FP32.Run",
+            "Smoke/GPU_Bug_FP32.Run",
+            "CPU_Costly_NONE.Run",
+            "Standard/GPU_Keep_FP32.Run",
+        ]
+        for generated in (result.stdout, installed):
+            match = re.search(r"--gtest_filter=([^\s)]+)", generated)
+            self.assertIsNotNone(match)
+            positive, _, negative = match.group(1).partition("-")
+            selected = [
+                name
+                for name in inventory
+                if any(fnmatchcase(name, p) for p in positive.split(":"))
+                and not any(fnmatchcase(name, p) for p in negative.split(":"))
+            ]
+            self.assertEqual(selected, inventory[:3])
+
+    def test_yaml_pattern_anchor_cannot_bypass_pattern_validation(self):
+        result, _ = self._run_parser(
+            """
+unsafe: &unsafe
+  - "Smoke/*;injected"
+test_categories:
+  quick:
+    test_patterns: [*unsafe, "CPU_*"]
+    labels: [quick]
+"""
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("add_test(", result.stdout)
 
     def test_cli_direct_gtest_emits_yaml_and_filter(self):
         result, _ = self._run_parser(MINIMAL_YAML)
