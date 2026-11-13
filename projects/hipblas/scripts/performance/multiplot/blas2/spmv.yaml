@@ -20,7 +20,7 @@ Tests:
   function: spmv
   precision: *single_double_precisions
   samples: 10
-  uplo: L
+  uplo: [U, L]
   alpha: 1
   beta: 1
   incx: 1

@@ -24,8 +24,8 @@ Tests:
   - name: syrk
     function: syrk
     precision: *single_double_precisions_complex_real
-    uplo: L
-    transA: N
+    uplo: [U, L]
+    transA: [N, T]
     alpha: 1
     beta: 1
     matrix_size: *sizes

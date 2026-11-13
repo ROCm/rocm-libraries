@@ -20,7 +20,7 @@ Tests:
   function: syr
   precision: *single_double_precisions
   samples: 10
-  uplo: L
+  uplo: [U, L]
   alpha: 1
   incx: 1
   matrix_size: *sizes

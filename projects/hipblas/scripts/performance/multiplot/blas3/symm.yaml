@@ -24,8 +24,8 @@ Tests:
   - name: symm
     function: symm
     precision: *single_double_precisions_complex_real
-    side: L
-    uplo: L
+    side: [L, R]
+    uplo: [U, L]
     alpha: 1
     beta: 1
     matrix_size: *sizes

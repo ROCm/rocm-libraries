@@ -19,7 +19,7 @@ Tests:
   function: gbmv
   precision: *single_double_precisions_complex_real
   samples: 10
-  transA: N
+  transA: [N, T]
   alpha: 1
   beta: 1
   incx: 1

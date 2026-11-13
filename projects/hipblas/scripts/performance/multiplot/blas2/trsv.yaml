@@ -20,8 +20,8 @@ Tests:
   function: trsv
   precision: *single_double_precisions_complex_real
   step_size: 2048
-  uplo: L
-  transA: N
+  uplo: [U, L]
+  transA: [N, T]
   diag: N
   incx: 1
   samples: 10

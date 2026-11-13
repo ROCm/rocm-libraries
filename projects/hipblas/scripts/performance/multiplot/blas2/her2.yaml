@@ -20,7 +20,7 @@ Tests:
   function: her2
   precision: *single_double_precisions_complex
   samples: 10
-  uplo: L
+  uplo: [U, L]
   alpha: 1
   incx: 1
   incy: 1

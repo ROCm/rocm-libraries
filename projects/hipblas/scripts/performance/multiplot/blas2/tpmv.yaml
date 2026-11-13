@@ -20,8 +20,8 @@ Tests:
   function: tpmv
   precision: *single_double_precisions_complex_real
   samples: 10
-  uplo: L
-  transA: N
+  uplo: [U, L]
+  transA: [N, T]
   diag: N
   incx: 1
   matrix_size: *sizes

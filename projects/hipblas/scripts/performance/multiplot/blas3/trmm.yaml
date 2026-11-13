@@ -24,9 +24,9 @@ Tests:
   - name: trmm
     function: trmm
     precision: *single_double_precisions_complex_real
-    side: L
-    uplo: L
-    transA: N
+    side: [L, R]
+    uplo: [U, L]
+    transA: [N, T]
     diag: N
     alpha: 1
     beta: 1

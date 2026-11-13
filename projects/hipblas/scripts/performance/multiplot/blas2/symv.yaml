@@ -20,7 +20,7 @@ Tests:
     category: bench
     function: symv
     precision: *single_double_precisions
-    uplo: L
+    uplo: [U, L]
     alpha: 1
     beta: 1
     incx: 1

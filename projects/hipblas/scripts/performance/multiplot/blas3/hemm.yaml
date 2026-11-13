@@ -26,9 +26,9 @@ Tests:
   - name: hemm
     function: hemm
     precision: *single_double_precisions_complex
-    side: L
-    uplo: L
-    transA: N
+    side: [L, R]
+    uplo: [U, L]
+    transA: [N, T]
     diag: N
     alpha: 1
     beta: 1

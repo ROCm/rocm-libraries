@@ -19,7 +19,7 @@ Tests:
     category: bench
     function: gemv
     precision: *single_double_precisions_complex_real
-    transA: N
+    transA: [N, T]
     alpha: 1
     beta: 1
     incx: 1

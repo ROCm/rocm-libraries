@@ -24,8 +24,8 @@ Tests:
   - name: herkx
     function: herkx
     precision: *single_double_precisions_complex
-    uplo: L
-    transA: N
+    uplo: [U, L]
+    transA: [N, T]
     alpha: 1
     beta: 1
     matrix_size: *sizes
