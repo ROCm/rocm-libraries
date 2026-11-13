@@ -283,8 +283,14 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
     const int64_t blocksPerPartition = blocksPerPartitionOf(problem, config);
     const int64_t wanted
         = std::max<int64_t>(1, computeUnits) * (isHankel(config) ? config.bpc : BLOCKS_PER_CU);
-    const int64_t partitions
-        = std::clamp<int64_t>(divUp(wanted, blocksPerPartition), 1, static_cast<int64_t>(a.rows));
+    // A vector tile's block splits a partition's rows over its row lanes: at least four rows a
+    // lane, or the lanes idle and the partial sums outgrow the work.
+    const int64_t rowsAtLeast
+        = config.variant == "vtile"
+              ? 4 * (BLOCK / vtileChannelLanes(a.c, std::max<int64_t>(config.cv, 1)))
+              : 1;
+    const int64_t partitions = std::clamp<int64_t>(
+        divUp(wanted, blocksPerPartition), 1, std::max<int64_t>(1, a.rows / rowsAtLeast));
     a.rowsPerPartition = static_cast<int>(divUp(a.rows, partitions));
     a.partitions = static_cast<int>(divUp(a.rows, a.rowsPerPartition));
 }
