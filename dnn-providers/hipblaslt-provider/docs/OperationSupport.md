@@ -48,22 +48,29 @@ Matmul(a, b) → d
 - Compute type: `FP32`
 
 > **Known issue (#10811):** FP8 OCP on operand A paired with FP6 OCP on operand
-> B currently returns incorrect results and is rejected as unsupported
-> (originally observed on gfx950; not yet arch-gated pending further testing).
+> B returns incorrect results when A is column-major, so that layout is rejected as
+> unsupported on every architecture (observed on gfx950). With a row-major
+> (K-contiguous) A the pair is supported.
 
-**Hardware support:** Supported on **gfx950** only.
+**Hardware support:**
+- **gfx950:** every operand layout in the table below.
+- **gfx1250:** K-contiguous A and B only (#13715); no FP6 inputs.
 
-> **Known issue (#13715):** on **gfx1250**, hipBLASLt has MX GEMM kernels only for
-> `transA = T, transB = N`. The layout below reaches hipBLASLt as
-> `transA = N, transB = T` (after the row-major operand swap), so hipBLASLt
-> finds no algorithm and the engine declines every MX graph on gfx1250.
+**Operand layouts:** each MX input is a packed matrix.
+
+| A `[M, K]` | B `[K, N]` | gfx950 | gfx1250 |
+|---|---|---|---|
+| row-major (K-contiguous) | column-major (K-contiguous) | yes | yes |
+| column-major (M-contiguous) | row-major (N-contiguous) | yes | no |
+| row-major | row-major | yes | no |
+| column-major | column-major | yes | no |
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the
 [hipBLASLt API reference](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/reference/api-reference.html).
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
-- Scale tensors: dtype `FP8_E8M0`, with one scale per 32-element block — element count `M*(K/32)` for `scale_a`, `(K/32)*N` for `scale_b`
-- Layout: `opA = T` (A is col-major, i.e., `stride[-2] == 1`), `opB = N` (B is row-major, i.e., `stride[-1] == 1`)
+- Scale tensors: dtype `FP8_E8M0`, natural (unswizzled) values, one scale per 32-element block: `[M, K/32]` for `scale_a`, `[K/32, N]` for `scale_b`
+- Layout: A, B and both scales are packed row- or column-major matrices (see the table above); padded leading dimensions are rejected
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
 - Block size: innermost `block_size == 32` for both scale tensors (VEC32)
 - Batch: single batch only (`batch == 1`); hipBLASLt requires `B == 1` for this scale mode

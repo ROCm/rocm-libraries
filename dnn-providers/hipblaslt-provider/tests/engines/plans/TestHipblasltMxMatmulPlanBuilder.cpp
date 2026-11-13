@@ -1,17 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "TestWorkarounds.hpp"
+#include "engines/plans/HipblasltMxMatmulPlan.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 
@@ -143,9 +149,10 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
 // Fixtures
 // ===========================================================================
 
-// CPU fixture: negative cases that reject the graph before any GPU handle use.
-// No device required — the handle is default-constructed and never touched
-// because every rejection happens during topology/constraint checks.
+// CPU fixture: graph-level negative cases, no device required. The handle has no
+// hipBLASLt handle, so isApplicable() also returns false for a valid graph that
+// reaches the heuristic: these tests show that a graph is declined, not why. The
+// packing rules are tested in the GPU fixture, against a packed control.
 class TestHipblasltMxMatmulPlanBuilder : public ::testing::Test
 {
 protected:
@@ -209,6 +216,99 @@ static flatbuffers::FlatBufferBuilder
                                     xTypeB);
 }
 
+namespace
+{
+
+// Physical order of our A and B. hipBLAS sees the transposed pair (row-major
+// swap): MN_MN -> NT (the original provider layout), K_K -> TN (the only layout
+// with Tensile MX kernels), K_MN -> NN, MN_K -> TT.
+enum class MxOperandLayout
+{
+    MN_MN,
+    K_K,
+    K_MN,
+    MN_K,
+};
+
+const char* toString(MxOperandLayout layout)
+{
+    switch(layout)
+    {
+    case MxOperandLayout::MN_MN:
+        return "MN_MN";
+    case MxOperandLayout::K_K:
+        return "K_K";
+    case MxOperandLayout::K_MN:
+        return "K_MN";
+    case MxOperandLayout::MN_K:
+        return "MN_K";
+    default:
+        return "?";
+    }
+}
+
+// M = N = 32, K = 128 MX graph in the given operand layout. Scales are
+// K-block-contiguous ([M, K/32] row-major, [K/32, N] column-major) unless
+// mnContiguousScales is set.
+flatbuffers::FlatBufferBuilder createMxGraphWithLayout(MxOperandLayout layout,
+                                                       DT xTypeA = DT::FP8_E4M3,
+                                                       DT cType = DT::HALF,
+                                                       DT xTypeB = DT::UNSET,
+                                                       bool mnContiguousScales = false)
+{
+    const bool aKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::K_MN;
+    const bool bKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::MN_K;
+    const std::vector<int64_t> aStrides
+        = aKContiguous ? std::vector<int64_t>{128, 1} : std::vector<int64_t>{1, 32};
+    const std::vector<int64_t> bStrides
+        = bKContiguous ? std::vector<int64_t>{1, 128} : std::vector<int64_t>{32, 1};
+    const std::vector<int64_t> scaleAStrides
+        = mnContiguousScales ? std::vector<int64_t>{1, 32} : std::vector<int64_t>{4, 1};
+    const std::vector<int64_t> scaleBStrides
+        = mnContiguousScales ? std::vector<int64_t>{32, 1} : std::vector<int64_t>{1, 4};
+    return createValidMxMatmulGraph({32, 128},
+                                    aStrides,
+                                    {128, 32},
+                                    bStrides,
+                                    {32, 32},
+                                    {32, 1},
+                                    {32, 4},
+                                    {4, 32},
+                                    xTypeA,
+                                    cType,
+                                    DT::FP8_E8M0,
+                                    DT::FP8_E8M0,
+                                    DT::FLOAT,
+                                    32,
+                                    false,
+                                    false,
+                                    xTypeB,
+                                    scaleAStrides,
+                                    scaleBStrides);
+}
+
+bool onArch(const char* arch)
+{
+    return archMatches(
+        hipdnn_test_sdk::utilities::currentDeviceArch(), arch, ArchMatchMode::PREFIX);
+}
+
+bool onGfx1250()
+{
+    return hipblaslt_plugin_test::isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch());
+}
+
+// (A type, B type, output type) triples with a gfx1250 Tensile MX kernel in the
+// hipBLASLt this was written against. The gfx1250 A0 nightly pin lacks some of
+// them (no E5M2, no FP16 output), so only these four are asserted there.
+bool hasGfx1250TensileKernel(DT aType, DT bType, DT cType)
+{
+    const bool sameFp8OrFp4 = aType == bType && (aType == DT::FP8_E4M3 || aType == DT::FP4_E2M1);
+    return sameFp8OrFp4 && (cType == DT::BFLOAT16 || cType == DT::FLOAT);
+}
+
+} // namespace
+
 // ===========================================================================
 // isApplicable — positive cases (GPU-gated via SKIP_IF_NO_DEVICES in SetUp)
 // ===========================================================================
@@ -248,6 +348,24 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::X_TYPE, TypeParam::OUT_TYPE);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
+        << "x=" << EnumNameDataType(TypeParam::X_TYPE)
+        << " out=" << EnumNameDataType(TypeParam::OUT_TYPE);
+}
+
+// K-contiguous A and B (hipBLAS TN), the layout frameworks pass and the only one
+// hipBLASLt has Tensile MX kernels for. gfx950 runs every pair on rocRoller;
+// gfx1250 only has Tensile kernels for some pairs.
+TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicableKContiguous)
+{
+    if(onGfx1250()
+       && !hasGfx1250TensileKernel(TypeParam::X_TYPE, TypeParam::X_TYPE, TypeParam::OUT_TYPE))
+    {
+        GTEST_SKIP() << "no gfx1250 Tensile MX kernel asserted for this pair";
+    }
+    auto fb = createMxGraphWithLayout(
+        MxOperandLayout::K_K, TypeParam::X_TYPE, TypeParam::OUT_TYPE, TypeParam::X_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
         << "x=" << EnumNameDataType(TypeParam::X_TYPE)
@@ -453,23 +571,230 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongBlockSize)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// opA != T (A must be col-major for MX) — pass row-major A strides
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpANotT)
+// Operands and scales must be packed row- or column-major matrices: rocRoller
+// ignores leading dimensions, so a padded one would be read as packed (#14290).
+// Each case changes the strides of one tensor of a K-contiguous graph that is
+// accepted when packed (on every MX arch), so the decline comes from those strides.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
 {
-    auto fb = createValidMxMatmulGraph(
-        {32, 128}, {128, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+    const auto graphWithStrides = [](const std::vector<int64_t>& aStrides,
+                                     const std::vector<int64_t>& bStrides,
+                                     const std::vector<int64_t>& scaleAStrides,
+                                     const std::vector<int64_t>& scaleBStrides) {
+        return createValidMxMatmulGraph({32, 128},
+                                        aStrides,
+                                        {128, 32},
+                                        bStrides,
+                                        {32, 32},
+                                        {32, 1},
+                                        {32, 4},
+                                        {4, 32},
+                                        DT::FP8_E4M3,
+                                        DT::BFLOAT16,
+                                        DT::FP8_E8M0,
+                                        DT::FP8_E8M0,
+                                        DT::FLOAT,
+                                        32,
+                                        false,
+                                        false,
+                                        DT::UNSET,
+                                        scaleAStrides,
+                                        scaleBStrides);
+    };
+    const std::vector<int64_t> aPacked = {128, 1};
+    const std::vector<int64_t> bPacked = {1, 128};
+    const std::vector<int64_t> scaleAPacked = {4, 1};
+    const std::vector<int64_t> scaleBPacked = {1, 4};
+
+    auto packed = graphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
+    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
+
+    struct Case
+    {
+        const char* name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    // A row-major [32, 128] with a row stride of 136.
+    cases.push_back({"padded A", graphWithStrides({136, 1}, bPacked, scaleAPacked, scaleBPacked)});
+    // B column-major [128, 32] with a column stride of 136.
+    cases.push_back({"padded B", graphWithStrides(aPacked, {1, 136}, scaleAPacked, scaleBPacked)});
+    // Neither axis of A has unit stride.
+    cases.push_back(
+        {"non-matrix A", graphWithStrides({256, 2}, bPacked, scaleAPacked, scaleBPacked)});
+    // scale_a row-major [32, 4] with a row stride of 8.
+    cases.push_back({"padded scale_a", graphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
+    // scale_b column-major [4, 32] with a column stride of 8.
+    cases.push_back({"padded scale_b", graphWithStrides(aPacked, bPacked, scaleAPacked, {1, 8})});
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
+    }
 }
 
-// opB != N (B must be row-major for MX) — pass col-major B strides
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpBNotN)
+// The same rule for the NT layout (M-contiguous A, N-contiguous B, row-major
+// scales), which the provider accepted before it checked packing: a padded operand
+// or scale was then read as packed. gfx950 only; gfx1250 declines NT for layout.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsNt)
 {
-    auto fb = createValidMxMatmulGraph(
-        {32, 128}, {1, 32}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check";
+    }
+    const auto graphWithStrides = [](const std::vector<int64_t>& aStrides,
+                                     const std::vector<int64_t>& bStrides,
+                                     const std::vector<int64_t>& scaleAStrides,
+                                     const std::vector<int64_t>& scaleBStrides) {
+        return createValidMxMatmulGraph({32, 128},
+                                        aStrides,
+                                        {128, 32},
+                                        bStrides,
+                                        {32, 32},
+                                        {32, 1},
+                                        {32, 4},
+                                        {4, 32},
+                                        DT::FP8_E4M3,
+                                        DT::HALF,
+                                        DT::FP8_E8M0,
+                                        DT::FP8_E8M0,
+                                        DT::FLOAT,
+                                        32,
+                                        false,
+                                        false,
+                                        DT::UNSET,
+                                        scaleAStrides,
+                                        scaleBStrides);
+    };
+    const std::vector<int64_t> aPacked = {1, 32};
+    const std::vector<int64_t> bPacked = {32, 1};
+    const std::vector<int64_t> scaleAPacked = {4, 1};
+    const std::vector<int64_t> scaleBPacked = {32, 1};
+
+    auto packed = graphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
+    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
+
+    struct Case
+    {
+        const char* name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    // A column-major [32, 128] with a column stride of 40.
+    cases.push_back({"padded A", graphWithStrides({1, 40}, bPacked, scaleAPacked, scaleBPacked)});
+    // B row-major [128, 32] with a row stride of 40.
+    cases.push_back({"padded B", graphWithStrides(aPacked, {40, 1}, scaleAPacked, scaleBPacked)});
+    // scale_a row-major [32, 4] with a row stride of 8.
+    cases.push_back({"padded scale_a", graphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
+    // scale_b row-major [4, 32] with a row stride of 40.
+    cases.push_back({"padded scale_b", graphWithStrides(aPacked, bPacked, scaleAPacked, {40, 1})});
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
+    }
 }
+
+// rocRoller (gfx950) reads every operand-order combination; the plan transposes a
+// scale whose order differs from its operand's.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx950)
+{
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check";
+    }
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        for(const bool mnContiguousScales : {false, true})
+        {
+            auto fb = createMxGraphWithLayout(
+                layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
+        }
+    }
+}
+
+// gfx1250 has Tensile MX kernels for hipBLAS TN only (#13715): K-contiguous A and B
+// are accepted with either scale order, every other layout is declined.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsOnlyKContiguousOnGfx1250)
+{
+    if(!onGfx1250())
+    {
+        GTEST_SKIP() << "gfx1250-only check";
+    }
+    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
+    {
+        for(const bool mnContiguousScales : {false, true})
+        {
+            auto fb = createMxGraphWithLayout(
+                MxOperandLayout::K_K, xType, DT::BFLOAT16, DT::UNSET, mnContiguousScales);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                << "x=" << EnumNameDataType(xType) << " mnContiguousScales=" << mnContiguousScales;
+        }
+    }
+    for(const auto layout : {MxOperandLayout::MN_MN, MxOperandLayout::K_MN, MxOperandLayout::MN_K})
+    {
+        auto fb = createMxGraphWithLayout(layout, DT::FP8_E4M3, DT::BFLOAT16);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << toString(layout);
+    }
+}
+
+#if WORKAROUND_ISSUE_14286
+// HIPBLASLT_USE_ROCROLLER=0 makes hipBLASLt route VEC32_UE8M0 problems to Tensile,
+// whose gfx950 MX kernels expect pre-swizzled scales and silently return wrong
+// results with natural ones. The plan must refuse that combination.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTensileWithNaturalScalesOnGfx950)
+{
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check";
+    }
+    // hipBLASLt reads the variable once, at handle creation.
+    ScopedEnvironmentVariableSetter const forceTensile("HIPBLASLT_USE_ROCROLLER", "0");
+    HipdnnEnginePluginHandle tensileHandle;
+    ASSERT_EQ(hipblasLtCreate(&tensileHandle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
+    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtHandle_t> const ownedHandle(
+        tensileHandle.hipblasltHandle,
+        [](hipblasLtHandle_t h) { EXPECT_EQ(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS); });
+
+    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K, DT::FP8_E4M3, DT::FLOAT);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_FALSE(_builder.isApplicable(tensileHandle, graph));
+
+    // The swizzled format feeds the same kernels correctly.
+    const auto& deqA
+        = graph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>();
+    const auto& deqB
+        = graph.getNodeWrapper(1)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>();
+    const auto& matmul
+        = graph.getNodeWrapper(2)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes>();
+    std::unique_ptr<MxMatmulPlan> plan;
+    EXPECT_NO_THROW(plan = createMxMatmulPlan(tensileHandle,
+                                              deqA,
+                                              deqB,
+                                              matmul,
+                                              graph.getTensorMap(),
+                                              MxScaleFormat::SWIZZLED_GFX950));
+    if(plan != nullptr)
+    {
+        EXPECT_EQ(plan->scaleFormat(), MxScaleFormat::SWIZZLED_GFX950);
+    }
+}
+#endif
 
 // Non-MX graph (batchnorm) must return false
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchnormGraph)
@@ -548,15 +873,40 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
     }
 }
 
-// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt does have gfx1250 MX
-// kernels for these element types, but only for transA=T, transB=N, while this
-// provider always sends transA=N, transB=T, so every MX graph must be declined.
-// A failure here means hipBLASLt now offers a kernel for the provider's problem;
-// see the issue before enabling MX on gfx1250.
+// #10811 only hits hipBLASLt transB = T, i.e. a column-major graph A. A K-contiguous
+// (row-major) FP8 A with an FP6 B is correct on gfx950 and is accepted.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWithFp6B)
+{
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check (no FP6 MX kernels on gfx1250)";
+    }
+    for(const auto layout : {MxOperandLayout::K_K, MxOperandLayout::K_MN})
+    {
+        for(const auto aType : {DT::FP8_E4M3, DT::FP8_E5M2})
+        {
+            for(const auto bType : {DT::FP6_E2M3, DT::FP6_E3M2})
+            {
+                auto fb = createMxGraphWithLayout(layout, aType, DT::HALF, bType);
+                GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+                EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                    << toString(layout) << " A=" << EnumNameDataType(aType)
+                    << " B=" << EnumNameDataType(bType);
+            }
+        }
+    }
+}
+
+// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt has gfx1250 MX
+// kernels for these element types only for transA=T, transB=N, while the canonical
+// (M/N-contiguous) layout here reaches hipBLASLt as transA=N, transB=T. The
+// provider declines that layout on gfx1250 itself, before asking hipBLASLt; if
+// hipBLASLt ships non-TN gfx1250 MX kernels, check their scale layout before
+// relaxing that rule.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
 {
     const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
-    if(!archMatches(archName, "gfx1250", ArchMatchMode::PREFIX))
+    if(!hipblaslt_plugin_test::isGfx1250Target(archName))
     {
         GTEST_SKIP() << "gfx1250-only check, running on " << archName;
     }

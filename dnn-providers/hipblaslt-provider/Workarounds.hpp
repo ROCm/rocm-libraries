@@ -28,7 +28,12 @@
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#10811 — on gfx950 a block-scaled MX GEMM with FP8 OCP
 // (E4M3 or E5M2) on graph operand A and FP6 (E2M3 or E3M2) on graph operand B
-// returns incorrect results.
+// returns incorrect results. Narrowed down with hipblaslt-bench (VEC32 scales,
+// every heuristic solution run): hipBLASLt A = FP6 x B = FP8 with transB = T is
+// wrong on the rocRoller kernels rr_32x32x64 and rr_16x16x128 (one of them is the
+// heuristic's first choice); transB = N is correct. Graph A reaches hipBLASLt as
+// B (row-major swap), with transB = T exactly when graph A is column-major, so
+// only that layout is declined; a K-contiguous (row-major) A is unaffected.
 //
 // REJECT_IF_WORKAROUND_ISSUE_10811 must only be invoked from a function with
 // return type `bool` (it contains a `return`).
@@ -37,6 +42,19 @@
 // single call site. Also delete the test
 // `TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsFp8AWithFp6B` and add the
 // four `MxMixedConfig<FP8_*, FP6_*>` pairings to `MxMixedConfigs` in that same file.
+// ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#14286 — hipBLASLt selects MX kernels without matching their
+// scale layout to the scale mode. A Tensile MX kernel reads one of three layouts
+// (NoSwizzle, gfx950 HostPreSwizzle, gfx1250 InMemorySwizzle), and the heuristic
+// ignores it: with HIPBLASLT_USE_ROCROLLER=0 on gfx950, VEC32_UE8M0 (documented as
+// natural scales) selects HostPreSwizzle kernels, and on gfx1250 it selects
+// InMemorySwizzle kernels, whose layout no scale mode documents. Both silently
+// return wrong results unless the scales match the kernel.
+//
+// WORKAROUND_ISSUE_14286 enables a guard in the MX plan: it reads the selected
+// kernel's layout from its name (the `_MXSF` token, or rocRoller), declines when it
+// does not match the scales the plan prepares, and feeds natural scales to a gfx1250
+// NoSwizzle kernel.
 // ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
@@ -84,12 +102,17 @@
             (tensorMap), (deqAttrA).x_tensor_uid());                                \
         const auto tXB = ::hipblaslt_plugin::hipblaslt_utils::findTensorAttributes( \
             (tensorMap), (deqAttrB).x_tensor_uid());                                \
+        const auto& stridesXA = tXA.strides();                                      \
         if(::hipblaslt_plugin::hipblaslt_utils::isTypeFp8Ocp(tXA.dataType())        \
-           && ::hipblaslt_plugin::hipblaslt_utils::isTypeFp6Ocp(tXB.dataType()))    \
+           && ::hipblaslt_plugin::hipblaslt_utils::isTypeFp6Ocp(tXB.dataType())     \
+           && (stridesXA.empty() || stridesXA.back() != 1))                         \
         {                                                                           \
             HIPDNN_PLUGIN_LOG_INFO(                                                 \
-                "[#10811] MX matmul not applicable: FP8 OCP A with FP6 B returns "  \
-                "incorrect results");                                               \
+                "[#10811] MX matmul not applicable: FP8 OCP A (column-major) with " \
+                "FP6 B returns incorrect results");                                 \
             return false;                                                           \
         }                                                                           \
     } while(0)
+
+// NOLINTNEXTLINE(modernize-macro-to-enum)
+#define WORKAROUND_ISSUE_14286 1
