@@ -251,6 +251,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 180)\n")
 
+# Pure runner policy remains quick. Real subprocess/process-tree contracts have
+# a separate standard-tier owner and whole-entry budget.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_runner_contract_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m \"not worker_integration\" -v -rs --timeout=30)\n"
+       "set_tests_properties(rocke_library_runner_contract_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;comprehensive\\;full\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+       "  TIMEOUT 180)\n"
+       "add_test(rocke_library_worker_integration_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m worker_integration -v -rs --timeout=30)\n"
+       "set_tests_properties(rocke_library_worker_integration_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\\;comprehensive\\;full\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+       "  TIMEOUT 180)\n")
+
 # Tiled attention cache-key contract (no GPU). The targeted share/split
 # checks take seconds and run in the quick tier. The invariant sweep compares
 # key equality with build equality across every selector threshold for each
@@ -270,6 +284,40 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 900)\n")
+
+# Exhaustive counted-sync gates are intentionally outside normal pytest
+# discovery. The structural gate is host-only; the compiler gate additionally
+# requires the reference COMGR/LLVM toolchain and llvm-objdump. They share a
+# lock to cap aggregate host memory and compiler pressure in parallel runs.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
+       "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH};PYTEST_ADDOPTS=;PYTEST_PLUGINS=;PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
+       "  PROCESSORS 4\n"
+       "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  TIMEOUT 1800)\n"
+       "set(_rocke_counted_isa_environment\n"
+       "    \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+       "    \"ROCKE_COUNTED_ISA_OPTIONAL=0\"\n"
+       "    \"PYTEST_ADDOPTS=\"\n"
+       "    \"PYTEST_PLUGINS=\"\n"
+       "    \"PYTEST_DISABLE_PLUGIN_AUTOLOAD=1\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_RUN=1\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_PARTIAL=0\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
+       "    \"ROCKE_BWD_NO_COMGR_PIN=\"\n"
+       "    \"ROCKE_BWD_ISA_ARCH=\"\n"
+       "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
+       "list(APPEND _rocke_counted_isa_environment\n"
+       "     \${_rocke_compiler_tool_environment})\n"
+       "add_test(rocke_library_counted_compiler_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
+       "set_tests_properties(rocke_library_counted_compiler_gate PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
+       "  PROCESSORS 4\n"
+       "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  TIMEOUT 7200)\n")
 
 # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
 # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv

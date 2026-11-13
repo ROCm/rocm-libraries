@@ -289,6 +289,36 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert command[configuration + 1 : command.index("-v")] == paths, name
             assert command[-2:] == ["-m", marker_expression], name
         expected_tiling_environment = {"PYTHONPATH": package_root}
+        library_pythonpath = os.pathsep.join(
+            (f"{test_ctest_rel}tests/library", package_root)
+        )
+        expected_runner_environment = {
+            "PYTHONPATH": library_pythonpath,
+        }
+        expected_counted_ir_environment = {
+            "PYTHONPATH": library_pythonpath,
+            "PYTEST_ADDOPTS": "",
+            "PYTEST_PLUGINS": "",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "ROCKE_EXPLICIT_GATE_PREFLIGHT": "",
+        }
+        expected_counted_isa_environment = {
+            "PYTHONPATH": library_pythonpath,
+            "ROCKE_COUNTED_ISA_OPTIONAL": "0",
+            "PYTEST_ADDOPTS": "",
+            "PYTEST_PLUGINS": "",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "ROCKE_EXPLICIT_GATE_PREFLIGHT": "",
+            "ROCKE_BWD_NO_COMGR_PIN": "",
+            "ROCKE_BWD_ISA_ARCH": "",
+            "ROCKE_ISA_INSPECT_PROBE": (
+                f"{test_ctest_rel}tests/support/probe_isa_inspect.py"
+            ),
+        }
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
                 "PATH": os.pathsep.join(
@@ -304,6 +334,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_tiling_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
+            expected_counted_isa_environment.update(compiler_environment)
 
         platform_pytest_parts = [
             test["name"] for test in tests if test["name"].startswith("rocke_pytest_")
@@ -318,6 +349,32 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
             )
+            assert (
+                environment_for(tests, "rocke_library_runner_contract_pytest")
+                == expected_runner_environment
+            )
+            assert (
+                environment_for(tests, "rocke_library_worker_integration_pytest")
+                == expected_runner_environment
+            )
+            assert (
+                environment_for(tests, "rocke_library_counted_structural_gate")
+                == expected_counted_ir_environment
+            )
+            assert (
+                environment_for(tests, "rocke_library_counted_compiler_gate")
+                == expected_counted_isa_environment
+            )
+            counted = next(
+                test
+                for test in tests
+                if test["name"] == "rocke_library_counted_compiler_gate"
+            )
+            counted_properties = {
+                prop["name"]: prop["value"] for prop in counted["properties"]
+            }
+            assert counted_properties["PROCESSORS"] == 4
+            assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
         # COMGR-only gates get the package and nothing compiler-specific.
         comgr_only_environment = environment_for(
             tests, "rocke_arch_domain_reproducibility"
