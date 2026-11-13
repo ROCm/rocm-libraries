@@ -3434,6 +3434,33 @@ def _relieveOne(state, baseSccs, pairs, spans, population, objective) -> bool:
     return False
 
 
+def _m0Anchor(ops, i):
+    """Nearest instruction above ops[i] the pass never moves, or None."""
+    for op in reversed(ops[:i]):
+        if not (op.m0w or op.movable or type(op.inst).__name__.startswith("SNop")):
+            return op
+    return None
+
+
+def _raiseWithinGaps(ops, baseOps, baseScc, pairs):
+    """Raise each instruction the pass moved to the earliest legal slot of
+    the gap it landed in, so SALU still leads its gap."""
+    baseAnchor = {id(op): _m0Anchor(baseOps, i) for i, op in enumerate(baseOps)}
+    for op in [op for op in ops if op.m0w or op.movable]:
+        i = _opIndex(ops, op)
+        if baseAnchor.get(id(op), op) is _m0Anchor(ops, i):
+            continue
+        top = i
+        for p in range(i - 1, -1, -1):
+            if ops[p].mfma or _m0Conflict(op, ops[p]):
+                break
+            if _m0Move(ops, i, p, baseScc, pairs) is not None:
+                top = p
+        if top != i:
+            ops[:] = _m0Move(ops, i, top, baseScc, pairs)
+    return ops
+
+
 def _reorderBody(module, order):
     """Make the body's instructions issue in order. Comments stay in place;
     an instruction not yet in the body is inserted."""
@@ -3467,7 +3494,9 @@ def spaceMainLoopM0Writes(bodies, outside, sgprIndex=None):
     when that lowers the gap objective (_placeM0WriteFreeingSwap). Once
     every write is placed, base swaps, SRD steps and m0 writes leave
     crowded gaps one at a time while the objective drops
-    (_relieveM0Gaps). Every move keeps each register and m0 read, each
+    (_relieveM0Gaps). Last, each moved instruction rises to the earliest
+    legal slot of its gap, so SALU still leads it (_raiseWithinGaps).
+    Every move keeps each register and m0 read, each
     SCC reader's producer, and the spacing of placed writes. Loads,
     reads, waits, barriers, VALU and MFMAs never move, so no wait count
     changes. A body without MFMAs is left as it is.
@@ -3477,6 +3506,7 @@ def spaceMainLoopM0Writes(bodies, outside, sgprIndex=None):
             if not _isComment(inst)] for body in bodies]
     if not ops or not all(any(op.mfma for op in body) for body in ops):
         return
+    baseOps = [list(body) for body in ops]
     state = _M0LoopGaps(ops, list(outside))
     baseSccs = [_m0SccMap(body) for body in ops]
     pairs = [[(body[i], body[i + 1]) for i in range(len(body) - 1)
@@ -3487,7 +3517,8 @@ def spaceMainLoopM0Writes(bodies, outside, sgprIndex=None):
             _placeM0WriteFreeingSwap(state, r, writer, baseSccs[r], placed)
             placed.append((writer, load))
     _relieveM0Gaps(state, baseSccs, pairs)
-    for body, order in zip(bodies, state.bodies):
+    for r, body in enumerate(bodies):
+        order = _raiseWithinGaps(state.bodies[r], baseOps[r], baseSccs[r], pairs[r])
         _reorderBody(body, [op.inst for op in order])
 
 

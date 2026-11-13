@@ -280,9 +280,8 @@ def test_no_gap_opens_with_a_valu(any_src):
 def test_salu_issues_first_in_each_gap(any_src):
     """No SALU, m0 write or load follows a ds_read or VALU of its gap
     unless a wait, barrier or branch separates them or it uses the
-    earlier instruction's result. An m0 write spaced from its load may
-    trail the gap. The loop counter and back-branch after the C1 cell are
-    not part of any gap."""
+    earlier instruction's result. The loop counter and back-branch after
+    the C1 cell are not part of any gap."""
     body = _mainloop_lines(any_src)
     body = body[:next(i for i, ln in enumerate(body) if "MAINLOOP_C1 end" in ln)]
     for i, gap in enumerate(_mfma_gap_lines(body)):
@@ -293,8 +292,6 @@ def test_salu_issues_first_in_each_gap(any_src):
                 behind = []
             elif op.startswith("ds_read") or _is_valu(op):
                 behind.append(code)
-            elif op.startswith("s_") and code.split()[1] == "m0,":
-                continue
             elif op.startswith(("s_", "buffer_load")):
                 operands = code[len(op):]
                 for earlier in behind:

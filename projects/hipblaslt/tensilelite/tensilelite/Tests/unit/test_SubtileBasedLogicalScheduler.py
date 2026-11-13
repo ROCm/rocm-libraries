@@ -7766,7 +7766,7 @@ class TestSpaceMainLoopM0Writes:
             [SWaitCnt(dscnt=0, comment="drain"), SBarrier(comment="barrier"),
              *self._reads("G", 3)],
             TestSpaceM0WritesFromLdsLoads._pair("a"))
-        assert gaps[:4] == [["R0", "m0 a"], ["F0", "F1", "F2", "F3", "F4"],
+        assert gaps[:4] == [["m0 a", "R0"], ["F0", "F1", "F2", "F3", "F4"],
                             ["drain", "barrier", "G0", "G1", "G2"], ["L a"]]
 
     def test_m0_stays_with_a_nop_below_full_gaps(self):
@@ -7780,7 +7780,7 @@ class TestSpaceMainLoopM0Writes:
                          TestSpaceM0WritesFromLdsLoads._pair("a") + self._reads("R", 4),
                          outside=8)
         if hoisted:
-            assert gaps[:2] == [[f"F{i}" for i in range(above)] + ["m0 a"],
+            assert gaps[:2] == [["m0 a"] + [f"F{i}" for i in range(above)],
                                 ["L a", "R0", "R1", "R2", "R3"]]
         else:
             assert gaps[1] == ["m0 a", self.NOP, "L a", "R0", "R1", "R2", "R3"]
@@ -7790,9 +7790,22 @@ class TestSpaceMainLoopM0Writes:
         gaps = self._run(self._reads("F", above),
                          self._reads("R", 4) + TestSpaceM0WritesFromLdsLoads._pair("a"))
         if hoisted:
-            assert gaps[1] == ["R0", "R1", "R2", "R3", "L a"]
+            assert gaps[:2] == [["m0 a"] + [f"F{i}" for i in range(above)],
+                                ["R0", "R1", "R2", "R3", "L a"]]
         else:
-            assert gaps[1] == ["R0", "R1", "R2", "m0 a", "R3", "L a"]
+            assert gaps[1] == ["m0 a", "R0", "R1", "R2", "R3", "L a"]
+
+    def test_m0_rises_to_its_base_writer_but_never_into_a_carry_pair(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SMovB32
+        salu = TestIssueSaluFirst
+        base = SMovB32(dst=sgpr("LocalWriteBaseAddrA"), src=sgpr("SwapA"), comment="set")
+        gaps = self._run(
+            self._reads("F", 5),
+            [*self._reads("R", 1), salu._add("add"), base, salu._carry(),
+             *self._reads("S", 2), *TestSpaceM0WritesFromLdsLoads._pair("a")],
+            outside=8)
+        assert gaps[1] == ["R0", "add", "set", "carry", "m0 a", "S0", "S1", "L a"]
 
     def test_m0_crosses_a_carry_pair_but_never_lands_inside_it(self):
         salu = TestIssueSaluFirst
@@ -7807,14 +7820,14 @@ class TestSpaceMainLoopM0Writes:
         gaps = self._run(self._reads("R", 1),
                          self._reads("F", 4) + [salu._add("add"), salu._carry()],
                          outside=3)
-        assert gaps[:2] == [["R0", "add"], ["F0", "F1", "F2", "F3", "carry"]]
+        assert gaps[:2] == [["add", "R0"], ["F0", "F1", "F2", "F3", "carry"]]
 
     def test_blocking_swap_moves_up_to_free_its_m0(self):
         swap = TestSpaceM0WritesFromLdsLoads._swap()
         gaps = self._run(
             self._reads("R", 1),
             self._reads("F", 3) + [swap, *TestSpaceM0WritesFromLdsLoads._pair("a")])
-        assert gaps[:2] == [["R0", "swap", "m0 a"], ["F0", "F1", "F2", "L a"]]
+        assert gaps[:2] == [["swap", "m0 a", "R0"], ["F0", "F1", "F2", "L a"]]
 
     def test_loads_reads_and_waits_never_move(self):
         from rocisa.instruction import SBarrier, SWaitCnt
@@ -7842,7 +7855,7 @@ class TestSpaceMainLoopM0Writes:
             for b in range(2)]
         spaceMainLoopM0Writes(bodies, [0, 5], self.SGPRS)
         first, second = (TestHalfDisjointCell._gaps(body) for body in bodies)
-        assert first == ([], [["R00", "m0 a0"], ["L a0"], []])
+        assert first == ([], [["m0 a0", "R00"], ["L a0"], []])
         assert second == (["m0 a1"], [["R10"], ["L a1"], []])
 
 
