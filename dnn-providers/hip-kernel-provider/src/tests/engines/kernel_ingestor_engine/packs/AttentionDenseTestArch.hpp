@@ -57,6 +57,9 @@ struct AttentionDenseTestArch
     /// a field a completed record carries (a record without it reads as 0). A case on the
     /// bias is instantiated only for the arches that serve one (biasServingArches()).
     bool servesBias;
+    /// gfx942 binds a causal sliding window (its catalog ships windowed kernels); gfx950's
+    /// graph match declines every window.
+    bool servesSlidingWindow;
     std::string_view kernelMatchSymbol;
     /// The head of every decline line the graph match logs.
     std::string_view engineName;
@@ -78,6 +81,7 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     true,
     true,
     true,
+    true,
     "hipkernel.gfx942_attention_dense.kernel_match",
     "hipkernel:Gfx942AttentionDense",
     "hipkernel.gfx942_attention_dense.dispatch.v1",
@@ -94,6 +98,7 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     false,
     false,
     true,
+    false,
     "hipkernel.gfx950_attention_dense.kernel_match",
     "hipkernel:Gfx950AttentionDense",
     "hipkernel.gfx950_attention_dense.dispatch.v2",

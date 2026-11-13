@@ -85,7 +85,7 @@ using namespace hip_kernel_provider::test_utilities;
  * only its tile, so a bias row is forced to its tile and grid alone and its expected kernel is
  * the one of its class carrying use_additive_bias = 1. A plain row's kernel carries 0, which a
  * catalog record that omits the field also means. A bias graph is never offered the
- * persistent grid.
+ * persistent grid, nor served when it also has a sliding window: no kernel carries both.
  *
  * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
  * forms and must compute the original graph's CPU reference without selecting a kernel
@@ -864,6 +864,8 @@ using IntegrationGpuGfx942AttentionDenseKnobCoverage
 using IntegrationGpuGfx942AttentionDenseSwzLegality
     = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
 using IntegrationGpuGfx942AttentionDenseBiasGrid = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
+using IntegrationGpuGfx942AttentionDenseBiasWindow
+    = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head
 /// size, dtype, causal flag, window, LSE, tile and additive bias. The table must run every
@@ -1178,6 +1180,43 @@ TEST_F(IntegrationGpuGfx942AttentionDenseBiasGrid, NeverOffersThePersistentGridT
         EXPECT_TRUE(detail::advertises(knobs, PERSISTENT_KNOB, 0)) << "bias " << catalogBias(shape);
         EXPECT_EQ(detail::advertises(knobs, PERSISTENT_KNOB, 1), persistentOffered)
             << "bias " << catalogBias(shape);
+    }
+}
+
+/// The catalog ships no bias kernel with a sliding window (its windowed kernels carry no
+/// bias, and its bias kernels no window), so the engine is not offered a graph with both: no
+/// plan is built, rather than the bias dropped by a window kernel or the window dropped by a
+/// bias kernel. The same shape with only the window and with only the bias is offered, so
+/// the graph is not refused for anything else.
+TEST_F(IntegrationGpuGfx942AttentionDenseBiasWindow, DoesNotServeABiasGraphWithASlidingWindow)
+{
+    const auto windowed
+        = makeShape(DataType::BFLOAT16, 128, 8, 2, Mask::WINDOW_TOP_LEFT, 128, 2, 512, 512);
+    const auto biased
+        = withBias(makeShape(DataType::BFLOAT16, 128, 8, 2, Mask::BOUNDS_TOP_LEFT, 0, 2, 512, 512),
+                   BiasLayout::FULL);
+    const auto both = withBias(windowed, BiasLayout::FULL);
+    for(const auto& [name, shape, offered] : {std::tuple{"WindowOnly", windowed, true},
+                                              std::tuple{"BiasOnly", biased, true},
+                                              std::tuple{"BiasAndWindow", both, false}})
+    {
+        SCOPED_TRACE(name);
+        auto sdpa = detail::buildSdpaGraph(name, shape);
+        auto result = sdpa.graph->build_operation_graph(this->_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        std::vector<int64_t> rankedEngineIds;
+        result = sdpa.graph->get_ranked_engine_ids(rankedEngineIds);
+        const bool listed = result.code == ErrorCode::OK
+                            && std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId())
+                                   != rankedEngineIds.end();
+        EXPECT_EQ(listed, offered)
+            << ENGINE.name << (offered ? " did not offer" : " offered") << " to serve this graph";
+        if(!offered)
+        {
+            // Forcing the engine does not build a plan either.
+            result = sdpa.graph->create_execution_plan_ext(engineId(), {});
+            EXPECT_NE(result.code, ErrorCode::OK) << "a plan was created for " << ENGINE.name;
+        }
     }
 }
 

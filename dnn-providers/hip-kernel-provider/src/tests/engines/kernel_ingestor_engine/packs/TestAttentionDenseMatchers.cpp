@@ -731,6 +731,62 @@ TEST_P(TestAttentionDenseBiasMatch, PairsBiasGraphsWithBiasCandidatesOnly)
     }
 }
 
+/// The catalog ships no bias kernel with a sliding window: its bias cells are causal or
+/// plain with window 0, and its windowed kernels carry no bias. A bias graph with a window
+/// must therefore find no candidate (so the engine is not applicable and no plan is built),
+/// and in particular not the window-less bias kernel, which would run the full causal
+/// attention, nor the window kernel without the bias, which would drop it. gfx950 declines
+/// the window at graph_match, so nothing reaches kernel_match; gfx942 binds the window and
+/// kernel_match refuses each of those candidates, and would serve a bias kernel built with
+/// that window if the catalog gained one (the control that keeps this from passing for an
+/// unrelated reason).
+TEST_P(TestAttentionDenseBiasMatch, ServesNoBiasGraphWithASlidingWindowFromTheShippedKernels)
+{
+    static constexpr int64_t WINDOW = 128;
+    const auto windowed = [](GraphSpec spec) {
+        spec.leftBound = WINDOW;
+        spec.rightBound = 0;
+        return spec;
+    };
+    const auto candidate = [&](int64_t bias, int64_t window) {
+        auto kernel = makeKernel(arch(), baseGraph());
+        kernel.metadata[std::string("use_additive_bias")] = bias;
+        kernel.metadata[std::string("sliding_window")] = window;
+        return kernel;
+    };
+    const auto servedBy = [&](const GraphSpec& spec, const KernelDefinition& kernel) {
+        const Graph graph(arch(), spec);
+        const auto bound = graph.match();
+        return bound.has_value()
+               && hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+                   std::string(arch().kernelMatchSymbol))(graph.context(), *bound, kernel);
+    };
+
+    const auto biasWindowGraph = windowed(withBias({BATCH, HEADS, SEQ, SEQ}));
+    EXPECT_EQ(matchGraph(arch(), biasWindowGraph).has_value(), arch().servesSlidingWindow);
+
+    // The three shapes the catalog ships for this tile: plain, bias without a window, and a
+    // window without a bias.
+    for(const auto& [bias, window] : {std::pair{int64_t{0}, int64_t{0}},
+                                      std::pair{int64_t{1}, int64_t{0}},
+                                      std::pair{int64_t{0}, WINDOW}})
+    {
+        SCOPED_TRACE("candidate use_additive_bias " + std::to_string(bias) + ", sliding_window "
+                     + std::to_string(window));
+        EXPECT_FALSE(servedBy(biasWindowGraph, candidate(bias, window)));
+    }
+
+    if(arch().servesSlidingWindow)
+    {
+        // Each half of the combination is served on its own, by the candidate built for it.
+        EXPECT_TRUE(servedBy(windowed(baseGraph()), candidate(0, WINDOW)));
+        EXPECT_TRUE(servedBy(withBias({BATCH, HEADS, SEQ, SEQ}), candidate(1, 0)));
+        // So the matcher is not what refuses the combination: a bias kernel built with the
+        // window would serve it, and its absence from the catalog is what leaves none.
+        EXPECT_TRUE(servedBy(biasWindowGraph, candidate(1, WINDOW)));
+    }
+}
+
 /// kernel_match reads the bias flag from the binding instead of assuming one; a binding
 /// that lacks it (a renamed token) is refused rather than read as "no bias".
 TEST_P(TestAttentionDenseBiasMatch, RefusesABindingWithoutTheBiasFlag)
