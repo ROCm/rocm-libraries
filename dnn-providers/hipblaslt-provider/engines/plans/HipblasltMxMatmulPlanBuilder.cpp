@@ -185,6 +185,22 @@ void checkVirtualTensors(const BlockScaleDequantizeAttributes& deqAttrA,
     requireVirtual(deqAttrB.y_tensor_uid(), "B dequantize output");
 }
 
+// The plan scales by 2^(scale) only. is_negative_scale selects the reference
+// semantics Y = X * 2^(-scale), which the plan does not implement, so either
+// dequantize node requesting it is declined.
+void checkScaleSign(const BlockScaleDequantizeAttributes& deqAttrA,
+                    const BlockScaleDequantizeAttributes& deqAttrB)
+{
+    PLUGIN_THROW_IF_FALSE(
+        !deqAttrA.is_negative_scale(),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "MX matmul: A dequantize is_negative_scale is not supported (Y = X * 2^(-scale))");
+    PLUGIN_THROW_IF_FALSE(
+        !deqAttrB.is_negative_scale(),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "MX matmul: B dequantize is_negative_scale is not supported (Y = X * 2^(-scale))");
+}
+
 // Verify the input shapes are consistent with the output. The matmul is
 // A[M, K] x B[K, N] = C[M, N], so logically (independent of physical strides):
 //   A dims[-2]=M, dims[-1]=K; B dims[-2]=K, dims[-1]=N; C dims[-2]=M, dims[-1]=N.
@@ -433,6 +449,7 @@ void checkConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 
     checkImplementationLimitations(tXA, tXB);
     checkVirtualTensors(deqAttrA, deqAttrB, matmulAttr, tensorMap);
+    checkScaleSign(deqAttrA, deqAttrB);
     checkComputeTypes(graph);
     checkShapesMatchOutput(tXA, tXB, tC);
     checkScaleTensors(deqAttrA, deqAttrB, tXA, tXB, tensorMap);

@@ -5,8 +5,10 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -34,11 +36,15 @@ enum class MxTensor
     SCALE_B, // B scale — should be non-virtual
     YB, // B dequant output — should be virtual
     C, // matmul output — should be non-virtual
+    NONE, // no tensor corrupted
 };
 
 // Builds an otherwise-valid canonical MX graph with the given tensor's is_virtual
 // flag flipped from its required value, to exercise the builder's virtuality checks.
-flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
+// The dequantize nodes carry the given is_negative_scale flags.
+flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target,
+                                                             bool negativeScaleA = false,
+                                                             bool negativeScaleB = false)
 {
     // Returns the is_virtual flag for a tensor, flipped from its valid value when it
     // is the corruption target.
@@ -104,7 +110,7 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
 
     auto deqAttrA
         = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleDequantizeAttributesDirect(
-            builder, xAUid, scaleAUid, yAUid, &blockSizeVec, false);
+            builder, xAUid, scaleAUid, yAUid, &blockSizeVec, negativeScaleA);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "deq_a",
@@ -114,7 +120,7 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
 
     auto deqAttrB
         = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleDequantizeAttributesDirect(
-            builder, xBUid, scaleBUid, yBUid, &blockSizeVec, false);
+            builder, xBUid, scaleBUid, yBUid, &blockSizeVec, negativeScaleB);
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "deq_b",
@@ -149,6 +155,15 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target)
 class TestHipblasltMxMatmulPlanBuilder : public ::testing::Test
 {
 protected:
+    // Other suites install their own plugin logging callback; route plugin logs to the
+    // shared recorder so tests can assert decline causes.
+    void SetUp() override
+    {
+        hipdnn_plugin_sdk::logging::initializeCallbackLogging(
+            "hipblaslt_plugin_tests",
+            hipdnn_test_sdk::utilities::initializeTestLogRecordingShared());
+    }
+
     HipblasltMxMatmulPlanBuilder _builder;
     HipdnnEnginePluginHandle _handle{};
 };
@@ -653,6 +668,61 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualOutputC)
     auto fb = createMxGraphWithWrongVirtual(MxTensor::C);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+// is_negative_scale selects Y = X * 2^(-scale), which the VEC32_UE8M0 plan does not
+// implement, so the builder declines it on either dequantize node. The decline cause
+// is asserted from the log because, without a GPU handle, every graph that passes the
+// constraint checks is also rejected later by plan construction.
+struct NegativeScaleCase
+{
+    bool negativeScaleA;
+    bool negativeScaleB;
+};
+
+class TestHipblasltMxMatmulPlanBuilderNegativeScale
+    : public TestHipblasltMxMatmulPlanBuilder,
+      public ::testing::WithParamInterface<NegativeScaleCase>
+{
+};
+
+TEST_P(TestHipblasltMxMatmulPlanBuilderNegativeScale, IsApplicableDeclinesNegativeScale)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto fb = createMxGraphWithWrongVirtual(
+        MxTensor::NONE, GetParam().negativeScaleA, GetParam().negativeScaleB);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "is_negative_scale"))
+        << recorder.getRecordedLogsAsString();
+}
+
+INSTANTIATE_TEST_SUITE_P(Roles,
+                         TestHipblasltMxMatmulPlanBuilderNegativeScale,
+                         ::testing::Values(NegativeScaleCase{true, false},
+                                           NegativeScaleCase{false, true},
+                                           NegativeScaleCase{true, true}));
+
+// The schema default (false on both nodes) passes the negative-scale check.
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableDoesNotDeclineDefaultScaleSign)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::NONE);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+
+    (void)_builder.isApplicable(_handle, graph);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "is_negative_scale"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsDefaultScaleSign)
+{
+    auto fb = createMxGraphWithWrongVirtual(MxTensor::NONE);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
 // Scale-tensor contract: VEC32_UE8M0 requires the scales to be FP8_E8M0 and to
