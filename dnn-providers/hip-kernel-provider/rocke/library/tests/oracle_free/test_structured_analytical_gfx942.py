@@ -4,13 +4,13 @@
 """On-GPU structured-logit checks for the shipped gfx942 dense kernel.
 
 Each quick case launches its fixture under the four basis exposures and the
-folded exposure, twice, through the same raw-bit adapter as the uniform
-lane. Every stored coordinate must lie in the Tier B set derived on the CPU
-from the pinned arithmetic path; no measured value enters that set.
+folded exposure, twice, through a raw-bit adapter. Every stored coordinate must
+lie in the Tier B set derived on the CPU from the pinned arithmetic path; no
+measured value enters that set.
 
 The only skip is a processor that is not gfx942, through the shared
 ``rocke.tests.gpu.current_device_arch_in`` gate, so ``ROCKE_REQUIRE_GFX942=1``
-turns it into a failure. On gfx942 a missing or mismatched ``P4_CALIBRATION``
+turns it into a failure. On gfx942 a missing or mismatched ``STRUCTURED_CALIBRATION``
 entry fails after the records are written, so an unratified case fails closed.
 """
 
@@ -25,27 +25,27 @@ import numpy as np
 import pytest
 from rocke.tests.gpu import current_device_arch_in
 
-from ._p4_analytical import (
-    P4_EXPOSURES,
-    P4_QUICK_CASES,
-    P4_SEPARATION_ROWS,
-    P4_UNSEPARATED,
-    P4Case,
-    P4Fixture,
-    P4Mutation,
-    P4Result,
-    analyze_p4_policy,
+from ._structured_analytical import (
+    STRUCTURED_EXPOSURES,
+    STRUCTURED_QUICK_CASES,
+    STRUCTURED_SEPARATION_ROWS,
+    STRUCTURED_UNSEPARATED,
+    StructuredCase,
+    StructuredFixture,
+    StructuredMutation,
+    StructuredResult,
+    analyze_structured_policy,
     applicable_mutations,
     epilogue_artifact_for,
-    format_p4_result,
+    format_structured_result,
     mutation_separation,
-    p4_diagnostics,
-    p4_inputs,
-    p4_records,
-    require_p4_calibration,
+    structured_diagnostics,
+    structured_inputs,
+    structured_records,
+    require_structured_calibration,
 )
-from ._p4_shared_analytical import UniformObservation, encode_bits
-from ._p4_shared_subject import (
+from ._structured_shapes import Observation, encode_bits
+from ._structured_subject import (
     ResolvedDenseSubject,
     resolve_dense_subject,
     run_dense_case,
@@ -60,15 +60,15 @@ _WRONG_SCALE_EXPOSURE = "basis@0"
 
 
 def _run_exposures(
-    case: P4Case,
+    case: StructuredCase,
     subject: ResolvedDenseSubject,
-    exposures: tuple[str, ...] = P4_EXPOSURES,
+    exposures: tuple[str, ...] = STRUCTURED_EXPOSURES,
     *,
     scale_override: float | None = None,
-) -> UniformObservation:
+) -> Observation:
     outputs = []
     for exposure in exposures:
-        q, k, v = p4_inputs(case, exposure)
+        q, k, v = structured_inputs(case, exposure)
         outputs.append(
             (
                 exposure,
@@ -82,27 +82,32 @@ def _run_exposures(
                 ),
             )
         )
-    return UniformObservation(tuple(outputs))
+    return Observation(tuple(outputs))
 
 
-def _same_bits(first: UniformObservation, second: UniformObservation) -> bool:
+def _same_bits(first: Observation, second: Observation) -> bool:
     return all(
         name == other and np.array_equal(left, right)
         for (name, left), (other, right) in zip(first.exposures, second.exposures)
     )
 
 
-def _not_rejected(case: P4Case, what: str, mutated: P4Result, control: P4Result) -> str:
+def _not_rejected(
+    case: StructuredCase,
+    what: str,
+    mutated: StructuredResult,
+    control: StructuredResult,
+) -> str:
     """Explain a mutation the checker did not reject, blaming the right side: a
     kernel whose output already fails Tier B can match a mutated prediction."""
     if control.violations:
         return (
             f"{case.case_id}: {what} was not rejected and the kernel output itself "
-            f"fails Tier B; control: {format_p4_result(control)}"
+            f"fails Tier B; control: {format_structured_result(control)}"
         )
     return (
         f"{case.case_id}: checker failed to reject {what}; "
-        f"{format_p4_result(mutated)}"
+        f"{format_structured_result(mutated)}"
     )
 
 
@@ -138,7 +143,7 @@ def _code_object(subject: ResolvedDenseSubject) -> dict[str, str]:
 
 
 def _capture_records(
-    case: P4Case, records: list[dict], observation: UniformObservation
+    case: StructuredCase, records: list[dict], observation: Observation
 ) -> None:
     """Write the records and the raw output bits, so ratification can audit
     every stored coordinate offline rather than trust the aggregates."""
@@ -155,8 +160,8 @@ def _capture_records(
     )
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=lambda case: case.case_id)
-def test_p4_structured_logits(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=lambda case: case.case_id)
+def test_structured_logits(case: StructuredCase) -> None:
     """Gate a ratified case: deterministic, and every coordinate in Tier B.
 
     Mutation self-checks and record capture run before the gate, so an
@@ -167,33 +172,33 @@ def test_p4_structured_logits(case: P4Case) -> None:
     subject = resolve_dense_subject(case)
     observation = _run_exposures(case, subject)
     deterministic = _same_bits(observation, _run_exposures(case, subject))
-    control = analyze_p4_policy(case, observation)
-    results: dict[str, P4Result] = {"none": control}
+    control = analyze_structured_policy(case, observation)
+    results: dict[str, StructuredResult] = {"none": control}
     separations = {}
 
     # Analyzer-side mutations on the same real output (sampled rows suffice to
     # reject); cells proven inseparable on the CPU are owned elsewhere.
     for mutation in applicable_mutations(case):
-        if (case.case_id, mutation) in P4_UNSEPARATED:
+        if (case.case_id, mutation) in STRUCTURED_UNSEPARATED:
             continue
-        mutated = analyze_p4_policy(
-            case, observation, mutation=mutation, rows=P4_SEPARATION_ROWS
+        mutated = analyze_structured_policy(
+            case, observation, mutation=mutation, rows=STRUCTURED_SEPARATION_ROWS
         )
         assert mutated.violations, _not_rejected(case, mutation.value, mutated, control)
         results[mutation.value] = mutated
         separations[mutation.value] = mutation_separation(case, mutation)
 
     # Subject-side mutation: the kernel itself launched with the wrong scale.
-    if case.fixture is P4Fixture.IDENTITY:
+    if case.fixture is StructuredFixture.IDENTITY:
         wrong = _run_exposures(
             case, subject, (_WRONG_SCALE_EXPOSURE,), scale_override=_WRONG_SCALE
         )
-        mutated = analyze_p4_policy(case, wrong, require_complete=False)
+        mutated = analyze_structured_policy(case, wrong, require_complete=False)
         what = f"the kernel launched with scale={_WRONG_SCALE}"
         assert mutated.violations, _not_rejected(case, what, mutated, control)
         results["subject_scale_override"] = mutated
         separations["subject_scale_override"] = mutation_separation(
-            case, P4Mutation.OMIT_SQRT_D
+            case, StructuredMutation.OMIT_SQRT_D
         )
 
     # The IR-exact and the launched artifact's epilogue agreement are recorded
@@ -202,20 +207,20 @@ def test_p4_structured_logits(case: P4Case) -> None:
     artifact = epilogue_artifact_for(case.dtype, code_object["hsaco_sha256"])
     _capture_records(
         case,
-        p4_records(
+        structured_records(
             case,
             subject.candidate_name,
             results,
             deterministic=deterministic,
-            diagnostics=p4_diagnostics(case, observation, artifact=artifact),
+            diagnostics=structured_diagnostics(case, observation, artifact=artifact),
             separations=separations,
             code_object=code_object,
         ),
         observation,
     )
 
-    summary = f"deterministic={deterministic}; {format_p4_result(control)}"
-    require_p4_calibration(
+    summary = f"deterministic={deterministic}; {format_structured_result(control)}"
+    require_structured_calibration(
         arch, subject.candidate_name, case, subject.fingerprint, detail=summary
     )
     assert deterministic, f"{case.case_id}: repeated launches differ; {summary}"

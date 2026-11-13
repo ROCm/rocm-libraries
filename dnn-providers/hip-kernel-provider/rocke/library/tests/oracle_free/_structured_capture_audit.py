@@ -16,7 +16,8 @@ coordinates are reported, never absorbed into an enclosure.
 
 Usage, from ``rocke/library`` with ``rocke`` importable::
 
-    PYTHONPATH=.:../platform/python python -m tests.oracle_free._p4_capture_audit \\
+    PYTHONPATH=.:../platform/python python -m \\
+        tests.oracle_free._structured_capture_audit \\
         --artifact rocm-7.13.0 <capture dir> [<capture dir> ...]
 
 The first directory is audited; every further one must be bit-identical to it.
@@ -34,11 +35,11 @@ from types import MappingProxyType
 
 import numpy as np
 
-from ._p4_analytical import (
-    P4_EPILOGUE_ARTIFACTS,
-    P4_EXPOSURES,
-    P4_QUICK_CASES,
-    P4Case,
+from ._structured_analytical import (
+    STRUCTURED_EPILOGUE_ARTIFACTS,
+    STRUCTURED_EXPOSURES,
+    STRUCTURED_QUICK_CASES,
+    StructuredCase,
     epilogue_alternatives,
     tier_b_bounds,
     tier_b_exposure,
@@ -82,7 +83,7 @@ class CaptureAudit:
 
 
 def load_capture(
-    directory: Path, case: P4Case
+    directory: Path, case: StructuredCase
 ) -> tuple[dict[str, np.ndarray] | None, list[str]]:
     """One case's saved exposures, or ``None`` and the reasons it is unusable."""
     path = Path(directory) / f"{case.case_id}.npz"
@@ -91,8 +92,10 @@ def load_capture(
     with np.load(path) as data:
         arrays = {name: data[name] for name in data.files}
     problems = []
-    if sorted(arrays) != sorted(P4_EXPOSURES):
-        problems.append(f"{path}: exposures {sorted(arrays)} != {sorted(P4_EXPOSURES)}")
+    if sorted(arrays) != sorted(STRUCTURED_EXPOSURES):
+        problems.append(
+            f"{path}: exposures {sorted(arrays)} != {sorted(STRUCTURED_EXPOSURES)}"
+        )
     for name, array in arrays.items():
         if array.dtype != np.uint16 or array.shape != tuple(case.output_shape):
             problems.append(
@@ -103,14 +106,14 @@ def load_capture(
 
 
 def audit_case(
-    case: P4Case,
+    case: StructuredCase,
     capture: Mapping[str, np.ndarray],
     *,
     artifact: str,
     rows: Iterable[int] | None = None,
 ) -> CaseAudit:
     """Judge every coordinate of ``rows`` (default: all) of one capture."""
-    single_lanes = P4_EPILOGUE_ARTIFACTS[artifact].single_lanes
+    single_lanes = STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes
     queries = tuple(range(case.base.seqlen_q)) if rows is None else tuple(rows)
     lane = np.arange(case.base.head_dim) % 4
     single_site = np.isin(lane, sorted(single_lanes))
@@ -120,7 +123,7 @@ def audit_case(
     outside: list[Coordinate] = []
     rule = np.zeros((4, 2), dtype=np.int64)
     coordinates = 0
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         if rows is None:
             low, high = tier_b_exposure(case, exposure)
         else:
@@ -170,11 +173,11 @@ def audit_captures(
     directories: Sequence[Path],
     *,
     artifact: str,
-    cases: Sequence[P4Case] = P4_QUICK_CASES,
+    cases: Sequence[StructuredCase] = STRUCTURED_QUICK_CASES,
     rows: Iterable[int] | None = None,
 ) -> CaptureAudit:
     """Audit the first capture directory and compare the others bit-for-bit."""
-    if artifact not in P4_EPILOGUE_ARTIFACTS:
+    if artifact not in STRUCTURED_EPILOGUE_ARTIFACTS:
         raise ValueError(f"no epilogue artifact named {artifact!r}")
     if not directories:
         raise ValueError("at least one capture directory is required")
@@ -192,7 +195,7 @@ def audit_captures(
                 continue
             differing = sum(
                 int(np.count_nonzero(reference[name] != capture[name]))
-                for name in P4_EXPOSURES
+                for name in STRUCTURED_EXPOSURES
             )
             if differing:
                 problems.append(
@@ -209,7 +212,7 @@ def audit_captures(
 
 
 def format_audit(audit: CaptureAudit, *, limit: int = 8) -> str:
-    compiler = P4_EPILOGUE_ARTIFACTS[audit.artifact].compiler
+    compiler = STRUCTURED_EPILOGUE_ARTIFACTS[audit.artifact].compiler
     captures = [str(path) for path in audit.directories]
     lines = [f"artifact={audit.artifact} ({compiler}); captures={captures}"]
     lines.extend(f"PROBLEM {problem}" for problem in audit.problems)
@@ -242,7 +245,7 @@ def format_audit(audit: CaptureAudit, *, limit: int = 8) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--artifact", required=True, choices=sorted(P4_EPILOGUE_ARTIFACTS)
+        "--artifact", required=True, choices=sorted(STRUCTURED_EPILOGUE_ARTIFACTS)
     )
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("directories", nargs="+", type=Path)

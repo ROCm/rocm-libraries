@@ -245,10 +245,10 @@ test_categories:
       - "rocke_arch_domain_reproducibility"
       - "rocke_library_attention_cache_key_sweep_pytest"
       - "rocke_compiler_options_reproducibility"
-      # The oracle-free structured-logit lane (rocke/library/tests/oracle_free/
-      # README_P4.md): its predictions are exact rational arithmetic over every
-      # output coordinate, about three minutes for the CPU contracts and ten
-      # seconds per case for the gfx942 launches.
+      # The oracle-free structured-logit check (rocke/library/tests/oracle_free/
+      # README_structured.md): its predictions are exact rational arithmetic
+      # over every output coordinate, about three minutes for the CPU contracts
+      # and ten seconds per case for the gfx942 launches.
       - "rocke_oracle_free_structured_logit_pytest"
       - "rocke_oracle_free_structured_logit_cpu_pytest"
     labels:
