@@ -1215,6 +1215,53 @@ TEST(Maf1_0Init, NameRoundTrips)
     EXPECT_EQ(mode, InitMode::Maf1_0);
 }
 
+// Maf2_1 draws U[-1, 1]: values in range with mean 0 and variance 1/3, repeatable for a tensor,
+// different for another tensor index.
+TEST(Maf2_1Init, UniformRepeatableAndPerTensor)
+{
+    using TensileLite::Client::DataInitialization;
+    size_t const       n = 1 << 16;
+    std::vector<float> a(n), a2(n), b(n);
+    DataInitialization::initArrayMaf2_1(a.data(), n, ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf2_1(a2.data(), n, ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf2_1(b.data(), n, ContractionProblemGemm::TENSOR::B);
+    EXPECT_EQ(a, a2);
+    EXPECT_NE(a, b);
+    double sum = 0, sumSq = 0;
+    for(float v : a)
+    {
+        ASSERT_TRUE(v >= -1.f && v <= 1.f) << v;
+        sum += v;
+        sumSq += double(v) * v;
+    }
+    double const mean = sum / n;
+    EXPECT_NEAR(mean, 0.0, 0.01);
+    EXPECT_NEAR(sumSq / n - mean * mean, 1.0 / 3.0, 0.01);
+}
+
+TEST(Maf2_1Init, UnsupportedTypesThrow)
+{
+    using TensileLite::Client::DataInitialization;
+    int32_t i32 = 0;
+    EXPECT_THROW(DataInitialization::initArrayMaf2_1(&i32, 1, 0), std::runtime_error);
+    using TensileLite::Client::InitMode;
+    EXPECT_THROW(DataInitialization::getValue<float>(InitMode::Maf2_1), std::runtime_error);
+}
+
+TEST(Maf2_1Init, NameRoundTrips)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_EQ(static_cast<int>(InitMode::Maf2_1), 31);
+    EXPECT_EQ(TensileLite::Client::ToString(InitMode::Maf2_1), "Maf2_1");
+    InitMode           mode = InitMode::Zero;
+    std::istringstream in("Maf2_1");
+    in >> mode;
+    EXPECT_EQ(mode, InitMode::Maf2_1);
+    std::istringstream num("31");
+    num >> mode;
+    EXPECT_EQ(mode, InitMode::Maf2_1);
+}
+
 // =============================================================================
 //   Section 5 — TensileLite::hip::CopyTensorVoid
 // =============================================================================

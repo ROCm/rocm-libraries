@@ -225,6 +225,8 @@ namespace TensileLite
                 return "Maf2_0";
             case InitMode::Maf2_0UnitScale:
                 return "Maf2_0UnitScale";
+            case InitMode::Maf2_1:
+                return "Maf2_1";
 
             case InitMode::Count:
                 break;
@@ -304,6 +306,8 @@ namespace TensileLite
                 mode = InitMode::Maf2_0;
             else if(strValue == ToString(InitMode::Maf2_0UnitScale))
                 mode = InitMode::Maf2_0UnitScale;
+            else if(strValue == ToString(InitMode::Maf2_1))
+                mode = InitMode::Maf2_1;
             else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
             {
                 int value = atoi(strValue.c_str());
@@ -2044,6 +2048,10 @@ namespace TensileLite
             // MAF2.0 X=1 rows (MX FP8, FP4): unit block scales, N(0,1) data.
             case InitMode::Maf2_0UnitScale:
                 return "maf2_0_unit_scale";
+            // MAF2.1 block-scaled data (mxDataGenerator Maf2_1): data U[-1, 1] rounded to the
+            // element; E8M0 scales 2^e with e uniform over [-127, 0], E4M3/E5M3 scales U[0, 1].
+            case InitMode::Maf2_1:
+                return "maf2_1";
             // Free / Count have no mxDataGenerator analogue; throw rather than
             // silently fall through to an unrelated distribution.
             case InitMode::Free:
@@ -2057,7 +2065,7 @@ namespace TensileLite
                   "NaN, Inf, BadInput, BadOutput, Identity, SerialIdx/Dim0/Dim1, "
                   "Trig{Sin,Cos,AbsSin,AbsCos}[Ind], Random, RandomNarrow, "
                   "RandomNegPosLimited, UniformLowPrecision, Maf1_0, Maf2_0, "
-                  "Maf2_0UnitScale) "
+                  "Maf2_0UnitScale, Maf2_1) "
                   "or add a mapping in initModeToMXMethod.");
         }
 
@@ -2209,6 +2217,9 @@ namespace TensileLite
                      && abFromInitArray)
                       throw std::runtime_error(
                           "Maf2_0 block-scaled (MX) data needs mx-data-generator=1");
+                  if(dataInit == InitMode::Maf2_1 && abFromInitArray)
+                      throw std::runtime_error(
+                          "Maf2_1 block-scaled (MX) data needs mx-data-generator=1");
                   if(dataInit == InitMode::Maf2_0UnitScale
                      && dataDesc.dataType() != rocisa::DataType::Float4
                      && dataDesc.dataType() != rocisa::DataType::Float8

@@ -99,6 +99,10 @@ namespace TensileLite
         //   the run.
         // Maf2_0UnitScale (30): the MAF2.0 X=1 rows: MX FP8 and FP4 sides get every block scale
         //   1.0 and N(0,1) data; every other tensor is filled as Maf2_0.
+        // Maf2_1 (31): MAF2.1 data init. U[-1, 1] for the non-scaled types (Double, Float, Half,
+        //   BFloat16, FP8); block-scaled (MX) sides use mxDataGenerator Maf2_1 (data U[-1, 1]
+        //   rounded to the element; E8M0 scales 2^e with e uniform over [-127, 0], E4M3/E5M3
+        //   scales U[0, 1] rounded). Seeded like Maf2_0, from its own base.
         enum class InitMode
         {
             Zero = 0, // 0
@@ -132,6 +136,7 @@ namespace TensileLite
             Maf1_0, // 28
             Maf2_0, // 29
             Maf2_0UnitScale, // 30
+            Maf2_1, // 31
             Count
         };
 
@@ -149,7 +154,7 @@ namespace TensileLite
                    || mode == InitMode::TrigSin || mode == InitMode::TrigCos
                    || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos
                    || mode == InitMode::Maf1_0 || mode == InitMode::Maf2_0
-                   || mode == InitMode::Maf2_0UnitScale;
+                   || mode == InitMode::Maf2_0UnitScale || mode == InitMode::Maf2_1;
         }
 
         static bool IsRandomLike(InitMode const& mode)
@@ -601,6 +606,8 @@ namespace TensileLite
                 case InitMode::Maf2_0:
                 case InitMode::Maf2_0UnitScale:
                     throw std::runtime_error("Maf2_0 is not supported for scalar values.");
+                case InitMode::Maf2_1:
+                    throw std::runtime_error("Maf2_1 is not supported for scalar values.");
                 case InitMode::SerialIdx:
                 case InitMode::SerialDim0:
                 case InitMode::SerialDim1:
@@ -690,6 +697,9 @@ namespace TensileLite
                 case InitMode::Maf2_0:
                 case InitMode::Maf2_0UnitScale:
                     initArrayMaf2_0<T>(array, elements, tensorIndex);
+                    break;
+                case InitMode::Maf2_1:
+                    initArrayMaf2_1<T>(array, elements, tensorIndex);
                     break;
                 case InitMode::SerialIdx:
                     initArrayConvert<T>(array, elements);
@@ -816,6 +826,9 @@ namespace TensileLite
                 case InitMode::Maf2_0UnitScale:
                     initArrayMaf2_0<T>(array, tensor.totalAllocatedElements(), tensorIndex);
                     break;
+                case InitMode::Maf2_1:
+                    initArrayMaf2_1<T>(array, tensor.totalAllocatedElements(), tensorIndex);
+                    break;
                 case InitMode::Free:
                 case InitMode::Count:
                     throw std::runtime_error("Invalid InitMode.");
@@ -941,6 +954,38 @@ namespace TensileLite
                 {
                     throw std::runtime_error(
                         "Maf2_0 init is not supported for this data type yet.");
+                }
+            }
+
+            // Maf2_1 draws U[-1, 1] with Maf2_0's seeding scheme from its own base, 2^30 above
+            // Maf2_0's (as hipBLASLt's maf2_1), so the two never share a stream. Conversion as in
+            // initArrayMaf2_0.
+            template <typename T>
+            static void initArrayMaf2_1(T* array, size_t elements, size_t tensorIndex)
+            {
+                if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                             || std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>
+                             || std::is_same_v<T, Float8> || std::is_same_v<T, BFloat8>
+                             || std::is_same_v<T, Float8_fnuz> || std::is_same_v<T, BFloat8_fnuz>)
+                {
+                    constexpr uint32_t baseSeed   = 1713573849u + 0x40000000u;
+                    constexpr int      maxThreads = 32;
+                    const uint32_t     seed
+                        = baseSeed + maxThreads * static_cast<uint32_t>(tensorIndex);
+                    const int numThreads = std::min(maxThreads, omp_get_max_threads());
+#pragma omp parallel num_threads(numThreads)
+                    {
+                        std::mt19937 gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+                        std::uniform_real_distribution<double> dist(-1.0, 1.0);
+#pragma omp for schedule(static)
+                        for(size_t i = 0; i < elements; i++)
+                            array[i] = static_cast<T>(dist(gen));
+                    }
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "Maf2_1 init is not supported for this data type yet.");
                 }
             }
 
