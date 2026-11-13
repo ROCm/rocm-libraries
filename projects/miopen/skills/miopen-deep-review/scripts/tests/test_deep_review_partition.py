@@ -5,6 +5,7 @@ orient-gate)."""
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -522,3 +523,83 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
     run(part, "orient-gate", rd)
     assert capsys.readouterr().out == ""
+
+
+def test_appl_scope_is_where_applicability_is_decided(part):
+    # catches: a solver, fusion or find-path change that never reaches APPL, or code that
+    # decides nothing about applicability (tests, drivers, kernels, docs) that does
+    inside = (
+        "projects/miopen/src/solver/conv/conv_asm_1x1u.cpp",
+        "projects/miopen/src/solver/batchnorm/forward_spatial_multiple.cpp",
+        "projects/miopen/src/solver.cpp",
+        "projects/miopen/src/include/miopen/solver/implicitgemm_util.hpp",
+        "projects/miopen/src/include/miopen/solver.hpp",
+        "projects/miopen/src/include/miopen/conv/problem_description.hpp",
+        "projects/miopen/src/conv/solver_finders.cpp",
+        "projects/miopen/src/ck_impl/ck_impl_lib.cpp",
+        "projects/miopen/src/fusion/fusion_plan.cpp",
+        "projects/miopen/src/include/miopen/fusion/solvers.hpp",
+        "projects/miopen/src/hip/convolutionocl.cpp",
+    )
+    outside = (
+        "projects/miopen/test/gtest/unit_conv_solver_tests.cpp",
+        "projects/miopen/driver/conv_driver.hpp",
+        "projects/miopen/src/kernels/Conv_Winograd_v13_3_12.s",
+        "projects/miopen/src/hip/batchnormocl.cpp",
+        "projects/miopen/docs/reference/env_variables.rst",
+        "projects/miopen/include/miopen/miopen.h",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
+
+
+def test_packets_appl_takes_trigger_files_only(part, tmp_path, capsys):
+    # catches: APPL not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    trigger = "projects/miopen/src/solver/conv/conv_asm_1x1u.cpp"
+    other = "projects/miopen/driver/conv_driver.hpp"
+    rd = make_round(tmp_path / "a", [(3, 1, trigger), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", "APPL")
+    packet = (rd / "packets" / "APPL.md").read_text()
+    assert trigger in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", "APPL")
+    assert not (rd / "packets" / "APPL.md").exists()
+    assert "APPL: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_leak_sweep_allowlist_covers_every_report_lane(part):
+    # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
+    # finding IDs are flagged as leaks
+    leaks = SCRIPT.parent.parent / "lanes" / "leaks.md"
+    match = re.search(
+        r"^\^\(([A-Z|]+)\)\[0-9\]\*-p\?\[0-9\]\+\$$", leaks.read_text(), re.M
+    )
+    assert match, "finding-ID allow-list line not found in leaks.md"
+    assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
+
+
+def test_lane_id_is_a_provisional_id(part):
+    # catches: APPL dropped from CONCERN_LANES, so its findings are invisible to the
+    # ledger and comment-reference checks
+    assert "APPL" in part.CONCERN_LANES
+    assert part.PROVISIONAL_ID.findall("see APPL1-p2 and CORR1-p2") == [
+        "APPL1-p2",
+        "CORR1-p2",
+    ]
+
+
+def test_runbook_partition_table_lists_exactly_the_concern_lanes(part):
+    # catches: a lane added to CONCERN_LANES without a RUNBOOK row (or the reverse), so
+    # the host never learns when to run it
+    runbook = SCRIPT.parent.parent / "RUNBOOK.md"
+    section = re.search(r"^## Partition\n(.*?)^## ", runbook.read_text(), re.M | re.S)
+    assert section, "## Partition section not found in RUNBOOK.md"
+    rows = re.findall(r"^\| `([A-Z]+)(?:<k>)?` \|", section.group(1), re.M)
+    assert sorted(rows) == sorted({"CORR", *part.CONCERN_LANES})
