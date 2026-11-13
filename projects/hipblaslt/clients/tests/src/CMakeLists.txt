@@ -5,6 +5,7 @@ target_sources(hipblaslt-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/client_handle_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_buffer_transfer_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/device_vector_guard_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
@@ -52,6 +53,8 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fp6_tile128x4_args_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/handwritten_algo_reuse_gtest.cpp
 )
 
 if(NOT WIN32)
