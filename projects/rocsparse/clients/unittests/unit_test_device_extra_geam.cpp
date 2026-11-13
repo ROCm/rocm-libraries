@@ -31,6 +31,8 @@
 
 #include "rocsparse_spgeam_descr.hpp"
 
+#include <optional>
+
 using namespace extra_ut;
 
 namespace
@@ -219,10 +221,54 @@ namespace
 {
     using stage_t = rocsparse_spgeam_stage;
 
+    // The stages that count the non-zeros of C, and run before C exists in the
+    // documented order.
+    bool is_nnz_analysis(stage_t stage)
+    {
+        return stage == rocsparse_spgeam_stage_analysis
+               || stage == rocsparse_spgeam_stage_symbolic_analysis;
+    }
+
+    // Frees a block filled with 0xff bytes into the device's default memory pool,
+    // with the pool's release threshold raised so that the block is kept. A later
+    // small hipMallocAsync on the handle's stream, like the spgeam descriptor's row
+    // pointer, can then reuse it, and a missing fill shows up in C. The threshold
+    // is restored on destruction.
+    struct PoisonedPool
+    {
+        hipMemPool_t pool      = nullptr;
+        uint64_t     threshold = 0;
+        PoisonedPool(rocsparse_handle handle, size_t bytes)
+        {
+            hipStream_t stream = nullptr;
+            int         device = 0;
+            EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+            EXPECT_EQ(hipGetDevice(&device), hipSuccess);
+            EXPECT_EQ(hipDeviceGetDefaultMemPool(&pool, device), hipSuccess);
+            EXPECT_EQ(hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold),
+                      hipSuccess);
+            uint64_t keep = UINT64_MAX;
+            EXPECT_EQ(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &keep),
+                      hipSuccess);
+            void* block = nullptr;
+            EXPECT_EQ(hipMallocAsync(&block, bytes, stream), hipSuccess);
+            EXPECT_EQ(hipMemsetAsync(block, 0xff, bytes, stream), hipSuccess);
+            EXPECT_EQ(hipFreeAsync(block, stream), hipSuccess);
+        }
+        PoisonedPool(const PoisonedPool&) = delete;
+        PoisonedPool& operator=(const PoisonedPool&) = delete;
+        ~PoisonedPool()
+        {
+            EXPECT_EQ(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold),
+                      hipSuccess);
+        }
+    };
+
     // C = alpha * A + beta * B where A and B have no rows / no columns / no
     // entries: C has no entries. Combined and split stage sequences.
-    // supply_c is false for the documented order: analysis runs before C is
-    // created, and rocsparse_spgeam_get_output reports nnz (AISPARSE-926).
+    // pass_C is false for the documented order: analysis (or symbolic analysis)
+    // runs before C is created, and rocsparse_spgeam_get_output reports nnz
+    // (AISPARSE-926). C is passed to every later stage, numeric analysis included.
     // I is the row pointer type of A, B and C; C has index base base_C and,
     // with null_row_ptr_C (m == 0 only), no row pointer array.
     template <typename T, typename I>
@@ -230,13 +276,13 @@ namespace
                       int64_t                m,
                       int64_t                n,
                       bool                   split,
-                      bool                   supply_c,
+                      bool                   pass_C,
                       rocsparse_pointer_mode mode,
                       rocsparse_index_base   base_C,
                       bool                   null_row_ptr_C)
     {
         SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
-                     + " split=" + std::to_string(split) + " supply_c=" + std::to_string(supply_c)
+                     + " split=" + std::to_string(split) + " pass_C=" + std::to_string(pass_C)
                      + " device=" + std::to_string(mode == rocsparse_pointer_mode_device) + " i64="
                      + std::to_string(sizeof(I) == 8) + " base_C=" + std::to_string(base_C)
                      + " null_row_ptr_C=" + std::to_string(null_row_ptr_C));
@@ -270,7 +316,7 @@ namespace
 
         // A supplied C starts with a nonzero count (at most m * n) so that the
         // analysis check sees the count being written.
-        const int64_t   nnz_C0 = (supply_c && m * n > 0) ? 1 : 0;
+        const int64_t   nnz_C0 = (pass_C && m * n > 0) ? 1 : 0;
         DevBuf<I>       pC(std::vector<I>(static_cast<size_t>(m) + 1, -7));
         DevBuf<int32_t> cC(1);
         DevBuf<T>       vC(1);
@@ -305,11 +351,8 @@ namespace
         if(::testing::Test::HasFatalFailure())
             return;
 
-        auto mat_c_for = [&](stage_t stage) -> rocsparse_spmat_descr {
-            const bool analysis = stage == rocsparse_spgeam_stage_analysis
-                                  || stage == rocsparse_spgeam_stage_symbolic_analysis
-                                  || stage == rocsparse_spgeam_stage_numeric_analysis;
-            if(!supply_c && analysis)
+        auto mat_C_for = [&](stage_t stage) -> rocsparse_spmat_descr {
+            if(!pass_C && is_nnz_analysis(stage))
             {
                 return nullptr;
             }
@@ -317,30 +360,40 @@ namespace
         };
 
         auto run = [&](stage_t stage) {
-            rocsparse_spmat_descr mat_c = mat_c_for(stage);
-            size_t                bs    = 0;
+            rocsparse_spmat_descr       mat_C = mat_C_for(stage);
+            std::optional<PoisonedPool> poison;
+            if(mat_C == nullptr)
+            {
+                poison.emplace(handle, (static_cast<size_t>(m) + 1) * sizeof(int64_t));
+            }
+            size_t bs = 0;
             ASSERT_EQ(rocsparse_spgeam_buffer_size(
-                          handle, descr.d, sA.p, sB.p, mat_c, stage, &bs, nullptr),
+                          handle, descr.d, sA.p, sB.p, mat_C, stage, &bs, nullptr),
                       rocsparse_status_success);
             DevBuf<char> tmp(bs);
             ASSERT_EQ(
                 rocsparse_spgeam(
-                    handle, descr.d, sA.p, sB.p, mat_c, stage, bs, bs ? tmp.ptr : nullptr, nullptr),
+                    handle, descr.d, sA.p, sB.p, mat_C, stage, bs, bs ? tmp.ptr : nullptr, nullptr),
                 rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         };
+        // rocsparse_spgeam_get_output is documented for the flow without C; with C
+        // supplied, the count is read from C.
         auto analysis_nnz = [&]() {
             int64_t nnz = -1;
-            ASSERT_EQ(rocsparse_spgeam_get_output(
-                          handle, descr.d, rocsparse_spgeam_output_nnz, &nnz, sizeof(nnz), nullptr),
-                      rocsparse_status_success);
-            ASSERT_EQ(nnz, 0);
-            if(supply_c)
+            if(pass_C)
             {
-                int64_t nnz_C = -1, r = 0, c = 0;
-                ASSERT_EQ(rocsparse_spmat_get_size(sC.p, &r, &c, &nnz_C), rocsparse_status_success);
-                ASSERT_EQ(nnz_C, 0);
+                int64_t r = 0, c = 0;
+                ASSERT_EQ(rocsparse_spmat_get_size(sC.p, &r, &c, &nnz), rocsparse_status_success);
             }
+            else
+            {
+                ASSERT_EQ(
+                    rocsparse_spgeam_get_output(
+                        handle, descr.d, rocsparse_spgeam_output_nnz, &nnz, sizeof(nnz), nullptr),
+                    rocsparse_status_success);
+            }
+            ASSERT_EQ(nnz, 0);
         };
 
         if(!split)
@@ -374,26 +427,24 @@ namespace
         if(null_row_ptr_C)
             return;
         // C has no entries: every row pointer, each pre-filled with -7, must be
-        // overwritten with the index base of C.
+        // overwritten with the index base of C. Without C at analysis, compute copies
+        // the spgeam descriptor's row pointer, which PoisonedPool leaves filled with
+        // 0xff bytes unless the analysis writes it.
         EXPECT_EQ(pC.host(), std::vector<I>(static_cast<size_t>(m) + 1, static_cast<I>(base_C)));
     }
 
     // Every row pointer type and index base of C, host pointer mode.
-    void empty_spgeam_c_formats(rocsparse_handle handle,
-                                int64_t          m,
-                                int64_t          n,
-                                bool             split,
-                                bool             supply_c,
-                                bool             null_row_ptr_C)
+    void empty_spgeam_C_formats(
+        rocsparse_handle handle, int64_t m, int64_t n, bool split, bool pass_C, bool null_row_ptr_C)
     {
         for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
         {
             empty_spgeam<float, int32_t>(
-                handle, m, n, split, supply_c, rocsparse_pointer_mode_host, base, null_row_ptr_C);
+                handle, m, n, split, pass_C, rocsparse_pointer_mode_host, base, null_row_ptr_C);
             if(::testing::Test::HasFatalFailure())
                 return;
             empty_spgeam<float, int64_t>(
-                handle, m, n, split, supply_c, rocsparse_pointer_mode_host, base, null_row_ptr_C);
+                handle, m, n, split, pass_C, rocsparse_pointer_mode_host, base, null_row_ptr_C);
             if(::testing::Test::HasFatalFailure())
                 return;
         }
@@ -409,32 +460,32 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
     for(const Dims& d : {Dims{0, 4}, Dims{4, 0}, Dims{6, 5}})
         for(bool split : {false, true})
         {
-            for(bool supply_c : {true, false})
+            for(bool pass_C : {true, false})
             {
                 empty_spgeam<rocsparse_double_complex, int32_t>(handle,
                                                                 d.m,
                                                                 d.n,
                                                                 split,
-                                                                supply_c,
+                                                                pass_C,
                                                                 rocsparse_pointer_mode_host,
                                                                 rocsparse_index_base_zero,
                                                                 false);
                 if(HasFatalFailure())
                     return;
-                empty_spgeam_c_formats(handle, d.m, d.n, split, supply_c, false);
+                empty_spgeam_C_formats(handle, d.m, d.n, split, pass_C, false);
                 if(HasFatalFailure())
                     return;
             }
             // Device pointer mode: the count is still written on the host, to the
             // spgeam descriptor with C omitted and to the C matrix descriptor with
             // C supplied.
-            for(bool supply_c : {false, true})
+            for(bool pass_C : {false, true})
             {
                 empty_spgeam<float, int32_t>(handle,
                                              d.m,
                                              d.n,
                                              split,
-                                             supply_c,
+                                             pass_C,
                                              rocsparse_pointer_mode_device,
                                              rocsparse_index_base_zero,
                                              false);
@@ -444,12 +495,82 @@ TEST_F(ExtraGeam, spgeam_empty_operands)
             // C without rows may be created without a row pointer array.
             if(d.m == 0)
             {
-                for(bool supply_c : {false, true})
+                for(bool pass_C : {false, true})
                 {
-                    empty_spgeam_c_formats(handle, d.m, d.n, split, supply_c, true);
+                    empty_spgeam_C_formats(handle, d.m, d.n, split, pass_C, true);
                     if(HasFatalFailure())
                         return;
                 }
             }
         }
+}
+
+// A C without rows may have a null row pointer. When A has rows, compute and
+// symbolic compute copy m + 1 row pointer entries into C, so a null row pointer
+// is rejected instead of skipped.
+TEST_F(ExtraGeam, spgeam_null_row_ptr_C_with_rows_rejected)
+{
+    const int64_t   m = 4, n = 4;
+    Rng             rng(7);
+    const Csr       E  = csr_with_row_lengths<float>(m, n, std::vector<int64_t>(m, 0), rng);
+    DevBuf<int32_t> pA = up_idx<int32_t>(E.ptr), cA = up_idx<int32_t>(E.col);
+    DevBuf<float>   vA = up_val<float>(E.val);
+    DevBuf<int32_t> cC(1);
+    DevBuf<float>   vC(1);
+    ASSERT_TRUE(pA.ptr && cA.ptr && vA.ptr && cC.ptr && vC.ptr);
+    SpmatH sA, sC;
+    ASSERT_EQ(rocsparse_create_csr_descr(&sA.p,
+                                         m,
+                                         n,
+                                         0,
+                                         pA.ptr,
+                                         cA.ptr,
+                                         vA.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_csr_descr(&sC.p,
+                                         0,
+                                         n,
+                                         0,
+                                         nullptr,
+                                         cC.ptr,
+                                         vC.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    PointerModeGuard mode_guard(handle, rocsparse_pointer_mode_host);
+    const float      alpha = 2.0f, beta = -1.0f;
+    for(stage_t compute : {rocsparse_spgeam_stage_compute, rocsparse_spgeam_stage_symbolic_compute})
+    {
+        SCOPED_TRACE("compute stage " + std::to_string(compute));
+        const stage_t analysis = compute == rocsparse_spgeam_stage_compute
+                                     ? rocsparse_spgeam_stage_analysis
+                                     : rocsparse_spgeam_stage_symbolic_analysis;
+        SpgeamDescrH  descr;
+        ASSERT_NE(descr.d, nullptr);
+        spgeam_set_inputs(
+            handle, descr.d, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r, &alpha, &beta);
+        if(HasFatalFailure())
+            return;
+        for(stage_t stage : {analysis, compute})
+        {
+            rocsparse_spmat_descr mat_C = stage == analysis ? nullptr : sC.p;
+            size_t                bs    = 0;
+            ASSERT_EQ(rocsparse_spgeam_buffer_size(
+                          handle, descr.d, sA.p, sA.p, mat_C, stage, &bs, nullptr),
+                      rocsparse_status_success);
+            DevBuf<char> tmp(bs);
+            EXPECT_EQ(
+                rocsparse_spgeam(
+                    handle, descr.d, sA.p, sA.p, mat_C, stage, bs, bs ? tmp.ptr : nullptr, nullptr),
+                stage == analysis ? rocsparse_status_success : rocsparse_status_invalid_pointer);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+    }
 }

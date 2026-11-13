@@ -547,18 +547,20 @@ namespace rocsparse
                 }
             }
 
-            if((nnz_A == 0 && nnz_B == 0) && csr_row_ptr_C != nullptr)
+            if(nnz_A == 0 && nnz_B == 0)
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::valset(handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
-            }
-            else if(csr_row_ptr_C == nullptr && called_from_spgeam && descr != nullptr
-                    && descr->csr_row_ptr_C != nullptr)
-            {
-                // The descriptor row pointer is base 0. Fill it so a later
-                // compute or symbolic compute copies a valid empty pattern into C.
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                    handle, m + 1, int64_t(0), descr->indextype, descr->csr_row_ptr_C));
+                if(csr_row_ptr_C != nullptr)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                        handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+                }
+                else if(called_from_spgeam && descr != nullptr && descr->csr_row_ptr_C != nullptr)
+                {
+                    // The descriptor row pointer is base 0. Fill it so a later
+                    // compute or symbolic compute copies a valid empty pattern into C.
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                        handle, m + 1, int64_t(0), descr->indextype, descr->csr_row_ptr_C));
+                }
             }
             return rocsparse_status_success;
         }
