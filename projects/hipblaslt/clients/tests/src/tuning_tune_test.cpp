@@ -3332,6 +3332,37 @@ namespace
         EXPECT_NE(out.substr(at, out.find('\n', at) - at).find(settings), std::string::npos) << out;
     }
 
+    // By default a key's first three calls run default selection's pick untimed,
+    // and exploration starts after them.
+    TEST_F(TuningOnline_pre_checkin, AKeysFirstCallsRunTheDefaultPickUntimed)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        std::vector<hipblasLtMatmulAlgo_t> top = problem.heuristic(1);
+        ASSERT_EQ(top.size(), 1u);
+        const int pick = hipblaslt_ext::getIndexFromAlgo(top[0]);
+
+        enterOnline(m_path);
+        unsetenv("HIPBLASLT_TUNING_COLD_ITERS");
+        hipblaslt_tuning_reset_for_test();
+
+        for(int call = 0; call < 3; call++)
+        {
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched));
+            EXPECT_EQ(launched, pick) << "cold call " << call << " ran another kernel";
+        }
+
+        EXPECT_GT(runToResolution(problem).size(), 1u)
+            << "online launched one kernel throughout, so it never probed";
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(columnValues(m_path, "cold_iters"), std::vector<std::string>{"3"})
+            << "the row does not record three cold calls";
+    }
+
     // A shape the file already serves, here from a tune row, is replayed and not
     // explored.
     TEST_F(TuningOnline_pre_checkin, AnExistingRowIsReplayedNotExplored)

@@ -4158,9 +4158,11 @@ namespace
         {
             return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 3));
         }
+        // A few untimed calls let the clocks settle before timing starts. They
+        // run default selection's pick, so they cost nothing over tuning off.
         static int onlineColdIterations()
         {
-            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 3));
         }
         static int onlineMinImprovementPercent()
         {

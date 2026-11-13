@@ -200,8 +200,9 @@ notices go depends on logging:
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
         | Sets untimed warm-up launches per candidate (``online``: untimed calls under a key before
           exploration starts).
-      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 0)
+      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 3)
         | 0 disables warm-up
+        | ``online`` runs default selection's pick on these calls, so clocks settle at no extra cost
 
     * - | ``HIPBLASLT_TUNING_HOT_ITERS``
         | Sets timed launches per candidate.
