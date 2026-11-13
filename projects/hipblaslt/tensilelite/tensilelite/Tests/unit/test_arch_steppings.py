@@ -4140,3 +4140,21 @@ def test_config_allows_two_entries_with_the_same_effective_capabilities():
     assert archNamesFromConfig(
         "gfx942:xnack+;gfx942:xnack+[cu=64]", isa942, ["gfx942"]
     ) == ["gfx942:xnack+[cu=64]"]
+
+
+@pytest.mark.parametrize("spec", ["gfx1250:xnack+", "gfx1250-strict:xnack+"])
+def test_the_asan_xnack_mode_is_registered_as_a_spec_of_its_own(spec):
+    """Nothing in Python writes these, which is exactly why they need pinning.
+
+    A device ASAN build names the mode rather than leaving it to the driver, so
+    the spec arrives from cmake and no caller here spells it -- it reads as a
+    dead entry to anyone tidying the map. Dropping it configures cleanly and
+    then fails inside TensileCreateLibrary, because the two checks between a
+    request and codegen do not ask the same question: Tensile.py checks
+    baseArchName, which a qualified spec passes on the strength of its base
+    alone, while splitArchsFromPredicates matches the spec as written.
+    """
+    from tensilelite.Common.Architectures import splitArchsFromPredicates
+
+    archs, _ = splitArchsFromPredicates([spec])
+    assert archs == [spec]

@@ -78,6 +78,13 @@ architectureMap = {
     "gfx1250-strict": "gfx1250-strict",
     "gfx1250:xnack-": "gfx1250",
     "gfx1250-strict:xnack-": "gfx1250-strict",
+    # Device ASAN names the mode it needs rather than leaving it to the driver,
+    # so the build asks for these by `-a gfx1250` under a sanitizer, or by `all`.
+    # Needed as entries of their own because splitArchsFromPredicates matches the
+    # spec as written: a bare-name lookup would be enough for Tensile.py, which
+    # checks baseArchName, and the build would still fail later where it is not.
+    "gfx1250:xnack+": "gfx1250",
+    "gfx1250-strict:xnack+": "gfx1250-strict",
 }
 
 
