@@ -23038,6 +23038,35 @@ class KernelWriterAssembly(KernelWriter):
       self._emitTdmIterCount(mod, sIter, remainRowsSgpr, rows_per_il, tile_dim1)
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
+  def _swizzledTdmRemainRows(self, kernel, tP, mt, dstSgpr, tmpSgpr, comp):
+    """dim1 for a swizzled-TDM descriptor: the MI rows left from this load's base.
+
+    The host pads the free dimension to whole MI rows, so the buffer holds
+    ceil(Size/MI) rows. The last macro-tile (and, wave-separated, a later
+    component) can start fewer rows than it loads before that end; clamping dim1
+    makes TDM zero-fill those rows instead of reading past the buffer.
+    comp = (compShift, waveIdxSgpr, compOffset, rowsPerComp) for the wave-separated
+    builder, None when one load covers the whole macro-tile.
+    """
+    mod = Module("swizzled-TDM remaining rows")
+    tile01 = tP["tile01Idx"]
+    mi = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+    size, wg = ("SizeI", "WorkGroup0") if tile01 == 0 else ("SizeJ", "WorkGroup1")
+    assert mi & (mi - 1) == 0 and mt % mi == 0
+    mod.add(SAddU32(sgpr(dstSgpr), sgpr(size), mi - 1, f"swizzled dim1: {size} + MI({mi})-1"))
+    mod.add(SLShiftRightB32(sgpr(dstSgpr), int(log2(mi)), sgpr(dstSgpr), "swizzled dim1: padded MI rows"))
+    mod.add(SMulI32(sgpr(tmpSgpr), sgpr(wg), mt // mi, f"swizzled dim1: tile start row = {wg} * MT/MI({mt // mi})"))
+    mod.add(SSubU32(sgpr(dstSgpr), sgpr(dstSgpr), sgpr(tmpSgpr), "swizzled dim1: rows left from the tile"))
+    mod.add(SCMovB32(sgpr(dstSgpr), 0, "swizzled dim1: none left"))
+    if comp is not None:
+      compShift, waveIdxSgpr, compOffset, rowsPerComp = comp
+      if compShift is not None:
+        mod.add(self.tdmEmitWaveCompId(tmpSgpr, compShift, waveIdxSgpr, "swizzled dim1: compId", compOffset))
+        mod.add(SMulI32(sgpr(tmpSgpr), sgpr(tmpSgpr), rowsPerComp, f"swizzled dim1: compId * rowsPerComp({rowsPerComp})"))
+        mod.add(SSubU32(sgpr(dstSgpr), sgpr(dstSgpr), sgpr(tmpSgpr), "swizzled dim1: rows left from this component"))
+        mod.add(SCMovB32(sgpr(dstSgpr), 0, "swizzled dim1: none left"))
+    return mod
+
   def _emitSwizzleTdmIterateInit(self, mod, kernel, tc, dtype, descSgprName,
                                  swzTile0, swzRows, bpe, globalIncSgpr):
     """TDM iterate-mode init for the swizzled-B VW>1 LDS pad.
@@ -23466,16 +23495,17 @@ class KernelWriterAssembly(KernelWriter):
       # nO extent (walk clamp); tile1 drops to 1 (one nO per iteration). Non-iterate (VW==1)
       # keeps tile1 = swzRows (all nO in one contiguous 2-D issue).
       swzTilePerIssue = 1 if isTdmIter else swzRows
-      with self.allocTmpSgpr(2, tag="swzTDM_desc") as swzTmp:
+      with self.allocTmpSgpr(3, tag="swzTDM_desc") as swzTmp:
         sIdx    = swzTmp.idx        # reused for dim/tile values
         strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        rowTmp  = swzTmp.idx + 2
         mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
         mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
         mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = #nO (walk clamp)"))
+        mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp, None))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
@@ -23757,16 +23787,18 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setPadding(descSgprName(1), 0, 0))
       else:
         mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
-      with self.allocTmpSgpr(2, tag="swzTDM_descWS") as swzTmp:
+      with self.allocTmpSgpr(3, tag="swzTDM_descWS") as swzTmp:
         sIdx    = swzTmp.idx        # reused for dim/tile values
         strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        rowTmp  = swzTmp.idx + 2
         mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
         mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
         mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = #nO per component (walk clamp)"))
+        mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp,
+                                            (compShift, waveIdxSgpr, compOffset, swzRows)))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
