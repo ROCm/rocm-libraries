@@ -715,9 +715,9 @@ WMMA11_16 = ("wmma11_f16", "wmma11_bf16")
 WMMA12_16 = ("wmma12_f16", "wmma12_bf16")
 RDNA_16 = WMMA11_16 + WMMA12_16
 BREADTH = {
-    # gfx950: resnet50 c512 7^2 144 against 164 us, c512 14^2 s2 170 against 199, c256 k1024
-    # 14^2 1x1 107 against 286 (4 blocks a unit), inception 35^2 5x5 102 against 193, c288 k384
-    # 35^2 s2 390 against 431.
+    # gfx950: resnet50 c512 7^2 144 against 162 us, c512 14^2 s2 170 against 200, c256 k1024
+    # 14^2 1x1 116 against 194 (4 blocks a unit), inception 35^2 5x5 110 against 140, c288 k384
+    # 35^2 s2 390 against 432.
     (GFX950_16, "3x3pk"): [(CF, (128, 128, 4, 2, 64), (2,))],
     (GFX950_16, "3x3s2pk"): [(CF, (256, 64, 4, 2, 32), (2,))],
     (GFX950_16, "1x1"): [(CF, (64, 128, 2, 2, 32), (4,))],
@@ -727,26 +727,21 @@ BREADTH = {
     # 35^2 s2 597 against 1183.
     (CDNA32_16, "1x1"): [(CF, (128, 64, 2, 2, 32), (2,))],
     (CDNA32_16, "3x3s2ph"): [(CF, (128, 64, 2, 2, 32), (1,))],
-    # gfx1201: the same layers 638 against 764 us, 743 against 963, 492 against 795, 569 against
-    # 886, 1870 against 2972; inception c80 73^2 2974 against 3816 and c32 147^2 (3x3r1) 2070
-    # against 3149; channels-last sd unet c320 128^2 n8 2369 against 2532, flux vae c512 96^2 n8
-    # 3185 against 3273 (256^2 n1 alike), efficientnet c48 k192 120^2 3803 against 4060. Most
-    # gain from 4 blocks a unit.
-    (WMMA12_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
-    (WMMA12_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
+    # gfx1201 (gfx1101 alike where noted): the same layers 656 against 784 us (gfx1101 2111 against
+    # 2204), 750 against 986 (2365 against 2927), 477 against 622 (1676 against 2176), 576 against
+    # 700 (3214 against 3894), 1888 against 2461 (6472 against 7702); gfx1201 only: inception c80
+    # 73^2 2992 against 3339 and c32 147^2 (3x3r1) 2087 against 3037, and channels-last sd unet,
+    # flux vae and efficientnet layers 4-12% faster at 4 blocks a unit.
+    (RDNA_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
+    (RDNA_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
     (RDNA_16, "1x1"): [(CF, (128, 64, 4, 2, 32), (4,))],
-    (RDNA_16, "3x3"): [
-        (CF, (64, 32, 4, 2, 32), (4,)),
-        (CL, (64, 64, 2, 4, 32), (4,)),
-        (CL, (128, 32, 8, 1, 32), (4,)),
-        (CL, (64, 64, 4, 2, 32), (4,)),
-    ],
-    (RDNA_16, "3x3r1"): [(CF, (64, 32, 4, 2, 64), (4,))],
     (RDNA_16, "5x5r1"): [(CF, (64, 64, 4, 2, 64), (4,))],
     (RDNA_16, "3x3s2ph"): [(CF, (128, 32, 4, 2, 32), (4,))],
-    # gfx11 trial (measure on gfx1101): the packed rows too.
-    (WMMA11_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
-    (WMMA11_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
+    (WMMA12_16, "3x3"): [
+        (CF, (64, 32, 4, 2, 32), (4,)),
+        (CL, (64, 64, 4, 2, 32), (4,)),
+    ],
+    (WMMA12_16, "3x3r1"): [(CF, (64, 32, 4, 2, 64), (4,))],
 }
 # INTS keys of the BREADTH configs (build_x3 leaves them out).
 BREADTH_KEYS = set()
