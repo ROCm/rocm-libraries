@@ -15,7 +15,8 @@
 // prefix rule would miss.
 using cudaError_t = hipError_t;
 using cudaStream_t = hipStream_t; // must be hipStream_t: cudnnSetStream takes it
-using cudaDeviceProp = hipDeviceProp_t;
+// A macro, not an alias: the legacy samples write `struct cudaDeviceProp`.
+#define cudaDeviceProp hipDeviceProp_t
 using cudaMemcpyKind = hipMemcpyKind;
 static const cudaError_t cudaSuccess = hipSuccess;
 static const cudaMemcpyKind cudaMemcpyHostToDevice = hipMemcpyHostToDevice;
@@ -31,6 +32,7 @@ static const cudaMemcpyKind cudaMemcpyDeviceToDevice = hipMemcpyDeviceToDevice;
 #define cudaMemcpyAsync hipMemcpyAsync
 #define cudaMemset hipMemset
 #define cudaDeviceSynchronize hipDeviceSynchronize
+#define cudaDeviceReset hipDeviceReset
 #define cudaStreamCreate hipStreamCreate
 #define cudaStreamDestroy hipStreamDestroy
 #define cudaStreamSynchronize hipStreamSynchronize

@@ -121,11 +121,9 @@ namespace TensileLite
     struct TENSILELITEHOST_EXPORT KernelInvocation
     {
     public:
-        // A cluster launch delivers the cluster id in z to the kernel as a
-        // 16-bit value, and the batch is carried in z with ClusterDim.z = 1, so
-        // grid z is limited to 65535. Larger values are accepted by the launch
-        // API but wrap on the device.
-        static constexpr size_t MaxClusterGridDimZ = 65535;
+        // Max clusters in y and z of a cluster launch (16-bit cluster ids);
+        // larger grids launch without error but wrap on the device.
+        static constexpr size_t MaxClusterGridDimYZ = 65535;
 
         std::string kernelName;
         std::string codeObjectFile; //Code object file kernel is located in

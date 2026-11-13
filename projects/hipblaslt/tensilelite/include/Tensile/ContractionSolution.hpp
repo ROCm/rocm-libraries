@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
@@ -42,6 +43,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
@@ -360,6 +362,30 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
+    struct GL2PrefetchSAddrCheckPacket
+    {
+        bool   tluA;
+        bool   tluB;
+        size_t depthUA;
+        size_t depthUB;
+        // MacroTile times ClusterDim on that side: the cluster prefetches every
+        // tile it consumes, not just its own.
+        size_t clusterMT0;
+        size_t clusterMT1;
+        // MX scales: MXBlock 0 means the kernel prefetches no scales on that side.
+        size_t depthU;
+        size_t matrixInstK;
+        size_t mxBlockA;
+        size_t mxBlockB;
+        size_t mxBlockFreeA;
+        size_t mxBlockFreeB;
+        // Sparse metadata, prefetched only when it is loaded through TDM.
+        bool   metadata;
+        bool   tluMetadata;
+        size_t depthUMetadata;
+        size_t clusterMTMetadata;
+    };
+
     // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
     enum class TileProcessingStrategy { None, DataParallel, StreamK };
     enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
@@ -407,43 +433,139 @@ namespace TensileLite
 
     struct SizeMapping
     {
-        size_t waveNum = 0;
-        int    WavefrontSize = 0;
+        bool                   activationFused  = true;
+        int                    adaptiveGemm     = 0;
+        int                    adaptiveGemmGSUA = 0;
+        int                    adaptiveGemmNTAB = 0;
+        bool                   BufferLoad       = true;
+        bool                   BufferStore      = true;
+        dim3                   clusterDim{1, 1, 1};
+        int                    CUOccupancy                            = 0;
+        int                    customMainLoopScheduling               = 0;
+        size_t                 depthU                                 = 0;
+        bool                   DirectToLdsA                           = false;
+        bool                   DirectToLdsB                           = false;
+        bool                   DirectToVgprA                          = false;
+        bool                   DirectToVgprB                          = false;
+        bool                   enableLDSTrA                           = false;
+        bool                   enableLDSTrB                           = false;
+        int                    expertSchedulingMode                   = 0;
+        int                    globalAccumulation                     = 0;
+        int16_t                globalSplitU                           = 0;
+        bool                   globalSplitUCoalesced                  = false;
+        size_t                 globalSplitUPGR                        = 0;
+        bool                   globalSplitUWorkGroupMappingRoundRobin = false;
+        size_t                 grvwA                                  = 1;
+        size_t                 grvwB                                  = 1;
+        size_t                 gwvwC                                  = 1;
+        size_t                 gwvwD                                  = 1;
+        int                    HalfPLR                                = 0;
+        bool                   hasTemporalHint                        = false;
+        int                    LocalSplitU                            = 1;
+        dim3                   macroTile;
+        int                    magicDivAlg            = 1;
+        int                    MathClocksUnrolledLoop = 0;
+        std::array<int, 4>     matrixInstruction;
+        int                    Multicast                  = 0;
+        int                    nonTemporalA               = 0;
+        int                    nonTemporalB               = 0;
+        int                    NonTemporalD               = 0;
+        int                    NumLoadsCoalescedA         = 0;
+        int                    NumLoadsCoalescedB         = 0;
+        bool                   OneLDSBuffer               = false;
+        size_t                 packBatchDims              = 0;
+        int                    packSummationDims          = 0;
+        int                    persistentKernel           = 0;
+        bool                   persistentKernelAlongBatch = false;
+        int                    prefetchAcrossPersistent   = 0;
+        int                    PrefetchGL2                = 0;
+        int                    PrefetchGlobalRead         = 2;
+        int                    PrefetchLocalRead          = 1;
+        bool                   sourceKernel               = false;
+        bool                   SourceSwap                 = false;
+        size_t                 staggerStrideShift         = 0;
+        size_t                 staggerU                   = 0;
+        size_t                 staggerUMapping            = 0;
+        int                    streamKAtomic              = 0;
+        size_t                 synchronizerSizePerWG      = 0;
+        int                    TDMInst                    = 0;
+        int                    temporalHintA              = 0;
+        int                    temporalHintB              = 0;
+        int                    temporalHintD              = 0;
+        dim3                   threadTile;
+        TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
+        int                    UnrollLoopSwapGlobalReadOrder = 0;
+        int                    UnrollMajorLDSA               = -1;
+        int                    UnrollMajorLDSB               = -1;
+        bool                   useSubtileImpl                = false;
+        int                    VectorWidthA                  = 1;
+        int                    VectorWidthB                  = 1;
+        int                    WavefrontSize                 = 0;
+        std::array<int, 2>     waveGroup;
+        size_t                 waveNum                  = 0;
+        int                    WaveSeparateGlobalReadA  = 0;
+        int                    WaveSeparateGlobalReadB  = 0;
+        WorkAssignment         workAssignment           = WorkAssignment::StaticGrid;
+        int                    workGroupMapping         = 0;
+        int                    workGroupMappingXCC      = 0;
+        int                    workGroupMappingXCCGroup = 0;
+        dim3                   workGroupSize{0, 0, 0};
+        size_t                 workspaceSizePerElemBias = 0;
+        size_t                 workspaceSizePerElemC    = 0;
 
-        dim3 clusterDim{1, 1, 1};
+        int cacheHintA() const
+        {
+            return hasTemporalHint ? (temporalHintA == 1 || temporalHintA == 3 ? 4 : 0)
+                                   : nonTemporalA;
+        }
 
-        // vector3's default ctor leaves members uninitialized, but this field is
-        // read (calculateAutoGSU divides by it) before every solution sets it.
-        dim3 workGroupSize{0, 0, 0};
-        dim3 threadTile;
-        dim3 macroTile;
+        int cacheHintB() const
+        {
+            return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
+                                   : nonTemporalB;
+        }
 
-        std::array<int, 4> matrixInstruction;
-        size_t             grvwA = 1;
-        size_t             grvwB = 1;
-        size_t             gwvwC = 1;
-        size_t             gwvwD = 1;
+        int cacheHintD() const
+        {
+            return hasTemporalHint ? (temporalHintD == 1 || temporalHintD == 3 ? 4 : 0)
+                                   : NonTemporalD;
+        }
 
-        size_t  staggerU           = 0;
-        size_t  staggerUMapping    = 0;
-        size_t  depthU             = 0;
-        size_t  globalSplitUPGR    = 0;
-        int16_t globalSplitU       = 0;
-        size_t  staggerStrideShift = 0;
-        int     workGroupMapping   = 0;
+        bool hasDynamicAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue;
+        }
 
-        size_t packBatchDims              = 0;
-        int    packSummationDims          = 0;
-        int    magicDivAlg                = 1;
-        TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
-        WorkAssignment workAssignment = WorkAssignment::StaticGrid;
-        bool isPersistent() const { return tileProcessingStrategy != TileProcessingStrategy::None; }
-        bool isStreamK() const { return tileProcessingStrategy == TileProcessingStrategy::StreamK; }
-        bool isPersistentDataParallel() const { return tileProcessingStrategy == TileProcessingStrategy::DataParallel; }
-        bool hasStaticAssignment() const { return isPersistent() && workAssignment == WorkAssignment::StaticGrid; }
-        bool hasDynamicAssignment() const { return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue; }
-        bool hasHybridAssignment() const { return isPersistent() && workAssignment == WorkAssignment::Hybrid; }
-        bool requiresPartialReduction() const { return isStreamK() && streamKAtomic == 0; }
+        bool hasHybridAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::Hybrid;
+        }
+
+        bool hasStaticAssignment() const
+        {
+            return isPersistent() && workAssignment == WorkAssignment::StaticGrid;
+        }
+
+        bool isPersistent() const
+        {
+            return tileProcessingStrategy != TileProcessingStrategy::None;
+        }
+
+        bool isPersistentDataParallel() const
+        {
+            return tileProcessingStrategy == TileProcessingStrategy::DataParallel;
+        }
+
+        bool isStreamK() const
+        {
+            return tileProcessingStrategy == TileProcessingStrategy::StreamK;
+        }
+
+        bool requiresPartialReduction() const
+        {
+            return isStreamK() && streamKAtomic == 0;
+        }
+
         void validateExecutionPolicy() const
         {
             if(streamKAtomic < 0 || streamKAtomic > 1)
@@ -451,90 +573,9 @@ namespace TensileLite
             if(!isStreamK() && streamKAtomic)
                 throw std::runtime_error("StreamKAtomic requires TileProcessingStrategy=StreamK");
             if(isPersistentDataParallel() && workAssignment != WorkAssignment::StaticGrid)
-                throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
+                throw std::runtime_error(std::string(toString(tileProcessingStrategy))
+                                         + " supports WorkAssignment=StaticGrid only");
         }
-        int    streamKAtomic              = 0;
-        int    prefetchAcrossPersistent   = 0;
-        int    persistentKernel           = 0;
-        bool   persistentKernelAlongBatch = false;
-
-        bool sourceKernel = false;
-
-        int    globalAccumulation       = 0;
-        int    adaptiveGemmGSUA         = 0;
-        size_t workspaceSizePerElemC    = 0;
-        size_t workspaceSizePerElemBias = 0;
-
-        bool activationFused = true;
-
-        int  workGroupMappingXCC                    = 0;
-        int  workGroupMappingXCCGroup               = 0;
-        bool globalSplitUCoalesced                  = false;
-        bool globalSplitUWorkGroupMappingRoundRobin = false;
-
-        int CUOccupancy            = 0;
-        int PrefetchGlobalRead     = 2;
-        int MathClocksUnrolledLoop = 0;
-
-        size_t synchronizerSizePerWG = 0;
-
-        int nonTemporalA = 0;
-        int nonTemporalB = 0;
-
-        int temporalHintA = 0;
-        int temporalHintB = 0;
-
-        bool hasTemporalHint = false;
-        bool BufferLoad = true;
-        bool BufferStore = true;
-
-        int cacheHintA() const
-        {
-            return hasTemporalHint ? (temporalHintA == 1 || temporalHintA == 3 ? 4 : 0)
-                                   : nonTemporalA;
-        }
-        /// @see cacheHintA
-        int cacheHintB() const
-        {
-            return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
-                                   : nonTemporalB;
-        }
-
-        int adaptiveGemmNTAB = 0;
-
-        int customMainLoopScheduling = 0;
-
-        // Whether the kernel uses the subtile implementation (UseSubtileImpl).
-        // Plumbed into the Origami config so heuristics can reason about subtile
-        // kernels (e.g. rejecting them for small K).
-        bool useSubtileImpl = false;
-
-        // SourceSwap: MFMA operands are swapped so consecutive lanes run along M
-        // in D.  Either way each lane stores StoreVectorWidth contiguous M elements.
-        bool SourceSwap = false;
-
-        int NonTemporalD = 0;
-        int WaveSeparateGlobalReadA = 0;
-        int WaveSeparateGlobalReadB = 0;
-        int UnrollLoopSwapGlobalReadOrder = 0;
-        bool DirectToVgprA = false;
-        bool DirectToVgprB = false;
-        int NumLoadsCoalescedA = 0;
-        int NumLoadsCoalescedB = 0;
-        int VectorWidthA = 1;
-        int VectorWidthB = 1;
-        int LocalSplitU = 1;
-        bool DirectToLdsA = false;
-        bool DirectToLdsB = false;
-        bool OneLDSBuffer = false;
-        int  UnrollMajorLDSA = -1;
-        int  UnrollMajorLDSB = -1;
-        bool enableLDSTrA    = false;
-        bool enableLDSTrB    = false;
-
-        int expertSchedulingMode = 0;
-
-        std::array<int, 2> waveGroup;
     };
 
     struct StreamKStaticSplit
@@ -1091,6 +1132,19 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
+        // Publishes the host argument bytes for one grouped-GEMM problem of this
+        // solution. The first stored value is kept.
+        void ensureRequiredHostWorkspaceSize(Problem const& problem, Hardware const& hardware)
+        {
+            if(requiredHostWorkspaceSizePerProblem.load(std::memory_order_acquire)
+               != static_cast<size_t>(-1))
+                return;
+            size_t expected = static_cast<size_t>(-1);
+            size_t computed = requiredHostSizeGroupedGemmSingle(problem, hardware);
+            requiredHostWorkspaceSizePerProblem.compare_exchange_strong(
+                expected, computed, std::memory_order_release, std::memory_order_relaxed);
+        }
+
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
         void                 calculateTiles(dim3& tiles,
@@ -1101,9 +1155,9 @@ namespace TensileLite
         // Workgroup grid that generateSingleCall hands to the cluster launch of a
         // non-persistent kernel with clusterDim > 1. Not meaningful otherwise.
         dim3                 clusterLaunchGrid(Problem const& problem, Hardware const& hardware) const;
-        // False when a non-persistent cluster launch of this problem would exceed
-        // KernelInvocation::MaxClusterGridDimZ in grid z. Always true for other
-        // kernels.
+        // False when a non-persistent cluster launch of this problem would hold
+        // more than KernelInvocation::MaxClusterGridDimYZ clusters in y or z.
+        // Always true for other kernels.
         bool                 clusterLaunchGridFits(Problem const&  problem,
                                                    Hardware const& hardware) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
@@ -1493,16 +1547,13 @@ namespace TensileLite
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 
-            // In-device MX scale layout expected by the kernel. Mirrors the
+            // In-device MX scale layout expected by the kernel: a MXScaleFormat
+            // value, stored as an int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema. Mirrors the
             // MXScaleFormat solution parameter (see tensilelite/Common/ValidParameters.py).
-            // Encoded as a small int so it round-trips through msgpack and YAML
-            // logic files without an explicit enum schema:
-            //   0 = NoSwizzle       (default; canonical row/column layout)
-            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
-            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
             // The host (DataInitialization) consults this to decide whether to
             // apply the K-dimension swizzle on the MX scale tensor before upload.
-            int mxScaleFormat = 0;
+            int mxScaleFormat = static_cast<int>(MXScaleFormat::NoSwizzle);
         };
 
         struct LinearModel
@@ -1538,8 +1589,9 @@ namespace TensileLite
 
         ProblemType problemType;
 
-        // This will be calculated when getSolution is called
-        size_t requiredHostWorkspaceSizePerProblem = static_cast<size_t>(-1);
+        // Host argument bytes for one grouped-GEMM problem of this solution.
+        // ensureRequiredHostWorkspaceSize publishes the first value and keeps it.
+        std::atomic<size_t> requiredHostWorkspaceSizePerProblem{static_cast<size_t>(-1)};
 
         /// Debugging purposes.  Shouldn't contain any vital information that isn't
         /// somewhere else.
@@ -1563,8 +1615,9 @@ namespace TensileLite
         size_t skKGranularity() const
         {
             constexpr size_t scaleSwizzleK = 256;
-            if(problemType.mxScaleFormat != 1 || sizeMapping.depthU == 0
-               || sizeMapping.depthU >= scaleSwizzleK || scaleSwizzleK % sizeMapping.depthU != 0)
+            if(problemType.mxScaleFormat != static_cast<int>(MXScaleFormat::HostPreSwizzle)
+               || sizeMapping.depthU == 0 || sizeMapping.depthU >= scaleSwizzleK
+               || scaleSwizzleK % sizeMapping.depthU != 0)
                 return 1;
             return scaleSwizzleK / sizeMapping.depthU;
         }
@@ -1657,4 +1710,6 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                      stream,
+                                                    GL2PrefetchSAddrCheckPacket const& st);
 } // namespace TensileLite

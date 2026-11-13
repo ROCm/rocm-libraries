@@ -37,7 +37,7 @@
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
 
-#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp"
+#include "mx_tile128x4.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -53,12 +53,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <ios>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -171,15 +176,6 @@ namespace
             // that never appear in the library filename.
             const std::string arch      = gpuArchName();
             const std::string processor = arch.substr(0, arch.find(':'));
-            // The subtree the runtime loads, which for an A0 part reporting
-            // gfx1250 is not the one named for processor.
-            hipDeviceProp_t props{};
-            int             device = 0;
-            const int       rev    = hipGetDevice(&device) == hipSuccess
-                                    && hipGetDeviceProperties(&props, device) == hipSuccess
-                                ? props.asicRevision
-                                : -1;
-            const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
             for(const auto& root : libraryRootCandidates())
@@ -187,7 +183,7 @@ namespace
                 // Always the logical single-extension name: the loader resolves
                 // the shipped ".dat.zlib" by appending the suffix itself.
                 const std::filesystem::path logical
-                    = root / libArch / ("TensileLibrary_lazy_" + processor + ".dat");
+                    = root / processor / ("TensileLibrary_lazy_" + processor + ".dat");
                 tried += (tried.empty() ? "" : ", ") + logical.string();
 
                 if(!std::filesystem::exists(logical)
@@ -1142,6 +1138,823 @@ namespace
     {
         checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
                                  "wvSpltK_bf16_tn_m4");
+    }
+
+    // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.
+    uint8_t fp6Code(int halves, bool e3m2)
+    {
+        const int manBits = e3m2 ? 2 : 3;
+        const int bias    = e3m2 ? 3 : 1;
+        for(int code = 0; code < 32; ++code)
+        {
+            const int    exp = code >> manBits;
+            const int    man = code & ((1 << manBits) - 1);
+            const double value
+                = std::ldexp(exp ? (1 << manBits) + man : man, std::max(exp, 1) - bias - manBits);
+            if(value * 2 == std::abs(halves))
+                return static_cast<uint8_t>(code | (halves < 0 ? 0x20 : 0));
+        }
+        ADD_FAILURE() << halves << " / 2 has no FP6 code";
+        return 0;
+    }
+
+    // 6-bit LSB-first packing of one K-contiguous row.
+    void packFp6Row(uint8_t* dst, const uint8_t* codes, size_t k)
+    {
+        std::memset(dst, 0, k * 6 / 8);
+        for(size_t idx = 0; idx < k; ++idx)
+        {
+            const size_t bit = 6 * idx;
+            dst[bit / 8] |= static_cast<uint8_t>(codes[idx] << (bit % 8));
+            if(bit % 8 > 2)
+                dst[bit / 8 + 1] |= static_cast<uint8_t>(codes[idx] >> (8 - bit % 8));
+        }
+    }
+
+    struct MXFp6Case
+    {
+        const char* name;
+        hipDataType type;
+        int64_t     k;
+        const char* gfx950Pick;
+        bool        tiledB;
+    };
+
+    // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
+    bool onMXFp6RegisteredChip()
+    {
+        int device = 0;
+        int chipId = 0;
+        return gpuArchName().rfind("gfx950", 0) == 0 && hipGetDevice(&device) == hipSuccess
+               && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) == hipSuccess
+               && (chipId == 0x75a0 || chipId == 0x75a3);
+    }
+
+    constexpr const char* kMXFp6ChipSkip
+        = "The MXFP6 128x4 kernels are registered for gfx950 chips 0x75a0 and 0x75a3 only";
+
+    class RowUniformityMXFp6_smoke : public ::testing::TestWithParam<MXFp6Case>
+    {
+    };
+
+    // Round to nearest even of x, exact in double and in the normal bf16 range.
+    uint16_t bf16BitsRne(double x)
+    {
+        if(x == 0)
+            return std::signbit(x) ? 0x8000 : 0;
+        int          exp     = 0;
+        const double scaled  = std::frexp(std::abs(x), &exp) * 256;
+        double       rounded = std::floor(scaled);
+        if(scaled - rounded > 0.5 || (scaled - rounded == 0.5 && std::fmod(rounded, 2) != 0))
+            rounded += 1;
+        const float value = static_cast<float>(std::copysign(std::ldexp(rounded, exp - 8), x));
+        uint32_t    bits  = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return static_cast<uint16_t>(bits >> 16);
+    }
+
+    // The gfx950 MXFP6 custom kernels on the 128x4 scale layout, with A, and B when
+    // tiledB is set, in the COL256_R128 data layout, declare uniformSummationOrder. They
+    // need beta == 0, which the C heuristic never assumes, so the case goes through the
+    // extension API. Every row of the transposed A
+    // holds the same values, but each (row, K block) picks one of two encodings, v at
+    // scale s or v / 2 at scale s + 1, so D is row-invariant only if each row's data and
+    // scales are read from where the host layouts put them. Blocks 0 and K / 64 carry
+    // large products that cancel; what they absorb of the small ones while pending
+    // depends on the summation order, by more than D's bf16 precision.
+    // A second run on the same data lowers those two blocks' scales into the small
+    // range. Every partial sum is then exact in fp32 in any order, so sampled D must
+    // equal the exact dot product rounded to bf16.
+    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
+    {
+        const MXFp6Case&  c       = GetParam();
+        const bool        e3m2    = c.type == HIP_R_6F_E3M2;
+        constexpr int64_t m       = 4096;
+        constexpr int64_t n       = 4096;
+        const int64_t     k       = c.k;
+        const int64_t     kBlocks = k / 32;
+        constexpr int64_t large0  = 0;
+        const int64_t     large1  = kBlocks / 2;
+        constexpr int     one     = 127;
+        // One kernel per registered K and B order: the pick must be the one built for them.
+        const std::string kTag           = "_4096x4096x" + std::to_string(k) + "_";
+        auto              isExpectedPick = [&](const std::string& pick) {
+            return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
+                   && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
+        };
+
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
+
+        std::mt19937                       rng(0x6d786636u);
+        std::uniform_int_distribution<int> valueOf{-4, 4};
+        std::uniform_int_distribution<int> smallScaleOf{one - 3, one};
+        std::uniform_int_distribution<int> bitOf{0, 1};
+
+        // Row values of A and their scales, and the rows of B, both K-contiguous.
+        std::vector<int> aValue(k);
+        for(auto& value : aValue)
+            value = valueOf(rng);
+        std::vector<int> aScale(kBlocks);
+        for(auto& scale : aScale)
+            scale = smallScaleOf(rng);
+        aScale[large0] = aScale[large1] = one + 10;
+        std::copy_n(aValue.begin() + large0 * 32, 32, aValue.begin() + large1 * 32);
+
+        uint8_t codeOfHalves[17];
+        for(int halves = -8; halves <= 8; ++halves)
+            codeOfHalves[halves + 8] = fp6Code(halves, e3m2);
+        ASSERT_FALSE(HasFailure());
+
+        // B is packed, and tiled one 256-row block at a time when tiledB is set, which is
+        // contiguous in the tiled layout; only the columns read below keep their values.
+        constexpr int64_t    kProbeCols   = 64;
+        const int64_t        sampleRows[] = {0, 1, 15, 16, 255, 256, 2047, m - 1};
+        const int64_t        sampleCols[] = {0, 1, 63, 64, 255, 256, 2049, n - 1};
+        const size_t         rowBytes     = k * 6 / 8;
+        const size_t         blockBytes   = mx_tile128x4::kTileRows * rowBytes;
+        std::vector<uint8_t> codes(k);
+        std::vector<uint8_t> packedBlock(blockBytes);
+        std::vector<int8_t>  colValues(k);
+        std::vector<uint8_t> dataB(static_cast<size_t>(n) * rowBytes);
+        std::vector<uint8_t> bScale(static_cast<size_t>(n * kBlocks));
+
+        std::map<int64_t, std::vector<int8_t>> bValue;
+        for(int64_t col = 0; col < n; ++col)
+        {
+            for(int64_t idx = 0; idx < k; ++idx)
+                colValues[idx] = static_cast<int8_t>(valueOf(rng));
+            for(int64_t idx = 0; idx < 32; ++idx)
+                colValues[large1 * 32 + idx] = static_cast<int8_t>(-colValues[large0 * 32 + idx]);
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+                bScale[col * kBlocks + kb] = static_cast<uint8_t>(
+                    kb == large0 || kb == large1 ? one + 10 : smallScaleOf(rng));
+            if(col < kProbeCols
+               || std::find(std::begin(sampleCols), std::end(sampleCols), col)
+                      != std::end(sampleCols))
+                bValue[col] = colValues;
+
+            const int64_t blockRow = col % mx_tile128x4::kTileRows;
+            for(int64_t idx = 0; idx < k; ++idx)
+                codes[idx] = codeOfHalves[2 * colValues[idx] + 8];
+            if(!c.tiledB)
+            {
+                packFp6Row(dataB.data() + col * rowBytes, codes.data(), k);
+                continue;
+            }
+            packFp6Row(packedBlock.data() + blockRow * rowBytes, codes.data(), k);
+            if(blockRow == mx_tile128x4::kTileRows - 1)
+                mx_tile128x4::tileFp6Data(dataB.data() + (col - blockRow) * rowBytes,
+                                          packedBlock.data(),
+                                          mx_tile128x4::kTileRows,
+                                          k);
+        }
+
+        // The device sums whole-block products, each exact; only the order in which the
+        // blocks meet the fp32 accumulator can change D.
+        bool orderMatters = false;
+        for(int64_t col = 0; col < kProbeCols && !orderMatters; ++col)
+        {
+            std::vector<float> blockSums(kBlocks);
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                int dot = 0;
+                for(int64_t idx = kb * 32; idx < kb * 32 + 32; ++idx)
+                    dot += aValue[idx] * bValue[col][idx];
+                blockSums[kb] = static_cast<float>(
+                    std::ldexp(dot, aScale[kb] + bScale[col * kBlocks + kb] - 2 * one));
+            }
+            float forward = 0.0f;
+            float reverse = 0.0f;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                forward += blockSums[kb];
+                reverse += blockSums[kBlocks - 1 - kb];
+            }
+            orderMatters = hip_bfloat16{forward}.data != hip_bfloat16{reverse}.data;
+        }
+        ASSERT_TRUE(orderMatters) << "Forward and reverse block orders agree in bf16 for every "
+                                     "probed column, so this fill cannot detect an order change";
+
+        // Both encodings of A's row, packed: a block is a whole 24-byte group, so a row is
+        // assembled group by group from one or the other.
+        std::vector<uint8_t> packedAtScale(rowBytes);
+        std::vector<uint8_t> packedHalved(rowBytes);
+        for(int64_t idx = 0; idx < k; ++idx)
+            codes[idx] = codeOfHalves[2 * aValue[idx] + 8];
+        packFp6Row(packedAtScale.data(), codes.data(), k);
+        for(int64_t idx = 0; idx < k; ++idx)
+            codes[idx] = codeOfHalves[aValue[idx] + 8];
+        packFp6Row(packedHalved.data(), codes.data(), k);
+
+        std::vector<uint8_t> tiledA(static_cast<size_t>(m) * rowBytes);
+        std::vector<uint8_t> scalesA(static_cast<size_t>(m * kBlocks));
+        for(int64_t row = 0; row < m; ++row)
+        {
+            const int64_t blockRow = row % mx_tile128x4::kTileRows;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                const bool halved = bitOf(rng) != 0;
+                std::memcpy(packedBlock.data() + blockRow * rowBytes + kb * 24,
+                            (halved ? packedHalved : packedAtScale).data() + kb * 24,
+                            24);
+                scalesA[row * kBlocks + kb] = static_cast<uint8_t>(aScale[kb] + (halved ? 1 : 0));
+            }
+            if(blockRow == mx_tile128x4::kTileRows - 1)
+                mx_tile128x4::tileFp6Data(tiledA.data() + (row - blockRow) * rowBytes,
+                                          packedBlock.data(),
+                                          mx_tile128x4::kTileRows,
+                                          k);
+        }
+        packedBlock = {};
+
+        const std::vector<uint8_t> shuffledA = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> shuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+
+        // The exact run: the large blocks at the small range's top scale, so every block
+        // product is a multiple of 2^-6 of magnitude at most 512.
+        for(int64_t row = 0; row < m; ++row)
+            for(const int64_t kb : {large0, large1})
+                scalesA[row * kBlocks + kb] -= 10;
+        for(int64_t col = 0; col < n; ++col)
+            for(const int64_t kb : {large0, large1})
+                bScale[col * kBlocks + kb] -= 10;
+        aScale[large0] = aScale[large1] = one;
+        const std::vector<uint8_t> exactShuffledA
+            = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> exactShuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+        scalesA.clear();
+        scalesA.shrink_to_fit();
+
+        // Exact D of each sampled column in units of 2^-6; every row of A has the same
+        // values. Sum |product| < 2^24 bounds every fp32 partial sum below 2^18, so the
+        // device result in any summation order is the exact sum.
+        std::map<int64_t, int64_t> exactSum;
+        for(const int64_t col : sampleCols)
+        {
+            int64_t sum    = 0;
+            int64_t absSum = 0;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                int64_t dot = 0;
+                for(int64_t idx = kb * 32; idx < kb * 32 + 32; ++idx)
+                    dot += aValue[idx] * bValue[col][idx];
+                const int shift = aScale[kb] + bScale[col * kBlocks + kb] - 2 * one + 6;
+                ASSERT_TRUE(shift >= 0 && shift <= 6) << "block " << kb << " shift " << shift;
+                sum += dot * (int64_t(1) << shift);
+                absSum += std::abs(dot) * (int64_t(1) << shift);
+            }
+            ASSERT_LT(absSum, int64_t(1) << 24)
+                << "Column " << col << " can round in fp32, so the exact check does not hold";
+            exactSum[col] = sum;
+        }
+
+        void* dA         = nullptr;
+        void* dB         = nullptr;
+        void* dScaleA    = nullptr;
+        void* dScaleB    = nullptr;
+        void* dD         = nullptr;
+        void* dWorkspace = nullptr;
+        auto  release    = [&] {
+            for(void* ptr : {dA, dB, dScaleA, dScaleB, dD, dWorkspace})
+                static_cast<void>(hipFree(ptr));
+        };
+        if(hipMalloc(&dA, tiledA.size()) != hipSuccess || hipMalloc(&dB, dataB.size()) != hipSuccess
+           || hipMalloc(&dScaleA, shuffledA.size()) != hipSuccess
+           || hipMalloc(&dScaleB, shuffledB.size()) != hipSuccess
+           || hipMalloc(&dD, static_cast<size_t>(m * n) * sizeof(uint16_t)) != hipSuccess
+           || hipMalloc(&dWorkspace, kWorkspaceBytes) != hipSuccess)
+        {
+            release();
+            GTEST_SKIP() << "hipMalloc failed: not enough device memory";
+        }
+        const bool uploaded
+            = hipMemcpy(dA, tiledA.data(), tiledA.size(), hipMemcpyHostToDevice) == hipSuccess
+              && hipMemcpy(dB, dataB.data(), dataB.size(), hipMemcpyHostToDevice) == hipSuccess
+              && hipMemcpy(dScaleA, shuffledA.data(), shuffledA.size(), hipMemcpyHostToDevice)
+                     == hipSuccess
+              && hipMemcpy(dScaleB, shuffledB.data(), shuffledB.size(), hipMemcpyHostToDevice)
+                     == hipSuccess;
+
+        hipblasLtHandle_t handle = nullptr;
+        hipStream_t       stream = nullptr;
+        if(!uploaded || hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS
+           || hipStreamCreate(&stream) != hipSuccess)
+        {
+            if(handle)
+                hipblasLtDestroy(handle);
+            release();
+            FAIL() << "Upload, hipblasLt handle or stream creation failed";
+        }
+
+        std::vector<uint16_t> hostD(static_cast<size_t>(m * n));
+        std::vector<uint16_t> exactD(static_cast<size_t>(m * n));
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                       HIPBLAS_OP_N,
+                                                       c.type,
+                                                       c.type,
+                                                       HIP_R_16BF,
+                                                       HIP_R_16BF,
+                                                       HIPBLAS_COMPUTE_32F);
+            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+            if(c.tiledB)
+                problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            hipblaslt_ext::GemmInputs inputs;
+            inputs.setA(dA);
+            inputs.setB(dB);
+            inputs.setC(dD);
+            inputs.setD(dD);
+            inputs.setAlpha(&alpha);
+            inputs.setBeta(&beta);
+            inputs.setScaleA(dScaleA);
+            inputs.setScaleB(dScaleB);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_T,
+                                     HIPBLAS_OP_N,
+                                     c.type,
+                                     c.type,
+                                     HIP_R_16BF,
+                                     HIP_R_16BF,
+                                     HIPBLAS_COMPUTE_32F);
+
+            hipblaslt_ext::GemmPreference preference;
+            preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+            preference.setUniformSummationOrder(1);
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+            hipblasLtMatmulAlgo_t                         algo{};
+            size_t                                        workspaceBytes = 0;
+
+            const bool picked
+                = gemm.setProblem(m,
+                                  n,
+                                  k,
+                                  1,
+                                  k,
+                                  k,
+                                  m,
+                                  m,
+                                  k * m,
+                                  k * n,
+                                  m * n,
+                                  m * n,
+                                  epilogue,
+                                  inputs,
+                                  problemType)
+                      == HIPBLAS_STATUS_SUCCESS
+                  && gemm.algoGetHeuristic(1, preference, picks) == HIPBLAS_STATUS_SUCCESS
+                  && !picks.empty();
+            std::string pick = picked
+                                   ? hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo)
+                                   : std::string("<none>");
+            if(picked)
+                algo = picks[0].algo;
+            const bool ran
+                = picked && isExpectedPick(pick)
+                  && gemm.isAlgoSupported(algo, workspaceBytes) == HIPBLAS_STATUS_SUCCESS
+                  && workspaceBytes <= kWorkspaceBytes
+                  && gemm.initialize(algo, dWorkspace) == HIPBLAS_STATUS_SUCCESS
+                  && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                  && hipStreamSynchronize(stream) == hipSuccess
+                  && hipMemcpy(
+                         hostD.data(), dD, hostD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                         == hipSuccess;
+            EXPECT_TRUE(isExpectedPick(pick)) << "The default pick is " << pick << ", not a "
+                                              << c.gfx950Pick << "*" << kTag << "* kernel";
+            EXPECT_TRUE(ran || !isExpectedPick(pick)) << pick << " was picked but could not be run";
+            const bool ranExact
+                = ran
+                  && hipMemcpy(dScaleA,
+                               exactShuffledA.data(),
+                               exactShuffledA.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && hipMemcpy(dScaleB,
+                               exactShuffledB.data(),
+                               exactShuffledB.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                  && hipStreamSynchronize(stream) == hipSuccess
+                  && hipMemcpy(
+                         exactD.data(), dD, exactD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                         == hipSuccess;
+            EXPECT_TRUE(ranExact || !ran) << pick << " could not be run with the exact scales";
+        }
+        static_cast<void>(hipStreamDestroy(stream));
+        hipblasLtDestroy(handle);
+        release();
+        if(HasFailure())
+            return;
+
+        // Column-major D: every row equals row 0 exactly when every column is constant.
+        int64_t badRow = -1;
+        int64_t badCol = -1;
+        for(int64_t col = 0; col < n && badRow < 0; ++col)
+        {
+            const uint16_t* column = hostD.data() + col * m;
+            for(int64_t row = 1; row < m; ++row)
+                if(column[row] != column[0])
+                {
+                    badRow = row;
+                    badCol = col;
+                    break;
+                }
+        }
+        EXPECT_EQ(badRow, -1) << "D(" << badRow << ", " << badCol << ") differs bitwise from D(0, "
+                              << badCol << ") with uniform summation order enabled";
+        EXPECT_NE(std::count(hostD.begin(), hostD.begin() + m * n, hostD[0]),
+                  static_cast<std::ptrdiff_t>(m * n))
+            << "D is constant, so the fill did not reach the output";
+
+        int mismatches = 0;
+        for(const int64_t col : sampleCols)
+        {
+            const uint16_t expected
+                = bf16BitsRne(std::ldexp(static_cast<double>(exactSum[col]), -6));
+            for(const int64_t row : sampleRows)
+            {
+                const uint16_t actual = exactD[col * m + row];
+                if(actual != expected && ++mismatches <= 8)
+                    ADD_FAILURE() << "Exact run: D(" << row << ", " << col << ") = 0x" << std::hex
+                                  << actual << ", exact sum rounded to bf16 = 0x" << expected
+                                  << std::dec;
+            }
+        }
+        EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
+    }
+
+    // Every kernel in the quick tier, so every pull request on a registered chip runs
+    // each of them.
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6_smoke,
+        ::testing::Values(
+            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{
+                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
+            MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true}),
+        [](const ::testing::TestParamInfo<MXFp6Case>& info) {
+            return std::string(info.param.name);
+        });
+
+    struct MXFp6SelectionCase
+    {
+        const char* name;
+        hipDataType type;
+        int64_t     k;
+        bool        tiledB;
+        float       alpha;
+        float       beta;
+        bool        hasKernel;
+    };
+
+    class RowUniformityMXFp6Selection_smoke
+        : public ::testing::TestWithParam<MXFp6SelectionCase>
+    {
+    };
+
+    // The kernels do not bound their loads and stores, so only their predicates keep
+    // another problem away from them: a problem one predicate rejects gets no solution.
+    // Nothing is launched.
+    TEST_P(RowUniformityMXFp6Selection_smoke, OnlyRegisteredProblemsHaveASolution)
+    {
+        const MXFp6SelectionCase& c = GetParam();
+        constexpr int64_t         m = 4096;
+        constexpr int64_t         n = 4096;
+
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
+
+        void*             storage = nullptr;
+        hipblasLtHandle_t handle  = nullptr;
+        ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                   HIPBLAS_OP_N,
+                                                   c.type,
+                                                   c.type,
+                                                   HIP_R_16BF,
+                                                   HIP_R_16BF,
+                                                   HIPBLAS_COMPUTE_32F);
+        problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+        if(c.tiledB)
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        hipblaslt_ext::GemmInputs inputs;
+        inputs.setA(storage);
+        inputs.setB(storage);
+        inputs.setC(storage);
+        inputs.setD(storage);
+        inputs.setAlpha(&c.alpha);
+        inputs.setBeta(&c.beta);
+        inputs.setScaleA(storage);
+        inputs.setScaleB(storage);
+
+        hipblaslt_ext::Gemm           gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 c.type,
+                                 c.type,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmPreference preference;
+        preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+        std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+        EXPECT_EQ(gemm.setProblem(m,
+                                  n,
+                                  c.k,
+                                  1,
+                                  c.k,
+                                  c.k,
+                                  m,
+                                  m,
+                                  c.k * m,
+                                  c.k * n,
+                                  m * n,
+                                  m * n,
+                                  epilogue,
+                                  inputs,
+                                  problemType),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.algoGetHeuristic(8, preference, picks), HIPBLAS_STATUS_SUCCESS);
+        if(c.hasKernel)
+        {
+            ASSERT_FALSE(picks.empty());
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
+        }
+        else
+        {
+            for(auto& pick : picks)
+                ADD_FAILURE() << "Unexpected solution "
+                              << hipblaslt_ext::getSolutionNameFromAlgo(handle, pick.algo);
+        }
+
+        EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipFree(storage), hipSuccess);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6Selection_smoke,
+        ::testing::Values(
+            MXFp6SelectionCase{"E2M3_K65536", HIP_R_6F_E2M3, 65536, true, 1.0f, 0.0f, true},
+            MXFp6SelectionCase{"E2M3_K131072", HIP_R_6F_E2M3, 131072, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K32768", HIP_R_6F_E2M3, 32768, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Alpha2", HIP_R_6F_E2M3, 65536, true, 2.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Beta1", HIP_R_6F_E2M3, 65536, true, 1.0f, 1.0f, false},
+            MXFp6SelectionCase{
+                "E3M2_K65536_CanonicalB", HIP_R_6F_E3M2, 65536, false, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{
+                "E2M3_K131584_CanonicalB", HIP_R_6F_E2M3, 131584, false, 1.0f, 0.0f, false}),
+        [](const ::testing::TestParamInfo<MXFp6SelectionCase>& info) {
+            return std::string(info.param.name);
+        });
+
+    // The algo of the registered E2M3 kernel at K = 65536, reused for a problem one of
+    // its predicates rejects (another K, alpha != 1), is refused by the ext and the C
+    // API before anything launches.
+    class RowUniformityMXFp6AlgoReuse_smoke : public ::testing::Test
+    {
+    protected:
+        static constexpr int64_t m           = 4096;
+        static constexpr int64_t n           = 4096;
+        static constexpr int64_t kRegistered = 65536;
+
+        hipblasLtHandle_t handle    = nullptr;
+        void*             a         = nullptr;
+        void*             b         = nullptr;
+        void*             d         = nullptr;
+        void*             scaleA    = nullptr;
+        void*             scaleB    = nullptr;
+        void*             workspace = nullptr;
+        const size_t      dBytes    = m * n * sizeof(uint16_t);
+
+        void SetUp() override
+        {
+            if(!gpuAvailable())
+                GTEST_SKIP() << "No GPU available";
+            if(!onMXFp6RegisteredChip())
+                GTEST_SKIP() << kMXFp6ChipSkip;
+
+            // Sized for the registered K, the largest these cases use: 6-bit elements and
+            // one scale byte per 32 elements of K.
+            const size_t operandBytes = m * kRegistered * 6 / 8;
+            const size_t scaleBytes   = m * kRegistered / 32;
+            for(auto [ptr, bytes] : {std::pair{&a, operandBytes},
+                                     std::pair{&b, operandBytes},
+                                     std::pair{&scaleA, scaleBytes},
+                                     std::pair{&scaleB, scaleBytes}})
+            {
+                ASSERT_EQ(hipMalloc(ptr, bytes), hipSuccess);
+                ASSERT_EQ(hipMemset(*ptr, 0, bytes), hipSuccess);
+            }
+            ASSERT_EQ(hipMalloc(&d, dBytes), hipSuccess);
+            ASSERT_EQ(hipMalloc(&workspace, kWorkspaceBytes), hipSuccess);
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void TearDown() override
+        {
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            for(void* p : {a, b, d, scaleA, scaleB, workspace})
+                if(p)
+                    EXPECT_EQ(hipFree(p), hipSuccess);
+        }
+
+        // Fills D with a pattern a GEMM of zero inputs does not write, so a launch shows.
+        void poisonD()
+        {
+            ASSERT_EQ(hipMemset(d, 0x7f, dBytes), hipSuccess);
+        }
+
+        bool dUntouched()
+        {
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint8_t> host(dBytes);
+            EXPECT_EQ(hipMemcpy(host.data(), d, dBytes, hipMemcpyDeviceToHost), hipSuccess);
+            return std::all_of(host.begin(), host.end(), [](uint8_t byte) { return byte == 0x7f; });
+        }
+
+        hipblasStatus_t setExtProblem(hipblaslt_ext::Gemm& gemm, int64_t k, const float* alpha)
+        {
+            static const float             beta = 0.0f;
+            hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                       HIPBLAS_OP_N,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_16BF,
+                                                       HIP_R_16BF,
+                                                       HIPBLAS_COMPUTE_32F);
+            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            hipblaslt_ext::GemmInputs inputs;
+            inputs.setA(a);
+            inputs.setB(b);
+            inputs.setC(d);
+            inputs.setD(d);
+            inputs.setAlpha(alpha);
+            inputs.setBeta(&beta);
+            inputs.setScaleA(scaleA);
+            inputs.setScaleB(scaleB);
+            return gemm.setProblem(
+                m, n, k, 1, k, k, m, m, k * m, k * n, m * n, m * n, epilogue, inputs, problemType);
+        }
+
+        hipblaslt_ext::Gemm makeGemm()
+        {
+            return hipblaslt_ext::Gemm(handle,
+                                       HIPBLAS_OP_T,
+                                       HIPBLAS_OP_N,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_16BF,
+                                       HIP_R_16BF,
+                                       HIPBLAS_COMPUTE_32F);
+        }
+
+        hipblasLtMatmulAlgo_t registeredAlgo()
+        {
+            const float                                   alpha = 1.0f;
+            hipblaslt_ext::Gemm                           gemm  = makeGemm();
+            hipblaslt_ext::GemmPreference                 preference;
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+            preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+            EXPECT_EQ(setExtProblem(gemm, kRegistered, &alpha), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.algoGetHeuristic(1, preference, picks), HIPBLAS_STATUS_SUCCESS);
+            if(picks.empty())
+            {
+                ADD_FAILURE() << "No solution for the registered problem";
+                return {};
+            }
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
+            return picks[0].algo;
+        }
+
+        hipblasStatus_t cMatmul(int64_t k, float alpha, const hipblasLtMatmulAlgo_t& algo)
+        {
+            const float              beta   = 0.0f;
+            const hipblasOperation_t opA    = HIPBLAS_OP_T;
+            const hipblasOperation_t opB    = HIPBLAS_OP_N;
+            const int32_t            order  = HIPBLASLT_ORDER_COL256_R128_EXT;
+            const uint32_t           mode   = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+            hipblasLtMatmulDesc_t    desc   = nullptr;
+            hipblasLtMatrixLayout_t  la     = nullptr;
+            hipblasLtMatrixLayout_t  lb     = nullptr;
+            hipblasLtMatrixLayout_t  ld     = nullptr;
+            hipblasStatus_t          status = HIPBLAS_STATUS_INTERNAL_ERROR;
+            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&la, HIP_R_6F_E2M3, k, m, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&lb, HIP_R_6F_E2M3, k, n, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, m, n, m) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      la, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      lb, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS)
+            {
+                status = hipblasLtMatmul(handle,
+                                         desc,
+                                         &alpha,
+                                         a,
+                                         la,
+                                         b,
+                                         lb,
+                                         &beta,
+                                         d,
+                                         ld,
+                                         d,
+                                         ld,
+                                         &algo,
+                                         workspace,
+                                         kWorkspaceBytes,
+                                         nullptr);
+            }
+            for(auto* layout : {la, lb, ld})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            return status;
+        }
+    };
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, ExtApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+        const float one = 1.0f;
+        const float two = 2.0f;
+
+        hipblaslt_ext::Gemm gemm = makeGemm();
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(setExtProblem(gemm, 32768, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &two), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, CApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+
+        EXPECT_EQ(cMatmul(kRegistered, 1.0f, algo), HIPBLAS_STATUS_SUCCESS);
+
+        poisonD();
+        EXPECT_EQ(cMatmul(32768, 1.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(cMatmul(kRegistered, 2.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_TRUE(dUntouched()) << "a refused algo launched";
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.

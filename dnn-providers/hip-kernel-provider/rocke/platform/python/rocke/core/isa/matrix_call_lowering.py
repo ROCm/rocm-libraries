@@ -37,12 +37,23 @@ def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
         )
     flavor = lowerer._flavor
     derived = call.declaration(flavor)
-    declared = lowerer._decls.setdefault(call.key, derived)
+    declared = lowerer._decls.get(call.key, derived)
     if declared != derived:
         raise ValueError(
             f"matrix call for {op_id!r} declares {call.key!r} as {derived!r}, but the "
             f"declaration table holds {declared!r}"
         )
+    # Check every value before declarations, bitcasts, padding or gathers can
+    # change the lowerer. Rendering reuses these same form validation rules.
+    for arg in call.args:
+        if isinstance(arg, Imm):
+            arg.argument()
+        elif isinstance(arg, Signedness):
+            arg.argument(_catalog_op(lowerer, op_id))
+        else:
+            call.form(arg).check_operand(lowerer, op, arg.value)
+    call.result.check_result(lowerer, op)
+    lowerer._decls.setdefault(call.key, derived)
     lowerer._need(call.key)
     arguments = []
     for arg in call.args:

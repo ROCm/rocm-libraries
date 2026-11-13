@@ -20,8 +20,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <vector>
-
 #include "rocke/arena.h"
 #include "rocke/dtypes.h"
 #include "rocke/dtypes_internal.h"
@@ -311,7 +309,7 @@ int rocke_i_buffer_access_bytes(
             err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
         return 0;
     }
-    /* Python _SCALE_ENCODING_SCALARS: whole bytes, but no value form in the IR
+    /* Python core.storage.SCALE_ENCODINGS: whole bytes, but no value form in the IR
      * (no LLVM or HIP type in either engine). */
     if(strcmp(elem->name, "e8m0") == 0 || strcmp(elem->name, "e5m3") == 0)
     {
@@ -984,6 +982,13 @@ bool rocke_scheduler_strategy_is_valid(const char* strategy)
 
 size_t rocke_py_str_repr(const char* s, char* out, size_t cap)
 {
+    if(s == NULL)
+    {
+        /* Python repr(None). */
+        if(out != NULL && cap > 0)
+            snprintf(out, cap, "None");
+        return 4;
+    }
     const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
     size_t pos = 0;
     auto put = [&](char ch) {
@@ -1030,13 +1035,14 @@ bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t 
         return false;
     if(reason != NULL && reason_cap > 0)
     {
-        std::vector<char> name(rocke_py_str_repr(strategy, NULL, 0) + 1);
-        rocke_py_str_repr(strategy, name.data(), name.size());
-        snprintf(reason,
-                 reason_cap,
-                 "unsupported scheduler_strategy %s; expected one "
-                 "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
-                 name.data());
+        /* Written in place, so the text truncates as one snprintf would. */
+        size_t pos = (size_t)snprintf(reason, reason_cap, "unsupported scheduler_strategy ");
+        if(pos < reason_cap)
+            pos += rocke_py_str_repr(strategy, reason + pos, reason_cap - pos);
+        if(pos < reason_cap)
+            snprintf(reason + pos,
+                     reason_cap - pos,
+                     "; expected one of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None");
     }
     return true;
 }
@@ -1321,7 +1327,13 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.trap",
 
     /* tile.* gpu_checked_value failure path */
-    "tile.gpu_check_failed"};
+    "tile.gpu_check_failed",
+
+    /* tile.global_addr_of */
+    "tile.global_addr_of",
+
+    /* tile.* buffer f32 atomic add with a cache policy */
+    "tile.buffer_atomic_fadd_f32"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1618,7 +1630,12 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* trap                       */ false,
 
     /* tile.* gpu_checked_value failure path (effectful) */
-    /* gpu_check_failed           */ false};
+    /* gpu_check_failed           */ false,
+
+    /* tile.global_addr_of        */ true,
+
+    /* tile.* buffer f32 atomic add (effectful) */
+    /* buffer_atomic_fadd_f32     */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

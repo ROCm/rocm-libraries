@@ -111,6 +111,7 @@ add_executable(
     TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
+    TestNumericalNoteHeaders.cpp
     TestFlatbufferUtilities.cpp
     TestHandle.cpp
     TestHelpers.cpp

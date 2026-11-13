@@ -507,6 +507,8 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
               SolutionSet<ContractionSolution>({serves}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
               SolutionSet<ContractionSolution>({serves, rejects}));
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING),
+              SolutionSet<ContractionSolution>({serves, rejects}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::HARDWARE_ONLY).size(), 3u);
 }
 
@@ -686,7 +688,6 @@ TEST(LocalKernelMaster, smoke_TopOneSkipsShippedLibrary)
     ASSERT_EQ(top.size(), 1u);
     EXPECT_EQ(top[0], local);
     EXPECT_EQ(f.stub->lastTopRequest, -1);
-    EXPECT_FALSE(f.master.lastFindTopAlreadyRetAll());
 }
 
 TEST(LocalKernelMaster, smoke_UnmappedShapeUsesShippedLibrary)

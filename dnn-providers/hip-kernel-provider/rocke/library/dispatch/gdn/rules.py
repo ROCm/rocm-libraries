@@ -27,21 +27,30 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
     norm_gate_once_applies,
     out_lds_applies,
+    row_loads_applies,
+    row_loads_overrides,
     stream_rows_applies,
     xcd_remap_applies,
 )
-from rocke.dispatch.tuning import KnobAxis, WavesPerEuSpace, axis_knob_names
+from rocke.dispatch.tuning import (
+    KnobAxis,
+    WavesPerEuSpace,
+    axis_knob_names,
+    typed_knobs,
+)
 from rocke.dispatch.tuning.walk import iter_knob_sets
 
 from .axes import (
     AXES,
     CONV_ONCE_AXIS,
     DPP_REDUCE_AXIS,
+    FIELD_DEFAULTS,
     FULL_WAVES_PER_EU,
     INTERLEAVE_COLS_AXIS,
     NORM_GATE_ONCE_AXIS,
     OUT_LDS_AXIS,
     PRODUCTION_WAVES_PER_EU,
+    ROW_LOADS_AXIS,
     STATE_LOAD_HINT_AXIS,
     STATE_STORE_HINT_AXIS,
     STREAM_ROWS_AXIS,
@@ -80,13 +89,10 @@ UNTUNABLE_FIELDS = frozenset(
 )
 
 _KNOB_NAMES = axis_knob_names(AXES) | {"waves_per_eu"}
-_FIELD_DEFAULTS = {f.name: f.default for f in dc.fields(GdnDecodeSpec)}
-assert _KNOB_NAMES <= set(_FIELD_DEFAULTS), _KNOB_NAMES - set(_FIELD_DEFAULTS)
-assert (PROBLEM_FIELDS | TILE_FIELDS) <= set(_FIELD_DEFAULTS)
+assert _KNOB_NAMES <= set(FIELD_DEFAULTS), _KNOB_NAMES - set(FIELD_DEFAULTS)
+assert (PROBLEM_FIELDS | TILE_FIELDS) <= set(FIELD_DEFAULTS)
 assert (
-    PRODUCTION_WAVES_PER_EU[0]
-    == FULL_WAVES_PER_EU[0]
-    == _FIELD_DEFAULTS["waves_per_eu"]
+    PRODUCTION_WAVES_PER_EU[0] == FULL_WAVES_PER_EU[0] == FIELD_DEFAULTS["waves_per_eu"]
 )
 assert set(PRODUCTION_WAVES_PER_EU) <= set(FULL_WAVES_PER_EU)
 
@@ -94,7 +100,7 @@ assert set(PRODUCTION_WAVES_PER_EU) <= set(FULL_WAVES_PER_EU)
 # problem-independent values the knobs are a delta against.
 _SPEC_DEFAULTS = {
     name: default
-    for name, default in _FIELD_DEFAULTS.items()
+    for name, default in FIELD_DEFAULTS.items()
     if name not in PROBLEM_FIELDS | TILE_FIELDS
 }
 
@@ -105,7 +111,7 @@ _SPEC_DEFAULTS = {
 # ``False`` here, and the shared kit stores them as the bools they equal.
 _AXIS_VALUES = {
     axis.name: frozenset(
-        {_FIELD_DEFAULTS[axis.name]}
+        {FIELD_DEFAULTS[axis.name]}
         | {value for choice in axis.choices for _, value in choice}
     )
     for axis in AXES
@@ -123,6 +129,7 @@ _SCOPED_AXES = (
     (STREAM_ROWS_AXIS, stream_rows_applies),
     (INTERLEAVE_COLS_AXIS, interleave_cols_applies),
     (OUT_LDS_AXIS, out_lds_applies),
+    (ROW_LOADS_AXIS, row_loads_applies),
 )
 
 
@@ -137,19 +144,40 @@ def _scoped_axes(applies: Tuple[bool, ...]) -> Tuple[KnobAxis, ...]:
     )
 
 
-def out_of_scope_knobs(base: GdnDecodeSpec, knobs) -> Tuple[str, ...]:
-    """The knobs in ``knobs`` that are well formed but out of scope for
-    ``base``: the ones canonicalization drops on this problem, sorted."""
+def _restates_auto(kernel: GdnDecodeSpec) -> bool:
+    """A forced ``row_loads`` that is the order ``auto`` already picks for
+    ``kernel`` (its knobs and ``waves_per_eu`` included): auto's kernel."""
+    default = FIELD_DEFAULTS["row_loads"]
+    return kernel.row_loads != default and not row_loads_overrides(kernel)
+
+
+def out_of_scope_knobs(
+    base: GdnDecodeSpec, knobs, arch: str = "gfx950"
+) -> Tuple[str, ...]:
+    """The knobs in ``knobs`` (``waves_per_eu`` may be among them) that are
+    well formed but out of scope for ``base``, or a ``row_loads`` that
+    restates auto's order: the ones canonicalization drops on this problem,
+    sorted. Whether ``row_loads`` restates auto is only judged on a spec the
+    kernel accepts (``waves_per_eu`` in range included), so a bad value is
+    reported by resolution under its own name."""
     in_scope = axis_knob_names(_axes_of(base))
-    return tuple(
-        sorted(
-            name
-            for name, value in knobs.items()
-            if name in _AXIS_VALUES
-            and value in _AXIS_VALUES[name]
-            and name not in in_scope
+    known = {
+        name: value
+        for name, value in knobs.items()
+        if name in _AXIS_VALUES and value in _AXIS_VALUES[name]
+    }
+    dropped = {name for name in known if name not in in_scope}
+    outer = knobs.get("waves_per_eu", base.waves_per_eu)
+    if "row_loads" in in_scope and "row_loads" in known and type(outer) is int:
+        # Type the kept knobs as the kit's canonicalizer does (``1`` is
+        # ``True``), so an aliased knob is judged as the canonical one.
+        kept, _ = typed_knobs(
+            {k: v for k, v in known.items() if k not in dropped}, _axes_of(base)
         )
-    )
+        spec = dc.replace(base, **kept, waves_per_eu=outer)
+        if is_valid_spec(spec, arch=arch)[0] and _restates_auto(spec):
+            dropped.add("row_loads")
+    return tuple(sorted(dropped))
 
 
 @dc.dataclass(frozen=True)
@@ -160,8 +188,14 @@ class GdnDecodeSpace(WavesPerEuSpace):
 
     * ``conv_once`` needs ``fuse_conv``; ``norm_gate_once`` and ``out_lds``
       need ``fuse_out_norm``;
-    * ``dpp_reduce``, ``xcd_remap``, ``stream_rows`` and ``interleave_cols``
-      apply on the tiles where they change the emitted code.
+    * ``dpp_reduce``, ``xcd_remap``, ``stream_rows``, ``interleave_cols`` and
+      ``row_loads`` apply on the tiles where they change the emitted code;
+    * a forced ``row_loads`` that is the order ``auto`` picks anyway
+      (``row_loads_overrides`` is False: its knobs and ``waves_per_eu`` give
+      auto that order) is auto's kernel, so it is dropped too (:meth:`inert`).
+      The shared walk applies that drop at each ``waves_per_eu`` value, so
+      at each value a knob set lists one forced order: the one auto does not
+      choose there.
 
     So ``tuning_knobs`` alone (``tuning_id`` ``auto``) carry a configuration
     across shapes: where one of the knobs is out of scope it is dropped and the
@@ -184,6 +218,11 @@ class GdnDecodeSpace(WavesPerEuSpace):
     ``axes.py`` gives it; a pin may name any legal value.
     """
 
+    # Whether a forced row_loads restates auto's order depends on
+    # waves_per_eu, the outer knob, so the shared walk applies inert's drop
+    # at each waves_per_eu value; a pin is canonicalized at its own.
+    outer_dependent_knobs = frozenset({"row_loads"})
+
     def axes(self, base):
         return _axes_of(base)
 
@@ -202,8 +241,9 @@ class GdnDecodeSpace(WavesPerEuSpace):
 
     def out_of_scope(self, base, knobs) -> Tuple[str, ...]:
         """The knobs in ``knobs`` that are well formed but out of scope for
-        ``base``: the ones canonicalization drops on this problem."""
-        return out_of_scope_knobs(base, knobs)
+        ``base`` (or a ``row_loads`` restating auto's order): the ones
+        canonicalization drops on this problem."""
+        return out_of_scope_knobs(base, knobs, arch=self.arch)
 
     def canonicalize(self, base, knobs):
         # The shared kit reads an outer value of another type as the int it
@@ -219,6 +259,11 @@ class GdnDecodeSpace(WavesPerEuSpace):
 
     def build(self, base, knobs):
         return dc.replace(base, **knobs)
+
+    def inert(self, base, kernel):
+        if _restates_auto(kernel):
+            return {"row_loads": f"{kernel.row_loads!r} is auto's order here"}
+        return {}
 
     def validate(self, base, kernel):
         return is_valid_spec(kernel, arch=self.arch)

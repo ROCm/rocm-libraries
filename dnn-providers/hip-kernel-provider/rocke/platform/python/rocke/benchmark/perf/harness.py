@@ -51,7 +51,10 @@ def _write_pmc_input(groups: Sequence[Sequence[str]], path: Path) -> None:
     # group are collected in a single execution, so they are mutually consistent
     # (e.g. busy_cycles/wait_cycles from the same run). counters.group_counters packs
     # as many counters per group as each hardware block's slots allow.
-    path.write_text("".join("pmc: " + " ".join(g) + "\n" for g in groups))
+    text = "".join("pmc: " + " ".join(g) + "\n" for g in groups)
+    path.write_bytes(
+        text.encode("utf-8")
+    )  # LF on every OS; the profiler input is byte-exact
 
 
 def _run_rocprofv3(

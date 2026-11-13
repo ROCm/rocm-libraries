@@ -188,6 +188,15 @@ namespace TensileLite
                     return std::shared_ptr<MySolution>();
                 }
 
+                // Workspace sizing throws for clustered StreamK on grouped GEMM.
+                // Reject the solution so that throw cannot abort the search.
+                if(solution->usesStreamKSpatialCluster())
+                {
+                    if(debug)
+                        PredicateDebugger::printFooter(std::cout, false);
+                    return std::shared_ptr<MySolution>();
+                }
+
                 size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
                 for(size_t idx = 0; idx < problems.size(); idx++)
@@ -224,11 +233,7 @@ namespace TensileLite
                     }
                 }
 
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
 
                 if(debug)
                     PredicateDebugger::printFooter(std::cout, true);
@@ -305,7 +310,13 @@ namespace TensileLite
                 if((*solution->hardwarePredicate)(hardware))
                     useSolution = true;
 
-                if(searchType == SolutionLibrarySearchType::DEFAULT)
+                // Same rejection as findBestSolution(): do not size workspace for a
+                // clustered StreamK solution, which throws on grouped GEMM.
+                // DEFAULT search sizes workspace even when the hardware predicate
+                // failed, so this has to win over that call.
+                if(solution->usesStreamKSpatialCluster())
+                    useSolution = false;
+                else if(searchType == SolutionLibrarySearchType::DEFAULT)
                 {
                     size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
@@ -334,7 +345,7 @@ namespace TensileLite
                             useSolution = false;
                     }
                 }
-                else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                else if(isGemmTypeOnlySearch(searchType))
                 {
                     if(!isGemmTypeSame((*solution), problems[0]))
                         useSolution = false;
@@ -361,11 +372,7 @@ namespace TensileLite
 
             if(useSolution)
             {
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
                 return SolutionSet<MySolution>({solution});
             }
 

@@ -39,7 +39,7 @@ from kernels.common.conv_direct_grouped import DirectConvProblem
 GPU_ARCH = get_device_arch(0)
 
 
-def _problem(N=2, H=20, W=37, C=64, K=3, PAD=1, dtype="bf16", stride=1, **kw):
+def _problem(N=2, H=20, W=37, C=64, K=3, PAD=1, dtype="bf16", stride=1, KW=None, **kw):
     return DirectConvProblem(
         N=N,
         H=H,
@@ -48,7 +48,7 @@ def _problem(N=2, H=20, W=37, C=64, K=3, PAD=1, dtype="bf16", stride=1, **kw):
         cpg=1,
         kpg=1,
         KH=K,
-        KW=K,
+        KW=K if KW is None else KW,
         PAD=PAD,
         stride=stride,
         dtype=dtype,
@@ -103,9 +103,9 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
 
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.common.conv_direct_grouped import PROBLEM_DIMS
-        from rocke.core.backend import conv_direct_dw_fwd_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
         base = DwFwdWmmaSpec(problem=_problem())
         self.assertIsNone(dw_fwd_wmma_reason(base))
@@ -163,14 +163,14 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
         Python's over the AOT grid and a set of rejected specs."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
         from kernels.conv.direct_variants import make_direct_spec
-        from rocke.core.backend import conv_direct_dw_fwd_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
         variant = "direct_dw_fwd_wmma"
         specs = []
@@ -242,6 +242,9 @@ _CASES = (
     (dict(N=1, H=56, W=56, dtype="fp16"), dict(block_h=56, w_fold=1)),
     # A partial channel block (24 channels, 64 per block).
     (dict(C=24, H=13, W=19), dict(block_waves=8, block_h=2, w_fold=4, prefetch_rows=3)),
+    # Rectangular filters: one forward PAD on both axes.
+    (dict(K=3, KW=5, PAD=1, H=17, W=23), dict(block_h=6, w_fold=2)),
+    (dict(K=1, KW=7, PAD=3, H=9, W=30, dtype="fp16"), dict(block_waves=2, block_h=4)),
 )
 
 

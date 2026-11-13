@@ -55,7 +55,7 @@ static void check_every_other_op_returns_its_accumulator_dtype()
         for(int j = 0; j < arch->mma.num_ops; ++j)
         {
             const rocke_mma_op_t* op = &arch->mma.ops[j];
-            if(strcmp(rocke_mma_op_dst_dtype(op), op->c_dtype) == 0)
+            if(strcmp(rocke_mma_op_dst_dtype(op), op->srcs[2].dtype) == 0)
                 continue;
             ++differing;
             CHECK(strcmp(arches[i], "gfx1250") == 0 && is(op, k_op_id), op->op_id);
@@ -71,15 +71,17 @@ static void check_the_row()
     CHECK(op != NULL, k_op_id);
     if(!op)
         return;
-    CHECK(strcmp(op->family, "wmma") == 0 && strcmp(op->a_dtype, "bf16") == 0
-              && strcmp(op->b_dtype, "bf16") == 0 && strcmp(op->c_dtype, "fp32") == 0
+    CHECK(strcmp(op->family, "wmma") == 0 && strcmp(op->srcs[0].dtype, "bf16") == 0
+              && strcmp(op->srcs[1].dtype, "bf16") == 0 && strcmp(op->srcs[2].dtype, "fp32") == 0
               && strcmp(rocke_mma_op_dst_dtype(op), "bf16") == 0,
           k_op_id);
     CHECK(op->m == 16 && op->n == 16 && op->k == 32, k_op_id);
-    CHECK(op->a_frag_len == 16 && op->b_frag_len == 16 && op->c_frag_len == 8
-              && op->wave_size == 32,
+    CHECK(op->srcs[0].frag_len == 16 && op->srcs[1].frag_len == 16 && op->srcs[2].frag_len == 8
+              && op->dst.frag_len == 8 && op->wave_size == 32,
           k_op_id);
-    CHECK(op->a_layout == NULL && op->b_layout == NULL && op->c_layout == NULL, "no lane maps yet");
+    CHECK(op->srcs[0].layout == NULL && op->srcs[1].layout == NULL && op->srcs[2].layout == NULL
+              && op->dst.layout == NULL,
+          "no lane maps yet");
 }
 
 /* One query with result dtype `dst` (NULL: equal to the accumulator) must
@@ -129,6 +131,13 @@ static void check_bare_op_id()
     const char* f32 = rocke_arch_mma_op_id_dst_dtype(k_f32_result_op_id);
     CHECK(f32 != NULL && strcmp(f32, "fp32") == 0, k_f32_result_op_id);
     CHECK(rocke_arch_mma_op_id_dst_dtype("not_a_real_op_id") == NULL, "unknown op_id");
+    const char* c = rocke_arch_mma_op_id_c_dtype(k_op_id);
+    CHECK(c && strcmp(c, "fp32") == 0, "legacy C is the accumulator input");
+    const char* f64 = rocke_arch_mma_op_id_c_dtype("mfma_f64_16x16x4_f64");
+    CHECK(f64 && strcmp(f64, "fp64") == 0, "FP64 source control");
+    CHECK(rocke_arch_mma_op_id_c_dtype(NULL) == NULL, "NULL source ID");
+    CHECK(rocke_arch_mma_op_id_c_dtype("not_a_real_op_id") == NULL, "unknown source ID");
+    CHECK(rocke_arch_mma_op_id_dst_dtype(NULL) == NULL, "NULL result ID");
 
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "bf16f32_result") == ROCKE_OK, k_op_id);

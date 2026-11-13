@@ -210,19 +210,19 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
                                        int                               requestedAlgoCount,
                                        size_t                            maxWorkSpaceBytes)
 {
-    static TensileLite::StringSet emptySet({});
-    static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
-
-    // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
-    // But in that case, we don't need to get GridBased or Prediction which are already returned here
-    static std::mutex           mtx;
-    std::lock_guard<std::mutex> lock(mtx);
-    TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
-
+    // If the #-returned < #-requested, we'll call getAll. But in that case we
+    // don't need GridBased or Prediction, which are already returned above, so
+    // ask for a no-ranking search. This is a per-call argument so that a
+    // concurrent get-all on another handle still sees the full row set.
     std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
 
-    const bool read = getAllSolutions(prob, handle, allSolutionsResults, maxWorkSpaceBytes)
-                      == rocblaslt_status_success;
+    const bool read
+        = getAllSolutions(prob,
+                          handle,
+                          allSolutionsResults,
+                          maxWorkSpaceBytes,
+                          TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)
+          == rocblaslt_status_success;
     if(read)
     {
         int oriReturnAlgoCount = *returnAlgoCount;
@@ -248,8 +248,6 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
         }
     }
 
-    // reset
-    TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
     return read;
 }
 
@@ -1890,6 +1888,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT:
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_BF16;
@@ -2004,6 +2006,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                         matmulDesc->scaleBType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleBType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
@@ -2436,6 +2442,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Block_32_BF16)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT;
@@ -2568,6 +2579,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                             == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                    }
+                    else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                     }
                     else if(matmulDesc->scaleBType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
@@ -3226,6 +3242,7 @@ rocblaslt_status
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
+        bool layoutRuledOut = false;
         if(requestedAlgoCount > 0)
         {
             status = getBestSolutions(prob,
@@ -3235,7 +3252,8 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      pref->max_workspace_bytes,
+                                      &layoutRuledOut);
         }
 
         // Tag the top Tensile result with the hint it was ranked for so a launch
@@ -3270,8 +3288,10 @@ rocblaslt_status
             matmul_desc->bias = nullptr;
         log_api(__func__, "returnAlgoCount", *returnAlgoCount);
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > *returnAlgoCount
+        // Try to get size independent solutions from getAllSolutions(). Its
+        // search loads every shard of the operation, so it is skipped when the
+        // MX scale layout rule emptied the ranked list.
+        if(requestedAlgoCount > *returnAlgoCount && !layoutRuledOut
            && topUpWithSizeIndependentSolutions(handle,
                                                 prob,
                                                 tensile_data,
@@ -3479,6 +3499,7 @@ rocblaslt_status
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
 
+        bool layoutRuledOut = false;
         if(requestedAlgoCount - override_result.size() > 0)
             status
                 = getBestSolutions(handle,
@@ -3486,7 +3507,8 @@ rocblaslt_status
                                    gemmData,
                                    workspaceLimit,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
-                                   results);
+                                   results,
+                                   &layoutRuledOut);
 
         if(override_success)
         {
@@ -3497,22 +3519,24 @@ rocblaslt_status
         log_api(__func__, "returnAlgoCount", results.size());
 
         int duplicated_counts = 0;
-        static TensileLite::StringSet emptySet({});
-        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > results.size())
+        // Try to get size independent solutions from getAllSolutions(), unless
+        // the MX scale layout rule emptied the ranked list, as above.
+        if(requestedAlgoCount > results.size() && !layoutRuledOut)
         {
-            // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
-            // But in that case, we don't need to get GridBased or Prediction which are already returned here
-            static std::mutex mtx;
-            std::lock_guard<std::mutex> lock(mtx);
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
-
+            // If the #-returned < #-requested, we'll call getAll. But in that case we
+            // don't need GridBased or Prediction, which are already returned above, so
+            // ask for a no-ranking search. This is a per-call argument so that a
+            // concurrent get-all on another handle still sees the full row set.
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
             size_t                                         workspaceSizeInBytes = 0;
             if(rocblaslt_status_success
-               == getAllSolutions(gemmData, handle, gemmType, allSolutionsResults, workspaceLimit))
+               == getAllSolutions(gemmData,
+                                  handle,
+                                  gemmType,
+                                  allSolutionsResults,
+                                  workspaceLimit,
+                                  TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING))
             {
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();
@@ -3545,9 +3569,6 @@ rocblaslt_status
 
                 log_api(__func__, "final returnAlgoCount", results.size());
             }
-
-            // reset
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
         }
 
         log_api(__func__, "duplicated counts from getAll", duplicated_counts);

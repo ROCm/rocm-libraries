@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -75,9 +76,6 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
     float* dC   = (float*)dC_managed.get();
     void*  dbuf = (void*)dbuf_managed.get();
 
-    // SpSM structures
-    hipsparseSpMatDescr_t A;
-
     hipsparseSpSMDescr_t descr;
 
     verify_hipsparse_status_success(hipsparseSpSM_createDescr(&descr), "success");
@@ -85,9 +83,7 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
     size_t bsize;
 
     // Create SpSM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsr(&A, m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, dataType),
-        "success");
+    hipsparseLocalCsr   A(m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, dataType);
     hipsparseLocalDnMat B(m, k, m, dB, dataType, order);
     hipsparseLocalDnMat C(m, k, m, dC, dataType, order);
 
@@ -171,7 +167,6 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSM_destroyDescr(descr), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
 #endif
 }
 
@@ -297,9 +292,7 @@ void testing_spsm_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&A, m, m, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr A(m, m, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
     hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
@@ -428,7 +421,6 @@ void testing_spsm_csr(Arguments argus)
     }
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
 #endif
 }
 

@@ -16,6 +16,7 @@ pytest.importorskip(
     "rocke.core.ir", reason="rocke IR substrate required (build-only; no GPU)"
 )
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling import (  # noqa: E402
     InstrClass,
     TileMma,
@@ -44,9 +45,9 @@ def test_instrclass_masks_are_the_hardware_bits():
 def _tile_mma(warp_m, warp_n, tile_k):
     return TileMma(
         (warp_m, warp_n, tile_k),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(_ATOM, _ATOM, _ATOM)),
     )

@@ -13,13 +13,13 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
-#include "rocke/mfma_scale_internal.h"
-#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */
@@ -27,10 +27,10 @@
 /*
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
- * the accumulator fragment length and the result dtype for the atom. Both come
- * from the arch SSOT (core/arch/target): frag lengths from
- * rocke_arch_mma_c_frag_len (the _MMA_FRAGMENT_INFO projection) and the result
- * dtype from rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
+ * the dst fragment length and dtype for the atom. Both come from the
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_dst_frag_len
+ * (the _MMA_FRAGMENT_INFO projection) and the dst dtype from
+ * rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
  *
@@ -52,12 +52,12 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Accumulator fragment length for op_id, from the arch SSOT
- * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
+/* dst fragment length for op_id, from the arch SSOT
+ * (target._frag_info(op_id).dst.frag_len). Returns <= 0 for an unknown atom (the
  * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
-static int rocke_mma_c_frag_len(const char* op_id)
+static int rocke_mma_dst_frag_len(const char* op_id)
 {
-    return rocke_arch_mma_c_frag_len(op_id);
+    return rocke_arch_mma_dst_frag_len(op_id);
 }
 
 /* The result dtype of op_id, from the arch catalog SSOT
@@ -347,7 +347,19 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &attrs, "align", (int64_t)(n * elem_bytes));
+    /* Mirrors ir.py smem_store_vN. The natural alignment is n * elem_bytes,
+     * but that only holds if every address the store can land on is that
+     * aligned. An LDS tile advances by its innermost dimension per row, so a
+     * pad making that dimension a non-multiple of n -- lds_k_pad's whole
+     * purpose -- leaves alternate rows off the natural boundary. gcd bounds
+     * the claim to what every row start actually guarantees. Overstating
+     * alignment is undefined behaviour even where the hardware tolerates the
+     * access; understating it only affects instruction selection. */
+    rocke_attr_set_int(
+        b,
+        &attrs,
+        "align",
+        (int64_t)(rocke_i_smem_vec_align_elems(smem ? smem->type : NULL, n) * elem_bytes));
     rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE_VN, ops, nops, &attrs);
 }
 
@@ -659,7 +671,7 @@ static rocke_value_t* rocke_b_mma_fmt(rocke_ir_builder_t* b,
      * and accumulator element are resolved from the arch SSOT (the Python
      * bare-string code path). A <= 0 frag length means the op_id is unknown to
      * the SSOT (the zero-length _frag_info fallback). */
-    c_frag_len = rocke_mma_c_frag_len(op_id);
+    c_frag_len = rocke_mma_dst_frag_len(op_id);
     if(c_frag_len <= 0)
     {
         return (rocke_value_t*)rocke_i_set_err(

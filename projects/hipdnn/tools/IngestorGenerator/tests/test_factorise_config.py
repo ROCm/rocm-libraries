@@ -108,6 +108,61 @@ class TestRoundTrip:
             k.kernel_source.spec for k in want
         ]
 
+    def test_arms_whose_policy_resolves_an_unpinned_knob_differently_round_trip(
+        self, tmp_path
+    ):
+        """Two arms of one shape leave use_exp2_fast to the kernel's policy, which
+        resolves it to 1 on one and 0 on the other, beside a third arm that pins it.
+        A shape has one `resolved` value per field, so the arms must state theirs."""
+        long_form = _enumerated(
+            [
+                _kernel(
+                    "attn.bf16_sq512_bm128_eu1",
+                    {"dtype": "bf16", "seqlen_q": 512, "block_m": 128},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 128,
+                        "use_exp2_fast": 1,
+                    },
+                ),
+                _kernel(
+                    "attn.bf16_sq512_bm256_eu0",
+                    {"dtype": "bf16", "seqlen_q": 512, "block_m": 256},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 0,
+                    },
+                ),
+                _kernel(
+                    "attn.bf16_sq512_bm256_e1",
+                    {
+                        "dtype": "bf16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": True,
+                    },
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 1,
+                    },
+                ),
+            ]
+        )
+        compact = _compact(long_form)
+        factorise_config._round_trip(long_form, compact)
+        got = _expand(tmp_path, compact)
+        want = _enumerate(tmp_path, long_form)
+        assert [k.name for k in got] == [k.name for k in want]
+        assert [k.metadata for k in got] == [k.metadata for k in want]
+        assert [k.kernel_source.spec for k in got] == [
+            k.kernel_source.spec for k in want
+        ]
+
     def test_a_vocabulary_field_outside_the_spec_round_trips(self, tmp_path):
         """A vocabulary field the spec does not carry reaches the compact form as a
         matcher-spelling `resolved` value, which the expansion must accept."""
