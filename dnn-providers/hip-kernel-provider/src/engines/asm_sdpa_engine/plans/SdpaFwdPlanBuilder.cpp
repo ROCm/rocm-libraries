@@ -9,6 +9,8 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -414,6 +416,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
         HIP_KERNEL_RETURN_FALSE_IF(
             !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
+    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
+    {
+        return false;
     }
 
     const auto& tensorMap = opGraph.getTensorMap();

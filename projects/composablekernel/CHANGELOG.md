@@ -5,6 +5,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ## (Unreleased) Composable Kernel
 
 ### Fixed
+* Fixed CK Tile device compilation for gfx1250-strict, which the target check in `ck_tile/core/config.hpp` rejected.
 * Fixed all-zero CK Tile FMHA forward output on gfx11 with compilers that promote homogeneous struct allocas to vectors. `PermuteWarpGemmCToA` accessed past its thread buffers.
 * Fixed wrong CK Tile FMHA backward gradients on gfx11 caused by a strict-aliasing violation in `PermuteWarpGemmCToA`, which accessed 16-bit thread buffers through `uint32_t` lvalues.
 * Fixed FP8 format selection in the XDL FP8 GEMM, convolution, MoE, elementwise, CK Tile FlatMM, and grouped-quantization examples when built for gfx942 and gfx950 together. The affected examples select FNUZ or OCP types for the active device and retain native FP8 instructions.
@@ -16,6 +17,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
 * Fixed memory faults of CK Tile TDM transfers on gfx1250. The TDM and prefetch paths of the tile window read the tensor descriptor through a dangling reference, which some compilers fold to `INT32_MAX` tensor dimensions and strides.
 * Fixed the CK Tile GEMM Stream-K dispatcher rejecting linear and tree reduction kernels whose C store is narrower than 4 bytes, so fp16 and bf16 problems with an odd N (for example N = 1) get a linear or tree reduction kernel.
+* Fixed CK Tile FMHA bf16 accuracy in builds that compile `generate.py` output with their own build system (such as PyTorch).
 
 ### Added
 

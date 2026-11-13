@@ -23,9 +23,11 @@
  # THE SOFTWARE.
  #
  ###############################################################################
- set(ReductionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ add_hiptensor_test_objects(hiptensor_reduction_test_objects
  ${CMAKE_CURRENT_SOURCE_DIR}/reduction_resource.cpp
  ${CMAKE_CURRENT_SOURCE_DIR}/reduction_test.cpp)
+ set(ReductionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ $<TARGET_OBJECTS:hiptensor_reduction_test_objects>)
 
 #  tests
 set (ReductionTestSources ${ReductionCommonSources}

@@ -976,7 +976,7 @@ def cmake_build(Map conf=[:]){
             // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
             // So no ninja trace processing needed here
             if (!params.BUILD_INSTANCES_ONLY){
-                if (!runAllUnitTests ){
+                if (!runAllUnitTests){
                     // Smart Build: Run smart_build_and_test.sh
                     if( !setup_args.contains("gfx1250") ){
                     sh """
