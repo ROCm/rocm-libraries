@@ -62,11 +62,61 @@ the same loop and the same reduction, whichever wave and tile it falls in, and
 StaggerU is 0. The kernels therefore declare `uniformSummationOrder: true` in
 `custom.config`, so hipBLASLt can select them under uniform summation order.
 
+## `wvSplitKQ_vllm_f8_{bf16,f16}_tn_n<N>_y<YTILE>u<UNRL>`
+
+FP8 (E4M3) A and B with scalar scales, BF16 or FP16 C and D, FP32 accumulate,
+hipBLASLt TN with `n = N` tokens:
+
+```
+D[m + n*ldd] = alpha * scaleA * scaleB * sum_k A[m*lda + k] * B[n*ldb + k]
+               + beta * C[m + n*ldc]
+```
+
+This is what `torch._scaled_mm` reaches hipBLASLt with for FP8 linear layers
+with per-tensor scales, the GEMMs vLLM sends to `wvSplitKQ` for up to 4 tokens.
+Block `(64, 16)`, grid = device CU count, persistent over `m`. Each lane loads
+16 FP8 bytes of K at a time; each wave reduces `YTILE` rows with `UNRL` such
+loads per lane in flight and accumulates with `v_mfma_f32_16x16x32_fp8_fp8`.
+
+The main loop, the MFMA accumulation and the DPP reduction are vLLM's
+`wvSplitKQ_hf_sml_` and `wvSplitKQ_hf_`. Each kernel picks one at run time:
+when all `N * K` token bytes fit the 160 KB of LDS they are staged once for the
+workgroup's lifetime (`sml`); otherwise the bytes that fit are staged and the
+rest are read from global memory (`hf_`). Changes from vLLM:
+
+- alpha/beta epilogue with separate C and D and their own leading dimensions;
+  C is not read when `beta == 0`;
+- the scales are folded into alpha; a null scale address reads as 1;
+- the tokens are staged packed at stride K, reading only the K valid bytes of
+  each token, so a padded `ldb` neither overflows LDS nor reads past the last
+  token; LDS DMA is used only when every token row is 16-byte aligned;
+- 64-bit row offsets;
+- vLLM's host-side wave balancing (`mindiv`) is computed on the device, in
+  closed form;
+- the `sml` path handles `m` that is not a multiple of `YTILE`, like `hf_`;
+- no bias.
+
+| C and D | n | Tiles (YTILE, UNRL) |
+| ------- | - | ------------------- |
+| BF16, FP16 | 1, 2 | (2, 2) |
+| BF16, FP16 | 3, 4 | (2, 1) |
+
+These are vLLM's tiles for each `n`. gfx950 only: the kernels size their LDS
+stage for its 160 KB per CU and use its OCP FP8 encoding.
+
+Predicated in `custom.config`: `batch == 1`, `n == N`, `K % 16 == 0`, and unit
+strides on all four tensors. Rows past `m` read the last row and are not
+written, so `m` needs no bound, and K needs none either. Rows are reduced as in
+the BF16 and FP16 kernels, so these kernels also declare
+`uniformSummationOrder: true`.
+
 ## Kernarg preload
 
 The kernels take the arguments of the rocBLAS wvSpltK kernels, in the same
 order: 72 bytes, of which the first 14 dwords (everything the staging and the
-K loop read) are preloaded into SGPRs. `n` is passed but unused.
+K loop read) are preloaded into SGPRs. `n` is passed but unused. The FP8
+kernels append the scale A and scale B addresses (88 bytes), with the same
+preload.
 
 ## Library logic
 
@@ -114,10 +164,23 @@ The files use the MI350 (`0x75a0`) header. MI355X searches its own tuned logic
 (`gfx950_id75a3`) first, so its tuned sizes keep their kernels. On MI350, the
 ranges come before skinny sizes tuned in the same device's Bias libraries.
 
+The FP8 kernels are picked through `gfx950_Cijk_Alik_Bljk_F8BS_BH_SAB_UserArgs.yaml`
+(BF16 D) and `gfx950_Cijk_Alik_Bljk_F8HS_BH_SAB_UserArgs.yaml` (FP16 D), in the
+same directory. Their problem type is plain GEMM with scalar A and B scales.
+The BF16 file reuses the header of the shipped plain FP8 GEMM logic
+(`gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_F8BS_BH_SAB_UserArgs.yaml`), so
+its tuned sizes keep their kernels. gfx950 ships no plain FP8 GEMM logic with
+FP16 D, so the FP16 file forms a placeholder of its own, with the same header
+and D's data types set to FP16. Problems with a bias, an activation or a
+scale-alpha vector, scale vectors, or `K % 16 != 0` fall through to the
+libraries they reach today. The rows follow vLLM's dispatch: every `n` up to
+4 from K = 1024, where the 64 lanes of a wave first get 16 bytes of K each.
+
 ## Tensile metadata
 
 Each `.s` embeds its Tensile `custom.config`, generated from the Tensile YAML
-for its type and `n`, `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml`, which
+for its type and `n`, `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml` (or
+`custom_vllm_wvsplitkq_f8_{bf16,f16}_tn_n<N>.yaml` for the FP8 kernels), which
 lists that `n`'s tiles. To refresh one, delete the existing block first:
 `AddCustomConfig` will not overwrite it. Replacement assembly must stay at code
 object version 4 (see `../README.md`) and keep its `.amdgcn_target` /

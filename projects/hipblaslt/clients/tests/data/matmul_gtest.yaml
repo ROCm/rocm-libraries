@@ -141,6 +141,49 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# Skinny FP8 TN GEMMs with scalar A and B scales that library logic routes to the
+# vLLM wvSplitKQ custom kernels on gfx950: padded leading dimensions they must honor
+# (ldb 2052 and 2056 also keep the tokens off 16-byte boundaries), m not a multiple
+# of the wave tile, n * K past the LDS stage (4 x 41984), a scale on only A or only
+# B, n = 5, and general-batched (pointer-array) problems they cannot run, which must
+# fall back to other kernels.
+- name: matmul_skinny_f8_tn_dst_bf16
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  transA: T
+  transB: N
+  matrix_size: &skinny_f8_tn_sizes
+    - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 2, K: 1024, lda: 1040, ldb: 1056, ldc: 1048, ldd: 1056 }
+    - { M: 1027, N: 3, K: 2048, lda: 2048, ldb: 2056, ldc: 1027, ldd: 1032 }
+    - { M: 1024, N: 4, K: 2048, lda: 2064, ldb: 2052, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 8192, N: 1, K: 4096, lda: 4096, ldb: 4096, ldc: 8192, ldd: 8192 }
+    - { M: 1031, N: 4, K: 41984, lda: 41984, ldb: 41984, ldc: 1031, ldd: 1031 }
+  alpha: 1
+  beta: [0, 2]
+  scaleA: [0, 1]
+  scaleB: [0, 1]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '950'
+
+- name: matmul_skinny_f8_tn_dst_f16
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_fp16
+  transA: T
+  transB: N
+  matrix_size: *skinny_f8_tn_sizes
+  alpha: 1
+  beta: [0, 2]
+  scaleA: [0, 1]
+  scaleB: [0, 1]
+  batch_mode: [0, 1]
+  batch_count: 1
+  gpu_arch: '950'
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
