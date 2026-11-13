@@ -723,8 +723,8 @@ BREADTH = {
     (GFX950_16, "1x1"): [(CF, (64, 128, 2, 2, 32), (4,))],
     (GFX950_16, "5x5r1"): [(CF, (64, 64, 2, 2, 64), (2,))],
     (GFX950_16, "3x3s2ph"): [(CF, (128, 64, 4, 2, 32), (2,))],
-    # gfx942 (MI325X): resnet50 c256 k1024 14^2 1x1 158 against 318 us, inception c288 k384
-    # 35^2 s2 597 against 1183.
+    # gfx942 (MI325X): resnet50 c256 k1024 14^2 1x1 158 against 245 us, inception c288 k384
+    # 35^2 s2 595 against 862.
     (CDNA32_16, "1x1"): [(CF, (128, 64, 2, 2, 32), (2,))],
     (CDNA32_16, "3x3s2ph"): [(CF, (128, 64, 2, 2, 32), (1,))],
     # gfx1201 (gfx1101 alike where noted): the same layers 656 against 784 us (gfx1101 2111 against
