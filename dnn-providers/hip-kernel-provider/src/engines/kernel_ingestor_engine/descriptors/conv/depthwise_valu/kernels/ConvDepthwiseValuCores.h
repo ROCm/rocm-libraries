@@ -731,9 +731,17 @@ __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
                                            int iw0,
                                            int k_base)
 {
-    // 16-byte channel vectors when C and BK hold whole vectors (a uniform branch).
+    // 16-byte channel vectors when C and BK hold whole vectors (a uniform branch). On gfx94x a
+    // block of one vector per pixel (16-bit, BK 8: the 3-D LDS config) stages 12-18 % slower
+    // as vectors (lang-compare MI325X; gfx950 neutral, gfx1201 1.4-1.5x faster), so it keeps
+    // the element stage there.
     constexpr int VEC = 16 / static_cast<int>(sizeof(T));
-    if constexpr(BK % VEC == 0)
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+    constexpr int MIN_VECS_PER_PIXEL = 2;
+#else
+    constexpr int MIN_VECS_PER_PIXEL = 1;
+#endif
+    if constexpr(BK % VEC == 0 && BK / VEC >= MIN_VECS_PER_PIXEL)
     {
         if(p.C % VEC == 0)
         {
