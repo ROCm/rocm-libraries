@@ -203,6 +203,11 @@ struct DwX
         const float e = valu_to_f32(a[v ? i : (I)0]);
         return v ? e : 0.0f;
     }
+    /// The element at i when v, else some element of x: for a caller that masks its use.
+    __device__ float f32Unmasked(I i, bool v) const
+    {
+        return valu_to_f32(a[v ? i : (I)0]);
+    }
     __device__ T raw(I i, bool v) const
     {
         T z;
@@ -362,7 +367,7 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
                 const int wo = wo_base + j;
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
-                const float a = X.f32(a_row + (I)iw * p.C, v);
+                const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
                 const float t = acc[j] + w * a;
                 acc[j] = v ? t : acc[j];
             }
@@ -434,7 +439,7 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
         {
             const int iw = wo * p.sw - p.pw + kx * p.dw;
             const bool v = vy & dwIn(iw, p.Wi);
-            const float a = X.f32(a_row + iw, v);
+            const float a = X.f32Unmasked(a_row + iw, v);
             const float t = acc + valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * a;
             acc = v ? t : acc;
         }
@@ -512,7 +517,7 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
                     const int wo = wo_base + j;
                     const int iw = wo * p.sw - p.pw + kx * p.dw;
                     const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
-                    const float a = X.f32(a_row + (I)iw * p.C, v);
+                    const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
                     const float t = acc[j] + w * a;
                     acc[j] = v ? t : acc[j];
                 }
@@ -588,7 +593,7 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
             {
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & dwIn(iw, p.Wi);
-                const float a = X.f32(a_row + iw, v);
+                const float a = X.f32Unmasked(a_row + iw, v);
                 const float t = acc + valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * a;
                 acc = v ? t : acc;
             }
