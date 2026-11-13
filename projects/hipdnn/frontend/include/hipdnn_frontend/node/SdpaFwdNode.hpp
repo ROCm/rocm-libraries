@@ -41,6 +41,10 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
             attributes.left_bound, attributes.right_bound, "SdpaFwdNode"));
 
+        // The deprecated causal flags name different alignments; both set is invalid (SEM-002).
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDeprecatedCausalFlags(
+            attributes.causal_mask, attributes.causal_mask_bottom_right, "SdpaFwdNode"));
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();

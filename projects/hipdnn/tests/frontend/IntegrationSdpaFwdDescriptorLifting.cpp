@@ -373,7 +373,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
         .set_paged_attention_max_seq_len_kv(K_SDPA_PAGED_MAX_SEQ_LEN_KV)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
         .set_mma_core_mode(DataType::HALF);
-    sdpaNode->attributes.causal_mask = true;
+    // Only one deprecated causal flag may be set; SdpaFwdNode rejects the pair.
     sdpaNode->attributes.causal_mask_bottom_right = true;
 
     auto result = originalGraph->validate();
@@ -467,7 +467,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     // Boolean flags (direct member access -- not optional)
     EXPECT_TRUE(attrs.alibi_mask);
     EXPECT_TRUE(attrs.padding_mask);
-    EXPECT_TRUE(attrs.causal_mask);
+    EXPECT_FALSE(attrs.causal_mask);
     EXPECT_TRUE(attrs.causal_mask_bottom_right);
 
     // Optional bool

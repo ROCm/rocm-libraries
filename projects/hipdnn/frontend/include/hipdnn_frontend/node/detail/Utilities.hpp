@@ -494,6 +494,23 @@ inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
     return {};
 }
 
+// Rejects an SDPA node whose deprecated causal_mask and causal_mask_bottom_right members are both
+// set (forward and backward share the rule). Each names a different diagonal alignment, so the
+// pair has no single meaning (SdpaSemanticsRegister SEM-002). The error code is the one
+// cudnn-frontend returned for the pair while it still had both members.
+inline Error validateSdpaDeprecatedCausalFlags(bool causalMask,
+                                               bool causalMaskBottomRight,
+                                               const std::string& nodeName)
+{
+    HIPDNN_RETURN_IF_TRUE(causalMask && causalMaskBottomRight,
+                          ErrorCode::GRAPH_NOT_SUPPORTED,
+                          nodeName
+                              + ": causal_mask and causal_mask_bottom_right cannot both be set. "
+                                "Use diagonal_alignment = TOP_LEFT or BOTTOM_RIGHT with "
+                                "left_bound = -1 and right_bound = 0 instead");
+    return {};
+}
+
 // Validates scalar parameter tensor is properly configured
 // Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set
