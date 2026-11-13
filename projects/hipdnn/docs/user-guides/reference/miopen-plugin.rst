@@ -85,10 +85,14 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``FP32``
      - NCHW, NCDHW
      - Single-node graph⁷
+   * - Resample Forward (pooling, standalone)
+     - ``FP16``, ``BFP16``, ``FP32``
+     - NCHW, NHWC, NCDHW, NDHWC
+     - Single-node graph⁸
 
 .. note::
 
-  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
+  - For annotations ¹ through ⁴ and ⁶ through ⁸, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -148,6 +152,7 @@ Operation notes
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
 - **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip is not supported.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
+- ⁸ **Standalone Resample Forward**: A single-node graph supports ``MAXPOOL``, ``AVGPOOL_EXCLUDE_PADDING`` and ``AVGPOOL_INCLUDE_PADDING`` across ranks 4-5, with packed X and Y sharing one datatype and layout, and an ``FP32`` compute type. Padding must be symmetric and smaller than the window; unless it is all zero, ``MAXPOOL`` needs ``NEG_INF_PAD`` and the average modes need ``ZERO_PAD``. Y must have the floor-mode output size. The index output (``generate_index``) is supported for ``MAXPOOL`` in NCHW/NCDHW only, as ``INT8`` or ``INT32``; with ``INT8`` the input spatial size may not exceed 128, and on ``BFLOAT16`` tensors the padding must be zero (a known MIOpen limitation). The index tensor needs ``generate_index``, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y. On channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile above the scratch limit of MIOpen's tiled kernels (about 128 KiB) aren't supported. In-place execution and override-shape graphs aren't supported. Max pooling ignores NaN inputs. A window with no finite input (all NaN or -inf) gives index 0, even when the window doesn't hold element 0, and Y equal to the datatype's lowest finite value for ``FP32`` and ``FP16``, or -inf for ``BFLOAT16`` (a known MIOpen limitation). For such a window the HIP MLops engine writes index -1, and the CPU reference writes the first in-bounds value and its index.
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs

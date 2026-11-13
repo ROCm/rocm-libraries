@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
@@ -3535,6 +3537,208 @@ inline flatbuffers::FlatBufferBuilder
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
+    return builder;
+}
+
+// A tensor of a ResampleFwdGraphSpec.
+struct ResampleFwdTensorSpec
+{
+    // A dense, non-virtual tensor that is part of the graph.
+    static ResampleFwdTensorSpec dense(int64_t uid,
+                                       std::vector<int64_t> dims,
+                                       std::vector<int64_t> strides,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                                       = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        ResampleFwdTensorSpec tensor;
+        tensor.uid = uid;
+        tensor.dims = std::move(dims);
+        tensor.strides = std::move(strides);
+        tensor.dataType = dataType;
+        return tensor;
+    }
+
+    int64_t uid = 0;
+    std::vector<int64_t> dims;
+    // nullopt leaves the strides field out of the flatbuffer.
+    std::optional<std::vector<int64_t>> strides;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    bool isVirtual = false;
+    bool isRuntimePassByValue = false;
+    std::optional<int64_t> raggedOffsetTensorUid;
+    // false leaves the tensor out of the graph, so the node's reference to `uid` dangles.
+    bool inGraph = true;
+};
+
+// Configuration for a single-node ResampleFwdAttributes graph. The defaults describe a valid graph:
+// fp32 max pooling of a packed NCHW 2x3x6x6 tensor with a 3x3 window, stride 2 and padding 1
+// (NEG_INF_PAD) into 2x3x3x3, without an index.
+struct ResampleFwdGraphSpec
+{
+    static constexpr int64_t X_UID = 1;
+    static constexpr int64_t Y_UID = 2;
+    static constexpr int64_t INDEX_UID = 3;
+
+    // Pools `xDims` with `window`, `stride` and the same `padding` before and after every spatial
+    // dimension: packed channels-first X and Y of `dataType`, Y sized by the floor-mode formula, and
+    // NEG_INF_PAD for MAXPOOL or ZERO_PAD for the average modes. With `indexType`, the node
+    // generates an index into a packed channels-first tensor shaped like Y.
+    static ResampleFwdGraphSpec
+        packed(hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode,
+               const std::vector<int64_t>& xDims,
+               const std::vector<int64_t>& window,
+               const std::vector<int64_t>& stride,
+               const std::vector<int64_t>& padding,
+               hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+               = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+               std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> indexType
+               = std::nullopt)
+    {
+        using hipdnn_data_sdk::utilities::generateStrides;
+
+        std::vector<int64_t> yDims{xDims.at(0), xDims.at(1)};
+        for(size_t i = 0; i + 2 < xDims.size(); ++i)
+        {
+            yDims.push_back((xDims[i + 2] + 2 * padding.at(i) - window.at(i)) / stride.at(i) + 1);
+        }
+
+        ResampleFwdGraphSpec spec;
+        spec.mode = mode;
+        spec.paddingMode = mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
+                               ? hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD
+                               : hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD;
+        spec.x = ResampleFwdTensorSpec::dense(X_UID, xDims, generateStrides(xDims), dataType);
+        spec.y = ResampleFwdTensorSpec::dense(Y_UID, yDims, generateStrides(yDims), dataType);
+        if(indexType.has_value())
+        {
+            spec.index = ResampleFwdTensorSpec::dense(
+                INDEX_UID, yDims, generateStrides(yDims), indexType.value());
+            spec.generateIndex = true;
+        }
+        spec.window = window;
+        spec.stride = stride;
+        spec.setPadding(padding);
+        return spec;
+    }
+
+    // Gives X and Y packed channels-last strides (NHWC, NDHWC). The index keeps its strides.
+    void makeChannelsLast()
+    {
+        using hipdnn_data_sdk::utilities::generateStrides;
+        using hipdnn_data_sdk::utilities::strideOrderNhwc;
+        x.strides = generateStrides(x.dims, strideOrderNhwc(x.dims.size()));
+        y.strides = generateStrides(y.dims, strideOrderNhwc(y.dims.size()));
+    }
+
+    // Sets the same padding before and after every spatial dimension.
+    void setPadding(const std::vector<int64_t>& padding)
+    {
+        prePadding = padding;
+        postPadding = padding;
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode
+        = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL;
+    hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode
+        = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD;
+    ResampleFwdTensorSpec x = ResampleFwdTensorSpec::dense(X_UID, {2, 3, 6, 6}, {108, 36, 6, 1});
+    ResampleFwdTensorSpec y = ResampleFwdTensorSpec::dense(Y_UID, {2, 3, 3, 3}, {27, 9, 3, 1});
+    // Sets the node's index_tensor_uid; nullopt leaves it unset.
+    std::optional<ResampleFwdTensorSpec> index;
+    // nullopt leaves the vector out of the node.
+    std::optional<std::vector<int64_t>> window = std::vector<int64_t>{3, 3};
+    std::optional<std::vector<int64_t>> stride = std::vector<int64_t>{2, 2};
+    std::optional<std::vector<int64_t>> prePadding = std::vector<int64_t>{1, 1};
+    std::optional<std::vector<int64_t>> postPadding = std::vector<int64_t>{1, 1};
+    std::optional<bool> generateIndex;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    bool overrideShapeEnabled = false;
+    // Number of identical resample nodes in the graph.
+    uint32_t nodeCount = 1;
+};
+
+// Builds a ResampleFwdAttributes graph from `spec`. Graph tensor uids are unique, so a tensor
+// whose uid an earlier one already has is emitted once, and the node references it twice.
+inline flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleFwdGraphSpec& spec)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<int64_t> emittedUids;
+
+    const auto addTensor = [&](const ResampleFwdTensorSpec& tensor, const char* name) {
+        if(!tensor.inGraph
+           || std::find(emittedUids.begin(), emittedUids.end(), tensor.uid) != emittedUids.end())
+        {
+            return;
+        }
+        emittedUids.push_back(tensor.uid);
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+            builder,
+            tensor.uid,
+            name,
+            tensor.dataType,
+            tensor.strides.has_value() ? &tensor.strides.value() : nullptr,
+            &tensor.dims,
+            tensor.isVirtual,
+            data_objects::TensorValue::NONE,
+            0,
+            tensor.isRuntimePassByValue,
+            tensor.raggedOffsetTensorUid));
+    };
+
+    addTensor(spec.x, "x");
+    addTensor(spec.y, "y");
+    if(spec.index.has_value())
+    {
+        addTensor(spec.index.value(), "index");
+    }
+
+    const auto optionalVector = [](const std::optional<std::vector<int64_t>>& values) {
+        return values.has_value() ? &values.value() : nullptr;
+    };
+    const auto indexUid = spec.index.has_value()
+                              ? ::flatbuffers::Optional<int64_t>(spec.index->uid)
+                              : ::flatbuffers::Optional<int64_t>(::flatbuffers::nullopt);
+
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    for(uint32_t i = 0; i < spec.nodeCount; ++i)
+    {
+        const auto attributes
+            = data_objects::CreateResampleFwdAttributesDirect(builder,
+                                                              spec.x.uid,
+                                                              spec.y.uid,
+                                                              indexUid,
+                                                              optionalVector(spec.prePadding),
+                                                              optionalVector(spec.postPadding),
+                                                              optionalVector(spec.stride),
+                                                              optionalVector(spec.window),
+                                                              spec.mode,
+                                                              spec.paddingMode,
+                                                              spec.generateIndex);
+
+        const auto name = "resample_fwd_" + std::to_string(i);
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           name.c_str(),
+                                           spec.computeDataType,
+                                           data_objects::NodeAttributes::ResampleFwdAttributes,
+                                           attributes.Union()));
+    }
+
+    const auto graph = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes,
+                                                       flatbuffers::nullopt,
+                                                       spec.overrideShapeEnabled);
+    builder.Finish(graph);
     return builder;
 }
 
