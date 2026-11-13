@@ -8,11 +8,14 @@
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace ck_tile {
-// the Problem will be reused from CShuffleEpilogueProblem
-template <typename Problem_>
+// the Problem will be reused from CShuffleEpilogueProblem. AccElementwise maps each accumulator
+// in place before the conversion to ODataType (element_wise::SaturateFp8E4M3 saturates FP8);
+// PassThrough leaves them as they are.
+template <typename Problem_, typename AccElementwise_ = element_wise::PassThrough>
 struct TdmEpilogue
 {
     using Problem                          = remove_cvref_t<Problem_>;
+    using AccElementwise                   = remove_cvref_t<AccElementwise_>;
     using AsDataType                       = remove_cvref_t<typename Problem::AsDataType>;
     using BsDataType                       = remove_cvref_t<typename Problem::BsDataType>;
     using AccDataType                      = remove_cvref_t<typename Problem::AccDataType>;
@@ -109,9 +112,16 @@ struct TdmEpilogue
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
-        const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
-
-        store_tile(in_lds_window, c_warptile_in_tensor_casted);
+        if constexpr(std::is_same_v<AccElementwise, element_wise::PassThrough>)
+        {
+            store_tile(in_lds_window, cast_tile_pk<ODataType>(lds_tile));
+        }
+        else
+        {
+            auto mapped = lds_tile;
+            tile_elementwise_inout([](auto& v) { AccElementwise{}(v, v); }, mapped);
+            store_tile(in_lds_window, cast_tile_pk<ODataType>(mapped));
+        }
     }
 
     struct EmptyScale
@@ -227,8 +237,8 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
     return make_tensor_view<address_space_enum::lds>(static_cast<ODataType*>(p), desc);
 }
 
-template <typename Problem>
-constexpr bool is_tdm_epilogue(const TdmEpilogue<Problem>*)
+template <typename Problem, typename AccElementwise>
+constexpr bool is_tdm_epilogue(const TdmEpilogue<Problem, AccElementwise>*)
 {
     return true;
 }
