@@ -350,8 +350,10 @@ def permutation_bound(
     - probability cast: ``c`` per weight (round-to-nearest-even), because the
       accumulator consumes cast weights and the normalizer uncast ones, plus half
       the smallest subnormal per key;
-    - FP32 accumulation of the numerator and of the normalizer in any order
-      across ``n_T`` rescaled tiles, ``gamma(keys + n_T)``, and the reciprocal;
+    - accumulation across ``n_T`` rescaled tiles, ``gamma(keys + n_T)``: the
+      normalizer by FP32 additions in any order, the numerator by MFMA calls of
+      eight products, each within eight FP32 units of the summed magnitudes of
+      its accumulator and products; and the reciprocal;
     - the output store: one FP32 product and one round-to-nearest-even
       conversion.
 
