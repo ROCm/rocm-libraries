@@ -5314,6 +5314,20 @@ class Solution(collections.abc.Mapping):
       hasWmmaV3     = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
       swizzleAIsTDM = state["ProblemType"]["SwizzleTensorA"] and bool(state["TDMInst"] & 0x01) and hasWmmaV3
       swizzleBIsTDM = state["ProblemType"]["SwizzleTensorB"] and bool(state["TDMInst"] & 0x02) and hasWmmaV3
+      # The swizzled-TDM read packs one 16-byte ds_load_b128 per lane-half (innerK = 16 // bpe), and the
+      # host swizzle and kernel geometry are built and validated for 1- and 2-byte elements only
+      # (F8/BF8, I8, F16, BF16). Sub-byte types (F4/F6) would otherwise crash the kernel writer.
+      for tc, swizzleTcIsTDM in (("A", swizzleAIsTDM), ("B", swizzleBIsTDM)):
+        if swizzleTcIsTDM and not state.get("UseSubtileImpl"):
+          bpeTc = state["ProblemType"][f"DataType{tc}"].numBytes()
+          if bpeTc not in (1, 2):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports 1- and 2-byte data types only (got {bpeTc} bytes)")
+            return
+          # StreamK starts a workgroup mid-tile in K; the swizzled operand's K start would need the
+          # MI-row scaling (see StreamK._preShuffleRows, subtile-only today). Not supported yet.
+          if isStreamK(state):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support StreamK yet")
+            return
       # Default GlobalReadVectorWidthA
       if state["EnableMatrixInstruction"]:
         if state["GlobalReadVectorWidthA"] < 0:
