@@ -635,10 +635,10 @@ endif()
             )
 
             # test_verify_variant_sets_multi_launch_rocke.py packs with the real compiler and
-            # fails without one. Name the hipcc find_package(hip) resolved, as the packaging
+            # fails without one. Name the HIP compiler configure resolved, as the packaging
             # suite's own ctest entries do: the ROCm bin directory is not on every lane's PATH.
-            if(HIP_HIPCC_EXECUTABLE)
-                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
+            if(HKP_HIP_COMPILER)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIP_COMPILER=${HKP_HIP_COMPILER}")
             endif()
 
             # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
