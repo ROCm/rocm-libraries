@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND a.b.c for ROCm x.y.z
+
+### Optimized
+
+* Improved MTGP32 performance by using one block-wide barrier per generation step instead of two. This affects both the host and device APIs, and the generated values are unchanged.
+
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
 ### Optimized

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -231,13 +231,12 @@ public:
     __forceinline__ __device__ __host__ unsigned int next()
     {
 #ifdef __HIP_DEVICE_COMPILE__
-        unsigned int o = next_thread(threadIdx.x);
+        // Read the shared offset once, before the barrier. See advance_offset() for why
+        // a __syncthreads barrier per step is needed.
+        const unsigned int offset = m_state.offset;
+        const unsigned int o      = next_thread(threadIdx.x, offset);
         __syncthreads();
-        if(threadIdx.x == 0)
-        {
-            m_state.offset = (m_state.offset + blockDim.x) & MTGP_MASK;
-        }
-        __syncthreads();
+        advance_offset(offset, blockDim.x);
         return o;
 #else
         return 0;
@@ -247,22 +246,18 @@ public:
     __forceinline__ __device__ __host__ unsigned int next_single()
     {
 #if defined(__HIP_DEVICE_COMPILE__)
-        unsigned int t   = threadIdx.x;
-        unsigned int d   = blockDim.x;
-        int pos = pos_tbl;
-        unsigned int r;
-        unsigned int o;
+        const unsigned int t      = threadIdx.x;
+        const unsigned int offset = m_state.offset;
+        const unsigned int pos    = pos_tbl;
 
-        r = para_rec(m_state.status[(t + m_state.offset) & MTGP_MASK],
-                     m_state.status[(t + m_state.offset + 1) & MTGP_MASK],
-                     m_state.status[(t + m_state.offset + pos) & MTGP_MASK]);
-        m_state.status[(t + m_state.offset + MTGP_N) & MTGP_MASK] = r;
+        const unsigned int r = para_rec(m_state.status[(t + offset) & MTGP_MASK],
+                                        m_state.status[(t + offset + 1) & MTGP_MASK],
+                                        m_state.status[(t + offset + pos) & MTGP_MASK]);
+        m_state.status[(t + offset + MTGP_N) & MTGP_MASK] = r;
 
-        o = temper_single(r, m_state.status[(t + m_state.offset + pos - 1) & MTGP_MASK]);
+        const unsigned int o = temper_single(r, m_state.status[(t + offset + pos - 1) & MTGP_MASK]);
         __syncthreads();
-        if (t == 0)
-            m_state.offset = (m_state.offset + d) & MTGP_MASK;
-        __syncthreads();
+        advance_offset(offset, blockDim.x);
         return o;
 #else
         return 0;
@@ -308,14 +303,42 @@ private:
 protected:
     /// \brief Generate the next value for thread `thread_idx` and modify state in the process,
     ///   do not update offset.
-    __forceinline__ __device__ __host__ unsigned int next_thread(unsigned int thread_idx)
+    __forceinline__ __device__ __host__
+    unsigned int next_thread(unsigned int thread_idx, unsigned int offset)
     {
         const unsigned int r
-            = para_rec(m_state.status[(thread_idx + m_state.offset) & MTGP_MASK],
-                       m_state.status[(thread_idx + m_state.offset + 1) & MTGP_MASK],
-                       m_state.status[(thread_idx + m_state.offset + pos_tbl) & MTGP_MASK]);
-        m_state.status[(thread_idx + m_state.offset + MTGP_N) & MTGP_MASK] = r;
-        return temper(r, m_state.status[(thread_idx + m_state.offset + pos_tbl - 1) & MTGP_MASK]);
+            = para_rec(m_state.status[(thread_idx + offset) & MTGP_MASK],
+                       m_state.status[(thread_idx + offset + 1) & MTGP_MASK],
+                       m_state.status[(thread_idx + offset + pos_tbl) & MTGP_MASK]);
+        m_state.status[(thread_idx + offset + MTGP_N) & MTGP_MASK] = r;
+        return temper(r, m_state.status[(thread_idx + offset + pos_tbl - 1) & MTGP_MASK]);
+    }
+
+    __forceinline__ __device__ __host__
+    unsigned int next_thread(unsigned int thread_idx)
+    {
+        return next_thread(thread_idx, m_state.offset);
+    }
+
+    /// \brief Publish the offset for the next step. Must be called by every thread of the
+    ///   block, after the barrier that ends the current step, with the offset that the
+    ///   thread read from \p m_state.offset *before* that barrier.
+    ///
+    /// Every thread stores the same value, computed from its own register copy (never by
+    /// re-reading the shared offset, which another wave may already have advanced).
+    /// This needs one barrier per step:
+    /// - Within a step no thread writes \p m_state.offset before the barrier, so every thread
+    ///   reads the same old value.
+    /// - Each thread reads the offset of step k+1 after its own store in step k (program
+    ///   order), and other threads can only store that same value until the barrier of step
+    ///   k+1, so the read is always correct.
+    /// - The status words written in step k are visible in step k+1 because of the barrier,
+    ///   and the words read and written within one step never overlap
+    ///   (pos_tbl + blockDim.x <= MTGP_N, blockDim.x <= MTGP_TN).
+    __forceinline__ __device__ __host__
+    void advance_offset(unsigned int offset, unsigned int step)
+    {
+        m_state.offset = (offset + step) & MTGP_MASK;
     }
 
 public:
