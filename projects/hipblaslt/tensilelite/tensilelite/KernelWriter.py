@@ -4652,6 +4652,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module.addComment1("Begin Each Unroll: Check VGPR.checkin for INT8 LW")
     if kernel.get("ScalarLoadB") and not ScalarLoadB.prefetchAfterGlobalRead(kernel):
       module.add(ScalarLoadB.prefetch(self, kernel))
+    # PGR2DoubleG2L: this copy reads into one G2L set and local-writes the other. The prefetch
+    # before the loop left the second block in the first set, so the first copy stores that one.
+    doubleG2L = bool(kernel.get("PGR2DoubleG2L"))
+    g2lReadSet = 1 - lc % 2 if doubleG2L else 0
+    g2lWriteSwap = lc % 2 if doubleG2L else 0
 
     # swap the order of global read (B->A)
     # - swapAB (grBA=True)
@@ -4689,7 +4694,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if self.states.dcpTokenGate:
         self._dcpAdvanceTokens("Tensor")
 
-    g2lBufIdx1st = 0
+    g2lBufIdx1st = g2lReadSet
     if grBA==True or (kernel["DirectToVgpr%s"%tc1] and isDTVGRSecondBuf):
       # use second buffer
       g2lBufIdx1st = 1
@@ -4717,7 +4722,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.codes.globalReadMXSB = self.globalReadDo(kernel, 1, tensorParameters2nd["MX"], unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx2nd)
     else:
       self.codes.globalReadMXSB = StructuredModule()
-    g2lBufIdx2nd = 0
+    g2lBufIdx2nd = g2lReadSet
     if grBA==True or (kernel["DirectToVgpr%s"%tc2] and isDTVGRSecondBuf):
       # use second buffer
       g2lBufIdx2nd = 1
@@ -4746,8 +4751,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
 
     self.states.vmemLoadsAfterGlobalRead = 0
+    if doubleG2L:
+      # the local writes of this block wait for the other set; this block's reads stay in flight
+      self.states.vmemLoadsAfterGlobalRead += countGlobalRead(self.codes.globalReadA) + countGlobalRead(self.codes.globalReadB)
     if kernel.get("ScalarLoadB") and ScalarLoadB.prefetchAfterGlobalRead(kernel):
-      globalReadIncACode.add(ScalarLoadB.prefetch(self, kernel), 0)
+      lastRead = self.codes.globalReadB if countGlobalRead(self.codes.globalReadB) else self.codes.globalReadA
+      lastRead.footer.add(ScalarLoadB.prefetch(self, kernel))
       self.states.vmemLoadsAfterGlobalRead += 1
 
     self.codes.gl2PrefetchIncrement = Module()
@@ -4924,7 +4933,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersA, swapAB=1)
           else:
-            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
+            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA, swapAB=g2lWriteSwap)
             if "MX" in tensorParametersA:
               self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
             else:
@@ -4933,7 +4942,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
             else:
               self.codes.localWriteMXSB = Module()
-            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
+            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB, swapAB=g2lWriteSwap)
         else:
           self.codes.localWriteA = Module()
           self.codes.localWriteMXSA = Module()
@@ -10066,7 +10075,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
         self.states.a.startVgprG2L = vgprIdx
-        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+        if (("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1) or kernel.get("PGR2DoubleG2L"):
           vgprIdx += self.states.a.numVgprG2LAllocated*2
         else:
           vgprIdx += self.states.a.numVgprG2LAllocated
@@ -10075,7 +10084,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
         self.states.b.startVgprG2L = vgprIdx
-        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+        if (("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1) or kernel.get("PGR2DoubleG2L"):
           vgprIdx += self.states.b.numVgprG2LAllocated*2
         else:
           vgprIdx += self.states.b.numVgprG2LAllocated
