@@ -73,6 +73,11 @@ const std::vector<IngestorPack>& ingestorPacks()
 #ifdef HIPDNN_ENGINE_CONV_FFT
         {"hipkernel:CONV_FFT", &registerConvFftSymbols, &resetConvFftModuleCache},
 #endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
+        {"hipkernel:CONV_GROUP_VALU_WRW",
+         &registerConvGroupValuWrwSymbols,
+         &resetConvGroupValuWrwModuleCache},
+#endif
 #endif
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's

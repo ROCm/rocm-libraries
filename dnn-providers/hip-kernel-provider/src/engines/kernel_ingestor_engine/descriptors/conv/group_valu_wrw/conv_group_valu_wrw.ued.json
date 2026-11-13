@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "42ed130e-589d-5f7f-b78d-66783d601b7b",
+  "name": "hipkernel:CONV_GROUP_VALU_WRW",
+  "graph_match": {
+    "native": "hipkernel.conv_group_valu_wrw.graph_match"
+  },
+  "metadata": "25b0bf51-b1c2-5ba9-9ed7-e9fc2679c504",
+  "knobs": [
+    "cb",
+    "kb",
+    "p",
+    "nw",
+    "dot2",
+    "ring"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}
