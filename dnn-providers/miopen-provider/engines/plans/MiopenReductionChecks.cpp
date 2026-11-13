@@ -177,7 +177,8 @@ void checkOutputDoesNotOverlap(const TensorAttributes& output)
     {
         if(stride <= lastOffset)
         {
-            decline("output tensor strides make distinct elements overlap");
+            decline("output tensor strides are not nested, so distinct elements may overlap: each "
+                    "stride, in increasing order, must exceed the reach of the smaller axes");
         }
         lastOffset += (dim - 1) * stride;
     }

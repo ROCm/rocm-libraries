@@ -268,8 +268,18 @@ TEST(TestMiopenReductionChecks, AcceptsOutputStridePastCombinedReachOfInnerAxes)
 
 TEST(TestMiopenReductionChecks, DeclinesOutputOverlappingOnlyThroughCombinedInnerAxes)
 {
-    EXPECT_TRUE(isDeclinedWith(threeAxisOutputSpec(3),
-                               "output tensor strides make distinct elements overlap"));
+    EXPECT_TRUE(isDeclinedWith(threeAxisOutputSpec(3), "output tensor strides are not nested"));
+}
+
+// The check is sufficient, not exact: y [3, 2] with strides {2, 3} addresses 0, 3, 2, 5, 4, 7, so
+// no two elements share an address, but the stride-3 axis does not step past the reach (4) of the
+// stride-2 axis. The provider documents that such layouts are declined.
+TEST(TestMiopenReductionChecks, DeclinesInterleavedOutputStridesThatDoNotOverlap)
+{
+    auto spec = ReductionGraphSpec::packed(ReductionMode::ADD, {3, 2, 4}, {3, 2, 1});
+    spec.y.strides = std::vector<int64_t>{2, 3, 1};
+
+    EXPECT_TRUE(isDeclinedWith(spec, "output tensor strides are not nested"));
 }
 
 // ============================================================================
