@@ -1132,16 +1132,26 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         {
             return std::nullopt;
         }
+        // Blocks per unit: as many as are resident. CDNA: about 1024 threads per unit (the
+        // configs run at 2 waves per SIMD). RDNA (a WGP of 4 SIMDs): the single-tile
+        // transform-row configs are built for 8 waves per SIMD; the others and the 16-bin layout
+        // take up to 256 registers, so a SIMD holds 6 of them on the 1536-register parts and 4 on
+        // the others. A grid past what is resident runs a second, partly empty round of persistent
+        // blocks (gfx1201 unet c128 bwd, 16-bin k4t1: 9.77 ms at 8 blocks per WGP, 7.76 at the
+        // resident 6).
         long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
-        if(config.bins == 16)
+        if(config.arch != "gfx9")
         {
-            // The 16-bin layout's waves take up to 256 registers: a SIMD holds 6 of them on the
-            // 1536-register RDNA parts, 4 on the others. A grid past what is resident runs a
-            // second, partly empty round of persistent blocks (gfx1201 unet bwd: 1.26x slower).
             const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
-            const bool largeFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
-                                   || arch == "gfx1200" || arch == "gfx1201";
-            perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
+            const long long file = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
+                                           || arch == "gfx1200" || arch == "gfx1201"
+                                       ? 1536
+                                       : 1024;
+            const int kw = config.waves / 4;
+            const bool singleTile
+                = config.bins != 16 && kw > 0 && (config.bk / (16 * kw)) * (config.bt / 16) <= 2;
+            const long long perSimd = singleTile ? 8 : file / 256;
+            perUnit = std::max<long long>(1, 4 * perSimd / config.waves);
         }
         plan.mainBlocks
             = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));
