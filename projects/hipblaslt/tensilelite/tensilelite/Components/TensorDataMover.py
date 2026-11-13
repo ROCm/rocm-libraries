@@ -72,6 +72,21 @@ class TensorDataMoverLoad(TensorDataMover):
         return mod
 
     @staticmethod
+    def swizzledCompRows(mt: int, miRows: int, numComp: int) -> tuple:
+        """(rowsPerComp, replicate) for a wave-separated swizzled-TDM operand.
+
+        The swizzled layout is indivisible below one MI row block (nO), so the
+        macro-tile's mt/MI nO rows are split across the wave components. When they
+        do not divide evenly (e.g. MT=16 -> one nO over two components), every
+        component instead loads the whole tile from the same global address into
+        the same LDS address (identical bytes, so the overlapping writes are benign).
+        """
+        nO = mt // miRows
+        if numComp <= 1 or nO % numComp == 0:
+            return nO // max(numComp, 1), False
+        return nO, True
+
+    @staticmethod
     def swizzledTileStride(tp: Mapping, dstSgprIdx: int, mt: int, bpe: float) -> Module:
         """Bytes between consecutive macro-tiles of a swizzled-TDM operand.
 
@@ -299,7 +314,9 @@ class TensorDataMoverLoad(TensorDataMover):
                 swzMiN      = kernel["MatrixInstM"] if tp["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
                 swzInnerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
                 swzK        = (wavelen // swzMiN) * swzInnerK
-                rowsPerComp = (mt // swzMiN) // numComp
+                rowsPerComp, swzReplicate = self.swizzledCompRows(mt, swzMiN, numComp)
+                if swzReplicate:
+                    rowsPerComp = 0  # every component loads the whole tile from the WG base
                 with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
                     pk = swzTmp.idx
                     mod.add(SAddU32(sgpr(pk), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
