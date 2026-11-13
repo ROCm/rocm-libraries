@@ -756,6 +756,12 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
             "block_size 2147483648 > 1024 (hardware cap) on gfx950",
         ),
         (
+            # (2^21 / 32)^2 = 2^32 waves: a wave count computed in i32 wraps
+            # to 0 and slips under the cap.
+            {"block_tile_m": 2**21, "block_tile_n": 2**21},
+            "block_size 274877906944 > 1024 (hardware cap) on gfx950",
+        ),
+        (
             {"M": 50},
             (
                 "M (50) must be a multiple of 4: a lane reads the A scale codes of 4 "
@@ -780,17 +786,29 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
                 "2147483647: the kernel computes every buffer offset in i32"
             ),
         ),
+        (
+            # A is refused first; C's largest offset, about 1.02e19, would
+            # overflow an i64 computation. The case pins the text only: the
+            # overflow it once caused in the C++ engine shows only under UBSan.
+            {"M": 1_600_000_000, "N": 1_600_000_000, "K": 32, "block_tile_n": 32},
+            (
+                "the largest byte offset into A is 51199999999, expected at most "
+                "2147483647: the kernel computes every buffer offset in i32"
+            ),
+        ),
     ],
     ids=[
         "tile",
         "unset tile",
         "workgroup too large",
         "workgroup size past i32",
+        "wave count past i32",
         "M",
         "K",
         "empty",
         "C past i32 at the padded edge",
         "A past i32",
+        "A refused before C's offset passes i64",
     ],
 )
 def test_both_engines_refuse_invalid_specs(fields, message):
