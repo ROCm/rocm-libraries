@@ -228,6 +228,17 @@ ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
 constexpr auto INVOKE(F&& f, Args&&... args)
     -> decltype(invoke_impl<Fd>::call(::std::forward<F>(f), ::std::forward<Args>(args)...));
 
+template<class, class, class = void>
+struct is_invocable_impl : std::false_type
+{};
+
+template<class F, class... Args>
+struct is_invocable_impl<
+    F,
+    void(Args...),
+    std::void_t<decltype(INVOKE(::std::declval<F>(), ::std::declval<Args>()...))>> : std::true_type
+{};
+
 template<typename AlwaysVoid, typename, typename, typename...>
 struct invoke_result_r_impl
 {};
@@ -387,6 +398,23 @@ using invoke_result = invoke_result_r<void, F, Args...>;
 /// \tparam Args Input type(s) to the function ``F``.
 template<class F, class... Args>
 using invoke_result_t = typename invoke_result<F, Args...>::type;
+
+/// \brief Behaves like ``std::is_invocable``, but allows the use of is_invocable
+/// with device-only lambdas/functors in host-only functions on HIP-clang.
+///
+/// \tparam F Type of the function.
+/// \tparam Args Input type(s) to the function ``F``.
+template<class F, class... Args>
+struct is_invocable
+    : std::integral_constant<bool, detail::is_invocable_impl<F, void(Args...)>::value>
+{};
+
+/// \brief Helper type. It is an alias for ``is_invocable::value``.
+///
+/// \tparam F Type of the function.
+/// \tparam Args Input type(s) to the function ``F``.
+template<class F, class... Args>
+inline constexpr bool is_invocable_v = is_invocable<F, Args...>::value;
 
 /// \brief The type of intermediate accumulator (according to CCCL)
 template<typename Invokable, typename InputT, typename InitT = InputT>

@@ -158,7 +158,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
 
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -318,7 +318,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
 
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     // The different warp sizes
     constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
@@ -925,7 +925,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
 
     using flag_type = unsigned char;
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -1138,7 +1138,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
 
     using flag_type = unsigned char;
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes

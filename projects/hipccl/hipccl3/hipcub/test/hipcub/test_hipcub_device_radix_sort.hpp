@@ -82,29 +82,6 @@ public:
 
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);
 
-template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
-{
-    auto result = test_utils::get_random_data<T>(size,
-                                                 test_utils::numeric_limits<T>::min(),
-                                                 test_utils::numeric_limits<T>::max(),
-                                                 seed_value);
-    test_utils::add_special_values(result, seed_value);
-    return result;
-}
-
-template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
-{
-    using inner_t = typename test_utils::inner_type<T>::type;
-    return test_utils::get_random_data<T>(size,
-                                          test_utils::numeric_limits<inner_t>::min(),
-                                          test_utils::numeric_limits<inner_t>::max(),
-                                          seed_value);
-}
-
 template<bool Descending, class Key>
 auto invoke_sort_keys(void*       d_temporary_storage,
                       size_t&     temporary_storage_bytes,
@@ -233,8 +210,8 @@ void sort_keys()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
-    
-    if(TestFixture::params::use_graphs)
+
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -254,7 +231,8 @@ void sort_keys()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
 
             key_type* d_keys_input;
             key_type* d_keys_output;
@@ -300,7 +278,7 @@ void sort_keys()
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
@@ -312,7 +290,7 @@ void sort_keys()
                                                    end_bit,
                                                    stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -337,12 +315,12 @@ void sort_keys()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -496,7 +474,7 @@ void sort_pairs()
 
     hipStream_t stream = 0; // default
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -516,7 +494,8 @@ void sort_pairs()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             std::vector<value_type>     values_input;
             try
             {
@@ -591,7 +570,7 @@ void sort_pairs()
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_pairs<descending>(d_temporary_storage,
@@ -605,7 +584,7 @@ void sort_pairs()
                                                     end_bit,
                                                     stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -666,12 +645,12 @@ void sort_pairs()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -794,7 +773,7 @@ void sort_keys_double_buffer()
 
     hipStream_t stream = 0; // default
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -814,7 +793,8 @@ void sort_keys_double_buffer()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             key_type*                   d_keys_input;
             key_type*                   d_keys_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
@@ -859,7 +839,7 @@ void sort_keys_double_buffer()
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
@@ -870,7 +850,7 @@ void sort_keys_double_buffer()
                                                    end_bit,
                                                    stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -896,12 +876,12 @@ void sort_keys_double_buffer()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -1035,7 +1015,7 @@ void sort_pairs_double_buffer()
 
     hipStream_t stream = 0; // default
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1055,7 +1035,8 @@ void sort_pairs_double_buffer()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             std::vector<value_type>     values_input;
 
             try
@@ -1134,7 +1115,7 @@ void sort_pairs_double_buffer()
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_pairs<descending>(d_temporary_storage,
@@ -1146,7 +1127,7 @@ void sort_pairs_double_buffer()
                                                     end_bit,
                                                     stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -1213,12 +1194,12 @@ void sort_pairs_double_buffer()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 

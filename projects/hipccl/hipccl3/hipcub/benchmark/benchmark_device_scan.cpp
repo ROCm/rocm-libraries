@@ -31,7 +31,7 @@
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 template<bool Exclusive, class T, class BinaryFunction>
 auto run_device_scan(void*             temporary_storage,

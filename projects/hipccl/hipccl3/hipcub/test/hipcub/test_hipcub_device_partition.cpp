@@ -80,7 +80,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -154,7 +154,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -168,7 +168,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
                 input.size(),
                 stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -202,7 +202,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
                                                           expected_rejected,
                                                           expected_rejected.size()));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -213,7 +213,7 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -229,7 +229,7 @@ TYPED_TEST(HipcubDevicePartitionTests, FlaggedLarge)
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -298,7 +298,7 @@ TYPED_TEST(HipcubDevicePartitionTests, FlaggedLarge)
     HIP_CHECK(hipDeviceSynchronize());
 
     test_utils::GraphHelper gHelper;
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.startStreamCapture(stream);
 
     // Run
@@ -312,7 +312,7 @@ TYPED_TEST(HipcubDevicePartitionTests, FlaggedLarge)
         static_cast<size_t>(input.size()),
         stream));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.createAndLaunchGraph(stream);
 
     HIP_CHECK(hipDeviceSynchronize());
@@ -342,7 +342,7 @@ TYPED_TEST(HipcubDevicePartitionTests, FlaggedLarge)
     ASSERT_NO_FATAL_FAILURE(
         test_utils::assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.cleanupGraphHelper();
 
     HIP_CHECK(hipFree(d_input));
@@ -351,7 +351,7 @@ TYPED_TEST(HipcubDevicePartitionTests, FlaggedLarge)
     HIP_CHECK(hipFree(d_selected_count_output));
     HIP_CHECK(hipFree(d_temp_storage));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -391,7 +391,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
 #endif
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -460,7 +460,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -474,7 +474,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
                 select_op,
                 stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -508,7 +508,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
                                                           expected_rejected,
                                                           expected_rejected.size()));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -518,7 +518,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -544,7 +544,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfLarge)
 #endif
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -610,7 +610,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfLarge)
     HIP_CHECK(hipDeviceSynchronize());
 
     test_utils::GraphHelper gHelper;
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.startStreamCapture(stream);
 
     // Run
@@ -624,7 +624,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfLarge)
         select_op,
         stream));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.createAndLaunchGraph(stream);
 
     HIP_CHECK(hipDeviceSynchronize());
@@ -654,7 +654,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfLarge)
     ASSERT_NO_FATAL_FAILURE(
         test_utils::assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.cleanupGraphHelper();
 
     HIP_CHECK(hipFree(d_input));
@@ -662,7 +662,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfLarge)
     HIP_CHECK(hipFree(d_selected_count_output));
     HIP_CHECK(hipFree(d_temp_storage));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -695,7 +695,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -778,7 +778,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
             HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -795,7 +795,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
                 second_op,
                 stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -829,7 +829,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -841,7 +841,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -856,7 +856,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWayLarge)
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -934,7 +934,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWayLarge)
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
     test_utils::GraphHelper gHelper;
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.startStreamCapture(stream);
 
     // Run
@@ -951,7 +951,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWayLarge)
         second_op,
         stream));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.createAndLaunchGraph(stream);
 
     HIP_CHECK(hipDeviceSynchronize());
@@ -985,7 +985,7 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWayLarge)
 
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         gHelper.cleanupGraphHelper();
 
     HIP_CHECK(hipFree(d_input));
@@ -995,6 +995,6 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWayLarge)
     HIP_CHECK(hipFree(d_selected_counts));
     HIP_CHECK(hipFree(d_temp_storage));
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }

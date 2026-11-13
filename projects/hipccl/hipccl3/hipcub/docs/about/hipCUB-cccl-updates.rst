@@ -102,7 +102,7 @@ Removed functions and classes
    * - ``hipcub::DiscardOutputIterator``
      - Use ``thrust::discard_iterator`` instead.
    * - ``hipcub::DivideAndRoundUp``
-     - Use ``hip::round_up`` instead.
+     - Use ``hip::ceil_div`` instead.
    * - ``hipcub::Division``
      - Use ``hip::std::divides`` instead.
    * - ``hipcub::Equality``

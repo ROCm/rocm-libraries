@@ -124,20 +124,15 @@ class WarpMergeSort
           ValueT,
           LOGICAL_WARP_THREADS,
           ITEMS_PER_THREAD,
-          WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT>,
-          true>
+          WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT>>
 {
 private:
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == HIPCUB_DEVICE_WARP_THREADS;
   constexpr static bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
   constexpr static int TILE_SIZE = ITEMS_PER_THREAD * LOGICAL_WARP_THREADS;
 
-  using BlockMergeSortStrategyT = BlockMergeSortStrategy<KeyT,
-                                                         ValueT,
-                                                         LOGICAL_WARP_THREADS,
-                                                         ITEMS_PER_THREAD,
-                                                         WarpMergeSort,
-                                                         true>;
+  using BlockMergeSortStrategyT
+      = BlockMergeSortStrategy<KeyT, ValueT, LOGICAL_WARP_THREADS, ITEMS_PER_THREAD, WarpMergeSort>;
 
   const unsigned int warp_id;
   const uint64_t member_mask;

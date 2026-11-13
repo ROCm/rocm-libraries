@@ -473,6 +473,29 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     return data;
 }
 
+template<class T>
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
+{
+    auto result = test_utils::get_random_data<T>(size,
+                                                 test_utils::numeric_limits<T>::min(),
+                                                 test_utils::numeric_limits<T>::max(),
+                                                 seed_value);
+    test_utils::add_special_values(result, seed_value);
+    return result;
+}
+
+template<class T>
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
+{
+    using inner_t = typename test_utils::inner_type<T>::type;
+    return test_utils::get_random_data<T>(size,
+                                          test_utils::numeric_limits<inner_t>::min(),
+                                          test_utils::numeric_limits<inner_t>::max(),
+                                          seed_value);
+}
+
 // Windows HIP cannot support allocations >= 4 GiB.
 #ifdef _WIN32
 template<unsigned int MaxPow2 = 27>
@@ -511,6 +534,28 @@ inline std::vector<size_t> get_sizes(T seed_value)
     // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(10, 1, 100000, seed_value);
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    return sizes;
+}
+
+template<unsigned int LogicalWarpSize, class T>
+inline std::vector<int> get_warp_valid_items(T seed_value)
+{
+    // clang-format off
+    std::vector<int> sizes = {
+        -1, 0, 1,
+        LogicalWarpSize,
+        LogicalWarpSize + 1};
+    // clang-format on
+
+    const std::vector<int> random_sizes = {
+        test_utils::get_random_value<int>(2,
+                                          std::max(2, static_cast<int>(LogicalWarpSize)),
+                                          seed_value), /*small size*/
+        test_utils::get_random_value<int>(LogicalWarpSize + 2,
+                                          test_utils::numeric_limits<int>::max(),
+                                          seed_value) /*big size*/
+    };
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
