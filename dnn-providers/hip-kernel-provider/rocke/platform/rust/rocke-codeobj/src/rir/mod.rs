@@ -32,6 +32,7 @@ pub mod regalloc;
 mod reload;
 pub(crate) mod remat;
 pub mod unroll;
+pub mod voff_split;
 mod scan;
 mod scan_line;
 pub mod session;

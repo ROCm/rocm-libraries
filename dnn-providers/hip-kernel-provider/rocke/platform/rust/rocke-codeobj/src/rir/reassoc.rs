@@ -25,10 +25,10 @@ const ATOMS: usize = 6;
 const DEPTH: u32 = 12;
 
 #[derive(Clone)]
-struct Def {
-    kind: OpKind,
-    operands: Vec<ValueId>,
-    konst: Option<i64>,
+pub(super) struct Def {
+    pub(super) kind: OpKind,
+    pub(super) operands: Vec<ValueId>,
+    pub(super) konst: Option<i64>,
 }
 
 /// A linear form: (leaf, coefficient) terms sorted by leaf, coefficients and constant modulo 2^32.
@@ -107,7 +107,7 @@ impl Cx<'_> {
     }
 }
 
-fn collect(region: &Region, defs: &mut [Option<Def>], home: &mut [u32], loops: &mut Vec<(u32, u32)>, at: u32) {
+pub(super) fn collect(region: &Region, defs: &mut [Option<Def>], home: &mut [u32], loops: &mut Vec<(u32, u32)>, at: u32) {
     for op in &region.ops {
         let konst = (op.kind == OpKind::Constant).then(|| op.int_attr("value")).flatten();
         for r in &op.results {

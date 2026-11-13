@@ -88,6 +88,10 @@ pub struct Facts {
     /// an `smem_ptr_add` operand whose result is one, the LDS address of a
     /// DMA load, an `arith.trunc` to i32.
     pub low: FxHashSet<ValueId>,
+    /// The i64 `add`/`sub`/`mul`/`and`/`or`/`xor` results that only a
+    /// `low` address or a truncation reads: computed in 32 bits
+    /// (`low_i64`).
+    pub low_int: FxHashSet<ValueId>,
 }
 
 impl Facts {
@@ -149,7 +153,8 @@ impl Facts {
                 low.remove(&v);
             }
         }
-        Facts { provenance, low }
+        let low_int = super::low_i64::of(kernel, &low);
+        Facts { provenance, low, low_int }
     }
 }
 
@@ -516,6 +521,34 @@ mod tests {
         let facts = Facts::of(&kernel);
         let named = |name: &str| (0..kernel.values.len() as u32).map(ValueId).find(|&v| kernel.name_of(v) == name).expect(name);
         assert!(!facts.low.contains(&named("%a1")) && !facts.low.contains(&named("%a0")) && facts.low.contains(&named("%b1")));
+    }
+
+    /// `dma_kernel` whose %A offset is the i64 product `zext(slab) * 17408 + zext(slab)`, as a ring buffer's
+    /// slot offset is; `extra` adds ops after it.
+    fn wide_offset_kernel(extra: &str) -> String {
+        dma_kernel("", false, 0).replace(
+            "    %zslab : i64 = arith.zext ( %slab )\n",
+            &format!(
+                "    %zs0 : i64 = arith.zext ( %slab )\n    %k : i64 = arith.constant (  ) {{ ity = s:\"i64\", value = i:17408 }}\n    \
+                 %zs1 : i64 = arith.mul ( %zs0, %k )\n    %zslab : i64 = arith.add ( %zs1, %zs0 )\n{extra}"
+            ),
+        )
+    }
+
+    #[test]
+    fn i64_offset_arithmetic_that_only_the_low_dword_reaches_is_computed_in_32_bits() {
+        let kernel = rir::parse::parse(&wide_offset_kernel("")).unwrap_or_else(|e| panic!("{e}"));
+        let facts = Facts::of(&kernel);
+        let named = |name: &str| (0..kernel.values.len() as u32).map(ValueId).find(|&v| kernel.name_of(v) == name).expect(name);
+        assert!(facts.low_int.contains(&named("%zs1")) && facts.low_int.contains(&named("%zslab")));
+        let l = listing(&wide_offset_kernel(""));
+        assert!(!l.contains("s_mul_hi_u32") && !l.contains("v_mad_u64_u32") && !l.contains("s_addc_u32"), "{l}");
+        // The same value compared as an i64 is computed whole (and so is what feeds it).
+        let text = wide_offset_kernel("    %big : i1 = arith.cmp ( %zs1, %zslab ) { pred = s:\"ult\" }\n");
+        let kernel = rir::parse::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        let facts = Facts::of(&kernel);
+        let named = |name: &str| (0..kernel.values.len() as u32).map(ValueId).find(|&v| kernel.name_of(v) == name).expect(name);
+        assert!(!facts.low_int.contains(&named("%zs1")) && !facts.low_int.contains(&named("%zslab")));
     }
 
     #[test]

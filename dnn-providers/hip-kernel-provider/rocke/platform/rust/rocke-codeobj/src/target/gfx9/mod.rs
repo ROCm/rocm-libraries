@@ -40,7 +40,9 @@ pub mod lds_tr;
 pub mod licm_const;
 pub mod lits;
 pub mod loop_align;
+pub mod low_i64;
 pub mod m0_order;
+pub mod m0_uniform_add;
 pub mod mask_splat;
 pub mod masks;
 pub mod legalize;
@@ -54,6 +56,7 @@ pub mod minmax;
 pub mod minmax3;
 pub mod model;
 pub mod pack;
+pub mod pack_coalesce;
 pub mod peep;
 pub mod q38;
 pub mod relief;
@@ -102,6 +105,7 @@ pub fn prepare(f: &mut MFunc) {
         minmax3::run(f);
     }
     zero_acc::run(f);
+    m0_uniform_add::run(f);
     m0_hoist::run(f);
     rules::peephole(f);
     select::run(f);
@@ -116,6 +120,7 @@ pub fn prepare(f: &mut MFunc) {
     if !crate::rir::debug_flag("nopack") {
         pack::run(f);
     }
+    pack_coalesce::run(f);
     masks::reuse(f);
     if f.lever_anywhere("smemsink") {
         smem_sink::run(f);
