@@ -3564,6 +3564,32 @@ Tests:
   alpha_beta: *alpha_beta_range
   graph_test: true
 
+# Graph capture with a user-owned workspace (graph_test + user_allocated_workspace):
+# rocBLAS must not add mem_alloc/mem_free nodes to the graph.
+# bf16 F.linear shapes (N x K weight, M tokens -> gemm_ex T/N with m = N, n = M) with the
+# 79,691,776 B workspace PyTorch provides: the sizes reported on gfx950, plus sizes whose hipBLASLt
+# solutions need workspace on gfx942 (n = 16 and m = 1024).
+- name: gemm_ex_graph_user_workspace
+  category: pre_checkin
+  function:
+    gemm_ex: *hpa_bf16_precision
+  matrix_size:
+    - { M: 2304, N:   16, K: 8192,  lda: 8192,  ldb: 8192,  ldc: 2304, ldd: 2304 }
+    - { M: 2304, N: 1992, K: 8192,  lda: 8192,  ldb: 8192,  ldc: 2304, ldd: 2304 }
+    - { M: 2304, N: 2104, K: 8192,  lda: 8192,  ldb: 8192,  ldc: 2304, ldd: 2304 }
+    - { M: 2304, N: 2168, K: 8192,  lda: 8192,  ldb: 8192,  ldc: 2304, ldd: 2304 }
+    - { M: 2304, N: 2328, K: 8192,  lda: 8192,  ldb: 8192,  ldc: 2304, ldd: 2304 }
+    - { M: 1024, N:   64, K: 32768, lda: 32768, ldb: 32768, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N:  296, K: 32768, lda: 32768, ldb: 32768, ldc: 1024, ldd: 1024 }
+  pointer_mode_device: false
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  use_hipblaslt: 1
+  graph_test: true
+  user_allocated_workspace: 79691776
+
 - name: gemm_size_t
   category: stress
   function:

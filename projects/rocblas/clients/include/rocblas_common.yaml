@@ -658,6 +658,9 @@ Defaults:
   os_flags: ALL
   gpu_arch: ''
   api: C
+  # graph_test: capture the rocBLAS call(s) between handle.pre_test()/post_test() into a HIP graph
+  # and replay it. Enables ROCBLAS_STREAM_ORDER_ALLOC unless user_allocated_workspace is set; with
+  # user_allocated_workspace the captured graph must not contain mem_alloc/mem_free nodes.
   graph_test: false
   repeatability_check: false
   alpha_beta_stride: false
@@ -680,6 +683,8 @@ Defaults:
   pointer_mode_device: true
   stochastic_rounding: false
   outofplace: false
+  # user_allocated_workspace: bytes of device memory passed to rocblas_set_workspace (0 = rocBLAS-managed).
+  # See graph_test for the combined behavior.
   user_allocated_workspace: 0
   compute_type: -1
   use_hipblaslt: -1
