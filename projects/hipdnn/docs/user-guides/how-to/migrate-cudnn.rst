@@ -291,7 +291,9 @@ list, always preceded by ``SelectionHeuristic::Config`` and followed by
 ``SelectionHeuristic::StaticOrdering``. If no applicable engine has a usable
 prediction, the prediction policy declines and ordinary static engine selection
 still runs, so ``graph.create_execution_plans({HeuristicMode::B})`` never fails for
-want of a model. Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
+want of a model. ``HeuristicMode::FALLBACK``, the default, sets no list, and hipDNN's
+built-in default is the mode A list, so it ranks engines exactly as mode A does.
+Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
 
 Both modes rank by one *ranking metric*, ``tflops`` by default: calibrated
 throughput, highest first. ``graph.set_ranking_metric("time")`` ranks by predicted

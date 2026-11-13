@@ -859,7 +859,7 @@ General availability (beyond POC) is planned in the roadmap.
 |----------|---------|---------|
 | `HIPDNN_PLUGIN_DIR` | `hipdnn_plugins/engines/` (relative to cwd) | Engine plugin search directory |
 | `HIPDNN_HEURISTIC_PLUGIN_DIR` | `hipdnn_plugins/heuristics/` | Heuristic plugin search directory |
-| `HIPDNN_HEUR_POLICY_ORDER` | `Config,StaticOrdering` | Heuristic policy priority order |
+| `HIPDNN_HEUR_POLICY_ORDER` | `Config,ModeA,StaticOrdering` | Heuristic policy priority order |
 | `HIPDNN_HEUR_CONFIG_PATH` | (unset) | JSON rule file for config-based engine selection |
 | `HIPDNN_HEUR_FALLBACK_ENGINE_ORDER` | MIOpen-first | Engine preference for static ordering |
 | `HIPDNN_LOG_LEVEL` | `off` | Minimum log severity: `off`, `info`, `warn`, `error`, `fatal` |

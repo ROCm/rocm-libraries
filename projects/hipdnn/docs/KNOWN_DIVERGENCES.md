@@ -8,9 +8,9 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` uses hipDNN's default engine selection and logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `FALLBACK` and `OPENSOURCE` use hipDNN's default engine selection, which is the `ModeA` policy order that `A` requests, so they rank engines as `A` does; `OPENSOURCE` also logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
 
-The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's default engine selection; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the requested policy and every mode orders alike.
+The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's default engine selection, which ranks as `A` does; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the requested policy and every mode orders alike.
 
 ## Note filters
 

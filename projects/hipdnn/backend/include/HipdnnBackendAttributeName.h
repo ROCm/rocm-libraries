@@ -107,7 +107,9 @@ typedef enum
      *      either a policy name, which is hashed via policyNameToId, or a raw
      *      decimal int64 policy ID).
      *   2. This descriptor attribute, if set.
-     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
+     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::ModeA,
+     *      SelectionHeuristic::StaticOrdering]. ModeA ranks engines by their engine-level
+     *      (L1) prediction and declines when no engine has one, so StaticOrdering runs.
      *
      * Type: HIPDNN_TYPE_INT64
      */
