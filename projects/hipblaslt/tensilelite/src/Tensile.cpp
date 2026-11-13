@@ -51,6 +51,11 @@ namespace TensileLite
     {
         return MessagePackLoadLibraryMapping(filename);
     }
+
+    std::map<uint64_t, int> LoadUidMapping(std::string const& filename)
+    {
+        return MessagePackLoadUidMapping(filename);
+    }
 #endif
 
     template <typename MyProblem, typename MySolution>
