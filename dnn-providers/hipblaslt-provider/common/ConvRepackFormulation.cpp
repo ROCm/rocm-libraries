@@ -534,13 +534,18 @@ std::optional<ConvGemmPlanCalls>
         slice = 1;
         probe = bandOf(problem, 0, std::min<int64_t>(outRows, 2));
     }
-    form.columnsFirst = layout != ColumnLayout::CHANNELS_LAST && channelsOutermost(problem.y);
+    const bool channelsLast
+        = layout == ColumnLayout::CHANNELS_LAST || layout == ColumnLayout::STAGED_CHANNELS_LAST;
+    form.columnsFirst = !channelsLast && channelsOutermost(problem.y);
     if(form.columnsFirst
        && !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         form.columnsFirst = false;
     }
-    if(!sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
+    const bool stageAllImages = layout == ColumnLayout::STAGED_CHANNELS_LAST && !banded
+                                && problem.n > 1 && channelsOutermost(problem.y);
+    if(stageAllImages
+       || !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         stageY = true;
         if(!banded)
@@ -897,7 +902,7 @@ std::optional<ConvGemmPlanCalls> stagedOneByOneWeights(const ConvProblem& proble
 }
 
 /// The 1x1 channels-first backward weights of several images in @p layout: batched partials
-/// (CHANNELS_FIRST), staged channels-last (CHANNELS_LAST), or whichever moves fewer workspace
+/// (CHANNELS_FIRST), staged channels-last (CHANNELS_LAST, STAGED_CHANNELS_LAST), or whichever moves fewer workspace
 /// bytes (FOLLOW_Y), each falling back to the other when it does not apply.
 std::optional<ConvGemmPlanCalls>
     oneByOneWeights(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
@@ -913,7 +918,7 @@ std::optional<ConvGemmPlanCalls>
     {
         return batched.has_value() ? batched : staged;
     }
-    if(layout == ColumnLayout::CHANNELS_LAST)
+    if(layout == ColumnLayout::CHANNELS_LAST || layout == ColumnLayout::STAGED_CHANNELS_LAST)
     {
         return staged.has_value() ? staged : batched;
     }
@@ -931,6 +936,12 @@ constexpr int64_t MAX_BATCHED_OUTPUT = int64_t{1} << 20;
 /// Output elements up to which a long reduction is also cut into chunks: few enough tiles that
 /// the libraries' own split of k leaves the GPU idle (3 x 32, 32 x 451).
 constexpr int64_t MAX_CHUNKED_OUTPUT = int64_t{1} << 16;
+/// Shortest reduction a forward or backward data GEMM into a 16-bit output runs as fp32
+/// partials (narrowPartials). hipBLASLt on gfx1100 rounds its own split's parts to the output
+/// at 524288 terms (ratio 11 against the once-rounded tolerance) and stays within it up to
+/// 65536 (ratio <= 1.6, as rocBLAS without a split); the fp32-output kernels the partials need
+/// cost 1.1-4x there below it (14x14 c1024 3x3: 42 -> 168 us).
+constexpr int64_t MIN_NARROW_PARTIALS_K = int64_t{1} << 16;
 
 /// @p call's a and b advanced @p count elements along the reduction (k).
 void advanceReduction(GemmCall& call, int64_t count)
@@ -957,14 +968,30 @@ struct ReductionAxis
 /// images and chunks are parallel work. Each call batches the longest of the three axes and the
 /// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
 /// not qualify or the partials do not fit @p maxWorkspaceBytes.
+/// Forward and backward data qualify, with @p narrowPartials, with one GEMM straight into a
+/// 16-bit y or dx.
+/// The chunks a split reduction cuts a reduction of @p k into: enough that @p tiles output tiles
+/// per chunk reach SPLIT_TARGET_TILES, each chunk at least CHUNK_PIXELS long and the count
+/// dividing k; 1 when no such count above 1 exists.
+int64_t splitChunksFor(int64_t k, int64_t tiles)
+{
+    const int64_t wanted = (SPLIT_TARGET_TILES + tiles - 1) / std::max<int64_t>(tiles, 1);
+    for(int64_t chunks = std::min({wanted, MAX_CHUNKS, k / CHUNK_PIXELS}); chunks > 1; --chunks)
+    {
+        if(k % chunks == 0)
+        {
+            return chunks;
+        }
+    }
+    return 1;
+}
+
 ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
                                        ConvGemmPlanCalls plan,
-                                       size_t maxWorkspaceBytes)
+                                       size_t maxWorkspaceBytes,
+                                       bool splitReduction,
+                                       bool narrowPartials)
 {
-    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS)
-    {
-        return plan;
-    }
     ConvGemmStage* gemmStage = nullptr;
     for(auto& stage : plan.stages)
     {
@@ -984,6 +1011,18 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     }
     const auto& calls = gemmStage->calls;
     const GemmCall& first = calls.front();
+    // Forward and backward data: a single GEMM straight into a 16-bit y or dx only. A library
+    // may split its long reduction and round the parts to the output type between them
+    // (hipBLASLt on gfx11 does), so the partials here are fp32, summed in order and rounded
+    // once. An fp32 output, or an fp32 column matrix, is left as it is.
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS
+       && (!narrowPartials || calls.size() != 1 || first.k < MIN_NARROW_PARTIALS_K
+           || first.d.dataType == data_objects::DataType::FLOAT
+           || first.d.uid
+                  != (problem.direction == ConvDirection::FORWARD ? problem.y.uid : problem.x.uid)))
+    {
+        return plan;
+    }
     const auto images = static_cast<int64_t>(calls.size());
     const int64_t aStep = images > 1 ? calls[1].a.offset - first.a.offset : 0;
     const int64_t bStep = images > 1 ? calls[1].b.offset - first.b.offset : 0;
@@ -1013,7 +1052,11 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     {
         return plan;
     }
-    const int64_t chunks = groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
+    // Split: chunks by the output's tiles (fewer than SPLIT_TARGET_TILES), whatever its size.
+    const int64_t tiles = groups * ((first.m + 127) / 128) * ((first.n + 127) / 128);
+    const int64_t chunks = splitReduction
+                               ? (tiles < SPLIT_TARGET_TILES ? splitChunksFor(first.k, tiles) : 1)
+                               : (groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1);
     if(images < 2 && chunks < 2)
     {
         return plan;
@@ -1098,25 +1141,6 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     return plan;
 }
 
-/// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
-/// k walks), keeping each chunk's partial sum in the output type.
-constexpr int64_t SPLIT_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
-
-/// Whether a backend may sum @p call's reduction in pieces rounded to a narrow d between them.
-bool splitsIntoNarrowOutput(const GemmCall& call)
-{
-    if(call.d.dataType == data_objects::DataType::FLOAT)
-    {
-        return false;
-    }
-    const int64_t aStride = call.transposeA ? 1 : call.a.leadingDimension;
-    const int64_t bStride = call.transposeB ? call.b.leadingDimension : 1;
-    const int64_t bytes = elementBytes(call.a.dataType);
-    int64_t reach = 0;
-    return __builtin_mul_overflow(call.k, std::max(aStride, bStride) * bytes, &reach)
-           || reach >= SPLIT_REDUCTION_BYTES;
-}
-
 /// @p plan with a backward-weights GEMM whose reduction a backend could split (rocBLAS does,
 /// past 2^31 bytes of the operand k walks) summed into an fp32 copy of w in the workspace and
 /// rounded into w once, as the sliced plans already are; nullopt when the copy does not fit.
@@ -1129,7 +1153,7 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
     {
         for(const auto& call : stage.calls)
         {
-            needed = needed || (call.d.uid == problem.w.uid && splitsIntoNarrowOutput(call));
+            needed = needed || (call.d.uid == problem.w.uid && rocblasRoundsReductionChunks(call));
         }
     }
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS || !needed)
@@ -1182,8 +1206,11 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
 
 } // namespace
 
-std::optional<ConvGemmPlanCalls>
-    convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
+std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
+                                               size_t maxWorkspaceBytes,
+                                               ColumnLayout layout,
+                                               bool splitReduction,
+                                               bool narrowPartials)
 {
     auto plan = directGemmCalls(problem);
     if(!plan.has_value())
@@ -1200,8 +1227,65 @@ std::optional<ConvGemmPlanCalls>
     }
     return sumLongReductionsInFp32(
         problem,
-        batchReductionChains(problem, std::move(*plan), maxWorkspaceBytes),
+        batchReductionChains(
+            problem, std::move(*plan), maxWorkspaceBytes, splitReduction, narrowPartials),
         maxWorkspaceBytes);
+}
+
+std::optional<ConvGemmPlanCalls> reducedPrecisionGemmCalls(const ConvProblem& problem)
+{
+    if(problem.dataType != data_objects::DataType::HALF)
+    {
+        return std::nullopt;
+    }
+    const auto shape = oneByOneWeightsOf(problem);
+    // One GEMM already reduces over every image exactly: nothing for a reduced form to gain.
+    if(!shape.has_value() || directGemmCalls(problem).has_value())
+    {
+        return std::nullopt;
+    }
+    const int64_t kg = problem.kPerGroup();
+    const int64_t cg = problem.cPerGroup();
+    ConvGemmStage stage;
+    for(int64_t image = 0; image < problem.n; ++image)
+    {
+        // dw_g (kg x cg) += dy_n,g (kg x pixels) x_n,g^T (pixels x cg), batched over the groups.
+        const MatrixView dy{problem.y.uid,
+                            problem.dataType,
+                            kg,
+                            shape->pixels,
+                            problem.y.strides[1],
+                            shape->yPixelStride,
+                            kg * problem.y.strides[1],
+                            problem.y.offset + image * problem.y.strides[0]};
+        const MatrixView x{problem.x.uid,
+                           problem.dataType,
+                           shape->pixels,
+                           cg,
+                           shape->xPixelStride,
+                           problem.x.strides[1],
+                           cg * problem.x.strides[1],
+                           problem.x.offset + image * problem.x.strides[0]};
+        const MatrixView w{problem.w.uid,
+                           problem.dataType,
+                           kg,
+                           cg,
+                           problem.w.strides[0],
+                           problem.w.strides[1],
+                           kg * problem.w.strides[0],
+                           problem.w.offset};
+        auto call = gemmForViews(dy, x, w, problem.groups);
+        if(!call.has_value())
+        {
+            return std::nullopt;
+        }
+        call->accumulate = image > 0;
+        stage.calls.push_back(*call);
+    }
+    ConvGemmPlanCalls plan;
+    plan.row = ConvGemmRow::ONE_BY_ONE;
+    plan.stages.push_back(std::move(stage));
+    return plan;
 }
 
 } // namespace hipblaslt_plugin

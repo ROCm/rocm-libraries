@@ -38,7 +38,7 @@
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16 (and, with TF32 permission, the
  * three-bf16 fp32 configs). The cases cover every instantiated filter (3x3, 5x5, 7x7, 1x7, 7x1,
- * 3x3x3), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
+ * 3x3x3, 5x5x5), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
  * asymmetric padding, odd extents, channel counts that are not tile multiples (and 3, which only
  * the scalar configs serve), maps wide and deep enough for several blocks, depth splitting, and
  * true convolution (the filter reflected by the weight pre-pass). The CPU reference is
@@ -304,6 +304,8 @@ std::vector<DeviceCase> deviceCases()
     auto deep = dense(64, 64, {9, 8, 8}, {3, 3, 3}, {1, 1, 1}, true);
     deep.n = 1;
     cases.push_back({"Ndhwc3x3x3Deep", deep});
+    cases.push_back({"Ndhwc5x5x5", dense(64, 16, {6, 9, 10}, {5, 5, 5}, {2, 2, 2}, true)});
+    cases.push_back({"Ncdhw5x5x5Pad0", dense(24, 40, {7, 8, 9}, {5, 5, 5}, {0, 0, 0}, false)});
 
     auto convolution = dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
@@ -334,8 +336,41 @@ enum class Math
     THREE_BF16,
 };
 
+/// +inf and -inf planted into @p input (the tensor the reduction reads, besides the filter).
 template <typename T>
-void runCase(ConvShape shape, ConvDirection direction, Math math = Math::NATIVE)
+void plantInfinities(Tensor<T>& input)
+{
+    int64_t count = 1;
+    for(const auto extent : input.dims())
+    {
+        count *= extent;
+    }
+    auto* data = static_cast<T*>(input.rawHostData());
+    data[0] = static_cast<T>(INFINITY);
+    data[count / 2] = static_cast<T>(-INFINITY);
+    input.markHostModified();
+}
+
+/// A result matches its reference: within @p tolerance where the reference is finite, the same
+/// infinity, or NaN where the reference is NaN.
+bool matches(float got, float want, float tolerance)
+{
+    if(std::isnan(want))
+    {
+        return std::isnan(got);
+    }
+    if(std::isinf(want))
+    {
+        return got == want;
+    }
+    return std::fabs(got - want) <= tolerance;
+}
+
+template <typename T>
+void runCase(ConvShape shape,
+             ConvDirection direction,
+             Math math = Math::NATIVE,
+             bool infinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -351,6 +386,10 @@ void runCase(ConvShape shape, ConvDirection direction, Math math = Math::NATIVE)
     const bool forward = direction == ConvDirection::FORWARD;
     (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        plantInfinities(forward ? x : y);
+    }
     Tensor<T>& written = forward ? y : x;
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -434,7 +473,7 @@ void runCase(ConvShape shape, ConvDirection direction, Math math = Math::NATIVE)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
                               << ": got " << got << ", want " << want << ", tolerance "
@@ -501,6 +540,29 @@ TEST_P(TestGpuConvDirectThreeBf16, Float)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
         "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
+}
+
+/// +inf and -inf in the input: every output an infinity reaches is that infinity (NaN where both
+/// meet), as the exact fp32 configs give; the three-bf16 split must not turn them into NaN.
+TEST_P(TestGpuConvDirectThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto properties = currentDeviceProperties();
+    const auto arch = std::string(properties.gcnArchName);
+    if((arch.rfind("gfx9", 0) != 0 && arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx12", 0) != 0)
+       || arch.rfind("gfx906", 0) == 0)
+    {
+        GTEST_SKIP() << "no bf16 matrix cores";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
+}
+
+TEST_P(TestGpuConvDirectThreeBf16, FloatInfinitiesNative)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
 }
 
 std::vector<DeviceCase> threeBf16Cases()

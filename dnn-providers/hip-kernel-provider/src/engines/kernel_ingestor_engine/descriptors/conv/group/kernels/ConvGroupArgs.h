@@ -37,6 +37,10 @@ struct K4Args
     int fph[2];
     int fpw[2];
     long long wps;
+    // Three-bf16 (CONV_GROUP_P 3): the element stride between the input's and the expanded
+    // filter's three parts (hi | hi' | lo and hi | lo | hi'); unused otherwise.
+    long long xps;
+    long long wpt;
 };
 
 /// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the
@@ -63,3 +67,61 @@ struct K4ExpandArgs
     // zero past cg. 0: the block-diagonal layout above.
     int nbi;
 };
+
+/// Backward weights (CONV_GROUP_WRW): per group, filter tap (t, r, s) and channels k, c of it,
+///   dw[g cg + k][c][t][r][s] = sum over images and dy positions of
+///     dy[n][g cg + k][od][oh][ow] x[n][g cg + c][od sd - pd + t][oh ST - ph + r][ow ST - pw + s].
+/// x and dy are read in place, both packed channels-last or both packed channels-first (the
+/// kernel's CF). The dy positions run in tiles of TH rows x TW columns of one (image, output
+/// plane); the grid is (16 CB-channel tiles) x (depth taps) x splits, a split a contiguous run of
+/// `tiles` / `splits` tiles. A workgroup writes its fp32 partials to its split's slot:
+/// [split][g][k][c][tap], taps (t, r, s) flattened; ConvGroupWrwReduce adds the slots in a fixed
+/// order into dw (deterministic, no atomics).
+struct K4WrwArgs
+{
+    const void* x;
+    const void* dy;
+    float* partial;
+    int n, c, cg; // images, channels (all groups, x and dy alike), channels a group
+    int di, hi, wi; // x extents
+    int dout, ho, wo; // dy extents
+    int sd, pd, ph, pw; // depth stride (rows and columns: the compile-time ST), leading padding
+    int ft; // filter depth (a grid axis)
+    int tilesW, tilesH; // column and row tiles of an output plane
+    int splits;
+    long long tiles; // images x output planes x row tiles x column tiles
+    long long partialElems; // dw elements: one slot of the partials
+};
+
+/// The fixed-order sum of the partial slots into dw (element (k, c, t, r, s) at k sK + c sC +
+/// t sT + r sR + s sS, c within the group), in dw's element type; reflect: true convolution,
+/// the taps reflected.
+struct K4WrwReduceArgs
+{
+    const float* partial;
+    void* dw;
+    long long partialElems;
+    long long sK, sC, sT, sR, sS;
+    int slots;
+    int cg;
+    int t, r, s;
+    int reflect;
+};
+
+/// The reduce's slot groups: the slot count rounded up to a power of two, at most 16; a
+/// 256-thread block reduces 256 / groups dw elements.
+#define K4_WRW_REDUCE_GROUPS 16
+#ifdef __HIPCC_RTC__
+#define K4_HD __device__
+#elif defined(__HIPCC__)
+#define K4_HD __host__ __device__
+#else
+#define K4_HD
+#endif
+K4_HD inline int k4WrwReduceGroups(int slots)
+{
+    int g = 1;
+    while(g < slots && g < K4_WRW_REDUCE_GROUPS)
+        g *= 2;
+    return g;
+}

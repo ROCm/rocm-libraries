@@ -3,7 +3,9 @@
 
 #include "engines/rocblas/RocblasMatmulPlanBuilder.hpp"
 
+#include <algorithm>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -11,7 +13,9 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/GemmFormulation.hpp"
 #include "common/MatmulProblem.hpp"
+#include "engines/rocblas/RocblasGemm.hpp"
 #include "engines/rocblas/RocblasGemmPlan.hpp"
 
 namespace hipblaslt_plugin
@@ -21,7 +25,17 @@ bool RocblasMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& /*handle*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    return gemmForMatmul(opGraph).has_value();
+    const auto call = gemmForMatmul(opGraph);
+    // RocblasGemmPlan declines a reduction rocBLAS would round between chunks.
+    if(!call.has_value())
+    {
+        return false;
+    }
+    const auto fitted = fitLibraryLimits({*call});
+    const std::string arch = rocblas_backend::currentGcnArchName();
+    return std::none_of(fitted.begin(), fitted.end(), [&arch](const GemmCall& one) {
+        return rocblasRoundsReductionChunks(one) || rocblasGemvRoundsBf16Products(one, arch);
+    });
 }
 
 size_t RocblasMatmulPlanBuilder::getWorkspaceSize(

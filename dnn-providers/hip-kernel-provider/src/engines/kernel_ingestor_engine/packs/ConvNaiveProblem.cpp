@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/ConvComputeType.hpp"
 #include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
@@ -323,15 +324,6 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
         return std::nullopt;
     }
 
-    // The kernel accumulates in f32: at least the precision any of these asks for.
-    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
-    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
-       && computeType != data_objects::DataType::HALF
-       && computeType != data_objects::DataType::BFLOAT16)
-    {
-        return std::nullopt;
-    }
-
     // Both modes are served: convolution reflects the filter, cross-correlation does not.
     if(fields->mode != data_objects::ConvMode::CROSS_CORRELATION
        && fields->mode != data_objects::ConvMode::CONVOLUTION)
@@ -356,6 +348,12 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
 
     // One element type for all three; mixed precision is another kernel.
     if(x->dataType != w->dataType || x->dataType != y->dataType)
+    {
+        return std::nullopt;
+    }
+
+    // cuDNN's compute types for the element type; the kernel accumulates in f32.
+    if(!convServesComputeType(context.graph.getNodeWrapper(0).computeDataType(), x->dataType))
     {
         return std::nullopt;
     }
@@ -492,8 +490,13 @@ bool withinWorkloadBudget(const ConvNaiveProblem& problem,
     // Lanes are physical: count CUs, two per WGP where HIP reports WGPs (gfx10+).
     const int64_t reported = device_units::computeUnits(device);
     const int64_t computeUnits = reported > 0 ? reported : FALLBACK_COMPUTE_UNITS;
+    const int64_t elementLanes = problem.direction == ConvDirection::BACKWARD_WEIGHTS
+                                     ? NAIVE_WRW_LANES_PER_ELEMENT
+                                     : int64_t{1};
+    const auto outputLanes = pack_features::checkedMultiply(problem.args.total, elementLanes);
+    const int64_t deviceLanes = computeUnits * LANES_PER_COMPUTE_UNIT;
     const int64_t occupiedLanes = std::max<int64_t>(
-        1, std::min<int64_t>(computeUnits * LANES_PER_COMPUTE_UNIT, problem.args.total));
+        1, outputLanes.has_value() ? std::min<int64_t>(deviceLanes, *outputLanes) : deviceLanes);
     const int64_t perLane = problem.multiplyAccumulates / occupiedLanes
                             + (problem.multiplyAccumulates % occupiedLanes != 0 ? 1 : 0);
     return perLane <= NAIVE_MACS_PER_LANE_BUDGET;

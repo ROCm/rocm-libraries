@@ -70,6 +70,18 @@
     {
       "name": "nbo",
       "type": "int"
+    },
+    {
+      "name": "tw",
+      "type": "int"
+    },
+    {
+      "name": "bpu",
+      "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

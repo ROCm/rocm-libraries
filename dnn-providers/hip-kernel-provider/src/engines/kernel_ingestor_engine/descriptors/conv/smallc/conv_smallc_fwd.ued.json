@@ -24,7 +24,8 @@
     "fn",
     "wm",
     "wq",
-    "wn"
+    "wn",
+    "ep"
   ],
   "behavior_notes": [
     "runtime_compilation"

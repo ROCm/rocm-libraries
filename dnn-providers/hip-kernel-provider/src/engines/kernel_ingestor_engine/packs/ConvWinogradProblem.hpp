@@ -21,9 +21,9 @@
 /**
  * @file ConvWinogradProblem.hpp
  * @brief The graph-to-kernel half of the Winograd convolution engines (CONV_WINOGRAD_FWD,
- *        CONV_WINOGRAD_BWD): which graphs they accept, how a catalog config runs one, and the
- *        workspace that takes. Kept apart from the dispatch code so the rules can be tested
- *        without a device.
+ *        CONV_WINOGRAD_BWD, CONV_WINOGRAD_WRW): which graphs they accept, how a catalog config
+ *        runs one, and the workspace that takes. Kept apart from the dispatch code so the rules
+ *        can be tested without a device.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_winograd
 {
@@ -38,12 +38,17 @@ enum class Layout
 };
 
 /// A 2-D, 3x3, stride-1 or stride-2, dilation-1 convolution in the kernels' forward form (see
-/// ConvWinogradArgs.h; stride 2 as its phase convolution, `mode` 1 or 2). Pointers and tile counts are filled per config and launch.
+/// ConvWinogradArgs.h; stride 2 as its phase convolution, `mode` 1 or 2), or (backward weights,
+/// stride 1) in the F(3,r) form of `wrw`. Pointers and tile counts are filled per config and
+/// launch.
 struct WinogradProblem
 {
     conv_naive::ConvNaiveProblem base;
     conv_naive::ConvDirection direction = conv_naive::ConvDirection::FORWARD;
     K5Args args{};
+    /// Backward weights: the shape fields (channels over all groups, extents, padding, flip,
+    /// dw strides); tiles, splits and pointers per config and launch.
+    K5WrwArgs wrw{};
     int64_t xUid = 0;
     int64_t wUid = 0;
     int64_t yUid = 0;
@@ -59,7 +64,8 @@ struct WinogradProblem
  *        Winograd kernels do not serve it.
  *
  * Everything parseConvNaiveProblem gates, plus: two spatial axes, a 3x3 filter, stride 1 or 2
- * (the same on both axes), dilation 1, and every extent, channel count and padding within 32 bits. Any padding,
+ * (the same on both axes; backward weights stride 1 only), dilation 1, and every extent,
+ * channel count and padding within 32 bits. Any padding,
  * asymmetric included (the output extent the graph declares is the one computed), both
  * convolution modes, groups, fp32 / fp16 / bf16, and any operand layout (staged when the
  * variant does not read it).
@@ -67,6 +73,29 @@ struct WinogradProblem
 std::optional<WinogradProblem>
     parseWinogradProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                          conv_naive::ConvDirection direction);
+
+/**
+ * @brief Whether the forward and backward-data engines admit bf16 graphs: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16 set to a true value (the weight-gradient engine
+ *        keeps its own rules).
+ *
+ * The matrix-core bf16 operands round the transformed input and filter tiles to bf16, an error
+ * (about a third of bf16's unit roundoff of each tile's sum of |products|) the convolution's own
+ * precision model does not allow, and MIOpen has no bf16 Winograd to match. Declined until a plan
+ * can carry a numerical note; the bf16 instances and code stay and serve with the variable set.
+ */
+bool bf16Permitted();
+
+/**
+ * @brief Whether the F(4,3) configs (fp32 multipass) are admitted: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43 set to a true value.
+ *
+ * F(4,3)'s transforms (points 0, +-1, +-2) carry entries up to 8 and 1/24: about 27 fp32 ulps of
+ * each tile's sum of |products| on a 3x3 c128 layer, against about 1 for F(2,3) and the 5.7
+ * coefficient MIOpen's fp32 Winograd needs. Declined until a plan can carry a numerical note;
+ * the instances stay and serve with the variable set.
+ */
+bool f43Permitted();
 
 enum class Variant
 {
@@ -76,6 +105,7 @@ enum class Variant
     WREG, ///< fused WMMA with register-built operands (gfx11 / gfx12)
     SREG, ///< fused VALU with register operands (wave64 gfx9)
     COOP, ///< fused WMMA, the block transforms each input chunk once into LDS (gfx11 / gfx12)
+    WRW, ///< backward weights F(3,r): x / dy transforms, a split GEMM per position, dW transform
 };
 
 /// A catalog config's compile-time choices, read from its metadata.
@@ -91,6 +121,14 @@ struct Config
     int waves = 0; ///< fused WMMA waves per workgroup (register / cooperative: derived, checked)
     int bins = 0; ///< register WMMA: bins of a transform row per wave (4 or 2)
     bool f16Math = false; ///< register / cooperative, fp16: the input transform in packed fp16 math
+    /// 1: prefetch further (cooperative: the next item's first chunk behind the epilogue; fused
+    /// VALU: two input chunks ahead).
+    int pf = 0;
+    // Backward weights (variant WRW) reads m = r of F(3,r) (2 or 4), arch = the GEMM's atom
+    // family ("any": FMA on fp32 operands; "gfx9": MFMA 16x16; "gfx950": MFMA 16x16x32, 16-bit;
+    // "gfx11" / "gfx12": WMMA, 16-bit), the block gemmBm (out channels) x gemmBn (in channels)
+    // x gemmBk (tiles), and tm x tn: the FMA thread tile, or a wave's atoms along out and in
+    // channels (waves: their count, 0 for FMA).
 };
 
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.
@@ -103,6 +141,9 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName);
 struct Staging
 {
     bool needed = false;
+    /// Backward weights: a packed NHWC operand transposed to NCHW (copy.dims: N, H x W, C).
+    bool transpose = false;
+    unsigned int transposeBlocks[3] = {1, 1, 1};
     K5CopyArgs copy{};
     size_t workspaceOffset = 0;
     size_t bytes = 0;
@@ -129,6 +170,15 @@ struct Plan
     unsigned int outputBlocks[3] = {1, 1, 1};
     unsigned int mainBlocks = 1;
     unsigned int mainThreads = 256;
+    /// Backward weights: the transformed dy (U), the transformed x (V), the fp32 partials, and
+    /// the GEMM's operand bytes, atom code (CONV_WINO_WRW_ATOM) and threads.
+    K5WrwArgs wrw{}; ///< the problem with this config's tiles, ldt and splits for one full slice
+    size_t partOffset = 0, partBytes = 0;
+    int operandBytes = 0;
+    int wrwAtom = 0;
+    /// CONV_WINO_WRW_OPT: 0 fp32 operands, 1 the I/O type (fp16 graphs' F(3,2)).
+    int wrwOpt = 0;
+    unsigned int gemmThreads = 256;
 };
 
 /// Workspace limit the batch slicing keeps the multipass buffers under (the engine's own

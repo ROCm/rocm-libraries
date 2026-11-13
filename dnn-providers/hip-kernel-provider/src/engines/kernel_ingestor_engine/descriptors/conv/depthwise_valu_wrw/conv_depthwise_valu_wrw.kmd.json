@@ -26,6 +26,26 @@
     {
       "name": "kw",
       "type": "int"
+    },
+    {
+      "name": "q",
+      "type": "int"
+    },
+    {
+      "name": "g",
+      "type": "int"
+    },
+    {
+      "name": "nwg",
+      "type": "int"
+    },
+    {
+      "name": "bpc",
+      "type": "int"
+    },
+    {
+      "name": "mult",
+      "type": "int"
     }
   ]
 }

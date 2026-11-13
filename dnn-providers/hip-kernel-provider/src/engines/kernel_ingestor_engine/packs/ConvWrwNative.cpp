@@ -43,7 +43,9 @@
  * where there is no fp32 matrix core and, on gfx950, a direct loop for 16-bit channels-last
  * unit-stride layers (LDS DMA, swizzled transpose reads, an 8-wave ping-pong, a persistent
  * grid): x and dy are read in place
- * (packed channels-first or channels-last), every filter-width tap of a block's filter rows
+ * (packed channels-first or channels-last; the generic tier, loop 8, through any strides and
+ * at runtime filter widths, strides and dilations, where no specialized config's class serves),
+ * every filter-width tap of a block's filter rows
  * accumulates in registers, and the reduction over images and output positions is split over
  * blocks into fp32 partials in the workspace, which ConvWrwReduce (the same source under a
  * second entry point) adds in split order into dw: deterministic, no atomics. At one split
@@ -73,6 +75,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_wrw.dispatch";
 /// which (the row reduce for K C T R S at few splits).
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvWrwReduce";
 constexpr std::string_view REDUCE_ROWS_ENTRY_POINT = "ConvWrwReduceRows";
+/// Three-bf16's operand split (math 1), the same source again.
+constexpr std::string_view SPLIT_ENTRY_POINT = "ConvWrwSplit";
 
 // Tokens the graph match binds.
 constexpr std::string_view X_TOKEN = "conv_wrw.x.uid";
@@ -107,7 +111,14 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.ns = kernel.getIntMetadata("ns");
     config.wq = kernel.getIntMetadata("wq");
     config.dws = kernel.getIntMetadata("dws");
+    config.pb = kernel.getIntMetadata("pb");
     config.bpu = kernel.getIntMetadata("bpu");
+    // The generic loop's specialized classes (the two tiers); no other loop carries them.
+    if(config.loop == conv_wrw::LOOP_GENERIC)
+    {
+        config.spec = kernel.getStringMetadata("spec");
+    }
+    config.math = kernel.getIntMetadata("math");
     return config;
 }
 
@@ -186,18 +197,31 @@ const std::vector<KernelArgument>& reduceSignature()
     return s_signature;
 }
 
+const std::vector<KernelArgument>& splitSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K3SplitArgs)), 0, ""}};
+    return s_signature;
+}
+
 class PreparedConvWrw : public IngestorPreparedDispatch
 {
 public:
-    /// @p reduce is empty when the kernel writes dw itself (WrwLaunch::dwStore).
+    /// @p reduce is empty when the kernel writes dw itself (WrwLaunch::dwStore); @p split is
+    /// set for three-bf16 (WrwLaunch::split) only.
     PreparedConvWrw(IngestorKernelCode wrw,
                     std::optional<IngestorKernelCode> reduce,
+                    std::optional<IngestorKernelCode> split,
                     const WrwLaunch& launch,
                     const WrwProblem& problem)
         : _wrw(std::move(wrw))
         , _reduce(std::move(reduce))
+        , _split(std::move(split))
         , _args(launch.args)
         , _reduceArgs(launch.reduce)
+        , _splitArgs(launch.splitArgs)
+        , _splitYOffset(launch.splitYOffset)
+        , _splitBytes(launch.splitBytes)
         , _xUid(problem.xUid)
         , _dyUid(problem.dyUid)
         , _dwUid(problem.dwUid)
@@ -224,18 +248,42 @@ public:
         return _reduce->kernelForStream(stream);
     }
 
+    bool hasSplit() const
+    {
+        return _split.has_value();
+    }
+
+    compilation::IRunnableKernel& splitForStream(hipStream_t stream) const
+    {
+        return _split->kernelForStream(stream);
+    }
+
     void argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace,
                  K3Args& args,
-                 K3ReduceArgs& reduce) const
+                 K3ReduceArgs& reduce,
+                 K3SplitArgs& split) const
     {
         args = _args;
         reduce = _reduceArgs;
+        split = _splitArgs;
         args.x = hipdnn_plugin_sdk::findDeviceBuffer(_xUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dy = hipdnn_plugin_sdk::findDeviceBuffer(_dyUid, deviceBuffers, numDeviceBuffers).ptr;
-        args.partial = static_cast<float*>(workspace);
-        reduce.partial = static_cast<const float*>(workspace);
+        // Three-bf16: the kernel reads the split operands; the partials follow them.
+        auto* partial = static_cast<char*>(workspace);
+        if(_split.has_value())
+        {
+            split.x = static_cast<const float*>(args.x);
+            split.dy = static_cast<const float*>(args.dy);
+            split.xs = reinterpret_cast<unsigned short*>(partial);
+            split.ys = reinterpret_cast<unsigned short*>(partial + _splitYOffset);
+            args.x = split.xs;
+            args.dy = split.ys;
+            partial += _splitBytes;
+        }
+        args.partial = reinterpret_cast<float*>(partial);
+        reduce.partial = reinterpret_cast<const float*>(partial);
         reduce.dw
             = hipdnn_plugin_sdk::findDeviceBuffer(_dwUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dwOut = reduce.dw;
@@ -244,8 +292,12 @@ public:
 private:
     IngestorKernelCode _wrw;
     std::optional<IngestorKernelCode> _reduce;
+    std::optional<IngestorKernelCode> _split;
     K3Args _args;
     K3ReduceArgs _reduceArgs;
+    K3SplitArgs _splitArgs;
+    size_t _splitYOffset;
+    size_t _splitBytes;
     int64_t _xUid;
     int64_t _dyUid;
     int64_t _dwUid;
@@ -310,10 +362,20 @@ public:
             reduce->setBlockSize(launch->reduceBlock, 1, 1);
             reduce->setGridSize(launch->reduceGrid, 1, 1);
         }
+        std::optional<IngestorKernelCode> split;
+        if(launch->split)
+        {
+            KernelDefinition splitKernel = kernel;
+            splitKernel.source.entryPoint = std::string(SPLIT_ENTRY_POINT);
+            split = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, splitKernel, options, splitSignature());
+            split->setBlockSize(256, 1, 1);
+            split->setGridSize(launch->splitGrid, 1, 1);
+        }
         wrw.setBlockSize(launch->block, 1, 1);
         wrw.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
         return std::make_unique<PreparedConvWrw>(
-            std::move(wrw), std::move(reduce), *launch, *problem);
+            std::move(wrw), std::move(reduce), std::move(split), *launch, *problem);
     }
 
     void launch(const Handle& handle,
@@ -323,15 +385,20 @@ public:
                 void* workspace) const override
     {
         const auto& dispatch = dynamic_cast<const PreparedConvWrw&>(prepared);
-        if(dispatch.hasReduce() && workspace == nullptr)
+        if((dispatch.hasReduce() || dispatch.hasSplit()) && workspace == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, "conv_wrw needs its partial-sum workspace");
         }
         K3Args args{};
         K3ReduceArgs reduce{};
-        dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, reduce);
+        K3SplitArgs split{};
+        dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, reduce, split);
         const auto stream = handle.getStream();
+        if(dispatch.hasSplit())
+        {
+            dispatch.splitForStream(stream).launch(stream, split);
+        }
         dispatch.wrwForStream(stream).launch(stream, args);
         if(dispatch.hasReduce())
         {

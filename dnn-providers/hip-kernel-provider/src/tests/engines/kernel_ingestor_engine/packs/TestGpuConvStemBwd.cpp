@@ -181,6 +181,8 @@ conv_stem_bwd::StemBwdConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelD
     c.fm = kernel.getIntMetadata("fm");
     c.sh = kernel.getIntMetadata("sh");
     c.sw = kernel.getIntMetadata("sw");
+    c.ft = kernel.getIntMetadata("ft");
+    c.sd = kernel.getIntMetadata("sd");
     return c;
 }
 
@@ -349,6 +351,48 @@ std::vector<DeviceCase> deviceCases()
     threeD.stride = {1, 2, 2};
     threeD.dilation = {1, 1, 1};
     cases.push_back({"ThreeDOfDepthOne", threeD});
+    // Stride 1 (space-to-depth configs too): odd extents (a half super-pixel at each far
+    // edge), padding on one side per axis, true convolution.
+    cases.push_back({"Stem3x3S1OddExtents", stem(3, 16, {13, 31}, 3, 1, 1)});
+    // Stride 1, dy rows whole vectors: space-to-depth from column vectors too.
+    cases.push_back({"Stem3x3S1WholeRows", stem(3, 24, {13, 32}, 3, 1, 1)});
+    cases.push_back({"Stem5x5S1WholeRows", stem(3, 16, {11, 40}, 5, 1, 2)});
+    cases.push_back({"Stem7x7S1WholeRows", stem(4, 8, {9, 32}, 7, 1, 3)});
+    auto oneSided = stem(3, 16, {12, 22}, 3, 1, 0);
+    oneSided.prePadding = {0, 2};
+    oneSided.postPadding = {2, 0};
+    cases.push_back({"Stem3x3S1OneSidedPadding", oneSided});
+    auto convolutionS1 = stem(3, 16, {11, 19}, 5, 1, 2, true);
+    convolutionS1.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Stem5x5S1TrueConvolutionNhwc", convolutionS1});
+    // 3-D stems: the dx planes in the grid, the depth taps in the reduction (unit depth stride).
+    const auto stem3d = [](int64_t c,
+                           int64_t k,
+                           std::vector<int64_t> input,
+                           int64_t taps,
+                           int64_t filter,
+                           int64_t stride,
+                           int64_t padding,
+                           bool channelsLast = false) {
+        auto shape = stem(c, k, std::move(input), filter, stride, padding, channelsLast);
+        shape.filter = {taps, filter, filter};
+        shape.prePadding = shape.postPadding = {taps / 2, padding, padding};
+        shape.stride = {1, stride, stride};
+        shape.dilation = {1, 1, 1};
+        return shape;
+    };
+    cases.push_back({"Stem1x7x7S2Planes", stem3d(3, 16, {3, 21, 30}, 1, 7, 2, 3)});
+    cases.push_back({"Stem3x7x7S2Taps", stem3d(3, 24, {4, 21, 30}, 3, 7, 2, 3)});
+    cases.push_back({"Stem3x7x7S2TapsNhwc", stem3d(3, 16, {3, 17, 26}, 3, 7, 2, 3, true)});
+    cases.push_back({"Stem3x3x3S1OneChannel", stem3d(1, 16, {4, 10, 20}, 3, 3, 1, 1)});
+    // Depth padding on one side only: the planes past it read no dy plane.
+    auto leading = stem3d(3, 16, {3, 21, 30}, 3, 7, 2, 3);
+    leading.prePadding = {2, 3, 3};
+    leading.postPadding = {0, 3, 3};
+    cases.push_back({"Stem3x7x7S2LeadingDepthPadding", leading});
+    auto convolution3d = stem3d(3, 16, {3, 21, 30}, 3, 7, 2, 3);
+    convolution3d.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Stem3x7x7S2TrueConvolution", convolution3d});
     return cases;
 }
 
@@ -528,8 +572,8 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 11> KNOBS{
-        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw"};
+    static constexpr std::array<const char*, 13> KNOBS{
+        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft", "sd"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {

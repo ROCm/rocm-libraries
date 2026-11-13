@@ -20,26 +20,36 @@
 
 /**
  * @file ConvSmallcProblem.hpp
- * @brief The graph and config half of the small-input-channel forward convolution engine
- *        (CONV_SMALLC_FWD): which graphs it takes, what a catalog config declares, and how a
- *        config runs a problem. Kept apart from the dispatch code so the rules can be tested
- *        without a device.
+ * @brief The graph and config half of the small-input-channel convolution engines
+ *        (CONV_SMALLC_FWD, and CONV_SMALLC_BWD for stride-1 backward data with few
+ *        output-gradient channels): which graphs they take, what a catalog config declares, and
+ *        how a config runs a problem. Kept apart from the dispatch code so the rules can be
+ *        tested without a device.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_smallc
 {
 
-/// A forward convolution the engine can run: groups 1, 2-D or 3-D, fp32/fp16/bf16, any layout
-/// (element strides), one input image within 32-bit byte offsets.
+/// A convolution the engine can run, as the forward convolution its kernel computes: groups 1,
+/// 2-D or 3-D, fp32/fp16/bf16, any layout (element strides), one kernel input image within
+/// 32-bit byte offsets.
+///
+/// Backward data (unit stride on every axis) is the forward convolution over dy that writes dx:
+/// kernel input channels K, output channels C, input extents dy's, output extents dx's, padding
+/// (filter - 1) dilation - pre-padding per axis (negative where the graph pads past the filter),
+/// and the filter transposed (k <-> c) and reflected by the weight pre-pass.
 struct SmallcProblem
 {
     conv_naive::ConvNaiveProblem base;
+    bool backward = false; ///< backward data
     int elementBytes = 0;
     SmallcArgs args{}; ///< extents, padding and strides; pointers, tile and kpad by the plan
 };
 
-/// The problem @p context's graph describes, or nullopt.
+/// The problem @p context's graph describes in @p direction (FORWARD or BACKWARD_DATA), or
+/// nullopt.
 std::optional<SmallcProblem>
-    parseSmallcProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
+    parseSmallcProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                       conv_naive::ConvDirection direction = conv_naive::ConvDirection::FORWARD);
 
 /// A catalog config: compile-time filter geometry and tile, read from its metadata.
 struct Config
@@ -55,6 +65,7 @@ struct Config
     int sd = 0, sh = 0, sw = 0;
     int dd = 0, dh = 0, dw = 0;
     int fm = 0, fn = 0, wm = 0, wq = 0, wn = 0;
+    int ep = 0; ///< epilogue: 0 through LDS slots, 1 from registers (MMA, channels-fastest output)
 
     /// Taps per filter row in the weight layout: s rounded up to a power of two.
     int sp() const;
@@ -85,8 +96,9 @@ struct Plan
 
 /**
  * @brief The plan @p config runs @p problem with, or nullopt when the config does not serve it:
- *        its channel bound, filter, stride or dilation is not the graph's, or the launch exceeds
- *        the grid or the 32-bit offsets.
+ *        its channel bound, filter, stride or dilation is not the graph's, its register epilogue
+ *        (ep 1) meets an output whose channels are not adjacent, or the launch exceeds the grid
+ *        or the 32-bit offsets.
  */
 std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config);
 

@@ -107,6 +107,7 @@ NchwConfig configOf(const KernelDefinition& kernel)
     config.stages = kernel.getIntMetadata("stages");
     config.flat = kernel.getIntMetadata("flat");
     config.halo = kernel.getIntMetadata("halo");
+    config.math = kernel.getIntMetadata("math");
     return config;
 }
 
@@ -156,8 +157,15 @@ std::optional<NchwLaunch> launchOf(const MatchContext& context, const KernelDefi
         {
             return std::nullopt;
         }
+        // Three-bf16 (math 1) runs a bf16 atom on an fp32 graph: nchwLaunchFor gates it.
         const auto element = conv_igemm::atomElement(config.atom);
-        if(element != "any" && element != conv_igemm::dataElement(problem->base.dataType))
+        if(config.math == 0 && element != "any"
+           && element != conv_igemm::dataElement(problem->base.dataType))
+        {
+            return std::nullopt;
+        }
+        if(config.math != 0
+           && !conv_igemm_nchw::threeBf16Pays(*problem, context.deviceProperties.gcnArchName))
         {
             return std::nullopt;
         }
@@ -190,12 +198,25 @@ const std::vector<KernelArgument>& kernelSignature()
     return s_signature;
 }
 
+const std::vector<KernelArgument>& splitSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1Split3Args)), 0, ""}};
+    return s_signature;
+}
+
 class PreparedConvIgemmNchw : public IngestorPreparedDispatch
 {
 public:
-    PreparedConvIgemmNchw(IngestorKernelCode code, const NchwProblem& problem)
+    /// @p split is set for three-bf16 (NchwLaunch::split) only.
+    PreparedConvIgemmNchw(IngestorKernelCode code,
+                          std::optional<IngestorKernelCode> split,
+                          const NchwLaunch& launch,
+                          const NchwProblem& problem)
         : _code(std::move(code))
-        , _args(problem.args)
+        , _split(std::move(split))
+        , _plan(launch.plan)
+        , _args(launch.args)
         , _dxUid(problem.dxUid)
         , _wUid(problem.wUid)
         , _dyUid(problem.dyUid)
@@ -212,17 +233,39 @@ public:
         return _code.kernelForStream(stream);
     }
 
-    K7Args argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
+    K7Args argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                   uint32_t numDeviceBuffers,
+                   void* workspace,
+                   K1Split3Args& split) const
     {
         K7Args args = _args;
         args.dx = hipdnn_plugin_sdk::findDeviceBuffer(_dxUid, deviceBuffers, numDeviceBuffers).ptr;
         args.w = hipdnn_plugin_sdk::findDeviceBuffer(_wUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dy = hipdnn_plugin_sdk::findDeviceBuffer(_dyUid, deviceBuffers, numDeviceBuffers).ptr;
+        if(_split.has_value())
+        {
+            // Three-bf16: the kernel reads the split dy (3K channels) and w from the workspace.
+            split = conv_tf32::splitArgsFor(_plan, args.dy, args.w, workspace);
+            args.dy = split.t[0].dst;
+            args.w = split.t[1].dst;
+        }
         return args;
+    }
+
+    bool hasSplit() const
+    {
+        return _split.has_value();
+    }
+
+    compilation::IRunnableKernel& splitForStream(hipStream_t stream) const
+    {
+        return _split->kernelForStream(stream);
     }
 
 private:
     IngestorKernelCode _code;
+    std::optional<IngestorKernelCode> _split;
+    conv_tf32::SplitPlan _plan;
     K7Args _args;
     int64_t _dxUid;
     int64_t _wUid;
@@ -239,11 +282,13 @@ public:
     {
     }
 
-    size_t workspaceBytes(const MatchContext& /*context*/,
+    /// None, or (three-bf16) the split dy and w.
+    size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+                          const KernelDefinition& kernel) const override
     {
-        return 0;
+        const auto launch = launchOf(context, kernel);
+        return launch.has_value() && launch->split ? launch->plan.bytes : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -268,7 +313,17 @@ public:
         const bool fma = launch->kernelType.empty();
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
-        options.add("CONV_K7_T", elementTypeFor(problem->base.dataType));
+        if(launch->split)
+        {
+            // Three-bf16: the bf16 kernel writing fp32 dx, plus the split pre-pass.
+            options.add("CONV_K7_T", std::string("unsigned short"));
+            options.add("CONV_K7_TO", std::string("float"));
+            options.add(std::string(conv_tf32::SPLIT_DEFINE), std::string("1"));
+        }
+        else
+        {
+            options.add("CONV_K7_T", elementTypeFor(problem->base.dataType));
+        }
         options.add("CONV_K7_FMA", std::string(fma ? "1" : "0"));
         if(!fma)
         {
@@ -297,18 +352,40 @@ public:
             _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
         code.setBlockSize(launch->block, 1, 1);
         code.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
-        return std::make_unique<PreparedConvIgemmNchw>(std::move(code), *problem);
+        std::optional<IngestorKernelCode> split;
+        if(launch->split)
+        {
+            KernelDefinition splitKernel = kernel;
+            splitKernel.source.entryPoint = std::string(conv_tf32::SPLIT_ENTRY_POINT);
+            split = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, splitKernel, options, splitSignature());
+            split->setBlockSize(256, 1, 1);
+            split->setGridSize(launch->plan.grid, 1, 1);
+        }
+        return std::make_unique<PreparedConvIgemmNchw>(
+            std::move(code), std::move(split), *launch, *problem);
     }
 
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                 uint32_t numDeviceBuffers,
-                void* /*workspace*/) const override
+                void* workspace) const override
     {
         const auto& dispatch = dynamic_cast<const PreparedConvIgemmNchw&>(prepared);
-        const auto args = dispatch.argsFor(deviceBuffers, numDeviceBuffers);
-        dispatch.kernelForStream(handle.getStream()).launch(handle.getStream(), args);
+        if(dispatch.hasSplit() && workspace == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "conv_igemm_nchw three-bf16 needs its workspace");
+        }
+        K1Split3Args split{};
+        const auto args = dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, split);
+        const auto stream = handle.getStream();
+        if(dispatch.hasSplit())
+        {
+            dispatch.splitForStream(stream).launch(stream, split);
+        }
+        dispatch.kernelForStream(stream).launch(stream, args);
     }
 
 private:

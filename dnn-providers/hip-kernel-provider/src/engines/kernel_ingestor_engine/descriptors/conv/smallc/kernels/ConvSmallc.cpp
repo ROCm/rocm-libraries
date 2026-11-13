@@ -1,8 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The small-input-channel forward convolution kernels (CONV_SMALLC_FWD), compiled by HIPRTC per
-// catalog config. The pack defines:
+// The small-input-channel forward convolution kernels (CONV_SMALLC_FWD; CONV_SMALLC_BWD runs
+// stride-1 backward data with few output-gradient channels as the forward conv over dy with the
+// filter transposed and reflected), compiled by HIPRTC per catalog config. The pack defines:
 //   CONV_SMALLC_T        operand and output type: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_SMALLC_FMA      1 for the FMA kernel (256 threads), 0 for the MMA kernel
 //   CONV_SMALLC_ATOM     16x16 MMA atom (ConvIgemmCore.h), MMA kernel only
@@ -11,12 +12,16 @@
 //   CONV_SMALLC_SD, _SH, _SW     stride
 //   CONV_SMALLC_DD, _DH, _DW     dilation
 //   CONV_SMALLC_FM, _FN, _WM, _WQ, _WN   tile (ConvSmallcCore.h)
+//   CONV_SMALLC_EP       epilogue (MMA kernel): 0 through LDS slots, 1 from registers (default 0)
 
 #include "ConvIgemmCore.h"
 #include "ConvSmallcCore.h"
 
 #ifndef CONV_SMALLC_FMA
 #define CONV_SMALLC_FMA 0
+#endif
+#ifndef CONV_SMALLC_EP
+#define CONV_SMALLC_EP 0
 #endif
 #if CONV_SMALLC_FMA
 #define CONV_SMALLC_BLOCK 256
@@ -63,7 +68,8 @@ extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK) ConvSmallc(Small
                CONV_SMALLC_FN,
                CONV_SMALLC_WM,
                CONV_SMALLC_WQ,
-               CONV_SMALLC_WN>(a);
+               CONV_SMALLC_WN,
+               CONV_SMALLC_EP>(a);
 #endif
 }
 

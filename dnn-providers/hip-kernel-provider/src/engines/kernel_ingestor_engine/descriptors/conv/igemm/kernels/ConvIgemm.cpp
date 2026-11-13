@@ -18,6 +18,8 @@
 //   CONV_IGEMM_DMA      2 to 4: gfx950 buffer loads straight into a ring of that many swizzled
 //                       LDS stages (SWZ 1, K1_BUFFER 1)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
+//   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
+//                       2^31 - 1 pixels)
 
 #include "ConvIgemmCore.h"
 
@@ -49,7 +51,17 @@
 #define CONV_IGEMM_BLOCK (CONV_IGEMM_WM * CONV_IGEMM_WN * CONV_IGEMM_ATOM::WAVE)
 #endif
 
-extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) ConvIgemm(K1Args a)
+// CONV_IGEMM_WAVES_MAX (with CONV_IGEMM_WAVES_MIN): an occupancy target for the register
+// allocator, waves per SIMD; unset, the compiler's own.
+#if defined(CONV_IGEMM_WAVES_MAX)
+#define CONV_IGEMM_OCCUPANCY \
+    __attribute__((amdgpu_waves_per_eu(CONV_IGEMM_WAVES_MIN, CONV_IGEMM_WAVES_MAX)))
+#else
+#define CONV_IGEMM_OCCUPANCY
+#endif
+
+extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPANCY
+    ConvIgemm(K1Args a)
 {
 #if CONV_IGEMM_FMA
     k1ConvFma<CONV_IGEMM_T,

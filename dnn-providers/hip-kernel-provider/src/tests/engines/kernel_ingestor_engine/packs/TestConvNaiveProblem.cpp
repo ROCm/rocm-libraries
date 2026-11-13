@@ -394,6 +394,18 @@ TEST(TestConvNaiveDirection, RefusesAGraphOfAnotherDirection)
     }
 }
 
+TEST(TestConvNaiveComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        expectCudnnComputeTypes(ConvShape{},
+                                {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                                [direction](const ConvShape& shape) {
+                                    return parse(specFor(shape, direction)).has_value();
+                                });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Workload gate
 // ---------------------------------------------------------------------------
@@ -434,8 +446,9 @@ TEST(TestConvNaiveWorkload, DeclinesAProblemOverBudget)
 
 TEST(TestConvNaiveWorkload, BudgetsByTheLanesTheProblemCanOccupy)
 {
-    // Few output elements: the budget is per lane, so a weight gradient over a large batch
-    // spends it on far fewer threads than the device has.
+    // Few output elements: the budget is per lane. A weight gradient's dw element is one block
+    // of 256 lanes, so one element over 64 images of 64 x 64 (262144 multiply-accumulates) is
+    // 1024 a lane, and of 256 x 256 (4.2 M) 16384, past the budget.
     ConvShape shape;
     shape.n = 64;
     shape.c = 1;
@@ -446,8 +459,28 @@ TEST(TestConvNaiveWorkload, BudgetsByTheLanesTheProblemCanOccupy)
     const auto fwd = parse(specFor(shape, ConvDirection::FORWARD));
     ASSERT_TRUE(wrw.has_value() && fwd.has_value());
     EXPECT_EQ(wrw->args.total, 1);
-    EXPECT_FALSE(conv_naive::withinWorkloadBudget(*wrw, deviceWithComputeUnits(64)));
+    EXPECT_TRUE(conv_naive::withinWorkloadBudget(*wrw, deviceWithComputeUnits(64)));
     EXPECT_TRUE(conv_naive::withinWorkloadBudget(*fwd, deviceWithComputeUnits(64)));
+    shape.input = {256, 256};
+    const auto wide = parse(specFor(shape, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(wide.has_value());
+    EXPECT_FALSE(conv_naive::withinWorkloadBudget(*wide, deviceWithComputeUnits(64)));
+    // The device's lanes still bound it: 1-D, 8 images of 1024, 16 -> 16 channels, 3 taps
+    // (768 dw elements, 6.3 M multiply-accumulates) is 1536 a lane on 64 CUs.
+    ConvShape line;
+    line.n = 8;
+    line.c = 16;
+    line.k = 16;
+    line.input = {1024};
+    line.filter = {3};
+    line.prePadding = {1};
+    line.postPadding = {1};
+    line.stride = {1};
+    line.dilation = {1};
+    const auto oneD = parse(specFor(line, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(oneD.has_value());
+    EXPECT_TRUE(conv_naive::withinWorkloadBudget(*oneD, deviceWithComputeUnits(64)));
+    EXPECT_FALSE(conv_naive::withinWorkloadBudget(*oneD, deviceWithComputeUnits(4)));
 }
 
 TEST(TestConvNaiveWorkload, AssumesFallbackComputeUnitsWhenTheDeviceDoesNotSay)

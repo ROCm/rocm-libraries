@@ -241,7 +241,21 @@ struct K7Tiles
     static constexpr int SKEW = 16 / static_cast<int>(sizeof(T));
     static_assert(BK % KV == 0 && WQ % VEC == 0 && (BN * SMAX) % VEC == 0, "K7 tile loads");
 
-    __amdgpu_buffer_rsrc_t aRsrc, bRsrc;
+    // Buffer bases and sizes; the descriptors are rebuilt where used. Some step functions are not
+    // inlined (k7FmaSteps, init) and reach this struct through memory, and a descriptor loaded
+    // from memory is per-lane to the compiler: a waterfall loop around every load. Rebuilt by
+    // k1Rsrc (readfirstlane) it is scalar again; inlined, the rebuild folds away.
+    const void* aPtr;
+    const void* bPtr;
+    long long aBytes, bBytes;
+    __device__ __amdgpu_buffer_rsrc_t aRsrc() const
+    {
+        return k1Rsrc(aPtr, aBytes);
+    }
+    __device__ __amdgpu_buffer_rsrc_t bRsrc() const
+    {
+        return k1Rsrc(bPtr, bBytes);
+    }
     int tid, rows, row, wy, k, cs, bStart, q0w, taps;
     // The filter: elements per k row and per (k, c), the filter row's offset, the first channel
     // and, for T R > 1, the largest power of two (at most VEC) dividing S.
@@ -297,8 +311,10 @@ struct K7Tiles
         while(sub > 1 && a.fs % sub != 0)
             sub /= 2;
         const T* dy = static_cast<const T*>(a.dy) + static_cast<long long>(b.img) * a.dyImage;
-        aRsrc = k1Rsrc(dy, static_cast<long long>(a.n - b.img) * a.dyImage * sizeof(T));
-        bRsrc = k1Rsrc(a.w, static_cast<long long>(a.k) * kStride * sizeof(T));
+        aPtr = dy;
+        aBytes = static_cast<long long>(a.n - b.img) * a.dyImage * sizeof(T);
+        bPtr = a.w;
+        bBytes = static_cast<long long>(a.k) * kStride * sizeof(T);
         // The run's vectors per k row at this filter (BN * S is a multiple of 16).
         const int nvb = BN * a.fs / VEC;
 #pragma unroll
@@ -369,7 +385,7 @@ struct K7Tiles
     /// FLAT: the unit of pass p at k row kk (valid when ok).
     __device__ Raw loadFlat(int p, int kk, bool ok) const
     {
-        return k1BufferLoad<Raw>(aRsrc,
+        return k1BufferLoad<Raw>(aRsrc(),
                                  ok && aOff[p] >= 0
                                      ? static_cast<unsigned>(aOff[p] + kk * wy) * sizeof(T)
                                      : K1_OUT_OF_RANGE);
@@ -385,22 +401,22 @@ struct K7Tiles
         case 8:
             if constexpr(VEC >= 8)
                 return k7LoadStrided<T, VEC, (VEC >= 8 ? 8 : 1)>(
-                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+                    bRsrc(), phys, c, bS[p], cEnd, taps, fStride, ok);
             break;
         case 4:
             if constexpr(VEC >= 4)
                 return k7LoadStrided<T, VEC, (VEC >= 4 ? 4 : 1)>(
-                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+                    bRsrc(), phys, c, bS[p], cEnd, taps, fStride, ok);
             break;
         case 2:
             if constexpr(VEC >= 2)
                 return k7LoadStrided<T, VEC, (VEC >= 2 ? 2 : 1)>(
-                    bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+                    bRsrc(), phys, c, bS[p], cEnd, taps, fStride, ok);
             break;
         default:
             break;
         }
-        return k7LoadStrided<T, VEC, 1>(bRsrc, phys, c, bS[p], cEnd, taps, fStride, ok);
+        return k7LoadStrided<T, VEC, 1>(bRsrc(), phys, c, bS[p], cEnd, taps, fStride, ok);
     }
 
     /// Registers for the k rows from k0.
@@ -426,7 +442,7 @@ struct K7Tiles
                     else
                         bytes = k7Offset(
                             static_cast<unsigned>((kk * rows + row) * wy + q) * sizeof(T), ok);
-                    ra[p * KV + j] = k1BufferLoad<Raw>(aRsrc, bytes);
+                    ra[p * KV + j] = k1BufferLoad<Raw>(aRsrc(), bytes);
                 }
             }
 #pragma unroll
@@ -439,7 +455,7 @@ struct K7Tiles
                 {
                     const int kk = k0 + bK[p] * KV + j;
                     rb[p * KV + j] = k1BufferLoad<Raw>(
-                        bRsrc,
+                        bRsrc(),
                         k7Offset(static_cast<unsigned>(kk * cs + pos) * sizeof(T),
                                  active && kk < k));
                 }
@@ -464,7 +480,7 @@ struct K7Tiles
                 else
                 {
                     const int off = ok ? (kk * rows + row) * wy + q : 0;
-                    ra[p * KV + j] = k7LoadRun<T, VEC>(aRsrc, off, q, wy, ok);
+                    ra[p * KV + j] = k7LoadRun<T, VEC>(aRsrc(), off, q, wy, ok);
                 }
             }
         }
@@ -479,9 +495,10 @@ struct K7Tiles
             {
                 const int kk = k0 + bK[p] * KV + j;
                 const bool ok = kk < k;
-                rb[p * KV + j] = fStride == taps
-                                     ? k7LoadRun<T, VEC>(bRsrc, ok ? kk * cs + pos : 0, pos, cs, ok)
-                                     : loadStrided(p, ok ? kk : 0, ok);
+                rb[p * KV + j]
+                    = fStride == taps
+                          ? k7LoadRun<T, VEC>(bRsrc(), ok ? kk * cs + pos : 0, pos, cs, ok)
+                          : loadStrided(p, ok ? kk : 0, ok);
             }
         }
     }
@@ -670,7 +687,8 @@ template <class T,
           int ST,
           int TAPS,
           int FLAT = 0,
-          int HALOK = VEC>
+          int HALOK = VEC,
+          class TO = T>
 __device__ void k7DgradMma(const K7Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -700,9 +718,14 @@ __device__ void k7DgradMma(const K7Args& a)
     constexpr int LDB = BN * CP + PADE;
     constexpr int A_LDS = KMAJOR ? BK * LDA : Tiles::template aRow<LDK>(WQ);
     constexpr int B_LDS = KMAJOR ? BK * LDB : SMAX * BN * LDK;
-    constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(T));
-    constexpr int OUT_LDS = BN * OLD;
+    // The output tile in dx's element type TO (fp32 for three-bf16, else T), staged over the
+    // operand tiles: VECO of them a 16-byte vector.
+    constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(TO));
+    constexpr int OUT_LDS
+        = (BN * OLD * static_cast<int>(sizeof(TO)) + static_cast<int>(sizeof(T)) - 1)
+          / static_cast<int>(sizeof(T));
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
+    constexpr int VECO = VEC * static_cast<int>(sizeof(T)) / static_cast<int>(sizeof(TO));
     static_assert(WTQ % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "K7 wave tile");
     static_assert((BMQ * ST) % VEC == 0, "K7 epilogue");
 
@@ -714,7 +737,7 @@ __device__ void k7DgradMma(const K7Args& a)
     const K7Block b = FLAT > 0 ? k7BlockFlat<ST>(a, BMQ, BN) : k7Block<ST>(a, BMQ, BN);
     if(!b.live)
     {
-        k7ZeroTile<T, VEC, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
+        k7ZeroTile<TO, VECO, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
         return;
     }
     const int tid = threadIdx.x;
@@ -832,7 +855,7 @@ __device__ void k7DgradMma(const K7Args& a)
     // Epilogue: the tile into LDS as Os[c][x - x0], then each channel's contiguous dx run out in
     // vectors.
     __syncthreads();
-    T* Os = lds;
+    TO* Os = reinterpret_cast<TO*>(lds);
 #pragma unroll
     for(int p = 0; p < PW; ++p)
     {
@@ -847,7 +870,7 @@ __device__ void k7DgradMma(const K7Args& a)
                 {
                     const int q = wq * WTQ + i * DIM + Atom::dRow(lane, e);
                     const int c = wn * WTN + n * DIM + lane % DIM;
-                    Os[c * OLD + q * ST + px] = K1Elem<T>::store(acc[p][i][n][e]);
+                    Os[c * OLD + q * ST + px] = K1Elem<TO>::store(acc[p][i][n][e]);
                 }
     }
     if constexpr(NP < ST)
@@ -858,16 +881,16 @@ __device__ void k7DgradMma(const K7Args& a)
             const int c = v / (BMQ * (ST - NP));
             const int rest = v - c * (BMQ * (ST - NP));
             const int q = rest / (ST - NP);
-            Os[c * OLD + q * ST + NP + rest - q * (ST - NP)] = T{};
+            Os[c * OLD + q * ST + NP + rest - q * (ST - NP)] = TO{};
         }
     }
     __syncthreads();
-    constexpr int XV = BMQ * ST / VEC;
+    constexpr int XV = BMQ * ST / VECO;
     for(int v = tid; v < BN * XV; v += THREADS)
     {
         const int c = v / XV;
-        const int xv = (v - c * XV) * VEC;
-        k7Store<T, VEC, ST, FLAT>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
+        const int xv = (v - c * XV) * VECO;
+        k7Store<TO, VECO, ST, FLAT>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
     }
 }
 

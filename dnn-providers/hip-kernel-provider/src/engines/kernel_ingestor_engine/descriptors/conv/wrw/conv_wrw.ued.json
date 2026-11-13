@@ -27,7 +27,9 @@
     "ns",
     "bpu",
     "wq",
-    "dws"
+    "dws",
+    "pb",
+    "math"
   ],
   "behavior_notes": [
     "runtime_compilation"

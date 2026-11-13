@@ -19,9 +19,16 @@
 // in-channels (fp16 path, odd C zero-padded). Size P * ceil(cgi/VW) * cgo * G * 4 bytes.
 #pragma once
 
+#include "ConvArchFamily.h"
 #include "ConvWinogradCore.h"
 
 typedef _Float16 k5h2 __attribute__((ext_vector_type(2)));
+
+template <int V>
+struct K5Par
+{
+    static constexpr int value = V;
+};
 
 // Unroll of the Hadamard channel loop. Full unroll lets the scheduler hoist every LDS read of the
 // chunk (128 VGPRs of operands on top of 64 accumulators); 2 keeps operands to two steps.
@@ -48,9 +55,7 @@ __device__ inline float k5Round(float v)
 
 // Buffer loads: 32-bit byte offsets from a per-tensor resource (tensor < 2 GiB; the host slices
 // the batch otherwise); per-chunk and per-row offsets go in the scalar offset.
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)                      \
-    || defined(__gfx1200__) || defined(__gfx1201__)
+#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K5_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K5_RSRC_FLAGS 0x31014000
@@ -58,11 +63,19 @@ __device__ inline float k5Round(float v)
 #define K5_RSRC_FLAGS 0x00020000
 #endif
 
+// Callers pass wave-uniform values; readfirstlane says so, so the descriptor stays in SGPRs and
+// no buffer access becomes a waterfall loop (seen in ConvWinogradCoop with TheRock 10.3 HIPRTC).
 __device__ inline __amdgpu_buffer_rsrc_t k5Rsrc(const void* base, long long bytes)
 {
     const int records = bytes < 0x7fffffffLL ? static_cast<int>(bytes) : 0x7fffffff;
+    const unsigned long long p = reinterpret_cast<unsigned long long>(base);
+    const unsigned lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p));
+    const unsigned hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p >> 32));
     return __builtin_amdgcn_make_buffer_rsrc(
-        const_cast<void*>(base), static_cast<short>(0), records, K5_RSRC_FLAGS);
+        reinterpret_cast<void*>((static_cast<unsigned long long>(hi) << 32) | lo),
+        static_cast<short>(0),
+        __builtin_amdgcn_readfirstlane(records),
+        K5_RSRC_FLAGS);
 }
 template <class T>
 __device__ inline float k5BufLoad(__amdgpu_buffer_rsrc_t r, unsigned voff, unsigned soff)
@@ -168,7 +181,18 @@ struct K5F2Cfg
     static constexpr int LDS = (2 * BUF + RAW > P * RPP * LDM ? 2 * BUF + RAW : P * RPP * LDM);
 };
 
-template <class T, int M, bool DOT2, int BK, int BT, int CCV, int TM, int TN, bool DMA = false>
+// PFD (prefetch depth): 1 loads chunk ch + 1 while chunk ch's Hadamard runs; 2 loads chunk ch + 2
+// (two register sets of staged input and U), so a chunk's global loads have two Hadamards to land.
+template <class T,
+          int M,
+          bool DOT2,
+          int BK,
+          int BT,
+          int CCV,
+          int TM,
+          int TN,
+          bool DMA = false,
+          int PFD = 1>
 __device__ void k5FusedConv2(const K5Args& a)
 {
     typedef K5F2Cfg<T, M, DOT2, BK, BT, CCV, TM, TN, DMA> C;
@@ -185,6 +209,7 @@ __device__ void k5FusedConv2(const K5Args& a)
     static_assert(LB * C::BPW == 64 && P % C::BPW == 0, "wave layout");
     static_assert(TM % 4 == 0 && TN % 4 == 0, "4-runs");
     static_assert(C::UREG || (!DMA && !QUAD), "irregular U slots: plain staging only");
+    static_assert(PFD == 1 || (PFD == 2 && !DMA), "prefetch depth 2: register staging only");
     // Software-pipelined Hadamard (8 x 8 micro-tiles; K5_PIPE=0 for the plain loop).
     constexpr bool PIPE = K5_PIPE && TM == 8 && TN == 8 && !K5_LDS_SWIZZLE;
     constexpr int UQ = C::UREG ? THREADS / (BK * CCV) : 1;
@@ -254,14 +279,24 @@ __device__ void k5FusedConv2(const K5Args& a)
         }
         const bool uKok = k0 + uKk < cgo;
 
-        float raw[(DMA || QUAD) ? 1 : NPS][P];
-        unsigned ureg[DMA ? 1 : NU];
-        (void)ureg;
+        // A chunk's staged input and U in registers (PFD sets).
+        struct Staged
+        {
+            float raw[(DMA || QUAD) ? 1 : NPS][P];
+            unsigned ureg[DMA ? 1 : NU];
+            float qraw[4];
+        };
+        Staged sets[PFD];
         unsigned* rawL = lds + 2 * BUF; // DMA: [A*A][task]
         const int wave
             = __builtin_amdgcn_readfirstlane(tid / 64); // uniform: LDS DMA bases go to SGPRs/M0
-        float qraw[4];
-        auto load = [&](int ch) {
+        auto load = [&](int ch, Staged& S) {
+            auto& raw = S.raw;
+            auto& ureg = S.ureg;
+            auto& qraw = S.qraw;
+            (void)raw;
+            (void)ureg;
+            (void)qraw;
             const int c0 = ch * CCV * VW;
             if constexpr(QUAD && !DMA)
             {
@@ -395,7 +430,13 @@ __device__ void k5FusedConv2(const K5Args& a)
                 ureg[q] = __builtin_amdgcn_raw_buffer_load_b32(
                     rU, uoff, static_cast<unsigned>(q * UQ * cgiV * cgo * 4), 0);
         };
-        auto stage = [&](int buf) {
+        auto stage = [&](int buf, Staged& S) {
+            auto& raw = S.raw;
+            auto& ureg = S.ureg;
+            auto& qraw = S.qraw;
+            (void)raw;
+            (void)ureg;
+            (void)qraw;
             unsigned* Us = lds + buf * BUF;
             unsigned* Vs = Us + P * CCV * BK;
             if constexpr(QUAD)
@@ -527,16 +568,16 @@ __device__ void k5FusedConv2(const K5Args& a)
             for(int j = 0; j < TN; ++j)
                 acc[i][j] = 0.0f;
 
-        load(0);
-        stage(0);
+        load(0, sets[0]);
+        if(PFD == 2 && nCh > 1)
+            load(1, sets[PFD - 1]);
+        stage(0, sets[0]);
         if constexpr(DMA)
             asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
         __syncthreads();
-        for(int ch = 0; ch < nCh; ++ch)
+        // The Hadamard of chunk ch from LDS buffer ch & 1.
+        auto hadamard = [&](int ch) __attribute__((always_inline))
         {
-            const bool more = ch + 1 < nCh;
-            if(more)
-                load(ch + 1);
             const unsigned* Us = lds + (ch & 1) * BUF;
             const unsigned* Vs = Us + P * CCV * BK;
             if constexpr(PIPE)
@@ -624,12 +665,139 @@ __device__ void k5FusedConv2(const K5Args& a)
                                     __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
                         }
                 }
+        };
+        // PFD 1: chunk ch + 1 loads into the one set. PFD 2: chunk ch + 2 loads into set PAR (chunk
+        // ch's, staged already) and chunk ch + 1 stages from set 1 - PAR.
+        auto chunk = [&](int ch, auto parTag) __attribute__((always_inline))
+        {
+            constexpr int PAR = decltype(parTag)::value;
+            Staged& cur = sets[PFD == 2 ? PAR : 0];
+            Staged& nxt = sets[PFD == 2 ? 1 - PAR : 0];
+            const bool more = ch + 1 < nCh;
+            if(PFD == 1 && more)
+                load(ch + 1, cur);
+            if(PFD == 2 && ch + 2 < nCh)
+                load(ch + 2, cur);
+            hadamard(ch);
             if(more)
-                stage((ch + 1) & 1);
+                stage((ch + 1) & 1, nxt);
             if constexpr(DMA)
                 asm volatile("s_waitcnt vmcnt(0)" ::
                                  : "memory"); // U DMA landed before others read it
             __syncthreads();
+        };
+        if constexpr(PFD == 1)
+        {
+            for(int ch = 0; ch < nCh; ++ch)
+            {
+                const bool more = ch + 1 < nCh;
+                if(more)
+                    load(ch + 1, sets[0]);
+                const unsigned* Us = lds + (ch & 1) * BUF;
+                const unsigned* Vs = Us + P * CCV * BK;
+                if constexpr(PIPE)
+                {
+                    // Software-pipelined: the next channel's operands are loaded into the registers
+                    // freed by each quadrant of the 8 x 8 product (no extra VGPRs).
+                    unsigned av[8], bv[8];
+                    auto ld = [&](const unsigned* base, int off, unsigned* dst) {
+                        const uint4 x = *reinterpret_cast<const uint4*>(base + off);
+                        dst[0] = x.x, dst[1] = x.y, dst[2] = x.z, dst[3] = x.w;
+                    };
+                    auto mac = [&](int i0, int j0) {
+#pragma unroll
+                        for(int i = i0; i < i0 + 4; ++i)
+#pragma unroll
+                            for(int j = j0; j < j0 + 4; ++j)
+                            {
+                                if constexpr(DOT2)
+                                    acc[i][j]
+                                        = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
+                                                                 __builtin_bit_cast(k5h2, bv[j]),
+                                                                 acc[i][j],
+                                                                 false);
+                                else
+                                    acc[i][j] = __builtin_fmaf(
+                                        __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
+                            }
+                    };
+                    const int aOff0 = ty * 4, aOff1 = (TYN + ty) * 4, bOff0 = tx * 4,
+                              bOff1 = (TXN + tx) * 4;
+                    ld(Us + bin * CCV * BK, aOff0, av);
+                    ld(Us + bin * CCV * BK, aOff1, av + 4);
+                    ld(Vs + bin * CCV * BT, bOff0, bv);
+                    ld(Vs + bin * CCV * BT, bOff1, bv + 4);
+#pragma unroll 1
+                    for(int cv = 0; cv < CCV; ++cv)
+                    {
+                        const int nx = cv + 1 < CCV ? cv + 1 : cv; // last step reloads (harmless)
+                        const unsigned* ua = Us + (bin * CCV + nx) * BK;
+                        const unsigned* vb = Vs + (bin * CCV + nx) * BT;
+                        mac(0, 0);
+                        mac(0, 4);
+                        ld(ua, aOff0, av);
+                        mac(4, 0);
+                        ld(vb, bOff0, bv);
+                        mac(4, 4);
+                        ld(ua, aOff1, av + 4);
+                        ld(vb, bOff1, bv + 4);
+                    }
+                }
+                else
+#pragma unroll K5_HADAMARD_UNROLL
+                    for(int cv = 0; cv < CCV; ++cv)
+                    {
+                        const unsigned* ua = Us + (bin * CCV + cv) * BK;
+                        const unsigned* vb = Vs + (bin * CCV + cv) * BT;
+                        unsigned av[TM], bv[TN];
+#pragma unroll
+                        for(int q = 0; q < TM / 4; ++q)
+                        {
+                            const uint4 x = *reinterpret_cast<const uint4*>(
+                                ua + (((q * TYN + ty) * 4) ^ ((bin & 1) * SWU)));
+                            av[q * 4 + 0] = x.x, av[q * 4 + 1] = x.y, av[q * 4 + 2] = x.z,
+                                       av[q * 4 + 3] = x.w;
+                        }
+#pragma unroll
+                        for(int q = 0; q < TN / 4; ++q)
+                        {
+                            const uint4 x = *reinterpret_cast<const uint4*>(
+                                vb + (((q * TXN + tx) * 4) ^ ((bin & 1) * SWV)));
+                            bv[q * 4 + 0] = x.x, bv[q * 4 + 1] = x.y, bv[q * 4 + 2] = x.z,
+                                       bv[q * 4 + 3] = x.w;
+                        }
+#pragma unroll
+                        for(int i = 0; i < TM; ++i)
+#pragma unroll
+                            for(int j = 0; j < TN; ++j)
+                            {
+                                if constexpr(DOT2)
+                                    acc[i][j]
+                                        = __builtin_amdgcn_fdot2(__builtin_bit_cast(k5h2, av[i]),
+                                                                 __builtin_bit_cast(k5h2, bv[j]),
+                                                                 acc[i][j],
+                                                                 false);
+                                else
+                                    acc[i][j] = __builtin_fmaf(
+                                        __uint_as_float(av[i]), __uint_as_float(bv[j]), acc[i][j]);
+                            }
+                    }
+                if(more)
+                    stage((ch + 1) & 1, sets[0]);
+                if constexpr(DMA)
+                    asm volatile("s_waitcnt vmcnt(0)" ::
+                                     : "memory"); // U DMA landed before others read it
+                __syncthreads();
+            }
+        }
+        else
+        {
+            for(int ch = 0; ch < nCh; ch += 2)
+            {
+                chunk(ch, K5Par<0>{});
+                if(ch + 1 < nCh)
+                    chunk(ch + 1, K5Par<1>{});
+            }
         }
 
         // Epilogue: 4 passes; pass e stages out channels k0 + rr*4 + e (rr < RPP) for every bin.

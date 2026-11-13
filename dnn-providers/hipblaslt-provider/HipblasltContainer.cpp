@@ -19,6 +19,7 @@
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
+#include "engines/conv/ConvReducedPrecision.hpp"
 #include "engines/conv/ConvTf32.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
@@ -64,23 +65,53 @@ HipblasltContainer::HipblasltContainer()
         HIPDNN_PLUGIN_LOG_INFO(CONV_TF32_ENV_NAME << " set: registering the TF32 explicit-GEMM "
                                                      "convolution engines");
     }
-    const auto addConvEngine
-        = [this](int64_t engineId, ConvGemmPlanBuilder::PlanFactory factory, bool tf32) {
-              auto engine = std::make_unique<PlanBuilderEngine>(engineId);
-              engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
-                  std::move(factory), MAX_REPACK_WORKSPACE_BYTES, tf32));
-              _engineManager->addEngine(std::move(engine));
-          };
+    // The reduced-precision-reduction engines likewise, behind their own temporary switch.
+    const bool rprEngines = convReducedPrecisionEnginesEnabled();
+    if(rprEngines)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(CONV_RPR_ENV_NAME << " set: registering the reduced-precision-"
+                                                    "reduction explicit-GEMM convolution engines");
+    }
+    const auto addConvEngine = [this](int64_t engineId,
+                                      ConvGemmPlanBuilder::PlanFactory factory,
+                                      bool tf32,
+                                      ConvGemmPlanBuilder::NarrowPartials narrowPartials,
+                                      bool reducedPrecisionReduction = false) {
+        auto engine = std::make_unique<PlanBuilderEngine>(engineId);
+        engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
+                                                                     MAX_REPACK_WORKSPACE_BYTES,
+                                                                     tf32,
+                                                                     reducedPrecisionReduction,
+                                                                     false,
+                                                                     ColumnLayout::FOLLOW_Y,
+                                                                     narrowPartials));
+        _engineManager->addEngine(std::move(engine));
+    };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     const auto hipblasltGemm = [](const HipdnnEnginePluginHandle& handle,
                                   std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
         return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
     };
-    addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID, hipblasltGemm, false);
+    // hipBLASLt on gfx11 may round the parts of a long reduction to a 16-bit output.
+    constexpr auto HIPBLASLT_NARROW = ConvGemmPlanBuilder::NarrowPartials::ON_GFX11;
+    addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID,
+                  hipblasltGemm,
+                  false,
+                  HIPBLASLT_NARROW);
     if(tf32Engines)
     {
-        addConvEngine(
-            hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID, hipblasltGemm, true);
+        addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID,
+                      hipblasltGemm,
+                      true,
+                      HIPBLASLT_NARROW);
+    }
+    if(rprEngines)
+    {
+        addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID,
+                      hipblasltGemm,
+                      false,
+                      HIPBLASLT_NARROW,
+                      true);
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
@@ -88,10 +119,23 @@ HipblasltContainer::HipblasltContainer()
                                 std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
         return std::make_unique<RocblasGemmPlan>(std::move(calls));
     };
-    addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID, rocblasGemm, false);
+    constexpr auto ROCBLAS_NARROW = ConvGemmPlanBuilder::NarrowPartials::NEVER;
+    addConvEngine(
+        hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID, rocblasGemm, false, ROCBLAS_NARROW);
     if(tf32Engines)
     {
-        addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID, rocblasGemm, true);
+        addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID,
+                      rocblasGemm,
+                      true,
+                      ROCBLAS_NARROW);
+    }
+    if(rprEngines)
+    {
+        addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_RPR_ENGINE_ID,
+                      rocblasGemm,
+                      false,
+                      ROCBLAS_NARROW,
+                      true);
     }
 #endif
 #endif

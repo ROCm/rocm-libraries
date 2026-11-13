@@ -1,0 +1,11 @@
+/conv_group_bwd.kdp.json
+/conv_group_fwd.kdp.json
+/conv_group_wrw_bf16_cdna.kdp.json
+/conv_group_wrw_bf16_cdna908.kdp.json
+/conv_group_wrw_bf16_rdna.kdp.json
+/conv_group_wrw_f16_cdna.kdp.json
+/conv_group_wrw_f16_rdna.kdp.json
+/conv_group_wrw_f32_cdna.kdp.json
+/conv_group_wrw_f32_fma.kdp.json
+/conv_group_bwd_f32x3.kdp.json
+/conv_group_fwd_f32x3.kdp.json

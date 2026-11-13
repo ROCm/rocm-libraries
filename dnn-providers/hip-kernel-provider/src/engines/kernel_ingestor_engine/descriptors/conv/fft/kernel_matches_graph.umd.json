@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "ebc93cbd-3655-55be-b475-246b66458a24",
+  "name": "kernel direction, dtype and transform size serve the graph above the FFT admission floor",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_fft.kernel_match"
+}

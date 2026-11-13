@@ -44,8 +44,10 @@
  *
  * The schedule is hipconv's Hankel depthwise wgrad (partial sums per partition of the
  * reduction, folded in a fixed order), reimplemented on vector ALU so it runs on every
- * architecture, both layouts, 1-D to 3-D and every element type in exact fp32 arithmetic. Every
- * kernel config is admitted on correctness alone; autotune (UHD later) ranks them.
+ * architecture, both layouts, 1-D to 3-D and every element type in exact fp32 arithmetic. On
+ * CDNA the hankel configs run the construction itself on 4x4x4 MFMA (16-bit, channels-last,
+ * unit stride; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
+ * autotune (UHD later) ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -84,7 +86,9 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
         return std::nullopt;
     }
     const auto& a = base->args;
-    if(a.groups < 1 || a.c != a.groups || a.k != a.groups)
+    // One input channel a group; the base parse makes the output channels a whole number per
+    // group (the multiplier).
+    if(a.groups < 1 || a.c != a.groups)
     {
         return std::nullopt;
     }
@@ -94,6 +98,7 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
         return std::nullopt;
     }
     // Shapes in 32-bit ints; element offsets are formed in 64 bits by the kernels.
+    // (The output channels are bounded with their taps below.)
     for(const long long value : {a.n, a.c})
     {
         if(value < 1 || value > INT_LIMIT)
@@ -118,12 +123,13 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
     }
     const long long rows = a.n * a.outSpatial[0] * a.outSpatial[1];
     const long long taps = a.filter[0] * a.filter[1] * a.filter[2];
-    if(rows > INT_LIMIT || taps > INT_LIMIT || a.c * taps > INT_LIMIT)
+    if(rows > INT_LIMIT || taps > INT_LIMIT || a.k * taps > INT_LIMIT)
     {
         return std::nullopt;
     }
 
     WrwProblem problem;
+    problem.mult = a.k / a.c;
     problem.layout = *layout;
     problem.ndims = base->spatialRank == 3 ? 3 : 2;
     problem.flipFilter = a.flipFilter != 0;
@@ -157,14 +163,83 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
     return problem;
 }
 
-void partitionFor(WrwProblem& problem, int64_t computeUnits)
+namespace
+{
+
+bool isHankel(const WrwConfig& config)
+{
+    return config.variant == "hankel";
+}
+
+/// Partial blocks per partition: channel blocks.
+int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
+{
+    const auto& a = problem.args;
+    if(isHankel(config))
+    {
+        return divUp(a.c, 64 * config.nwg);
+    }
+    // The VALU kernels walk output channels.
+    const int64_t channels = a.c * problem.mult;
+    return problem.layout == DepthwiseLayout::CHANNELS_LAST ? divUp(channels, CHANNELS_PER_BLOCK)
+                                                            : channels;
+}
+
+} // namespace
+
+int64_t hankelLdsBytes(const WrwConfig& config)
+{
+    // ConvDepthwiseHankelWrw.h: G x-row buffers of 64 nwg channel rows, and KH + G - 1 ring
+    // slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots over banks).
+    const int64_t rg = divUp(config.kw, 4);
+    const int64_t xWords = divUp(config.q / 4 + rg, 8) * 8;
+    const int64_t dyWords = divUp(config.q / 4, 8) * 8;
+    const int64_t channels = 64 * config.nwg;
+    const int64_t xPitch = 4 * xWords + 4, dyPitch = 4 * dyWords + 4;
+    const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
+    const int64_t slots = config.kh + config.g - 1;
+    return (config.g * channels * xPitch + (slots + 1) * slot) * 2;
+}
+
+bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const bool f16 = problem.base.dataType == data_objects::DataType::HALF;
+    const bool bf16 = problem.base.dataType == data_objects::DataType::BFLOAT16;
+    // 4x4x4 MFMA: fp16 from gfx908, bf16 (the _1k form) from gfx90a.
+    const bool cdna = arch == "gfx90a" || arch == "gfx942" || arch == "gfx950";
+    if(!((f16 && (cdna || arch == "gfx908")) || (bf16 && cdna)))
+    {
+        return false;
+    }
+    const auto& a = problem.args;
+    // No multiplier (the matrix-core kernel walks input channels).
+    if(config.mult != 1 || problem.layout != DepthwiseLayout::CHANNELS_LAST || problem.ndims != 2
+       || a.kd != 1 || config.kd != 1 || a.kh != config.kh || a.kw != config.kw)
+    {
+        return false;
+    }
+    if(a.sh != 1 || a.sw != 1 || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
+    {
+        return false;
+    }
+    if(config.q < 4 || config.q > 64 || config.q % 4 != 0 || config.g < 1 || config.g > 4
+       || (config.nwg != 1 && config.nwg != 2 && config.nwg != 4)
+       || (config.bpc != 1 && config.bpc != 2 && config.bpc != 4 && config.bpc != 8))
+    {
+        return false;
+    }
+    const int64_t ldsLimit = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+    return hankelLdsBytes(config) <= ldsLimit;
+}
+
+void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& config)
 {
     auto& a = problem.args;
     // Enough partitions that the partial kernel fills the device, each at least one row.
-    const int64_t blocksPerPartition = problem.layout == DepthwiseLayout::CHANNELS_LAST
-                                           ? divUp(a.c, CHANNELS_PER_BLOCK)
-                                           : static_cast<int64_t>(a.c);
-    const int64_t wanted = std::max<int64_t>(1, computeUnits) * BLOCKS_PER_CU;
+    const int64_t blocksPerPartition = blocksPerPartitionOf(problem, config);
+    const int64_t wanted
+        = std::max<int64_t>(1, computeUnits) * (isHankel(config) ? config.bpc : BLOCKS_PER_CU);
     const int64_t partitions
         = std::clamp<int64_t>(divUp(wanted, blocksPerPartition), 1, static_cast<int64_t>(a.rows));
     a.rowsPerPartition = static_cast<int>(divUp(a.rows, partitions));
@@ -174,19 +249,17 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits)
 size_t workspaceBytesFor(const WrwProblem& problem)
 {
     const auto& a = problem.args;
-    return static_cast<size_t>(a.partitions) * static_cast<size_t>(a.c)
+    return static_cast<size_t>(a.partitions) * static_cast<size_t>(a.c * problem.mult)
            * static_cast<size_t>(a.taps) * sizeof(float);
 }
 
-std::optional<WrwLaunch> launchFor(const WrwProblem& problem)
+std::optional<WrwLaunch> launchFor(const WrwProblem& problem, const WrwConfig& config)
 {
     const auto& a = problem.args;
     WrwLaunch launch;
     launch.block = BLOCK;
-    launch.partialGrid = problem.layout == DepthwiseLayout::CHANNELS_LAST
-                             ? int64_t{a.partitions} * divUp(a.c, CHANNELS_PER_BLOCK)
-                             : int64_t{a.partitions} * a.c;
-    launch.foldGrid = divUp(int64_t{a.c} * a.taps, BLOCK);
+    launch.partialGrid = int64_t{a.partitions} * blocksPerPartitionOf(problem, config);
+    launch.foldGrid = divUp(int64_t{a.c} * problem.mult * a.taps, BLOCK);
     if(launch.partialGrid < 1 || launch.partialGrid > INT_LIMIT || launch.foldGrid > INT_LIMIT)
     {
         return std::nullopt;
@@ -234,6 +307,22 @@ std::string elementTypeFor(const std::string& dtype)
         "conv_depthwise_valu_wrw kernel declares unsupported dtype '" + dtype + "'");
 }
 
+/// A kernel's config, from its metadata.
+conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
+{
+    conv_depthwise_valu_wrw::WrwConfig config;
+    config.variant = kernel.getStringMetadata("variant");
+    config.kd = kernel.getIntMetadata("kd");
+    config.kh = kernel.getIntMetadata("kh");
+    config.kw = kernel.getIntMetadata("kw");
+    config.q = kernel.getIntMetadata("q");
+    config.g = kernel.getIntMetadata("g");
+    config.nwg = kernel.getIntMetadata("nwg");
+    config.bpc = kernel.getIntMetadata("bpc");
+    config.mult = kernel.getIntMetadata("mult");
+    return config;
+}
+
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
     const auto problem = conv_depthwise_valu_wrw::parseWrwProblem(context);
@@ -257,8 +346,9 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
-/// and 2-D). The partitions are sized from the device's units, so a device that reports none
-/// is declined.
+/// and 2-D); the matrix-core (hankel) configs pass hankelAdmits, and only they may set the
+/// q, g, nwg and bpc fields. The partitions are sized from the device's units, so a device that
+/// reports none is declined.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -273,23 +363,41 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto& variant = kernel.getStringMetadata("variant");
-    if(variant == "tile")
+    const auto config = configOf(kernel);
+    const bool hankel = config.variant == "hankel";
+    // The kernel's multiplier is the graph's.
+    if(config.mult != problem->mult)
     {
-        const auto& a = problem->args;
-        if(a.kd != kernel.getIntMetadata("kd") || a.kh != kernel.getIntMetadata("kh")
-           || a.kw != kernel.getIntMetadata("kw"))
+        return false;
+    }
+    // The matrix-core fields are the hankel variant's alone.
+    if(!hankel && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0))
+    {
+        return false;
+    }
+    const auto& a = problem->args;
+    if(config.variant == "tile")
+    {
+        if(a.kd != config.kd || a.kh != config.kh || a.kw != config.kw)
         {
             return false;
         }
     }
-    else if(variant != "floor")
+    else if(hankel)
+    {
+        if(!conv_depthwise_valu_wrw::hankelAdmits(
+               *problem, config, context.deviceProperties.gcnArchName))
+        {
+            return false;
+        }
+    }
+    else if(config.variant != "floor")
     {
         return false;
     }
-    conv_depthwise_valu_wrw::partitionFor(*problem,
-                                          device_units::dispatchUnits(context.deviceProperties));
-    return conv_depthwise_valu_wrw::launchFor(*problem).has_value();
+    conv_depthwise_valu_wrw::partitionFor(
+        *problem, device_units::dispatchUnits(context.deviceProperties), config);
+    return conv_depthwise_valu_wrw::launchFor(*problem, config).has_value();
 }
 
 /// The single argument both kernels take. Only consulted for a pre-built kernel.
@@ -351,7 +459,7 @@ public:
     /// One fp32 partial sum per (partition, channel, tap).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+                          const KernelDefinition& kernel) const override
     {
         auto problem = conv_depthwise_valu_wrw::parseWrwProblem(context);
         if(!problem.has_value())
@@ -359,7 +467,7 @@ public:
             return 0;
         }
         conv_depthwise_valu_wrw::partitionFor(
-            *problem, device_units::dispatchUnits(context.deviceProperties));
+            *problem, device_units::dispatchUnits(context.deviceProperties), configOf(kernel));
         return conv_depthwise_valu_wrw::workspaceBytesFor(*problem);
     }
 
@@ -378,9 +486,10 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "conv_depthwise_valu_wrw dispatch was given a graph its matcher did not admit");
         }
+        const auto config = configOf(kernel);
         conv_depthwise_valu_wrw::partitionFor(
-            *problem, device_units::dispatchUnits(context.deviceProperties));
-        const auto launch = conv_depthwise_valu_wrw::launchFor(*problem);
+            *problem, device_units::dispatchUnits(context.deviceProperties), config);
+        const auto launch = conv_depthwise_valu_wrw::launchFor(*problem, config);
         if(!launch.has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -392,14 +501,26 @@ public:
         options.add("CONV_DW_TYPE", elementTypeFor(kernel.getStringMetadata("dtype")));
         options.add("CONV_DW_LAYOUT",
                     std::string(problem->layout == DepthwiseLayout::CHANNELS_FIRST ? "1" : "0"));
-        const bool tile = kernel.getStringMetadata("variant") == "tile";
-        options.add("CONV_DW_VARIANT", std::string(tile ? "1" : "0"));
+        const bool tile = config.variant == "tile";
+        const bool hankel = config.variant == "hankel";
+        options.add("CONV_DW_VARIANT", std::string(hankel ? "2" : tile ? "1" : "0"));
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
-        if(tile)
+        // Defined only for a multiplier, so the multiplier-1 programs compile as before.
+        if(config.mult != 1)
         {
-            options.add("CONV_DW_KD", std::to_string(kernel.getIntMetadata("kd")));
-            options.add("CONV_DW_KH", std::to_string(kernel.getIntMetadata("kh")));
-            options.add("CONV_DW_KW", std::to_string(kernel.getIntMetadata("kw")));
+            options.add("CONV_DW_MULT", std::to_string(config.mult));
+        }
+        if(tile || hankel)
+        {
+            options.add("CONV_DW_KD", std::to_string(config.kd));
+            options.add("CONV_DW_KH", std::to_string(config.kh));
+            options.add("CONV_DW_KW", std::to_string(config.kw));
+        }
+        if(hankel)
+        {
+            options.add("CONV_DW_Q", std::to_string(config.q));
+            options.add("CONV_DW_G", std::to_string(config.g));
+            options.add("CONV_DW_NWG", std::to_string(config.nwg));
         }
 
         auto partial = buildIngestorKernelCode(

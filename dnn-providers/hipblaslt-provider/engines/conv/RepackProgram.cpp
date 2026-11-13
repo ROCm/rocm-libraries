@@ -26,15 +26,27 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 39> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 65> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
+                                                      "StridedTransposeNarrow2",
+                                                      "StridedTransposeNarrow4",
                                                       "StridedCastFloatToFloat",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",
+                                                      "StridedCastWideFloatToFloat",
+                                                      "StridedCastWideFloatToHalf",
+                                                      "StridedCastWideFloatToBfloat16",
                                                       "Im2Col2",
                                                       "Im2Col4",
+                                                      "Im2ColDisjointOutputs2V1",
+                                                      "Im2ColDisjointOutputs2V2",
+                                                      "Im2ColDisjointOutputs2V4",
+                                                      "Im2ColDisjointOutputs2V8",
+                                                      "Im2ColDisjointOutputs4V1",
+                                                      "Im2ColDisjointOutputs4V2",
+                                                      "Im2ColDisjointOutputs4V4",
                                                       "Im2ColRows2V1",
                                                       "Im2ColRows2V8",
                                                       "Im2ColRows4V1",
@@ -48,6 +60,20 @@ constexpr std::array<const char*, 39> ENTRY_POINTS = {"StridedCopy2",
                                                       "Col2ImFloat",
                                                       "Col2ImDisjoint2",
                                                       "Col2ImDisjoint4",
+                                                      "Col2ImDisjointWidth2V1",
+                                                      "Col2ImDisjointWidth2V2",
+                                                      "Col2ImDisjointWidth2V4",
+                                                      "Col2ImDisjointWidth2V8",
+                                                      "Col2ImDisjointChannels2V1",
+                                                      "Col2ImDisjointChannels2V2",
+                                                      "Col2ImDisjointChannels2V4",
+                                                      "Col2ImDisjointChannels2V8",
+                                                      "Col2ImDisjointWidth4V1",
+                                                      "Col2ImDisjointWidth4V2",
+                                                      "Col2ImDisjointWidth4V4",
+                                                      "Col2ImDisjointChannels4V1",
+                                                      "Col2ImDisjointChannels4V2",
+                                                      "Col2ImDisjointChannels4V4",
                                                       "Col2ImHalf",
                                                       "Col2ImBfloat16",
                                                       "Col2ImRowsFloatV1",
@@ -89,8 +115,9 @@ void throwOnHiprtcError(hiprtcResult status, const char* what)
 /// The code object of the repack program for @p arch.
 std::vector<char> compile(const std::string& arch)
 {
-    const std::array<const char*, 1> headers = {kernels::CONV_REPACK_ARGS_SOURCE};
-    const std::array<const char*, 1> headerNames = {"ConvRepackArgs.h"};
+    const std::array<const char*, 2> headers
+        = {kernels::CONV_REPACK_ARGS_SOURCE, kernels::CONV_REPACK_DISJOINT_SOURCE};
+    const std::array<const char*, 2> headerNames = {"ConvRepackArgs.h", "ConvRepackDisjoint.h"};
     hiprtcProgram program = nullptr;
     throwOnHiprtcError(hiprtcCreateProgram(&program,
                                            kernels::CONV_REPACK_SOURCE,
@@ -205,7 +232,8 @@ std::string RepackProgram::entryName(const RepackStep& step)
 void RepackProgram::launch(const RepackStep& step,
                            const void* src,
                            void* dst,
-                           hipStream_t stream) const
+                           hipStream_t stream,
+                           long long minRunThreads) const
 {
     // The kernels take their argument block by value; fill in its pointers, then let the launch
     // rules (kernels/ConvRepackLaunch.hpp) pick im2col's and col2im's specialized kernels.
@@ -224,13 +252,16 @@ void RepackProgram::launch(const RepackStep& step,
         cast->src = static_cast<const float*>(src);
         cast->dst = dst;
         total = cast->total;
+        // Many partials into few outputs: one 64-thread block per output (castLaunch).
+        launch = castLaunch(*cast, entryName(step));
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {
         im2col->x = src;
         im2col->col = dst;
         total = im2col->total;
-        launch = im2colLaunch(*im2col, static_cast<int>(elementBytes(step.dataType)));
+        launch
+            = im2colLaunch(*im2col, static_cast<int>(elementBytes(step.dataType)), minRunThreads);
     }
     else if(auto* col2im = std::get_if<Col2ImArgs>(&args))
     {
@@ -240,7 +271,8 @@ void RepackProgram::launch(const RepackStep& step,
         const auto generic = entryName(step); // Col2Im<Type>
         launch = col2imLaunch(*col2im,
                               generic.substr(std::string("Col2Im").size()),
-                              static_cast<int>(elementBytes(step.dataType)));
+                              static_cast<int>(elementBytes(step.dataType)),
+                              minRunThreads);
     }
     if(total <= 0)
     {

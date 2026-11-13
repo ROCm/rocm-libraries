@@ -231,21 +231,25 @@ endif()
 if(HIPBLASLTPROVIDER_ENABLE_CONV)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_CONV=1)
     # The convolution repack kernels are compiled at runtime by HIPRTC from source embedded in
-    # the plugin: kernels/ConvRepack.cpp and the argument header it shares with the host.
+    # the plugin: kernels/ConvRepack.cpp, the argument header it shares with the host, and the
+    # disjoint-tap run kernels' header (its own literal: each stays under 64 KiB).
     find_package(hiprtc REQUIRED)
     target_link_libraries(hipblaslt_plugin_private PUBLIC hiprtc::hiprtc)
     set(_conv_repack_files
         "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackDisjoint.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in"
     )
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_conv_repack_files})
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in" _conv_repack_header)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp" _conv_repack_source)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h" _conv_repack_args)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackDisjoint.h" _conv_repack_disjoint)
     # Plain replacement rather than configure_file: the sources are not CMake templates.
     string(REPLACE "@CONV_REPACK_SOURCE@" "${_conv_repack_source}" _conv_repack_header "${_conv_repack_header}")
     string(REPLACE "@CONV_REPACK_ARGS_SOURCE@" "${_conv_repack_args}" _conv_repack_header "${_conv_repack_header}")
+    string(REPLACE "@CONV_REPACK_DISJOINT_SOURCE@" "${_conv_repack_disjoint}" _conv_repack_header "${_conv_repack_header}")
     # Written through a COPYONLY configure_file, which leaves an unchanged output untouched, so
     # an unchanged kernel recompiles nothing.
     set(_conv_repack_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/kernels/ConvRepackSources.hpp")

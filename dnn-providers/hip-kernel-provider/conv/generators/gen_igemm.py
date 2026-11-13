@@ -35,6 +35,7 @@ FIELDS = [
     "swz",
     "dma",
     "fuse",
+    "large",
 ]
 # Every field that tells two configs of one graph apart is a knob (the candidate enumeration
 # identifies a config by its knob tuple).
@@ -68,6 +69,7 @@ def C(
     swz=0,
     dma=0,
     fuse=0,
+    large=0,
 ):
     return dict(
         atom=atom,
@@ -88,6 +90,7 @@ def C(
         swz=swz,
         dma=dma,
         fuse=fuse,
+        large=large,
     )
 
 
@@ -150,6 +153,32 @@ def withFuse(cfgs, tag):
     ]
 
 
+# large 1: 64-bit positions within an image (K1_LARGE), the generic tier's variant for images past
+# 2^31 - 1 pixels, served only there (and the other configs only below). Twins of the plain
+# configs of a few tiles per atom, the 1-wide-vector ones included (one-channel images).
+LARGE_TILES = {(128, 128, 32), (128, 64, 32), (64, 64, 16), (128, 128, 16)}
+
+
+def withLarge(cfgs):
+    return cfgs + [
+        dict(c, large=1)
+        for c in cfgs
+        if (c["bm"], c["bn"], c["bk"]) in LARGE_TILES
+        and c["math"] == "native"
+        and not (
+            c["xcd"]
+            or c["halo"]
+            or c["wdirect"]
+            or c["pack"]
+            or c["cf"]
+            or c["swz"]
+            or c["dma"]
+            or c["fuse"]
+            or c["large"]
+        )
+    ]
+
+
 def withSwz(cfgs):
     return cfgs + [
         dict(c, swz=1)
@@ -194,11 +223,14 @@ def mfma(dt, atoms32, atoms16, wide32=None, wide16=None):
             C(atoms32, 128, 128, 32, vec=v, xcd=1),
             C(atoms32, 64, 128, 64, vec=v, xcd=1),
         ]
-    # Larger XCD-ordered tiles for compute-bound dense layers (L2 reuse; 256x256 with 2x4 waves).
+    # Larger XCD-ordered tiles for compute-bound dense layers (L2 reuse; 256x256 with 2x4 waves),
+    # and the 256x256 tile in plain order for the archs without XCDs (gfx908, gfx90a: 12-14% over
+    # the 128-wide tiles on deeplab's dilated c2048 / c512 3x3).
     if atoms32:
         cfgs += [
             C(atoms32, 256, 128, 32, vec=v, xcd=1),
             C(atoms32, 256, 256, 32, 2, 4, vec=v, xcd=1),
+            C(atoms32, 256, 256, 32, 2, 4, vec=v),
         ]
     if wide32:
         cfgs += [
@@ -401,10 +433,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     for dtype, cfgs in CATALOG.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         # The direct filter is a backward-data loader: forward has no use for it.
-        cfgs = withCf(
-            withSwz(
-                withFlat(
-                    withFuse([c for c in cfgs if tag == "bwd" or not c["wdirect"]], tag)
+        cfgs = withLarge(
+            withCf(
+                withSwz(
+                    withFlat(
+                        withFuse(
+                            [c for c in cfgs if tag == "bwd" or not c["wdirect"]], tag
+                        )
+                    )
                 )
             )
         )
@@ -427,6 +463,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 f".dma{c['dma']}" if c["dma"] else ""
             ) + (
                 f".fuse{c['fuse']}" if c["fuse"] else ""
+            ) + (
+                ".large" if c["large"] else ""
             )
             kernels.append(
                 {
