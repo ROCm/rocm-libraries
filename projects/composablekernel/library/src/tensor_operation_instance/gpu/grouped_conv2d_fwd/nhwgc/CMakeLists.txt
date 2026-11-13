@@ -6,6 +6,7 @@ include(ShardInstantiation)
 # NHWGC layout instances for grouped_conv2d_fwd
 set(GROUPED_CONV2D_FWD_NHWGC
    # dl
+   dl/device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
    dl/device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    dl/device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_f32_instance.cpp
    # wmma
