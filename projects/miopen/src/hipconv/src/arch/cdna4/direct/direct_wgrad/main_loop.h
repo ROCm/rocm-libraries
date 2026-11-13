@@ -30,9 +30,8 @@ struct Accumulators
 
 // A phase boundary.
 //
-// The barrier is the raw intrinsic because __syncthreads fences all address spaces, which lowers
-// to vmcnt(0) and drains the prefetch this schedule keeps in flight. The sched_barrier pins the
-// instruction order across it, or the loads float over the barrier and the phasing collapses.
+// The barrier is the raw intrinsic because, while the 16-bit path's LDS DMA prefetch is in flight,
+// the release fence in __syncthreads lowers to s_waitcnt vmcnt(0), which drains it.
 __device__ inline void phase_barrier()
 {
     __builtin_amdgcn_s_barrier();
@@ -78,7 +77,7 @@ __device__ void publish_row(int load_wave,
 // Tail says this is the last block, which stops at the image's last row. Its positions drop the
 // prefetches no surviving position reads, which takes the loaders' address arithmetic out of a
 // block the allocator has no room for and separates ping's and pong's drain counts; see
-// docs/algorithms/direct/direct-wgrad-main-loop-blocks.md.
+// docs/algorithms/details/direct/direct-wgrad-main-loop-blocks.md.
 template <Config cfg, hipconv::DataType DT, int U, bool ZeroAcc, bool Tail = false>
 __device__ void run_iteration(int wave_group,
                               int load_wave,
@@ -102,8 +101,9 @@ __device__ void run_iteration(int wave_group,
     static_assert(keep <= arch::max_vmcnt);
 
     // Positions of a tail block that still prefetch, counted at each wavegroup's own drain:
-    // ping counts the positions before its own, pong counts its own as well. Zero under every
-    // config the table ships; the drain arithmetic is derived in the block-structure doc.
+    // ping counts the positions before its own, pong counts its own as well. Zero wherever kh
+    // divides row_buffers, which every 16-bit entry does; tf32's 4×4 has 9 and its 5×5 has 8.
+    // The drain arithmetic is derived in the block-structure doc.
     constexpr int tail_issues = maximum(0, cfg.unroll() - 1 - cfg.prefetch_rows);
     constexpr bool issue      = !Tail || U < tail_issues;
     constexpr int ping_ahead  = Tail ? minimum(U, tail_issues) : U;
@@ -127,6 +127,9 @@ __device__ void run_iteration(int wave_group,
         arch::s_wait_vmcnt<ping_keep>();
         publish_row<cfg, DT, read_slot>(
             load_wave, s_loader, delta_loader, s_ring, delta_ring, stage);
+        // Ping's reads from its last memory phase retire before the barrier, after which other
+        // waves refill that slot. Without this wait only the compiler's waits for the MFMAs did.
+        arch::s_wait_lgkmcnt<0>();
     }
     phase_barrier();
     __builtin_amdgcn_s_setprio(0);
@@ -141,8 +144,8 @@ __device__ void run_iteration(int wave_group,
     //
     // ladder_pays picks between the two S read forms, which issue the same reads. The ladder
     // shares one address register across the rungs that fold, and constrains the schedule enough
-    // to measure 1.27x slower on a row that folds no rung the compiler would not fold unaided;
-    // see the ladder section of docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md.
+    // to measure 1.27× slower on a row that folds no rung the compiler would not fold unaided;
+    // see the ladder section of docs/algorithms/details/direct/direct-wgrad-cdna4-lds-swizzle.md.
     rt_s<cfg, DT> s_tile[cfg.kw];
     if constexpr(SRowLayout<cfg>::ladder_pays())
     {
@@ -187,14 +190,23 @@ __device__ void run_iteration(int wave_group,
     // Its row is therefore the one after ping's, and on the tf32 path that is the row it
     // publishes. Between them the two wavegroups publish each row exactly once -- ping at the
     // iteration that reads it, pong at the one before -- each writing the share its own loads
-    // fetched. In a tail the row after the last may not exist, and publishing it writes stale
-    // registers to a slot the next item's prologue refills before anything reads it.
+    // fetched. At the image's last row there is no row after it, and the guard skips the
+    // publish, leaving that slot to the next item's prologue, which refills it before anything
+    // reads it.
     if(wave_group != 0)
     {
         arch::s_wait_vmcnt<pong_keep>();
-        if(iter + 1 < sched.iterations())
+        const bool publishes = iter + 1 < sched.iterations();
+        if(publishes)
             publish_row<cfg, DT, U + 1>(
                 load_wave, s_loader, delta_loader, s_ring, delta_ring, stage);
+
+        // Pong's reads of read_slot retire before the barrier, after which ping's DMA refills it.
+        //
+        // On the tf32 path publish_row has already waited lgkmcnt(0), except at the image's last
+        // row. See docs/algorithms/details/direct/direct-wgrad-main-loop-blocks.md.
+        if(!cfg.is_tf32() || !publishes)
+            arch::s_wait_lgkmcnt<0>();
     }
     phase_barrier();
     __builtin_amdgcn_s_setprio(1);
@@ -220,8 +232,8 @@ __device__ void run_iteration(int wave_group,
 // Run positions U .. Unroll-1 of a block, stopping at the first row the image does not hold.
 //
 // The nesting leaves the allocator one straight path with exits off it: a position that finds no
-// row exits the whole block. A flat run rejoins after every position and measures 1.44x slower;
-// see docs/algorithms/direct/direct-wgrad-main-loop-blocks.md.
+// row exits the whole block. A flat run rejoins after every position and measures 1.44× slower;
+// see docs/algorithms/details/direct/direct-wgrad-main-loop-blocks.md.
 //
 // The test is workgroup-uniform, so both wavegroups stop at the same position and leave with the
 // same barrier count.
@@ -249,8 +261,8 @@ __device__ void run_positions(int base, int rows, const Body& body)
 // FirstTouch says the accumulators hold nothing yet, so the first block writes them through the
 // three-operand mma and spares the caller a zeroing pass. The kernel does not take it, the peel
 // costing a third copy of the block body; see the note where the kernel zeroes them and
-// docs/algorithms/direct/direct-wgrad-main-loop-blocks.md.
-template <Config cfg, hipconv::DataType DT, bool FirstTouch = true>
+// docs/algorithms/details/direct/direct-wgrad-main-loop-blocks.md.
+template <Config cfg, hipconv::DataType DT, bool FirstTouch>
 __device__ void run_main_loop(int wave_group,
                               int load_wave,
                               int item,
@@ -277,7 +289,7 @@ __device__ void run_main_loop(int wave_group,
     // The block folds every slot index to a constant, so the loop cannot run a fraction of one,
     // and padding the height out instead collects nothing: a surplus iteration is still gated by
     // its two barriers and its memory phase. See
-    // docs/algorithms/direct/direct-wgrad-main-loop-blocks.md.
+    // docs/algorithms/details/direct/direct-wgrad-main-loop-blocks.md.
     const int rows  = sched.iterations();
     const int whole = (rows / unroll) * unroll;
 
@@ -367,10 +379,16 @@ __device__ void run_main_loop(int wave_group,
     };
     run_rows();
 
-    // Undo the stagger. Ping absorbs the barrier pong took at entry, so both wavegroups leave
-    // having executed the same count and whatever barriers come next cannot deadlock.
+    // Undo the stagger.
+    //
+    // Ping absorbs the barrier pong took at entry, so both wavegroups leave having executed the
+    // same count and whatever barriers come next cannot deadlock. Ping's last LDS reads retire
+    // before the barrier, after which the next item's prologue refills their slots.
     if(wave_group == 0)
+    {
+        arch::s_wait_lgkmcnt<0>();
         phase_barrier();
+    }
 
     __builtin_amdgcn_s_setprio(0);
 }

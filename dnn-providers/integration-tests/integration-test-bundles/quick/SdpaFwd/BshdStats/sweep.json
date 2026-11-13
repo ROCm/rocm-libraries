@@ -1,0 +1,617 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              384,
+              128
+            ],
+            "strides": [
+              786432,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              384,
+              128
+            ],
+            "strides": [
+              98304,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              384,
+              1
+            ],
+            "strides": [
+              6144,
+              384,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 2D LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    },
+    {
+      "id": "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              8,
+              256,
+              1
+            ],
+            "strides": [
+              2048,
+              256,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 2D LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    },
+    {
+      "id": "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              128,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              128,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              8,
+              512,
+              128
+            ],
+            "strides": [
+              524288,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              32,
+              128,
+              1
+            ],
+            "strides": [
+              4096,
+              128,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 2D LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    },
+    {
+      "id": "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              512,
+              1
+            ],
+            "strides": [
+              8192,
+              512,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 2D LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    },
+    {
+      "id": "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4,
+              2048,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              32,
+              1,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              4,
+              2048,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              512,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              4,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 3D (decode) LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    },
+    {
+      "id": "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              1,
+              1024,
+              64
+            ],
+            "strides": [
+              65536,
+              64,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              1,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              8,
+              1,
+              64
+            ],
+            "strides": [
+              512,
+              64,
+              512,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              1,
+              1024,
+              64
+            ],
+            "strides": [
+              65536,
+              64,
+              64,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              8,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.125,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "BSHD SdpaFwd with a head-major FP32 stats output [B, Hq, Sq, 1]; served by the gfx950 unified 3D (decode) LSE-on kernels.",
+        "operation": "SdpaFwd",
+        "reference_source": "verified against the CPU/GPU reference executors (no golden data)"
+      }
+    }
+  ]
+}

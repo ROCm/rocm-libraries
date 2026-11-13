@@ -20,6 +20,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#ifndef _WIN32
+#include <cxxabi.h>
+#endif
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
@@ -32,9 +35,12 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -54,6 +60,7 @@
 #include "instruction/mfma.hpp"
 #include "stinkytofu/Config/Config.h"
 #include "stinkytofu/Version.h"
+#include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -61,12 +68,14 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
+#include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 #ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
 #include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
@@ -770,7 +779,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
         }
-        else if (auto typed = dynamic_cast<const GlobalAtomicIncU32Saddr*>(inst)) {
+        else if (auto typed = dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst)) {
             // GlobalAtomicIncU32Saddr carries cache scope / temporal hint / offset as rocisa
             // GLOBALModifiers; translate so the emitter prints them (the returning-atomic
             // th:TH_ATOMIC_RETURN is added separately by the emitter). Scoped to the atomic
@@ -1037,12 +1046,453 @@ void traverseModule(const rocisa::Module& module,
     }
 }
 
+// rocisa native tree -> logical IR -> lowerLogicalModuleToAsm (composite expansion
+// + ToStinkyAsmPass). import rocisa is unchanged; this only replaces the direct
+// rocisa -> asm visitor behind ModuleOptions::LowerViaLogicalIR.
+std::string rocisaClassName(const rocisa::Instruction& inst) {
+#ifndef _WIN32
+    // Itanium C++ ABI demangling (libstdc++ / libc++abi on Linux); MSVC ABI has
+    // no equivalent of cxxabi.h, and typeid(...).name() under MSVC is already
+    // human-readable, so no demangling is needed there.
+    int status = 0;
+    std::unique_ptr<char, decltype(&std::free)> demangled(
+        abi::__cxa_demangle(typeid(inst).name(), nullptr, nullptr, &status), &std::free);
+    std::string full = (status == 0 && demangled) ? demangled.get() : typeid(inst).name();
+#else
+    std::string full = typeid(inst).name();
+#endif
+    const auto pos = full.rfind("::");
+    return pos == std::string::npos ? full : full.substr(pos + 2);
+}
+
+int asmCap(const std::map<std::string, int>& caps, const char* key) {
+    const auto it = caps.find(key);
+    return it == caps.end() ? 0 : it->second;
+}
+
+void setTrue16FromCommon(LogicalInstruction* logical, const rocisa::CommonInstruction* common) {
+    using StHalf = stinkytofu::HighBitSel;
+    auto regHalf = [](const rocisa::Container* cont) -> StHalf {
+        auto* reg = dynamic_cast<const rocisa::RegisterContainer*>(cont);
+        if (reg && reg->halfSelect.has_value()) {
+            return static_cast<StHalf>(static_cast<int>(*reg->halfSelect));
+        }
+        return StHalf::NONE;
+    };
+    auto inputHalf = [&](const InstructionInput& in) -> StHalf {
+        if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&in)) {
+            return regHalf(pptr->get());
+        }
+        return StHalf::NONE;
+    };
+    StHalf dst0 = regHalf(common->dst.get());
+    StHalf dstHi = regHalf(common->dst1.get());
+    std::vector<StHalf> srcSels;
+    srcSels.reserve(common->srcs.size());
+    for (const auto& src : common->srcs) srcSels.push_back(inputHalf(src));
+    bool any = dst0 != StHalf::NONE || dstHi != StHalf::NONE;
+    for (auto sel : srcSels) any = any || sel != StHalf::NONE;
+    if (!any) return;
+    logical->true16 = True16Modifiers(dst0, dstHi, srcSels);
+}
+
+void matrixFmtsFromText(const std::string& text, std::string& fmtA, std::string& fmtB) {
+    auto grab = [&](const char* key) -> std::string {
+        const auto pos = text.find(key);
+        if (pos == std::string::npos) return {};
+        const auto begin = pos + std::char_traits<char>::length(key);
+        const auto end = text.find_first_of(" \t\n\r", begin);
+        return text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    };
+    fmtA = grab("matrix_a_fmt:");
+    fmtB = grab("matrix_b_fmt:");
+}
+
+void fillLogicalOperands(LogicalInstruction* logical, const rocisa::Instruction* inst,
+                         const std::map<std::string, int>& asmCaps, bool hasVgprMsb,
+                         GfxArchID archId) {
+    if (dynamic_cast<const rocisa::SDelayAlu*>(inst) ||
+        dynamic_cast<const rocisa::SWaitCnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitCnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitLoadcnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitDscnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitKMcnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitCntVscnt*>(inst) ||
+        dynamic_cast<const rocisa::_SWaitStorecnt*>(inst) ||
+        dynamic_cast<const rocisa::SBarrier*>(inst) ||
+        dynamic_cast<const rocisa::SWaitAlu*>(inst)) {
+        return;
+    }
+
+    if (const auto* mfma = dynamic_cast<const rocisa::MFMAInstruction*>(inst)) {
+        if (mfma->acc) {
+            StinkyRegister dst = toStinkyRegister(mfma->acc.get(), hasVgprMsb, archId);
+            if (dst.isValid()) logical->dests.push_back(dst);
+        }
+        if (mfma->a) {
+            StinkyRegister src = toStinkyRegister(mfma->a.get(), hasVgprMsb, archId);
+            if (src.isValid()) logical->srcs.push_back(src);
+        }
+        if (mfma->b) {
+            StinkyRegister src = toStinkyRegister(mfma->b.get(), hasVgprMsb, archId);
+            if (src.isValid()) logical->srcs.push_back(src);
+        }
+        StinkyRegister acc2 = mfma->acc2.has_value()
+                                  ? toStinkyRegister(*mfma->acc2, hasVgprMsb, archId)
+                                  : StinkyRegister(mfma->acc2_imm);
+        if (acc2.isValid()) logical->srcs.push_back(acc2);
+        return;
+    }
+
+    for (const InstructionInput& dst : inst->getDstParams()) {
+        StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb, archId);
+        if (reg.isValid()) logical->dests.push_back(reg);
+    }
+
+    std::vector<InstructionInput> srcParams = inst->getSrcParams();
+    if (dynamic_cast<const rocisa::BufferAtomicAddF32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB64*>(inst)) {
+        if (!srcParams.empty()) srcParams.erase(srcParams.begin());
+    }
+    if (typeid(*inst) == typeid(rocisa::VLShiftLeftAddU32) && asmCap(asmCaps, "HasAddLshl")) {
+        if (srcParams.size() >= 3) std::swap(srcParams[1], srcParams[2]);
+    }
+    for (const InstructionInput& src : srcParams) {
+        StinkyRegister reg = toStinkyRegister(src, hasVgprMsb, archId);
+        if (reg.isValid()) logical->srcs.push_back(reg);
+    }
+}
+
+void applyLogicalPayload(LogicalInstruction* logical, const rocisa::Instruction* inst,
+                         const std::map<std::string, int>& asmCaps) {
+    if (const auto* mfma = dynamic_cast<const rocisa::MFMAInstruction*>(inst)) {
+        const int m = mfma->variant.size() > 0 ? mfma->variant[0] : 0;
+        const int n = mfma->variant.size() > 1 ? mfma->variant[1] : 0;
+        const int k = mfma->variant.size() > 2 ? mfma->variant[2] : 0;
+        const int blocks = mfma->variant.size() > 3 ? mfma->variant[3] : 1;
+        const bool scaled = mfma->forceScaledWMMA();
+        const bool hasF8 = asmCap(asmCaps, "HasWMMA_f8f6f4") != 0;
+        std::string fmtA;
+        std::string fmtB;
+        if (hasF8) matrixFmtsFromText(mfma->toString(), fmtA, fmtB);
+        const int negSrcs = mfma->neg ? (asmCap(asmCaps, "HasWMMA_V1") ? 3 : 2) : 0;
+        logical->setSpecialData(new MFMAData(mfma->typeConvert(mfma->instType),
+                                             mfma->typeConvert(mfma->accType), m, n, k, blocks,
+                                             mfma->mfma1k, mfma->neg, mfma->reuseA, mfma->reuseB,
+                                             fmtA, fmtB, scaled, scaled && hasF8, negSrcs));
+    } else if (const auto* mxmfma = dynamic_cast<const rocisa::MXMFMAInstruction*>(inst)) {
+        const int m = mxmfma->variant.size() > 0 ? mxmfma->variant[0] : 0;
+        const int n = mxmfma->variant.size() > 1 ? mxmfma->variant[1] : 0;
+        const int k = mxmfma->variant.size() > 2 ? mxmfma->variant[2] : 0;
+        // Per-matrix input formats (matrix_a_fmt:MATRIX_FMT_FP4 ...) are parsed
+        // back out of the printed instruction, exactly as the MFMA branch does.
+        std::string fmtA;
+        std::string fmtB;
+        matrixFmtsFromText(mxmfma->toString(), fmtA, fmtB);
+        // rocisa MXMFMAInstruction maps the per-matrix MX scale datatype to
+        // matrix_{a,b}_scale_fmt: INST_F8 -> E4M3 (2), INST_E5M3 -> E5M3 (1),
+        // anything else -> no modifier. ToStinkyAsmPass re-derives the enum from
+        // these strings (scaleFmtFromStr), so emit the tokens it recognizes.
+        auto scaleTypeStr = [](rocisa::InstType t) -> std::string {
+            if (t == rocisa::InstType::INST_F8) return "fp8";
+            if (t == rocisa::InstType::INST_E5M3) return "e5m3";
+            return "";
+        };
+        logical->setSpecialData(new MXMFMAData(
+            mxmfma->typeConvert(), "f32", scaleTypeStr(mxmfma->mxScaleAType),
+            scaleTypeStr(mxmfma->mxScaleBType), m, n, k, mxmfma->block, mxmfma->reuseA,
+            mxmfma->reuseB, fmtA, fmtB, mxmfma->mxScaleASel, mxmfma->mxScaleBSel));
+    } else if (const auto* smfma = dynamic_cast<const rocisa::SMFMAInstruction*>(inst)) {
+        const int m = smfma->variant.size() > 0 ? smfma->variant[0] : 0;
+        const int n = smfma->variant.size() > 1 ? smfma->variant[1] : 0;
+        const int k = smfma->variant.size() > 2 ? smfma->variant[2] : 0;
+        const int blocks = smfma->variant.size() > 3 ? smfma->variant[3] : 1;
+        logical->setSpecialData(new SMFMAData(smfma->typeConvert(smfma->instType),
+                                              smfma->typeConvert(smfma->accType), m, n, k, blocks,
+                                              smfma->mfma1k, smfma->neg));
+    } else if (const auto* barrier = dynamic_cast<const rocisa::SBarrier*>(inst)) {
+        logical->setSpecialData(new SBarrierLogicalData(barrier->getSeparate(), barrier->getWait(),
+                                                        barrier->getClusterBarrier()));
+    } else if (const auto* waitAlu = dynamic_cast<const rocisa::SWaitAlu*>(inst)) {
+        logical->setSpecialData(new SWaitAluLogicalData(
+            waitAlu->getVaVdst(), waitAlu->getVaSdst(), waitAlu->getVaSsrc(), waitAlu->getHoldCnt(),
+            waitAlu->getVmVsrc(), waitAlu->getVaVcc(), waitAlu->getSaSdst()));
+    } else if (const auto* delay = dynamic_cast<const rocisa::SDelayAlu*>(inst)) {
+        logical->sdelayalu = convertSDelayAluData(delay);
+    } else if (const auto* setpc = dynamic_cast<const rocisa::SSetPCB64*>(inst)) {
+        if (!setpc->longBranchLabel.empty()) logical->longBranchLabel = setpc->longBranchLabel;
+    } else if (const auto* swappc = dynamic_cast<const rocisa::SSwapPCB64*>(inst)) {
+        // s_swappc_b64 carries its possible callee entry labels. Path 1 attaches
+        // these as CallTargetData in legalizeInstruction; carry them through logical
+        // IR so ToStinkyAsmPass can reattach the same modifier. Calls have no label
+        // operand fallback (getCallTargets reads only CallTargetData), so this is
+        // mandatory for the asm IR to match path 1.
+        if (!swappc->calleeFuncs.empty()) logical->callTargets = swappc->calleeFuncs;
+    }
+
+    std::array<int, 7> counts{-1, -1, -1, -1, -1, -1, -1};
+    if (asmCaps.count("MaxLgkmcnt")) counts[5] = asmCaps.at("MaxLgkmcnt");
+    if (asmCaps.count("MaxVmcnt")) counts[6] = asmCaps.at("MaxVmcnt");
+    bool hasWait = false;
+    if (const auto* wait = dynamic_cast<const rocisa::SWaitCnt*>(inst)) {
+        counts[0] = wait->vlcnt;
+        counts[1] = wait->vscnt;
+        counts[3] = wait->dscnt;
+        counts[4] = wait->kmcnt;
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitCnt*>(inst)) {
+        counts[2] = wait->getLgkmcnt();
+        counts[0] = wait->getVmcnt();
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitLoadcnt*>(inst)) {
+        const int cap = asmCap(asmCaps, "MaxLoadcnt");
+        counts[0] = cap > 0 ? std::min(wait->getLoadcnt(), cap) : wait->getLoadcnt();
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitDscnt*>(inst)) {
+        const int cap = asmCap(asmCaps, "MaxDscnt");
+        counts[3] = cap > 0 ? std::min(wait->getDscnt(), cap) : wait->getDscnt();
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitKMcnt*>(inst)) {
+        counts[4] = wait->getKmcnt();
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitCntVscnt*>(inst)) {
+        counts[1] = wait->getVscnt();
+        hasWait = true;
+    } else if (const auto* wait = dynamic_cast<const rocisa::_SWaitStorecnt*>(inst)) {
+        // gfx12 legalizeWaitCnt emits s_wait_storecnt from the vscnt slot.
+        counts[1] = wait->getStorecnt();
+        hasWait = true;
+    }
+    if (hasWait) logical->swaitcnt = counts;
+
+    if (const auto* typed = dynamic_cast<const rocisa::DSLoadInstruction*>(inst)) {
+        if (typed->ds) logical->ds = convertDSModifiers(*typed->ds);
+    } else if (const auto* typed = dynamic_cast<const rocisa::DSStoreInstruction*>(inst)) {
+        if (typed->ds) logical->ds = convertDSModifiers(*typed->ds);
+    } else if (const auto* typed = dynamic_cast<const rocisa::FLATReadInstruction*>(inst)) {
+        if (typed->flat) logical->flat = convertFLATModifiers(*typed->flat, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::FLATStoreInstruction*>(inst)) {
+        if (typed->flat) logical->flat = convertFLATModifiers(*typed->flat, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::GLOBALLoadInstruction*>(inst)) {
+        if (typed->modifier) logical->global = convertGLOBALModifiers(*typed->modifier, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::TensorLoadToLds*>(inst)) {
+        if (typed->tensor) logical->tensor = convertTENSORModifiers(*typed->tensor);
+    } else if (const auto* typed = dynamic_cast<const rocisa::MUBUFReadInstruction*>(inst)) {
+        logical->mubuf = buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::MUBUFStoreInstruction*>(inst)) {
+        logical->mubuf = buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst)) {
+        if (typed->modifier) logical->global = convertGLOBALModifiers(*typed->modifier, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::SMemLoadInstruction*>(inst)) {
+        if (typed->smem) logical->smem = convertSMEMModifiers(*typed->smem, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::SMemStoreInstruction*>(inst)) {
+        if (typed->smem) logical->smem = convertSMEMModifiers(*typed->smem, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::SMemAtomicDecInstruction*>(inst)) {
+        if (typed->smem) logical->smem = convertSMEMModifiers(*typed->smem, asmCaps);
+    } else if (const auto* typed = dynamic_cast<const rocisa::CommonInstruction*>(inst)) {
+        if (typed->vop3) logical->vop3 = convertVOP3PModifiers(*typed->vop3);
+        if (typed->sdwa) logical->sdwa = convertSDWAModifiers(*typed->sdwa);
+        if (typed->dpp) logical->dpp = convertDPPModifiers(*typed->dpp);
+        setTrue16FromCommon(logical, typed);
+    } else if (const auto* typed = dynamic_cast<const rocisa::GlobalWb*>(inst)) {
+        logical->cacheScope = CacheScopeModifiers(convertMUBUFScope(typed->scope));
+    } else if (const auto* typed = dynamic_cast<const rocisa::GlobalInv*>(inst)) {
+        logical->cacheScope = CacheScopeModifiers(convertMUBUFScope(typed->scope));
+    } else if (const auto* typed = dynamic_cast<const rocisa::GlobalPrefetchB8*>(inst)) {
+        if (const auto& gm = typed->getModifier()) {
+            logical->global = stinkytofu::GLOBALModifiers(gm->offset, convertTemporalHint(gm->th),
+                                                          convertMUBUFScope(gm->scope));
+        }
+    }
+
+    if (auto memToken = inst->getMemToken()) logical->memtoken = memToken->tokens;
+}
+
+logical::Opcode logicalOpcodeFor(const rocisa::Instruction& inst, const std::string& className) {
+    if (dynamic_cast<const rocisa::MFMAInstruction*>(&inst)) return logical::MFMA;
+    if (dynamic_cast<const rocisa::MXMFMAInstruction*>(&inst)) return logical::MXMFMA;
+    if (dynamic_cast<const rocisa::SMFMAInstruction*>(&inst)) return logical::SMFMA;
+    if (dynamic_cast<const rocisa::SWaitCnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitCnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitLoadcnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitDscnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitKMcnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitCntVscnt*>(&inst) ||
+        dynamic_cast<const rocisa::_SWaitStorecnt*>(&inst)) {
+        return logical::SWaitCnt;
+    }
+    // The rocisa class is SSchedulingFence but the logical opcode dropped the
+    // leading S (logical::SchedulingFence), so parseOpcode(className) cannot find
+    // it by name. Map it explicitly, mirroring the MFMA / SWaitCnt cases above, so
+    // the fence is carried into the logical IR and lowered by ToStinkyAsmPass
+    // instead of throwing "no logical opcode for rocisa::SSchedulingFence".
+    if (dynamic_cast<const rocisa::SSchedulingFence*>(&inst)) {
+        return logical::SchedulingFence;
+    }
+    return logical::parseOpcode(className.c_str());
+}
+
+std::shared_ptr<LogicalInstruction> createLogicalFromRocisa(
+    const rocisa::Instruction& inst, const std::map<std::string, int>& asmCaps, bool hasVgprMsb,
+    GfxArchID archId) {
+    const std::string className = rocisaClassName(inst);
+    const logical::Opcode opcode = logicalOpcodeFor(inst, className);
+    if (opcode == logical::UNKNOWN) {
+        throw std::runtime_error("no logical opcode for rocisa::" + className);
+    }
+    LogicalInstruction* logical = IRBase::createIR<LogicalInstruction>(opcode);
+    logical->comment = inst.comment;
+    fillLogicalOperands(logical, &inst, asmCaps, hasVgprMsb, archId);
+    applyLogicalPayload(logical, &inst, asmCaps);
+    return makeLogicalInstructionShared(logical);
+}
+
+bool itemContainsPrefetchLoad(const rocisa::Item* item) {
+    if (dynamic_cast<const rocisa::MUBUFReadInstruction*>(item) ||
+        dynamic_cast<const rocisa::GLOBALLoadInstruction*>(item) ||
+        dynamic_cast<const rocisa::FLATReadInstruction*>(item) ||
+        dynamic_cast<const rocisa::TensorLoadToLds*>(item)) {
+        return true;
+    }
+    if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+        for (const auto& child : mod->itemList) {
+            if (itemContainsPrefetchLoad(child.get())) return true;
+        }
+    }
+    return false;
+}
+
+bool itemContainsNamedModule(const rocisa::Item* item, const std::string& name) {
+    if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+        if (mod->name == name) return true;
+        for (const auto& child : mod->itemList) {
+            if (itemContainsNamedModule(child.get(), name)) return true;
+        }
+    }
+    return false;
+}
+
+struct LogicalLowerCtx {
+    const std::map<std::string, int>& asmCaps;
+    bool hasVgprMsb;
+    GfxArchID archId;
+};
+
+void appendLogicalItem(PyLogicalModule& lm, const rocisa::Item* item, const LogicalLowerCtx& ctx);
+
+void appendLogicalModule(PyLogicalModule& lm, const rocisa::Module& module, bool root,
+                         const LogicalLowerCtx& ctx) {
+    int pgrStart = -1;
+    int loopBody = -1;
+    int epiStart = -1;
+    int epiEnd = -1;
+    if (root) {
+        for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+            const rocisa::Item* item = module.itemList[i].get();
+            if (pgrStart == -1 && itemContainsPrefetchLoad(item)) pgrStart = i;
+            if (const auto* sub = dynamic_cast<const rocisa::Module*>(item)) {
+                if (sub->name == "loopBody") loopBody = i;
+            }
+            if (itemContainsNamedModule(item, "GlobalWriteElements")) {
+                if (epiStart == -1) epiStart = i;
+                epiEnd = i;
+            }
+        }
+    }
+    const bool hasPgr = root && pgrStart != -1 && loopBody != -1 && pgrStart <= loopBody;
+    const bool hasEpi = root && epiStart != -1 && epiEnd != -1 && epiStart <= epiEnd;
+
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        if (hasEpi && i == epiStart) {
+            lm.beginGroup("globalWriteEpilogue");
+            lm.addTextBlock("");
+        }
+        if (hasPgr && i == pgrStart) lm.beginGroup("loopWithPrefetch");
+        appendLogicalItem(lm, module.itemList[i].get(), ctx);
+        if (hasPgr && i == loopBody) lm.endGroup("loopWithPrefetch");
+        if (hasEpi && i == epiEnd) {
+            lm.addTextBlock("");
+            lm.endGroup("globalWriteEpilogue");
+        }
+    }
+}
+
+void appendLogicalItem(PyLogicalModule& lm, const rocisa::Item* item, const LogicalLowerCtx& ctx) {
+    if (const auto* text = dynamic_cast<const rocisa::TextBlock*>(item)) {
+        lm.addTextBlock(text->text);
+        return;
+    }
+    if (const auto* label = dynamic_cast<const rocisa::Label*>(item)) {
+        lm.addLabel(label->getLabelName(), static_cast<uint16_t>(label->alignment), label->comment);
+        return;
+    }
+    if (const auto* valueSet = dynamic_cast<const rocisa::ValueSet*>(item)) {
+        const std::string text = valueSet->toString();
+        const auto pos = text.rfind(',');
+        std::string value;
+        if (pos != std::string::npos) {
+            value = text.substr(pos + 1);
+            const auto first = value.find_first_not_of(" \t\n\r");
+            const auto last = value.find_last_not_of(" \t\n\r");
+            if (first != std::string::npos) value = value.substr(first, last - first + 1);
+        }
+        lm.addSetDirective(valueSet->name, value);
+        return;
+    }
+    if (const auto* valueIf = dynamic_cast<const rocisa::ValueIf*>(item)) {
+        lm.addIfDirective(valueIf->value);
+        return;
+    }
+    if (const auto* valueEndif = dynamic_cast<const rocisa::ValueEndif*>(item)) {
+        lm.addEndifDirective(valueEndif->comment);
+        return;
+    }
+    if (dynamic_cast<const rocisa::Macro*>(item) ||
+        dynamic_cast<const rocisa::MacroInstruction*>(item)) {
+        lm.addTextBlock(item->toString());
+        return;
+    }
+    if (const auto* sub = dynamic_cast<const rocisa::Module*>(item)) {
+        if (sub->isCallable) {
+            const std::string name = sub->callableName.empty() ? sub->name : sub->callableName;
+            lm.beginCallable(name);
+            appendLogicalModule(lm, *sub, false, ctx);
+            lm.endCallable(name);
+            return;
+        }
+        if (!sub->name.empty()) lm.beginGroup(sub->name);
+        appendLogicalModule(lm, *sub, false, ctx);
+        if (!sub->name.empty()) lm.endGroup(sub->name);
+        return;
+    }
+    const auto* inst = dynamic_cast<const rocisa::Instruction*>(item);
+    if (inst == nullptr) {
+        throw std::runtime_error("rocisa item has no logical-IR form: " + item->toString());
+    }
+    lm.add(createLogicalFromRocisa(*inst, ctx.asmCaps, ctx.hasVgprMsb, ctx.archId));
+}
+
+std::shared_ptr<StinkyAsmModule> lowerRocisaModuleViaLogical(
+    const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
+    const StinkyAsmModule::ModuleOptions& moduleOptions) {
+    const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+    const LogicalLowerCtx ctx{asmCaps, asmCap(asmCaps, "HasVgprMSB") != 0,
+                              resolveArchId(arch, moduleOptions.ArchName)};
+    PyLogicalModule logical(moduleName.empty() ? module.name : moduleName);
+    appendLogicalModule(logical, module, true, ctx);
+    return lowerLogicalModuleToAsm(logical, arch, moduleOptions);
+}
+
 }  // anonymous namespace
 
 namespace stinkytofu {
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
+    if (moduleOptions.LowerViaLogicalIR) {
+        return lowerRocisaModuleViaLogical(module, arch, moduleName, moduleOptions);
+    }
     // Resolve the GfxArchID from this kernel's ISA triple. Steppings that share a triple (e.g.
     // gfx1250 v0/v1 on {12,5,0}) are indistinguishable by triple alone, so the lookup returns the
     // first-registered stepping. ModuleOptions.ArchName carries the concrete stepping to pick
@@ -1826,4 +2276,26 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         "The returned object's emitAssembly() will include both signature and instructions. "
         "Options may be passed via the 'options' dict (keys: TileA0, TileB0, TileM0, NumGRA, "
         "NumGRB, NumGRM, wavefrontSize, etc.); dict values override individual parameters.");
+
+    // Debug-only: build the StinkyTofu logical IR for a rocisa.Module and return
+    // it as text. This mirrors lowerRocisaModuleViaLogical up to the point where
+    // the logical IR exists, but stops before lowering it to asm. KernelWriter
+    // calls this under the ENABLE_DEBUG_STINKYTOFU_LOGICAL env var to dump the
+    // logical IR the same way ENABLE_DEBUG_STINKYTOFU_ASM dumps the emitted asm.
+    m.def(
+        "dumpLogicalModuleText",
+        [](const rocisa::Module& module, nb::object arch_obj, const std::string& moduleName) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+            const LogicalLowerCtx ctx{asmCaps, asmCap(asmCaps, "HasVgprMSB") != 0,
+                                      resolveArchId(archArray, "")};
+            PyLogicalModule logical(moduleName.empty() ? module.name : moduleName);
+            appendLogicalModule(logical, module, true, ctx);
+            std::ostringstream oss;
+            logical.dump(oss);
+            return oss.str();
+        },
+        nb::arg("module"), nb::arg("arch"), nb::arg("moduleName") = "",
+        "Build the StinkyTofu logical IR for a rocisa.Module and return it as text "
+        "(debug helper for ENABLE_DEBUG_STINKYTOFU_LOGICAL).");
 }
