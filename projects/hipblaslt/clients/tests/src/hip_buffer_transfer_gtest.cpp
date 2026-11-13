@@ -56,8 +56,14 @@ TEST(HipBufferTransfer, smoke_RejectsInvalidSwizzleGeometry)
     expectHostEquals(observed, sentinel);
 }
 
-TEST(HipBufferTransfer, smoke_TransfersAndBroadcastsNormally)
+class HipBufferTransferMemoryMode : public ::testing::TestWithParam<bool>
 {
+};
+
+TEST_P(HipBufferTransferMemoryMode, smoke_TransfersAndBroadcastsNormally)
+{
+    const bool hmm = GetParam();
+
     constexpr std::size_t             repeats = 4;
     constexpr std::array<int32_t, 3>  firstValues{11, -7, 42};
     constexpr std::array<int32_t, 12> firstExpected{11, -7, 42, 11, -7, 42, 11, -7, 42, 11, -7, 42};
@@ -69,49 +75,51 @@ TEST(HipBufferTransfer, smoke_TransfersAndBroadcastsNormally)
     ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
     const std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
         streamOwner(stream, &hipStreamDestroy);
-    for(bool hmm : {false, true})
-    {
-        SCOPED_TRACE(hmm);
-        HipHostBuffer first(HIP_R_32I, firstValues.size());
-        copyToHost(first, firstValues);
-        HipDeviceBuffer device(HIP_R_32I, firstExpected.size(), hmm);
-        ASSERT_EQ(device.memcheck(), hipSuccess);
-        ASSERT_EQ(synchronize(device, first, repeats, stream), hipSuccess);
 
-        HipHostBuffer observed(HIP_R_32I, firstExpected.size());
-        ASSERT_EQ(synchronize(observed, device), hipSuccess);
-        expectHostEquals(observed, firstExpected);
+    HipHostBuffer first(HIP_R_32I, firstValues.size());
+    copyToHost(first, firstValues);
+    HipDeviceBuffer device(HIP_R_32I, firstExpected.size(), hmm);
+    ASSERT_EQ(device.memcheck(), hipSuccess);
+    ASSERT_EQ(synchronize(device, first, repeats, stream), hipSuccess);
 
-        HipHostBuffer fullInput(HIP_R_32I, broadcastInput.size());
-        copyToHost(fullInput, broadcastInput);
-        ASSERT_EQ(synchronize(device, fullInput, 1, stream), hipSuccess);
-        ASSERT_EQ(broadcast(device, repeats), hipSuccess);
-        ASSERT_EQ(synchronize(observed, device), hipSuccess);
-        expectHostEquals(observed, broadcastExpected);
-    }
+    HipHostBuffer observed(HIP_R_32I, firstExpected.size());
+    ASSERT_EQ(synchronize(observed, device), hipSuccess);
+    expectHostEquals(observed, firstExpected);
+
+    HipHostBuffer fullInput(HIP_R_32I, broadcastInput.size());
+    copyToHost(fullInput, broadcastInput);
+    ASSERT_EQ(synchronize(device, fullInput, 1, stream), hipSuccess);
+    ASSERT_EQ(broadcast(device, repeats), hipSuccess);
+    ASSERT_EQ(synchronize(observed, device), hipSuccess);
+    expectHostEquals(observed, broadcastExpected);
 }
 
 // 11 bytes in 3 blocks: each block is 3 bytes at offset block * 11 / 3, leaving the
 // remainder bytes 6 and 10 untouched.
-TEST(HipBufferTransfer, smoke_TransfersPreserveTruncatedBlockOffsets)
+TEST_P(HipBufferTransferMemoryMode, smoke_TransfersPreserveTruncatedBlockOffsets)
 {
+    const bool hmm = GetParam();
+
     constexpr std::array<uint8_t, 11> expected{11, 22, 33, 11, 22, 33, 0xa5, 11, 22, 33, 0xa5};
-    for(bool hmm : {false, true})
-    {
-        SCOPED_TRACE(hmm);
-        HipHostBuffer input(HIP_R_8U, expected.size());
-        std::fill_n(input.as<uint8_t>(), expected.size(), 0xa5);
-        std::copy_n(expected.begin(), 3, input.as<uint8_t>());
-        HipDeviceBuffer device(HIP_R_8U, expected.size(), hmm);
-        ASSERT_EQ(device.memcheck(), hipSuccess);
-        ASSERT_EQ(synchronize(device, input), hipSuccess);
-        ASSERT_EQ(synchronize(device, input, 3), hipSuccess);
-        HipHostBuffer observed(HIP_R_8U, expected.size());
-        ASSERT_EQ(synchronize(observed, device), hipSuccess);
-        for(std::size_t i = 0; i < expected.size(); ++i)
-            EXPECT_EQ(observed.as<uint8_t>()[i], expected[i]) << "mismatch at byte " << i;
-    }
+    HipHostBuffer input(HIP_R_8U, expected.size());
+    std::fill_n(input.as<uint8_t>(), expected.size(), 0xa5);
+    std::copy_n(expected.begin(), 3, input.as<uint8_t>());
+    HipDeviceBuffer device(HIP_R_8U, expected.size(), hmm);
+    ASSERT_EQ(device.memcheck(), hipSuccess);
+    ASSERT_EQ(synchronize(device, input), hipSuccess);
+    ASSERT_EQ(synchronize(device, input, 3), hipSuccess);
+    HipHostBuffer observed(HIP_R_8U, expected.size());
+    ASSERT_EQ(synchronize(observed, device), hipSuccess);
+    for(std::size_t i = 0; i < expected.size(); ++i)
+        EXPECT_EQ(observed.as<uint8_t>()[i], expected[i]) << "mismatch at byte " << i;
 }
+
+INSTANTIATE_TEST_SUITE_P(MemoryModes,
+                        HipBufferTransferMemoryMode,
+                        ::testing::Values(false, true),
+                        [](const ::testing::TestParamInfo<bool>& info) {
+                            return info.param ? "Managed" : "Device";
+                        });
 
 TEST(HipBufferTransfer, smoke_TransfersValidSwizzleGeometry)
 {
