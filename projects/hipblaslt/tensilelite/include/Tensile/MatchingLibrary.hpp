@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
 #include <tensilelitehost/export.h>
@@ -185,8 +186,46 @@ namespace TensileLite
                 return library->findBestSolution(problems, hardware);
             };
             SolutionVector<MySolution> solutions
-                = table->findTopMatch(problems[0], transform, numSolutions);
+                = table->findTopMatch(groupedKeyProblem(problems), transform, numSolutions);
             return solutions;
+        }
+
+        /// The problem whose size keys a grouped search. W4A16 MoE groups share
+        /// m and k and differ in n (tokens per expert), so key on the total n;
+        /// otherwise a prefill call whose first expert has one token would pick
+        /// the decode tile. Other grouped problems key on the first group.
+        static MyProblem groupedKeyProblem(std::vector<MyProblem> const& problems)
+        {
+            MyProblem const& p0 = problems[0];
+            if constexpr(std::is_same_v<MyProblem, ContractionProblemGemm>)
+            {
+                if(p0.scaleBlockSizeA() && problems.size() > 1)
+                {
+                    size_t n = 0;
+                    for(auto const& p : problems)
+                        n += p.freeSizeB(0);
+                    return ContractionProblemGemm::GEMM_Strides(p0.transA(),
+                                                                p0.transB(),
+                                                                p0.a().dataType(),
+                                                                p0.b().dataType(),
+                                                                p0.c().dataType(),
+                                                                p0.d().dataType(),
+                                                                p0.freeSizeA(0),
+                                                                n,
+                                                                p0.boundSize(0),
+                                                                p0.batchSize(0),
+                                                                p0.a().strides()[1],
+                                                                p0.a().strides()[2],
+                                                                p0.b().strides()[1],
+                                                                p0.b().strides()[2],
+                                                                p0.c().strides()[1],
+                                                                p0.c().strides()[2],
+                                                                p0.d().strides()[1],
+                                                                p0.d().strides()[2],
+                                                                p0.beta());
+                }
+            }
+            return p0;
         }
     };
 } // namespace TensileLite

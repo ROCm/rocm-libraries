@@ -209,6 +209,8 @@ def test_block_dequant_solution_is_valid(toolchain):
         # SIA=1 and PGR>=2 are each fine alone; only together do they
         # desynchronise the scale from the A data it scales.
         ({"PrefetchGlobalRead": 2, "ScheduleIterAlg": 1}, "ScheduleIterAlg"),
+        # A larger multiple than DepthU validated wrong on gfx1151.
+        ({"depthU": 64, "AssertSummationElementMultiple": 128}, "AssertSummationElementMultiple"),
     ],
 )
 def test_block_dequant_rejects_unsupported_shapes(toolchain, kw, reason):
@@ -988,6 +990,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
     paths = sorted(GFX1151_LOGIC.glob("*/*I4*.yaml"))
     assert paths
     seen = set()
+    grouped = set()
     for path in paths:
         data = LibraryIO.read(str(path), True)
         logic = LibraryIO.parseLibraryLogicData(
@@ -1001,6 +1004,15 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                 assert custom["macrotile"][:2] == ([16, 1] if "_T512_" in custom["name"] else [4, 1])
                 continue
             kernel, src = _emit_solution(toolchain, solution)
+            if kernel["ProblemType"]["GroupedGemm"]:
+                # Grouped (MoE): one fixed group size, so no per-gemm groupSize
+                # argument; scale and zero-point pointers come per group.
+                assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32]
+                assert ".name:            groupSize" not in src
+                assert "v_wmma_f32_16x16x16" in src
+                assert "G2LScaleZeroA" in src
+                grouped.add(kernel["BaseName"])
+                continue
             assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
             args = kernel["CustomKernel"]["args"]
             assert args[-1]["semantic"] == "ScaleBlockSizeA"
@@ -1019,6 +1031,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
             seen.add(kernel["BaseName"])
     assert len(seen) == 20
+    assert len(grouped) == 3
 
 
 @pytest.mark.parametrize("zeroPoint", [False, True])

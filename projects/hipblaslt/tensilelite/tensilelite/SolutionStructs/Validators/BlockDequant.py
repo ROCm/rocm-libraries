@@ -217,6 +217,12 @@ def validateBlockDequantCombination(state, printRejectionReason):
                "AssertSummationElementMultiple (%d) must be a multiple of DepthU (%d)"
                % (state["AssertSummationElementMultiple"], state["DepthU"]))
         return False
+    # A larger multiple validates wrong on gfx1151 (MT32/64x16, DepthU 64/128).
+    if state["AssertSummationElementMultiple"] != state["DepthU"]:
+        reject(state, printRejectionReason,
+               "UseScaleAB=Block requires AssertSummationElementMultiple (%d) == DepthU (%d)"
+               % (state["AssertSummationElementMultiple"], state["DepthU"]))
+        return False
 
     # Accepted. Only now mutate the state: per-load scale offsets need a per-load
     # A offset VGPR to derive from, and the SGPR-offset optimization would
