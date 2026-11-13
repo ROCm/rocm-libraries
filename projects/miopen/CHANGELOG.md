@@ -63,6 +63,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   replay a captured graph.
 
 ### Added
+* [Conv] Added gfx1250 (`gfx1250`/`gfx1250-strict`) conv AI heuristic support on the precomputed
+  config-tower runtime: TunaNet solver-selection and KTN candidate-selection model assets plus the
+  precomputed config-embedding tables for the grouped xdlops forward, backward-data, and
+  backward-weights solvers (2D and 3D).
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

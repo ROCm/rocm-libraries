@@ -28,6 +28,27 @@
 #define GAURD_MIOPEN_AI_HEURISTICS_HPP_
 
 #include <miopen/config.h>
+#include <string>
+
+namespace miopen {
+namespace ai {
+namespace common {
+
+// Normalize a device/arch name for AI-heuristic model lookups and gates: drop any runtime
+// sub-target suffix ("gfx1250-strict" -> "gfx1250") or feature flags ("gfx1250:sramecc+" ->
+// "gfx1250"). The base gfx* names contain no '-' or ':', so trimming at the first such
+// separator maps a reported variant back to the arch the shipped per-arch models are keyed on.
+// Defined outside the AI-feature guard below: the grouped-conv solvers' IsModelApplicable call it
+// unconditionally, so it must exist even when both AI options are off.
+inline std::string NormalizeArch(const std::string& name)
+{
+    return name.substr(0, name.find_first_of("-:"));
+}
+
+} // namespace common
+} // namespace ai
+} // namespace miopen
+
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <unordered_map>
 #include <typeinfo>

@@ -981,6 +981,57 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
                                   << models.size() << " bundled model(s):" << oss.str();
 }
 
+// CPU (no-Handle) run of the gfx1250 TunaNet ND solver-selection models (2D and 3D). The
+// GPU_ConvNDAIHeuristics_FP32 suite skips unless the device is gfx942/gfx950, and gfx125X CI is
+// build-only, so the gfx1250 num_cu/arch feature path is otherwise only loaded
+// (BundledFdeepModelsLoad) and never run. GetNDModel builds the model and Forward() runs fdeep,
+// which throws if the engineered input width disagrees with the model's trained input -- the exact
+// failure this guards against.
+TEST(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
+{
+    if(!immed_mode::HasBundledTunaNetModels("gfx1250"))
+        GTEST_SKIP() << "gfx1250 TunaNet models not installed";
+
+    const auto make_problem = [](int dim) {
+        if(dim == 3)
+        {
+            miopen::TensorDescriptor in(miopenFloat, std::vector<int>{1, 64, 8, 56, 56});
+            miopen::TensorDescriptor wei(miopenFloat, std::vector<int>{64, 64, 3, 3, 3});
+            miopen::TensorDescriptor out(miopenFloat, std::vector<int>{1, 64, 8, 56, 56});
+            miopen::ConvolutionDescriptor conv(3,
+                                               miopenConvolution,
+                                               miopenPaddingDefault,
+                                               {1, 1, 1},
+                                               {1, 1, 1},
+                                               {1, 1, 1},
+                                               {0, 0, 0});
+            return miopen::conv::ProblemDescription(
+                in, wei, out, conv, miopen::conv::Direction::Forward);
+        }
+        miopen::TensorDescriptor in(miopenFloat, std::vector<int>{1, 64, 56, 56});
+        miopen::TensorDescriptor wei(miopenFloat, std::vector<int>{64, 64, 3, 3});
+        miopen::TensorDescriptor out(miopenFloat, std::vector<int>{1, 64, 56, 56});
+        miopen::ConvolutionDescriptor conv(
+            2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}, {0, 0});
+        return miopen::conv::ProblemDescription(
+            in, wei, out, conv, miopen::conv::Direction::Forward);
+    };
+
+    for(int dim : {2, 3})
+    {
+        auto model = immed_mode::GetNDModel("gfx1250", dim);
+        ASSERT_NE(model, nullptr) << "GetNDModel returned null for gfx1250 " << dim << "D";
+        const auto problem = make_problem(dim);
+        std::vector<float> probs;
+        ASSERT_NO_THROW({ probs = model->Forward(problem); })
+            << "gfx1250 " << dim
+            << "D TunaNet Forward threw: engineered input width disagrees with the model input.";
+        EXPECT_EQ(probs.size(), model->GetSolverMap().size())
+            << "gfx1250 " << dim << "D: expected one probability per solver";
+        EXPECT_FALSE(probs.empty());
+    }
+}
+
 } // namespace
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

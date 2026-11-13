@@ -871,7 +871,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 // md5 that matches the installed input encoder (a mismatch rejects the table -> empty vocab).
 TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
 {
-    const std::array<const char*, 2> arches  = {"gfx942", "gfx950"};
+    const std::array<const char*, 3> arches  = {"gfx942", "gfx950", "gfx1250"};
     const std::array<const char*, 6> solvers = {"ConvHipImplicitGemmGroupFwdXdlops",
                                                 "ConvHipImplicitGemmGroupBwdXdlops",
                                                 "ConvHipImplicitGemmGroupWrwXdlops",
@@ -893,8 +893,8 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
                 << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
         }
     // This suite is compiled only with MIOPEN_ENABLE_AI_KERNEL_TUNING (see the guard at the top of
-    // the file). All 12 (gfx942 + gfx950) x 6-solver tables ship with this PR, so require every one
-    // -- EXPECT_GT(present, 0) would stay green if 11 of 12 .bin files were dropped from packaging.
+    // the file). All 18 (gfx942 + gfx950 + gfx1250) x 6-solver tables ship, so require every one
+    // -- EXPECT_GT(present, 0) would stay green if 17 of 18 .bin files were dropped from packaging.
     EXPECT_EQ(present, static_cast<int>(arches.size() * solvers.size()))
         << "expected all " << arches.size() * solvers.size()
         << " shipped config-embedding tables installed at " << db << ", found " << present;

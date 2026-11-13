@@ -190,10 +190,8 @@ void CheckGetFeaturesND_MapValues(const std::map<std::string, float>& features,
     expected["conv_stride_w"] = static_cast<float>(
         miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
 
-    if(is3d)
-    {
-        expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
-    }
+    // dilation_d is supplied in both 2D and 3D (see GetFeaturesND), so check it unconditionally.
+    expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
     expected["dilation_h"] = static_cast<float>(problem.GetDilationH());
     expected["dilation_w"] = static_cast<float>(problem.GetDilationW());
 
@@ -630,8 +628,9 @@ TEST_P(GPU_ConvNDKernelTuning_FP32, GetFeaturesND_Test)
     int max_cu        = 304;
     auto features     = GetFeaturesND(problem, max_cu, device_arch);
 
-    // 2D has 23 features, 3D has 29 features (6 depth-related features)
-    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 23u;
+    // 2D has 24 features (dilation_d is supplied in both 2D and 3D), 3D adds 5 more
+    // depth-only features (in_d, out_d, fil_d, pad_d, conv_stride_d) for 29 total.
+    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 24u;
     ASSERT_EQ(features.size(), expected_feature_count);
     CheckGetFeaturesND_MapValues(features, problem, param.direction, spatial_dim == 3);
 }
@@ -975,7 +974,7 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
     for(const auto& arch : test_archs)
     {
         auto features = GetFeaturesND(problem, max_cu, arch);
-        EXPECT_EQ(features.size(), 23u) << "Feature count inconsistent for " << arch;
+        EXPECT_EQ(features.size(), 24u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 2.0f) << "Spatial dim incorrect for " << arch;
     }
 }
