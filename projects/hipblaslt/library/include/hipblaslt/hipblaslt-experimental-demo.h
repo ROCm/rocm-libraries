@@ -17,8 +17,8 @@
 /*! \ingroup experimental_module
  *  \brief Revision of experimental feature DEMO declared in this header.
  *
- *  Incremented on every breaking change to the feature: a removed declaration, a function
- *  replaced by a renamed version, a retired enumerator, or a changed contract test.
+ *  Incremented on every breaking change to the feature: a removed declaration, a function or
+ *  type replaced by a renamed version, a retired enumerator, or a changed contract test.
  *  Additions do not increment it. tools/scripts/check_experimental_api.py enforces this.
  */
 #define HIPBLASLT_EXPERIMENTAL_DEMO 1

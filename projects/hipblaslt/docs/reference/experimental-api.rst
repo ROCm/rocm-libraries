@@ -89,7 +89,9 @@ Lifecycle
 * A breaking change never changes a declaration in place. A function whose signature or
   documented behavior changes gets a new name (for example with a ``_v2`` suffix) and the old name
   is removed, so a program built against the old revision fails to load or falls back instead of
-  calling the new code with old arguments. Each breaking change increments the feature's revision
+  calling the new code with old arguments. The same applies to structs, unions and typedefs: any
+  change to one, including adding a member, gives it a new name, and the functions that use it
+  get new names too. Each breaking change increments the feature's revision
   and is listed under an ``Experimental`` heading in the CHANGELOG.
 * An experimental feature ships in at most four ROCm releases, counted from the release that
   introduced it (patch releases don't count). Revision increments don't reset this. By then it
@@ -122,7 +124,8 @@ These rules are checked automatically, so they cannot be forgotten.
   experimental API. It compares the declarations and contract tests with the target branch and
   fails if:
 
-  * a function or enumerator was changed in place, an enumerator value was reused, or
+  * a function, struct, union, typedef or enumerator was changed in place, an enumerator value
+    was reused, or
     ``HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER`` went down or is too low;
   * a declaration or contract test was removed or changed without incrementing that feature's
     revision;
