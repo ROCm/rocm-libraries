@@ -764,7 +764,7 @@ impl Checker<'_> {
                 }
             }
             VecAnd => {
-                if !matches!(same(2)?, Type::Vec(Scalar::I32, _)) {
+                if !matches!(same(2)?, Type::Vec(Scalar::I32, _) | Type::Vec(Scalar::I16, 1)) {
                     return Err(mismatch());
                 }
             }

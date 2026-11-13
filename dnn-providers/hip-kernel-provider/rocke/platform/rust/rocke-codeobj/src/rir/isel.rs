@@ -1106,8 +1106,12 @@ impl<'a> Isel<'a> {
         // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
         // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
         // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
+        // A 1-lane i16 vector that is only bitcast, splat or ANDed (the keyless-row mask of a 16-bit O store) is that
+        // 16-bit view too, whatever the lever.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
-        let i16_ok = matches!(op.kind, Extract | Insert) && super::lever("i16vec");
+        let one_lane = |v: &ValueId| !i16_vec(v) || matches!(self.k.ty(*v), Type::Vec(_, 1));
+        let i16_ok = (matches!(op.kind, Extract | Insert) && super::lever("i16vec"))
+            || (matches!(op.kind, Bitcast | VecSplat | VecAnd) && op.results.iter().chain(&op.operands).all(one_lane));
         if op.kind != VecBitcast && !i16_ok && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
             return Err(unsupported(format!("{:?} of i16 vectors", op.kind)));
         }
@@ -1961,6 +1965,16 @@ impl<'a> Isel<'a> {
             DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
+                        // As `rocke.core.ir.dpp_xor_ctrl`: a mask outside the register-only set is the kernel's error.
+                        Some(mask @ 1..=15) if self.t.target == Target::Gfx950 && !matches!(mask, 1 | 2 | 3 | 7 | 8 | 15) => {
+                            return Err(CompileError::new(
+                                "ROCKE_DIRECT_INVALID",
+                                format!(
+                                    "tile.dpp_xor: xor_mask {mask} has no register-only DPP encoding on gfx950 (no row_xmask); \
+                                     masks 1, 2, 3, 7, 8 and 15 do. Use warp_shuffle_xor (ds_swizzle) for this mask"
+                                ),
+                            ));
+                        }
                         Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
                             isel_hooks::XorShuffle::QuadPerm(ctrl) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl, true)),
                             isel_hooks::XorShuffle::Swizzle(offset) => (Opc::DsSwizzleB32, offset),
@@ -2837,6 +2851,9 @@ impl<'a> Isel<'a> {
             OpKind::VecAnd => OpKind::And,
             _ => OpKind::Fma,
         };
+        if kind == OpKind::And && elem == Scalar::I16 {
+            return self.and_i16x1(op);
+        }
         let mut srcs = Vec::with_capacity(3);
         for &o in &op.operands {
             srcs.push(match self.splats.get(&o) {
@@ -2898,6 +2915,23 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
+    /// `vector.and` of two 1-lane i16 vectors (the keyless-row mask of a 16-bit
+    /// O store): the AND of the zero-extended halves, whose high half is zero.
+    fn and_i16x1(&mut self, op: &Op) -> Result<(), CompileError> {
+        let uni = self.uni(op.results[0]);
+        let mut x = [Opnd::Imm(0); 2];
+        for (x, &o) in x.iter_mut().zip(&op.operands) {
+            let (h, hi) = self.half(o)?;
+            *x = self.widen16(h, hi, false, uni);
+        }
+        let out = match x {
+            [Opnd::Imm(a), Opnd::Imm(b)] => Opnd::Imm(a & b),
+            _ => self.int_bin(OpKind::And, x[0], x[1], !self.is_v(x[0]) && !self.is_v(x[1]), false)?,
+        };
+        self.set(op.results[0], Val::H(out, false));
+        Ok(())
+    }
+
     /// `vector.splat`: the scalar copied into every element.
     fn splat_op(&mut self, op: &Op) -> Result<(), CompileError> {
         let v = op.results[0];
@@ -2905,6 +2939,10 @@ impl<'a> Isel<'a> {
             return Err(unsupported("vector.splat to a scalar"));
         };
         match elem.bytes() {
+            2 if elem == Scalar::I16 && n == 1 => {
+                let (o, hi) = self.half(op.operands[0])?;
+                self.set(v, Val::H(o, hi));
+            }
             4 => {
                 let o = self.w(op.operands[0])?;
                 let dst = self.vgpr(n as u8);

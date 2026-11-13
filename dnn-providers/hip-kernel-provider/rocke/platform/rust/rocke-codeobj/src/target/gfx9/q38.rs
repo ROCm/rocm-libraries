@@ -1507,6 +1507,26 @@ mod tests {
     }
 
     #[test]
+    fn one_lane_i16_vectors_are_bitcast_splat_and_anded() {
+        // zero_keyless_row of a 16-bit O store: bf16 value masked by a trunc'd i32 select, no lever
+        let body = concat!(
+            "    %f : f32 = arith.bitcast ( %tid )\n",
+            "    %h : bf16 = arith.cast_f32_to ( %f ) { target = s:\"bf16\" }\n",
+            "    %p : vec<bf16x1> = vector.pack ( %h ) { elem = s:\"bf16\", vec = i:1 }\n",
+            "    %t : i16 = arith.trunc ( %tid )\n",
+            "    %b : vec<i16x1> = arith.bitcast ( %p ) { target = s:\"vec<i16x1>\" }\n",
+            "    %s : vec<i16x1> = vector.splat ( %t ) { vec = i:1 }\n",
+            "    %a : vec<i16x1> = vector.and ( %b, %s )\n",
+            "    %e : vec<bf16x1> = arith.bitcast ( %a ) { target = s:\"vec<bf16x1>\" }\n",
+            "    memref.global_store_vN ( %O, %tid, %e ) { align = i:2, elem_type = s:\"bf16\", vec = i:1 }\n",
+            "    %r : i32 = arith.add ( %tid, %c0 )\n",
+        );
+        let text = kernel("    %O : ptr<bf16,global>\n", body);
+        let l = listing(&text);
+        assert!(has(&l, "v_and_b32") && has(&l, "global_store_short"), "{l}");
+    }
+
+    #[test]
     fn masksall_evaluates_a_uniform_compare_once_outside_loops() {
         let mut body = String::from("    %lt : i1 = arith.cmp ( %n, %c8 ) { pred = s:\"lt\" }\n    %acc0 : i32 = arith.add ( %tid, %c0 )\n");
         for j in 0..4 {
