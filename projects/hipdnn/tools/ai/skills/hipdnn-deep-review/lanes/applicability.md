@@ -100,7 +100,7 @@ A reachable claim at `IMPORTANT` or above carries its graph mutation and the thr
 
 When the `Hazard knowledge:` field of `dispatch-context.md` (or the dispatch `Overrides:`) names a directory, read its README, its
 property checklist and the page for the changed provider. Cite matching history (PR numbers) in findings and say whether a finding matches
-an open candidate row there by ID. Otherwise run from this brief and write `Knowledge: none supplied` under **Coverage** (a
+an open candidate row there by ID, and write `Hazard knowledge: <directory read>` under **Coverage**. Otherwise run from this brief and write `Hazard knowledge: none supplied` under **Coverage** (a
 non-file line, free of `|`).
 
 ## Handoffs
