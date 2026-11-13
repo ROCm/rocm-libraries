@@ -122,8 +122,7 @@ bool AssetsPresent(const ArchSolver& as)
     const auto db = miopen::GetSystemDbPath();
     return miopen::fs::exists(db / (as.arch + "_" + as.solver + "_input_encoder.tn.model")) &&
            miopen::fs::exists(db / (as.arch + "_" + as.solver + "_metadata.tn.model")) &&
-           miopen::fs::exists(db /
-                              (as.arch + "_" + as.solver + "_kernel_config_embeddings.bin"));
+           miopen::fs::exists(db / (as.arch + "_" + as.solver + "_kernel_config_embeddings.bin"));
 }
 
 std::string NameOf(const ::testing::TestParamInfo<ArchSolver>& info)
@@ -166,9 +165,9 @@ TEST_P(CPU_CandidateSelectionCpu_NONE, PrecomputeSelectorReturnsPick)
     const auto accept_all = [](const std::string&, int, bool) { return true; };
     const auto pick       = SelectBestVocabCandidate(
         as.arch, as.solver, MakeCompleteFeatureMap(as.is3d), /*use_tf32=*/false, accept_all);
-    ASSERT_TRUE(pick.has_value())
-        << "SelectBestVocabCandidate fell back for " << as.arch << "/" << as.solver
-        << ": table rejected, input-shape mismatch, or empty vocabulary.";
+    ASSERT_TRUE(pick.has_value()) << "SelectBestVocabCandidate fell back for " << as.arch << "/"
+                                  << as.solver
+                                  << ": table rejected, input-shape mismatch, or empty vocabulary.";
     EXPECT_FALSE(pick->first.empty());
 }
 
