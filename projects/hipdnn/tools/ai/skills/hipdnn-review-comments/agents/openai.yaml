@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Review Comments"
+  short_description: "Curated, fact-checked PR comments from review findings"
+  default_prompt: "Use $hipdnn-review-comments to turn the given review findings into curated, fact-checked inline PR comments by following its runbook, present them for sign-off, and post only what I approve."
