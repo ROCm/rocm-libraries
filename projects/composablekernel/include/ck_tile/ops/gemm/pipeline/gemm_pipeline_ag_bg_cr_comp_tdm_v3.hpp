@@ -97,6 +97,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         kMxScaleWordsPerK;
     static constexpr bool kMxScaleLdsActive =
         Policy::kMxScaleLds && kMxScaleThreadWordsA % 4 == 0 && kMxScaleThreadWordsB % 4 == 0;
+    // Policy::kMxScaleWide (when kMxScaleLds is not active): the same tiles, global path, 128-bit
+    // loads of the swizzled layout. kMxScaleSwizzled: the host must lay the scales out for either.
+    static constexpr bool kMxScaleWideActive = Policy::kMxScaleWide && !kMxScaleLdsActive &&
+                                               kMxScaleThreadWordsA % 4 == 0 &&
+                                               kMxScaleThreadWordsB % 4 == 0;
+    static constexpr bool kMxScaleSwizzled = kMxScaleLdsActive || kMxScaleWideActive;
 
     // kMxScaleLds: one K tile of scales per operand per stage, KPerBlock / 128 int32 per row.
     static constexpr index_t kMxScaleRingBytes =
@@ -309,6 +315,64 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
             {
                 return {a_tile[0], b_tile[0]};
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE void read_next()
+            {
+            }
+        };
+        // Policy::kMxScaleWide: as MxScaleState (two register buffers, the next K tile's scales
+        // loaded at the top of each tile), but from the swizzled layout of kMxScaleLds, where
+        // this thread's words of one K tile are contiguous: 128-bit global loads from a running
+        // pointer instead of one 32-bit buffer load (and its address math) per word.
+        template <typename AScaleTile,
+                  typename BScaleTile,
+                  index_t kRowsA,
+                  index_t kRowsB,
+                  index_t kScaleK>
+        struct MxScaleWideState
+        {
+            static constexpr index_t kWordsA  = kRowsA * kScaleK;
+            static constexpr index_t kWordsB  = kRowsB * kScaleK;
+            static constexpr index_t kThreadA = AScaleTile::get_thread_buffer_size();
+            static constexpr index_t kThreadB = BScaleTile::get_thread_buffer_size();
+            static_assert(kThreadA % 4 == 0 && kThreadB % 4 == 0,
+                          "kMxScaleWide loads the scale words 128 bits at a time");
+
+            const int32_t* a_glb; // this thread's words of the K tile the next load<>() reads
+            const int32_t* b_glb;
+            AScaleTile a_tile[2];
+            BScaleTile b_tile[2];
+
+            template <typename Tile, index_t kN>
+            CK_TILE_DEVICE static void read_words(Tile& t, const int32_t* src)
+            {
+                using T = typename Tile::DataType;
+                static_assert(sizeof(T) == sizeof(int32_t), "scale packs are 32-bit");
+                static_for<0, kN / 4, 1>{}([&](auto q) {
+                    int32x4_t v;
+                    __builtin_memcpy(&v, src + 4 * q.value, sizeof(v));
+                    static_for<0, 4, 1>{}([&](auto j) {
+                        t.get_thread_buffer()(number<4 * q.value + j.value>{}) =
+                            bit_cast<T>(v[j.value]);
+                    });
+                });
+            }
+            // prologue: tile 0 into buffer 0. advance: nothing (buffers follow the LDS stage).
+            CK_TILE_DEVICE void prologue() { load<0>(); }
+            CK_TILE_DEVICE void advance() {}
+            template <index_t Buf>
+            CK_TILE_DEVICE void load()
+            {
+                read_words<AScaleTile, kThreadA>(a_tile[Buf], a_glb);
+                read_words<BScaleTile, kThreadB>(b_tile[Buf], b_glb);
+                a_glb += kWordsA;
+                b_glb += kWordsB;
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
+            {
+                return {a_tile[Buf], b_tile[Buf]};
             }
             template <index_t Buf>
             CK_TILE_DEVICE void read_next()
@@ -783,10 +847,16 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                   "kMxScalePrefetchDepth: 1, or 2 with the split barrier");
                     static_assert(!kMxScaleLdsActive || kSplitBarrier,
                                   "kMxScaleLds needs the split barrier");
-                    if constexpr(kMxScaleLdsActive)
+                    if constexpr(kMxScaleSwizzled)
                     {
-                        using State =
-                            MxScaleLdsState<AScaleTile, BScaleTile, MPerBlock, NPerBlock, kScaleK>;
+                        using State = std::conditional_t<
+                            kMxScaleLdsActive,
+                            MxScaleLdsState<AScaleTile, BScaleTile, MPerBlock, NPerBlock, kScaleK>,
+                            MxScaleWideState<AScaleTile,
+                                             BScaleTile,
+                                             MPerBlock,
+                                             NPerBlock,
+                                             kScaleK>>;
                         // the block's scale rows: layout [block][K tile][words of one K tile]
                         const auto a_org         = a_tmp.get_window_origin();
                         const auto b_org         = b_tmp.get_window_origin();
@@ -810,6 +880,8 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         const auto b_r0 = Policy::template MakeScaleBDramTileDistribution<Problem>()
                                               .calculate_index()[number<0>{}];
                         State st{};
+                        const auto a_word0 = a_r0 * State::kThreadA;
+                        const auto b_word0 = b_r0 * State::kThreadB;
                         const int32_t* a_tile0 =
                             a_base + (static_cast<long_index_t>(a_org[number<0>{}] / MPerBlock) *
                                           a_kt_total +
@@ -820,15 +892,24 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                           b_kt_total +
                                       kt0) *
                                          State::kWordsB;
-                        // the first fill brings tile 1's scales (one K tile ahead of the data)
-                        st.a_glb = a_tile0 + State::kWordsA;
-                        st.b_glb = b_tile0 + State::kWordsB;
-                        st.ring =
-                            reinterpret_cast<int32_t*>(static_cast<char*>(p_smem) +
-                                                       2 * Policy::template GetSmemSize<Problem>());
-                        st.a_word0 = a_r0 * State::kThreadA;
-                        st.b_word0 = b_r0 * State::kThreadB;
-                        st.load_first(a_tile0, b_tile0);
+                        if constexpr(kMxScaleLdsActive)
+                        {
+                            // the first fill brings tile 1's scales (one K tile ahead of the data)
+                            st.a_glb = a_tile0 + State::kWordsA;
+                            st.b_glb = b_tile0 + State::kWordsB;
+                            st.ring  = reinterpret_cast<int32_t*>(
+                                static_cast<char*>(p_smem) +
+                                2 * Policy::template GetSmemSize<Problem>());
+                            st.a_word0 = a_word0;
+                            st.b_word0 = b_word0;
+                            st.load_first(a_tile0, b_tile0);
+                        }
+                        else
+                        {
+                            // this thread's words of tile 0; prologue() loads them
+                            st.a_glb = a_tile0 + a_word0;
+                            st.b_glb = b_tile0 + b_word0;
+                        }
                         return st;
                     }
                     else if constexpr(Policy::kMxScalePrefetchDepth == 2)

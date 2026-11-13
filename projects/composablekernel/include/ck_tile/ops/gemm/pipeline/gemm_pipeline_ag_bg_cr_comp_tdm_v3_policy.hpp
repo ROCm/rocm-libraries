@@ -67,6 +67,12 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// are contiguous), not preShuffleScaleBuffer_gfx1250.
     static constexpr bool kMxScaleLds = false;
 
+    /// MX only: load the A/B scales from global memory into registers as now (one K tile
+    /// ahead), but from kMxScaleLds's scale layout with 128-bit loads instead of one 32-bit load
+    /// per word. Ignored where kMxScaleLds applies, and for tiles whose per-thread scale words do
+    /// not fill whole 128-bit loads. Needs the scales in that layout (see kMxScaleLds).
+    static constexpr bool kMxScaleWide = false;
+
     /// MX only, split barrier only: how many K tiles ahead the A/B scales are loaded from global
     /// memory into registers. 1: the scales of tile t + 1 are loaded at the top of tile t into the
     /// other of two register buffers. 2: three register buffers, rotated at the top of every K

@@ -81,14 +81,18 @@ using CLayout        = RowMajor;
 constexpr int kScale = 32; // K elements per scale
 
 #if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) || \
-    defined(CK_EX55_MX_SCALE_LDS)
+    defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE)
 // EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth;
 // -DCK_EX55_A_ROW_PREFETCH=1 sets kStreamARowPrefetch; -DCK_EX55_MX_SCALE_LDS=1 sets kMxScaleLds
-// (and the host lays the scales out for it, see swizzle_scales_for_lds).
+// (and the host lays the scales out for it, see swizzle_scales_for_lds); -DCK_EX55_MX_SCALE_WIDE=1
+// sets kMxScaleWide (the same layout, global 128-bit loads).
 struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 {
 #if defined(CK_EX55_MX_SCALE_LDS)
     [[maybe_unused]] static constexpr bool kMxScaleLds = CK_EX55_MX_SCALE_LDS != 0;
+#endif
+#if defined(CK_EX55_MX_SCALE_WIDE)
+    [[maybe_unused]] static constexpr bool kMxScaleWide = CK_EX55_MX_SCALE_WIDE != 0;
 #endif
 #if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH)
     [[maybe_unused]] static constexpr ck_tile::index_t kMxScalePrefetchDepth =
@@ -467,7 +471,7 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     const HostOperand a = make_operand(p.M, pad_m, p.K, sparse, sigma, seed, 0);
     const HostOperand b = make_operand(p.N, pad_n, p.K, sparse, sigma, seed, 1);
     std::vector<ScaleDataType> sa_dev(a.raw.size()), sb_dev(b.raw.size());
-    if constexpr(Inst::Pipeline::kMxScaleLdsActive)
+    if constexpr(Inst::Pipeline::kMxScaleSwizzled)
     {
         using BW = typename Inst::TileShape::BlockWarps;
         if(!swizzle_scales_for_lds(a.raw.data(),
@@ -490,10 +494,13 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
             std::printf("kMxScaleLds needs M, N multiples of the tile and K of the K tile\n");
             return 2;
         }
-        // the pipeline's last scale fill reads one K tile past K: pad by one K tile of a block
-        const size_t kt_bytes = static_cast<size_t>(Inst::TileShape::kK) / kScale;
-        sa_dev.resize(sa_dev.size() + Inst::kTileM * kt_bytes, ScaleDataType{});
-        sb_dev.resize(sb_dev.size() + Inst::kTileN * kt_bytes, ScaleDataType{});
+        // kMxScaleLds: the last scale fill reads one K tile past K: pad by one K tile of a block
+        if constexpr(Inst::Pipeline::kMxScaleLdsActive)
+        {
+            const size_t kt_bytes = static_cast<size_t>(Inst::TileShape::kK) / kScale;
+            sa_dev.resize(sa_dev.size() + Inst::kTileM * kt_bytes, ScaleDataType{});
+            sb_dev.resize(sb_dev.size() + Inst::kTileN * kt_bytes, ScaleDataType{});
+        }
     }
     else
     {
