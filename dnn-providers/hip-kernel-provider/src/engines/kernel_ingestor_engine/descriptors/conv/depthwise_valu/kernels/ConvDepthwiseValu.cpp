@@ -12,7 +12,9 @@
 //                     4 = backward-data gather (any stride; gather-term geometry),
 //                     5 = backward-data stride phase blocks (gather-term geometry; 2-D, compile-time
 //                     filter and stride CONV_DW_STRIDE, unit dilation; channels-last: CONV_DW_VEC
-//                     channels per thread, CONV_DW_BK channel vectors per block)
+//                     channels per thread, CONV_DW_BK channel vectors per block),
+//                     6 = rowtile (channels-last 2-D, unit stride and dilation, compile-time
+//                     filter; a CONV_DW_TH x CONV_DW_TW output tile of CONV_DW_VEC channels per lane)
 //   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor, 2-D LDS)
 //   CONV_DW_NDIMS     2 or 3 (3-D: floor or LDS)
 //   CONV_DW_FLIP      1 reflects the filter
@@ -99,6 +101,8 @@
     ((CONV_DW_BD / CONV_DW_RD) * (CONV_DW_BH / CONV_DW_RH) * (CONV_DW_BW / CONV_DW_RW) * CONV_DW_BK)
 #elif CONV_DW_VARIANT == 2 || CONV_DW_VARIANT == 3
 #define CONV_DW_BLOCK ((CONV_DW_BH / CONV_DW_RH) * (CONV_DW_BW / CONV_DW_RW) * CONV_DW_BK)
+#elif CONV_DW_VARIANT == 6
+#define CONV_DW_BLOCK DW_ROWTILE_BLOCK
 #else
 #define CONV_DW_BLOCK 256
 #endif
@@ -194,6 +198,13 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
                           CONV_DW_BK,
                           CONV_DW_RH,
                           CONV_DW_RW>(in, filter, out, p);
+#elif CONV_DW_VARIANT == 6
+    dw::v7_rowtile_core_nhwc<ElementType,
+                             CONV_DW_KH,
+                             CONV_DW_KW,
+                             CONV_DW_TH,
+                             CONV_DW_TW,
+                             CONV_DW_VEC>(in, filter, out, p);
 #elif CONV_DW_VARIANT == 3
     dw::v3b_lds_core_nhwc<ElementType,
                           CONV_DW_KH,
@@ -204,6 +215,6 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
                           CONV_DW_RH,
                           CONV_DW_RW>(in, filter, out, p);
 #else
-#error "CONV_DW_VARIANT must be 0 (floor), 1 (microtile), 2 (fused) or 3 (LDS)"
+#error "CONV_DW_VARIANT must be 0 (floor), 1 (microtile), 2 (fused), 3 (LDS) or 6 (rowtile)"
 #endif
 }

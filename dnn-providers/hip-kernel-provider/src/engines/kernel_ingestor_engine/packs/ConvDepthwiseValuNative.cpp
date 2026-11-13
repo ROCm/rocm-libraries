@@ -39,8 +39,8 @@
  *
  * The kernels are hipconv's hand-written VALU depthwise cores (descriptors/conv/depthwise_valu/
  * kernels). Every kernel config in the catalog is a candidate: its kernel match admits it on
- * correctness alone -- layout, rank, element type and, for the halo and LDS variants, unit
- * stride and dilation and their compile-time filter size. Which config runs is the ranking's:
+ * correctness alone -- layout, rank, element type and, for the halo, LDS and rowtile variants,
+ * unit stride and dilation and their compile-time filter size. Which config runs is the ranking's:
  * catalog order (the floors first) until autotune measures, and UHD once trained. No
  * shape-to-config routing is built in.
  */
@@ -230,7 +230,8 @@ bool kernelMatches(const MatchContext& context,
     }
     if(tile->variant != DepthwiseVariant::FLOOR)
     {
-        // The halo and LDS variants bake the filter and assume unit stride and dilation.
+        // The halo, LDS and rowtile variants bake the filter and assume unit stride and
+        // dilation.
         const auto& a = problem->args;
         if(!problem->unitStrideAndDilation || tile->kh != a.kh || tile->kw != a.kw
            || (problem->ndims == 3 && tile->kd != a.kd))
@@ -363,7 +364,9 @@ public:
         auto code = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
         code.setBlockSize(static_cast<unsigned int>(launch->block), 1, 1);
-        code.setGridSize(static_cast<unsigned int>(launch->grid), 1, 1);
+        code.setGridSize(static_cast<unsigned int>(launch->grid),
+                         static_cast<unsigned int>(launch->gridY),
+                         static_cast<unsigned int>(launch->gridZ));
         auto prepared = *problem;
         if(gather)
         {

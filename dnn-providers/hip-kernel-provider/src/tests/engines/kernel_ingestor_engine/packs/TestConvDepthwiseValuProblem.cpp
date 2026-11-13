@@ -247,6 +247,24 @@ TEST(TestConvDepthwiseValuProblem, LaunchCoversTheProblemPerVariant)
     ASSERT_TRUE(nchwLaunch.has_value());
     // One thread per output element: 2 * 40 * 8 * 9 = 5760 -> 23 blocks.
     EXPECT_EQ(nchwLaunch->grid, 23);
+    EXPECT_EQ(nchwLaunch->gridY, 1);
+    EXPECT_EQ(nchwLaunch->gridZ, 1);
+
+    DepthwiseTile rowtile;
+    rowtile.variant = DepthwiseVariant::ROWTILE;
+    rowtile.kh = rowtile.kw = 3;
+    rowtile.th = 4;
+    rowtile.tw = 2;
+    rowtile.vec = 2;
+    const auto rowtileLaunch = launchFor(*problem, rowtile);
+    ASSERT_TRUE(rowtileLaunch.has_value());
+    // 64 lanes over the channel groups of one spatial tile: (ceil(wo / 2), ceil(c / 2 / 64),
+    // n * ceil(ho / 4)) = (5, 1, 4).
+    EXPECT_EQ(rowtileLaunch->block, 64);
+    EXPECT_EQ(rowtileLaunch->grid, 5);
+    EXPECT_EQ(rowtileLaunch->gridY, 1);
+    EXPECT_EQ(rowtileLaunch->gridZ, 4);
+    EXPECT_FALSE(launchFor(*nchw, rowtile).has_value());
 }
 
 TEST(TestConvDepthwiseValuProblem, LaunchDeclinesABlockOverTheLimit)

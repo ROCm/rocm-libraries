@@ -76,6 +76,18 @@ CONFIGS = [
     # Whole 14 x 14 / 16 x 16 planes (convnext) per block, 4 channels, 4 x 4 outputs per thread.
     cfg("NCHW", 2, "lds", kh=7, kw=7, bh=16, bw=16, bk=4, rh=4, rw=4),
 ]
+# Register tiles with the input rows streamed (v7_rowtile_core_nhwc): channels-last 2-D, unit
+# stride and dilation, compile-time filter; th x tw outputs of vec (1 or 2) channels per lane.
+# Wide output rows for the small filters, square tiles up to 7 x 7 for the large ones.
+ROWTILE_TILES = {
+    3: ((2, 8), (4, 4), (4, 8), (7, 7)),
+    5: ((4, 4), (4, 8), (7, 7)),
+    7: ((2, 14), (4, 4), (4, 8), (7, 7)),
+}
+for k, tiles in ROWTILE_TILES.items():
+    for th, tw in tiles:
+        for vec in (1, 2):
+            CONFIGS.append(cfg("NHWC", 2, "rowtile", kh=k, kw=k, th=th, tw=tw, vec=vec))
 
 # Backward data only: the gather over the taps (v5_gather_bwd), the one form a strided backward
 # data runs in.
@@ -128,6 +140,8 @@ def tag(c):
     )
     if c["variant"] == "microtile":
         return f"{dims}.microtile_k{k}_t{c['th']}x{c['tw']}"
+    if c["variant"] == "rowtile":
+        return f"{dims}.rowtile_k{k}_t{c['th']}x{c['tw']}_c{c['vec']}"
     blk = "x".join(
         str(c[a])
         for a in (("bd", "bh", "bw", "bk") if c["ndims"] == 3 else ("bh", "bw", "bk"))

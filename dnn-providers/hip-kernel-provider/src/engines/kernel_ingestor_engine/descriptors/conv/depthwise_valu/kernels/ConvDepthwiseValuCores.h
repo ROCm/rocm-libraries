@@ -34,6 +34,9 @@
 //   - Values the compiler cannot prove wave-uniform but that are (tid / BK with BK a multiple
 //     of the wave size) are made scalar with readfirstlane (dwWaveUniformDiv).
 //   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
+//   - The rowtile core keeps f16 operands packed and FMAs through dwFma (v_fma_mix_f32), and
+//     rounds to f16 as a separate step (valu_from_f32), so its f16 output is the fmaf of the
+//     converted operands bit for bit.
 //
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
 //   v3a_microtile_core_nhwc register 2D halo reuse (no LDS); s=d=1, compile-time KH/KW.
@@ -46,6 +49,8 @@
 //   v6_phase_block_nhwc/nchw  backward data by stride phase blocks: each thread computes the
 //                           S x S dx pixels of one dy position from the dy window they share
 //                           (compile-time filter and stride, unit dilation), both layouts.
+//   v7_rowtile_core_nhwc    register output tile per lane, input rows streamed, spatial tile
+//                           per block (no LDS); s=d=1, compile-time KH/KW, 1-2 channels/lane.
 #pragma once
 
 #include "ConvArchFamily.h"
@@ -64,6 +69,29 @@ template <typename T>
 __device__ inline void valu_from_f32(float s, T& d)
 {
     d = static_cast<T>(s);
+}
+// The fp32 result rounded to f16. The empty asm keeps the rounding a separate step: the backend
+// would otherwise fold an FMA producing s into v_fma_mixlo_f16, which rounds the exact result to
+// f16 once and differs from rounding to fp32 first in about 1 of 2000 near-halfway cases.
+__device__ inline void valu_from_f32(float s, _Float16& d)
+{
+    asm("" : "+v"(s));
+    d = static_cast<_Float16>(s);
+}
+
+// acc + w * x, rounded once. An explicit fmaf rather than acc += w * x: the contraction of a
+// separate multiply and add happens late, after the SLP vectorizer may have paired the multiplies
+// into v_pk_mul_f32 (gfx90a and later), which leaves two roundings. f16 operands stay f16 in
+// their registers, and the backend folds both conversions into the FMA (v_fma_mix_f32, every
+// shipped arch): the products are exact in fp32, so the result is the fmaf of the converted
+// operands bit for bit, at half the operand registers and no conversion instructions.
+__device__ inline float dwFma(float w, float x, float acc)
+{
+    return __builtin_fmaf(w, x, acc);
+}
+__device__ inline float dwFma(_Float16 w, _Float16 x, float acc)
+{
+    return __builtin_fmaf(static_cast<float>(w), static_cast<float>(x), acc);
 }
 
 #ifndef CONV_DW_FLIP
@@ -185,6 +213,7 @@ __device__ inline __amdgpu_buffer_rsrc_t dwRsrc(const void* base, long bytes)
 }
 
 typedef unsigned int __attribute__((ext_vector_type(4))) DwU4;
+typedef unsigned int __attribute__((ext_vector_type(2))) DwU2;
 
 /// x reads. Buffer form (BUF, 32-bit indices): a buffer load at a byte offset; an element that
 /// is not valid (v false) reads zero from the hardware (offset past the end): no select, no
@@ -1585,6 +1614,197 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
                     if(ry + S * m < KH && rx + S * mm < KW)
                         acc += w[(ry + S * m) * KW + rx + S * mm] * win[m][mm];
             valu_from_f32(acc, d0[(long)y * p.Wo + x]);
+        }
+    }
+}
+
+// ---- v7 rowtile: register tile, input rows streamed (no LDS, no barrier) ----
+// A lane computes a TH x TW output tile of CPL adjacent channels; a block is 64 lanes over the
+// channel groups of one spatial tile (grid: W tiles, channel blocks, N x H tiles), so every
+// address and predicate except the channel is wave-uniform. The tile's TH+KH-1 input rows are
+// streamed one at a time (TW+KW-1 pixels each), each added into every output row whose filter
+// row it is, so one input row is live. Per output the taps add in (ky, kx) order, as in the
+// other cores. s=d=1, compile-time KH/KW, C % CPL == 0.
+//
+// x and y go through one buffer resource per row, based at the row's start (a 64-bit scalar)
+// with 32-bit lane offsets: a pixel left or right of the image row, or a row outside the image,
+// reads hardware zero (offset past the record count), and an output past the edge is dropped.
+// So one body serves every tensor size whose rows are below 2^31 bytes.
+#define DW_ROWTILE_BLOCK 64
+
+/// The FMA operand of a 16-bit float element: f16 stays f16 (dwFma widens it), bf16 widens to
+/// fp32 by a shift, fp32 is itself.
+template <typename T>
+struct DwOperand
+{
+    typedef float type;
+};
+template <>
+struct DwOperand<_Float16>
+{
+    typedef _Float16 type;
+};
+
+/// The CPL channels at a buffer byte offset as FMA operands (zero past the records).
+template <typename T, int CPL>
+__device__ inline void
+    dwRowLoad(__amdgpu_buffer_rsrc_t r, unsigned off, typename DwOperand<T>::type (&o)[CPL])
+{
+    static_assert(CPL == 1 || CPL == 2, "rowtile: 1 or 2 channels per lane");
+    if constexpr(sizeof(T) == 4 && CPL == 1)
+        o[0] = __builtin_bit_cast(float, __builtin_amdgcn_raw_buffer_load_b32(r, off, 0, 0));
+    else if constexpr(sizeof(T) == 4)
+    {
+        // The elements are copied out before the bit casts: clang's __builtin_bit_cast of a
+        // vector element expression (u.y) reads element 0.
+        const DwU2 u = __builtin_bit_cast(DwU2, __builtin_amdgcn_raw_buffer_load_b64(r, off, 0, 0));
+        const unsigned lo = u.x, hi = u.y;
+        o[0] = __builtin_bit_cast(float, lo);
+        o[1] = __builtin_bit_cast(float, hi);
+    }
+    else
+    {
+        const unsigned u
+            = CPL == 1 ? static_cast<unsigned>(__builtin_amdgcn_raw_buffer_load_b16(r, off, 0, 0))
+                       : __builtin_amdgcn_raw_buffer_load_b32(r, off, 0, 0);
+#pragma unroll
+        for(int c = 0; c < CPL; ++c)
+        {
+            const unsigned short h = static_cast<unsigned short>(u >> (16 * c));
+            if constexpr(__is_same(T, _Float16))
+                o[c] = __builtin_bit_cast(_Float16, h);
+            else
+                o[c] = __builtin_bit_cast(float, static_cast<unsigned>(h) << 16);
+        }
+    }
+}
+
+/// The CPL outputs at a buffer byte offset (dropped past the records).
+template <typename T, int CPL>
+__device__ inline void dwRowStore(__amdgpu_buffer_rsrc_t r, unsigned off, const float (&v)[CPL])
+{
+    if constexpr(sizeof(T) == 4 && CPL == 1)
+        __builtin_amdgcn_raw_buffer_store_b32(__builtin_bit_cast(unsigned, v[0]), r, off, 0, 0);
+    else if constexpr(sizeof(T) == 4)
+    {
+        const DwU2 u = {__builtin_bit_cast(unsigned, v[0]), __builtin_bit_cast(unsigned, v[1])};
+        __builtin_amdgcn_raw_buffer_store_b64(__builtin_bit_cast(DwU2, u), r, off, 0, 0);
+    }
+    else
+    {
+        unsigned u = 0;
+#pragma unroll
+        for(int c = 0; c < CPL; ++c)
+        {
+            T e;
+            valu_from_f32(v[c], e);
+            u |= static_cast<unsigned>(__builtin_bit_cast(unsigned short, e)) << (16 * c);
+        }
+        if constexpr(CPL == 1)
+            __builtin_amdgcn_raw_buffer_store_b16(static_cast<unsigned short>(u), r, off, 0, 0);
+        else
+            __builtin_amdgcn_raw_buffer_store_b32(u, r, off, 0, 0);
+    }
+}
+
+template <typename T, int KH, int KW, int TH, int TW, int CPL>
+__device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
+                                            const T* __restrict__ Wt,
+                                            T* __restrict__ D,
+                                            ValuParams p)
+{
+    constexpr int SW = TW + KW - 1;
+    constexpr unsigned EB = sizeof(T);
+    const int G = p.C / CPL;
+    const int Htiles = (p.Ho + TH - 1) / TH;
+    const int wt = static_cast<int>(blockIdx.x);
+    const int n = static_cast<int>(blockIdx.z) / Htiles;
+    const int ht = static_cast<int>(blockIdx.z) - n * Htiles;
+    const int g = static_cast<int>(blockIdx.y) * DW_ROWTILE_BLOCK + static_cast<int>(threadIdx.x);
+    if(g >= G)
+        return;
+    const int k0 = g * CPL;
+
+    typedef typename DwOperand<T>::type S;
+    S w[CPL][KH][KW];
+#pragma unroll
+    for(int c = 0; c < CPL; ++c)
+#pragma unroll
+        for(int ky = 0; ky < KH; ++ky)
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+            {
+                const T e = Wt[(long)(k0 + c) * KH * KW + dwTap2(ky, kx, KH, KW)];
+                if constexpr(__is_same(S, float))
+                    w[c][ky][kx] = valu_to_f32(e);
+                else
+                    w[c][ky][kx] = e;
+            }
+
+    float acc[CPL][TH][TW];
+#pragma unroll
+    for(int c = 0; c < CPL; ++c)
+#pragma unroll
+        for(int ty = 0; ty < TH; ++ty)
+#pragma unroll
+            for(int tx = 0; tx < TW; ++tx)
+                acc[c][ty][tx] = 0.0f;
+
+    // Lane byte offsets of the row's pixels, the same in every row: a column left of the image
+    // wraps past 2^31, one right of it lands past the row's records.
+    const int ih0 = ht * TH - p.ph, iw0 = wt * TW - p.pw;
+    const unsigned rowBytes = static_cast<unsigned>(p.Wi) * p.C * EB;
+    unsigned xo[SW];
+#pragma unroll
+    for(int sx = 0; sx < SW; ++sx)
+        xo[sx] = static_cast<unsigned>((iw0 + sx) * p.C + k0) * EB;
+#pragma unroll
+    for(int r = 0; r < TH + KH - 1; ++r)
+    {
+        const int ih = ih0 + r;
+        const bool vy = dwIn(ih, p.Hi);
+        const __amdgpu_buffer_rsrc_t xr
+            = dwRsrc(A + ((long)n * p.Hi + (vy ? ih : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
+        S seg[SW][CPL];
+#pragma unroll
+        for(int sx = 0; sx < SW; ++sx)
+            dwRowLoad<T, CPL>(xr, xo[sx], seg[sx]);
+#pragma unroll
+        for(int ty = 0; ty < TH; ++ty)
+        {
+            const int ky = r - ty;
+            if(ky < 0 || ky >= KH)
+                continue;
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+#pragma unroll
+                for(int tx = 0; tx < TW; ++tx)
+#pragma unroll
+                    for(int c = 0; c < CPL; ++c)
+                        acc[c][ty][tx] = dwFma(w[c][ky][kx], seg[tx + kx][c], acc[c][ty][tx]);
+        }
+        // Keep the rows streamed: without the fence the scheduler hoists every row's loads and
+        // keeps them all live.
+        __builtin_amdgcn_sched_barrier(0);
+    }
+
+    const int wo0 = wt * TW;
+    const unsigned outRowBytes = static_cast<unsigned>(p.Wo) * p.C * EB;
+#pragma unroll
+    for(int ty = 0; ty < TH; ++ty)
+    {
+        const int ho = ht * TH + ty;
+        const bool vo = ho < p.Ho;
+        const __amdgpu_buffer_rsrc_t yr
+            = dwRsrc(D + ((long)n * p.Ho + (vo ? ho : 0)) * p.Wo * p.C, vo ? outRowBytes : 0);
+#pragma unroll
+        for(int tx = 0; tx < TW; ++tx)
+        {
+            float v[CPL];
+#pragma unroll
+            for(int c = 0; c < CPL; ++c)
+                v[c] = acc[c][ty][tx];
+            dwRowStore<T, CPL>(yr, static_cast<unsigned>((wo0 + tx) * p.C + k0) * EB, v);
         }
     }
 }
