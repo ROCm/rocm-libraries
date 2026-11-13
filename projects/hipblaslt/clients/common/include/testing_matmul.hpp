@@ -43,6 +43,7 @@
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
 #include "memory_estimate_check.hpp"
+#include "mx_tile128x4.hpp"
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -90,10 +91,18 @@ bool isSwizzleSupported(hipDataType datatype)
     case HIP_R_16F:
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_4F_E2M1:
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
         return true;
     default:
         return false;
     }
+}
+
+bool isFp6Datatype(hipDataType datatype)
+{
+    return static_cast<int>(datatype) == HIP_R_6F_E2M3
+           || static_cast<int>(datatype) == HIP_R_6F_E3M2;
 }
 
 bool MXUseRocroller()
@@ -116,6 +125,9 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
         return HIPBLASLT_ORDER_COL16_4R16;
     case HIP_R_4F_E2M1:
         return HIPBLASLT_ORDER_COL16_4R32;
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
+        return HIPBLASLT_ORDER_COL256_R128_EXT;
     default:
         throw std::runtime_error("unsupported datatype in orderForDatatype");
     }
@@ -160,6 +172,13 @@ void calculateKforSwizzling(
         // BK=32 bytes, K=16 bytes, BK/K=2
         MiK  = 16; // K inner block = 16 bytes
         MiKv = 8;
+        break;
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
+        // Sizing only: HIPBLASLT_ORDER_COL256_R128_EXT tiles hold 128 K per row, see
+        // tile_fp6_tensor.
+        MiK  = 128;
+        MiKv = 16;
         break;
     default:
         throw std::runtime_error("unsupported datatype in calculateKforSwizzling");
@@ -464,6 +483,32 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
     default:
         hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
     }
+}
+
+// HIPBLASLT_ORDER_COL256_R128_EXT. src holds m_n packed FP6 rows of k elements.
+void tile_fp6_tensor(
+    HipHostBuffer& dst, const HipHostBuffer& src, size_t b, size_t m_n, size_t k, size_t ld)
+{
+    if(ld != k)
+        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_EXT requires ld equal to K");
+    if(b != 1)
+        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_EXT requires batch count 1");
+    mx_tile128x4::tileFp6Data(dst.as<uint8_t>(), src.as<uint8_t>(), m_n, k);
+}
+
+void swizzle_operand(HipHostBuffer&       dst,
+                     const HipHostBuffer& src,
+                     hipDataType          datatype,
+                     const Arguments&     arg,
+                     size_t               b,
+                     size_t               m_n,
+                     size_t               k,
+                     size_t               ld)
+{
+    if(isFp6Datatype(datatype))
+        tile_fp6_tensor(dst, src, b, m_n, k, ld);
+    else
+        swizzle_tensor_type(dst, src, datatype, arg, b, m_n, k, ld, false);
 }
 
 template <typename Tout>
@@ -971,15 +1016,6 @@ auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
     return static_cast<decltype(in)>(static_cast<decltype(in)>(1)
                                      / (static_cast<decltype(in)>(1) + std::exp(-in)));
 };
-
-// -1 inherits the handle. A value on the test argument is this problem's request
-// and wins over the bench-wide CLI knob.
-inline int32_t resolved_uniform_summation_order(const Arguments& arg)
-{
-    if(arg.uniform_summation_order >= 0)
-        return arg.uniform_summation_order;
-    return hipblaslt_bench_options::uniform_summation_order();
-}
 
 void testing_matmul_bad_arg(const Arguments& arg)
 {
@@ -2872,15 +2908,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &dyn,
                     sizeof(dyn)));
             }
-            int32_t uso = resolved_uniform_summation_order(arg);
-            if(uso >= 0)
-            {
-                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
-                    matmul[0][i],
-                    HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
-                    &uso,
-                    sizeof(uso)));
-            }
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
@@ -3774,8 +3801,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                swizzle_tensor_type(
-                    tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
+                swizzle_operand(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i]);
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
             }
 
@@ -3783,8 +3809,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                swizzle_tensor_type(
-                    tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i], false);
+                swizzle_operand(tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i]);
                 CHECK_HIP_ERROR(synchronize(dB[i], tmp, block_count));
             }
 
@@ -4070,6 +4095,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                 }
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                }
                 else if(isW4A16Scaling(arg.scaleA))
                 {
                     // Client scale values match the public API enum.
@@ -4131,6 +4160,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                }
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                 }
 
                 if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -4266,8 +4299,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     HipHostBuffer tmp(TiA, size_dA[i]);
                     CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                    swizzle_tensor_type(
-                        tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i], false);
+                    swizzle_operand(tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i]);
                     CHECK_HIP_ERROR(synchronize(dA[batchCount], tmp, block_count));
                 }
 
@@ -4275,8 +4307,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     HipHostBuffer tmp(TiB, size_dB[i]);
                     CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                    swizzle_tensor_type(
-                        tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
+                    swizzle_operand(tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i]);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
                 }
                 //// copy data from CPU to device end
@@ -4482,15 +4513,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &dyn,
                         sizeof(dyn)));
                 }
-                int32_t uso = resolved_uniform_summation_order(arg);
-                if(uso >= 0)
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
-                        matmul[b][i],
-                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
-                        &uso,
-                        sizeof(uso)));
-                }
             }
 
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -4673,6 +4695,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
                         case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                         default:
                             // Client scale values match the public API enum.
                             if(isW4A16Scaling(f))
@@ -5623,7 +5647,21 @@ void testing_matmul_with_bias(const Arguments& arg,
     returnedAlgoCount = heuristicResult.size();
 
     // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
-    if(arg.allow_no_solution && returnedAlgoCount == 0)
+    // On a chip a case names in require_solution_chip_ids, a solution must exist.
+    bool requireSolution = false;
+    if(arg.require_solution_chip_ids[0] != 0)
+    {
+        int device = 0;
+        int chipId = 0;
+        if(hipGetDevice(&device) == hipSuccess
+           && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) == hipSuccess
+           && chipId != 0)
+            requireSolution = std::find(std::begin(arg.require_solution_chip_ids),
+                                        std::end(arg.require_solution_chip_ids),
+                                        chipId)
+                              != std::end(arg.require_solution_chip_ids);
+    }
+    if(arg.allow_no_solution && !requireSolution && returnedAlgoCount == 0)
     {
 #ifdef GOOGLE_TEST
         GTEST_SKIP() << "the library offers no solution for this shape";
