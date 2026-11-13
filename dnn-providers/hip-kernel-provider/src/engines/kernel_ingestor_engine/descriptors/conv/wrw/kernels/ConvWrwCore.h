@@ -522,7 +522,7 @@ struct K3Tiles
         row = xRow[0];
         if constexpr(FR == 1)
         {
-            rowOk = rowOk && xOk[0];
+            rowOk = rowOk & xOk[0];
         }
         else
         {
@@ -534,7 +534,7 @@ struct K3Tiles
                     any = xOk[f];
                     row = xRow[f];
                 }
-            rowOk = rowOk && any;
+            rowOk = rowOk & any;
         }
     }
 
@@ -573,16 +573,18 @@ struct K3Tiles
         // ALIGN: the units start at iwA, the multiple of VEC at or below iw0.
         const int iwA = iw0 >= 0 ? iw0 / VEC * VEC : -((-iw0 + VEC - 1) / VEC) * VEC;
         s.shiftX = iwA - iw0;
+        // Bitwise (not short-circuit) per-lane load predicates here and in every K3 tile: with &&
+        // the compiler may turn the offset select into exec-masked branches around the loads.
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
-            const bool ok = yOk && ((aOk >> p) & 1u);
+            const bool ok = yOk & (((aOk >> p) & 1u) != 0u);
             if(LAYOUT == K3_NCHW)
             {
                 const int off = aOff[p] + yRow + q0;
                 if constexpr(ALIGN == 1)
                 {
-                    const bool in = ok && q0 + aPos[p] < a.wo;
+                    const bool in = ok & (q0 + aPos[p] < a.wo);
                     k3Load(
                         s.ra[p], yr, in ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
                 }
@@ -598,7 +600,7 @@ struct K3Tiles
 #pragma unroll
                 for(int j = 0; j < KV; ++j)
                 {
-                    const bool okq = ok && q0 + aPos[p] + j < a.wo;
+                    const bool okq = ok & (q0 + aPos[p] + j < a.wo);
                     const int off = aOff[p] + yRow + q0 * ys4 + j * ys4;
                     const unsigned at
                         = okq ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE;
@@ -620,7 +622,7 @@ struct K3Tiles
                 if constexpr(ALIGN == 1)
                 {
                     const int iw = iwA + bPos[p];
-                    const bool in = rowOk && iw >= 0 && iw < a.wi;
+                    const bool in = rowOk & (iw >= 0) & (iw < a.wi);
                     const int off = bOff[p] + row + iwA;
                     k3Load(
                         s.rb[p], xr, in ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -640,7 +642,7 @@ struct K3Tiles
                 for(int j = 0; j < KV; ++j)
                 {
                     const int iw = iw0 + bPos[p] + SW * j;
-                    const bool ok = rowOk && iw >= 0 && iw < a.wi;
+                    const bool ok = rowOk & (iw >= 0) & (iw < a.wi);
                     const int off = bOff[p] + row + iw0 * xs4 + j * SW * xs4;
                     k3Load(s.rb[p * KV + j],
                            xr,
@@ -880,7 +882,7 @@ struct K3PackTiles
             unitOf(tid + p * THREADS, f, pos, c);
             const int r = pos / (wv * SW);
             const int iw = pos - r * wv * SW - a.pw;
-            const bool ok = r < rows && iw >= 0 && iw < a.wi && tid + p * THREADS < B_UNITS;
+            const bool ok = (r < rows) & (iw >= 0) & (iw < a.wi) & (tid + p * THREADS < B_UNITS);
             bInfo[p] = ok ? r | (iw << 16) : -1;
         }
     }
@@ -907,13 +909,13 @@ struct K3PackTiles
                   ys3 = static_cast<int>(a.ys[3]);
         const int xs1 = static_cast<int>(a.xs[1]), xs3 = static_cast<int>(a.xs[3]);
         const int ohA = oh0 + rA;
-        const bool rowA = live && colA < a.wo && ohA < a.ho;
+        const bool rowA = live & (colA < a.wo) & (ohA < a.ho);
         const int yBase = od * ys2 + ohA * ys3 + colA;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int k = k0 + kA0 + p * (THREADS / BQ);
-            const bool ok = rowA && k < kg;
+            const bool ok = rowA & (k < kg);
             const int off = (g * kg + k) * ys1 + yBase;
             k3Load(ra[p], yr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
@@ -937,8 +939,8 @@ struct K3PackTiles
                 }
             const int oh = oh0 + r;
             const int ih = oh * a.sh + ihOff;
-            const bool ok
-                = live && bInfo[p] >= 0 && oh < a.ho && fok && c0 + c < cg && ih >= 0 && ih < a.hi;
+            const bool ok = live & (bInfo[p] >= 0) & (oh < a.ho) & fok & (c0 + c < cg) & (ih >= 0)
+                            & (ih < a.hi);
             const int off = (g * cg + c0 + c) * xs1 + base + ih * xs3 + iw;
             k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
@@ -1652,7 +1654,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                 for(int w = 0; w < KW; ++w)
                 {
                     const int ow = chunk * BQ + qg * KW + w;
-                    const bool ok = live && u < A_UNITS && ow < a.wo && k < kg;
+                    const bool ok = live & (u < A_UNITS) & (ow < a.wo) & (k < kg);
                     const long long off
                         = (g * kg + k) * ys1 + od * ys2 + oh * ys3 + ow * ys4 - yOrg;
                     k3Load(ra[p * KW + w],
@@ -1671,13 +1673,13 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                     const int cv = u % CVN, qg = u / CVN;
                     const int c = c0 + cv * VEC;
                     const int id = od * a.sd + tapD[0], ih = oh * a.sh + tapH[0];
-                    const bool rowOk = live && u < B_UNITS && c < cg && id >= 0 && id < a.di
-                                       && ih >= 0 && ih < a.hi;
+                    const bool rowOk = live & (u < B_UNITS) & (c < cg) & (id >= 0) & (id < a.di)
+                                       & (ih >= 0) & (ih < a.hi);
 #pragma unroll
                     for(int w = 0; w < KW; ++w)
                     {
                         const int iw = chunk * BQ + qg * KW + w + tapW[0];
-                        const bool ok = rowOk && iw >= 0 && iw < a.wi;
+                        const bool ok = rowOk & (iw >= 0) & (iw < a.wi);
                         const long long off
                             = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
                         k3Load(rb[p * KW + w],
@@ -1693,14 +1695,14 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                 tapOf(t, tok, dD, dH, dW);
                 const int c = c0 + cv * VEC;
                 const int id = od * a.sd + dD, ih = oh * a.sh + dH;
-                const bool rowOk = live && u < B_UNITS && tok && c < cg && id >= 0 && id < a.di
-                                   && ih >= 0 && ih < a.hi;
+                const bool rowOk = live & (u < B_UNITS) & tok & (c < cg) & (id >= 0) & (id < a.di)
+                                   & (ih >= 0) & (ih < a.hi);
 #pragma unroll
                 for(int w = 0; w < KW; ++w)
                 {
                     const int ow = chunk * BQ + qg * KW + w;
                     const int iw = ow * a.sw + dW;
-                    const bool ok = rowOk && ow < a.wo && iw >= 0 && iw < a.wi;
+                    const bool ok = rowOk & (ow < a.wo) & (iw >= 0) & (iw < a.wi);
                     const long long off
                         = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
                     k3Load(rb[p * KW + w],
@@ -1711,13 +1713,13 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             return;
         }
         const int ow = chunk * BQ + j;
-        const bool qOk = live && ow < a.wo;
+        const bool qOk = live & (ow < a.wo);
         const long long yPos = od * ys2 + oh * ys3 + ow * ys4;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int k = k0 + row0 + p * ROWS;
-            const bool ok = qOk && k < kg;
+            const bool ok = qOk & (k < kg);
             const long long off = (g * kg + k) * ys1 + yPos - yOrg;
             k3Load(ra[p], yr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
@@ -1730,8 +1732,8 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             int dD, dH, dW;
             tapOf(t, tok, dD, dH, dW);
             const int id = od * a.sd + dD, ih = oh * a.sh + dH, iw = ow * a.sw + dW;
-            const bool ok = qOk && tok && c < cg && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
-                            && iw >= 0 && iw < a.wi;
+            const bool ok = qOk & tok & (c < cg) & (id >= 0) & (id < a.di) & (ih >= 0) & (ih < a.hi)
+                            & (iw >= 0) & (iw < a.wi);
             const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
             k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
@@ -2116,11 +2118,11 @@ struct K3SmallClTiles
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
-            const bool ok = yOk && ((aOk >> p) & 1u);
+            const bool ok = yOk & (((aOk >> p) & 1u) != 0u);
 #pragma unroll
             for(int j = 0; j < KV; ++j)
             {
-                const bool okq = ok && q0 + aPos[p] + j < a.wo;
+                const bool okq = ok & (q0 + aPos[p] + j < a.wo);
                 const int off = aOff[p] + yRow + (q0 + j) * ys4;
                 k3Load(ra[p * KV + j],
                        yr,
@@ -2145,7 +2147,7 @@ struct K3SmallClTiles
                     row = xRow[ff];
                 }
             const int iw = iw0 + pos;
-            const bool ok = u < B_UNITS && rowOk && c0 + c < cg && iw >= 0 && iw < a.wi;
+            const bool ok = (u < B_UNITS) & rowOk & (c0 + c < cg) & (iw >= 0) & (iw < a.wi);
             const int off = row + iw * xs4 + gc0 + c;
             k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
@@ -2851,12 +2853,12 @@ struct K3FmaTiles
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int q = q0 + aPos[p];
-            const bool ok = yOk && ((aOk >> p) & 1u) && q < a.wo;
+            const bool ok = yOk & (((aOk >> p) & 1u) != 0u) & (q < a.wo);
 #pragma unroll
             for(int i = 0; i < PER; ++i)
             {
                 const int off = aOff[p] + yRow + (LAYOUT == K3_NCHW ? q0 + i * ys1 : q0 * ys4);
-                const bool oki = ok && (LAYOUT != K3_NCHW || k0 + aCh[p] + i < kg);
+                const bool oki = ok & (LAYOUT != K3_NCHW || k0 + aCh[p] + i < kg);
                 k3Load(ra[p * PER + i],
                        yr,
                        oki ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -2866,12 +2868,12 @@ struct K3FmaTiles
         for(int p = 0; p < B_PASSES; ++p)
         {
             const int iw = iwA + bPos[p];
-            const bool ok = xOk && ((bOk >> p) & 1u) && iw >= 0 && iw < a.wi;
+            const bool ok = xOk & (((bOk >> p) & 1u) != 0u) & (iw >= 0) & (iw < a.wi);
 #pragma unroll
             for(int i = 0; i < PER; ++i)
             {
                 const int off = bOff[p] + xRow + (LAYOUT == K3_NCHW ? iwA + i * xs1 : iwA * xs4);
-                const bool oki = ok && (LAYOUT != K3_NCHW || c0 + bCh[p] + i < cg);
+                const bool oki = ok & (LAYOUT != K3_NCHW || c0 + bCh[p] + i < cg);
                 k3Load(rb[p * PER + i],
                        xr,
                        oki ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -3283,12 +3285,12 @@ struct K3FmaRowTiles
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int q = q0 + aPos[p];
-            const bool ok = yOk && ((aOk >> p) & 1u) && q < a.wo;
+            const bool ok = yOk & (((aOk >> p) & 1u) != 0u) & (q < a.wo);
 #pragma unroll
             for(int i = 0; i < PER; ++i)
             {
                 const int off = aOff[p] + yRow + (LAYOUT == K3_NCHW ? q0 + i * ys1 : q0 * ys4);
-                const bool oki = ok && (LAYOUT != K3_NCHW || k0 + aCh[p] + i < kg);
+                const bool oki = ok & (LAYOUT != K3_NCHW || k0 + aCh[p] + i < kg);
                 k3Load(ra[p * PER + i],
                        yr,
                        oki ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -3307,12 +3309,12 @@ struct K3FmaRowTiles
                     row = xRow[f];
                 }
             const int iw = iwA + bPos[p];
-            const bool ok = rowOk && ((bOk >> p) & 1u) && iw >= 0 && iw < a.wi;
+            const bool ok = rowOk & (((bOk >> p) & 1u) != 0u) & (iw >= 0) & (iw < a.wi);
 #pragma unroll
             for(int i = 0; i < PER; ++i)
             {
                 const int off = bOff[p] + row + (LAYOUT == K3_NCHW ? iwA + i * xs1 : iwA * xs4);
-                const bool oki = ok && (LAYOUT != K3_NCHW || c0 + bCh[p] + i < cg);
+                const bool oki = ok & (LAYOUT != K3_NCHW || c0 + bCh[p] + i < cg);
                 k3Load(rb[p * PER + i],
                        xr,
                        oki ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
