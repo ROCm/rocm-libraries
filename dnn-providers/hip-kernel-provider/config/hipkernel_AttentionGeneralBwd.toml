@@ -99,4 +99,4 @@ rtol = 1e-05
 [[test_skips]]
 archs = ["gfx950"]
 filters = ["*_SdpaBackward_*.s37_b2h3k3v3_72x120_d128_bfp16_none_s1_tolu"]
-reason = "s37: one dQ element outside the class U bf16 tolerance on gfx950; tracked as AICK-3060"
+reason = "s37: one dQ element outside the class U bf16 tolerance on gfx950"

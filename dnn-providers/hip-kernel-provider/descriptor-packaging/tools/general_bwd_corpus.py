@@ -501,13 +501,19 @@ def _single_backward(g) -> bool:
     )
 
 
+def _posix_key(path: str) -> str:
+    # Windows' backslash sorts differently from '/', which reorders sibling paths.
+    return Path(path).as_posix()
+
+
 def bundle_graphs(skipped: Counter) -> list[tuple[str, dict]]:
     out = []
     for tmpl_path in sorted(
         glob.glob(
             str(BUNDLES / "*" / "SdpaBackward" / "**" / "graph.template.json"),
             recursive=True,
-        )
+        ),
+        key=_posix_key,
     ):
         d = Path(tmpl_path).parent
         sweep = d / "sweep.json"
@@ -523,7 +529,10 @@ def bundle_graphs(skipped: Counter) -> list[tuple[str, dict]]:
                 continue
             out.append((f"bundle:{rel}/{case['id']}", g))
     for path in sorted(
-        glob.glob(str(BUNDLES / "*" / "SdpaBackward" / "**" / "*.json"), recursive=True)
+        glob.glob(
+            str(BUNDLES / "*" / "SdpaBackward" / "**" / "*.json"), recursive=True
+        ),
+        key=_posix_key,
     ):
         p = Path(path)
         if p.name in (

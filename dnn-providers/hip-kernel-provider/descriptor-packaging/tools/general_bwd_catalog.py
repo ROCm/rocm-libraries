@@ -522,6 +522,16 @@ def stale_files(generated: Path, bundle: Path) -> list[str]:
     )
 
 
+def first_difference(generated: Path, installed: Path) -> str:
+    """Where the two files first differ, for a stale-descriptor report."""
+    a, b = generated.read_bytes(), installed.read_bytes()
+    at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    return (
+        f"first difference at byte {at} (generated {len(a)} bytes, installed {len(b)}): "
+        f"generated {a[max(0, at - 20) : at + 20]!r}, installed {b[max(0, at - 20) : at + 20]!r}"
+    )
+
+
 def verify(bundle: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
@@ -574,10 +584,12 @@ def main(argv=None) -> int:
                 print(f"general_bwd_catalog: {exc}", file=sys.stderr)
                 return 2
             if args.check:
-                failures += [
-                    f"stale descriptor {args.bundle / n}"
-                    for n in stale_files(generated, args.bundle)
-                ]
+                installed = _installed(args.bundle)
+                for n in stale_files(generated, args.bundle):
+                    failure = f"stale descriptor {args.bundle / n}"
+                    if n in installed and (generated / n).is_file():
+                        failure += f": {first_difference(generated / n, installed[n])}"
+                    failures.append(failure)
             else:
                 install(generated, args.bundle)
     if args.verify:
