@@ -90,6 +90,29 @@ inline void hipsparselt_init_sin(
     hipsparselt_init_sin(A.data(), M, N, lda, stride, batch_count);
 }
 
+// Initialize matrices with rand_int values generated from the element index, the same way as
+// hipBLASLt's rand_int A and C.
+template <typename T>
+void hipsparselt_init_idx(
+    T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+#pragma omp parallel for
+        for(size_t j = 0; j < N; ++j)
+        {
+            size_t offset = j * lda + i_batch * stride;
+            for(size_t i = 0; i < M; ++i)
+                A[i + offset] = random_int_idx<T>(i + offset);
+        }
+}
+
+template <typename T>
+inline void hipsparselt_init_idx(
+    std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    hipsparselt_init_idx(A.data(), M, N, lda, stride, batch_count);
+}
+
 // Initialize matrix so adjacent entries have alternating sign.
 // In gemm if either A or B are initialized with alernating
 // sign the reduction sum will be summing positive
@@ -108,7 +131,7 @@ void hipsparselt_init_alternating_sign(
             size_t offset = j * lda + i_batch * stride;
             for(size_t i = 0; i < M; ++i)
             {
-                auto value    = random_generator<T>();
+                auto value    = random_int_idx<T>(i + offset);
                 A[i + offset] = (i ^ j) & 1 ? value : negate(value);
             }
         }
