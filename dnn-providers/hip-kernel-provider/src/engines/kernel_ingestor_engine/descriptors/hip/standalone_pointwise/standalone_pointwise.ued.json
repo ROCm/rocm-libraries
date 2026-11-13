@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2201",
+  "name": "hipkernel:StandalonePointwise",
+  "sdk_version": "1.2.0",
+  "graph_match": {"native": "hipkernel.standalone_pointwise.graph_match.v2"},
+  "sort_kernel_catalog": {"default": "78b79c44-802f-4f8b-8dd1-d9c20f2f2202"},
+  "metadata": "78b79c44-802f-4f8b-8dd1-d9c20f2f2203"
+}

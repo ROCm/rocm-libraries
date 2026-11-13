@@ -1638,6 +1638,17 @@ class TestPointwiseExtract:
         with pytest.raises(FeatureError, match="int32"):
             self._extract("add", in_dtypes=("float", "int32"))
 
+    def test_gen_index_accepts_int32_output(self) -> None:
+        assert self._extract("gen_index", out_dtype="int32", axis_tensor_uid=1) == {
+            "mode:gen_index",
+            "dtype:fp32",
+        }
+
+    @pytest.mark.parametrize("mode", ["relu_fwd", "add", "binary_select"])
+    def test_int32_output_is_only_catalogued_for_gen_index(self, mode: str) -> None:
+        with pytest.raises(FeatureError, match="int32"):
+            self._extract(mode, out_dtype="int32")
+
     @pytest.mark.parametrize(
         "mode, kwargs",
         [

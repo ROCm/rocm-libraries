@@ -252,6 +252,14 @@ struct PointwiseSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
+        using Type = hipdnn_flatbuffers_sdk::data_objects::DataType;
+        constexpr auto MODE = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX;
+        addUnaryPlanBuilder<MODE, Type::FLOAT, Type::FLOAT, Type::FLOAT>(map);
+        addUnaryPlanBuilder<MODE, Type::HALF, Type::FLOAT, Type::FLOAT>(map);
+        addUnaryPlanBuilder<MODE, Type::BFLOAT16, Type::FLOAT, Type::FLOAT>(map);
+        addUnaryPlanBuilder<MODE, Type::FLOAT, Type::FLOAT, Type::INT32>(map);
+        addUnaryPlanBuilder<MODE, Type::HALF, Type::FLOAT, Type::INT32>(map);
+        addUnaryPlanBuilder<MODE, Type::BFLOAT16, Type::FLOAT, Type::INT32>(map);
         return map;
     }
 
@@ -264,6 +272,10 @@ private:
                                                         PointwiseSignatureKey>& map)
     {
         // Add all implemented unary operations
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
@@ -297,6 +309,14 @@ private:
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
     }
 
     template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
@@ -308,6 +328,21 @@ private:
                                                          PointwiseSignatureKey>& map)
     {
         // Add all implemented binary operations
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
         addBinaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
                              Input0DataTypeEnum,
                              Input1DataTypeEnum,

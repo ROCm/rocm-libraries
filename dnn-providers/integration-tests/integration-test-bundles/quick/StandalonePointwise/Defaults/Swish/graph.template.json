@@ -1,0 +1,59 @@
+{
+  "compute_data_type": "${case.compute_data_type}",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "PointwiseUnaryTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 0,
+        "in_1_tensor_uid": null,
+        "in_2_tensor_uid": null,
+        "operation": "swish_fwd",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "PointwiseUnary",
+      "outputs": {
+        "out_0_tensor_uid": 1
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Input",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "PointwiseUnary::OUT_0",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    }
+  ]
+}

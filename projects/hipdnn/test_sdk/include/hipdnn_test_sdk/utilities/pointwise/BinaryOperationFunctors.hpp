@@ -184,4 +184,60 @@ struct TanhBackward
     }
 };
 
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct EluBackward
+{
+    ComputeType alpha;
+    explicit EluBackward(ComputeType value = ComputeType{1})
+        : alpha(value)
+    {
+    }
+    template <typename Dy, typename X>
+    OutputType operator()(const Dy& dy, const X& x) const
+    {
+        const auto value = static_cast<ComputeType>(x);
+        return static_cast<OutputType>(
+            static_cast<ComputeType>(dy)
+            * (value > ComputeType{0} ? ComputeType{1} : alpha * std::exp(value)));
+    }
+};
+
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct SoftplusBackward
+{
+    ComputeType beta;
+    explicit SoftplusBackward(ComputeType value = ComputeType{1})
+        : beta(value)
+    {
+    }
+    template <typename Dy, typename X>
+    OutputType operator()(const Dy& dy, const X& x) const
+    {
+        const auto value = beta * static_cast<ComputeType>(x);
+        const auto sigmoid = value >= ComputeType{0}
+                                 ? ComputeType{1} / (ComputeType{1} + std::exp(-value))
+                                 : std::exp(value) / (ComputeType{1} + std::exp(value));
+        return static_cast<OutputType>(static_cast<ComputeType>(dy) * sigmoid);
+    }
+};
+
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct SwishBackward
+{
+    ComputeType beta;
+    explicit SwishBackward(ComputeType value = ComputeType{1})
+        : beta(value)
+    {
+    }
+    template <typename Dy, typename X>
+    OutputType operator()(const Dy& dy, const X& x) const
+    {
+        const auto value = static_cast<ComputeType>(x);
+        const auto sigmoid = ComputeType{1} / (ComputeType{1} + std::exp(-beta * value));
+        return static_cast<OutputType>(
+            static_cast<ComputeType>(dy)
+            * (sigmoid + beta * value * sigmoid * (ComputeType{1} - sigmoid)));
+    }
+};
+
 } // namespace hipdnn_test_sdk::utilities::pointwise

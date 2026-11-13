@@ -405,6 +405,41 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForLeakyReluActivationGraph)
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
+{
+    auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    auto nativeGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
+    auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
+    activation->operation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;
+    activation->in_1_tensor_uid = flatbuffers::nullopt;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, nativeGraph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    setupMockCompileChain();
+    Context ctx;
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestRMSnormBwdPlanBuilder, ForwardReluIsNotApplicable)
+{
+    auto builder = createRMSnormActivationTestGraph(
+        false,
+        false,
+        false,
+        false,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForUnsupportedActivationModeActivationGraph)
 {
     auto builder = createRMSnormActivationTestGraph(

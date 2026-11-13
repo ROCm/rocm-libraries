@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include "PointwiseGraphUtils.hpp"
@@ -25,6 +26,82 @@ using namespace hipdnn_sdk_test_utils;
 class TestPointwisePlan : public ::testing::Test
 {
 };
+
+TEST_F(TestPointwisePlan, ScalarOperandsUseBakedValuesAndReadRuntimePointersOnEachExecution)
+{
+    for(const bool runtime : {false, true})
+    {
+        TensorAttributesT scalar;
+        scalar.uid = 1;
+        scalar.data_type = DataType::FLOAT;
+        scalar.dims = {1};
+        scalar.strides = {1};
+        scalar.is_runtime_pass_by_value = runtime;
+        if(!runtime)
+        {
+            scalar.value.Set(Float32Value(1.25f));
+        }
+        TensorAttributesT input;
+        input.uid = 2;
+        input.data_type = DataType::FLOAT;
+        input.dims = {2, 3};
+        input.strides = {8, 2};
+        auto output = input;
+        output.uid = 3;
+        PointwiseParams params;
+        params.mode = PointwiseMode::SUB;
+        params.in0Tensor = scalar;
+        params.in1Tensor = input;
+        params.out0Tensor = output;
+        PointwisePlan<float, float, bool, float> plan(std::move(params));
+        Tensor<float> inputTensor(input.dims, input.strides);
+        Tensor<float> outputTensor(output.dims, output.strides);
+        inputTensor.fillWithValue(0.5f);
+        float scalarValue = 1.25f;
+        std::unordered_map<int64_t, void*> variantPack{{input.uid, inputTensor.rawHostData()},
+                                                       {output.uid, outputTensor.rawHostData()}};
+        if(runtime)
+        {
+            variantPack.emplace(scalar.uid, &scalarValue);
+        }
+        plan.execute(variantPack);
+        EXPECT_EQ(outputTensor.getHostValue(1, 2), 0.75f);
+        scalarValue = -2.0f;
+        plan.execute(variantPack);
+        EXPECT_EQ(outputTensor.getHostValue(1, 2), runtime ? -2.5f : 0.75f);
+    }
+}
+
+TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityPreservesValues)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 2, 2},
+                                   {1, 3, 2, 2},
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::IDENTITY);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const NodeWrapper nodeWrapper(&graphWrapper.getNode(0));
+    const auto& attributes = nodeWrapper.attributesAs<PointwiseAttributes>();
+    auto* input = static_cast<float*>(variantPack.at(attributes.in_0_tensor_uid()));
+    const auto* output = static_cast<const float*>(variantPack.at(attributes.out_0_tensor_uid()));
+    const std::array<float, 12> expected
+        = {-3.0f, -2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        input[i] = expected[i];
+    }
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(output[i], expected[i]) << "element " << i;
+    }
+}
 
 TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
 {
