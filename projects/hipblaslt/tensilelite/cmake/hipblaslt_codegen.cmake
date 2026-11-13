@@ -341,6 +341,21 @@ function(create_device_library)
          "${_codegen_dir}/tensilelite/*.h"
          "${_codegen_dir}/tensilelite/*.s")
     list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
+    if(WIN32)
+        # Some CustomKernels/* assembly filenames (rocRoller/Triton codegen
+        # output) push the absolute path past Windows' 260-char MAX_PATH,
+        # which makes ninja fail to Stat() them as DEPENDS of the stamp below.
+        # They're read by TensileLogic/TensileCreateLibrary as data, not
+        # compiled directly, so dropping the handful that are too long from
+        # dependency tracking only means an edit to one of them won't by
+        # itself invalidate the stamp.
+        foreach(_src IN LISTS _codegen_sources)
+            string(LENGTH "${_src}" _src_len)
+            if(_src_len GREATER 259)
+                list(REMOVE_ITEM _codegen_sources "${_src}")
+            endif()
+        endforeach()
+    endif()
     list(APPEND _codegen_dependencies
          ${_logic_files}
          ${_codegen_sources}
