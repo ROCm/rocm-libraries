@@ -42,7 +42,7 @@ struct static_for
     }
 };
 
-constexpr size_t max(size_t a, size_t b)
+constexpr size_t tensile_reduction_max(size_t a, size_t b)
 {
     return (a > b) ? a : b;
 }
@@ -65,7 +65,7 @@ __device__ inline void
     int num_records       = strideJ * n * sizeof(DataTypeCompute);
     int num_records_bias  = m * sizeof(DataTypeOut);
 
-    constexpr size_t sumLength      = max((size_t)1, VW - 1);
+    constexpr size_t sumLength      = tensile_reduction_max((size_t)1, VW - 1);
     DataTypeCompute  sum[sumLength] = {0};
     if(idx + (VW - 1) < m)
     {
@@ -110,7 +110,7 @@ __device__ inline void
         {
             int              currRow   = row + i;
             int              rowStride = currRow * strideJ + voffset;
-            constexpr size_t tmpLength = max((size_t)1, VW - 1);
+            constexpr size_t tmpLength = tensile_reduction_max((size_t)1, VW - 1);
             DataTypeCompute  tmp[tmpLength];
             static_for<0, VW - 1>()([&](int vw) {
                 buffer_load<DataTypeCompute, sizeof(DataTypeCompute)>(
