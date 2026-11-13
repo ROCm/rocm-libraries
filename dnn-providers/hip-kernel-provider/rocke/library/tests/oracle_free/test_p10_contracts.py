@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+import ast
 import ctypes
 import itertools
+import math
 from dataclasses import replace
 from fractions import Fraction
 from functools import cache
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -84,6 +87,8 @@ from ._p10_subject import (
     p10_schedule,
     resolve_p10_subject,
 )
+from .test_contracts import _SKIP_CALLS, _dotted_name
+from .test_p10_dense import _judge_output, _not_rejected
 
 # Literal, so a change of the uniform-probability lane's specifications does not
 # silently change what the placement probe covers.
@@ -1540,3 +1545,82 @@ def test_bf16_rows_past_128_are_one_step_apart_and_still_rejected(
     swapped = 2 * case.batch * case.nhead_q
     assert result.outside[Channel.ROW] == swapped
     assert (result.near, result.worst_ulp) == (swapped, 1)
+
+
+def _gpu_lane_tree() -> ast.Module:
+    path = Path(__file__).with_name("test_p10_dense.py")
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def test_gpu_lane_parametrizes_over_the_subject_matrix() -> None:
+    argvalues: list[ast.AST] = []
+    for node in ast.walk(_gpu_lane_tree()):
+        if not isinstance(node, ast.Call):
+            continue
+        if not _dotted_name(node.func).endswith("mark.parametrize"):
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        argvalues.append(node.args[1] if len(node.args) > 1 else keywords["argvalues"])
+    assert argvalues, "the GPU lane has no parametrized test"
+    for value in argvalues:
+        assert isinstance(value, ast.Name), ast.dump(value)
+        assert value.id == "P10_SUBJECT_CASES"
+
+
+def test_gpu_lane_skips_only_through_the_require_aware_arch_gate() -> None:
+    """The shared architecture gate on the case's own architecture is the only
+    permitted skip, so ``ROCKE_REQUIRE_<ARCH>=1`` fails a lane that lost its GPU,
+    and an out-of-scope dispatch outcome on the architecture fails, never skips."""
+    calls = [
+        node for node in ast.walk(_gpu_lane_tree()) if isinstance(node, ast.Call)
+    ]
+    escapes = [
+        f"line {node.lineno}: {_dotted_name(node.func)}"
+        for node in calls
+        if _dotted_name(node.func).split(".")[-1] in _SKIP_CALLS
+    ]
+    assert not escapes
+    gates = [
+        node for node in calls if _dotted_name(node.func) == "current_device_arch_in"
+    ]
+    assert len(gates) == 1, [ast.dump(gate) for gate in gates]
+    arches = gates[0].args[0]
+    assert isinstance(arches, ast.Tuple), ast.dump(arches)
+    assert [_dotted_name(item) for item in arches.elts] == ["arch"]
+
+
+@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+def test_gpu_lane_judgement_passes_the_emulated_output(case: UniformCase) -> None:
+    control = _judge_output("label", case, _DERIVED_SCHEDULE, _correct_output(case))
+    assert control.violations == ()
+    assert control.compared == math.prod(case.output_shape)
+
+
+def test_gpu_lane_judgement_fails_an_output_one_step_off_its_target() -> None:
+    case = P10_UNGROUPED_CASES[1]
+    stored = codeword_target_bits(case).copy()
+    stored[1, 200, 2, LANE_BATCH] += 1
+    with pytest.raises(AssertionError, match=r"label: batch lanes: 1 output\(s\)"):
+        _judge_output("label", case, _DERIVED_SCHEDULE, _with_bits(case, stored))
+
+
+def test_gpu_lane_judgement_blames_the_output_for_a_cancelled_mutation() -> None:
+    """A kernel that swaps adjacent rows stores exactly what that mutation turns
+    back into the correct output, so the mutation is not rejected. The message
+    must then point at the output's own violations rather than at the analyzer."""
+    case = P10_UNGROUPED_CASES[1]
+    mutation = P10Mutation.ADJACENT_ROW_SWAP
+    correct = _correct_output(case)
+    buggy = apply_mutation(case, _DERIVED_SCHEDULE, mutation, correct)
+    with pytest.raises(AssertionError) as raised:
+        _judge_output("label", case, _DERIVED_SCHEDULE, buggy)
+    blamed = str(raised.value)
+    assert "adjacent_row_swap was not rejected through the row channel" in blamed
+    assert "the kernel output itself fails the verdict" in blamed
+    assert "analyzer failed" not in blamed
+
+    admissible = path_exact_admissible(case)
+    clean = analyze_codeword(case, correct, admissible)
+    assert "analyzer failed to reject adjacent_row_swap" in _not_rejected(
+        "label", mutation, clean, clean
+    )
