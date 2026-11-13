@@ -337,11 +337,17 @@ _LOWERING_MUTATIONS = {
 }
 
 
+_LOWERING_MESSAGES = {
+    "tensors_not_a_list": "graph tensors is not a list",
+    "bool_uid": "has no integer uid",
+}
+
+
 @pytest.mark.parametrize("name", sorted(_LOWERING_MUTATIONS))
 def test_lowering_rules(name):
     g = _dense_graph()
     _LOWERING_MUTATIONS[name](g)
-    with pytest.raises(HipdnnLoweringError):
+    with pytest.raises(HipdnnLoweringError, match=_LOWERING_MESSAGES.get(name)):
         _lower(g)
 
 

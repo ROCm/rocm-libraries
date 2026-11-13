@@ -119,6 +119,7 @@ test_categories:
       # parser ignores a listed name that has no registered test.
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_attention_bwd_hipdnn_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -202,6 +203,7 @@ test_categories:
       # parser ignores a listed name that has no registered test.
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_attention_bwd_hipdnn_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the

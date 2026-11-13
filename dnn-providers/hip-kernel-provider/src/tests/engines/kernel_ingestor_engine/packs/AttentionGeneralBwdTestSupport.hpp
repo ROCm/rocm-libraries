@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -390,7 +391,8 @@ inline ArchKernels archKernels(std::string_view arch)
 inline std::filesystem::path corpusPath(std::string_view arch)
 {
     const std::string fileName = "corpus_" + std::string(arch) + ".jsonl";
-    if(const char* overridePath = std::getenv("HKP_GENERAL_BWD_CORPUS"))
+    const auto overridePath = hipdnn_data_sdk::utilities::getEnv("HKP_GENERAL_BWD_CORPUS");
+    if(!overridePath.empty())
     {
         const std::filesystem::path path(overridePath);
         return std::filesystem::is_directory(path) ? path / fileName : path;
