@@ -510,14 +510,21 @@ __device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a)
     // A lane's columns may run past its row on either side (padding, the tile's edge): the
     // offsets reach into the neighbouring rows, whose elements the mask clears. The buffer
     // (the block's images) answers a load that straddles either of its ends with zeros, valid
-    // elements included: rows that close to them -- the first plane's top rows (iy wi < pw) and
-    // the last channel pair's bottom rows -- load element by element.
-    const bool firstPair = c0 == 0, lastPair = c0 + 2 >= a.c;
+    // elements included, so a row whose loads may reach before the buffer's first element or
+    // past its last loads element by element. That is the first planes' top rows and the last
+    // planes' bottom rows; for a plane narrower than the padding plus a tile (a 1 x 1 dy of a
+    // 7 x 7 backward data, padded by 6), it is several channel pairs, not only the first and
+    // the last. The bounds are the wave's lowest and highest element over its lanes (image,
+    // channel of the pair, column and pass), so the branch stays wave-uniform.
+    const long colLow = (long)S * x0 - a.pw;
+    const long colHigh = (long)S * (x0 + 8 * (JB - 1)) - a.pw + P * (KWP - 1) + P;
+    const long pairLow = (long)c0 * planeI + colLow;
+    const long pairHigh = (long)(nimg - 1) * imgI + (long)(c0 + 1) * planeI + colHigh;
+    const long bufferElements = (long)nimg * imgI;
     // Raw words: the mask is applied where the MFMA reads them, so a load's wait stays there.
     auto gload = [&](int iy, uw* d) {
         const bool ok = iy >= 0 && iy < a.hi;
-        if((firstPair && iy >= 0 && (long)iy * a.wi < a.pw)
-           || (lastPair && iy < a.hi && (long)(a.hi - 1 - iy) * a.wi < KPL))
+        if(ok && (pairLow + (long)iy * a.wi < 0 || pairHigh + (long)iy * a.wi > bufferElements))
         {
 #pragma unroll
             for(int ph = 0; ph < KWP; ++ph)

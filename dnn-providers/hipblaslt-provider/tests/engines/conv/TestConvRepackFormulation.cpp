@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -208,6 +210,49 @@ TEST(TestConvRepackFormulation, AChannelsLastPreferenceOverridesY)
     EXPECT_FALSE(nhwc->columnsFirst);
 }
 
+TEST(TestConvRepackFormulation, StagedChannelsLastRunsOneGemmOverEveryImage)
+{
+    // A channels-first strided 1x1: the other layouts batch a GEMM per image; staged
+    // channels-last copies y channels-last so one GEMM covers both images' positions.
+    ConvGemmShape strided1x1;
+    strided1x1.stride = {2, 2};
+    strided1x1.input = {6, 8};
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto problem = parse(strided1x1, direction);
+        const auto followY = im2colGemmCalls(problem);
+        const auto staged = im2colGemmCalls(
+            problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::STAGED_CHANNELS_LAST);
+        ASSERT_TRUE(followY.has_value());
+        ASSERT_TRUE(staged.has_value());
+        EXPECT_FALSE(staged->columnsFirst);
+        ASSERT_EQ(gemmStages(*staged), 1u) << static_cast<int>(direction);
+        ASSERT_EQ(staged->stages[0].calls.size(), 1u);
+        const auto& call = staged->stages[0].calls[0];
+        EXPECT_EQ(call.batchCount, 1);
+        // The positions of both images (3 x 4 each) in one GEMM dimension.
+        if(direction == ConvDirection::BACKWARD_WEIGHTS)
+        {
+            EXPECT_EQ(call.k, 2 * 3 * 4);
+        }
+        else
+        {
+            EXPECT_TRUE(call.m == 2 * 3 * 4 || call.n == 2 * 3 * 4);
+        }
+        // y staged channels-last next to the columns.
+        EXPECT_EQ(staged->workspace.size(), followY->workspace.size() + 1);
+    }
+    // Channels-last y needs no staging: the same plan as channels-last columns.
+    const auto nhwc = parse(channelsLast(strided1x1), ConvDirection::BACKWARD_DATA);
+    const auto staged
+        = im2colGemmCalls(nhwc, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::STAGED_CHANNELS_LAST);
+    const auto plain
+        = im2colGemmCalls(nhwc, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::CHANNELS_LAST);
+    ASSERT_TRUE(staged.has_value());
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(staged->workspaceBytes, plain->workspaceBytes);
+}
+
 TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsBatchesImagesAfterIm2col)
 {
     // Channels-first backward weights reduces over images, which no single channels-first GEMM
@@ -289,6 +334,111 @@ TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
     const auto* sum = stepArgs<StridedCastArgs>(stage.after.at(0));
     ASSERT_NE(sum, nullptr);
     EXPECT_EQ(sum->batches, 4);
+}
+
+TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
+{
+    // One output pixel over 16384 terms: forward, a filter as large as its 32 x 32 image of 16
+    // channels; backward data, a 1x1 dx of one channel from 16384 output channels. Into a bf16 or
+    // half output the reduction runs as 4 chunks of 4096 whose fp32 partials a cast sums in
+    // order (narrowPartials); an fp32 output, or the default, keeps the single GEMM.
+    ConvGemmShape forward;
+    forward.n = 1;
+    forward.c = forward.k = 16;
+    forward.input = {32, 32};
+    forward.filter = {32, 32};
+    ConvGemmShape backward;
+    backward.n = 1;
+    backward.c = 1;
+    backward.k = 16384;
+    backward.input = {1, 1};
+    for(const auto& [base, direction, outUid] :
+        {std::tuple{forward, ConvDirection::FORWARD, CONV_Y_UID},
+         std::tuple{backward, ConvDirection::BACKWARD_DATA, CONV_X_UID}})
+    {
+        for(const auto dataType : {conv_data_objects::DataType::BFLOAT16,
+                                   conv_data_objects::DataType::HALF,
+                                   conv_data_objects::DataType::FLOAT})
+        {
+            auto shape = base;
+            shape.dataType = dataType;
+            SCOPED_TRACE(std::to_string(static_cast<int>(direction)) + " "
+                         + std::to_string(static_cast<int>(dataType)));
+            const auto problem = parse(shape, direction);
+            const auto single = convGemmCalls(problem);
+            ASSERT_TRUE(single.has_value());
+            ASSERT_EQ(single->stages.at(0).calls.size(), 1u);
+            EXPECT_EQ(single->stages.at(0).calls[0].k, 16384);
+            const auto calls = convGemmCalls(
+                problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, false, true);
+            ASSERT_TRUE(calls.has_value());
+            const bool narrow = dataType != conv_data_objects::DataType::FLOAT;
+            const auto& stage = calls->stages.at(0);
+            ASSERT_EQ(stage.calls.size(), 1u);
+            const auto& call = stage.calls[0];
+            EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
+            if(narrow)
+            {
+                EXPECT_EQ(call.k, 4096);
+                EXPECT_EQ(call.batchCount, 4);
+                EXPECT_NE(call.d.uid, outUid);
+                ASSERT_EQ(stage.after.size(), 1u);
+                const auto* sum = stepArgs<StridedCastArgs>(stage.after[0]);
+                ASSERT_NE(sum, nullptr);
+                EXPECT_EQ(sum->batches, 4);
+                EXPECT_EQ(stage.after[0].dstUid, outUid);
+                EXPECT_EQ(stage.after[0].dataType, dataType);
+            }
+            else
+            {
+                EXPECT_EQ(call.k, 16384);
+                EXPECT_EQ(call.d.uid, outUid);
+                EXPECT_TRUE(stage.after.empty());
+            }
+        }
+    }
+}
+
+TEST(TestConvRepackFormulation, SplitReductionFillsTheGpuWithFp32Partials)
+{
+    // A 1x1 channels-last 320 -> 320 backward weights over 8 x 128 x 128 positions: one GEMM of
+    // 9 output tiles behind a 131072 reduction. Split, it is 32 chunks of 4096 (32 x 9 tiles
+    // toward SPLIT_TARGET_TILES), fp32 partials summed into w; by default, the one GEMM.
+    ConvGemmShape shape = channelsLast({});
+    shape.n = 8;
+    shape.c = shape.k = 320;
+    shape.input = {128, 128};
+    shape.dataType = conv_data_objects::DataType::BFLOAT16;
+    const auto problem = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto direct = convGemmCalls(problem);
+    ASSERT_TRUE(direct.has_value());
+    ASSERT_EQ(direct->stages.size(), 1u);
+    EXPECT_EQ(direct->stages[0].calls.at(0).k, 131072);
+    EXPECT_TRUE(direct->workspace.empty());
+
+    const auto split
+        = convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, true);
+    ASSERT_TRUE(split.has_value());
+    const auto& stage = split->stages.at(0);
+    ASSERT_EQ(stage.calls.size(), 1u);
+    EXPECT_EQ(stage.calls[0].batchCount, 32);
+    EXPECT_EQ(stage.calls[0].k, 4096);
+    EXPECT_EQ(stage.calls[0].d.dataType, conv_data_objects::DataType::FLOAT);
+    const auto* sum = stepArgs<StridedCastArgs>(stage.after.at(0));
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->batches, 32);
+    EXPECT_EQ(split->workspaceBytes, 32u * 320 * 320 * sizeof(float));
+
+    // Enough tiles already (4096 x 4096 is 1024): split leaves the plan as it is.
+    shape.c = shape.k = 4096;
+    shape.input = {16, 16};
+    const auto wide = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const auto wideSplit
+        = convGemmCalls(wide, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, true);
+    ASSERT_TRUE(wideSplit.has_value());
+    EXPECT_EQ(wideSplit->workspaceBytes, convGemmCalls(wide)->workspaceBytes);
+    EXPECT_EQ(wideSplit->stages.at(0).calls.at(0).k,
+              convGemmCalls(wide)->stages.at(0).calls.at(0).k);
 }
 
 TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImages)

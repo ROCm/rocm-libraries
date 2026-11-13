@@ -358,6 +358,31 @@ inline RepackLaunch
     return launch;
 }
 
+/// Partials per output from which the cast sums with a 64-thread block per output.
+constexpr long long WIDE_CAST_BATCHES = 64;
+/// Outputs up to which it does (one block each).
+constexpr long long WIDE_CAST_OUTPUTS = 1LL << 18;
+
+/**
+ * @brief The launch for cast @p args, whose generic entry is @p genericEntry
+ *        ("StridedCastFloatTo<Type>"): the wide kernel (one 64-thread block per output, a fixed
+ *        tree over its partials) for at least WIDE_CAST_BATCHES partials into at most
+ *        WIDE_CAST_OUTPUTS outputs, else an empty entry (the generic kernel, its grid by the
+ *        caller).
+ */
+inline RepackLaunch castLaunch(const StridedCastArgs& args, const std::string& genericEntry)
+{
+    RepackLaunch launch;
+    if(args.batches >= WIDE_CAST_BATCHES && args.total <= WIDE_CAST_OUTPUTS)
+    {
+        const std::string prefix = "StridedCast";
+        launch.entry = prefix + "Wide" + genericEntry.substr(prefix.size());
+        launch.grid = static_cast<unsigned int>(args.total);
+        launch.block = 64;
+    }
+    return launch;
+}
+
 /**
  * @brief The launch for col2im @p args writing @p typeName ("Float", "Half", "Bfloat16") of
  *        @p bytes bytes; fills args.launch.

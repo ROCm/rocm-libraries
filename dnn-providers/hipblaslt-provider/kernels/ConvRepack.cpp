@@ -131,6 +131,53 @@ __device__ void stridedCast(const StridedCastArgs& args)
     }
 }
 
+/// The cast of many partials into few outputs: one 64-thread block per output element, each
+/// thread summing every 64th partial in order, then a fixed tree in LDS. Deterministic (the same
+/// order on every run and GPU), one rounding; for sums of many partials, which the per-element
+/// loop above runs on a handful of threads.
+template <typename OutputType>
+__device__ void stridedCastWide(const StridedCastArgs& args)
+{
+    constexpr int LANES = 64;
+    __shared__ float partial[LANES];
+    const long long index = blockIdx.x;
+    if(index >= args.total)
+    {
+        return;
+    }
+    long long rest = index;
+    long long srcOffset = 0;
+    long long dstOffset = 0;
+    for(int axis = args.rank - 1; axis >= 0; --axis)
+    {
+        const long long coordinate = rest % args.dims[axis];
+        rest /= args.dims[axis];
+        srcOffset += coordinate * args.srcStrides[axis];
+        dstOffset += coordinate * args.dstStrides[axis];
+    }
+    const int lane = static_cast<int>(threadIdx.x);
+    float sum = 0.0f;
+    for(int batch = lane; batch < args.batches; batch += LANES)
+    {
+        sum += args.src[srcOffset + batch * args.batchStride];
+    }
+    partial[lane] = sum;
+    __syncthreads();
+#pragma unroll
+    for(int width = LANES / 2; width > 0; width /= 2)
+    {
+        if(lane < width)
+        {
+            partial[lane] += partial[lane + width];
+        }
+        __syncthreads();
+    }
+    if(lane == 0)
+    {
+        static_cast<OutputType*>(args.dst)[dstOffset] = static_cast<OutputType>(partial[0]);
+    }
+}
+
 __device__ inline long long filterSize(const ConvColumnGeometry& g)
 {
     return g.filter[0] * g.filter[1] * g.filter[2];
@@ -1218,6 +1265,22 @@ extern "C" __global__ void __launch_bounds__(256) StridedTransposeNarrow2(Stride
 extern "C" __global__ void __launch_bounds__(256) StridedTransposeNarrow4(StridedCopyArgs args)
 {
     stridedTransposeNarrow<unsigned int>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(64) StridedCastWideFloatToFloat(StridedCastArgs args)
+{
+    stridedCastWide<float>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(64) StridedCastWideFloatToHalf(StridedCastArgs args)
+{
+    stridedCastWide<_Float16>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(64)
+    StridedCastWideFloatToBfloat16(StridedCastArgs args)
+{
+    stridedCastWide<__bf16>(args);
 }
 
 extern "C" __global__ void __launch_bounds__(256) StridedTranspose2(StridedCopyArgs args)

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <functional>
+#include <limits>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -269,6 +270,120 @@ TEST(TestMatmulProblem, LongExtentsSplitIntoChunks)
     EXPECT_EQ(split[1].a.offset, MAX_GEMM_EXTENT * 8); // a stored m x k: k walks columns
     EXPECT_EQ(split[1].b.offset, MAX_GEMM_EXTENT); // b stored k x n: k walks rows
     EXPECT_EQ(split[1].d.offset, 0);
+}
+
+TEST(TestMatmulProblem, RocblasChunkedReductionsIntoNarrowOutputsAreFlagged)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // bf16, a stored m x k (not transposed): k walks lda. rocBLAS's chunk is the largest k with
+    // k * lda * 2 bytes under 2^31.
+    GemmCall call = smallCall();
+    call.batchCount = 1;
+    for(auto* operand : {&call.a, &call.b, &call.d})
+    {
+        operand->dataType = data_objects::DataType::BFLOAT16;
+    }
+    const int64_t lda = 8193 * 8193;
+    call.a.leadingDimension = lda;
+    const int64_t chunk = ROCBLAS_REDUCTION_BYTES / (lda * 2);
+    ASSERT_EQ(chunk, 15);
+    call.k = chunk;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(call));
+    call.k = chunk + 1; // the 16-channel backward data of one 8193 x 8193 image
+    EXPECT_TRUE(rocblasRoundsReductionChunks(call));
+    EXPECT_GT(call.k * call.a.leadingDimension * 2, ROCBLAS_REDUCTION_BYTES);
+
+    // An fp32 d sums the chunks in fp32: one rounding per chunk at fp32, as a split k would.
+    GemmCall fp32Out = call;
+    fp32Out.d.dataType = data_objects::DataType::FLOAT;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(fp32Out));
+
+    // a transposed: k walks unit stride, whatever lda.
+    GemmCall unitStride = call;
+    unitStride.transposeA = true;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(unitStride));
+
+    // b transposed: k walks ldb.
+    GemmCall viaB = call;
+    viaB.a.leadingDimension = 8;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(viaB));
+    viaB.transposeB = true;
+    viaB.b.leadingDimension = lda;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(viaB));
+
+    // fp16 the same; an overflowing stride flags any k past 1.
+    GemmCall half = call;
+    half.a.dataType = half.b.dataType = half.d.dataType = data_objects::DataType::HALF;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(half));
+    half.a.leadingDimension = std::numeric_limits<int64_t>::max();
+    half.k = 1;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(half));
+    half.k = 2;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(half));
+}
+
+TEST(TestMatmulProblem, RocblasBf16GemvRuleFollowsRocblasRouting)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // A depthwise convolution's GEMM: m = 1 over 128 groups, 3 taps, a transposed.
+    GemmCall call;
+    call.m = 1;
+    call.n = 4096;
+    call.k = 3;
+    call.batchCount = 128;
+    call.transposeA = true;
+    for(auto* operand : {&call.a, &call.b, &call.d})
+    {
+        operand->dataType = data_objects::DataType::BFLOAT16;
+    }
+    call.a.leadingDimension = 3;
+    call.b.leadingDimension = 384;
+    call.d.leadingDimension = 128;
+    // gfx11 runs it as rocblas_gemvtsm_kernel; gfx12 and gfx94x/950 never take the GEMV path.
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(call, "gfx1100"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(call, "gfx1151:xnack-"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx1201"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx950"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx942"));
+    // gfx90a's bf16 rules send m = 1 with b not transposed to Tensile.
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx90a"));
+
+    // fp16 products stay fp32.
+    GemmCall half = call;
+    half.a.dataType = half.b.dataType = half.d.dataType = data_objects::DataType::HALF;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(half, "gfx1100"));
+    // The small-m kernel only: more than 64 reduction rows, 8 batch entries or fewer, or a
+    // GEMV that is not transposed (b transposed for m = 1) run other kernels.
+    GemmCall longK = call;
+    longK.k = 65;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(longK, "gfx1100"));
+    longK.k = 64;
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(longK, "gfx1100"));
+    GemmCall fewBatches = call;
+    fewBatches.batchCount = 8;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(fewBatches, "gfx1100"));
+    GemmCall bTransposed = call;
+    bTransposed.transposeB = true;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(bTransposed, "gfx1100"));
+    // Neither m nor n is 1: Tensile.
+    GemmCall wide = call;
+    wide.m = 2;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(wide, "gfx1100"));
+
+    // n = 1, a and b transposed, a short x stride: the GEMV path on gfx90a too.
+    GemmCall column = call;
+    column.m = 4096;
+    column.n = 1;
+    column.transposeB = true;
+    column.b.leadingDimension = 8;
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx1100"));
+    column.b.leadingDimension = 9;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    // n = 1 with a transposed and b not: Tensile on gfx90a, the GEMV on gfx11.
+    column.transposeB = false;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx1100"));
 }
 
 } // namespace

@@ -474,6 +474,81 @@ TEST(TestGpuRepackKernels, NarrowTransposeMatchesTheHostAcrossTiles)
     }
 }
 
+TEST(TestGpuRepackKernels, WideCastSumsManyPartialsInAFixedTree)
+{
+    // 300 outputs (a 12 x 25 view of a padded destination), each the sum of 200 fp32 partials:
+    // the wide cast (64 lanes, every 64th partial in order, then a halving tree). The host model
+    // follows the same order, so fp32 output matches it exactly.
+    SKIP_IF_NO_DEVICES();
+    const RepackProgram program;
+    constexpr int64_t ROWS = 12, COLS = 25, BATCHES = 200, PITCH = 32;
+    std::mt19937 random(7);
+    std::uniform_real_distribution<float> value(-1.0f, 1.0f);
+    std::vector<float> src(static_cast<size_t>(ROWS * COLS * BATCHES));
+    for(auto& v : src)
+    {
+        v = value(random);
+    }
+    std::vector<float> want(static_cast<size_t>(ROWS * PITCH), -7.0f);
+    for(int64_t r = 0; r < ROWS; ++r)
+    {
+        for(int64_t c = 0; c < COLS; ++c)
+        {
+            std::array<float, 64> lane{};
+            for(int64_t l = 0; l < 64; ++l)
+            {
+                float sum = 0.0f;
+                for(int64_t b = l; b < BATCHES; b += 64)
+                {
+                    sum += src[static_cast<size_t>(b * ROWS * COLS + r * COLS + c)];
+                }
+                lane[static_cast<size_t>(l)] = sum;
+            }
+            for(int64_t width = 32; width > 0; width /= 2)
+            {
+                for(int64_t l = 0; l < width; ++l)
+                {
+                    lane[static_cast<size_t>(l)] += lane[static_cast<size_t>(l + width)];
+                }
+            }
+            want[static_cast<size_t>(r * PITCH + c)] = lane[0];
+        }
+    }
+    void* deviceSrc = nullptr;
+    void* deviceDst = nullptr;
+    ASSERT_EQ(hipMalloc(&deviceSrc, src.size() * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&deviceDst, want.size() * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(deviceSrc, src.data(), src.size() * sizeof(float), hipMemcpyHostToDevice),
+              hipSuccess);
+    const std::vector<float> fill(want.size(), -7.0f);
+    ASSERT_EQ(hipMemcpy(deviceDst, fill.data(), fill.size() * sizeof(float), hipMemcpyHostToDevice),
+              hipSuccess);
+    StridedCastArgs args{};
+    args.rank = 2;
+    args.dims[0] = ROWS;
+    args.dims[1] = COLS;
+    args.srcStrides[0] = COLS;
+    args.srcStrides[1] = 1;
+    args.dstStrides[0] = PITCH;
+    args.dstStrides[1] = 1;
+    args.total = ROWS * COLS;
+    args.batches = static_cast<int>(BATCHES);
+    args.batchStride = ROWS * COLS;
+    EXPECT_EQ(castLaunch(args, "StridedCastFloatToFloat").entry, "StridedCastWideFloatToFloat");
+    const RepackStep step{args, data_objects::DataType::FLOAT, 0, 0};
+    program.launch(step, deviceSrc, deviceDst, nullptr);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    std::vector<float> got(want.size());
+    ASSERT_EQ(hipMemcpy(got.data(), deviceDst, got.size() * sizeof(float), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipFree(deviceSrc), hipSuccess);
+    ASSERT_EQ(hipFree(deviceDst), hipSuccess);
+    EXPECT_EQ(got, want);
+    // Few partials keep the per-element loop.
+    args.batches = 63;
+    EXPECT_TRUE(castLaunch(args, "StridedCastFloatToFloat").entry.empty());
+}
+
 TEST(TestRepackProgram, EntryNamesFollowTheStepKind)
 {
     EXPECT_EQ(RepackProgram::entryName({StridedCopyArgs{}, data_objects::DataType::HALF, 0, 0}),

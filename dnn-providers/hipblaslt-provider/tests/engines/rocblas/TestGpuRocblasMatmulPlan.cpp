@@ -200,6 +200,34 @@ class TestGpuRocblasMatmulPlan : public ::testing::TestWithParam<MatmulCase>
 {
 };
 
+/// A bf16 matmul whose reduction walks a 67 M-element leading dimension (a stored column-major,
+/// 8193 * 8193 rows, k = 16): rocBLAS would cut k into chunks of 15 and 1 and round the first to
+/// bf16 before adding the second, so the engine declines it (hipBLASLt serves it). An fp32 c, or
+/// a stored row-major (k unit stride), is kept. Host-only: nothing runs.
+TEST(TestRocblasMatmulLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks)
+{
+    const int64_t rows = int64_t{8193} * 8193;
+    const RocblasMatmulPlanBuilder builder;
+    HipdnnEnginePluginHandle handle;
+    for(const bool aColumnMajor : {true, false})
+    {
+        for(const auto outType : {hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT})
+        {
+            auto spec = matmulSpec(rows, 16, 16, {}, aColumnMajor, false, true);
+            spec.a.dataType = spec.b.dataType
+                = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
+            spec.c.dataType = outType;
+            const MatmulGraph graph(spec);
+            const bool declined
+                = aColumnMajor && outType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+            EXPECT_EQ(builder.isApplicable(handle, graph.graph()), !declined)
+                << "a column-major " << aColumnMajor << ", fp32 c "
+                << (outType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        }
+    }
+}
+
 TEST_P(TestGpuRocblasMatmulPlan, Fp32)
 {
     SKIP_IF_NO_DEVICES();

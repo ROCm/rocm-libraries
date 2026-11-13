@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
@@ -17,9 +18,28 @@
 namespace hipblaslt_plugin
 {
 
-RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls)
+RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls, const std::string& gcnArchName)
     : _calls(fitLibraryLimits(std::move(calls)))
 {
+    // A reduction rocBLAS would chunk into a half or bf16 output rounds once per chunk:
+    // declined, so the result is summed in fp32 and rounded once, or not computed here.
+    if(std::any_of(_calls.begin(), _calls.end(), rocblasRoundsReductionChunks))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "rocBLAS would split a reduction into a narrow output, rounding between the parts");
+    }
+    // So is a bf16 GEMV whose kernel rounds each product to bf16.
+    const std::string arch
+        = gcnArchName.empty() ? rocblas_backend::currentGcnArchName() : gcnArchName;
+    if(std::any_of(_calls.begin(), _calls.end(), [&arch](const GemmCall& call) {
+           return rocblasGemvRoundsBf16Products(call, arch);
+       }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "rocBLAS would run a bf16 GEMV that rounds every product to bf16 on " + arch);
+    }
 }
 
 size_t RocblasGemmPlan::getWorkspaceSize(const HipdnnEnginePluginHandle& /*handle*/) const

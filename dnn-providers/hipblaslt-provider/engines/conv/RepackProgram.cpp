@@ -26,7 +26,7 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 62> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 65> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
@@ -35,6 +35,9 @@ constexpr std::array<const char*, 62> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCastFloatToFloat",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",
+                                                      "StridedCastWideFloatToFloat",
+                                                      "StridedCastWideFloatToHalf",
+                                                      "StridedCastWideFloatToBfloat16",
                                                       "Im2Col2",
                                                       "Im2Col4",
                                                       "Im2ColDisjointOutputs2V1",
@@ -249,6 +252,8 @@ void RepackProgram::launch(const RepackStep& step,
         cast->src = static_cast<const float*>(src);
         cast->dst = dst;
         total = cast->total;
+        // Many partials into few outputs: one 64-thread block per output (castLaunch).
+        launch = castLaunch(*cast, entryName(step));
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {
