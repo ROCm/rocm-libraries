@@ -174,3 +174,12 @@ an emission profile. LLVM24 retains LLVM23's datalayout and target-op surface bu
 has a distinct named-barrier declaration and call ABI. That does not prove every
 build of either major has an identical DataLayout or intrinsic catalog;
 toolchain-specific compilation and drift tests remain necessary.
+
+The detected LLVM version also decides which `-mllvm` backend options a compile
+may pass. LLVM's option parser exits the whole process on an option it does not
+know, so every one is checked against a measured table before COMGR is called,
+and a kernel that needs an option the loaded compiler lacks raises
+`CompilerOptionNotAccepted` (a `ValueError`, exported from `rocke.runtime`). The
+contract and the table are in `rocke.runtime.compiler_options`;
+`tools/gen_compiler_options.py` measures it, and the CTest
+`rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.
