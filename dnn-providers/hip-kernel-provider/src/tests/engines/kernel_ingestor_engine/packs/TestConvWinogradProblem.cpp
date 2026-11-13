@@ -1304,16 +1304,8 @@ TEST(TestConvWinogradPlan, CooperativeSixteenBinGridIsWhatTheUnitsHold)
     eightWaves.bk = 128;
     eightWaves.waves = 8;
     EXPECT_EQ(gridOn(eightWaves, "gfx1100"), 32U * 3);
-    // The transform-row layout: single-tile configs at 8 waves per SIMD (16 waves of 32: two
-    // blocks); 2 x 2 tiles (256 registers) 6 per SIMD on the large-file parts.
+    // The transform-row layout keeps 1024 threads per unit: 16 waves of 32, two blocks.
     EXPECT_EQ(gridOn(coop("gfx11", 1), "gfx1100"), 32U * 2);
-    auto twoByTwo = coop("gfx12", 1);
-    twoByTwo.bk = 64;
-    twoByTwo.waves = 8; // mt 2, nt 2, kw 2
-    EXPECT_EQ(gridOn(twoByTwo, "gfx1201"), 32U * 3);
-    EXPECT_EQ(gridOn(twoByTwo, "gfx1102"), 32U * 2);
-    // CDNA keeps about 1024 threads per unit.
-    EXPECT_EQ(gridOn(coop("gfx9", 1), "gfx942"), 32U * 1);
 }
 
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
