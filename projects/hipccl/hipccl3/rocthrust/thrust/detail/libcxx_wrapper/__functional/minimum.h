@@ -38,7 +38,7 @@ template <typename Tp = void>
 struct minimum
 {
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr Tp operator()(const Tp& lhs, const Tp& rhs) const
+  [[nodiscard]] inline THRUST_HOST_DEVICE constexpr Tp operator()(const Tp& lhs, const Tp& rhs) const
     noexcept(noexcept((lhs < rhs) ? lhs : rhs))
   {
     return (lhs < rhs) ? lhs : rhs;
@@ -51,7 +51,7 @@ struct minimum<void>
 {
   THRUST_EXEC_CHECK_DISABLE
   template <typename T1, typename T2>
-  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr ::std::common_type_t<T1, T2>
+  [[nodiscard]] inline THRUST_HOST_DEVICE constexpr ::std::common_type_t<T1, T2>
   operator()(const T1& lhs, const T2& rhs) const noexcept(noexcept((lhs < rhs) ? lhs : rhs))
   {
     return (lhs < rhs) ? lhs : rhs;

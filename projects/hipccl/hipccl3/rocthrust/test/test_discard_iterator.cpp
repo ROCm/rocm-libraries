@@ -46,7 +46,7 @@ TEST(DiscardIteratorTests, TestDiscardIteratorTraits)
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
@@ -152,7 +152,7 @@ TEST(DiscardIteratorTests, TestZippedDiscardIterator)
   using IteratorTuple2 = tuple<int*, discard_iterator<>>;
   using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
-  ZipIterator2 z_iter_first = thrust::make_zip_iterator(thrust::make_tuple((int*) 0, thrust::make_discard_iterator()));
+  ZipIterator2 z_iter_first = thrust::make_zip_iterator((int*) 0, thrust::make_discard_iterator());
   ZipIterator2 z_iter_last  = z_iter_first + 10;
 
   for (; z_iter_first != z_iter_last; ++z_iter_first)

@@ -51,7 +51,7 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocPRIM includes
 #  include <rocprim/rocprim.hpp>
@@ -101,7 +101,7 @@ THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
   //  using size_type = thrust::detail::it_difference_t<ItemsInputIt>;
   using size_type = int;
 
-  size_type num_items       = static_cast<size_type>(thrust::distance(items_first, items_last));
+  size_type num_items       = static_cast<size_type>(_THRUST_STD::distance(items_first, items_last));
   size_t temp_storage_bytes = 0;
   hipStream_t stream        = hip_rocprim::stream(policy);
   bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
@@ -190,7 +190,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HOST_DEVICE unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   using input_type = thrust::detail::it_value_t<InputIt>;
-  return hip_rocprim::unique_copy(policy, first, last, result, equal_to<input_type>());
+  return hip_rocprim::unique_copy(policy, first, last, result, _THRUST_STD::equal_to<input_type>());
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -225,7 +225,7 @@ template <class Derived, class ForwardIt>
 ForwardIt THRUST_HOST_DEVICE unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last)
 {
   using input_type = thrust::detail::it_value_t<ForwardIt>;
-  return hip_rocprim::unique(policy, first, last, equal_to<input_type>());
+  return hip_rocprim::unique(policy, first, last, _THRUST_STD::equal_to<input_type>());
 }
 
 template <typename BinaryPred>
@@ -249,9 +249,10 @@ unique_count(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last,
   {
     return 0;
   }
-  auto size = thrust::distance(first, last);
-  auto it   = thrust::make_zip_iterator(thrust::make_tuple(first, thrust::next(first)));
-  return 1 + thrust::count_if(policy, it, thrust::next(it, size - 1), zip_adj_not_predicate<BinaryPred>{binary_pred});
+  auto size = _THRUST_STD::distance(first, last);
+  auto it   = thrust::make_zip_iterator(first, _THRUST_STD::next(first));
+  return 1
+       + thrust::count_if(policy, it, _THRUST_STD::next(it, size - 1), zip_adj_not_predicate<BinaryPred>{binary_pred});
 }
 
 } // namespace hip_rocprim

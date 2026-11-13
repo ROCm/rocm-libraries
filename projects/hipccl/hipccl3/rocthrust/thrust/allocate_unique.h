@@ -47,7 +47,7 @@ struct allocator_delete final
   {}
   template <typename U, typename UAllocator>
   allocator_delete(allocator_delete<U, UAllocator>&& other) noexcept
-      : alloc_(std::move(other.get_allocator()))
+      : alloc_(_THRUST_STD::move(other.get_allocator()))
   {}
 
   template <typename U, typename UAllocator>
@@ -59,7 +59,7 @@ struct allocator_delete final
   template <typename U, typename UAllocator>
   allocator_delete& operator=(allocator_delete<U, UAllocator>&& other) noexcept
   {
-    alloc_ = std::move(other.get_allocator());
+    alloc_ = _THRUST_STD::move(other.get_allocator());
     return *this;
   }
 
@@ -120,7 +120,7 @@ struct array_allocator_delete final
   {}
   template <typename U, typename UAllocator>
   array_allocator_delete(array_allocator_delete<U, UAllocator>&& other) noexcept
-      : alloc_(std::move(other.get_allocator()))
+      : alloc_(_THRUST_STD::move(other.get_allocator()))
       , count_(other.count_)
   {}
 
@@ -134,7 +134,7 @@ struct array_allocator_delete final
   template <typename U, typename UAllocator>
   array_allocator_delete& operator=(array_allocator_delete<U, UAllocator>&& other) noexcept
   {
-    alloc_ = std::move(other.get_allocator());
+    alloc_ = _THRUST_STD::move(other.get_allocator());
     count_ = other.count_;
     return *this;
   }
@@ -219,7 +219,7 @@ allocate_unique(Allocator const& alloc, Args&&... args)
 
   traits::construct(alloc_T, thrust::raw_pointer_cast(hold.get()), THRUST_FWD(args)...);
   auto deleter = allocator_delete<T, typename traits::allocator_type>(alloc);
-  return std::unique_ptr<T, decltype(deleter)>(hold.release(), std::move(deleter));
+  return std::unique_ptr<T, decltype(deleter)>(hold.release(), _THRUST_STD::move(deleter));
 }
 
 //! Creates a \p std::unique_ptr holding storage for a new object of type \p T without constructing it, using \p alloc
@@ -243,7 +243,7 @@ uninitialized_allocate_unique(Allocator const& alloc)
   auto hold         = hold_t(traits::allocate(alloc_T, 1), hold_deleter);
 
   auto deleter = uninitialized_allocator_delete<T, typename traits::allocator_type>(alloc_T);
-  return std::unique_ptr<T, decltype(deleter)>(hold.release(), std::move(deleter));
+  return std::unique_ptr<T, decltype(deleter)>(hold.release(), _THRUST_STD::move(deleter));
 }
 
 //! Creates a \p std::unique_ptr holding an array of objects of type \p T, each one constructed with \p args, using \p
@@ -268,7 +268,7 @@ allocate_unique_n(Allocator const& alloc, Size n, Args&&... args)
 
   uninitialized_construct_n_with_allocator(alloc_T, hold.get(), n, THRUST_FWD(args)...);
   auto deleter = array_allocator_delete<T, typename traits::allocator_type>(alloc_T, n);
-  return std::unique_ptr<T[], decltype(deleter)>(hold.release(), std::move(deleter));
+  return std::unique_ptr<T[], decltype(deleter)>(hold.release(), _THRUST_STD::move(deleter));
 }
 
 //! Creates a \p std::unique_ptr holding storage for an array of objects of type \p T without constructing them, using
@@ -292,7 +292,7 @@ uninitialized_allocate_unique_n(Allocator const& alloc, Size n)
   auto hold         = hold_t(traits::allocate(alloc_T, n), hold_deleter);
 
   auto deleter = uninitialized_array_allocator_delete<T, typename traits::allocator_type>(alloc_T, n);
-  return std::unique_ptr<T[], decltype(deleter)>(hold.release(), std::move(deleter));
+  return std::unique_ptr<T[], decltype(deleter)>(hold.release(), _THRUST_STD::move(deleter));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

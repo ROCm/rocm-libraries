@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -131,8 +131,8 @@ int main(void)
   reduce_tuple<int, float> binary_op; // reduction operator
 
   result_type result = thrust::transform_reduce(
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), data.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), data.begin())) + data.size(),
+    thrust::make_zip_iterator(thrust::counting_iterator<int>(0), data.begin()),
+    thrust::make_zip_iterator(thrust::counting_iterator<int>(0), data.begin()) + data.size(),
     unary_op,
     init,
     binary_op);

@@ -36,7 +36,7 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/execution_policy.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -55,8 +55,8 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt lower_bound(
 {
   using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = _THRUST_STD::distance(needles_begin, needles_end);
+  const size_type haystack_size = _THRUST_STD::distance(haystack_begin, haystack_end);
 
   if (needles_size == 0)
   {
@@ -119,8 +119,8 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt upper_bound(
 {
   using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = _THRUST_STD::distance(needles_begin, needles_end);
+  const size_type haystack_size = _THRUST_STD::distance(haystack_begin, haystack_end);
 
   if (needles_size == 0)
   {
@@ -183,8 +183,8 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt binary_search(
 {
   using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = _THRUST_STD::distance(needles_begin, needles_end);
+  const size_type haystack_size = _THRUST_STD::distance(haystack_begin, haystack_end);
 
   if (needles_size == 0)
   {

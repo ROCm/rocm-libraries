@@ -35,7 +35,7 @@
 
 #include <cub/device/device_select.cuh> // IWYU pragma: export
 
-#include <type_traits>
+#include <cuda/std/type_traits> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -263,8 +263,8 @@ public:
              typename NumItemsT,
              typename EqualityOpT>
     HIPCUB_RUNTIME_FUNCTION
-    static
-        typename std::enable_if_t<!std::is_convertible<EqualityOpT, hipStream_t>::value, hipError_t>
+    static typename _HIPCUB_STD::
+        enable_if_t<!_HIPCUB_STD::is_convertible<EqualityOpT, hipStream_t>::value, hipError_t>
         UniqueByKey(void*                d_temp_storage,
                     size_t&              temp_storage_bytes,
                     KeyIteratorT         d_keys_input,

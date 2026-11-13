@@ -57,6 +57,8 @@ You can build and install rocPRIM on Linux or Windows.
   #     separate tests with the ip name embedded into the test name. Building for all, but selecting
   #     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
   #   USE_SYSTEM_LIB - OFF by default. Setting this flag to ON will build tests from the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
+  #   HIPCCL_USE_LEGACY_API - ON by default. Enables legacy behavior from before CCCL 3.0 parity, restored for backward compatibility
+  #     (e.g. segmented radix sort offset iterators that only provide operator[]).
   #
   # ! IMPORTANT !
   # Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'

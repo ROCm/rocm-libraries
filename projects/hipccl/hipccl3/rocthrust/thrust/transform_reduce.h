@@ -98,7 +98,7 @@ THRUST_NAMESPACE_BEGIN
  *                                        data, data + 6,
  *                                        absolute_value<int>(),
  *                                        0,
- *                                        thrust::maximum<int>());
+ *                                        _THRUST_LIBCXX::maximum<int>());
  *  // result == 3
  *  \endcode
  *
@@ -170,7 +170,7 @@ THRUST_HOST_DEVICE OutputType transform_reduce(
  *  int result = thrust::transform_reduce(data, data + 6,
  *                                        absolute_value<int>(),
  *                                        0,
- *                                        thrust::maximum<int>());
+ *                                        _THRUST_LIBCXX::maximum<int>());
  *  // result == 3
  *  \endcode
  *

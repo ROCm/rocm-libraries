@@ -430,7 +430,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 3.0.0)
+  set(CCCL_MINIMUM_VERSION 3.1.4)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -510,6 +510,11 @@ else()
       endif()
     endif()
   endif()
+
+  # libhipcxx (only for ROCm platform) - hard dependency, see require_libhipcxx.cmake
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(require_libhipcxx)
+  hipccl_require_libhipcxx(3.4)
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)

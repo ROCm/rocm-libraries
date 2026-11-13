@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,7 +112,7 @@ int main(void)
     C.begin(), ValueToScaledInteger{C_scale}, ScaledIntegerToValue{C_scale});
 
   // Sum A and B as ScaledIntegers, storing the scaled result in C
-  thrust::transform(A_begin, A_end, B_begin, C_begin, thrust::plus<ScaledInteger>{});
+  thrust::transform(A_begin, A_end, B_begin, C_begin, _THRUST_STD::plus<ScaledInteger>{});
 
   thrust::host_vector<int> A_h(A);
   thrust::host_vector<int> B_h(B);

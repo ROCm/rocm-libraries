@@ -55,13 +55,13 @@ class error_code;
 /*! A metafunction returning whether or not the parameter is an \p error_code enum.
  */
 template <typename T>
-struct is_error_code_enum : public thrust::detail::false_type
+struct is_error_code_enum : public _THRUST_STD::false_type
 {};
 
 /*! A metafunction returning whether or not the parameter is an \p error_condition enum.
  */
 template <typename T>
-struct is_error_condition_enum : public thrust::detail::false_type
+struct is_error_condition_enum : public _THRUST_STD::false_type
 {};
 
 // XXX N3092 prefers enum class errc { ... }
@@ -157,7 +157,7 @@ enum errc_t
 /*! Specialization of \p is_error_condition_enum for \p errc::errc_t
  */
 template <>
-struct is_error_condition_enum<errc::errc_t> : public thrust::detail::true_type
+struct is_error_condition_enum<errc::errc_t> : public _THRUST_STD::true_type
 {};
 
 // [19.5.1.1] class error_category

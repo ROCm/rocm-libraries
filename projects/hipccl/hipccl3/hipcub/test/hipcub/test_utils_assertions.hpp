@@ -126,10 +126,11 @@ inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expe
 }
 
 template<class T>
-inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+inline auto assert_near(const std::vector<T>&        result,
+                        const std::vector<T>&        expected,
+                        [[maybe_unused]] const float percent) ->
+    typename std::enable_if<std::is_integral<T>::value>::type
 {
-    (void)percent;
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {

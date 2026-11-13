@@ -56,10 +56,8 @@ template <allocation_fn Alloc, deallocation_fn Dealloc, typename Pointer>
 class hip_memory_resource final : public mr::memory_resource<Pointer>
 {
 public:
-  Pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
+  Pointer do_allocate(std::size_t bytes, [[maybe_unused]] std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
-    (void) alignment;
-
     void* ret;
     hipError_t status = Alloc(&ret, bytes);
 
@@ -72,11 +70,8 @@ public:
     return Pointer(ret);
   }
 
-  void do_deallocate(Pointer p, std::size_t bytes, std::size_t alignment) override
+  void do_deallocate(Pointer p, [[maybe_unused]] std::size_t bytes, [[maybe_unused]] std::size_t alignment) override
   {
-    (void) bytes;
-    (void) alignment;
-
     hipError_t status = Dealloc(thrust::detail::pointer_traits<Pointer>::get(p));
 
     if (status != hipSuccess)
@@ -100,7 +95,7 @@ using device_memory_resource = detail::hip_memory_resource<hipMalloc, hipFree, t
 using managed_memory_resource =
   detail::hip_memory_resource<detail::hipMallocManaged, hipFree, thrust::hip::universal_pointer<void>>;
 using pinned_memory_resource =
-  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_pointer<void>>;
+  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_host_pinned_pointer<void>>;
 
 } // namespace detail
 //! \endcond
