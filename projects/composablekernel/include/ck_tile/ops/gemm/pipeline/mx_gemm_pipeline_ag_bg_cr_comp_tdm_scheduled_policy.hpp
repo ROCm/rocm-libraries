@@ -7,7 +7,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_asmem_bsmem_creg_tdm_scheduled.hpp"
+#include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp"
@@ -758,9 +760,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
-    /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (as
-    /// MRow / NRow), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte words,
-    /// is GetLdsRowByteOffset's less the operand's base.
+    /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (V1's
+    /// PackMNIter order), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte
+    /// words, is GetLdsRowByteOffset's less the operand's base.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
     {
@@ -1119,12 +1121,39 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                                        sequence<4, 1, 3, 2>>{});
     }
 
-    /// The block GEMM: a wave's LDS fragment reads and WMMAs on this policy's LDS layout.
+    /// The block GEMM: BlockGemmARegBRegCRegV1 with PackMNIter (M and N in the fragment order of
+    /// MakeLdsBlockDescriptor) and one K step per sub-tile, reading this policy's LDS layout. The
+    /// warp GEMM's operands take one access per 16-byte chunk, as MakeLdsReadDistribution reads
+    /// them. The warp GEMM is the gfx1250 WMMA WarpGemmDispatcher picks on the device, built from
+    /// its traits because the dispatcher has no gfx1250 16x16x128 WMMA in the host pass (which also
+    /// instantiates the pipeline) nor named WMMAs with USE_NEW_UNIFIED_FRAMEWORK.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
+        using Shape               = typename Problem::BlockGemmShape;
+        using ADataType           = typename Problem::ADataType;
+        using BDataType           = typename Problem::BDataType;
+        constexpr auto num_access = static_cast<WGAttrNumAccessEnum>(GetChunksPerLane<Problem>());
+        using Wmma                = WmmaTraits<gfx125_t,
+                                               ADataType,
+                                               BDataType,
+                                               float,
+                                               GetAtomM<Problem>(),
+                                               GetAtomN<Problem>(),
+                                               kAtomK>;
+        using Attr =
+            WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl<Wmma>, false, num_access, num_access>;
+        using WarpGemm = WarpGemmImpl<Attr>;
+        using V1Policy = BlockGemmARegBRegCRegV1CustomPolicy<ADataType,
+                                                             BDataType,
+                                                             float,
+                                                             typename Shape::BlockWarps,
+                                                             WarpGemm,
+                                                             GetKSteps<Problem>(),
+                                                             true>;
         return BlockGemmMxAsmemBsmemCRegTDMScheduled<Problem,
-                                                     MxGemmPipelineAgBgCrCompTDMScheduledPolicy>{};
+                                                     MxGemmPipelineAgBgCrCompTDMScheduledPolicy,
+                                                     V1Policy>{};
     }
 
     /// Whether the kernel is launched with a cluster: (x, y, z) = (kclusterN, kclusterM, 1).
@@ -1176,12 +1205,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     private:
-    // The LDS layout (rocKE _lds_placement): TensileLite's padding and segment interleave. The
-    // block GEMM reads rows and scales through the offset helpers until it moves to the V1 block
-    // GEMM.
-    template <typename, typename>
-    friend struct BlockGemmMxAsmemBsmemCRegTDMScheduled;
-
+    // The LDS layout (rocKE _lds_placement): TensileLite's padding and segment interleave.
     static constexpr index_t kDataPadBytes    = 16;
     static constexpr index_t kBankCycleBytes  = 256;
     static constexpr index_t kMxsBlockBytes   = 256;
