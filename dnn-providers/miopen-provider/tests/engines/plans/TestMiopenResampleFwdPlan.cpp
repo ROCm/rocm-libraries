@@ -293,6 +293,37 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWithoutIndexWritesValues)
     EXPECT_TRUE(result.index.empty());
 }
 
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPool3dWritesInt32Indices)
+{
+    // 4x4x4 input pooled 2x2x2 / 2 into 2x2x2. The inner 2x2x2 cube (every coordinate 1 or 2)
+    // holds 10..17 and the rest is 0, so each window's maximum sits at the window corner nearest
+    // the centre, a different (d, h, w) offset in every window. Indices are flattened offsets into
+    // the 4x4x4 input: d * 16 + h * 4 + w.
+    std::vector<float> x(64, 0.0f);
+    float next = 10.0f;
+    for(int d = 1; d <= 2; ++d)
+    {
+        for(int h = 1; h <= 2; ++h)
+        {
+            for(int w = 1; w <= 2; ++w)
+            {
+                x.at(static_cast<size_t>(d * 16 + h * 4 + w)) = next++;
+            }
+        }
+    }
+
+    const auto spec = ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                   {1, 1, 4, 4, 4},
+                                                   {2, 2, 2},
+                                                   {2, 2, 2},
+                                                   {0, 0, 0},
+                                                   DataType::FLOAT,
+                                                   DataType::INT32);
+    const PoolingResult expected{{10, 11, 12, 13, 14, 15, 16, 17},
+                                 {21, 22, 25, 26, 37, 38, 41, 42}};
+    expectMatches(run(spec, x), expected, 0.0);
+}
+
 TEST_F(TestGpuMiopenResampleFwdPlan, AvgExcludePaddingDividesByValidCount)
 {
     const auto result = run(paddedAverageSpec(), ascending(9, 1.0f));
