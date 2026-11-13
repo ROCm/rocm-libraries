@@ -7613,6 +7613,122 @@ class TestIssueSaluFirst:
         assert gaps[0] == ["S", "V", "m0", "L"]
 
 
+class TestSpaceM0WritesFromLdsLoads:
+    """Each m0 write gets one issue slot before the load that reads it."""
+
+    NOP = "m0 write -> direct-to-LDS load"
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceM0WritesFromLdsLoads)
+        return TestHalfDisjointCell._gaps(spaceM0WritesFromLdsLoads(module))[1]
+
+    @staticmethod
+    def _pair(tag, vaddr=1):
+        m0, load = TestKeepValuBehindLeader._request(vaddr=vaddr)
+        m0.comment, load.comment = f"m0 {tag}", f"L {tag}"
+        return [m0, load]
+
+    @staticmethod
+    def _swap(tensor="A"):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SXorB32
+        base = f"LocalWriteBaseAddr{tensor}"
+        return SXorB32(dst=sgpr(base), src0=sgpr(base), src1=sgpr(f"Swap{tensor}"),
+                       comment="swap")
+
+    def test_m0_moves_up_across_one_mfma(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body([read], self._pair("a")))
+        assert gaps[:2] == [["m0 a", "R"], ["L a"]]
+
+    def test_m0_never_crosses_two_mfmas(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [valu], [], self._pair("a")))
+        assert gaps[:3] == [["V"], ["m0 a"], ["L a"]]
+
+    def test_m0_stays_behind_an_earlier_lds_load(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read], self._pair("a"), self._pair("b")))
+        assert gaps[:3] == [["m0 a", "R"], ["L a", "m0 b"], ["L b"]]
+
+    def test_m0_behind_its_base_swap_takes_a_filler(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [self._swap()] + self._pair("a") + [valu]))
+        assert gaps[1] == ["swap", "m0 a", "V", "L a"]
+
+    def test_m0_behind_its_base_swap_takes_a_nop(self):
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)], [self._swap()] + self._pair("a")))
+        assert gaps[1] == ["swap", "m0 a", self.NOP, "L a"]
+
+    def test_filler_never_writes_the_load_address(self):
+        valu = TestKeepValuBehindLeader._xor(1, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [self._swap()] + self._pair("a", vaddr=1) + [valu]))
+        assert gaps[1] == ["swap", "m0 a", self.NOP, "L a", "V"]
+
+    def test_m0_never_splits_an_scc_pair(self):
+        salu = TestIssueSaluFirst
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read(7, "R0")], [salu._add("add"), salu._carry(), read(9), *self._pair("a")]))
+        assert gaps[1] == ["add", "carry", "m0 a", "R", "L a"]
+
+    def test_m0_right_behind_an_scc_pair_takes_a_nop(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [salu._add("add"), salu._carry(), *self._pair("a")]))
+        assert gaps[1] == ["add", "carry", "m0 a", self.NOP, "L a"]
+
+    def test_scale_m0_move_crosses_an_scc_pair(self):
+        from rocisa.container import mgpr, sgpr
+        from rocisa.instruction import SMovB32
+        salu = TestIssueSaluFirst
+        m0, load = self._pair("s")
+        move = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteBaseAddrMXSA"),
+                       comment="m0 s")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._swap("MXSA")], [salu._add("add"), salu._carry(), move, load]))
+        assert gaps[:2] == [["swap", "m0 s"], ["add", "carry", "L s"]]
+
+    def test_two_pairs_in_one_gap(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            self._pair("a") + self._pair("b") + [valu]))
+        assert gaps[:2] == [["m0 a", "R"], ["L a", "m0 b", "V", "L b"]]
+
+    def test_two_pairs_in_one_gap_without_filler(self):
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            self._pair("a") + self._pair("b")))
+        assert gaps[:2] == [["m0 a", "R"], ["L a", "m0 b", self.NOP, "L b"]]
+
+    def test_m0_stays_behind_a_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [SWaitCnt(dscnt=0, comment="drain")] + self._pair("a")))
+        assert gaps[1] == ["drain", "m0 a", self.NOP, "L a"]
+
+
 class TestReadInOpeningBarrierGap:
     """The first barrier's gap takes the body's next ds_read when it can."""
 

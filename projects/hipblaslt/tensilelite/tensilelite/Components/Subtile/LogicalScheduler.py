@@ -1039,6 +1039,8 @@ class LogicalScheduler:
         # gfx950 dual-period uniform epoch.
         self._scaleShadowPlan = None
         self._mainloopC0Schedule = None
+        # The labels _emitLoop has emitted a region module under.
+        self._regionLabels = set()
         # The A/B ds_reads emitted into _mainloopC0Schedule.
         self._mainloopC0DataReads = []
         # (tensor, atom tile start) -> half its GR issues in, or None when the
@@ -5512,6 +5514,7 @@ class LogicalScheduler:
                               else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
         module = Module(label)
+        self._regionLabels.add(label)
         module.addComment0(f"{label} start")
         use_pap_preloop_skip = (
             label == "PRELOOP"
@@ -7745,8 +7748,32 @@ class LogicalScheduler:
 
         module.add(endLabel)
         clearPartitionZeroOverwriteMarks()
+        self._spaceRegionM0Writes(writer, module)
 
         return module
+
+    def _spaceRegionM0Writes(self, writer, module):
+        """Space the m0 writes of every region in module from their loads.
+
+        Runs once the region order is final: C1 still edits C0, and the
+        bodies, exits and tail are woven after their own emission. Each
+        region is spaced on its own. gfx9 only.
+        """
+        from .InstructionScheduler import _isCodeModule, spaceM0WritesFromLdsLoads
+        version = getattr(writer.states, "version", None)
+        if not (isinstance(version, (tuple, list)) and tuple(version[:1]) == (9,)):
+            return
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                if getattr(item, "name", None) in self._regionLabels:
+                    spaceM0WritesFromLdsLoads(item)
+                else:
+                    walk(item)
+
+        walk(module)
 
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
@@ -7780,6 +7807,7 @@ class LogicalScheduler:
                                   schedule=False))
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
+        self._spaceRegionM0Writes(writer, module)
         return module
 
     # ── VGPR tile allocation ──────────────────────────────

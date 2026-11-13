@@ -13,7 +13,7 @@ from typing import List, Tuple, Optional
 from rocisa.code import Module, TextBlock
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, LocalWriteInstruction, GlobalReadInstruction, GlobalWriteInstruction, \
-    CommonInstruction, SMemLoadInstruction, VXorB32
+    CommonInstruction, SMemLoadInstruction, SNop, VXorB32
 
 
 class _SlotPlacer:
@@ -2992,6 +2992,129 @@ def keepValuBehindLeader(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
             unmovable.update(id(leaves[i][1]) for i in run)
         else:
             return module
+
+
+def _isComment(inst) -> bool:
+    if not isinstance(inst, TextBlock):
+        return False
+    return all(not line or line.startswith(("/*", "//")) and (
+        line.startswith("//") or line.endswith("*/"))
+        for line in (raw.strip() for raw in str(inst).splitlines()))
+
+
+def _isDirectToLdsLoad(inst) -> bool:
+    return _isBufferLoad(inst) and list(inst.getParams())[0] is None
+
+
+def _readsM0(inst) -> bool:
+    return _isBufferLoad(inst) or any(
+        role == "src" and span[0] == "m"
+        for role, span in _instructionRegisterSpans(inst))
+
+
+def _blocksM0Hoist(inst, writer) -> bool:
+    """Whether the m0 write must stay below inst.
+
+    Any m0 reader or writer, a writer of the m0 sources, an SCC producer
+    or consumer when the m0 write sets SCC, and every wait, barrier,
+    branch, label or hidden operand. An LDS read takes no m0 on gfx9.
+    """
+    if isinstance(inst, TextBlock):
+        return not _isComment(inst)
+    if _isOrderFence(inst) or _isM0Update(inst) or _readsM0(inst):
+        return True
+    if _isDsRead(inst):
+        return False
+    if not _operandsVisible(inst):
+        return True
+    if _writesScc(writer) and (_writesScc(inst) or _readsScc(inst)):
+        return True
+    sources = [span for role, span in _instructionRegisterSpans(writer)
+               if role == "src"]
+    return any(role == "dst" and any(_spansOverlap(span, s) for s in sources)
+               for role, span in _instructionRegisterSpans(inst))
+
+
+def _m0Filler(leaves, writerAt, loadAt):
+    """The first SALU or VALU of the load's gap that may issue between
+    the m0 write and the load, or None.
+
+    It touches neither SCC nor m0, crosses only instructions it is
+    independent of, and is not what spaces another m0 write.
+    """
+    writer, load = leaves[writerAt][1], leaves[loadAt][1]
+    crossed = [load]
+    previous = load
+    for index in range(loadAt + 1, len(leaves)):
+        inst = leaves[index][1]
+        if _isComment(inst):
+            continue
+        if _isMfma(inst) or isinstance(inst, TextBlock) or _isOrderFence(inst):
+            return None
+        if ((_isScalarAlu(inst) or _isVALU(inst)) and _operandsVisible(inst)
+                and not (_writesScc(inst) or _readsScc(inst) or _readsM0(inst))
+                and not _isM0Update(previous)
+                and all(_mayReorder(x, inst) for x in [writer] + crossed)):
+            return index
+        crossed.append(inst)
+        previous = inst
+    return None
+
+
+def spaceM0WritesFromLdsLoads(module):
+    """Give every m0 write one wait state before the direct-to-LDS load
+    that reads it.
+
+    gfx9 needs one issue slot between a SALU write of m0 and an LDS-DMA
+    load of it. The placer keeps each m0 write right ahead of its load,
+    since paths are placed apart and another could land its own m0 write
+    in between. Once the body is final, each such write moves up to just
+    behind the nearest instruction it must stay below
+    (_blocksM0Hoist), crossing at most one MFMA. A write that cannot
+    move takes an independent instruction from behind its load
+    (_m0Filler) or else an s_nop 0. Only the m0 write and SALU or VALU
+    move, so no wait count changes.
+    """
+    done = []
+    while True:
+        leaves = _bodyLeaves(module)
+        code = [i for i, (_c, inst) in enumerate(leaves) if not _isComment(inst)]
+        pair = next(
+            ((w, l) for w, l in zip(code, code[1:])
+             if _isM0Update(leaves[w][1]) and _isDirectToLdsLoad(leaves[l][1])
+             and not any(leaves[w][1] is d for d in done)), None)
+        if pair is None:
+            return module
+        writerAt, loadAt = pair
+        writer = leaves[writerAt][1]
+        done.append(writer)
+        blocker, mfmas = None, 0
+        for index in range(writerAt - 1, -1, -1):
+            inst = leaves[index][1]
+            if _isMfma(inst):
+                if mfmas:
+                    blocker = index
+                    break
+                mfmas += 1
+            elif _blocksM0Hoist(inst, writer):
+                blocker = index
+                break
+        start = -1 if blocker is None else blocker
+        if any(start < i < writerAt for i in code):
+            if blocker is None:
+                _moveLeaves(leaves, [writerAt], code[0], before=True)
+            else:
+                _moveLeaves(leaves, [writerAt], blocker, before=False)
+            continue
+        filler = _m0Filler(leaves, writerAt, loadAt)
+        if filler is not None:
+            _moveLeaves(leaves, [filler], loadAt, before=True)
+            continue
+        container, load = leaves[loadAt]
+        items = list(container.items())
+        at = next(i for i, item in enumerate(items) if item is load)
+        container.setItems(items[:at] + [SNop(
+            waitState=0, comment="m0 write -> direct-to-LDS load")] + items[at:])
 
 
 def _saluFirstRank(inst):
