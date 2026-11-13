@@ -3439,6 +3439,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::maf1_0
                && arg.initialization != hipblaslt_initialization::maf2_0
                && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
+               && arg.initialization != hipblaslt_initialization::maf2_1
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3449,7 +3450,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
                        "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
-                       "maf1_0, maf2_0 or maf2_0_unit_scale, not "
+                       "maf1_0, maf2_0, maf2_0_unit_scale or maf2_1, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
@@ -3562,6 +3563,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::maf1_0
                && arg.initialization != hipblaslt_initialization::maf2_0
                && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
+               && arg.initialization != hipblaslt_initialization::maf2_1
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3572,7 +3574,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
                        "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
-                       "maf1_0, maf2_0 or maf2_0_unit_scale, not "
+                       "maf1_0, maf2_0, maf2_0_unit_scale or maf2_1, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
