@@ -83,6 +83,7 @@ class DataInitName(Enum):
   Maf1_0 = 28
   Maf2_0 = 29
   Maf2_0UnitScale = 30
+  Maf2_1 = 31
 
 class ClientLogLevel(Enum):
   Error = 0

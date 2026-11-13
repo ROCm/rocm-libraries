@@ -185,7 +185,9 @@ globalParameters["CSVMergeSameProblemID"] = False
 #                            29=Maf2_0 (MAF2.0: N(0,1) for Double/Float/Half/BFloat16/FP8, MX sides from
 #                               mxDataGenerator; fixed-seed, A/B/C get different seeds),
 #                            30=Maf2_0UnitScale (MAF2.0 X=1: MX FP8 and FP4 sides get unit block scales
-#                               and N(0,1) data; otherwise as 29)
+#                               and N(0,1) data; otherwise as 29),
+#                            31=Maf2_1 (MAF2.1: U[-1,1] for Double/Float/Half/BFloat16/FP8, MX sides from
+#                               mxDataGenerator; seeded apart from 29)
 #       For A, B, C, D: All the InitMode (0~16) can be used
 #       For Alpha/Beta: Only problem-independent init (0~7, 16, 23~26) can be used,
 #                       problem-dependent init (8~15) would cause a exception (Invalid InitMode) in New Client

@@ -975,6 +975,90 @@ INSTANTIATE_TEST_SUITE_P(
                                     16}));
 
 // ---------------------------------------------------------------------------
+// maf2_1 MX data: E8M0 block scales are 2^e with e uniform over [-127, 0] (bytes 0..127); E4M3/E5M3
+// scales are U[0, 1] rounded to the scale format; data U[-1, 1] rounded to the element, so the
+// reference is the decoded element times its scale.
+// ---------------------------------------------------------------------------
+
+class MXDataGenMaf2_1 : public ::testing::TestWithParam<hipDataType>
+{
+};
+
+TEST_P(MXDataGenMaf2_1, E8M0ScalesAreExponentUniformAndReferenceMatches)
+{
+    const hipDataType dt   = GetParam();
+    const bool        e4m3 = dt == HIP_R_8F_E4M3;
+    const auto        out  = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_1");
+
+    const size_t      blocks = (256 / 32) * 64;
+    std::set<uint8_t> distinct(out.scale.begin(), out.scale.begin() + blocks);
+    for(uint8_t s : distinct)
+        EXPECT_LE(s, 127) << "scale above 2^0";
+    EXPECT_GT(distinct.size(), 100u) << "exponents should cover most of [-127, 0]";
+
+    for(size_t i = 0; i < out.data.size(); ++i)
+    {
+        const double v = decodeOcpFp8(out.data[i], e4m3);
+        ASSERT_LE(std::abs(v), 1.0) << "i=" << i;
+        const double expected = v * std::ldexp(1.0, int(out.scale[i / 32]) - 127);
+        ASSERT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
+    }
+
+    const auto b = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_1", 1);
+    EXPECT_NE(out.data, b.data) << "A and B must differ";
+    const auto maf2_0 = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0");
+    EXPECT_NE(out.data, maf2_0.data) << "maf2_1 and maf2_0 must use different streams";
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp8, MXDataGenMaf2_1, ::testing::Values(HIP_R_8F_E4M3, HIP_R_8F_E5M2));
+
+class MXDataGenMaf2_1Fp4 : public ::testing::TestWithParam<Fp4ScaleCase>
+{
+};
+
+TEST_P(MXDataGenMaf2_1Fp4, ScalesPerFormatAndDecodedReference)
+{
+    const auto        c   = GetParam();
+    const hipDataType f4  = static_cast<hipDataType>(HIP_R_4F_E2M1);
+    const auto        out = runFp8MX(f4, c.scaleType, "maf2_1", 0, c.mxBlock);
+
+    auto scaleValue = [&](uint8_t s) {
+        if(c.scaleType == HIP_R_8F_E4M3)
+            return decodeUe4m3Scale(s);
+        if(c.scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT))
+            return decodeUe5m3Scale(s);
+        return std::ldexp(1.0, int(s) - 127);
+    };
+
+    const size_t blocks = out.ref.size() / c.mxBlock;
+    double       sum    = 0;
+    for(size_t b = 0; b < blocks; ++b)
+    {
+        const double v = scaleValue(out.scale[b]);
+        ASSERT_TRUE(std::isfinite(v)) << "block " << b;
+        ASSERT_LE(v, 1.0) << "block " << b;
+        sum += v;
+    }
+    if(c.scaleType != HIP_R_8F_UE8M0)
+        EXPECT_NEAR(sum / blocks, 0.5, 0.03) << "mean scale";
+
+    for(size_t i = 0; i < out.ref.size(); ++i)
+    {
+        const double d = decodeFp4At(out.data, i);
+        ASSERT_LE(std::abs(d), 1.0) << "i=" << i;
+        ASSERT_EQ(out.ref[i], static_cast<float>(d * scaleValue(out.scale[i / c.mxBlock])))
+            << "i=" << i;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp4,
+                         MXDataGenMaf2_1Fp4,
+                         ::testing::Values(Fp4ScaleCase{HIP_R_8F_UE8M0, 32},
+                                           Fp4ScaleCase{HIP_R_8F_E4M3, 16},
+                                           Fp4ScaleCase{static_cast<hipDataType>(HIP_R_8F_E5M3_EXT),
+                                                        16}));
+
+// ---------------------------------------------------------------------------
 // maf1_0 MX data: every block scale is 0.5, and the code of stored element n (= i + j * rows) is
 // sin (A, seedIndex % 3 == 0) or cos (B) of n + batch * rows * cols (batch = seedIndex / 3),
 // rounded once to nearest even at unit scale, so its value is 0.5 * code. Checked against a
