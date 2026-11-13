@@ -28,6 +28,7 @@ FILES = {
     "DATABASE.md": (ST / "DATABASE.md", 7 * KB),
     "ENTRY-FORMAT.md": (ST / "ENTRY-FORMAT.md", 5 * KB),
     "PROFILING.md": (HB / "PROFILING.md", 5 * KB),
+    "SETUP.md": (ST / "SETUP.md", 5 * KB),
 }
 
 # a common path is the set of files an agent reads for one kind of task
