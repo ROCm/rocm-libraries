@@ -60,6 +60,7 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
+        "projects/hipblaslt/tensilelite/requirements-dev-common.txt",
         ".github/workflows/component-ci-logic-corpus.yml",
     ],
     "hipblaslt_rocjitsu_scripts": [
