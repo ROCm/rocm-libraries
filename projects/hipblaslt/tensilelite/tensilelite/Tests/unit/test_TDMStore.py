@@ -156,8 +156,6 @@ def test_disabled_is_not_validated():
 
 _OUTPUT = "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
   "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
-_SIDE_EFFECTS = \
-  "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 
 
@@ -173,10 +171,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
-  ({"UseE": True}, _SIDE_EFFECTS),
-  ({"Gradient": True}, _SIDE_EFFECTS),
-  ({"UseGateResidual": True}, _SIDE_EFFECTS),
-  ({"OutputAmaxD": True}, _SIDE_EFFECTS),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
@@ -783,6 +777,52 @@ def test_mbsk_reduced_tile_keeps_buffer_store_with_prefetch_method_1(gp_gfx1250,
   assert stores[("OptNLL_MBSK", "0")]["tdm"] == [8]
   assert stores[("GSU1", "0")]["nonEdgeTdm"] == 1
   assert "64-bit byte offset from SrdTD" not in asm and "each wave reduces on its own" not in asm
+
+
+_AUX_E = {"DataType": "B", "DestDataType": "B", "ComputeDataType": "s", "HighPrecisionAccumulate": True,
+          "TransposeA": False, "TransposeB": False, "UseBeta": True, "Batched": True, "UseE": True, "UseBias": 1,
+          "BiasDataTypeList": ["s", "B"], "Activation": True, "ActivationType": "hipblaslt_all", "UseScaleAlphaVec": 1,
+          "SupportUserArgs": True}
+_AUX_E_SOLUTION = dict(mi=[16, 16, 32, 1, 1, 8, 4, 2, 2], DepthU=64, VectorWidthA=1, VectorWidthB=1,
+                       GlobalReadVectorWidthA=1, GlobalReadVectorWidthB=1, LocalReadVectorWidth=8, PrefetchGlobalRead=2,
+                       PrefetchLocalRead=1, ScheduleIterAlg=4, TransposeLDS=-1, LDSTrInst=True, TDMInst=3,
+                       ExpandPointerSwap=False, StoreVectorWidth=8, SourceSwap=False, ActivationFuncCall=True)
+
+
+def _storeBlocks(asm):
+  """{name: lines} of the store blocks, label_GW_*_Then and _NonEdge up to the next label_GW_ label."""
+  blocks, cur = {}, None
+  for line in asm.splitlines():
+    m = re.match(r"label_GW_(\w+_(?:Then|NonEdge)):$", line)
+    if line.startswith("label_GW_"):
+      cur = blocks.setdefault(m.group(1), []) if m else None
+    elif cur is not None:
+      cur.append(line.strip())
+  return blocks
+
+
+def _sameRegs(lines):
+  return [re.sub(r"\bv\[[^\]]*\]|\bv\d+\b|\bs\[\d+:\d+\]|\bs\d+\b", "R", l.split("//")[0].strip()) for l in lines]
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """Develop's forward E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml: each TDM block stages D in place of its stores
+  and keeps the E stores of the level-0 block; an edge TDM block is that edge block, with its vector width, its masks
+  and its C loads, so no element outside D reaches E or the epilogue."""
+  _, base = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=0, ProblemType=_AUX_E, **_AUX_E_SOLUTION)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType=_AUX_E, **_AUX_E_SOLUTION)
+  assert base and sol.get("Valid"), capsys.readouterr().out
+  ref, blocks = _storeBlocks(base), _storeBlocks(asm)
+  tdm = {k: v for k, v in blocks.items() if any(l.startswith("tensor_store_from_lds ") for l in v)}
+  assert tdm and set(tdm) <= set(ref)
+  pick = lambda lines, tc, op: _sameRegs([l for l in lines if l.startswith(op) and "s[sgprSrd%s:" % tc in l])
+  for k, v in tdm.items():
+    assert not pick(v, "D", "buffer_store"), k
+    assert pick(v, "E", "buffer_store") == pick(ref[k], "E", "buffer_store") and pick(v, "E", "buffer_store"), k
+    if k.endswith("_Then"):
+      assert pick(v, "C", "buffer_load") == pick(ref[k], "C", "buffer_load"), k
+      assert sum("stage D element" in l for l in v) == len(pick(ref[k], "D", "buffer_store")), k
 
 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
