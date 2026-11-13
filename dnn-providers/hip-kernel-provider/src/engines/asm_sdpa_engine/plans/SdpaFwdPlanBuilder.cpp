@@ -458,23 +458,6 @@ static bool fwdByteRangesFitU32(const hipdnn_flatbuffers_sdk::data_objects::Tens
     return true;
 }
 
-static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
-{
-    if(archId == "gfx942")
-    {
-        auto pos = coName.rfind('/');
-        if(isMi308)
-        {
-            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
-        }
-        else
-        {
-            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
-        }
-    }
-    return asm_kernels::getAsmKernelTocKey(coName);
-}
-
 bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -1022,7 +1005,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     // Load kernel module from kpack archive
-    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
+    auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 

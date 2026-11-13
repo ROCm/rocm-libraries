@@ -48,4 +48,22 @@ inline auto getAsmKernelTocKey(const std::string& coName) -> std::string
     return coName.substr(pos + 1);
 }
 
+/// The TOC key of a forward co_name on archId. gfx942 ships each forward
+/// object once per MI300 and MI308 variant, in a directory between the module
+/// and the file name; @p isMi308 selects the variant there and is ignored on
+/// every other arch.
+///
+/// Input:  "gfx942/fmha_v3_fwd/fwd_hd128_bf16_rtne.co", "gfx942", false
+/// Output: "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
+inline auto
+    getFwdKernelTocKey(std::string coName, const std::string& archId, bool isMi308) -> std::string
+{
+    if(archId == "gfx942")
+    {
+        const auto pos = coName.rfind('/');
+        coName.insert(pos == std::string::npos ? 0 : pos + 1, isMi308 ? "MI308/" : "MI300/");
+    }
+    return getAsmKernelTocKey(coName);
+}
+
 } // namespace asm_sdpa_engine::asm_kernels

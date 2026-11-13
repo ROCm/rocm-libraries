@@ -99,8 +99,8 @@ constexpr SdpaBwdDqAccLayout sdpaBwdDqAccLayout(
 /// batch fits: the row and head strides and the per-batch span of `headsQ`
 /// heads, in bytes. The span is checked for B == 1 as well, where the layout's
 /// batch stride is 0. Offsets across batches are bounded per row by the dqdkdv
-/// lookup (bwd_dispatch::psskOffOffsetsFitU32 for the pssk = 0 rows). Logs
-/// each offending field.
+/// lookup (bwd_dispatch::psskOffOffsetsFitU32 for the pssk = 0 rows, through
+/// sdpaBwdDqAccBytesFitU32). Logs each offending field.
 inline bool sdpaBwdDqAccFitsU32(const SdpaBwdDqAccLayout& layout, size_t headsQ)
 {
     const auto elementBytes = static_cast<int64_t>(layout.elementBytes);
@@ -117,6 +117,19 @@ inline bool sdpaBwdDqAccFitsU32(const SdpaBwdDqAccLayout& layout, size_t headsQ)
     }
     ok &= plan_utils::byteStrideFitsU32("dq_acc per-batch span", perBatch, elementBytes);
     return ok;
+}
+
+/// True when the whole dq_acc of `batch` batches of `headsQ` heads spans at
+/// most UINT32_MAX bytes, so offsets across batches fit 32 bits as well. The
+/// byte count is formed without overflow (layout.bytes wraps for huge shapes).
+inline bool sdpaBwdDqAccBytesFitU32(const SdpaBwdDqAccLayout& layout, size_t batch, size_t headsQ)
+{
+    int64_t bytes = 0;
+    return !__builtin_mul_overflow(
+               static_cast<int64_t>(batch), static_cast<int64_t>(headsQ), &bytes)
+           && !__builtin_mul_overflow(bytes, static_cast<int64_t>(layout.nheadStride), &bytes)
+           && !__builtin_mul_overflow(bytes, static_cast<int64_t>(layout.elementBytes), &bytes)
+           && bytes <= static_cast<int64_t>(UINT32_MAX);
 }
 
 /// Total backward workspace size. Layout: D buffer | dq_acc, where dq_acc is

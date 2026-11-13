@@ -9,6 +9,8 @@
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 #include <cstdint>
@@ -212,6 +214,39 @@ struct KernelRequest
 // excludes every pssk = 0 row; the rule is applied to every pssk = 0 row,
 // including the few whose disassembly shows 64-bit bases.
 bool psskOffOffsetsFitU32(const KernelRequest& request);
+
+// The dqdkdv CSV `atomic32` value of each accumulator.
+enum class AccumulatorMode : int
+{
+    A16 = 0, // 16-bit accumulator (atomic32 = 0)
+    A32 = 1 // 32-bit accumulator (atomic32 = 1)
+};
+
+// The KernelRequest for a backward graph, with the mask it classified.
+struct ClassifiedRequest
+{
+    KernelRequest request;
+    plan_utils::DiagonalBand band;
+    plan_utils::MaskType maskType;
+};
+
+// The KernelRequest for a backward graph on archId with accumulator accMode.
+// isApplicable and buildPlan both build it here, so the two sites resolve the
+// same rows. The mask is classified on the graph dims (dqdkdvMaskOrdinal), and
+// the request carries the ordinal the lookup asks for (requestedMaskOrdinal).
+// Expects rank-4 [B, H, S, D] tensors. Throws HipdnnPluginException for
+// contradictory mask attributes.
+ClassifiedRequest
+    makeKernelRequest(const std::string& archId,
+                      const std::string& dataTypeId,
+                      const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+                      AccumulatorMode accMode);
 
 // Resolves the registry row AITER v0.1.29 get_heuristic_kernel() picks for
 // `stage`, and returns its composite key (arch + knl_name), or an empty string

@@ -44,19 +44,14 @@ namespace
 
 // Dispatch enums shared with the forward path: MaskType via plan_utils;
 // RoundingMode and BatchMode via hip_kernel_provider_common (the same header the
-// forward builder consumes). AccumulatorMode stays backward-local because the
+// forward builder consumes). AccumulatorMode is bwd_dispatch's because the
 // forward dispatch has no 16/32-bit accumulator axis.
+using bwd_dispatch::AccumulatorMode;
 using hip_kernel_provider_common::BatchMode;
 using hip_kernel_provider_common::RoundingMode;
 using plan_utils::MaskType;
 
 using bwd_dispatch::BF16_CVT_FP16_SENTINEL;
-
-enum class AccumulatorMode : int
-{
-    A16 = 0, // 16-bit accumulator (atomic32 = 0)
-    A32 = 1 // 32-bit accumulator (atomic32 = 1)
-};
 
 // Output of resolveStage: the TOC key (for kpack archive lookup), kernel
 // symbol name, and tile sizes for the resolved registry row.
@@ -230,8 +225,10 @@ std::optional<fmha_v3_bwdConfig> findDqdkdvConfig(const std::string& archId,
     return *best;
 }
 
-// The registry row AITER v0.1.29 picks for `stage`, or std::nullopt when no row
-// matches. Returns a copy so callers do not hold references into the registry.
+// The registry row for `stage` (AITER v0.1.29 get_heuristic_kernel(), plus the
+// pssk = 0 guards and the deterministic (pssk, pddv) choice of
+// findDqdkdvConfig), or std::nullopt when no row matches. Returns a copy so
+// callers do not hold references into the registry.
 std::optional<fmha_v3_bwdConfig> resolveStageConfig(bwd_dispatch::PipelineStage stage,
                                                     const std::string& archId,
                                                     const bwd_dispatch::KernelRequest& request)
@@ -286,72 +283,6 @@ int64_t spanBytes(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& 
     const auto* dims = tensor.dims();
     return bwd_dispatch::bhsdSpanBytes(
         bhsStrides(tensor), dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3), K_BF16_BYTES);
-}
-
-// The KernelRequest for a backward graph, with the mask it classified.
-struct BwdKernelRequest
-{
-    bwd_dispatch::KernelRequest request;
-    plan_utils::DiagonalBand band;
-    MaskType maskType;
-};
-
-// The KernelRequest for a backward graph on archId. isApplicable and buildPlan
-// both build it here, so the two sites resolve the same rows. The mask is
-// classified on the graph dims (dqdkdvMaskOrdinal), and the request carries the
-// ordinal the lookup asks for (requestedMaskOrdinal). Throws
-// HipdnnPluginException for contradictory mask attributes.
-BwdKernelRequest
-    makeKernelRequest(const std::string& archId,
-                      const std::string& dataTypeId,
-                      const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
-                      AccumulatorMode accMode)
-{
-    BwdKernelRequest result{};
-    auto& request = result.request;
-    const auto* qDims = q.dims();
-    request.dataType = dataTypeId;
-    request.hdimQ = static_cast<int>(qDims->Get(3));
-    request.hdimV = static_cast<int>(v.dims()->Get(3));
-    request.seqLenQ = qDims->Get(2);
-    request.seqLenKv = k.dims()->Get(2);
-
-    result.band = plan_utils::makeCoveringBoundsUnbound(
-        plan_utils::resolveDiagonalBand(attrs), request.seqLenQ, request.seqLenKv);
-    result.maskType = plan_utils::getMaskType(
-        result.band.leftBound, result.band.rightBound, result.band.alignment);
-    request.mask = bwd_dispatch::requestedMaskOrdinal(
-        archId,
-        bwd_dispatch::dqdkdvMaskOrdinal(archId, result.maskType, result.band.alignment),
-        static_cast<int>(accMode),
-        request.seqLenQ,
-        request.seqLenKv);
-
-    request.atomic32 = static_cast<int>(accMode);
-    request.mode = static_cast<int>(getBatchMode(attrs));
-    request.bf16Cvt = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
-                                             : static_cast<int>(getRoundingMode(attrs));
-    request.psskOffStridesOk = bwd_dispatch::psskOffStridesMatch(bhsStrides(q),
-                                                                 bhsStrides(k),
-                                                                 bhsStrides(v),
-                                                                 bhsStrides(dO),
-                                                                 bhsStrides(dk),
-                                                                 bhsStrides(dv),
-                                                                 qDims->Get(1),
-                                                                 k.dims()->Get(1));
-    request.batch = qDims->Get(0);
-    request.nheadQ = qDims->Get(1);
-    request.gradKvSpanBytes = std::max(spanBytes(dk), spanBytes(dv));
-    request.inputSpanBytes = std::max({spanBytes(q), spanBytes(k), spanBytes(v), spanBytes(dO)});
-    request.qBatchStrideMatchesDqAcc = bwd_dispatch::qBatchStrideMatchesDqAcc(
-        bhsStrides(q), request.batch, request.nheadQ, request.seqLenQ, qDims->Get(3));
-    return result;
 }
 
 // Backward kernels live in a flat layout under
@@ -764,14 +695,68 @@ bool psskOffOffsetsFitU32(const KernelRequest& request)
     {
         return request.inputSpanBytes <= K_U32_MAX;
     }
-    // dq_acc: FP32 [B, H_q, S_q, D_qk].
-    int64_t dqAccBytes = 0;
+    // dq_acc, whose batch offset the kernels derive from Q's batch stride.
+    const auto dqAcc = sdpaBwdDqAccLayout(static_cast<size_t>(request.batch),
+                                          static_cast<size_t>(request.nheadQ),
+                                          static_cast<size_t>(request.seqLenQ),
+                                          static_cast<size_t>(request.hdimQ),
+                                          AccumulatorType::A32);
     return request.qBatchStrideMatchesDqAcc
-           && !__builtin_mul_overflow(request.batch, request.nheadQ, &dqAccBytes)
-           && !__builtin_mul_overflow(dqAccBytes, request.seqLenQ, &dqAccBytes)
-           && !__builtin_mul_overflow(dqAccBytes, int64_t{request.hdimQ}, &dqAccBytes)
-           && !__builtin_mul_overflow(dqAccBytes, K_FP32_BYTES, &dqAccBytes)
-           && dqAccBytes <= K_U32_MAX;
+           && sdpaBwdDqAccBytesFitU32(
+               dqAcc, static_cast<size_t>(request.batch), static_cast<size_t>(request.nheadQ));
+}
+
+ClassifiedRequest
+    makeKernelRequest(const std::string& archId,
+                      const std::string& dataTypeId,
+                      const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+                      AccumulatorMode accMode)
+{
+    ClassifiedRequest result{};
+    auto& request = result.request;
+    const auto* qDims = q.dims();
+    request.dataType = dataTypeId;
+    request.hdimQ = static_cast<int>(qDims->Get(3));
+    request.hdimV = static_cast<int>(v.dims()->Get(3));
+    request.seqLenQ = qDims->Get(2);
+    request.seqLenKv = k.dims()->Get(2);
+
+    result.band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(attrs), request.seqLenQ, request.seqLenKv);
+    result.maskType = plan_utils::getMaskType(
+        result.band.leftBound, result.band.rightBound, result.band.alignment);
+    request.mask
+        = requestedMaskOrdinal(archId,
+                               dqdkdvMaskOrdinal(archId, result.maskType, result.band.alignment),
+                               static_cast<int>(accMode),
+                               request.seqLenQ,
+                               request.seqLenKv);
+
+    request.atomic32 = static_cast<int>(accMode);
+    request.mode = static_cast<int>(getBatchMode(attrs));
+    request.bf16Cvt = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
+                                             : static_cast<int>(getRoundingMode(attrs));
+    request.psskOffStridesOk = psskOffStridesMatch(bhsStrides(q),
+                                                   bhsStrides(k),
+                                                   bhsStrides(v),
+                                                   bhsStrides(dO),
+                                                   bhsStrides(dk),
+                                                   bhsStrides(dv),
+                                                   qDims->Get(1),
+                                                   k.dims()->Get(1));
+    request.batch = qDims->Get(0);
+    request.nheadQ = qDims->Get(1);
+    request.gradKvSpanBytes = std::max(spanBytes(dk), spanBytes(dv));
+    request.inputSpanBytes = std::max({spanBytes(q), spanBytes(k), spanBytes(v), spanBytes(dO)});
+    request.qBatchStrideMatchesDqAcc = qBatchStrideMatchesDqAcc(
+        bhsStrides(q), request.batch, request.nheadQ, request.seqLenQ, qDims->Get(3));
+    return result;
 }
 
 int dqdkdvMaskOrdinal(const std::string& archId,
@@ -1164,19 +1149,19 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // the default A32 accumulator. buildPlan declines an A16 request the A16
     // kernels cannot serve.
     const int64_t seqLenKv = kTensor->dims()->Get(2);
-    BwdKernelRequest classified{};
+    bwd_dispatch::ClassifiedRequest classified{};
     try
     {
-        classified = makeKernelRequest(deviceString,
-                                       dataTypeId,
-                                       attrs,
-                                       *qTensor,
-                                       *kTensor,
-                                       *vTensor,
-                                       *doTensor,
-                                       *dkTensor,
-                                       *dvTensor,
-                                       AccumulatorMode::A32);
+        classified = bwd_dispatch::makeKernelRequest(deviceString,
+                                                     dataTypeId,
+                                                     attrs,
+                                                     *qTensor,
+                                                     *kTensor,
+                                                     *vTensor,
+                                                     *doTensor,
+                                                     *dkTensor,
+                                                     *dvTensor,
+                                                     AccumulatorMode::A32);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -1484,16 +1469,16 @@ void SdpaBwdPlanBuilder::buildPlan(
     // The accumulator selects the atomic32 dqdkdv rows, the mask the lookup
     // asks for (requestedMaskOrdinal) and the post stage (postStage).
     const bool useA32 = (accType == AccumulatorType::A32);
-    const auto classified = makeKernelRequest(deviceString,
-                                              dataTypeId,
-                                              sdpaAttrs,
-                                              *qTensor,
-                                              *kTensor,
-                                              *vTensor,
-                                              *doTensor,
-                                              *dkTensor,
-                                              *dvTensor,
-                                              toAccumulatorMode(accType));
+    const auto classified = bwd_dispatch::makeKernelRequest(deviceString,
+                                                            dataTypeId,
+                                                            sdpaAttrs,
+                                                            *qTensor,
+                                                            *kTensor,
+                                                            *vTensor,
+                                                            *doTensor,
+                                                            *dkTensor,
+                                                            *dvTensor,
+                                                            toAccumulatorMode(accType));
     const auto& request = classified.request;
     const auto& maskBand = classified.band;
 

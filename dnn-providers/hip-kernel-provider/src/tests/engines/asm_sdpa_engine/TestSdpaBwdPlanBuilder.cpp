@@ -1168,6 +1168,129 @@ TEST(TestSdpaBwdRegistryLookup, Gfx942Pssk0RowsNeedEveryOffsetToFit32Bits)
     EXPECT_FALSE(resolvedPsskPddv("gfx942", bigGrad).has_value());
 }
 
+namespace
+{
+// Dims and strides of one [B, H, S, D] tensor.
+struct BhsdLayout
+{
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+BhsdLayout packedLayout(int64_t batch, int64_t heads, int64_t seq, int64_t headDim)
+{
+    std::vector<int64_t> dims{batch, heads, seq, headDim};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    return {std::move(dims), std::move(strides)};
+}
+
+// The same layout with its batch stride set to batchStride elements.
+BhsdLayout withBatchStride(BhsdLayout layout, int64_t batchStride)
+{
+    layout.strides[0] = batchStride;
+    return layout;
+}
+
+// The gfx942 request bwd_dispatch::makeKernelRequest() builds for an unmasked
+// bf16 graph whose Q, O, dO and dQ have layout qo and K, V, dK and dV layout kv.
+bwd_dispatch::KernelRequest gfx942GraphRequest(const BhsdLayout& qo,
+                                               const BhsdLayout& kv,
+                                               bwd_dispatch::AccumulatorMode accMode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes;
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qo.dims,
+        qo.strides,
+        kv.dims,
+        kv.strides,
+        kv.dims,
+        kv.strides,
+        qo.dims,
+        qo.strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
+    const auto& tensors = graph.getTensorMap();
+    return bwd_dispatch::makeKernelRequest("gfx942",
+                                           "bf16",
+                                           attrs,
+                                           *tensors.at(attrs.q_tensor_uid()),
+                                           *tensors.at(attrs.k_tensor_uid()),
+                                           *tensors.at(attrs.v_tensor_uid()),
+                                           *tensors.at(attrs.do_tensor_uid()),
+                                           *tensors.at(attrs.dk_tensor_uid()),
+                                           *tensors.at(attrs.dv_tensor_uid()),
+                                           accMode)
+        .request;
+}
+} // namespace
+
+// The request built from a graph carries the facts the pssk = 0 offset guard
+// reads, so the guard sees the graph's dq_acc and tensor spans. Packed bf16
+// hd128, H_q = 32, S = 12288: the FP32 dq_acc is 4,227,858,432 bytes at B = 21
+// and 4,429,185,024 at B = 22.
+TEST(TestSdpaBwdGraphRequest, Gfx942A32DqAccPast4GiBLeavesThePssk0Row)
+{
+    using bwd_dispatch::AccumulatorMode;
+    constexpr int64_t K_BATCH_BYTES = int64_t{32} * 12288 * 128 * 2;
+
+    const auto fits = packedLayout(21, 32, 12288, 128);
+    const auto request = gfx942GraphRequest(fits, fits, AccumulatorMode::A32);
+    EXPECT_EQ(request.batch, 21);
+    EXPECT_EQ(request.nheadQ, 32);
+    EXPECT_EQ(request.atomic32, ATOMIC_A32);
+    EXPECT_EQ(request.gradKvSpanBytes, 21 * K_BATCH_BYTES);
+    EXPECT_EQ(request.inputSpanBytes, 21 * K_BATCH_BYTES);
+    EXPECT_TRUE(request.psskOffStridesOk);
+    EXPECT_TRUE(request.qBatchStrideMatchesDqAcc);
+    EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_UNPADDED);
+
+    const auto wraps = packedLayout(22, 32, 12288, 128);
+    EXPECT_EQ(resolvedPsskPddv("gfx942", gfx942GraphRequest(wraps, wraps, AccumulatorMode::A32)),
+              K_PSSK_PDDV);
+}
+
+// K, V, dK and dV with a 2^31-element batch stride span 2^32 + 786,432 bytes,
+// while dq_acc (packed [2, 8, 384, 128] FP32) stays small: the A32 pssk = 0
+// row is left for its dK and dV offsets alone.
+TEST(TestSdpaBwdGraphRequest, Gfx942A32GradKvPast4GiBLeavesThePssk0Row)
+{
+    using bwd_dispatch::AccumulatorMode;
+    const auto qo = packedLayout(2, 8, 384, 128);
+    const auto kv = withBatchStride(qo, int64_t{1} << 31);
+    const auto request = gfx942GraphRequest(qo, kv, AccumulatorMode::A32);
+    EXPECT_EQ(request.gradKvSpanBytes, (int64_t{1} << 32) + 786432);
+    EXPECT_TRUE(request.psskOffStridesOk);
+    EXPECT_TRUE(request.qBatchStrideMatchesDqAcc);
+    EXPECT_EQ(resolvedPsskPddv("gfx942", request), K_PSSK_PDDV);
+}
+
+// Q, O, dO and dQ with a 2^31-element batch stride span 2^32 + 786,432 bytes;
+// K, V, dK and dV stay packed. gfx942 A16 has only pssk = 0 rows, so no row
+// serves the graph, and A32 leaves the pssk = 0 row because the padded Q batch
+// stride is not the dq_acc one.
+TEST(TestSdpaBwdGraphRequest, Gfx942BatchPaddedQLeavesEveryPssk0Row)
+{
+    using bwd_dispatch::AccumulatorMode;
+    const auto kv = packedLayout(2, 8, 384, 128);
+    const auto qo = withBatchStride(kv, int64_t{1} << 31);
+
+    const auto packedA16 = gfx942GraphRequest(kv, kv, AccumulatorMode::A16);
+    EXPECT_EQ(packedA16.atomic32, ATOMIC_A16);
+    EXPECT_EQ(resolvedPsskPddv("gfx942", packedA16), K_UNPADDED);
+
+    const auto a16 = gfx942GraphRequest(qo, kv, AccumulatorMode::A16);
+    EXPECT_EQ(a16.inputSpanBytes, (int64_t{1} << 32) + 786432);
+    EXPECT_EQ(a16.gradKvSpanBytes, int64_t{2} * 8 * 384 * 128 * 2);
+    EXPECT_TRUE(a16.psskOffStridesOk);
+    EXPECT_FALSE(resolvedPsskPddv("gfx942", a16).has_value());
+
+    const auto a32 = gfx942GraphRequest(qo, kv, AccumulatorMode::A32);
+    EXPECT_FALSE(a32.qBatchStrideMatchesDqAcc);
+    EXPECT_EQ(resolvedPsskPddv("gfx942", a32), K_PSSK_PDDV);
+}
+
 // Bytes from the first element to one past the last; (n - 1) * stride on each
 // axis plus one row of D elements.
 TEST(TestSdpaBwdSpanBytes, CountsToOnePastTheLastElement)

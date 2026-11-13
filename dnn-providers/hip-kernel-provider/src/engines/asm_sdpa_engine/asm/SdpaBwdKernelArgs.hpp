@@ -19,7 +19,8 @@
 //     split_stride): the gfx942 and gfx950 kernels end at 0x2c0 and 0xc0
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added detailed field documentation for all three backward kernels
-//   - Organized into 3-kernel pipeline: odo → dqdkdv → dq_convert
+//   - Organized by pipeline: odo → dqdkdv → dq_convert or dq_shuffle (no post
+//     stage for gfx942 A16)
 // =============================================================================
 
 #pragma once
@@ -245,9 +246,13 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad3 _p41;
 
     // ---- Window attention mask coordinates ---------------------------------
-    int32_t mask_x; // co:mask_x  Window mask X coordinate (-1 if disabled)
+    // Both are 0 for the masks the kernel bakes in (none and causal). For a
+    // window, gfx942 takes window coordinates (computeMaskCoordinates) and
+    // gfx950 the FlashAttention window sizes, -1 for an unbounded side
+    // (dqdkdvMaskCoordinates()).
+    int32_t mask_x; // co:mask_x  gfx942 X coordinate; gfx950 right window size
     SgprPad3 _p42;
-    int32_t mask_y; // co:mask_y  Window mask Y coordinate (-1 if disabled)
+    int32_t mask_y; // co:mask_y  gfx942 Y coordinate; gfx950 left window size
     SgprPad3 _p43;
 };
 
@@ -308,9 +313,11 @@ struct __attribute__((packed)) fmha_bwd_post_kernel_args
     SgprPad2 _p11;
 };
 
-// Compile-time ABI verification: the struct sizes must match AITER's
-// definitions exactly.  Any mismatch indicates the kernel ABI has changed and
-// the structs must be updated.
+// Compile-time ABI verification: the struct sizes match AITER's definitions up
+// to the gfx1250-only tail fields of the dqdkdv and post structs, which the
+// gfx942 and gfx950 kernels do not declare (their kernarg segments are 704 and
+// 192 bytes). Any mismatch indicates the kernel ABI has changed and the structs
+// must be updated.
 static_assert(sizeof(fmha_bwd_dqdkdv_args) == 704,
               "fmha_bwd_dqdkdv_args size mismatch with AITER ABI");
 

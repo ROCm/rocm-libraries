@@ -730,6 +730,31 @@ def test_apply_never_writes_outside_tracked_modules(sync, env, capsys):
     assert not (kernels / "gfx942").exists()
 
 
+def test_apply_with_an_untracked_pin_rewrites_nothing(sync, env, capsys):
+    """A pin naming a module this tool does not write fails apply before any
+    module file is rewritten, so the tree still matches its pin."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    plan(sync, env, "v0.1.0")
+    assert apply(sync, env) == 0
+    pins_path = kernels / "aiter_pins.json"
+    pins = json.loads(pins_path.read_text())
+    pins["modules"]["gfx942/fmha_v4_fwd"] = pins["modules"][KEY]
+    pins_path.write_text(json.dumps(pins, indent=2) + "\n")
+    aiter.write("hsa/gfx942/fmha_v3_fwd/MI300/fwd_hd128.co", kernel(ROW_HD128, "v2"))
+    aiter.commit("v0.2.0")
+    assert plan(sync, env, "v0.2.0") == 0
+
+    def snapshot() -> dict[Path, bytes]:
+        return {p: p.read_bytes() for p in kernels.rglob("*") if p.is_file()}
+
+    before = snapshot()
+    capsys.readouterr()
+    assert apply(sync, env) == 2
+    assert "not a tracked ASM module" in capsys.readouterr().err
+    assert snapshot() == before
+
+
 def test_verify_catches_tampering(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)

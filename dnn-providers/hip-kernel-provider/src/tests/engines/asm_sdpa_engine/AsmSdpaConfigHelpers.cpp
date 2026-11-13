@@ -284,19 +284,13 @@ std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
         {
             continue;
         }
-        if(arch != "gfx942")
+        entries.push_back(
+            {asm_kernels::getFwdKernelTocKey(config.co_name, arch, false), config.knl_name});
+        // gfx942 ships each forward object once per MI300 and MI308 variant.
+        if(arch == "gfx942")
         {
-            entries.push_back({asm_kernels::getAsmKernelTocKey(config.co_name), config.knl_name});
-            continue;
-        }
-        // gfx942 ships each forward object once per MI300 and MI308 variant, in a directory
-        // between the module and the file name (SdpaFwdPlanBuilder getKernelTocKey).
-        const auto pos = config.co_name.rfind('/');
-        for(const char* variant : {"MI300/", "MI308/"})
-        {
-            const auto coName
-                = config.co_name.substr(0, pos + 1) + variant + config.co_name.substr(pos + 1);
-            entries.push_back({asm_kernels::getAsmKernelTocKey(coName), config.knl_name});
+            entries.push_back(
+                {asm_kernels::getFwdKernelTocKey(config.co_name, arch, true), config.knl_name});
         }
     }
     return entries;

@@ -1,8 +1,8 @@
 # ASM Kernel Binaries — Provenance
 
 This directory holds vendored GPU code-object (`.co`) binaries from the AITER
-project for both forward and backward FMHA kernels. Both groups come from AITER
-v0.1.29.
+project for both forward and backward FMHA kernels. Each module's release is in
+`aiter_pins.json` and its `SOURCE.md`.
 
 | Kernel group | AITER commit | Platforms | Per-arch SOURCE.md |
 |---|---|---|---|
@@ -76,9 +76,21 @@ Not every row is dispatched:
 
 ## Verified Kernel Matrix
 
-Every graph the backward engine accepts runs a kernel AITER ships, chosen by
-the same rules AITER uses. Only some of those kernels have been checked on a GPU
-against the CPU backward reference. A checked kernel is **verified**.
+Every graph the backward engine accepts runs a kernel AITER ships. The engine
+follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
+`get_heuristic_kernel()` in `mha_bwd.cu`) with these deliberate differences:
+
+- A `pssk = 0` DQDKDV row also needs every (batch, head) offset its kernel
+  forms in 32 bits to fit (`psskOffOffsetsFitU32`), which AITER does not check.
+  Otherwise the engine takes a `pssk = 1` row.
+- When no row has exactly the requested `pssk` and `pddv`, the engine takes the
+  smallest qualifying (`pssk`, `pddv`); AITER takes whichever its map yields last.
+- The engine serves two cases AITER sends to CK: Sq ≤ 16, and gfx942 bands with
+  left bound 0 and right bound 0 or unbounded
+  ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
+
+Only some of those kernels have been checked on a GPU against the CPU backward
+reference. A checked kernel is **verified**.
 
 The verified list is `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp`.
 Each entry names an arch, a dtype and the head dims of a DQDKDV registry row.

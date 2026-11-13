@@ -837,8 +837,10 @@ def write_pins(kernels: Path, pins: dict) -> None:
     """Write the pin file and the SOURCE.md of every pinned module, which is
     generated from it."""
     pins["modules"] = dict(sorted(pins["modules"].items()))
+    # Every key is checked before anything is written.
+    directories = {key: safe_module_dir(kernels, key) for key in pins["modules"]}
     for key, entry in pins["modules"].items():
-        directory = safe_module_dir(kernels, key)
+        directory = directories[key]
         if directory.is_dir():
             (directory / SOURCE_MD).write_text(
                 render_source_md(*split_key(key), entry), encoding="utf-8"
@@ -1659,6 +1661,11 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     ]
     if blocking:
         raise SyncError("the plan has blocking findings:\n  " + "\n  ".join(blocking))
+    # write_pins regenerates the SOURCE.md of every pinned module, so a pin this
+    # tool cannot write fails here, before any module is rewritten.
+    pins = load_pins(kernels)
+    for key in pins["modules"]:
+        safe_module_dir(kernels, key)
     for key, plan in report["modules"].items():
         current = {
             p: sha256(d) for p, d in read_dir(safe_module_dir(kernels, key)).items()
@@ -1668,7 +1675,6 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     commit, _ = upstream.resolve(report["commit"])
     keys = list(report["modules"])
     files = upstream.materialize(commit, [f"hsa/{k}" for k in keys], [])
-    pins = load_pins(kernels)
     pins["upstream"] = UPSTREAM_WEB
     for key in keys:
         plan = report["modules"][key]
