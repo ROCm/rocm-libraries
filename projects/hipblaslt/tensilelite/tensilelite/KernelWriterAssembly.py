@@ -7217,7 +7217,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment0("lr%s swizzled-TDM base" % tP["tileChar"])
     waveWidth = kernel["WavefrontSize"]
     miN       = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-    innerK    = 16 // int(kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
+    innerK    = int(16 / kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
     blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
     tile01    = tP["tile01Idx"]
     miWaveGroup = kernel["MIWaveGroup"]
@@ -16827,7 +16827,7 @@ class KernelWriterAssembly(KernelWriter):
       # _localReadSwizzledTDM), NOT in the LocalReadAddr VGPR, so localReadInitPointers resets it to 0 at
       # every DepthU boundary — required for correct multi-main-loop-iteration (K>DepthU) reads.
       module   = Module("localReadInc swizzledTDM")
-      innerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      innerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
       miN      = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
       kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
       inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
@@ -25222,9 +25222,12 @@ class KernelWriterAssembly(KernelWriter):
       # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
       # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
       swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-      swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
+      # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
+      swzUnitShift = 1 if dtype.isFloat4() else 0
       swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
       # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
       # stride (setPadding(0,0) already applied above for isTdmIter). dim1 stays the full
@@ -25237,16 +25240,16 @@ class KernelWriterAssembly(KernelWriter):
         rowTmp  = swzTmp.idx + 2
         mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
         mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
-        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
         mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp, None))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
                                           swzTile0, swzRows, bpe, strideS)
-      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
       mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
     elif isMetadataML1:
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
@@ -25509,9 +25512,12 @@ class KernelWriterAssembly(KernelWriter):
     # calculateStartAddrWaveSeparated; per-component LDS base is the wId*dataBytes above.
     if bool(tP.get("isSwizzledTDM")):
       swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-      swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
+      # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
+      swzUnitShift = 1 if dtype.isFloat4() else 0
       swzRows   = (mt // swzMiN) // numComp               # nO rows per component
       # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
       # stride, and the pad_interval field (which cannot encode the 4096B nO block) is
@@ -25529,9 +25535,9 @@ class KernelWriterAssembly(KernelWriter):
         rowTmp  = swzTmp.idx + 2
         mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
         mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
-        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
         mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
         mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp,
                                             (compShift, waveIdxSgpr, compOffset, swzRows)))
@@ -25539,7 +25545,7 @@ class KernelWriterAssembly(KernelWriter):
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
                                           swzTile0, swzRows, bpe, strideS)
-      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
       mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
       return mod
 
@@ -27066,11 +27072,12 @@ class KernelWriterAssembly(KernelWriter):
       # nO row. Waves split nO rows, not K, so no per-wave K offset applies.
       swzMi = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]
       swzK = tP["swizzleK"]
+      swzUnitShift = 1 if dtype.isFloat4() else 0   # F4: descriptor counts bytes (see initTDMDescriptor)
       with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_swzTmpSgpr") as tmpSgpr:
         mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1), "swizzled tail: K rem = SizeL % DepthU"))
         mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzK - 1, "swizzled tail: rem + swzK-1"))
         mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), hex(0xFFFFFFFF & ~(swzK - 1)), "swizzled tail: alignUp(rem, swzK)"))
-        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzMi, f"swizzled tail: dim0 = MI({swzMi}) * alignUp(rem, swzK)"))
+        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzMi >> swzUnitShift, f"swizzled tail: dim0 = MI({swzMi}) * alignUp(rem, swzK) (desc units)"))
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, 1, self))
       return mod
 

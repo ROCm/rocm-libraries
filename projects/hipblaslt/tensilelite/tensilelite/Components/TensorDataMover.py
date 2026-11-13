@@ -297,7 +297,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 # paddedK = roundup(SizeL, swzK). Component wCompId loads rowsPerComp nO rows ->
                 # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
                 swzMiN      = kernel["MatrixInstM"] if tp["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-                swzInnerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+                swzInnerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
                 swzK        = (wavelen // swzMiN) * swzInnerK
                 rowsPerComp = (mt // swzMiN) // numComp
                 with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
