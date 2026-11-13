@@ -16,6 +16,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -288,6 +289,7 @@ namespace
         ObjectMap     internalArgs;
         ObjectMap     problem;
         ObjectMap     custom;
+        ObjectMap     solutionExtras;
 
 #ifdef TENSILE_YAML
         template <typename T>
@@ -368,6 +370,8 @@ namespace
                                     {"internalArgsSupport", object(internalArgs)},
                                     {"customKernel", object(custom)},
                                     {"problemType", object(problem)}};
+            for(const auto& [key, value] : solutionExtras)
+                fields[key] = value;
             ObjectMap        library{{"solutions", object(std::vector<ObjectMap>{fields})},
                                      {"library",
                                       object(ObjectMap{{"type", object(std::string("Single"))},
@@ -711,6 +715,24 @@ namespace
         {
             canonical(policy);
             EXPECT_EQ(readSolution()->internalArgsSupport.persistentLoopArgsVersion, 0);
+        }
+    }
+
+    // Prebuilt metadata written before SolutionUID existed has no solutionUid key.
+    TEST_F(PersistentExecutionPolicySerializationTest, MissingSolutionUidDefaultsToZero)
+    {
+        canonical(policies[0]);
+        EXPECT_EQ(readSolution()->solutionUid, 0u);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SolutionUidKeepsFullWidth)
+    {
+        canonical(policies[0]);
+        for(uint64_t uid : {uint64_t{1}, uint64_t{1} << 32, std::numeric_limits<uint64_t>::max()})
+        {
+            SCOPED_TRACE(uid);
+            solutionExtras["solutionUid"] = object(uid);
+            EXPECT_EQ(readSolution()->solutionUid, uid);
         }
     }
 

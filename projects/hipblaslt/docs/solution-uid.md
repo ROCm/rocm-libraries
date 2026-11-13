@@ -1,9 +1,12 @@
 # Solution UID foundation
 
-`SolutionUID` is a stable 64-bit identifier for a hipBLASLt/TensileLite
-solution. This first migration step provides the identifier format and
-maintenance tooling, but does not assign or consume UIDs in library generation
-or at runtime.
+`SolutionUID` is a 64-bit identifier for a hipBLASLt/TensileLite solution
+record. An identifier persisted in logic YAML stays stable across library
+rebuilds. Library generation decodes that identifier and stores it in runtime
+metadata. When the YAML has no UID, generation assigns one for that build
+without updating the YAML; rebuilding can produce a different UID. Loading
+older prebuilt metadata with no UID leaves the runtime value at zero.
+Runtime selection by UID is a later migration step.
 
 Geko assigns a fresh UID to solutions copied into `final_libs` or `full_libs`,
 including copies from Origami. These are new records, even when they describe
@@ -60,12 +63,14 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 the file.
 
 One Tensile process and one Geko generation each replace a zero, malformed, or
-colliding UID in the files that run writes. `TensileMergeLibrary` writes its
-output, and that output replaces a missing, zero, malformed, or colliding UID on
-every solution it contains, including solutions copied from the base file. A
-unique non-zero base UID is kept. Uniqueness across the shipped logic tree is
-checked by `test_solution_uid_uniqueness.py` in the logic-corpus lane
+colliding UID in the files that run writes. A missing YAML field is not written
+back there: library generation assigns a UID for that build only.
+`TensileMergeLibrary` writes its output, and that output replaces a missing,
+zero, malformed, or colliding UID on every solution it contains, including
+solutions copied from the base file. A unique non-zero base UID is kept.
+Uniqueness across the shipped logic tree is checked by
+`test_solution_uid_uniqueness.py` in the logic-corpus lane
 (`tox -e logic-corpus`).
 
-Runtime metadata, runtime selection, and mandatory uniqueness are introduced
-by later migration steps.
+Mandatory uniqueness in library generation is introduced by a later migration
+step.
