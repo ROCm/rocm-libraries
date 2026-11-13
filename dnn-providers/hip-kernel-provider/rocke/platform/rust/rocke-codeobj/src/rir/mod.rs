@@ -1395,6 +1395,7 @@ fn compile_with(
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
+        crate::target::gfx9::trunc_mix::mark(&mut kernel);
     }
     validate::kernel(&kernel)?;
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);

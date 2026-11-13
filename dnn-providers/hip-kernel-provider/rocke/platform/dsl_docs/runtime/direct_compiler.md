@@ -261,7 +261,18 @@ on the same inputs in these ways:
 - **Rounding.** Each rounding the IR states is kept. LLVM may fuse operations
   the IR keeps separate: for example, the last FMA of a chain and the f16
   conversion of its result become one `v_fma_mixlo_f16`, with one rounding
-  instead of two. Such outputs can differ by 1 ULP.
+  instead of two. Such outputs can differ by 1 ULP (about 1 element in 10^5 of
+  an fp16 depthwise convolution). On gfx950 the compiler makes the same fusion
+  where LLVM does, so those outputs agree bit for bit
+  (`target/gfx9/trunc_mix.rs`): a scalar f16 conversion of an f32 `arith.fma`
+  or `arith.fmul` that only buffer stores read, or that is the only such
+  conversion of its region and only plain stores read. LLVM leaves two or more
+  of the latter to its SLP vectorizer (a `<2 x float>` multiply and
+  `v_cvt_pk_f16_f32`, which round twice, as does the direct compiler's packed
+  form), and a conversion of a loop's carried value is not a product at all
+  (the direct compiler's own unrolling does not change that: the conversions are
+  marked on the IR as parsed). A product that other instructions read is
+  computed again inside the `v_fma_mixlo_f16`, as LLVM does.
 - **NaN and signed zero.** Float `max` and `min` quiet a signaling NaN first,
   as LLVM's `maxnum` semantics require, and no rewrite assumes that there are no
   NaNs or no signed zeros. COMGR's code can skip the quieting, or fold a pattern
@@ -357,6 +368,7 @@ gfx950 only:
 | `noselect9` | Skips gfx950's own instruction rewrites (`target/gfx9/select.rs`). |
 | `nowideadd` | Keeps the carry adds of a 64-bit address plus a zero-extended VGPR. |
 | `nopack` | No packed f32. |
+| `nomixtrunc` | Rounds an f32 product or FMA to f16 in two steps (`v_fma_f32`, `v_cvt_f16_f32`) where LLVM fuses them into one `v_fma_mixlo_f16`. |
 | `noliteralreuse` | Moves a literal into a register at each use. |
 | `nocopyreuse` | Copies an SGPR into a VGPR at each use that needs one. |
 | `noclauses` | Allocates registers without keeping loads apart from their memory clauses. |

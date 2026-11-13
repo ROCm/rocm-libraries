@@ -64,6 +64,7 @@ pub mod sched_groups;
 pub mod select;
 pub mod spill;
 pub mod trade;
+pub mod trunc_mix;
 pub mod unrolled;
 pub mod vectorize;
 pub mod waitcnt;

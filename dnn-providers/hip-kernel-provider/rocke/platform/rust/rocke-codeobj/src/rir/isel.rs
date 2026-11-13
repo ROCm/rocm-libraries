@@ -175,6 +175,9 @@ struct Isel<'a> {
     vote_sel: FxHashMap<ValueId, (ValueId, bool, bool)>,
     /// f16 `vector.trunc_f32_to` results of f32 vector products, and the factors.
     trunc_mul: FxHashMap<ValueId, (ValueId, ValueId)>,
+    /// gfx950: scalar f16 conversions marked by `gfx9::trunc_mix` of an f32 `arith.fmul` or `arith.fma` result ->
+    /// its factors and addend (`None`: the product alone); each is one `v_fma_mixlo_f16`.
+    scalar_mix: FxHashMap<ValueId, (ValueId, ValueId, Option<ValueId>)>,
     /// `alias::value_tags`, by which VMEM instructions get `MInst::mem`;
     /// empty (every access `alias::ANY`) with `ROCKE_DIRECT_DEBUG=noalias`.
     mem_tags: Vec<u16>,
@@ -1273,6 +1276,7 @@ impl<'a> Isel<'a> {
                 self.valu(Opc::VCvtF32F16, [r(dst)], [src], if hi { M_OPSEL_SRC0 } else { 0 });
                 self.set(res.unwrap(), Val::W(r(dst)));
             }
+            CastF32To | TruncF32ToF16 if self.scalar_mix.contains_key(&res.unwrap()) => self.scalar_trunc_mix(op)?,
             CastF32To => {
                 if op.str_attr("target") != Some("f16") {
                     return Err(unsupported("cast_f32_to only supports f16"));
@@ -3084,6 +3088,38 @@ impl<'a> Isel<'a> {
             }
         }
         self.set(v, Val::T(dst));
+        Ok(())
+    }
+
+    /// A scalar f16 conversion of an f32 product or FMA (`find_scalar_trunc_mix`): one `v_fma_mixlo_f16` of the
+    /// factors and the addend (-0.0 for a product, so that a negative zero product stays one), which rounds the
+    /// exact result to f16 once, as LLVM selects `fptrunc (fma a, b, c)` and `fptrunc (fmul a, b)`.
+    fn scalar_trunc_mix(&mut self, op: &Op) -> Result<(), CompileError> {
+        let v = op.results[0];
+        let (a, b, c) = self.scalar_mix[&v];
+        let mut mods = 0;
+        let mut src = |this: &mut Self, i: u32, x: ValueId| -> Result<Opnd, CompileError> {
+            // An `arith.fneg` read by FMAs only is never emitted: its operand comes with a negation modifier.
+            let o = match this.fneg_fma.get(&x) {
+                Some(&y) => {
+                    mods |= M_NEG0 << i;
+                    this.w(y)?
+                }
+                None => this.w(x)?,
+            };
+            Ok(this.vop3p_opnd(o))
+        };
+        let (a, b) = (src(self, 0, a)?, src(self, 1, b)?);
+        let c = match c {
+            Some(c) => src(self, 2, c)?,
+            None => {
+                mods |= M_NEG2;
+                Opnd::Imm(0)
+            }
+        };
+        let dst = self.vgpr(1);
+        self.valu(Opc::VFmaMixloF16, [r(dst)], [a, b, c], mods);
+        self.set(v, Val::H(r(dst), false));
         Ok(())
     }
 
@@ -6088,6 +6124,35 @@ fn find_f16_packs(cx: &ChainCx, region: &Region, packs: &mut FxHashMap<ValueId, 
     }
 }
 
+/// The scalar f16 conversions `gfx9::trunc_mix` marked whose f32 is still an `arith.fmul` or `arith.fma` after
+/// optimization: one `v_fma_mixlo_f16` rounds the exact result once, as LLVM selects them. The product or FMA is
+/// skipped when the conversion is its only reader.
+fn find_scalar_trunc_mix(
+    cx: &ChainCx,
+    region: &Region,
+    found: &mut FxHashMap<ValueId, (ValueId, ValueId, Option<ValueId>)>,
+    skip: &mut FxHashSet<ValueId>,
+) {
+    let f32_scalar = Type::Scalar(Scalar::F32);
+    for op in &region.ops {
+        for inner in &op.regions {
+            find_scalar_trunc_mix(cx, inner, found, skip);
+        }
+        if op.attr(crate::target::gfx9::trunc_mix::MARK).is_none() || skip.contains(&op.results[0]) {
+            continue;
+        }
+        let x = op.operands[0];
+        let Some(d) = cx.defs.get(&x).filter(|d| matches!(d.kind, OpKind::Fmul | OpKind::Fma)) else { continue };
+        if *cx.k.ty(x) != f32_scalar || d.operands.iter().any(|&o| *cx.k.ty(o) != f32_scalar) {
+            continue;
+        }
+        found.insert(op.results[0], (d.operands[0], d.operands[1], (d.kind == OpKind::Fma).then(|| d.operands[2])));
+        if cx.uses[x.0 as usize] == 1 {
+            skip.insert(x);
+        }
+    }
+}
+
 /// f16 `vector.trunc_f32_to` of a single-use product of even-length f32
 /// vectors: the product folds into the conversion (`trunc_mix`).
 fn find_trunc_products(cx: &ChainCx, region: &Region, found: &mut FxHashMap<ValueId, (ValueId, ValueId)>, skip: &mut FxHashSet<ValueId>) {
@@ -6306,6 +6371,10 @@ pub fn select_for(
     find_vote_selects(&cx, &kernel.body, &mut vote_sel, &mut chains.skip);
     let mut trunc_mul = FxHashMap::default();
     find_trunc_products(&cx, &kernel.body, &mut trunc_mul, &mut chains.skip);
+    let mut scalar_mix = FxHashMap::default();
+    if target == Target::Gfx950 {
+        find_scalar_trunc_mix(&cx, &kernel.body, &mut scalar_mix, &mut chains.skip);
+    }
     let (mut negs, mut fma_uses) = (FxHashMap::default(), FxHashMap::default());
     find_fneg_fma(kernel, &kernel.body, &mut negs, &mut fma_uses);
     let fneg_fma = negs.into_iter().filter(|(v, _)| fma_uses.get(v) == Some(&uses[v.0 as usize])).collect();
@@ -6341,6 +6410,7 @@ pub fn select_for(
         packs,
         vote_sel,
         trunc_mul,
+        scalar_mix,
         mem_tags: if super::debug_flag("noalias") { Vec::new() } else { super::alias::value_tags(kernel) },
         lds_dma: match target {
             Target::Gfx950 => crate::target::gfx9::lds_dma::Facts::of(kernel),
@@ -7880,5 +7950,98 @@ mod dword_quad_tests {
         let (off, on) = (listing(""), listing(", u16_zext = b:true"));
         assert!(off.contains("ds_read_u16") && and16(&off), "{off}");
         assert!(on.contains("ds_read_u16") && !and16(&on), "{on}");
+    }
+}
+
+/// f16 conversions of f32 products and FMAs that `gfx9::trunc_mix` marks round once (`v_fma_mixlo_f16`), as LLVM
+/// selects them: an f32 FMA followed by `v_cvt_f16_f32` rounds twice, which differs by one f16 ulp on about 1
+/// element in 10^5.
+#[cfg(test)]
+mod f16_single_rounding_tests {
+    use super::{Opc, Opnd, M_NEG2};
+    use crate::target::Target;
+
+    /// A kernel storing the f16 conversion of the f32 `%m` (computed from three f32 loads `%a`, `%b`, `%c`) with
+    /// a plain store; `extra` is more IR after it.
+    fn kernel(m: &str, convert: &str, extra: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @round {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %X : ptr<f32,global>\n    \
+             %Y : ptr<f16,global>\n    %Z : ptr<f32,global>\n  }}\n  region @entry {{\n    \
+             %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c64 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:64 }}\n    \
+             %c128 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:128 }}\n    \
+             %t1 : i32 = arith.add ( %tid, %c64 )\n    %t2 : i32 = arith.add ( %tid, %c128 )\n    \
+             %a : f32 = memref.global_load_typed ( %X, %tid ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             %b : f32 = memref.global_load_typed ( %X, %t1 ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             %c : f32 = memref.global_load_typed ( %X, %t2 ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             {m}\n    {convert}\n    \
+             memref.global_store_typed ( %Y, %tid, %h ) {{ align = i:2, elem_type = s:\"f16\" }}\n    {extra}\n    \
+             cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn listing(text: &str, target: Target) -> String {
+        crate::rir::compile_any_target(text, target).unwrap_or_else(|e| panic!("{e}")).listing()
+    }
+
+    fn count(listing: &str, mnemonic: &str) -> usize {
+        listing.lines().filter(|l| l.trim_start().starts_with(mnemonic)).count()
+    }
+
+    const TRUNC: &str = "%h : f16 = arith.trunc_f32_to_f16 ( %m )";
+    const CAST: &str = "%h : f16 = arith.cast_f32_to ( %m ) { target = s:\"f16\" }";
+    const FMA: &str = "%m : f32 = arith.fma ( %a, %b, %c )";
+    const FMUL: &str = "%m : f32 = arith.fmul ( %a, %b )";
+
+    #[test]
+    fn an_fma_converted_to_f16_is_one_mixlo() {
+        for convert in [TRUNC, CAST] {
+            let l = listing(&kernel(FMA, convert, ""), Target::Gfx950);
+            assert_eq!(count(&l, "v_fma_mixlo_f16"), 1, "{convert}\n{l}");
+            assert_eq!((count(&l, "v_fma_f32"), count(&l, "v_cvt_f16_f32")), (0, 0), "{convert}\n{l}");
+        }
+    }
+
+    #[test]
+    fn a_product_converted_to_f16_is_one_mixlo_with_a_negative_zero_addend() {
+        for convert in [TRUNC, CAST] {
+            let text = kernel(FMUL, convert, "");
+            let l = listing(&text, Target::Gfx950);
+            assert_eq!(count(&l, "v_fma_mixlo_f16"), 1, "{convert}\n{l}");
+            assert_eq!((count(&l, "v_mul_f32"), count(&l, "v_cvt_f16_f32")), (0, 0), "{convert}\n{l}");
+            // the addend is -0.0 (0 with its negation modifier), so a negative zero product stays negative
+            let c = crate::rir::compile_for(&text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+            let mix = c.func.blocks.iter().flat_map(|b| &b.insts).find(|i| i.op == Opc::VFmaMixloF16).expect("a mixlo");
+            assert_eq!((mix.uses[2], mix.mods & M_NEG2), (Opnd::Imm(0), M_NEG2), "{l}");
+        }
+    }
+
+    #[test]
+    fn a_product_read_elsewhere_is_computed_again_inside_the_mixlo() {
+        // LLVM does the same: the f32 product stays for its other reader, the f16 is rounded from the exact one.
+        let extra = "memref.global_store_typed ( %Z, %tid, %m ) { align = i:4, elem_type = s:\"f32\" }";
+        let l = listing(&kernel(FMUL, TRUNC, extra), Target::Gfx950);
+        assert_eq!((count(&l, "v_mul_f32"), count(&l, "v_fma_mixlo_f16"), count(&l, "v_cvt_f16_f32")), (1, 1, 0), "{l}");
+    }
+
+    #[test]
+    fn two_stored_conversions_are_left_to_the_slp_vectorizer_model() {
+        // LLVM vectorizes two stored products (a multiply and `v_cvt_pk_f16_f32`): no mixlo, as before.
+        let extra = "%m2 : f32 = arith.fmul ( %b, %c )\n    %h2 : f16 = arith.trunc_f32_to_f16 ( %m2 )\n    \
+                     memref.global_store_typed ( %Y, %t1, %h2 ) { align = i:2, elem_type = s:\"f16\" }";
+        let l = listing(&kernel(FMUL, TRUNC, extra), Target::Gfx950);
+        assert_eq!(count(&l, "v_fma_mixlo_f16"), 0, "{l}");
+    }
+
+    #[test]
+    fn other_f32_values_still_convert_with_cvt() {
+        let l = listing(&kernel("%m : f32 = arith.fadd ( %a, %b )", TRUNC, ""), Target::Gfx950);
+        assert_eq!((count(&l, "v_add_f32"), count(&l, "v_cvt_f16_f32"), count(&l, "v_fma_mixlo_f16")), (1, 1, 0), "{l}");
+    }
+
+    #[test]
+    fn gfx1151_keeps_the_conversion() {
+        let l = listing(&kernel(FMA, TRUNC, ""), Target::Gfx1151);
+        assert_eq!(count(&l, "v_fma_mixlo_f16"), 0, "{l}");
     }
 }
