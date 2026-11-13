@@ -664,9 +664,9 @@ access that poisons the rest of the process).
 Outputs MIOpen computes wrongly are not data for the fit: an output whose
 error against the float64 result exceeds a quarter of `sigma`, or that holds a
 NaN or an infinity. That leaves out 211 cases: the mixed-layout class `F15`
-(124, both directions), the 3D channels-last `F16plane`, `F16chan` and
-`F16fast` cases (44), and the extreme-magnitude classes `F21tiny` and
-`F21large` (42, values that underflow or overflow).
+(124, both directions), the non-packed-stride classes `F16plane`, `F16chan`
+and `F16fast` (44), and the extreme-magnitude classes
+`F21tiny` and `F21large` (42, values that underflow or overflow).
 
 | Direction | Output | Correct outputs (fit / validation) | Fail the per-op default | Fail the dynamic tolerance | Smallest headroom (fit / validation) | Median headroom |
 |---|---|---|---|---|---|---|
@@ -730,12 +730,14 @@ the tree:
 | test plans, all levels | new | 7,954 | 7,789 | 165 |
 | in the tree (`*_Convolution*`), all levels | the bundles' own | 1,280 | 1,280 | 0 |
 
-Every failure is an output MIOpen computes wrongly (values of 1e4 to 1e36,
-infinities, NaNs or wrong signs): 171 distinct cases, all of the classes
-listed above (`F15` 124, `F16plane` 20, `F16chan` 15, `F16fast` 9, `F21large`
-3), 3 of them 3D channels-last forward cases. With the per-op defaults the
-same plan cases had about 130 more failures per seed, all of them correct
-outputs.
+Every failure but three is an output MIOpen computes wrongly (values of 1e4
+to 1e38, infinities, NaNs, wrong signs or doubled values): 168 distinct
+cases of the classes listed above (`F15` 124, `F16plane` 20, `F16chan` 15,
+`F16fast` 9; 3 of them forward, all channels-last). The other three are
+`F21large` backward-weights outputs that overflow to infinity where the
+reference is just under the largest value of the type. With the per-op
+defaults the same plan cases had about 130 more failures per seed, all of
+them correct outputs.
 
 ### When an engine needs more
 
