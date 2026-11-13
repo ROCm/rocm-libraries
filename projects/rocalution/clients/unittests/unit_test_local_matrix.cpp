@@ -3552,6 +3552,40 @@ TEST(local_matrix_preconditions,
     }
 }
 
+// rocSPARSE rejects an ELL matrix that is wider than it has columns, which only padding
+// beyond the longest row makes it. The host applies such a matrix, the accelerator ends
+// the program.
+TEST(local_matrix_preconditions, ell_wider_than_ncol_ends_the_program_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+
+    // Rows {1, 2} and {0, 3} of a 2 x 2 matrix, padded to 3 entries per row
+    rocalution::LocalMatrix<double> A;
+    A.AllocateELL("A", 6, 2, 2, 3);
+    int*    col     = nullptr;
+    double* val     = nullptr;
+    int     max_row = 0;
+    A.LeaveDataPtrELL(&col, &val, max_row);
+    const int    cols[6] = {0, 1, 1, -1, -1, -1};
+    const double vals[6] = {1.0, 3.0, 2.0, 0.0, 0.0, 0.0};
+    std::copy(cols, cols + 6, col);
+    std::copy(vals, vals + 6, val);
+    A.SetDataPtrELL(&col, &val, "A", 6, 2, 2, 3);
+
+    auto y = make_local_vector(Backend::Host, std::vector<double>(2, 0.0));
+    A.Apply(*make_local_vector(Backend::Host, std::vector<double>(2, 1.0)), y.get());
+    EXPECT_EQ(values_of(*y), (std::vector<double>{3.0, 3.0}));
+
+    const std::string message = "The ELL width max_row = 3 is larger than ncol = 2, which is not "
+                                "supported on the accelerator.*Fatal error - the program will be "
+                                "terminated.*File: [^;]*";
+    EXPECT_LOGGED_EXIT(A.MoveToAccelerator(), message + "hip_matrix_ell\\.cpp;");
+
+    rocalution::LocalMatrix<double> H;
+    H.MoveToAccelerator();
+    EXPECT_LOGGED_EXIT(H.AllocateHYB("H", 6, 0, 3, 2, 2), message + "hip_matrix_hyb\\.cpp;");
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 

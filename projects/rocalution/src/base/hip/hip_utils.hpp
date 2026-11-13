@@ -140,6 +140,20 @@
         }                                                                                 \
     }
 
+// rocSPARSE rejects an ELL descriptor that is wider than the matrix has columns. The
+// natural width of a matrix without duplicate entries never is, so only padding to a
+// larger max_row leads here.
+#define CHECK_SPMAT_ELL_WIDTH(max_row, ncol, file, line)                                           \
+    {                                                                                              \
+        if(static_cast<int64_t>(max_row) > static_cast<int64_t>(ncol))                             \
+        {                                                                                          \
+            LOG_INFO("The ELL width max_row = " << (max_row)                                       \
+                                                << " is larger than ncol = " << (ncol)             \
+                                                << ", which is not supported on the accelerator"); \
+            FATAL_ERROR(file, line);                                                               \
+        }                                                                                          \
+    }
+
 namespace rocalution
 {
     static __device__ __forceinline__ float hip_nontemporal_load(const float* ptr)

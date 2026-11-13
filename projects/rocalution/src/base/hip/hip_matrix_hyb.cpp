@@ -99,6 +99,8 @@ namespace rocalution
 
         if(this->ell_nnz_ > 0)
         {
+            CHECK_SPMAT_ELL_WIDTH(this->mat_.ELL.max_row, this->ncol_, __FILE__, __LINE__);
+
             status = rocsparse_create_ell_descr(&this->ell_spmat_descr_,
                                                 this->nrow_,
                                                 this->ncol_,
