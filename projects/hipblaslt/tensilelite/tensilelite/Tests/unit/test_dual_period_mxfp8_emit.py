@@ -27,7 +27,14 @@ import shutil
 import pytest
 
 
-def _emit_dual_period_kernel(plr=1):
+# MT256x256, MIWT 8x4, MIWG 2x4: the geometry described above.
+_MI_8X4 = (16, 16, 128, 1, 1, 8, 4, 2, 4)
+# MT256x320, MIWT 8x10, MIWG 2x2 (library sol 102): its halves are long enough
+# for planHalfDisjointBalance to move wrap A tiles into a current-cell read.
+_MI_8X10 = (16, 16, 128, 1, 1, 8, 10, 2, 2)
+
+
+def _emit_dual_period_kernel(plr=1, mi=_MI_8X4):
     """Build the real dual-period MXFP8 solution and return its assembly text.
 
     Partition-directed PLR (next-partition prefetch, n-major traversal, 2x2
@@ -35,7 +42,7 @@ def _emit_dual_period_kernel(plr=1):
     parameters -- no environment knobs are required.  ``plr`` only reaches the
     solution; the schedule pins its own base, so it cannot change the assembly.
     """
-    res = _codegen_kernel(plr=plr)
+    res = _codegen_kernel(plr=plr, mi=mi)
     assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
     src = res.src
     if isinstance(src, (bytes, bytearray)):
@@ -43,7 +50,7 @@ def _emit_dual_period_kernel(plr=1):
     return src
 
 
-def _codegen_kernel(plr=1, mx=True, mi=(16, 16, 128, 1, 1, 8, 4, 2, 4)):
+def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4):
     """Run codegen on the dual-period geometry, or a plain-FP8 kernel when not mx."""
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.Common.Capabilities import makeIsaInfoMap
@@ -176,6 +183,42 @@ def dual_src():
     return _emit_dual_period_kernel()
 
 
+@pytest.fixture(scope="module")
+def balanced_8x10():
+    """The 8x10 kernel, with each balanced-read deferral recorded.
+
+    Returns the assembly and one (body, balanced reads, applied) entry per
+    main-loop body, in emit order. The bodies are the scheduler's modules
+    after every post-pass, so they hold the final order."""
+    from tensilelite.Components.Subtile import InstructionScheduler
+    defer = InstructionScheduler.deferBalancedCurrentCellWait
+    calls = []
+
+    def record(module, balancedReads):
+        applied = defer(module, balancedReads)
+        calls.append((module, list(balancedReads), applied))
+        return applied
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(InstructionScheduler, "deferBalancedCurrentCellWait", record)
+        src = _emit_dual_period_kernel(mi=_MI_8X10)
+    return src, calls
+
+
+@pytest.fixture(scope="module")
+def unbalanced_8x10_src():
+    from tensilelite.Components.Subtile import LogicalScheduler
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(LogicalScheduler, "planHalfDisjointBalance", lambda *a, **k: None)
+        return _emit_dual_period_kernel(mi=_MI_8X10)
+
+
+@pytest.fixture(scope="module", params=["8x4", "8x10"])
+def any_src(request, dual_src, balanced_8x10):
+    """Geometry-independent checks run on both kernels."""
+    return dual_src if request.param == "8x4" else balanced_8x10[0]
+
+
 def test_six_scale_reads_per_epoch(dual_src):
     body = _mainloop_lines(dual_src)
     reads = [ln for ln in body if "ds_read" in ln and re.search(r"// S[AB] MT=", ln)]
@@ -223,23 +266,23 @@ def test_scale_cadence_once_per_epoch(dual_src):
     assert len(re.findall(r"swap MXS\w+ LR vgpr", body)) == 2
 
 
-def test_valu_stays_out_of_direct_to_lds_gaps(dual_src):
-    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+def test_valu_stays_out_of_direct_to_lds_gaps(any_src):
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(any_src))):
         assert not (any(_is_valu(op) for op in gap)
                     and any(op.startswith("buffer_load") for op in gap)), (i, gap)
 
 
-def test_no_gap_opens_with_a_valu(dual_src):
-    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+def test_no_gap_opens_with_a_valu(any_src):
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(any_src))):
         assert not (gap and _is_valu(gap[0])), (i, gap)
 
 
-def test_salu_issues_first_in_each_gap(dual_src):
+def test_salu_issues_first_in_each_gap(any_src):
     """No SALU, m0 write or load follows a ds_read or VALU of its gap
     unless a wait, barrier or branch separates them or it uses the
     earlier instruction's result. The loop counter and back-branch after
     the C1 cell are not part of any gap."""
-    body = _mainloop_lines(dual_src)
+    body = _mainloop_lines(any_src)
     body = body[:next(i for i, ln in enumerate(body) if "MAINLOOP_C1 end" in ln)]
     for i, gap in enumerate(_mfma_gap_lines(body)):
         behind = []
@@ -256,11 +299,11 @@ def test_salu_issues_first_in_each_gap(dual_src):
                     assert dst in operands, (i, gap, earlier, code)
 
 
-def test_load_runs_and_salu_per_gap_stay_capped(dual_src):
+def test_load_runs_and_salu_per_gap_stay_capped(any_src):
     """At most five consecutive gaps issue a load, and no gap holds more
     SALU and m0 writes than its five follower slots."""
     run = 0
-    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(any_src))):
         run = run + 1 if any(op.startswith("buffer_load") for op in gap) else 0
         assert run <= 5, (i, gap)
         salu = [op for op in gap if op.startswith("s_") and not op.startswith(
@@ -343,7 +386,7 @@ def test_c1_scale_refreshes_sit_at_their_war_floors(dual_src):
     assert [floor for _at, floor in refreshes] == [at for at, _floor in refreshes]
 
 
-def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
+def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(any_src):
     """A half puts a load beside a ds_read only when it has fewer gaps
     after its barrier that could take a load alone than loads: gaps with
     no read, wait, barrier, VALU or request, room for m0 and the load,
@@ -353,7 +396,7 @@ def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
     def has(gap, *prefixes):
         return any(code.startswith(prefixes) for code in gap)
 
-    halves = _half_gaps(_mainloop_lines(dual_src))
+    halves = _half_gaps(_mainloop_lines(any_src))
     assert len(halves) == 4
     for c, gaps in enumerate(halves):
         barrier = [i for i, gap in enumerate(gaps) if has(gap, "s_barrier")]
@@ -484,3 +527,54 @@ def test_loads_name_their_macro_tile(dual_src):
     assert re.search(r"// B MT=n ", src)
     assert re.search(r"// A MT=n\+1 ", src) or re.search(r"// B MT=n\+1 ", src)
     assert "MT=n+2" in src
+
+
+def test_8x10_balances_both_main_loop_bodies(balanced_8x10):
+    _src, calls = balanced_8x10
+    assert len(calls) == 2, "expected the C0 and C1 main-loop bodies"
+    for body, reads, applied in calls:
+        assert reads, body.name
+        assert applied, body.name
+
+
+def test_8x10_balanced_reads_follow_their_opening_barrier(balanced_8x10):
+    from tensilelite.Components.Subtile.InstructionScheduler import _isBarrier
+    for body, reads, _applied in balanced_8x10[1]:
+        items = list(body.flatitems())
+        barrier = next(k for k, inst in enumerate(items) if _isBarrier(inst))
+        at = [next(k for k, inst in enumerate(items) if inst is read) for read in reads]
+        assert all(k > barrier for k in at), (body.name, barrier, at)
+
+
+def test_8x10_balanced_reads_have_one_covering_wait(balanced_8x10):
+    """Between each balanced read and its first consumer MFMA exactly one
+    lgkm wait retires it: none is missing and none is redundant."""
+    from tensilelite.Components.Subtile.InstructionScheduler import (
+        _incrementsLgkm, _instructionRegisterSpans, _isMfma, _isWaitCnt,
+        _lgkmCovers, _readsSpans)
+    for body, reads, _applied in balanced_8x10[1]:
+        items = list(body.flatitems())
+        for read in reads:
+            at = next(k for k, inst in enumerate(items) if inst is read)
+            dests = [span for role, span in _instructionRegisterSpans(read) if role == "dst"]
+            consumer = next(k for k in range(at + 1, len(items))
+                            if _isMfma(items[k]) and _readsSpans(items[k], dests))
+            covering, issued = 0, 0
+            for inst in items[at + 1:consumer]:
+                if _isWaitCnt(inst) and _lgkmCovers(inst, issued):
+                    covering += 1
+                if _incrementsLgkm(inst):
+                    issued += 1
+            assert covering == 1, (body.name, read.comment, covering)
+
+
+def _vmcnt_sequence(src):
+    return re.findall(r"vmcnt\((\d+)\)", "\n".join(
+        ln.split("//")[0] for ln in _mainloop_lines(src)))
+
+
+def test_8x10_balance_keeps_the_vmcnt_sequence(balanced_8x10, unbalanced_8x10_src):
+    balanced = _vmcnt_sequence(balanced_8x10[0])
+    assert balanced
+    assert balanced == _vmcnt_sequence(unbalanced_8x10_src)
+    assert "balanced current-cell" not in "\n".join(_mainloop_lines(unbalanced_8x10_src))
