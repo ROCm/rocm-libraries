@@ -52,11 +52,10 @@ class TestTuning(unittest.TestCase):
                 "cluster_signal_wmmas": {"values": [None, 3]},
                 "half_plr": {"values": ["b", "none"]},
                 "lds_segment_interleave": {"values": [True, False]},
-                "odd_tiles": {"values": [-1, 1]},
                 "store_width": {"values": [0, 4]},
             }
         )
-        self.assertEqual(len(tunings), 64)
+        self.assertEqual(len(tunings), 32)
         for t in tunings:
             token = sched.encode_tuning(t)
             self.assertNotRegex(token, r"[\s;|\"'$]")
@@ -65,6 +64,9 @@ class TestTuning(unittest.TestCase):
     def test_unknown_key(self):
         with self.assertRaises(ValueError):
             sched.normalize_tuning({"gl2": 4})
+        # The tile-count parity is the pipeline's TailNumber, not an instance trait.
+        with self.assertRaises(ValueError):
+            sched.normalize_tuning({"odd_tiles": 1})
 
     def test_instance_rules(self):
         def reason(t):
@@ -97,10 +99,8 @@ class TestTuning(unittest.TestCase):
             "ck_tile::MxTdmScheduledHalfPlr::B, ck_tile::MxTdmScheduledHalfBOrder::Late, false>",
         )
         self.assertEqual(
-            sched.cpp_kernel_traits(
-                spec, {"edge": False, "odd_tiles": 0, "tail_steps": 2}
-            ),
-            "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, 2, 8>",
+            sched.cpp_kernel_traits(spec, {"edge": False, "tail_steps": 2}),
+            "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 2, 8>",
         )
         self.assertEqual(
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
@@ -114,9 +114,9 @@ class TestTuning(unittest.TestCase):
         self.assertEqual(
             sched.instance_unsupported_reason(spec, {"edge": False}), "edge"
         )
-        self.assertEqual(
-            sched.instance_unsupported_reason(spec, {"odd_tiles": 1}), "odd_tiles"
-        )
+        # Any tile count: 4096 / 512 is even, 4608 / 512 odd.
+        odd = dataclasses.replace(spec, K=4096 + 512)
+        self.assertEqual(sched.instance_unsupported_reason(odd, {}), "")
         tail = dataclasses.replace(spec, K=4096 + 256)
         self.assertEqual(sched.instance_unsupported_reason(tail, {}), "tail_steps")
         self.assertEqual(sched.instance_unsupported_reason(tail, {"tail_steps": 2}), "")
@@ -487,10 +487,8 @@ class TestRockeConversion(unittest.TestCase):
             conv.to_dispatcher_config(fp8_out)
         cfg = conv.to_dispatcher_config(fp8_out + "_fp16")
         self.assertEqual(cfg["edge"], False)
-        self.assertEqual(cfg["odd_tiles"], 0)
-        self.assertTrue(
-            codegen.kernel_name(cfg).endswith("_32x16x128_c4x4_noedge_even")
-        )
+        self.assertNotIn("odd_tiles", cfg)
+        self.assertTrue(codegen.kernel_name(cfg).endswith("_32x16x128_c4x4_noedge"))
 
     def test_cli(self):
         r = subprocess.run(

@@ -7,7 +7,7 @@ A rocKE kernel (its name, e.g. ``mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x
 or its spec dict) becomes a tile_engine config (one instance: a single value per tile, trait
 and tuning key) or a dispatcher config (unified_mx_gemm_codegen.py). With the problem's M, N
 and K the instance gets the shape traits that problem needs exactly (no edge code when M and N
-are whole tiles, the K tail, the tile parity), so it is the instance rocKE would build.
+are whole tiles, the K tail), so it is the instance rocKE would build.
 
 tile_engine and the dispatcher build A and B of one type (fp4 or fp8) and an fp16 D. A rocKE
 kernel outside that (bf8 or mixed inputs, its default fp8 D) needs ``out_dtype="fp16"`` to

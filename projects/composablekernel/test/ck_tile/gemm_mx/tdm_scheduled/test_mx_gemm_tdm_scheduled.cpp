@@ -25,24 +25,27 @@ template <typename O, typename Tuning, typename Traits>
 using Fp4BigTdm = TdmKernel<pk_fp4_t, pk_fp4_t, O, 256, 256, 512, 2, 2, 32, Tuning, Traits>;
 
 // The rocKE MAF winner, mx_gemm_mxfp4_t256x256x512_c4x4.
-using Maf         = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0, 0, 8>>;
-using MafOdd      = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1, 0, 8>>;
-using MafAny      = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, -1, 0, 8>>;
-using MafTail     = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0, 1, 8>>;
-using MafOddTail3 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1, 3, 8>>;
+using Maf         = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0, 8>>;
+using MafTail     = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1, 8>>;
+using MafOddTail3 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 3, 8>>;
 
 TEST(MxGemmTdmScheduled, Fp4MafEvenTiles) { check<Maf>(1024, 1024, 2048); }
 TEST(MxGemmTdmScheduled, Fp4MafLongK) { check<Maf>(1024, 1024, 65536); }
-TEST(MxGemmTdmScheduled, Fp4MafOddTilesPeel)
+TEST(MxGemmTdmScheduled, Fp4MafOddTiles)
 {
-    check<MafOdd>(1024, 1024, 512);
-    check<MafOdd>(1024, 1024, 1536);
+    check<Maf>(1024, 1024, 512);
+    check<Maf>(1024, 1024, 1536);
+    check<Maf>(1024, 1024, 2560);
 }
-TEST(MxGemmTdmScheduled, Fp4AnyParityRunsBoth)
+// One instance serves every whole-tile count: 1 and 2 run without the loop, 3 and 4 with it,
+// each with TailNumber One (odd) or Two (even).
+TEST(MxGemmTdmScheduled, Fp4MafTileCounts)
 {
-    check<MafAny>(1024, 1024, 512);
-    check<MafAny>(1024, 1024, 1024);
-    check<MafAny>(1024, 1024, 2560);
+    for(index_t tiles = 1; tiles <= 4; ++tiles)
+    {
+        check<Maf>(1024, 1024, tiles * 512);
+        check<MafTail>(1024, 1024, tiles * 512 + 128);
+    }
 }
 TEST(MxGemmTdmScheduled, Fp4KTail)
 {
@@ -55,21 +58,21 @@ TEST(MxGemmTdmScheduled, Fp4KTail)
 
 TEST(MxGemmTdmScheduled, Fp4OutputTypes)
 {
-    check<Fp4Big<half_t, Tu<4, 4>, Shape<false, false, 0, 0, 8>>>(1024, 1024, 2048);
-    check<Fp4Big<bf16_t, Tu<4, 4>, Shape<false, false, 0, 0, 8>>>(1024, 1024, 2048);
+    check<Fp4Big<half_t, Tu<4, 4>, Shape<false, false, 0, 8>>>(1024, 1024, 2048);
+    check<Fp4Big<bf16_t, Tu<4, 4>, Shape<false, false, 0, 8>>>(1024, 1024, 2048);
 }
 
 TEST(MxGemmTdmScheduled, Fp4Clusters)
 {
-    check<Fp4Big<fp8_t, Tu<1, 1>, Shape<false, false, 0, 0, 8>>>(512, 768, 2048);
-    check<Fp4Big<fp8_t, Tu<2, 2>, Shape<false, false, 0, 0, 8>>>(512, 1024, 2048);
-    check<Fp4Big<fp8_t, Tu<4, 2>, Shape<false, false, 0, 0, 8>>>(512, 1024, 2048);
-    check<Fp4Big<fp8_t, Tu<2, 2, 4, 3>, Shape<false, false, 0, 0, 8>>>(512, 1024, 2048);
+    check<Fp4Big<fp8_t, Tu<1, 1>, Shape<false, false, 0, 8>>>(512, 768, 2048);
+    check<Fp4Big<fp8_t, Tu<2, 2>, Shape<false, false, 0, 8>>>(512, 1024, 2048);
+    check<Fp4Big<fp8_t, Tu<4, 2>, Shape<false, false, 0, 8>>>(512, 1024, 2048);
+    check<Fp4Big<fp8_t, Tu<2, 2, 4, 3>, Shape<false, false, 0, 8>>>(512, 1024, 2048);
 }
 
 TEST(MxGemmTdmScheduled, Fp4ScheduleVariants)
 {
-    using S = Shape<false, false, 0, 0, 8>;
+    using S = Shape<false, false, 0, 8>;
     check<Fp4Big<fp8_t,
                  Tu<4, 4, 2, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
                  S>>(1024, 1024, 4096);
@@ -95,7 +98,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  2,
                  32,
                  Tu<4, 4>,
-                 Shape<false, false, 0, 0, 8>>>(1024, 1024, 2048);
+                 Shape<false, false, 0, 8>>>(1024, 1024, 2048);
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
                  fp8_t,
@@ -106,7 +109,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  2,
                  32,
                  Tu<2, 2>,
-                 Shape<false, false, 0, 0, 4>>>(512, 512, 4096);
+                 Shape<false, false, 0, 4>>>(512, 512, 4096);
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
                  fp8_t,
@@ -117,7 +120,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  4,
                  32,
                  Tu<2, 2>,
-                 Shape<false, false, 0, 0, 4>>>(512, 512, 2048);
+                 Shape<false, false, 0, 4>>>(512, 512, 2048);
     check<
         Kernel<pk_fp4_t,
                pk_fp4_t,
@@ -129,7 +132,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                1,
                32,
                Tu<1, 1, 4, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late, false>,
-               Shape<false, false, 0, 0, 4>>>(512, 512, 2048);
+               Shape<false, false, 0, 4>>>(512, 512, 2048);
     // The 16x16 atom with FP4, and the MAB shape: tile_n 16, one N repeat.
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
@@ -141,7 +144,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  2,
                  16,
                  Tu<4, 4>,
-                 Shape<false, false, 0, 0, 8>>>(1024, 1024, 2048);
+                 Shape<false, false, 0, 8>>>(1024, 1024, 2048);
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
                  fp8_t,
@@ -152,7 +155,7 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  1,
                  16,
                  Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                 Shape<false, false, 0, 0, 1>>>(2048, 16, 4096);
+                 Shape<false, false, 0, 1>>>(2048, 16, 4096);
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
                  fp8_t,
@@ -163,12 +166,12 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  1,
                  16,
                  Tu<1, 1, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
-                 Shape<true, false, 0, 0, 1>>>(1000, 16, 2048);
+                 Shape<true, false, 0, 1>>>(1000, 16, 2048);
 }
 
 TEST(MxGemmTdmScheduled, EightBitTypes)
 {
-    using S = Shape<false, false, 0, 0, 4>;
+    using S = Shape<false, false, 0, 4>;
     check<Kernel<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, S>>(512, 512, 2048);
     check<Kernel<bf8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, S>>(512, 512, 2048);
     check<Kernel<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, S>>(512, 512, 2048);
@@ -206,14 +209,13 @@ TEST(MxGemmTdmScheduled, EightBitTypes)
                  Tu<2, 2, 4, -1, 0, MxTdmScheduledHalfPlr::None>,
                  S>>(512, 512, 2048);
     // 8-bit edge and K tail (rocKE's 1000 x 1000 x (2048 + 96) bf8 check).
-    check<
-        Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, Shape<true, true, 0, 1, 4>>>(
+    check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, Shape<true, true, 1, 4>>>(
         1000, 1000, 2048 + 96);
 }
 
 TEST(MxGemmTdmScheduled, Edges)
 {
-    using Edge = Fp4Big<fp8_t, Tu<1, 1>, Shape<true, true, 0, 0, 8>>;
+    using Edge = Fp4Big<fp8_t, Tu<1, 1>, Shape<true, true, 0, 8>>;
     check<Edge>(1000, 1000, 2048);
     check<Edge>(1, 1000, 2048);
     check<Edge>(1000, 8, 2048);
@@ -230,7 +232,7 @@ TEST(MxGemmTdmScheduled, Edges)
                  2,
                  32,
                  Tu<1, 1>,
-                 Shape<true, true, 0, 0, 1>>>(1024, 1001, 2048);
+                 Shape<true, true, 0, 1>>>(1024, 1001, 2048);
 }
 
 /// E past the output range: scales 2^3, 2^8 and 2^14 above the sparse check's on each operand
@@ -238,12 +240,12 @@ TEST(MxGemmTdmScheduled, Edges)
 /// saturates to +-448; FP16 rounds without clamping, to inf past 65504.
 TEST(MxGemmTdmScheduled, Fp8Saturation)
 {
-    using S = Shape<false, false, 0, 0, 8>;
+    using S = Shape<false, false, 0, 8>;
     for(int shift : {0, 5, 11})
     {
         check<Fp4Big<fp8_t, Tu<1, 1>, S>>(256, 256, 2048, shift);
         check<Fp4Big<half_t, Tu<1, 1>, S>>(256, 256, 2048, shift);
-        check<Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<false, false, 0, 0, 1>>>(256, 256, 2048, shift);
+        check<Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<false, false, 0, 1>>>(256, 256, 2048, shift);
     }
 }
 
@@ -251,7 +253,7 @@ TEST(MxGemmTdmScheduled, Fp8Saturation)
 /// FP16 output and edges with N odd.
 TEST(MxGemmTdmScheduled, TdmEpilogue)
 {
-    using S = Shape<false, false, 0, 0, 1>;
+    using S = Shape<false, false, 0, 1>;
     check<Fp4BigTdm<fp8_t, Tu<4, 4>, S>>(1024, 1024, 2048);
     check<Fp4BigTdm<half_t, Tu<4, 4>, S>>(1024, 1024, 2048);
     check<TdmKernel<pk_fp4_t,
@@ -265,7 +267,7 @@ TEST(MxGemmTdmScheduled, TdmEpilogue)
                     16,
                     Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
                     S>>(2048, 16, 4096);
-    using Edge = Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<true, true, 0, 0, 1>>;
+    using Edge = Fp4BigTdm<fp8_t, Tu<1, 1>, Shape<true, true, 0, 1>>;
     check<Edge>(1000, 1001, 2048);
     check<Edge>(1, 1000, 2048);
     check<TdmKernel<fp8_t,
@@ -278,7 +280,7 @@ TEST(MxGemmTdmScheduled, TdmEpilogue)
                     2,
                     16,
                     Tu<1, 1>,
-                    Shape<true, true, 0, 1, 1>>>(1000, 1001, 2048 + 96);
+                    Shape<true, true, 1, 1>>>(1000, 1001, 2048 + 96);
 }
 
 } // namespace

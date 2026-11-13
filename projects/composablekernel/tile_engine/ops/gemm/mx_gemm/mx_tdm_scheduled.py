@@ -56,11 +56,10 @@ TUNING_DEFAULTS: Dict[str, object] = {
 
 #: Shape-dependent code paths of a CK instance (the Problem's MxTdmScheduledGemmTraits). rocKE derives
 #: them from its compile-time M, N and K; a CK instance fixes them and runs every problem they
-#: cover. The defaults run any M and N and any tile count with no K tail; store_width 0 means the
-#: widest the tile allows.
+#: cover. The defaults run any M and N with no K tail; store_width 0 means the widest the tile
+#: allows. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
 SHAPE_DEFAULTS: Dict[str, object] = {
     "edge": True,
-    "odd_tiles": -1,
     "tail_steps": 0,
     "wide": False,
     "store_width": 0,
@@ -965,8 +964,6 @@ def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> st
     suffix = spec.tuning_name(with_shape_parts=False)
     if not t["edge"]:
         suffix += "_noedge"
-    if t["odd_tiles"] != -1:
-        suffix += "_odd" if t["odd_tiles"] == 1 else "_even"
     if t["tail_steps"]:
         suffix += f"_tail{t['tail_steps']}"
     if t["wide"]:
@@ -990,8 +987,6 @@ def validate_instance(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
         or not _is_pow2(width)
     ):
         return "store_width"
-    if t["odd_tiles"] not in (-1, 0, 1):
-        return "odd_tiles"
     if not 0 <= t["tail_steps"] < spec.k_steps:
         return "tail_steps"
     return "ok"
@@ -1010,8 +1005,6 @@ def instance_unsupported_reason(
         return "edge"
     if (spec.wide_a or spec.wide_b or spec.wide_d) and not t["wide"]:
         return "wide"
-    if t["odd_tiles"] >= 0 and (spec.K // spec.tile_k) % 2 != t["odd_tiles"]:
-        return "odd_tiles"
     if spec.tail_steps != t["tail_steps"]:
         return "tail_steps"
     if spec.N % instance_store_width(spec, t):
@@ -1046,7 +1039,7 @@ def cpp_kernel_traits(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     wide = "true" if t["wide"] else "false"
     return (
         f"ck_tile::MxTdmScheduledGemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
-        f"{t['odd_tiles']}, {t['tail_steps']}, {instance_store_width(spec, t)}>"
+        f"{t['tail_steps']}, {instance_store_width(spec, t)}>"
     )
 
 
@@ -1059,7 +1052,6 @@ def te_tuning_from_spec(
     if shape_traits and spec.M and spec.N and spec.K:
         t.update(
             edge=spec.edge_m or spec.edge_n,
-            odd_tiles=(spec.K // spec.tile_k) % 2,
             tail_steps=spec.tail_steps,
             wide=spec.wide_a or spec.wide_b or spec.wide_d,
             store_width=0

@@ -115,12 +115,12 @@ struct Tu
         ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
 };
 
-// Whole tiles, even tile count, no K tail.
+// Whole M and N tiles, no K tail.
 template <index_t StoreWidth>
-using Even = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, 0, StoreWidth>;
-// Any M, N (edges), any tile count, no K tail.
+using Whole = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 0, StoreWidth>;
+// Any M, N (edges), no K tail.
 template <index_t StoreWidth>
-using Any = ck_tile::MxTdmScheduledGemmTraits<true, true, false, false, false, -1, 0, StoreWidth>;
+using Any = ck_tile::MxTdmScheduledGemmTraits<true, true, false, false, false, 0, StoreWidth>;
 
 using ck_tile::bf16_t;
 using ck_tile::bf8_t;
@@ -419,7 +419,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            32,
                            Tu<4, 4>,
-                           Even<8>>>}},
+                           Whole<8>>>}},
             {"maf_fp16",
              {"maf with fp16 out",
               run<Pipeline<pk_fp4_t,
@@ -432,7 +432,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            32,
                            Tu<4, 4>,
-                           Even<8>>>}},
+                           Whole<8>>>}},
             {"maf_bf16",
              {"maf with bf16 out",
               run<Pipeline<pk_fp4_t,
@@ -445,7 +445,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            32,
                            Tu<4, 4>,
-                           Even<8>>>}},
+                           Whole<8>>>}},
             {"maf_hblate",
              {"maf, GL2 distance 2, half-B late",
               run<Pipeline<
@@ -459,7 +459,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                   2,
                   32,
                   Tu<4, 4, 2, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
-                  Even<8>>>}},
+                  Whole<8>>>}},
             {"maf_c2x2",
              {"maf on a 2x2 cluster",
               run<Pipeline<pk_fp4_t,
@@ -472,7 +472,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            32,
                            Tu<2, 2>,
-                           Even<8>>>}},
+                           Whole<8>>>}},
             {"medium_t128",
              {"mxfp4 t128x128x1024 c2x2",
               run<Pipeline<pk_fp4_t,
@@ -485,7 +485,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            32,
                            Tu<2, 2>,
-                           Even<4>>>}},
+                           Whole<4>>>}},
             {"medium",
              {"mxfp4 t128x128x1024 16x16 atom, c4x4, no half-PLR (medium winner)",
               run<Pipeline<pk_fp4_t,
@@ -498,7 +498,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            16,
                            Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
-                           Even<4>>>}},
+                           Whole<4>>>}},
             {"mab",
              {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
               run<Pipeline<pk_fp4_t,
@@ -511,7 +511,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            1,
                            16,
                            Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                           Even<1>>>}},
+                           Whole<1>>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
               run<Pipeline<pk_fp4_t,
@@ -524,16 +524,16 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            1,
                            16,
                            Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                           Even<1>>>}},
+                           Whole<1>>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
               run<Pipeline<pk_fp4_t, pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32, Tu<1, 1>, Any<1>>>}},
             {"fp8",
              {"mxfp8 t128x128x256 16x16 atom c2x2",
-              run<Pipeline<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+              run<Pipeline<fp8_t, fp8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole<4>>>}},
             {"fp8_bf8_bf16",
              {"fp8 x bf8, bf16 out, t128x128x256 c2x2",
-              run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Even<4>>>}},
+              run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole<4>>>}},
         };
     return m;
 }

@@ -164,13 +164,12 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
  *
  * EdgeM / EdgeN (kPadM / kPadN): the last M (N) tile is partial, its TDM rows clipped and its D
  * vectors masked. WideA / WideB / WideD (LargeTensors if any): A's, B's or D's byte offsets pass
- * 2^31 and are i64. OddTiles: 1 if K / tile_k is odd, 0 if even, -1 if either (the odd tile then
- * runs after the loop, which may cost registers: rocKE knows the count at compile time).
- * TailSteps: the K steps of a last, partial tile when tile_k does not divide K (0 without one),
- * as rocKE's MxGemmSpec.tail_steps. StoreWidth: D columns per vector store. The edge and wide
- * paths are supersets of the ones they replace (an edge kernel runs whole tiles, a wide one
- * narrow offsets) and any store width dividing N works, so one instance serves every problem its
- * traits cover; OddTiles (unless -1) and TailSteps must be the problem's.
+ * 2^31 and are i64. TailSteps: the K steps of a last, partial tile when tile_k does not divide K
+ * (0 without one). StoreWidth: D columns per vector store. The edge and wide paths are supersets
+ * of the ones they replace (an edge kernel runs whole tiles, a wide one narrow offsets) and any
+ * store width dividing N works, so one instance serves every problem its traits cover;
+ * TailSteps must be the problem's. The parity of the whole-tile count is the pipeline's
+ * TailNumber, chosen at run time.
  * MxTdmScheduledSelectTraits gives the values an M x N x K problem needs.
  */
 template <bool EdgeM_         = false,
@@ -178,7 +177,6 @@ template <bool EdgeM_         = false,
           bool WideA_         = false,
           bool WideB_         = false,
           bool WideD_         = false,
-          index_t OddTiles_   = -1,
           index_t TailSteps_  = 0,
           index_t StoreWidth_ = 1>
 struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
@@ -204,7 +202,6 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
     static constexpr bool kWideA         = WideA_;
     static constexpr bool kWideB         = WideB_;
     static constexpr bool kWideD         = WideD_;
-    static constexpr index_t kOddTiles   = OddTiles_;
     static constexpr index_t kTailSteps  = TailSteps_;
     static constexpr bool kHasTail       = TailSteps_ != 0;
     static constexpr index_t kStoreWidth = StoreWidth_;
@@ -218,7 +215,6 @@ struct MxTdmScheduledShapeTraits
     bool wide_a;
     bool wide_b;
     bool wide_d;
-    index_t odd_tiles;
     index_t tail_steps;
     index_t store_width;
 };
@@ -252,7 +248,6 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
             span_m * packed_k > span,
             span_n * packed_k > span,
             span_m * span_n > span,
-            static_cast<index_t>(K / Shape::kK % 2),
             static_cast<index_t>(integer_divide_ceil(K % Shape::kK, 128)),
             width};
 }

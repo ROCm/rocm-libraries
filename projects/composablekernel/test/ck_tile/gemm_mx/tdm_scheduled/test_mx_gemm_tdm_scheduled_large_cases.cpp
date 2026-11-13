@@ -63,7 +63,7 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      1,
                      16,
                      Tu<1, 4, 0, -1, 0, MxTdmScheduledHalfPlr::None>,
-                     ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 0, 1>>;
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 1>>;
     check_sampled<K>(65536, 16, 81920);
 }
 
@@ -80,7 +80,7 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
                      2,
                      32,
                      Tu<1, 1>,
-                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 0, 8>>;
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 8>>;
     check_sampled<K>(33024, 33024, 1024);
     check_sampled<
         TdmKernel<pk_fp4_t,
@@ -93,7 +93,7 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
                   2,
                   32,
                   Tu<1, 1>,
-                  ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 0, 1>>>(
+                  ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0, 1>>>(
         33024, 33024, 1024);
 }
 

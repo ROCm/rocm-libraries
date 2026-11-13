@@ -117,9 +117,9 @@ struct Tu
         ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
 };
 
-template <bool EdgeM, bool EdgeN, index_t OddTiles, index_t TailSteps, index_t StoreWidth>
-using Shape = ck_tile::
-    MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, false, OddTiles, TailSteps, StoreWidth>;
+template <bool EdgeM, bool EdgeN, index_t TailSteps, index_t StoreWidth>
+using Shape =
+    ck_tile::MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, false, TailSteps, StoreWidth>;
 
 /// rocKE's sparse check (mx_gemm_bench.sparse_inputs): A and B nonzero only in a few 128-K steps
 /// (the first and last, both sides of the first and last tile boundaries, then random ones up to
