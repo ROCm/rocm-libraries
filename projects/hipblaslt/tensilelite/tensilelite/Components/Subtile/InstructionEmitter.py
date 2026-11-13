@@ -154,37 +154,40 @@ class InstructionEmitter:
         self._bakeAbLdsBuf = bool(
             kernel.get("TDMSingleIssuer") and getattr(writer, "ldsV7", None))
         self._bakingAbLds = False
-        self._ldsBufPhase = {"A": 0, "B": 0}
+        self._ldsBufPhase = 0
 
-    def begin_ab_lds_bake(self, phase_a=0, phase_b=0):
-        """Start compile-time A/B/MX LDS buf-half baking for one populate pass.
+    def ab_lds_bake_phases(self):
+        """Mainloop bodies the bake needs: A/B parity x scale ring depth."""
+        import os  # TEMP bisect
+        return int(os.environ.get("TL_BAKE_PHASES", 0)) or max(2, int(self.writer.ldsV7.sc_nbuf))
 
-        phase_* is the buffer half used by mtIteration=0 LRs. mtIteration=1
-        LRs use the other half (``phase ^ mtIteration``). populate() walks
-        EmittedModules in list order (primaries before preOp lr_incs), so the
-        bias cannot be tracked by toggling on emit_lr_inc — use mtIteration.
-        SA follows A's phase, SB follows B's (gemm_wt: scale buf from iter parity).
+    def begin_ab_lds_bake(self, phase=0):
+        """Start compile-time A/B/MX LDS buffer baking for one populate pass.
+
+        ``phase`` is the mainloop body (iteration mod ab_lds_bake_phases()).
+        mtIteration=0 LRs read data buffer ``phase & 1`` and scale buffer
+        ``phase % sc_nbuf``; mtIteration=1 LRs (the next iteration's) read the
+        buffers one iteration on. populate() walks EmittedModules in list order
+        (primaries before preOp lr_incs), so the bias cannot be tracked by
+        toggling on emit_lr_inc — use mtIteration.
         """
         assert self._bakeAbLdsBuf, "A/B LDS bake requires TDMSingleIssuer + ldsV7"
         self._bakingAbLds = True
-        self._ldsBufPhase = {"A": int(phase_a) & 1, "B": int(phase_b) & 1}
+        self._ldsBufPhase = int(phase)
 
     def end_ab_lds_bake(self):
         self._bakingAbLds = False
 
     def _ab_lds_offset_bias(self, tensor, mtIteration=0):
-        """Bake even/odd LDS buf into ds immediates (A/B data + MX scales)."""
+        """Bake the body's LDS buffers into ds immediates (A/B data + MX scales)."""
         if not self._bakingAbLds:
             return 0
         lay = self.writer.ldsV7
+        it = self._ldsBufPhase + int(mtIteration)
         if tensor in ("A", "B"):
-            phase = self._ldsBufPhase[tensor] ^ (int(mtIteration) & 1)
-            return phase * int(lay.buf)
+            return (it & 1) * int(lay.buf)
         if tensor in ("SA", "SB"):
-            # Scale ring depth is 2 (sc_nbuf); same even/odd phase as A/B.
-            key = "A" if tensor == "SA" else "B"
-            phase = self._ldsBufPhase[key] ^ (int(mtIteration) & 1)
-            return phase * int(lay.sc_buf)
+            return (it % int(lay.sc_nbuf)) * int(lay.sc_buf)
         return 0
 
     def emit_mfma(self, placement, unroll_iter=0):
@@ -383,7 +386,15 @@ class InstructionEmitter:
                     and not self.kernel.get("TDMSingleIssuer")):
                 module.add(refreshTDMDescriptorSubtile(
                     self.writer, self.kernel, tc))
-            module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
+            # Body p's scale TDM fills buffer p (the preloop issued sc_nbuf
+            # slices), so the next one goes to p + 1.
+            lay = getattr(self.writer, "ldsV7", None)
+            if self._bakingAbLds and lay is not None and lay.sc_nbuf > 2:
+                self.writer.tdmScaleNextBuf = (self._ldsBufPhase + 1) % lay.sc_nbuf
+            try:
+                module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
+            finally:
+                self.writer.tdmScaleNextBuf = None
         if self.kernel.get("TDMSingleIssuer"):
             # Wave-gated issue (cmp; cbranch; load; advance; label): one item so
             # no WMMA/LR/barrier lands inside the region other waves skip.

@@ -606,6 +606,7 @@ defaultBenchmarkCommonParameters = [
     {"MXSBTilePair": [0]},
     {"MXScaleLRB128": [0]},
     {"TDMClusterSyncAfterFree": [0]},
+    {"MXScaleLdsBuffers": [2]},
     {"ClusterMulticast": [1]},
     {"LRLookaheadB": [1]},
     {"LDSSegmentBRotate": [0]},

@@ -28,7 +28,7 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
-    SNop, SOrB32, SSubI32, SSubU32, SXorB32,
+    SNop, SOrB32, SSubBU32, SSubI32, SSubU32, SXorB32, SCMovB32,
     SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SCmpGeU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
@@ -2105,10 +2105,15 @@ def _initTDMSingleIssuerAdvParams(mod, writer, kernel, tc):
                     comment="TDMSingleIssuer: %s addr+stride" % tc))
     mod.add(SXorB32(dst=sgpr("tdmLdsXorMask"), src0=addr, src1=sgpr("tdmLdsXorMask"),
                     comment="TDMSingleIssuer: %s xor mask" % tc))
+  elif tc.startswith("MX"):
+    # Last slice the tile reads: L - 1, or L with a K tail (the tail loop's).
+    mod.add(SAndB32(dst=sgpr("tdmScaleSlicesLeft"), src0=int(kernel["DepthU"]) - 1,
+                    src1=sgpr("SizesSum+0"), comment="K % DepthU"))
+    mod.add(SCmpEQU32(src0=sgpr("tdmScaleSlicesLeft"), src1=0, comment="no K tail?"))
+    mod.add(SSubBU32(dst=sgpr("tdmScaleSlicesLeft"), src0=sgpr("LoopCounterL"), src1=0,
+                     comment="TDMSingleIssuer: %s last scale slice = L - 1 + tail" % tc))
   else:
-    # n>=3 rotate needs SwapMask/AdvStride/Span — not allocated under ldsV7.
-    raise RuntimeError(
-        "TDMSingleIssuer n>=3 advance needs rotate SGPRs; ldsV7 uses n=2")
+    raise RuntimeError("TDMSingleIssuer: %s LDS ring deeper than 2" % tc)
   if tc.startswith("MX"):
     from .SubtileScaleEmit import emitScaleTdmStepBytes, scaleRowPitch
     ti = _subtileTileInfo(writer, tc)
@@ -2661,23 +2666,36 @@ def _emitTDMSingleIssuerAdvanceAB(tc=None):
 
 
 def _emitTDMSingleIssuerAdvanceMX(writer, tc):
-  """MX depth>=3 advance: ring rotate + wrap, then global bump on live desc."""
+  """MX ring deeper than 2: next scale buffer, then the held global bump.
+
+  A baked mainloop body knows its next buffer (``writer.tdmScaleNextBuf``) and
+  sets it; the preloop and tail rotate. The scale TDM runs sc_nbuf slices
+  ahead, so the last iterations issue past K: once the last slice the tile
+  reads is out, tdmGlobalInc drops to 0 and those TDMs re-read it into
+  buffers nothing reads.
+  """
   g0 = _tdmSIGroup0(tc)
+  lay = writer.ldsV7
+  base = lay.sc_mxsa if tc == "MXSA" else lay.sc_mxsb
+  n, stride = lay.sc_nbuf, lay.sc_buf
   mod = Module("TDMSingleIssuer advance MX")
-  mod.addComment0("TDMSingleIssuer: MX rotate/wrap + global bump")
-  with writer.allocTmpSgpr(1) as tmpRes:
-    tmp = tmpRes.idx
-    mod.add(SAddU32(dst=sgpr(f"{g0}+1"), src0=sgpr(f"{g0}+1"),
-                    src1=sgpr("tdmLdsAdvStride"),
+  nextBuf = getattr(writer, "tdmScaleNextBuf", None)
+  if nextBuf is not None:
+    mod.addComment0("TDMSingleIssuer: MX next buffer %d of %d + held global bump" % (nextBuf, n))
+    mod.add(SMovB32(dst=sgpr(f"{g0}+1"), src=hex(base + nextBuf * stride),
+                    comment="desc LDS = %s buffer %d" % (tc, nextBuf)))
+  else:
+    mod.addComment0("TDMSingleIssuer: MX rotate/wrap + held global bump")
+    mod.add(SAddU32(dst=sgpr(f"{g0}+1"), src0=sgpr(f"{g0}+1"), src1=hex(stride),
                     comment="desc LDS += stride"))
-    mod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(f"{g0}+1"),
-                    src1=sgpr("tdmLdsAdvSpan"),
-                    comment="wrapped-to-buffer0 candidate"))
-    mod.add(SCmpGeU32(src0=sgpr(f"{g0}+1"), src1=sgpr("tdmLdsSwapMaskA"),
+    mod.add(SCmpGeU32(src0=sgpr(f"{g0}+1"), src1=hex(base + n * stride),
                       comment="past last LDS buffer?"))
-    mod.add(SCSelectB32(dst=sgpr(f"{g0}+1"), src0=sgpr(tmp),
-                        src1=sgpr(f"{g0}+1"),
+    mod.add(SCSelectB32(dst=sgpr(f"{g0}+1"), src0=hex(base), src1=sgpr(f"{g0}+1"),
                         comment="wrap desc LDS to buffer 0"))
+  mod.add(SSubU32(dst=sgpr("tdmScaleSlicesLeft"), src0=sgpr("tdmScaleSlicesLeft"), src1=1,
+                  comment="borrow = last slice of the tile issued"))
+  mod.add(SCMovB32(dst=sgpr("tdmGlobalInc"), src=0,
+                   comment="hold the scale address from here on"))
   mod.add(_emitTDMSingleIssuerGlobalBump(tc))
   return mod
 

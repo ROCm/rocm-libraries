@@ -5,9 +5,9 @@
 
 Places A0/A1/B0/B1 in distinct 64 KB segments so one issuer wave can fill a
 whole operand via ITERATE x2 while concurrent pair-0/pair-1 LRs hit different
-segments. Scale rings sit after the four data groups (shared, depth 2 —
-gemm_wt ``mx_sbuf=2``) so even/odd bodies can bake the scale buf into ds
-immediates and drop the mid-loop rotate. Fits the 320 KB gfx1250 LDS cap.
+segments. Scale rings sit after the four data groups (shared, depth 2 or 4 —
+gemm_wt ``mx_sbuf``) so the per-phase mainloop bodies can bake the scale buf
+into ds immediates and drop the mid-loop rotate. Fits the 320 KB gfx1250 LDS cap.
 
 Tile geometry this targets: MT256, MI32x16x128_f4, WT 4x8, 2x2 waves, row pad
 272, DU512. See bench/gfx1250_mxf4/lds_v7_layout.py for the asm-patch twin.
@@ -23,9 +23,9 @@ CAP = 327680
 ROW = 272
 HALF_ROWS = 128
 BUF = HALF_ROWS * ROW  # 34816
-SC_BUF = 8192
 SC_NBUF = 2  # gemm_wt default mx_sbuf; enables even/odd bake (was 3 + runtime rotate)
-SC_RING = SC_BUF * SC_NBUF  # 16384 per operand
+SC_RING = 16384  # per operand; MXScaleLdsBuffers splits it into sc_nbuf buffers
+SC_SLICE = 4096  # one operand's scales per DU512 slice: MT256 x 512/32 bytes
 
 # Wave ownership for TDMSingleIssuer — match gemm_wt mx_v7:
 #   TDM A/B on waves 0/2; scale TDM + GL2 PF on waves 1/3 (mx_wave = pf_wave).
@@ -70,8 +70,11 @@ class LdsV7Layout:
     return {"A": PREFETCH_A, "B": PREFETCH_B}[tc]
 
 
-def make_lds_v7_layout() -> LdsV7Layout:
+def make_lds_v7_layout(sc_nbuf: int = SC_NBUF) -> LdsV7Layout:
   """Greedy place A0,A1,B0,B1 at max(segment_g, prev_end), then scale rings."""
+  sc_buf = SC_RING // sc_nbuf
+  if sc_buf < SC_SLICE:
+    raise RuntimeError(f"LdsV7 scale buffer {sc_buf} B < one slice ({SC_SLICE} B)")
   bases: list[int] = []
   prev = 0
   for g in range(4):
@@ -92,7 +95,7 @@ def make_lds_v7_layout() -> LdsV7Layout:
       a0=a0, a1=a1, b0=b0, b1=b1,
       buf=BUF, inc_a=a1 - a0, inc_b=b1 - b0,
       sc_mxsa=sc_mxsa, sc_mxsb=sc_mxsb,
-      sc_buf=SC_BUF, sc_nbuf=SC_NBUF, sc_ring=SC_RING,
+      sc_buf=sc_buf, sc_nbuf=sc_nbuf, sc_ring=SC_RING,
       end=end,
   )
 

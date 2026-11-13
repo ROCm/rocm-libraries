@@ -69,12 +69,16 @@ def pcRelOffsets(loopAt: int, pfAt: Sequence[int]) -> List[int]:
 
 
 def parseLoopSpan(disasm: str):
-  """Return ``(loopAt, backAt)`` from llvm-objdump ``-d`` text, or ``None``."""
+  """Return ``(loopAt, backAt)`` from llvm-objdump ``-d`` text, or ``None``.
+
+  TDMWaveRoleBodies lays the other waves' bodies (``label_LoopBeginL_W<n>``)
+  after wave 0's, so the span runs to the last back-edge of any of them.
+  """
   loopM = re.search(r"^([0-9a-f]+) <label_LoopBeginL>:", disasm, re.M)
-  backMs = re.findall(r"s_cbranch_scc\d label_LoopBeginL\s+// ([0-9A-F]+):", disasm)
+  backMs = re.findall(r"s_cbranch_scc\d label_LoopBeginL(?:_W\d+)?\s+// ([0-9A-F]+):", disasm)
   if not loopM or not backMs:
     return None
-  return int(loopM.group(1), 16), int(backMs[-1], 16)
+  return int(loopM.group(1), 16), max(int(b, 16) for b in backMs)
 
 
 def parsePrefetchPcs(disasm: str) -> List[int]:

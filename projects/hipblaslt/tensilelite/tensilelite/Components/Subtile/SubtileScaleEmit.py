@@ -266,6 +266,17 @@ def emitScaleLRLDSSwap(ti, writer, kernel):
   return module
 
 
+def emitScaleLRBufferAdvance(ti, writer, steps):
+  """Move scale LR read offsets from buffer 0 to buffer ``steps`` (no wrap)."""
+  n, stride = _lrSwapParams(writer, ti.tc)
+  assert 0 < steps < n, f"{ti.tc}: LR advance by {steps} of {n} buffers"
+  module = Module()
+  for vOff in ti.sharedVgprLROffset:
+    module.add(VAddU32(dst=vgpr(vOff), src0=vgpr(vOff), src1=hex(steps * stride),
+                       comment="%s LR -> LDS buffer %d" % (ti.tc, steps)))
+  return module
+
+
 # =========================================================================
 # Legacy Scale emit functions (moved from SubtileBasedKernel.py)
 # =========================================================================

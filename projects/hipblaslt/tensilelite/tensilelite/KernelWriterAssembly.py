@@ -1620,6 +1620,8 @@ class KernelWriterAssembly(KernelWriter):
         # skip SwapMask + AdvStride/Span (SGPR room for dedicated MX Group0/1/2).
         module.add(self.defineSgpr("tdmLdsXorMask", 1))
         module.add(self.defineSgpr("tdmGlobalInc", 1))
+        if kernel.get("MXScaleLdsBuffers", 2) > 2:
+          module.add(self.defineSgpr("tdmScaleSlicesLeft", 1))
       else:
         module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
         module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))

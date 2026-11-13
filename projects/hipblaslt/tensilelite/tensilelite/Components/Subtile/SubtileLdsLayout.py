@@ -242,7 +242,7 @@ def _applyTdmSingleIssuerLayout(writer, kernel: dict) -> None:
   rather than the footprint; the scales use a ring after the data groups.
   """
   from .LdsV7Layout import make_lds_v7_layout
-  lay = make_lds_v7_layout()
+  lay = make_lds_v7_layout(int(kernel.get("MXScaleLdsBuffers", 2)))
   writer.ldsV7 = lay
   writer.ldsStartOffsetA = lay.a0
   writer.ldsStartOffsetB = lay.b0

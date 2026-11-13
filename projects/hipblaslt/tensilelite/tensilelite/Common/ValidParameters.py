@@ -478,6 +478,12 @@ validParameters = { # we need to make sure this matches develop
     # on the cluster N WMMAs later, just before the TDM, so no peer can write a buffer
     # before every WG of the cluster has freed it.
     "TDMClusterSyncAfterFree": list(range(0, 9)),
+    # TDMSingleIssuer scale LDS buffers per operand. 2 (default) = the scale TDM for
+    # slice s+2 refills slice s's buffer, about 1.25 iterations ahead of its READY.
+    # 4 = slice s+4, about 3.25 iterations ahead; the mainloop then has four bodies
+    # per wave (A/B parity and scale buffer baked into the ds offsets) and the scale
+    # issuers wait for 3 outstanding scale TDMs instead of 1. Requires TDMWaveRoleBodies.
+    "MXScaleLdsBuffers": [2, 4],
     # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
     # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
     # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.

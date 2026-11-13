@@ -6816,21 +6816,37 @@ class LogicalScheduler:
             "TDMWaveRoleBodies needs the TDMSingleIssuer A/B LDS bake mainloop"
         if abLdsBake:
             from .SubtileLREmit import localReadLDSBufferSwap
+            from .SubtileScaleEmit import emitScaleLRBufferAdvance
             assert uf == 1, "A/B LDS bake requires unroll_factor==1"
-            assert skipMainloop is not None, "A/B LDS bake exits the odd copy to SkipMainloop"
-            exitEven = Label("ExitMainloopBufEven", "")
-            # TDMWaveRoleBodies: one even/odd pair per wave with its WaveIdx
+            assert skipMainloop is not None, "A/B LDS bake exits the last copy to SkipMainloop"
+            # One body per phase = iteration mod (A/B parity x scale ring depth).
+            phases = self._emitted_phases_per_unroll[0]
+            nPh = len(phases)
+            scNbuf = int(writer.ldsV7.sc_nbuf)
+            names = ["even", "odd"] if nPh == 2 else [str(p) for p in range(nPh)]
+            labelNames = [n.capitalize() for n in names]
+            exitStubs = [Label("ExitMainloopBuf" + labelNames[p], "") for p in range(nPh - 1)]
+            # TDMWaveRoleBodies: one set of phase bodies per wave with its WaveIdx
             # gates folded; waves dispatch once here instead of per duty.
             roles = (list(range(kernel["NumThreads"] // kernel["WavefrontSize"]))
                      if kernel.get("TDMWaveRoleBodies") else [None])
             # _emitLoop adjusts wait counts in place: copy before any role emits.
-            emittedEven = [self._emitted_per_unroll[0]] + [
-                copy.deepcopy(self._emitted_per_unroll[0]) for _ in roles[1:]]
-            emittedOdd = [self._emitted_odd_per_unroll[0]] + [
-                copy.deepcopy(self._emitted_odd_per_unroll[0]) for _ in roles[1:]]
+            emittedPh = [[phases[p] if ri == 0 else copy.deepcopy(phases[p])
+                          for p in range(nPh)] for ri in range(len(roles))]
             suffixes = ["" if r in (None, 0) else f"_W{r}" for r in roles]
             loopBegins = [loopBegin] + [Label("LoopBeginL" + s, "", alignment=16)
                                         for s in suffixes[1:]]
+            # The bodies' scale TDMs run scNbuf slices ahead; the preloop
+            # issued pgr, so issue the rest on the paths that enter the loop.
+            if scNbuf > 2:
+                from .SubtileGREmit import emitTDMSingleIssuerLoad
+                assert scNbuf > self.config.pgr, "scale ring shallower than PGR"
+                module.addComment0("MXScaleLdsBuffers: scale slices %d..%d" % (
+                    self.config.pgr, scNbuf - 1))
+                for _ in range(self.config.pgr, scNbuf):
+                    for tc, mx in (("MXSA", "MXBlockA"), ("MXSB", "MXBlockB")):
+                        if kernel["ProblemType"].get(mx, 0):
+                            module.add(emitTDMSingleIssuerLoad(writer, kernel, tc))
             if len(roles) > 1:
                 from .WaveRoleBodies import emitWaveRoleDispatch
                 emitWaveRoleDispatch(module, loopBegins, "TDMWaveRoleBodies")
@@ -6838,49 +6854,64 @@ class LogicalScheduler:
             def roleBody(body, role):
                 if role is None:
                     return body
-                from .WaveRoleBodies import foldWaveIdxGates
-                return foldWaveIdxGates(body, role)
+                from .WaveRoleBodies import foldWaveIdxGates, relaxScaleIssuerTensorcnt
+                from .LdsV7Layout import ISSUER_MXSA, ISSUER_MXSB
+                body = foldWaveIdxGates(body, role)
+                if scNbuf > 2 and role in (ISSUER_MXSA, ISSUER_MXSB):
+                    body = relaxScaleIssuerTensorcnt(body, scNbuf - 1)
+                return body
 
             for ri, role in enumerate(roles):
                 sfx = suffixes[ri]
-                loopBeginOdd = Label("LoopBeginL_BufOdd" + sfx, "", alignment=16)
-                module.add(loopBegins[ri])
-                addTraceMarker()
-                loopBodyEven = roleBody(self._emitLoop(
-                    writer, kernel, "MAINLOOP_C0_BufEven" + sfx, emittedEven[ri]), role)
-                _emitBodySetupBranch(
-                    module, loopBodyEven, loopExitSetup("buf even"),
-                    SCBranchSCC1(labelName=exitEven.getLabelName(),
-                                 comment="buf even exit → sync LR + NGLL"),
-                    hoist=exitHoist)
-                module.add(loopBeginOdd)
-                addTraceMarker()
-                loopBodyOdd = roleBody(self._emitLoop(
-                    writer, kernel, "MAINLOOP_C0_BufOdd" + sfx, emittedOdd[ri]), role)
-                _emitBodySetupBranch(
-                    module, loopBodyOdd, loopExitSetup("buf odd"),
-                    SCBranchSCC0(labelName=loopBegins[ri].getLabelName(),
-                                 comment="restart mainloop (buf even)"),
-                    hoist=exitHoist)
-                # Odd exit skips ExitEven's xor (VGPR still buf0) into SkipMainloop.
+                for p in range(nPh):
+                    if p == 0:
+                        module.add(loopBegins[ri])
+                    else:
+                        module.add(Label("LoopBeginL_Buf" + labelNames[p] + sfx, "",
+                                         alignment=16))
+                    addTraceMarker()
+                    loopBody = roleBody(self._emitLoop(
+                        writer, kernel, "MAINLOOP_C0_Buf" + labelNames[p] + sfx,
+                        emittedPh[ri][p]), role)
+                    if p < nPh - 1:
+                        branch = SCBranchSCC1(labelName=exitStubs[p].getLabelName(),
+                                              comment="buf %s exit → sync LR + NGLL" % names[p])
+                    else:
+                        branch = SCBranchSCC0(labelName=loopBegins[ri].getLabelName(),
+                                              comment="restart mainloop (buf %s)" % names[0])
+                    _emitBodySetupBranch(module, loopBody, loopExitSetup("buf %s" % names[p]),
+                                         branch, hoist=exitHoist)
+                # The last body's exit leaves every LR VGPR at buffer 0, which is
+                # where NGLL reads next: straight into SkipMainloop.
                 module.add(SBranch(labelName=skipMainloop.getLabelName(),
-                                   comment="buf odd exit → NGLL (VGPR already buf0)"))
-            module.add(exitEven)
-            module.add(localReadLDSBufferSwap("A", writer, kernel))
-            module.add(localReadLDSBufferSwap("B", writer, kernel))
-            # MX scales also bake under even/odd (sc_nbuf=2); sync VGPR bases
-            # so NGLL/NLL runtime xor sees buf1 after an even exit.
-            if kernel["ProblemType"].get("MXBlockA", 0):
-                module.add(localReadLDSBufferSwap("MXSA", writer, kernel))
-            if kernel["ProblemType"].get("MXBlockB", 0):
-                module.add(localReadLDSBufferSwap("MXSB", writer, kernel))
-            # NGLL/NLL are separate modules, so insertLRSwapRawWaitAlu won't
-            # see these xors; wait here before falling into SkipMainloop.
-            if isGfx1250:
-                from rocisa.instruction import SWaitAlu
-                module.add(SWaitAlu(
-                    va_vdst=0,
-                    comment="wait for ExitEven LR buffer xor before NGLL"))
+                                   comment="buf %s exit → NGLL (VGPR already buf0)" % names[-1]))
+            # Body p's exit: NGLL reads data buffer (p+1)&1 and scale buffer
+            # (p+1)%scNbuf, while the mainloop kept the LR VGPRs at buffer 0.
+            for p, stub in enumerate(exitStubs):
+                nxt = p + 1
+                module.add(stub)
+                if nxt & 1:
+                    module.add(localReadLDSBufferSwap("A", writer, kernel))
+                    module.add(localReadLDSBufferSwap("B", writer, kernel))
+                for tc, mx in (("MXSA", "MXBlockA"), ("MXSB", "MXBlockB")):
+                    if not kernel["ProblemType"].get(mx, 0):
+                        continue
+                    if scNbuf == 2:
+                        if nxt & 1:
+                            module.add(localReadLDSBufferSwap(tc, writer, kernel))
+                    elif nxt % scNbuf:
+                        ti = writer.states.mxsa.tileInfo if tc == "MXSA" else writer.states.mxsb.tileInfo
+                        module.add(emitScaleLRBufferAdvance(ti, writer, nxt % scNbuf))
+                # NGLL/NLL are separate modules, so insertLRSwapRawWaitAlu won't
+                # see these xors; wait here before NGLL.
+                if isGfx1250:
+                    from rocisa.instruction import SWaitAlu
+                    module.add(SWaitAlu(
+                        va_vdst=0,
+                        comment="wait for Exit%s LR buffer xor before NGLL" % labelNames[p]))
+                if p < len(exitStubs) - 1:
+                    module.add(SBranch(labelName=skipMainloop.getLabelName(),
+                                       comment="buf %s exit → NGLL" % names[p]))
         elif portSplit:
             loopBeginB = Label("LoopBeginL_PortB", "", alignment=16)
             loopEnd = Label("MainloopPortsJoin", "")
@@ -7560,22 +7591,21 @@ class LogicalScheduler:
             emitter._bakeAbLdsBuf and self.unroll_factor == 1)
 
         self._emitted_per_unroll = []
-        self._emitted_odd_per_unroll = []
+        # [unroll][phase]: one baked mainloop body per A/B parity x scale buffer.
+        self._emitted_phases_per_unroll = []
         self._ngll_per_unroll = []
         self._nll_per_unroll = []
         for ui in range(self.unroll_factor):
             if self._ab_lds_bake:
-                emitter.begin_ab_lds_bake(0, 0)
-                em_even = copy.deepcopy(self._emitted)
-                emitter.populate(em_even, unroll_iter=ui)
-                emitter.end_ab_lds_bake()
-                self._emitted_per_unroll.append(em_even)
-
-                emitter.begin_ab_lds_bake(1, 1)
-                em_odd = copy.deepcopy(self._emitted)
-                emitter.populate(em_odd, unroll_iter=ui)
-                emitter.end_ab_lds_bake()
-                self._emitted_odd_per_unroll.append(em_odd)
+                phases = []
+                for phase in range(emitter.ab_lds_bake_phases()):
+                    emitter.begin_ab_lds_bake(phase)
+                    em = copy.deepcopy(self._emitted)
+                    emitter.populate(em, unroll_iter=ui)
+                    emitter.end_ab_lds_bake()
+                    phases.append(em)
+                self._emitted_per_unroll.append(phases[0])
+                self._emitted_phases_per_unroll.append(phases)
             else:
                 em_copy = copy.deepcopy(self._emitted)
                 emitter.populate(em_copy, unroll_iter=ui)

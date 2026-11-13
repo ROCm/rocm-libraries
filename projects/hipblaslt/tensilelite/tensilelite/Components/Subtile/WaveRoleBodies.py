@@ -11,7 +11,7 @@ instead dispatches once into one body per wave with those duties resolved.
 """
 
 from rocisa.code import Label, Module
-from rocisa.instruction import SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SBranch
+from rocisa.instruction import SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SBranch, SWaitTensorcnt
 
 # Scalar classes that cannot write SCC, so they may sit between a gate's
 # compare and its branch.
@@ -77,6 +77,21 @@ def foldWaveIdxGates(module, role):
   for item in out.flatitems():
     assert not any(str(s) == "s[sgprWaveIdx]" for s in getattr(item, "srcs", [])), \
       "WaveIdx survives in role-%d body" % role
+  return out
+
+
+def relaxScaleIssuerTensorcnt(module, count):
+  """Let a scale issuer's READY waits leave ``count`` scale TDMs in flight.
+
+  A role body's tensorcnt counts only that wave's own TDMs. With sc_nbuf scale
+  buffers the slice a READY publishes is followed by up to sc_nbuf - 1 younger
+  ones, so ``count`` = sc_nbuf - 1; drains (tensorcnt 0) stay.
+  """
+  out = Module(module.name)
+  for item in module.flatitems():
+    if isinstance(item, SWaitTensorcnt) and item.getParams()[0] > 0:
+      item = SWaitTensorcnt(tensorcnt=count, comment=item.comment)
+    out.add(item)
   return out
 
 

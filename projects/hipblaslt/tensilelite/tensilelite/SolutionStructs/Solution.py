@@ -7173,6 +7173,8 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "TDMClusterSyncAfterFree requires TDMSingleIssuer")
     if state.get("MXSBTilePair") and not state.get("TDMSingleIssuer"):
       reject(state, printRejectionReason, "MXSBTilePair requires TDMSingleIssuer")
+    if state.get("MXScaleLdsBuffers", 2) != 2 and not state.get("TDMWaveRoleBodies"):
+      reject(state, printRejectionReason, "MXScaleLdsBuffers=4 requires TDMWaveRoleBodies")
     if state.get("MXScaleLRB128"):
       if not state.get("MXSBTilePair"):
         reject(state, printRejectionReason, "MXScaleLRB128 requires MXSBTilePair")
