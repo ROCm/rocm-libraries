@@ -2425,8 +2425,8 @@ namespace TensileLite
                                                        scaleElemSize,
                                                        kFast,
                                                        unsignedExponentScale);
-                          if(mxBlockFree > 1 && unsignedExponentScale
-                             && IsRandomLike(scaleInitMode))
+                          if(shouldVaryMXScaleFreeTiles(
+                                 dataInitMode, scaleInitMode, mxBlockFree, unsignedExponentScale))
                               varyMXScaleFreeTiles(scalePtr, tiledFree, compactKBlocks, kFast);
                           if(kFast)
                               restrideMXScaleBufferKFast(

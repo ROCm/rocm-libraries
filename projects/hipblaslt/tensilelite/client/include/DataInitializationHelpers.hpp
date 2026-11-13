@@ -140,6 +140,20 @@ namespace TensileLite
                     }
                 }
             }
+            // Whether initOneMXSide applies varyMXScaleFreeTiles: random-like scale
+            // init on E8 scales with a free-dim block above one. The MAF data modes
+            // prescribe their scales (MAF1.0 0.5, MAF2.0 drawn, unit scale 1.0), so
+            // they are never varied.
+            inline bool shouldVaryMXScaleFreeTiles(InitMode dataInit,
+                                                   InitMode scaleInit,
+                                                   size_t   mxBlockFree,
+                                                   bool     unsignedExponentScale)
+            {
+                bool const maf = dataInit == InitMode::Maf1_0 || dataInit == InitMode::Maf2_0
+                                 || dataInit == InitMode::Maf2_0UnitScale;
+                return mxBlockFree > 1 && unsignedExponentScale && IsRandomLike(scaleInit) && !maf;
+            }
+
             // ----------------------------------------------------------------
             //  varyMXScaleFreeTiles
             //

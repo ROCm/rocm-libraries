@@ -1103,6 +1103,19 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
     EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
 }
 
+TEST(VaryMXScaleFreeTiles, SkipsMafScales)
+{
+    using TensileLite::Client::InitMode;
+    // A random scale init varies the E8 tiles when the free-dim block is above one.
+    EXPECT_TRUE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 1, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, false));
+    // MAF data keeps its prescribed scales (e.g. MAF1.0's 0x7E would become 0x7C).
+    for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
+        EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(mode, InitMode::Random, 2, true))
+            << TensileLite::Client::ToString(mode);
+}
+
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 // Maf1_0 fills element (i, j, b) of a padded 3 x 4 x 2 tensor (ld 5, batch stride 23) with
