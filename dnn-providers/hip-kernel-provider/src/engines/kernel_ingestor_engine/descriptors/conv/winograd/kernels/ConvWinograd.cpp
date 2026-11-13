@@ -98,7 +98,17 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args
     k5FusedFilterTransform<CONV_WINO_T, CONV_WINO_M, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
 }
 
-extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) ConvWinogradFused(K5Args a)
+// Waves per SIMD the fused kernel is built for: the 8 x 16 micro-tile with prefetch depth 2 holds
+// 8 (192 registers on RDNA: two blocks per WGP; gfx1100 maskrcnn c256 200² 25.9 -> 23.0 ms);
+// otherwise no bound.
+#if CONV_WINO_TM * CONV_WINO_TN > 64 && CONV_WINO_PFD == 2
+#define CONV_WINO_FUSED_WPE __attribute__((amdgpu_waves_per_eu(8)))
+#else
+#define CONV_WINO_FUSED_WPE
+#endif
+
+extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO_FUSED_WPE
+    ConvWinogradFused(K5Args a)
 {
     k5FusedConv2<CONV_WINO_T,
                  CONV_WINO_M,

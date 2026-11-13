@@ -1274,6 +1274,40 @@ TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
     EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
 }
 
+TEST(TestConvWinogradPlan, CooperativeSixteenBinGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: 65536 tiles, far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](const ConfigFields& fields, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 4 waves of up to 256 registers: 6 per SIMD on the 1536-register parts (24 per unit), 4 on
+    // the others.
+    EXPECT_EQ(gridOn(coop16("gfx12"), "gfx1201"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1100"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1102"), 32U * 4);
+    auto eightWaves = coop16("gfx11");
+    eightWaves.bk = 128;
+    eightWaves.waves = 8;
+    EXPECT_EQ(gridOn(eightWaves, "gfx1100"), 32U * 3);
+    // The transform-row layout keeps 1024 threads per unit: 16 waves of 32, two blocks.
+    EXPECT_EQ(gridOn(coop("gfx11", 1), "gfx1100"), 32U * 2);
+}
+
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
 {
     // On RDNA a group's U of 4 MiB and up (16 positions x K x C x 2 bytes) is re-read per tile

@@ -1132,7 +1132,17 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         {
             return std::nullopt;
         }
-        const long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        if(config.bins == 16)
+        {
+            // The 16-bin layout's waves take up to 256 registers: a SIMD holds 6 of them on the
+            // 1536-register RDNA parts, 4 on the others. A grid past what is resident runs a
+            // second, partly empty round of persistent blocks (gfx1201 unet bwd: 1.26x slower).
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const bool largeFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
+                                   || arch == "gfx1200" || arch == "gfx1201";
+            perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
+        }
         plan.mainBlocks
             = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));
         break;

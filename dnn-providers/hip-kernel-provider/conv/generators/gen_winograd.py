@@ -261,8 +261,10 @@ F32_BLOCKS = [
 # 5-13% on gfx1201, 2-10% on gfx1101).
 F32_PF_BLOCKS = [(64, 32, 4, 8, 8)]
 # RDNA fp32: 8 x 16 micro-tiles read 0.75 LDS bytes per FMA instead of 1 (the Hadamard is
-# LDS-bound there; maskrcnn c256 200² 14% faster on gfx1201, 10-15% on gfx1100). More than gfx9's
-# 128 registers at two waves per SIMD: RDNA families only.
+# LDS-bound there; maskrcnn c256 200² 14% faster on gfx1201). More than gfx9's 128 registers at two
+# waves per SIMD: RDNA families only. gfx11 runs it with prefetch depth 2 at 8 waves per SIMD
+# (192 registers; maskrcnn c256 200² 29.9 -> 23.0 ms on gfx1100), gfx12 without (the cap costs
+# 5% there).
 F32_RDNA_BLOCKS = [(64, 64, 2, 8, 16)]
 F16_BLOCKS = [(64, 32, 2, 8, 8), (32, 32, 8, 8, 4), (16, 32, 2, 8, 4)]
 BF16_BLOCKS = [(64, 32, 4, 8, 8), (32, 32, 8, 8, 4), (16, 32, 4, 8, 4)]
@@ -270,7 +272,8 @@ CATALOG = {
     "FLOAT": sreg([0])
     + fused(F32_BLOCKS)
     + fused(F32_PF_BLOCKS, pf=1)
-    + fused(F32_RDNA_BLOCKS, (2,), archs=("gfx11", "gfx12"))
+    + fused(F32_RDNA_BLOCKS, (2,), archs=("gfx12",))
+    + fused(F32_RDNA_BLOCKS, (2,), pf=1, archs=("gfx11",))
     + multipass((4, 2, 3), "none")
     + multipass((4, 2, 3), "llc"),
     "HALF": coop(COOP_F16)
