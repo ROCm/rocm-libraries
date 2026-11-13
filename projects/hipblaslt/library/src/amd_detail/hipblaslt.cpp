@@ -74,6 +74,8 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
         return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_arch_mismatch:
         return HIPBLAS_STATUS_ARCH_MISMATCH;
+    case rocblaslt_status_not_supported:
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
     default:
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }
