@@ -1,0 +1,138 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# SMOKE: 8. Codegen / RA tooling — 1 Exact/OOB category, single MT 256x256.
+#
+# ProblemType matches library logic:
+#   gfx1250_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml
+# Exact sizes: 3 per OOB category from
+#   hipblaslt-ZeroGPUDay workloads(BBS TN OOB exact re-tune_1027C).csv
+#   (see oob_representatives.md). Format Exact: [M, N, batch, K].
+#
+# One BenchmarkProblems group per parameter family so forks stay within-group
+# (no full cross-product). Only currently-legal values are forked; see
+# parameter_combinations.md.
+#
+# Note: several Exact sizes are very large. Validation is capped; drop or comment
+# sizes for smoke runs.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 128
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  CpuThreads: 8
+  PrintLevel: 1
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  ##############################################################################
+  # 8. Codegen / RA tooling
+  ##############################################################################
+  -
+    - # ProblemType: BBS TN + Bias + HA + ScaleAlphaVec + UserArgs (matches library logic)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup
+      # StinkyTofu register-allocation modes (SIA=4 already pinned).
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - TransposeLDS: [-1]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+        - StoreRemapVectorWidth: [0]
+        - SourceSwap: [True]
+        - LDSTrInst: [False]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT 256x256 smoke pin
+        - TDMInst: [3]
+        - MXLoadInst: [TDM]
+        - StinkyTofuRegisterAllocation: [0, 1, 2, 3]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # --- 01. Small GEMMs ---
+          - Exact: [656, 112, 1, 32]  # csv index=44 tile=64x16x32_0
+          # --- 02. Medium GEMMs ---
+          - Exact: [464, 1872, 1, 6736]  # csv index=129 tile=160x192x64_0
+          # --- 03. Large GEMMs ---
+          - Exact: [4464, 5968, 1, 6464]  # csv index=102 tile=224x256x128_0
+          # --- 04. Large M, smaller N and K ---
+          - Exact: [11600, 7936, 1, 6048]  # csv index=193 tile=240x256x128_0
+          # --- 05. Large M, very small N and K ---
+          - Exact: [259280, 16, 1, 32]  # csv index=177 tile=256x16x32_0
+          # --- 06. Large N, smaller M and K ---
+          - Exact: [1696, 107104, 1, 928]  # csv index=97 tile=256x256x128_0
+          # --- 07. Large N, very small M and K ---
+          - Exact: [16, 450560, 1, 32]  # csv index=17 tile=16x256x32_0
+          # --- 08. Large K, smaller M and N ---
+          - Exact: [1472, 3232, 1, 10448]  # csv index=45 tile=192x208x64_0
+          # --- 09. Large K, very small M and N ---
+          - Exact: [16, 64, 1, 231696]  # csv index=10 tile=16x64x128_0
+          # --- 10. Large M and N ---
+          - Exact: [24208, 32416, 1, 2336]  # csv index=107 tile=256x256x128_0
+          # --- 11. Large N and K ---
+          - Exact: [368, 8432, 1, 30048]  # csv index=30 tile=192x208x128_0
+          # --- 12. Large M and K ---
+          - Exact: [35216, 208, 1, 19952]  # csv index=68 tile=144x256x128_0
+          # --- 13. Very Large GEMMs ---
+          - Exact: [11840, 8576, 1, 11360]  # csv index=123 tile=256x240x128_0
+          # --- 14. M = 1 ---
+          - Exact: [1, 7632, 1, 36352]  # csv index=195 tile=16x256x256_0
+          # --- 15. N = 1 ---
+          - Exact: [42720, 1, 1, 18784]  # csv index=124 tile=192x16x256_0
+          # --- 16. K = 1 ---
+          - Exact: [12912, 36976, 1, 1]  # csv index=26 tile=224x192x32_0
+          # --- 17. Small batch ---
+          - Exact: [4928, 6656, 40, 16]  # csv index=126 tile=256x224x32_0
+          # --- 18. Medium batch ---
+          - Exact: [1120, 656, 382, 512]  # csv index=135 tile=224x224x64_0
+          # --- 19. Large batch ---
+          - Exact: [48, 720, 3028, 208]  # csv index=82 tile=48x192x64_0
+          # --- 20. Very large batch ---
+          - Exact: [4048, 16, 51732, 16]  # csv index=90 tile=256x16x64_0
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

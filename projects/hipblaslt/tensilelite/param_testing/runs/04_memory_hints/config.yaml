@@ -1,0 +1,183 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Research workspace: BBS TN OOB representatives x parameter-group forks.
+#
+# ProblemType matches library logic:
+#   gfx1250_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml
+# Exact sizes: 3 per OOB category from
+#   hipblaslt-ZeroGPUDay workloads(BBS TN OOB exact re-tune_1027C).csv
+#   (see oob_representatives.md). Format Exact: [M, N, batch, K].
+#
+# One BenchmarkProblems group per parameter family so forks stay within-group
+# (no full cross-product). Only currently-legal values are forked; see
+# parameter_combinations.md.
+#
+# Note: several Exact sizes are very large. Validation is capped; drop or comment
+# sizes for smoke runs.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 128
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  CpuThreads: 8
+  PrintLevel: 1
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  ##############################################################################
+  # 4. Memory temporal / volatility hints
+  ##############################################################################
+  -
+    - # ProblemType: BBS TN + Bias + HA + ScaleAlphaVec + UserArgs (matches library logic)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup
+      # Broadcast TemporalHint/NonVolatile + AdaptiveGemmNTAB.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - TransposeLDS: [-1]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+        - StoreRemapVectorWidth: [0]
+        - SourceSwap: [True]
+        - LDSTrInst: [False]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT 256x256 (dominant OOB winner family)
+          - [16, 16, 32, 1, 1, 1, 8, 1, 2]  # MT 16x256 (M=1 / thin-M winners)
+          - [16, 16, 32, 1, 1, 8, 1, 2, 1]  # MT 256x16 (N=1 / thin-N winners)
+        - TDMInst: [3]
+        - MXLoadInst: [TDM]
+        - TemporalHint: [-1, 0, 1, 7]
+        - NonVolatile: [-1, 0, 1]
+        - AdaptiveGemmNTAB: [0, 1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # --- 01. Small GEMMs ---
+          - Exact: [656, 112, 1, 32]  # csv index=44 tile=64x16x32_0
+          - Exact: [96, 224, 1, 240]  # csv index=69 tile=32x32x64_0
+          - Exact: [256, 224, 1, 144]  # csv index=194 tile=32x32x64_0
+          # --- 02. Medium GEMMs ---
+          - Exact: [464, 1872, 1, 6736]  # csv index=129 tile=160x192x64_0
+          - Exact: [544, 1728, 1, 7488]  # csv index=56 tile=192x176x64_0
+          - Exact: [7056, 896, 1, 1248]  # csv index=191 tile=208x128x128_0
+          # --- 03. Large GEMMs ---
+          - Exact: [4464, 5968, 1, 6464]  # csv index=102 tile=224x256x128_0
+          - Exact: [4928, 4848, 1, 7216]  # csv index=166 tile=192x256x128_0
+          - Exact: [5504, 6096, 1, 5440]  # csv index=105 tile=176x256x128_0
+          # --- 04. Large M, smaller N and K ---
+          - Exact: [11600, 7936, 1, 6048]  # csv index=193 tile=240x256x128_0
+          - Exact: [315952, 3696, 1, 1424]  # csv index=53 tile=256x256x128_0
+          - Exact: [168464, 3200, 1, 6368]  # csv index=55 tile=256x256x128_0
+          # --- 05. Large M, very small N and K ---
+          - Exact: [259280, 16, 1, 32]  # csv index=177 tile=256x16x32_0
+          - Exact: [98000, 96, 1, 64]  # csv index=104 tile=192x96x32_0
+          - Exact: [142816, 80, 1, 64]  # csv index=38 tile=192x80x32_0
+          # --- 06. Large N, smaller M and K ---
+          - Exact: [1696, 107104, 1, 928]  # csv index=97 tile=256x256x128_0
+          - Exact: [4944, 239104, 1, 192]  # csv index=150 tile=224x256x64_0
+          - Exact: [688, 957600, 1, 384]  # csv index=120 tile=256x224x64_0
+          # --- 07. Large N, very small M and K ---
+          - Exact: [16, 450560, 1, 32]  # csv index=17 tile=16x256x32_0
+          - Exact: [32, 207648, 1, 64]  # csv index=172 tile=32x224x32_0
+          - Exact: [16, 434352, 1, 64]  # csv index=27 tile=16x256x32_0
+          # --- 08. Large K, smaller M and N ---
+          - Exact: [1472, 3232, 1, 10448]  # csv index=45 tile=192x208x64_0
+          - Exact: [1392, 1680, 1, 319312]  # csv index=157 tile=208x256x128_0
+          - Exact: [7104, 1648, 1, 80048]  # csv index=109 tile=224x224x128_0
+          # --- 09. Large K, very small M and N ---
+          - Exact: [16, 64, 1, 231696]  # csv index=10 tile=16x64x128_0
+          - Exact: [80, 80, 1, 49872]  # csv index=36 tile=80x128x64_0
+          - Exact: [32, 32, 1, 423200]  # csv index=110 tile=32x32x256_0
+          # --- 10. Large M and N ---
+          - Exact: [24208, 32416, 1, 2336]  # csv index=107 tile=256x256x128_0
+          - Exact: [26656, 47824, 1, 1728]  # csv index=98 tile=256x256x128_0
+          - Exact: [25520, 15760, 1, 7296]  # csv index=190 tile=256x256x128_0
+          # --- 11. Large N and K ---
+          - Exact: [368, 8432, 1, 30048]  # csv index=30 tile=192x208x128_0
+          - Exact: [1040, 10928, 1, 28400]  # csv index=153 tile=224x224x128_0
+          - Exact: [912, 13120, 1, 53472]  # csv index=61 tile=256x208x128_0
+          # --- 12. Large M and K ---
+          - Exact: [35216, 208, 1, 19952]  # csv index=68 tile=144x256x128_0
+          - Exact: [51904, 848, 1, 31376]  # csv index=67 tile=256x176x128_0
+          - Exact: [25680, 1312, 1, 59792]  # csv index=19 tile=240x192x128_0
+          # --- 13. Very Large GEMMs ---
+          - Exact: [11840, 8576, 1, 11360]  # csv index=123 tile=256x240x128_0
+          - Exact: [11312, 12368, 1, 8928]  # csv index=46 tile=256x256x128_0
+          - Exact: [8224, 11424, 1, 14160]  # csv index=134 tile=256x256x128_0
+          # --- 14. M = 1 ---
+          - Exact: [1, 7632, 1, 36352]  # csv index=195 tile=16x256x256_0
+          - Exact: [1, 615664, 1, 928]  # csv index=93 tile=16x256x128_0
+          - Exact: [1, 107408, 1, 5968]  # csv index=88 tile=16x256x256_0
+          # --- 15. N = 1 ---
+          - Exact: [42720, 1, 1, 18784]  # csv index=124 tile=192x16x256_0
+          - Exact: [2240, 1, 1, 922208]  # csv index=78 tile=128x16x128_0
+          - Exact: [5040, 1, 1, 571264]  # csv index=58 tile=192x16x128_0
+          # --- 16. K = 1 ---
+          - Exact: [12912, 36976, 1, 1]  # csv index=26 tile=224x192x32_0
+          - Exact: [640, 1020544, 1, 1]  # csv index=75 tile=160x224x32_0
+          - Exact: [172256, 5152, 1, 1]  # csv index=200 tile=192x224x32_0
+          # --- 17. Small batch ---
+          - Exact: [4928, 6656, 40, 16]  # csv index=126 tile=256x224x32_0
+          - Exact: [3264, 2416, 7, 400]  # csv index=50 tile=256x224x64_0
+          - Exact: [1392, 4656, 13, 5488]  # csv index=161 tile=208x256x128_0
+          # --- 18. Medium batch ---
+          - Exact: [1120, 656, 382, 512]  # csv index=135 tile=224x224x64_0
+          - Exact: [448, 6464, 214, 448]  # csv index=87 tile=224x256x64_0
+          - Exact: [96, 1744, 353, 6960]  # csv index=149 tile=96x256x64_0
+          # --- 19. Large batch ---
+          - Exact: [48, 720, 3028, 208]  # csv index=82 tile=48x192x64_0
+          - Exact: [1776, 16, 4186, 784]  # csv index=81 tile=224x32x64_0
+          - Exact: [1488, 1568, 2773, 16]  # csv index=31 tile=256x224x32_0
+          # --- 20. Very large batch ---
+          - Exact: [4048, 16, 51732, 16]  # csv index=90 tile=256x16x64_0
+          - Exact: [80, 3616, 23009, 16]  # csv index=163 tile=80x256x32_0
+          - Exact: [2768, 32, 8803, 208]  # csv index=113 tile=160x32x64_0
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
