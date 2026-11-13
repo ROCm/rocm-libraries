@@ -1056,7 +1056,16 @@ public:
         s.kvTokStride = narrow(kStrides[SEQ_AXIS], "K/V token stride");
         s.kvHeadStride = narrow(kStrides[HEAD_AXIS], "K/V head stride");
         const auto kvExtent = innerExtent(k);
-        s.kvBlockSpanBytes = narrow(kvExtent.value_or(-1) * ELEMENT_BYTES, "K/V block span");
+        // graph_match declines a K without a block extent; refuse rather than build a
+        // span that disables the kernel's per-page bound.
+        if(!kvExtent.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string(ATTENTION_PAGED_UNIFIED_ENGINE_NAME)
+                    + ": K has no block extent, so the K/V block span is undefined");
+        }
+        s.kvBlockSpanBytes = narrow(*kvExtent * ELEMENT_BYTES, "K/V block span");
 
         // q-block grid: exact for a dense Q; for a ragged Q, enough blocks for every
         // sequence when the batch's tokens fit in Sq (the serving convention) -- the kernel's
