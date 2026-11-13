@@ -13,7 +13,20 @@ from attn_torch_function import (
     attention,
     AttentionExtraArgs
 )
-from _common_test import SdpaContext, SdpaParams
+from _common_test import (
+    SdpaContext,
+    SdpaParams,
+    FA_WINDOWS,
+    FA_WINDOW_IDS,
+    PD_CHOICES,
+    PD_CHOICE_IDS,
+    PD_DENSE_SEQLENS,
+    PD_DENSE_SEQLEN_IDS,
+    PD_WINDOW_IDS,
+    PD_WINDOW_VALUES,
+    fa_window_to_aotriton,
+    pd_causal,
+)
 
 FOR_RELEASE = bool(int(os.getenv('FOR_RELEASE', default='0')))
 
@@ -106,6 +119,32 @@ def _do_test_op_fwd(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, sm_scale
 def test_op_fwd(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, sm_scale, dropout_p, dtype, storage_flip):
     bias_type = None
     _do_test_op_fwd(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, sm_scale, dropout_p, dtype, storage_flip, bias_type)
+
+# VarlenBits::principal_diagonal_choice on dense calls; the window and p travel
+# in the `causal` slot as (left, right, p). See test_backward.py::
+# test_principal_diagonal for the full story. test_backward.py runs the same
+# cases with SKIP_BWD=1 for the forward alone; this is the standalone entry.
+@pytest.mark.parametrize('BATCH', [2])
+@pytest.mark.parametrize('N_HEADS', [3, (4, 2)])
+@pytest.mark.parametrize('D_HEAD', [64])
+@pytest.mark.parametrize('seqlen_q,seqlen_k', PD_DENSE_SEQLENS, ids=PD_DENSE_SEQLEN_IDS)
+@pytest.mark.parametrize('window', PD_WINDOW_VALUES, ids=PD_WINDOW_IDS)
+@pytest.mark.parametrize('principal_diagonal', PD_CHOICES, ids=PD_CHOICE_IDS)
+@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+def test_principal_diagonal(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, window, principal_diagonal, dtype):
+    causal = pd_causal(window, principal_diagonal)
+    _do_test_op_fwd(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, 'l1', 0.0, dtype, False, None)
+
+@pytest.mark.parametrize('BATCH', [2])
+@pytest.mark.parametrize('N_HEADS', [3])
+@pytest.mark.parametrize('D_HEAD', [64])
+@pytest.mark.parametrize('seqlen_q,seqlen_k', [PD_DENSE_SEQLENS[0], PD_DENSE_SEQLENS[2]],
+                         ids=[PD_DENSE_SEQLEN_IDS[0], PD_DENSE_SEQLEN_IDS[2]])
+@pytest.mark.parametrize('fa_window', FA_WINDOWS, ids=FA_WINDOW_IDS)
+def test_principal_diagonal_fa_windows(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, fa_window):
+    window = fa_window_to_aotriton(fa_window[0], fa_window[1], seqlen_q)
+    causal = pd_causal(window, 1)
+    _do_test_op_fwd(BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, 'l1', 0.0, torch.float16, False, None)
 
 # @pytest.mark.parametrize('BATCH', [1, 4])
 # @pytest.mark.parametrize('N_HEADS', [1, 4])
