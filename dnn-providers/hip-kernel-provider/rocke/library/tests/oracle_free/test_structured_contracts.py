@@ -1181,12 +1181,13 @@ def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
 #
 # Affected AMDGPU LLVM revisions select ``fptrunc(fmul float)`` without
 # ``contract`` as ``v_fma_mix{lo,hi}_f16 R, o, 0`` (one rounding) at some sites
-# and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; LLVM PR
-# #236759 proposes to make the fold require ``contract``. The classifier follows each
-# 16-bit half of the epilogue registers into the four-half output stores, so a
-# store element is "single", "double" or "unknown". FP32 FMAs are allowed only
-# inside the expansion of the one division ``fdiv 1.0, l``; that the expansion
-# returns ``RN(1 / l)`` is assumption A-DIV, not something this contract shows.
+# and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; a compiler
+# that requires ``contract`` for the fold selects none. The classifier follows
+# each 16-bit half of the epilogue registers into the four-half output stores,
+# so a store element is "single", "double" or "unknown". FP32 FMAs are allowed
+# only inside the expansion of the one division ``fdiv 1.0, l``; that the
+# expansion returns ``RN(1 / l)`` is assumption A-DIV, not something this
+# contract shows.
 # ---------------------------------------------------------------------------
 
 _ISA_REGISTER = re.compile(r"^v(\d+)$|^v\[(\d+):(\d+)\]$")
@@ -1263,12 +1264,13 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
     ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
     model.divisions = len(ends)
     # A write to the MODE register changes the rounding or denormal mode the
-    # wave started with (A-MODE); only the division expansion may do so.
-    inside = range(min(starts), ends[0] + 1) if len(ends) == 1 and starts else ()
+    # wave started with (A-MODE), and the change outlives the instruction that
+    # needed it. None is accepted, not even inside the division expansion:
+    # nothing here proves that a write there is undone before the epilogue.
     model.mode_writes = [
         f"{name} {', '.join(operands)}"
-        for index, (name, operands) in enumerate(instructions)
-        if name.startswith("s_setreg") and index not in inside
+        for name, operands in instructions
+        if name.startswith("s_setreg")
     ]
     if len(ends) != 1 or not starts:
         return model
@@ -1436,18 +1438,26 @@ def test_isa_classifier_rejects_an_unmodeled_fusion(extra: str, finding: str) ->
 
 
 def test_isa_classifier_reports_a_mode_register_write() -> None:
-    """A-MODE: the wave keeps the modes of its kernel descriptor. A write to
-    the MODE register outside the division expansion is reported; one inside
-    it (a compiler that enables denormals around the refinement) is not."""
+    """A-MODE: the wave keeps the modes of its kernel descriptor. Every write
+    to the MODE register is reported, wherever it is. One inside the division
+    expansion (a compiler that enables denormals around the refinement) is
+    reported too, alone or followed by a second write: the classifier does
+    not prove that the second restores the mode the wave started with."""
     store = _ISA_STORES[frozenset({0, 1})]
     write = "s_setreg_imm32_b32 0x3, 0xf0"
+    restore = "s_setreg_b32 0x3, s4"
+    clean = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, *store))
+    assert not clean.mode_writes and clean.divisions == 1
     outside = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, write, *store))
-    assert outside.mode_writes == ["s_setreg_imm32_b32 0x3, 0xf0"]
+    assert outside.mode_writes == [write]
     early = classify_epilogue_isa(_isa_excerpt(write, *_ISA_DIVISION, *store))
-    assert early.mode_writes
+    assert early.mode_writes == [write]
     division = (*_ISA_DIVISION[:3], write, *_ISA_DIVISION[3:])
     inside = classify_epilogue_isa(_isa_excerpt(*division, *store))
-    assert not inside.mode_writes and inside.divisions == 1
+    assert inside.mode_writes == [write] and inside.divisions == 1
+    division = (*_ISA_DIVISION[:3], write, *_ISA_DIVISION[3:-1], restore)
+    paired = classify_epilogue_isa(_isa_excerpt(*division, _ISA_DIVISION[-1], *store))
+    assert paired.mode_writes == [write, restore] and paired.divisions == 1
 
 
 # A-MODE (c): gfx942 has no BF16 conversion instruction, so ``fptrunc float to
@@ -1710,14 +1720,14 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
       ``fadd(fmul(l, alpha), l_tile)`` is not fused.
     - Every ``v_fma_mix*`` is ``R * o + 0`` feeding an output store; BF16 has
       none. FP16 stores are classified element by element. No mix instruction
-      at all is a compiler that does not fold (what LLVM PR #236759 proposes)
-      and is accepted.
+      at all is a compiler that requires ``contract`` for the fold, and is
+      accepted.
     - A named artifact (by HSACO digest) must show its recorded lanes.
     - A-MODE: the kernel descriptor starts every wave in round-to-nearest-even
-      for FP32 and FP16, with FP16 denormals kept, and no instruction outside
-      the division writes the MODE register. The FP32 denormal mode is
-      printed, not required: every FP32 subnormal of the path is enclosed with
-      its flushed value, so no verdict depends on it.
+      for FP32 and FP16, with FP16 denormals kept, and no instruction, the
+      division expansion included, writes the MODE register. The FP32 denormal
+      mode is printed, not required: every FP32 subnormal of the path is
+      enclosed with its flushed value, so no verdict depends on it.
     - A-MODE: every ``fptrunc float to bfloat`` of the BF16 kernel is the
       round-to-nearest-even integer sequence, and every pack of upper halves
       takes rounded values. A compiler with another sequence is not guessed."""
