@@ -216,6 +216,9 @@ class rocsolver_dispatcher
             {"getf2_npvt_64", testing_getf2_getrf_npvt<false, false, 0, T, int64_t>},
             {"getf2_npvt_batched_64", testing_getf2_getrf_npvt<true, true, 0, T, int64_t>},
             {"getf2_npvt_strided_batched_64", testing_getf2_getrf_npvt<false, true, 0, T, int64_t>},
+            {"getrf_npvt_64", testing_getf2_getrf_npvt<false, false, 1, T, int64_t>},
+            {"getrf_npvt_batched_64", testing_getf2_getrf_npvt<true, true, 1, T, int64_t>},
+            {"getrf_npvt_strided_batched_64", testing_getf2_getrf_npvt<false, true, 1, T, int64_t>},
             // getrf
             {"getf2", testing_getf2_getrf<false, false, 0, T, rocblas_int>},
             {"getf2_batched", testing_getf2_getrf<true, true, 0, T, rocblas_int>},
@@ -226,6 +229,9 @@ class rocsolver_dispatcher
             {"getf2_64", testing_getf2_getrf<false, false, 0, T, int64_t>},
             {"getf2_batched_64", testing_getf2_getrf<true, true, 0, T, int64_t>},
             {"getf2_strided_batched_64", testing_getf2_getrf<false, true, 0, T, int64_t>},
+            {"getrf_64", testing_getf2_getrf<false, false, 1, T, int64_t>},
+            {"getrf_batched_64", testing_getf2_getrf<true, true, 1, T, int64_t>},
+            {"getrf_strided_batched_64", testing_getf2_getrf<false, true, 1, T, int64_t>},
             // geqrf
             {"geqr2", testing_geqr2_geqrf<false, false, 0, T, rocblas_int>},
             {"geqr2_batched", testing_geqr2_geqrf<true, true, 0, T, rocblas_int>},
