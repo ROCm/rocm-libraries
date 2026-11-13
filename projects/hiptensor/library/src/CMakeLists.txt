@@ -173,8 +173,10 @@ function(create_hiptensor_shared_library)
         rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
     endif()
 
-    # HIP libs symbols are required by hipTensor and users of hipTensor
-    target_link_libraries(hiptensor PUBLIC hip::device hip::host)
+    # HIP runtime symbols are required by hipTensor and users of hipTensor. Users only need the
+    # host side: the public headers define no kernels, so hip::device (-x hip and one device
+    # pass per GPU target) stays private and is not forced onto consumers.
+    target_link_libraries(hiptensor PUBLIC hip::host PRIVATE hip::device)
     target_link_libraries(hiptensor PRIVATE Threads::Threads)
     set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()

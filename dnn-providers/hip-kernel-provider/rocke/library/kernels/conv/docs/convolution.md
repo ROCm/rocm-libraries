@@ -1471,6 +1471,40 @@ the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
 
+### Tiny channel counts on MFMA (`FwdSmallcMfmaSpec`, `FwdSmallkMfmaSpec`)
+
+`library/kernels/common/conv_fwd_small_mfma.py` (C++ twin
+`instance_conv_fwd_small_mfma.h`) is the wave64 MFMA form of the two kernels
+above, for gfx950 (no TDM): the same GEMMs on `mfma_f32_16x16x32`, with the
+data moved by buffer loads.
+
+- `build_fwd_smallc_mfma` -- `C <= 4` input channels (stems). A block stages
+  its output tile's input window into LDS with 16-byte buffer loads from the
+  8-element boundary at or below each window row (a load wholly outside the
+  tensor reads zero through the buffer bounds), masks every element to the
+  image and stores it at its window position; each lane gathers its im2col
+  fragment from that window at offsets computed once per kernel. The weights
+  stay in registers for the `tiles_per_block` tiles a block walks;
+  `prefetch` (with `tiles_per_block > 1`) issues the next tile's window loads
+  before the current tile's compute and stores. Each lane writes 4
+  consecutive output channels as one 8-byte store, so `K` must be a multiple
+  of 4.
+- `build_fwd_smallk_mfma` -- `K` <= 8 output channels. The same
+  `Z[q, (r, s, k)]` GEMM over the window's input pixels, its fragments read
+  straight from global memory (8 channels, one 16-byte load each; the
+  weights' fragments stay in L2), then the overlap-add from an fp32 copy of
+  `Z` in LDS. `C` must be a multiple of 8; filters may be rectangular with
+  their own column padding. `K` of 2, 4 or 8 writes one vector per pixel,
+  any other `K` channel by channel.
+
+Both: wave64, `PAD` in 0..KH-1, every tensor below 2 GiB; small C takes
+square filters with one padding only. The AOT grid is
+`FWD_SMALLC_MFMA_KNOBS` over the `FWD_SMALLC_STEMS` whose flattened filter
+fits five MFMA steps (the 14x14 / 16x16 patch-embedding stems stay on
+implicit GEMM), and `FWD_SMALLK_MFMA_KNOBS` over `FWD_SMALLK_LAYERS`
+(variants `direct_fwd_smallc_mfma` / `direct_fwd_smallk_mfma`), filtered per
+problem by tile efficiency.
+
 ### Large dilations (`DirectFwdTapOuterSpec`)
 
 `library/kernels/common/conv_direct_fwd_tapouter_wmma.py` (C++ twin

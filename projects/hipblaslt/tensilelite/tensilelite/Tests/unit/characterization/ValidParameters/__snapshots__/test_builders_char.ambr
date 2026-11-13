@@ -1417,6 +1417,7 @@
     'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrStoreShuffle',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -2026,6 +2027,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'LDSTrStoreShuffle': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LdsBlockSizePerPadA': dict({

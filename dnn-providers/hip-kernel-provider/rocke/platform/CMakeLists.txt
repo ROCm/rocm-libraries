@@ -118,11 +118,16 @@ option(ROCKE_INSTALL_TEST_GPU_REFERENCES
 #    capture them.
 #  * Standalone mode: keep artifacts in bin/ with the CTestTestfile under
 #    bin/rocke/, reached via "../<name>".
+if(NOT DEFINED ROCKE_TEST_INSTALL_DIR)
+  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}")
+  else()
+    set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
+  endif()
+endif()
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
-  set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}")
   set(ROCKE_TEST_CTEST_REL "./")
 else()
-  set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
   set(ROCKE_TEST_CTEST_REL "../")
 endif()
 
@@ -450,46 +455,6 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
-      # test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of
-      # the split-KV reduce's segment bound to the Python gate; it reads these
-      # headers from tests/hkp_packs in an installed tree.
-      set(_ROCKE_HKP_PACKS_DIR
-          "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engines/kernel_ingestor_engine/packs")
-      if(EXISTS "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp")
-        install(FILES "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionDenseGeometry.hpp"
-                      "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp"
-                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
-      endif()
-
-      # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
-      # graph template and every SdpaFwd golden graph. Those live outside rocke,
-      # so install a copy beside the tests (tests/sdpa/hipdnn_assets.py reads it)
-      # when configuring from a monorepo checkout; rocke_library_sdpa_pytest then
-      # fails, instead of skipping, if the copy is missing.
-      set(_ROCKE_MONOREPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
-      set(_ROCKE_SDPA_TEMPLATE
-          "${_ROCKE_MONOREPO_ROOT}/projects/hipdnn/tools/IngestorGenerator/configs/templates/attention_sdpa_fwd.graph.json")
-      set(_ROCKE_SDPA_BUNDLES
-          "${_ROCKE_MONOREPO_ROOT}/dnn-providers/integration-tests/integration-test-bundles")
-      set(_ROCKE_SDPA_HIPDNN_DEST "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/sdpa/hipdnn")
-      set(_ROCKE_SDPA_HIPDNN_ASSETS OFF)
-      if(EXISTS "${_ROCKE_SDPA_TEMPLATE}" AND IS_DIRECTORY "${_ROCKE_SDPA_BUNDLES}")
-        file(GLOB_RECURSE _rocke_sdpa_graphs CONFIGURE_DEPENDS
-             RELATIVE "${_ROCKE_SDPA_BUNDLES}" "${_ROCKE_SDPA_BUNDLES}/*.json")
-        # hipdnn_assets.sdpa_fwd_golden_graphs()'s selection.
-        list(FILTER _rocke_sdpa_graphs INCLUDE REGEX "^[^/]+/SdpaFwd[^/]*/.+\\.json$")
-        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(meta|support|sweep|template)\\.json$")
-        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(^|/)Default/")
-        if(_rocke_sdpa_graphs)
-          install(FILES "${_ROCKE_SDPA_TEMPLATE}" DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}")
-          foreach(_rocke_sdpa_graph IN LISTS _rocke_sdpa_graphs)
-            get_filename_component(_rocke_sdpa_graph_dir "${_rocke_sdpa_graph}" DIRECTORY)
-            install(FILES "${_ROCKE_SDPA_BUNDLES}/${_rocke_sdpa_graph}"
-                    DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}/integration-test-bundles/${_rocke_sdpa_graph_dir}")
-          endforeach()
-          set(_ROCKE_SDPA_HIPDNN_ASSETS ON)
-        endif()
-      endif()
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -567,6 +532,11 @@ if(ROCKE_INSTALL_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
+
+    # Test-only copy of the compiler-option measurement tool for the installed
+    # reproduction gate below; the table it checks is package data.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_compiler_options.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/compiler_options")
 
     # This GPU test lives alongside its benchmark helpers in the Python package.
     # Stage it under tests/ so the rocke_pytest_* parts collect it in both install
@@ -660,6 +630,20 @@ if(ROCKE_INSTALL_TESTS)
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1800)\n")
+
+    # Re-measure which -mllvm options the loaded compiler accepts and fail when
+    # its committed column in compiler_options.json differs or is missing. The
+    # build-tree twin is in tests/cmake/CoreTests.cmake. It fails rather than
+    # skips without a queryable COMGR: every lane that runs it compiles. Like
+    # the arch-domain entry above it only loads COMGR, so it needs neither the
+    # compiler tools nor the compiler-check requirement.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_compiler_options_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/compiler_options/gen_compiler_options.py\" --check)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_compiler_options_reproducibility PROPERTIES\n"
+           "  LABELS \"ckc;python;host;toolchain;generated-artifact;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  TIMEOUT 600)\n")
 
     # The differential golden: every parity family's Python reference output,
     # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host

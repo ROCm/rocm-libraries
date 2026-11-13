@@ -12,6 +12,16 @@
 #
 # A test that is in library/tests but in no list here does not run in CI.
 
+# Oracle-free uniform-probability launches of the shipped dense kernels. Only
+# the GPU module runs here; its CPU contracts run in the attention CPU lane.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_oracle_free_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 300)\n")
+
 # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
 # The test environment installs the platform wheel. PYTHONPATH puts the staged
 # library tree first so kernels.*, builders.*, dispatch.*, and benchmarks.* do
@@ -33,6 +43,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_conv_aot_grid_limits.py"
     "tests/library/tests/test_dgrad_stem_wmma.py"
     "tests/library/tests/test_fwd_small_wmma.py"
+    "tests/library/tests/test_fwd_small_mfma.py"
     "tests/library/tests/test_direct_dw_fwd_wmma.py"
     "tests/library/tests/test_direct_fwd_gstream_wmma.py"
     "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
@@ -186,8 +197,11 @@ endif()
 # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
 # bound against the compiled code object, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
-# that pins the shared dense spec's C++ mirror to the Python, and the
-# backward-test memo bound in tests/conftest.py.
+# that pins the shared dense spec's C++ mirror to the Python, the
+# oracle-free uniform-probability checker and subject contracts, the gfx942
+# dense golden IR hashes (pure text lowering, a few seconds), the dense
+# varlen-keys host checks, the gfx950 dense varlen K/V buffer bound on the emitted
+# IR, and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -196,8 +210,13 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_attention_dense_decode.py"
+    "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
+    "tests/library/tests/test_attention_dense_gfx942_golden.py"
+    "tests/library/tests/test_attention_dense_varlen_keys.py"
+    "tests/library/tests/test_attention_dense_varlen_keys.py"
     "tests/library/tests/test_attention_scalar_cache_key.py"
     "tests/library/tests/test_attention_spec_predicate_parity.py"
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
@@ -218,7 +237,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_sdpa_padding_mask.py"
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
-    "tests/library/tests/test_bwd_memo_bound.py")
+    "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/oracle_free/test_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -274,10 +294,11 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  TIMEOUT 180)\n")
 
 # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
-# wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
-# shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
-# through comgr and read the code object with llvm-objdump, so the entry also
-# takes the compiler environment; with it they fail rather than skip. Same
+# wiring, the IR golden, the fp32 oracle, the benchmark shape loader, the
+# shared read-ahead helper, and the compile-test skip policy. The prefill
+# occupancy / agpr_acc guards compile through comgr and read the code object
+# with llvm-objdump, so the entry also takes the compiler environment; with it
+# they fail rather than skip, and the skip-policy tests check that they do. Same
 # PYTHONPATH contract as the conv entry above; the staged library tree carries
 # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
 # tests/golden/mla_prefill_gfx942_ir_sha256.json.
@@ -287,7 +308,8 @@ set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
     "tests/library/tests/test_mla_prefill_gfx942_golden.py"
     "tests/library/tests/test_mla_reference.py"
     "tests/library/tests/test_mla_benchmark_shapes.py"
-    "tests/library/tests/test_read_ahead.py")
+    "tests/library/tests/test_read_ahead.py"
+    "tests/library/tests/test_compiler_test_utils.py")
 set(_ROCKE_LIBRARY_MLA_TESTS "")
 foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_MLA_TESTS
@@ -344,9 +366,11 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # case tables. Pointed at the DIRECTORY so a new file there runs automatically;
 # a GPU test added there must be --ignore'd here and enrolled in the GPU lane.
 # Distinct from rocke_sdpa_reference_unit_pytest below, which runs only
-# tests/test_sdpa_reference_contract.py.
+# tests/test_sdpa_reference_contract.py. The rocKE umbrella sets the requirement
+# when it stages the optional hipDNN assets; standalone platform builds leave it
+# disabled.
 set(_ROCKE_SDPA_PYTEST_ARGS "")
-if(_ROCKE_SDPA_HIPDNN_ASSETS)
+if(ROCKE_REQUIRE_INSTALLED_HIPDNN_SDPA_ASSETS)
   set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
 endif()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
