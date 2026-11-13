@@ -801,7 +801,7 @@ inline std::optional<WorkspaceLayout> workspaceLayoutOf(
     if(worklist)
     {
         const auto items = product({2, in.b, detail::ceilDiv(in.sKv, blockN)});
-        constexpr int64_t maxItems
+        const int64_t maxItems
             = std::numeric_limits<int64_t>::max() - generated::WORKLIST_HEADER_WORDS;
         const auto words = items && *items <= maxItems
                                ? std::optional<int64_t>(generated::WORKLIST_HEADER_WORDS + *items)
