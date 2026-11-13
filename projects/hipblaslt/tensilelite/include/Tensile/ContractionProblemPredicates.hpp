@@ -3090,6 +3090,50 @@ namespace TensileLite
                 }
             };
 
+            // MX scale layout of the solution. The host does not tell formats below
+            // kFirstExactFormat apart, so they match each other; a later format on
+            // either side must equal the other side.
+            struct MXScaleFormatEquals
+                : public Predicate_CRTP<MXScaleFormatEquals, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                static constexpr int kFirstExactFormat = 3;
+
+                int value = 0;
+
+                MXScaleFormatEquals() = default;
+                MXScaleFormatEquals(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXScaleFormatEquals";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value < kFirstExactFormat && problem.mxScaleFormat() < kFirstExactFormat)
+                        return true;
+                    return problem.mxScaleFormat() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.mxScaleFormat() << " matches sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
             {
                 enum

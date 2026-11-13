@@ -84,6 +84,12 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
 
+### MIOpen
+
+| Skill | Path | Use it when |
+| --- | --- | --- |
+| `miopen-review` | [`projects/miopen/skills/miopen-review/`](projects/miopen/skills/miopen-review/SKILL.md) | A lightweight single-pass review of a MIOpen PR or local commits: parallel reviewer lanes primed with MIOpen's contracts, a devil's-advocate pass, optional reproduction on a GPU host you supply, and draft comments posted only after approval. |
+
 ### StinkyTofu
 
 | Skill | Path | Use it when |

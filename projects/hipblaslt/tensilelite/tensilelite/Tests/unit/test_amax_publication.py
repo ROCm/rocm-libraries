@@ -15,7 +15,7 @@ import pytest
 import rocisa
 from rocisa.container import ContinuousRegister
 from tensilelite.Common import IsaVersion
-from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.ValidParameters import makeValidWorkGroups
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
@@ -65,12 +65,16 @@ class _Writer:
             self.sgprPool.checkIn(base)
 
 
-@pytest.fixture(params=[(IsaVersion(9, 5, 0), 64), (IsaVersion(12, 5, 0), 32)])
+@pytest.fixture(params=[(IsaVersion(9, 5, 0), 64, "gfx950"),
+                        (IsaVersion(12, 5, 0), 32, "gfx1250"),
+                        (IsaVersion(12, 5, 0), 32, "gfx1250-strict")])
 def target(request):
-    isa, wave = request.param
+    isa, wave, arch = request.param
     compiler = shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++"
     with preserve_rocisa_kernel_state():
-        info = makeIsaInfoMap([isa], compiler)[isa]
+        infos = makeIsaInfoMap([isa], compiler)
+        applyArchCapOverrides(infos, [arch])
+        info = infos[isa]
         rocisa.rocIsa.getInstance().setKernel(isa, wave)
         kernel = {
             "ISA": isa,
@@ -142,7 +146,15 @@ def test_amax_publication_uses_target_atomic_fences_and_srd(target):
     if kernel["WavefrontSize"] == 32:
         assert "s_atomic_dec" not in assembly
         atomic = assembly.index("flat_atomic_dec")
-        assert partial_store < assembly.index("global_wb") < atomic
+        if writer.states.archCaps["MTypeNC"]:
+            assert partial_store < assembly.index("global_wb scope:SCOPE_DEV") < atomic
+            assert "global_inv scope:SCOPE_DEV" in assembly
+        else:
+            assert "global_wb" not in assembly
+            assert "global_inv scope:SCOPE_SE" in assembly
+        publication = assembly[partial_store:atomic]
+        assert "s_wait_loadcnt 0" in publication
+        assert "s_wait_storecnt 0" in publication
         assert (
             atomic
             < assembly.index("global_inv")

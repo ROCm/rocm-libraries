@@ -516,15 +516,22 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
                                    const rocblaslt_matmul_algo*       algo,
                                    std::shared_ptr<GemmKernel>&       kernel)
 {
-    int* solutionIndex = (int*)algo->data;
+    if(algo == nullptr)
+        return rocblaslt_status_invalid_pointer;
 
-    if(solutionIndex == 0)
-        return rocblaslt_status_not_implemented;
+    // An algo from the Tensile path holds a Tensile index. Decoding it as a rocRoller index
+    // yields an arbitrary tile whose kernel can take minutes to generate.
+    const int solutionIndex = *reinterpret_cast<const int*>(algo->data);
+    if(!isRocRollerSolutionIndex(solutionIndex))
+    {
+        log_info(__func__, "not a rocRoller solution index: ", solutionIndex);
+        return rocblaslt_status_invalid_value;
+    }
 
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
     auto             kernelType       = genKernelType(prob);
 
-    auto solutionIndexParameters = indexToParameters(*solutionIndex);
+    auto solutionIndexParameters = indexToParameters(solutionIndex);
     auto existingKernel          = rocroller_handle->cache.getKernel(
         kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
@@ -535,7 +542,7 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     else
     {
         auto status = genKernelFromSolutionIndexParameters(
-            rocroller_handle, kernelType, solutionIndexParameters, *solutionIndex, kernel);
+            rocroller_handle, kernelType, solutionIndexParameters, solutionIndex, kernel);
         return status;
     }
 }

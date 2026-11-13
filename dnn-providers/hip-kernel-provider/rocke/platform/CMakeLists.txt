@@ -452,8 +452,7 @@ if(ROCKE_INSTALL_TESTS)
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
               PATTERN "reference_bundles" EXCLUDE
-              PATTERN "check_torch_reference.py" EXCLUDE
-              PATTERN "run_all.py" EXCLUDE)
+              PATTERN "check_torch_reference.py" EXCLUDE)
 
     else()
       message(WARNING
@@ -465,6 +464,12 @@ if(ROCKE_INSTALL_TESTS)
     install(PROGRAMS
             "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/analysis/lds-bank-conflict-expert")
+    # The counted ISA gate uses the shared disassembler without installing the
+    # source dsl_docs tree. Stage that one support module at an explicit path;
+    # CTest supplies it through ROCKE_ISA_INSPECT_PROBE below.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/tools/dsl_probes/probe_isa_inspect.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/support")
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
@@ -533,6 +538,11 @@ if(ROCKE_INSTALL_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
 
+    # Test-only copy of the compiler-option measurement tool for the installed
+    # reproduction gate below; the table it checks is package data.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_compiler_options.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/compiler_options")
+
     # This GPU test lives alongside its benchmark helpers in the Python package.
     # Stage it under tests/ so the rocke_pytest_* parts collect it in both install
     # layouts.
@@ -561,6 +571,17 @@ if(ROCKE_INSTALL_TESTS)
       file(RELATIVE_PATH _ROCKE_INSTALLED_PYTHONPATH
            "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rocke"
            "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_INSTALL_DIR}")
+    endif()
+
+    # Library tests need both the staged library packages and the exact installed
+    # rocke package. Escape Windows' path separator because CTest ENVIRONMENT is
+    # itself a semicolon-separated list.
+    if(WIN32)
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library\\;${_ROCKE_INSTALLED_PYTHONPATH}")
+    else()
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library:${_ROCKE_INSTALLED_PYTHONPATH}")
     endif()
 
     # Python test entries invoke via "python" (resolved from PATH at test time)
@@ -625,6 +646,20 @@ if(ROCKE_INSTALL_TESTS)
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1800)\n")
+
+    # Re-measure which -mllvm options the loaded compiler accepts and fail when
+    # its committed column in compiler_options.json differs or is missing. The
+    # build-tree twin is in tests/cmake/CoreTests.cmake. It fails rather than
+    # skips without a queryable COMGR: every lane that runs it compiles. Like
+    # the arch-domain entry above it only loads COMGR, so it needs neither the
+    # compiler tools nor the compiler-check requirement.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_compiler_options_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/compiler_options/gen_compiler_options.py\" --check)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_compiler_options_reproducibility PROPERTIES\n"
+           "  LABELS \"ckc;python;host;toolchain;generated-artifact;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  TIMEOUT 600)\n")
 
     # The differential golden: every parity family's Python reference output,
     # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host

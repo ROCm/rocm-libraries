@@ -44,6 +44,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBatchnormBwdPlan.cpp
+    TestGpuBatchnormBwdSignatureKey.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionBwdPlan.cpp

@@ -3,7 +3,7 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 5.3.0
+## (Unreleased) rocSPARSE 5.2.0
 
 ### Changed
 * `rocsparse_spmv` and `rocsparse_v2_spmv` with the default algorithm (`rocsparse_spmv_alg_default`) now select the nnz-split algorithm when the CSR-adaptive row-block partition is a poor fit. This applies to non-transposed CSR and to transposed and conjugate-transposed CSC, for general and symmetric matrices. The partition is a poor fit when row blocks spanning many mostly empty rows cover a substantial share of the matrix, or when many row blocks are runs of short rows between long rows that hold far fewer non-zeros than a full block. An empty prefix or suffix that the adaptive algorithm already skips does not cause the switch to the nnz-split algorithm. Half-precision (`f16` and `bf16`) matrices and the transposed CSR and non-transposed CSC defaults keep their previous algorithm, and explicit algorithm selections, including `rocsparse_spmv_alg_csr_adaptive`, still use the requested algorithm.
@@ -15,6 +15,7 @@ Documentation for rocSPARSE is available at
 * The 24 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/rocsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `ROCSPARSE_TEST_MIRROR`. The `--matrices-dir` and `--matrices-dir-install` options of `install.sh` and the `--matrices-dir` option of `rmake.py` still download missing matrices.
 
 ### Resolved issues
+* Fixed `rocsparse_Xnnz` writing past the end of `nnz_per_row_columns` when the direction is row and the matrix has no rows, and the COO and CSR analysis of `rocsparse_dense_to_sparse` writing past the end of `temp_buffer` when the dense matrix has no rows. The empty-row quick return fell through into the column case and cleared one entry per column.
 * Fixed integer overflows in `rocsparse_Xbsrsm_solve` for problems such as 50,000 block rows with 700,000 right-hand sides. The solve grid (one block per group of 16 right-hand sides and block row), the transposed-value gather grid for `trans_A = transpose` (from 33,554,432 non-zero blocks), and the scalar row count `mb * block_dim` used to set up the right-hand side and to check `ldb` and `ldx` were all computed in 32-bit arithmetic, and so were the offsets into `X` and the block value offsets `block_dim * block_dim * j`. They are now computed in 64-bit arithmetic. The launch grids are clamped to `(2^32 - 1) / blockDim.x`, and the kernels cover the remainder with a grid-stride loop, or with contiguous chunks when `mb` alone exceeds the limit.
 * Fixed `rocsparse_sptrsv` in device pointer mode when the data type set with `rocsparse_sptrsv_input_scalar_datatype` differs from the one set with `rocsparse_sptrsv_input_compute_datatype`. `alpha` was not converted to the compute data type, so the solve used an uninitialized internal scalar instead and produced incorrect results. Scalar data types that cannot be converted to the compute data type now return `rocsparse_status_invalid_value` in device pointer mode, as in host pointer mode.
 * Fixed `rocsparse_Xgtsv_no_pivot` and `rocsparse_Xgtsv_no_pivot_strided_batch` returning NaN for a diagonal system larger than 1024. 
@@ -51,7 +52,7 @@ Documentation for rocSPARSE is available at
 ### Removed
 * Removed the GoogleTest superbuild in `deps/CMakeLists.txt`, together with `deps/external-gtest.cmake` and `cmake/get-cli-arguments.cmake`.
 
-## (Unreleased) rocSPARSE 5.2.0
+## rocSPARSE 5.1.0 for ROCm 10.2
 
 ### Added
 * Added the `rocsparse_spsort` and `rocsparse_spsort_buffer_size` generic routines, which sort a sparse matrix in place or into a separate target matrix. COO matrices are sorted by row or by column, and CSR and CSC matrices have the indices within each row or column sorted. The values are reordered with the indices. Uniform strided batched matrices are supported, including broadcasting a single source matrix to every sample of the target matrix.
