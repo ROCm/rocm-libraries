@@ -38,9 +38,10 @@
 //   - Values the compiler cannot prove wave-uniform but that are (tid / BK with BK a multiple
 //     of the wave size) are made scalar with readfirstlane (dwWaveUniformDiv).
 //   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
-//   - The rowtile core keeps f16 operands packed and FMAs through dwFma (v_fma_mix_f32), and
-//     rounds to f16 as a separate step (valu_from_f32), so its f16 output is the fmaf of the
-//     converted operands bit for bit.
+//   - Every tap is an explicit fmaf (dwFma), one rounding, never a multiply and an add. The
+//     rowtile core keeps f16 operands packed (v_fma_mix_f32), and every core rounds to f16 as a
+//     separate step (valu_from_f32), so the f16 output is the fmaf of the converted operands
+//     bit for bit.
 //
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
 //   v3a_microtile_core_nhwc register 2D halo reuse (no LDS); s=d=1, compile-time KH/KW.
@@ -396,7 +397,7 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
                 const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
-                const float t = acc[j] + w * a;
+                const float t = dwFma(w, a, acc[j]);
                 acc[j] = v ? t : acc[j];
             }
         }
@@ -468,7 +469,7 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
             const int iw = wo * p.sw - p.pw + kx * p.dw;
             const bool v = vy & dwIn(iw, p.Wi);
             const float a = X.f32Unmasked(a_row + iw, v);
-            const float t = acc + valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * a;
+            const float t = dwFma(valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]), a, acc);
             acc = v ? t : acc;
         }
     }
@@ -546,7 +547,7 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
                     const int iw = wo * p.sw - p.pw + kx * p.dw;
                     const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
                     const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
-                    const float t = acc[j] + w * a;
+                    const float t = dwFma(w, a, acc[j]);
                     acc[j] = v ? t : acc[j];
                 }
             }
@@ -622,7 +623,8 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & dwIn(iw, p.Wi);
                 const float a = X.f32Unmasked(a_row + iw, v);
-                const float t = acc + valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * a;
+                const float t
+                    = dwFma(valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]), a, acc);
                 acc = v ? t : acc;
             }
         }
@@ -717,7 +719,7 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < TH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < TW; ++tx)
-                    acc[ty][tx] += w[ky][kx] * patch[ty + ky][tx + kx];
+                    acc[ty][tx] = dwFma(w[ky][kx], patch[ty + ky][tx + kx], acc[ty][tx]);
 
 #pragma unroll
     for(int ty = 0; ty < TH; ++ty)
@@ -901,7 +903,7 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < RW; ++tx)
-                    acc[ty][tx] += w[ky][kx] * patch[ty + ky][tx + kx];
+                    acc[ty][tx] = dwFma(w[ky][kx], patch[ty + ky][tx + kx], acc[ty][tx]);
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
     const bool kv = k < p.C;
@@ -997,10 +999,10 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < RW; ++tx)
-                    acc[ty][tx]
-                        += wv
-                           * valu_to_f32(
-                               tile[(((oy + ty + ky) * LW) + (ox + tx + kx)) * BK + klocal]);
+                    acc[ty][tx] = dwFma(
+                        wv,
+                        valu_to_f32(tile[(((oy + ty + ky) * LW) + (ox + tx + kx)) * BK + klocal]),
+                        acc[ty][tx]);
         }
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
@@ -1122,12 +1124,13 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
                     for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                         for(int tx = 0; tx < RW; ++tx)
-                            acc[tz][ty][tx]
-                                += wv
-                                   * valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
-                                                       + (ox + tx + kx))
-                                                          * BK
-                                                      + klocal]);
+                            acc[tz][ty][tx] = dwFma(
+                                wv,
+                                valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
+                                                  + (ox + tx + kx))
+                                                     * BK
+                                                 + klocal]),
+                                acc[tz][ty][tx]);
             }
 
     const I nOut = (I)n * p.Do * p.Ho * p.Wo * p.C;
@@ -1300,7 +1303,7 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
 #pragma unroll
                 for(int j = 0; j < RW; ++j)
                 {
-                    acc[r][j] += w[ky][kx] * segment[j + kx];
+                    acc[r][j] = dwFma(w[ky][kx], segment[j + kx], acc[r][j]);
                 }
             }
         }
@@ -1403,7 +1406,9 @@ __device__ inline void v5_gather_bwd(const T* __restrict__ A,
                 const long a = LAYOUT == 0
                                    ? ((((long)n * p.Di + oz) * p.Hi + oy) * p.Wi + ox) * p.C + k
                                    : ((((long)n * p.C + k) * p.Di + oz) * p.Hi + oy) * p.Wi + ox;
-                acc += valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * valu_to_f32(A[a]);
+                acc = dwFma(valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]),
+                            valu_to_f32(A[a]),
+                            acc);
             }
         }
     }
@@ -1517,7 +1522,7 @@ __device__ inline void v6_phase_block_nhwc(const T* __restrict__ A,
                         const float* w = &sW[(ry + S * m) * KW + rx + S * mm][cv * VEC];
 #pragma unroll
                         for(int e = 0; e < VEC; ++e)
-                            acc[e] += w[e] * win[m][mm][e];
+                            acc[e] = dwFma(w[e], win[m][mm][e], acc[e]);
                     }
                 }
                 T* d = D + ((long)(n * p.Ho + y) * p.Wo + x) * p.C + c0;
@@ -1600,7 +1605,7 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
 #pragma unroll
                 for(int mm = 0; mm < MX; ++mm)
                     if(ry + S * m < KH && rx + S * mm < KW)
-                        acc += w[(ry + S * m) * KW + rx + S * mm] * win[m][mm];
+                        acc = dwFma(w[(ry + S * m) * KW + rx + S * mm], win[m][mm], acc);
             valu_from_f32(acc, d0[(long)y * p.Wo + x]);
         }
     }
