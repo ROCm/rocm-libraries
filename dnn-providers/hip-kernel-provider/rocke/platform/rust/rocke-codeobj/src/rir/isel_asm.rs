@@ -19,7 +19,10 @@
 //! operand values moved into that file; a digit ties an input to that output
 //! (copied in first); `~{memory}` fences the block for the scheduler. Early
 //! clobbers need nothing: the instructions' own reads and writes give the
-//! allocator the live ranges. Anything else in a template is refused.
+//! allocator the live ranges. `a` constraints (AGPR operands, also pinned ones)
+//! are VGPRs, and a
+//! `v_mfma_*` instruction takes its operands in VGPR form. Anything else in a
+//! template is refused.
 
 use super::*;
 use crate::target::gfx9::gen_isa as t;
@@ -48,6 +51,16 @@ fn fixed_vgprs(text: &str) -> Option<(u16, u8)> {
     Some((inner.parse().ok()?, 1))
 }
 
+/// `{a[x:y]}` or `{aN}`.
+fn fixed_agprs(text: &str) -> bool {
+    let Some(inner) = text.strip_prefix("{a").and_then(|t| t.strip_suffix('}')) else { return false };
+    match inner.strip_prefix('[').and_then(|r| r.strip_suffix(']')).map(|r| r.split_once(':')) {
+        Some(Some((a, b))) => matches!((a.parse::<u16>(), b.parse::<u16>()), (Ok(a), Ok(b)) if a <= b && b < 256),
+        Some(None) => false,
+        None => inner.parse::<u16>().is_ok_and(|n| n < 256),
+    }
+}
+
 fn parse_constraints(text: &str) -> Result<(Vec<Constraint>, Vec<String>), CompileError> {
     let (mut out, mut clobbers) = (Vec::new(), Vec::new());
     for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
@@ -56,6 +69,11 @@ fn parse_constraints(text: &str) -> Result<(Vec<Constraint>, Vec<String>), Compi
         } else if let Some(rest) = part.strip_prefix('=') {
             match rest.trim_start_matches('&') {
                 c @ ("v" | "s") => out.push(Constraint::Out(c.chars().next().unwrap())),
+                // An AGPR output (rocKE's AGPR-form MFMA templates): the VGPR form of the instruction.
+                "a" => out.push(Constraint::Out('v')),
+                // An output pinned to AGPRs `{a[x:y]}` / `{aN}`: where the AGPRs go is the allocator's choice
+                // here, and the template names the operand as `$N` (a raw `aN` in it is refused).
+                a if fixed_agprs(a) => out.push(Constraint::Out('v')),
                 other => match fixed_vgprs(other) {
                     Some((first, n)) => out.push(Constraint::OutFixed(first, n)),
                     None => return Err(unsupported(format!("inline asm output constraint {other:?}"))),
@@ -417,6 +435,17 @@ impl Isel<'_> {
             }
             _ => {}
         }
+        // A matrix instruction (`v_mfma_*` dst, a, b, c): in VGPR form, as `mfma_vgpr_form` asks for; the
+        // `a` constraints of its template are VGPRs here.
+        if mnemonic.starts_with("v_mfma_") {
+            let opc = t::ALL.iter().copied().find(|&o| matches!(o, Opc::Gfx9(_)) && t::mnemonic(o) == Some(mnemonic) && crate::target::gfx9::agpr::is_mfma(o));
+            let (Some(opc), [d, a, b, c], []) = (opc, operands, mods) else {
+                return Err(unsupported(format!("inline asm {mnemonic} with {} operands and {} modifiers", operands.len(), mods.len())));
+            };
+            let (d, a, b, c) = (opnd(self, d)?, opnd(self, a)?, opnd(self, b)?, opnd(self, c)?);
+            self.emit(MInst::new(opc, [d], [a, b, c]));
+            return Ok(None);
+        }
         if mnemonic == "s_dcache_inv" {
             self.emit(MInst::new(Opc::Gfx9(t::Gfx9Op::SDcacheInv), [], []));
             return Ok(None);
@@ -610,6 +639,43 @@ mod tests {
         assert_eq!(opcode_of("v_cmp_lt_u32_e64", 3).map(|o| matches!(o, Opc::VCmp(_))), Some(true));
         assert_eq!(opcode_of("s_addc_u32", 3), Some(Opc::SAddcU32));
         assert_eq!(opcode_of("v_readfirstlane_b32", 2), Some(Opc::VReadfirstlaneB32));
+        // AGPR constraints, free and pinned, are VGPR outputs; a malformed pin is refused.
+        for text in ["=a,0,v,v", "={a[120:123]},v,v", "={a124},v", "=&a,v"] {
+            assert!(matches!(parse_constraints(text).unwrap().0[0], Constraint::Out('v')), "{text}");
+        }
+        for text in ["={a[3:1]}", "={a[0:300]}", "={a[1]}", "={q[0:3]}"] {
+            assert!(parse_constraints(text).is_err(), "{text}");
+        }
+    }
+
+    /// The AGPR-form MFMA templates of the attention backward (`=a` outputs, tied accumulators, or pinned
+    /// `{a[x:y]}` with a zero accumulator) compile in VGPR form: the MFMA names VGPRs, no AGPR is used.
+    #[test]
+    fn mfma_templates_with_agpr_constraints_compile_in_vgpr_form() {
+        let kernel = |constraints: &str, template: &str, operands: &str| {
+            format!(
+                "ckdsl.ir v1\nkernel @asm_mfma {{\n  attrs {{ max_workgroup_size = i:64, mfma_vgpr_form = b:true }}\n  params {{\n    %X : ptr<f16,global>\n    %Y : ptr<f32,global>\n  }}\n  \
+                 region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+                 %i : i32 = arith.mul ( %tid, %c4 )\n    \
+                 %a : vec<f16x4> = memref.global_load_vN ( %X, %i ) {{ align = i:8, elem_type = s:\"f16\", vec = i:4 }}\n    \
+                 %b : vec<f16x4> = memref.global_load_vN ( %X, %i ) {{ align = i:8, elem_type = s:\"f16\", vec = i:4 }}\n    \
+                 %z : vec<f32x4> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:4 }}\n    \
+                 %acc : vec<f32x4> = tile.inline_asm ( {operands} ) {{ constraints = s:\"{constraints}\", convergent = b:true, sideeffect = b:true, template = s:\"{template}\" }}\n    \
+                 %e : f32 = vector.extract ( %acc ) {{ index = i:1 }}\n    \
+                 memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+            )
+        };
+        for text in [
+            kernel("=a,0,v,v", "s_nop 1\\n\\tv_mfma_f32_16x16x16_f16 $0, $2, $3, $1\\n\\ts_nop 15", "%z, %a, %b"),
+            kernel("={a[120:123]},v,v", "s_nop 1\\n\\tv_mfma_f32_16x16x16_f16 $0, $1, $2, 0\\n\\ts_nop 15", "%a, %b"),
+        ] {
+            let listing = crate::rir::compile_any_target(&text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}")).listing();
+            assert_eq!(listing.matches("v_mfma_f32_16x16x16_f16").count(), 1, "{listing}");
+            assert!(!listing.contains("accvgpr") && !listing.contains(" a["), "{listing}");
+        }
+        // A raw AGPR name in the template is not mapped: refused, so COMGR compiles it.
+        let raw = kernel("=a,v,v", "v_mfma_f32_16x16x16_f16 $0, $1, $2, a[0:3]", "%a, %b");
+        assert!(crate::rir::compile_any_target(&raw, crate::target::Target::Gfx950).is_err());
     }
 
     /// rocKE's DMA-ring asm (`_attention_bwd_ring._ASM_X4`): M0 from an SGPR, a wait state, `global_load_lds_dwordx4`

@@ -768,6 +768,11 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            VecLshr => {
+                if !matches!(same(2)?, Type::Vec(Scalar::I32, _)) {
+                    return Err(mismatch());
+                }
+            }
             // An i32 flag of a global array; the reference lowering requires
             // the scope, and the store's ordering, from these values.
             FlagWaitEq | FlagStore => {
@@ -966,6 +971,29 @@ impl Checker<'_> {
             ReadLane => {
                 arity(1, 2)?;
                 if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || res != Some(types[0]) {
+                    return Err(mismatch());
+                }
+            }
+            BytePerm => {
+                arity(1, 2)?;
+                if *types[0] != i32t || *types[1] != i32t || res != Some(&i32t) || !matches!(self.int(op, "sel")?, Some(0..=0xffff_ffff)) {
+                    return Err(mismatch());
+                }
+            }
+            // A monotonic atomic i32 or i64 load / store at `ptr[index]` (the reference lowering's
+            // `load atomic` / `store atomic`); the ordering and scope are checked at selection.
+            GlobalLoadAtomic | GlobalStoreAtomic => {
+                let store = op.kind == GlobalStoreAtomic;
+                arity(usize::from(!store), 2 + usize::from(store))?;
+                let data = if store { types[2] } else { res.expect("one result") };
+                if !matches!(types[0], Type::Ptr(_)) || *types[1] != i32t || !matches!(data, Type::Scalar(Scalar::I32 | Scalar::I64)) {
+                    return Err(mismatch());
+                }
+            }
+            // `llvm.amdgcn.writelane` of an i32 or f32: (value, lane, passthrough).
+            WriteLane => {
+                arity(1, 3)?;
+                if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || *types[2] != *types[0] || res != Some(types[0]) {
                     return Err(mismatch());
                 }
             }
