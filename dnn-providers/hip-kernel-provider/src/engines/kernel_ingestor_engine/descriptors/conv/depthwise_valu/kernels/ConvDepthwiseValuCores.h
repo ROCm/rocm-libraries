@@ -20,9 +20,13 @@
 //     together; a branch per load waits for each one alone. The LDS staging loops run a
 //     compile-time trip count (the block size is the config's), fully unrolled, so a thread's
 //     halo loads issue back to back.
-//   - Index math is 32-bit when x and y are below 2^31 bytes (and the launched threads below
-//     2^31), with the thread decode by unsigned 32-bit division; larger tensors run the same
-//     cores with 64-bit indices, clamped global loads and guarded stores.
+//   - Index widths. Index math is 32-bit when x and y are below 2^31 bytes and the launched
+//     threads below 2^31 (dwTensorsFit32), with the thread decode by unsigned 32-bit division.
+//     Larger tensors: the floors switch at run time to a second body with 64-bit indices,
+//     clamped global loads and guarded stores; the tile cores (microtile, fused, LDS) have no
+//     such body and the kernel match declines them (launchFor), since a second body sets the
+//     register count of every launch (fused 7x7 16x16x32: 177 VGPRs with it, 77 without, on
+//     gfx950). The rowtile core rebases per row and has one body for every size.
 //   - In the 32-bit form the tile cores (microtile, fused, LDS) read x and write y through
 //     whole-tensor buffer resources (DwX, DwY) at 32-bit byte offsets: an element outside the
 //     image reads hardware zero and an output past the edge is stored past the end and dropped,
@@ -34,6 +38,10 @@
 //   - Values the compiler cannot prove wave-uniform but that are (tid / BK with BK a multiple
 //     of the wave size) are made scalar with readfirstlane (dwWaveUniformDiv).
 //   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
+//   - Every tap is an explicit fmaf (dwFma), one rounding, never a multiply and an add. The
+//     rowtile core keeps f16 operands packed (v_fma_mix_f32), and every core rounds to f16 as a
+//     separate step (valu_from_f32), so the f16 output is the fmaf of the converted operands
+//     bit for bit.
 //
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
 //   v3a_microtile_core_nhwc register 2D halo reuse (no LDS); s=d=1, compile-time KH/KW.
@@ -46,6 +54,8 @@
 //   v6_phase_block_nhwc/nchw  backward data by stride phase blocks: each thread computes the
 //                           S x S dx pixels of one dy position from the dy window they share
 //                           (compile-time filter and stride, unit dilation), both layouts.
+//   v7_rowtile_core_nhwc    register output tile per lane, input rows streamed, spatial tile
+//                           per block (no LDS); s=d=1, compile-time KH/KW, 1-2 channels/lane.
 #pragma once
 
 #include "ConvArchFamily.h"
@@ -64,6 +74,29 @@ template <typename T>
 __device__ inline void valu_from_f32(float s, T& d)
 {
     d = static_cast<T>(s);
+}
+// The fp32 result rounded to f16. The empty asm keeps the rounding a separate step: the backend
+// would otherwise fold an FMA producing s into v_fma_mixlo_f16, which rounds the exact result to
+// f16 once and differs from rounding to fp32 first in about 1 of 2000 near-halfway cases.
+__device__ inline void valu_from_f32(float s, _Float16& d)
+{
+    asm("" : "+v"(s));
+    d = static_cast<_Float16>(s);
+}
+
+// acc + w * x, rounded once. An explicit fmaf rather than acc += w * x: the contraction of a
+// separate multiply and add happens late, after the SLP vectorizer may have paired the multiplies
+// into v_pk_mul_f32 (gfx90a and later), which leaves two roundings. f16 operands stay f16 in
+// their registers, and the backend folds both conversions into the FMA (v_fma_mix_f32, every
+// shipped arch): the products are exact in fp32, so the result is the fmaf of the converted
+// operands bit for bit, at half the operand registers and no conversion instructions.
+__device__ inline float dwFma(float w, float x, float acc)
+{
+    return __builtin_fmaf(w, x, acc);
+}
+__device__ inline float dwFma(_Float16 w, _Float16 x, float acc)
+{
+    return __builtin_fmaf(static_cast<float>(w), static_cast<float>(x), acc);
 }
 
 #ifndef CONV_DW_FLIP
@@ -156,11 +189,6 @@ __device__ inline bool dwTensorsFit32(const ValuParams& p)
            && (long)p.N * p.C * p.Do * p.Ho * p.Wo * eb < lim
            && (long)gridDim.x * gridDim.y * gridDim.z * blockDim.x < lim;
 }
-template <typename T>
-__device__ inline bool dwImagesFit32(const ValuParams& p)
-{
-    return dwTensorsFit32<T>(p);
-}
 
 #if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define DW_RSRC_FLAGS 0x31004000
@@ -185,6 +213,7 @@ __device__ inline __amdgpu_buffer_rsrc_t dwRsrc(const void* base, long bytes)
 }
 
 typedef unsigned int __attribute__((ext_vector_type(4))) DwU4;
+typedef unsigned int __attribute__((ext_vector_type(2))) DwU2;
 
 /// x reads. Buffer form (BUF, 32-bit indices): a buffer load at a byte offset; an element that
 /// is not valid (v false) reads zero from the hardware (offset past the end): no select, no
@@ -368,7 +397,7 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
                 const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
-                const float t = acc[j] + w * a;
+                const float t = dwFma(w, a, acc[j]);
                 acc[j] = v ? t : acc[j];
             }
         }
@@ -440,7 +469,7 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
             const int iw = wo * p.sw - p.pw + kx * p.dw;
             const bool v = vy & dwIn(iw, p.Wi);
             const float a = X.f32Unmasked(a_row + iw, v);
-            const float t = acc + valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * a;
+            const float t = dwFma(valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]), a, acc);
             acc = v ? t : acc;
         }
     }
@@ -518,7 +547,7 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
                     const int iw = wo * p.sw - p.pw + kx * p.dw;
                     const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
                     const float a = X.f32Unmasked(a_row + (I)iw * p.C, v);
-                    const float t = acc[j] + w * a;
+                    const float t = dwFma(w, a, acc[j]);
                     acc[j] = v ? t : acc[j];
                 }
             }
@@ -594,7 +623,8 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
                 const bool v = vy & dwIn(iw, p.Wi);
                 const float a = X.f32Unmasked(a_row + iw, v);
-                const float t = acc + valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * a;
+                const float t
+                    = dwFma(valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]), a, acc);
                 acc = v ? t : acc;
             }
         }
@@ -689,7 +719,7 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < TH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < TW; ++tx)
-                    acc[ty][tx] += w[ky][kx] * patch[ty + ky][tx + kx];
+                    acc[ty][tx] = dwFma(w[ky][kx], patch[ty + ky][tx + kx], acc[ty][tx]);
 
 #pragma unroll
     for(int ty = 0; ty < TH; ++ty)
@@ -711,10 +741,8 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
                                                T* __restrict__ D,
                                                ValuParams p)
 {
-    if(dwTensorsFit32<T>(p))
-        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
-    else
-        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, long>(A, Wt, D, p);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
 }
 
 // Stages the halo'd [LD][LH][LW][BK] channels-last block (LD = 1 in 2-D) of the image starting at
@@ -875,7 +903,7 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < RW; ++tx)
-                    acc[ty][tx] += w[ky][kx] * patch[ty + ky][tx + kx];
+                    acc[ty][tx] = dwFma(w[ky][kx], patch[ty + ky][tx + kx], acc[ty][tx]);
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
     const bool kv = k < p.C;
@@ -905,12 +933,9 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
     static_assert(BW % RW == 0, "v4_fused: BW must be divisible by RW");
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v4_fused: LDS tile exceeds 64 KB");
-    // One LDS tile for both index widths (a __shared__ array per instantiation would be two).
     __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b lds-direct: LDS block stage, tap loop reads from LDS ----
@@ -974,10 +999,10 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
             for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                 for(int tx = 0; tx < RW; ++tx)
-                    acc[ty][tx]
-                        += wv
-                           * valu_to_f32(
-                               tile[(((oy + ty + ky) * LW) + (ox + tx + kx)) * BK + klocal]);
+                    acc[ty][tx] = dwFma(
+                        wv,
+                        valu_to_f32(tile[(((oy + ty + ky) * LW) + (ox + tx + kx)) * BK + klocal]),
+                        acc[ty][tx]);
         }
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
@@ -1007,10 +1032,8 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v3b_lds: LDS tile exceeds 64 KB");
     __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (3D) lds-direct over NDHWC: LDS block stage, tap loop reads from LDS ----
@@ -1101,12 +1124,13 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
                     for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
                         for(int tx = 0; tx < RW; ++tx)
-                            acc[tz][ty][tx]
-                                += wv
-                                   * valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
-                                                       + (ox + tx + kx))
-                                                          * BK
-                                                      + klocal]);
+                            acc[tz][ty][tx] = dwFma(
+                                wv,
+                                valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
+                                                  + (ox + tx + kx))
+                                                     * BK
+                                                 + klocal]),
+                                acc[tz][ty][tx]);
             }
 
     const I nOut = (I)n * p.Do * p.Ho * p.Wo * p.C;
@@ -1154,10 +1178,8 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
                   "v3b_lds_3d: LDS tile exceeds 64 KB");
     __shared__
         __attribute__((aligned(16))) T tile[(BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (NCHW) — channel-first LDS plane tile + register micro-tile ----
@@ -1281,7 +1303,7 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
 #pragma unroll
                 for(int j = 0; j < RW; ++j)
                 {
-                    acc[r][j] += w[ky][kx] * segment[j + kx];
+                    acc[r][j] = dwFma(w[ky][kx], segment[j + kx], acc[r][j]);
                 }
             }
         }
@@ -1309,10 +1331,8 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
 {
     static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
     __shared__ float tile[BK][BH + KH - 1][BW + KW]; // a pad column: HW + 1
-    if(dwImagesFit32<T>(p))
-        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v5 — backward data as a gather; any stride, dilation and padding ----
@@ -1386,7 +1406,9 @@ __device__ inline void v5_gather_bwd(const T* __restrict__ A,
                 const long a = LAYOUT == 0
                                    ? ((((long)n * p.Di + oz) * p.Hi + oy) * p.Wi + ox) * p.C + k
                                    : ((((long)n * p.C + k) * p.Di + oz) * p.Hi + oy) * p.Wi + ox;
-                acc += valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * valu_to_f32(A[a]);
+                acc = dwFma(valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]),
+                            valu_to_f32(A[a]),
+                            acc);
             }
         }
     }
@@ -1500,7 +1522,7 @@ __device__ inline void v6_phase_block_nhwc(const T* __restrict__ A,
                         const float* w = &sW[(ry + S * m) * KW + rx + S * mm][cv * VEC];
 #pragma unroll
                         for(int e = 0; e < VEC; ++e)
-                            acc[e] += w[e] * win[m][mm][e];
+                            acc[e] = dwFma(w[e], win[m][mm][e], acc[e]);
                     }
                 }
                 T* d = D + ((long)(n * p.Ho + y) * p.Wo + x) * p.C + c0;
@@ -1583,8 +1605,247 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
 #pragma unroll
                 for(int mm = 0; mm < MX; ++mm)
                     if(ry + S * m < KH && rx + S * mm < KW)
-                        acc += w[(ry + S * m) * KW + rx + S * mm] * win[m][mm];
+                        acc = dwFma(w[(ry + S * m) * KW + rx + S * mm], win[m][mm], acc);
             valu_from_f32(acc, d0[(long)y * p.Wo + x]);
+        }
+    }
+}
+
+// ---- v7 rowtile: register tile, input rows streamed (no LDS, no barrier) ----
+// A lane computes a TH x TW output tile of CPL adjacent channels; a block is 64 lanes over the
+// channel groups of one spatial tile (grid: W tiles, channel blocks, N x H tiles), so every
+// address and predicate except the channel is wave-uniform. The tile's (TH-1)*S+KH input rows
+// are streamed ((TW-1)*S+KW pixels each), each added into every output row whose filter row it
+// is. Per output the taps add in (ky, kx) order, as in the other cores. Compile-time KH/KW and
+// stride S (both axes), unit dilation, C % CPL == 0.
+//
+// x and y go through one buffer resource per row, based at the row's start (a 64-bit scalar)
+// with 32-bit lane offsets: a pixel left or right of the image row, or a row outside the image,
+// reads hardware zero (offset past the record count), and an output past the edge is dropped.
+// So one body serves every tensor size whose rows are below 2^31 bytes.
+#define DW_ROWTILE_BLOCK 64
+
+/// The FMA operand of a 16-bit float element: f16 stays f16 (dwFma widens it), bf16 widens to
+/// fp32 by a shift, fp32 is itself.
+template <typename T>
+struct DwOperand
+{
+    typedef float type;
+};
+template <>
+struct DwOperand<_Float16>
+{
+    typedef _Float16 type;
+};
+
+/// The CPL channels at a buffer byte offset as FMA operands (zero past the records).
+template <typename T, int CPL>
+__device__ inline void
+    dwRowLoad(__amdgpu_buffer_rsrc_t r, unsigned off, typename DwOperand<T>::type (&o)[CPL])
+{
+    static_assert(CPL == 1 || CPL == 2, "rowtile: 1 or 2 channels per lane");
+    if constexpr(sizeof(T) == 4 && CPL == 1)
+        o[0] = __builtin_bit_cast(float, __builtin_amdgcn_raw_buffer_load_b32(r, off, 0, 0));
+    else if constexpr(sizeof(T) == 4)
+    {
+        // The elements are copied out before the bit casts: clang's __builtin_bit_cast of a
+        // vector element expression (u.y) reads element 0.
+        const DwU2 u = __builtin_bit_cast(DwU2, __builtin_amdgcn_raw_buffer_load_b64(r, off, 0, 0));
+        const unsigned lo = u.x, hi = u.y;
+        o[0] = __builtin_bit_cast(float, lo);
+        o[1] = __builtin_bit_cast(float, hi);
+    }
+    else
+    {
+        const unsigned u
+            = CPL == 1 ? static_cast<unsigned>(__builtin_amdgcn_raw_buffer_load_b16(r, off, 0, 0))
+                       : __builtin_amdgcn_raw_buffer_load_b32(r, off, 0, 0);
+#pragma unroll
+        for(int c = 0; c < CPL; ++c)
+        {
+            const unsigned short h = static_cast<unsigned short>(u >> (16 * c));
+            if constexpr(__is_same(T, _Float16))
+                o[c] = __builtin_bit_cast(_Float16, h);
+            else
+                o[c] = __builtin_bit_cast(float, static_cast<unsigned>(h) << 16);
+        }
+    }
+}
+
+/// The CPL outputs at a buffer byte offset (dropped past the records).
+template <typename T, int CPL>
+__device__ inline void dwRowStore(__amdgpu_buffer_rsrc_t r, unsigned off, const float (&v)[CPL])
+{
+    if constexpr(sizeof(T) == 4 && CPL == 1)
+        __builtin_amdgcn_raw_buffer_store_b32(__builtin_bit_cast(unsigned, v[0]), r, off, 0, 0);
+    else if constexpr(sizeof(T) == 4)
+    {
+        const DwU2 u = {__builtin_bit_cast(unsigned, v[0]), __builtin_bit_cast(unsigned, v[1])};
+        __builtin_amdgcn_raw_buffer_store_b64(__builtin_bit_cast(DwU2, u), r, off, 0, 0);
+    }
+    else
+    {
+        unsigned u = 0;
+#pragma unroll
+        for(int c = 0; c < CPL; ++c)
+        {
+            T e;
+            valu_from_f32(v[c], e);
+            u |= static_cast<unsigned>(__builtin_bit_cast(unsigned short, e)) << (16 * c);
+        }
+        if constexpr(CPL == 1)
+            __builtin_amdgcn_raw_buffer_store_b16(static_cast<unsigned short>(u), r, off, 0, 0);
+        else
+            __builtin_amdgcn_raw_buffer_store_b32(u, r, off, 0, 0);
+    }
+}
+
+/// Row ih of image n (SW pixels at the lane offsets xo) as FMA operands; a row outside the image
+/// reads zeros (a resource with no records).
+template <typename T, int SW, int CPL>
+__device__ inline void dwRowtileLoadRow(const T* __restrict__ A,
+                                        const ValuParams& p,
+                                        int n,
+                                        int ih,
+                                        unsigned rowBytes,
+                                        const unsigned (&xo)[SW],
+                                        typename DwOperand<T>::type (&row)[SW][CPL])
+{
+    const bool vy = dwIn(ih, p.Hi);
+    const __amdgpu_buffer_rsrc_t xr
+        = dwRsrc(A + ((long)n * p.Hi + (vy ? ih : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
+#pragma unroll
+    for(int sx = 0; sx < SW; ++sx)
+        dwRowLoad<T, CPL>(xr, xo[sx], row[sx]);
+}
+
+/// Input row r of the tile into every output row whose filter row it is.
+template <int KH, int KW, int TH, int TW, int CPL, int S, typename Op>
+__device__ inline void dwRowtileFmas(float (&acc)[CPL][TH][TW],
+                                     const Op (&w)[CPL][KH][KW],
+                                     const Op (&row)[(TW - 1) * S + KW][CPL],
+                                     int r)
+{
+#pragma unroll
+    for(int ty = 0; ty < TH; ++ty)
+    {
+        const int ky = r - ty * S;
+        if(ky < 0 || ky >= KH)
+            continue;
+#pragma unroll
+        for(int kx = 0; kx < KW; ++kx)
+#pragma unroll
+            for(int tx = 0; tx < TW; ++tx)
+#pragma unroll
+                for(int c = 0; c < CPL; ++c)
+                    acc[c][ty][tx] = dwFma(w[c][ky][kx], row[tx * S + kx][c], acc[c][ty][tx]);
+    }
+}
+
+template <typename T, int KH, int KW, int TH, int TW, int CPL, int S>
+__device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
+                                            const T* __restrict__ Wt,
+                                            T* __restrict__ D,
+                                            ValuParams p)
+{
+    static_assert(S >= 1, "rowtile: a positive stride");
+    constexpr int SW = (TW - 1) * S + KW;
+    constexpr unsigned EB = sizeof(T);
+    const int G = p.C / CPL;
+    const int Htiles = (p.Ho + TH - 1) / TH;
+    const int wt = static_cast<int>(blockIdx.x);
+    const int n = static_cast<int>(blockIdx.z) / Htiles;
+    const int ht = static_cast<int>(blockIdx.z) - n * Htiles;
+    const int g = static_cast<int>(blockIdx.y) * DW_ROWTILE_BLOCK + static_cast<int>(threadIdx.x);
+    if(g >= G)
+        return;
+    const int k0 = g * CPL;
+
+    typedef typename DwOperand<T>::type Op;
+    Op w[CPL][KH][KW];
+#pragma unroll
+    for(int c = 0; c < CPL; ++c)
+#pragma unroll
+        for(int ky = 0; ky < KH; ++ky)
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+            {
+                const T e = Wt[(long)(k0 + c) * KH * KW + dwTap2(ky, kx, KH, KW)];
+                if constexpr(__is_same(Op, float))
+                    w[c][ky][kx] = valu_to_f32(e);
+                else
+                    w[c][ky][kx] = e;
+            }
+
+    float acc[CPL][TH][TW];
+#pragma unroll
+    for(int c = 0; c < CPL; ++c)
+#pragma unroll
+        for(int ty = 0; ty < TH; ++ty)
+#pragma unroll
+            for(int tx = 0; tx < TW; ++tx)
+                acc[c][ty][tx] = 0.0f;
+
+    // Lane byte offsets of the row's pixels, the same in every row: a column left of the image
+    // wraps past 2^31, one right of it lands past the row's records.
+    const int ih0 = ht * TH * S - p.ph, iw0 = wt * TW * S - p.pw;
+    const unsigned rowBytes = static_cast<unsigned>(p.Wi) * p.C * EB;
+    unsigned xo[SW];
+#pragma unroll
+    for(int sx = 0; sx < SW; ++sx)
+        xo[sx] = static_cast<unsigned>((iw0 + sx) * p.C + k0) * EB;
+    // The rows, streamed: a scheduling fence after each row's FMAs keeps the rows apart (without
+    // it every row's loads are hoisted and stay live). On wave64 (CDNA) each row's loads issue
+    // before the previous row's FMAs, two rows live; on wave32 (RDNA) after them, one row live,
+    // which measured faster there (the f32 rows run at 85-92% of DRAM bandwidth on gfx1201, and
+    // the second row costs waves). The prefetched row lands in its own array and is copied over:
+    // a two-slot ring indexed by r & 1 compiles to the same code but crashed instruction
+    // selection in one config (f16 7x7 7x7 vec 2) with the pinned nightly HIPRTC.
+    constexpr int R = (TH - 1) * S + KH;
+    constexpr bool PREFETCH = DW_WAVE == 64;
+    Op cur[SW][CPL];
+    dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0, rowBytes, xo, cur);
+#pragma unroll
+    for(int r = 0; r < R; ++r)
+    {
+        Op nxt[SW][CPL];
+        if constexpr(PREFETCH)
+            if(r + 1 < R)
+                dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0 + r + 1, rowBytes, xo, nxt);
+        dwRowtileFmas<KH, KW, TH, TW, CPL, S>(acc, w, cur, r);
+        __builtin_amdgcn_sched_barrier(0);
+        if(r + 1 < R)
+        {
+            if constexpr(PREFETCH)
+            {
+#pragma unroll
+                for(int sx = 0; sx < SW; ++sx)
+#pragma unroll
+                    for(int c = 0; c < CPL; ++c)
+                        cur[sx][c] = nxt[sx][c];
+            }
+            else
+                dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0 + r + 1, rowBytes, xo, cur);
+        }
+    }
+
+    const int wo0 = wt * TW;
+    const unsigned outRowBytes = static_cast<unsigned>(p.Wo) * p.C * EB;
+#pragma unroll
+    for(int ty = 0; ty < TH; ++ty)
+    {
+        const int ho = ht * TH + ty;
+        const bool vo = ho < p.Ho;
+        const __amdgpu_buffer_rsrc_t yr
+            = dwRsrc(D + ((long)n * p.Ho + (vo ? ho : 0)) * p.Wo * p.C, vo ? outRowBytes : 0);
+#pragma unroll
+        for(int tx = 0; tx < TW; ++tx)
+        {
+            float v[CPL];
+#pragma unroll
+            for(int c = 0; c < CPL; ++c)
+                v[c] = acc[c][ty][tx];
+            dwRowStore<T, CPL>(yr, static_cast<unsigned>((wo0 + tx) * p.C + k0) * EB, v);
         }
     }
 }

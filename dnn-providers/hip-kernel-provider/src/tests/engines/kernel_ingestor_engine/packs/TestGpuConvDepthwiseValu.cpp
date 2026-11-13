@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <utility>
@@ -114,6 +115,56 @@ Config phaseConfig(const std::string& layout, int64_t k, int64_t bk)
     return config;
 }
 
+Config rowtileConfig(int64_t k, int64_t th, int64_t tw, int64_t vec, int64_t stride = 1)
+{
+    Config config{"NHWC", 2, "rowtile"};
+    config.kh = config.kw = k;
+    config.th = th;
+    config.tw = tw;
+    config.vec = vec;
+    config.stride = stride;
+    return config;
+}
+
+/// The rowtile tiles the generator ships (gen_depthwise_valu.py ROWTILE_TILES, ROWTILE_S2_TILES),
+/// each with 1 and 2 channels per lane.
+const std::vector<Config>& rowtileConfigs()
+{
+    static const std::vector<Config> s_configs = [] {
+        std::vector<Config> configs;
+        const std::vector<std::array<int64_t, 3>> tiles{{3, 2, 8},
+                                                        {3, 4, 4},
+                                                        {3, 4, 8},
+                                                        {3, 7, 7},
+                                                        {5, 4, 4},
+                                                        {5, 4, 8},
+                                                        {5, 7, 7},
+                                                        {7, 2, 14},
+                                                        {7, 4, 4},
+                                                        {7, 4, 8},
+                                                        {7, 7, 7}};
+        for(const auto& [k, th, tw] : tiles)
+        {
+            for(const int64_t vec : {1, 2})
+            {
+                configs.push_back(rowtileConfig(k, th, tw, vec));
+            }
+        }
+        // Stride 2, forward only.
+        const std::vector<std::array<int64_t, 3>> stride2{
+            {3, 2, 8}, {3, 4, 4}, {3, 4, 8}, {5, 2, 8}, {5, 4, 4}};
+        for(const auto& [k, th, tw] : stride2)
+        {
+            for(const int64_t vec : {1, 2})
+            {
+                configs.push_back(rowtileConfig(k, th, tw, vec, 2));
+            }
+        }
+        return configs;
+    }();
+    return s_configs;
+}
+
 Config planeConfig(int64_t k, int64_t bh, int64_t bw, int64_t bk, int64_t rh, int64_t rw)
 {
     Config config{"NCHW", 2, "lds"};
@@ -175,6 +226,7 @@ const std::vector<Config>& catalog()
         {
             configs.push_back(plane);
         }
+        configs.insert(configs.end(), rowtileConfigs().begin(), rowtileConfigs().end());
         return configs;
     }();
     return s_configs;
@@ -362,6 +414,13 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nhwc5x5C72Pad1", depthwise(72, {11, 37}, {5, 5}, {1, 1}, true)});
     cases.push_back({"Nhwc7x7C136Wide", depthwise(136, {9, 70}, {7, 7}, {3, 3}, true)});
     cases.push_back({"Nhwc7x7C16Narrow", depthwise(16, {10, 5}, {7, 7}, {3, 3}, true)});
+    // Register row tiles: two channels per lane over 65 groups (a second block of one lane),
+    // padding past the filter's half (output rows and columns of padding only), one-row images.
+    cases.push_back({"Nhwc5x5C130Pad3", depthwise(130, {9, 11}, {5, 5}, {3, 3}, true)});
+    cases.push_back({"Nhwc3x3C64H1", depthwise(64, {1, 9}, {3, 3}, {1, 1}, true)});
+    auto stride5 = depthwise(40, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    cases.push_back({"Nhwc5x5Stride2C40", stride5});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
@@ -1086,6 +1145,289 @@ TEST(TestConvDepthwiseValuCatalog, EveryConfigServesADeviceCase)
         }
         EXPECT_TRUE(served) << config.tag() << " serves no device case";
     }
+}
+
+// Host-only: what a forward rowtile config admits, one refusal per field it gates.
+bool rowtileAdmits(const Config& config, ConvShape shape, DataType dataType = DataType::HALF)
+{
+    shape.dataType = dataType;
+    const auto pack = packFor(ConvDirection::FORWARD);
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto bound = matchesGraph(pack, fixture.context());
+    return bound.has_value()
+           && matchesKernel(pack,
+                            fixture.context(),
+                            kernelFor(config, dataType, ConvDirection::FORWARD),
+                            *bound);
+}
+
+TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
+{
+    const auto base = rowtileConfig(3, 4, 4, 2);
+    const auto shape = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    ASSERT_TRUE(rowtileAdmits(base, shape));
+    ASSERT_TRUE(rowtileAdmits(base, shape, DataType::FLOAT));
+    ASSERT_TRUE(rowtileAdmits(base, shape, DataType::BFLOAT16));
+    // Layout and rank.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {3, 3}, {1, 1}, false)));
+    auto threeD = base;
+    threeD.ndims = 3;
+    EXPECT_FALSE(rowtileAdmits(threeD, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
+    // Stride and dilation, either axis; a stride-2 tile only stride 2 on both axes.
+    auto strided = shape;
+    strided.stride = {1, 2};
+    EXPECT_FALSE(rowtileAdmits(base, strided));
+    const auto base2 = rowtileConfig(3, 4, 4, 2, 2);
+    auto stride2 = shape;
+    stride2.stride = {2, 2};
+    EXPECT_TRUE(rowtileAdmits(base2, stride2));
+    EXPECT_FALSE(rowtileAdmits(base, stride2));
+    EXPECT_FALSE(rowtileAdmits(base2, shape));
+    EXPECT_FALSE(rowtileAdmits(base2, strided));
+    auto stride21 = shape;
+    stride21.stride = {2, 1};
+    EXPECT_FALSE(rowtileAdmits(base2, stride21));
+    for(const int64_t stride : {0, -1})
+    {
+        auto other = base;
+        other.stride = stride;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << stride;
+    }
+    auto dilated = shape;
+    dilated.dilation = {2, 1};
+    dilated.prePadding = dilated.postPadding = {2, 1};
+    EXPECT_FALSE(rowtileAdmits(base, dilated));
+    // Filter height and width.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {5, 3}, {2, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {3, 5}, {1, 2}, true)));
+    // Channels per lane: 1 or 2, dividing the channels.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(37, {13, 11}, {3, 3}, {1, 1}, true)));
+    EXPECT_TRUE(
+        rowtileAdmits(rowtileConfig(3, 4, 4, 1), depthwise(37, {13, 11}, {3, 3}, {1, 1}, true)));
+    for(const int64_t vec : {0, 3, 4})
+    {
+        auto other = base;
+        other.vec = vec;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << vec;
+    }
+    // A positive output tile.
+    auto noHeight = base;
+    noHeight.th = 0;
+    EXPECT_FALSE(rowtileAdmits(noHeight, shape));
+    auto noWidth = base;
+    noWidth.tw = 0;
+    EXPECT_FALSE(rowtileAdmits(noWidth, shape));
+    // Every field the variant does not use is 0.
+    for(auto field : {&Config::kd,
+                      &Config::wstrip,
+                      &Config::bd,
+                      &Config::bh,
+                      &Config::bw,
+                      &Config::bk,
+                      &Config::rd,
+                      &Config::rh,
+                      &Config::rw})
+    {
+        auto other = base;
+        other.*field = 2;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << other.tag();
+    }
+    // x and y rows below 2^31 bytes (fp16: 2^30 elements), at the limit and one past it.
+    const int64_t rowElements = (int64_t{1} << 30) - 1;
+    const int64_t c = 64;
+    const int64_t widest = (rowElements - 1) / c;
+    EXPECT_TRUE(rowtileAdmits(base, depthwise(c, {1, widest}, {3, 3}, {1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(c, {1, widest + 1}, {3, 3}, {1, 1}, true)));
+    // The grid's channel-block and N x H-tile extents below 2^16.
+    auto rows = depthwise(40, {4 * 32767, 3}, {3, 3}, {1, 1}, true);
+    EXPECT_TRUE(rowtileAdmits(base, rows));
+    rows.input = {4 * 32768, 3};
+    EXPECT_FALSE(rowtileAdmits(base, rows));
+    const auto one = rowtileConfig(3, 4, 4, 1);
+    EXPECT_TRUE(rowtileAdmits(one, depthwise(64 * 65535, {3, 3}, {3, 3}, {1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(one, depthwise(64 * 65536, {3, 3}, {3, 3}, {1, 1}, true)));
+}
+
+// The rowtile cores keep f16 operands packed and let the FMA widen them (v_fma_mix_f32). This
+// must compute exactly what converting both operands to fp32 and calling fmaf computes: the f16
+// output of every rowtile config, bit for bit, against that sequence on the host (taps in (ky, kx)
+// order, one fp32 rounding per tap, a padding tap adding w * 0, one rounding to f16 at the end).
+// sampleStride 1 checks every output; a larger one checks every sampleStride-th output (in
+// logical (n, c, h, w) order) and every output of the last image row.
+void runRowtileBitwise(ConvShape shape,
+                       const std::vector<Config>& configs = rowtileConfigs(),
+                       int64_t sampleStride = 1)
+{
+    shape.dataType = DataType::HALF;
+    const auto direction = ConvDirection::FORWARD;
+    const auto spec = specFor(shape, direction);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = packFor(direction);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    Tensor<Half> x(spec.x.dims, spec.x.strides);
+    Tensor<Half> w(spec.w.dims, spec.w.strides);
+    Tensor<Half> y(spec.y.dims, spec.y.strides);
+    if(sampleStride == 1)
+    {
+        x.fillTensorWithRandomValues(-1.0f, 1.0f, 97);
+        w.fillTensorWithRandomValues(-1.0f, 1.0f, 98);
+    }
+    else
+    {
+        // Hashed f16 bit patterns of magnitude below 1 (biased exponent 0-14, either sign): as
+        // varied as random values, and quick for 2^30 elements.
+        for(auto* tensor : {&x, &w})
+        {
+            auto* data = static_cast<Half*>(tensor->rawHostData());
+            const auto count = static_cast<size_t>(tensor->elementCount());
+            const uint32_t salt = tensor == &x ? 0x9e3779b9u : 0x85ebca6bu;
+            for(size_t i = 0; i < count; ++i)
+            {
+                const uint32_t h = (static_cast<uint32_t>(i) ^ salt) * 0x27d4eb2fu;
+                data[i].data = static_cast<uint16_t>(((h >> 16) & 0x8000u)
+                                                     | (((h >> 11) % 15u) << 10) | (h & 0x3ffu));
+            }
+            tensor->markHostModified();
+        }
+    }
+    const auto* xs = static_cast<const Half*>(x.rawHostData());
+    const auto* ws = static_cast<const Half*>(w.rawHostData());
+    const int64_t kh = shape.filter[0], kw = shape.filter[1];
+    const bool flip = shape.mode == ConvMode::CONVOLUTION;
+    const auto expected = [&](const std::vector<int64_t>& o) {
+        float acc = 0.0f;
+        for(int64_t ky = 0; ky < kh; ++ky)
+        {
+            for(int64_t kx = 0; kx < kw; ++kx)
+            {
+                const int64_t ih = o[2] * shape.stride[0] - shape.prePadding[0] + ky;
+                const int64_t iw = o[3] * shape.stride[1] - shape.prePadding[1] + kx;
+                const bool inside
+                    = ih >= 0 && ih < shape.input[0] && iw >= 0 && iw < shape.input[1];
+                const float a
+                    = inside ? static_cast<float>(xs[offsetOf({o[0], o[1], ih, iw}, x.strides())])
+                             : 0.0f;
+                const float b = static_cast<float>(ws[offsetOf(
+                    {o[1], 0, flip ? kh - 1 - ky : ky, flip ? kw - 1 - kx : kx}, w.strides())]);
+                acc = std::fma(b, a, acc);
+            }
+        }
+        return Half(acc).data;
+    };
+    // The outputs checked, in logical (n, c, h, w) order.
+    const auto& dims = y.dims();
+    std::vector<std::vector<int64_t>> checked;
+    if(sampleStride == 1)
+    {
+        forEachIndex(dims, [&](const std::vector<int64_t>& o) { checked.push_back(o); });
+    }
+    else
+    {
+        const int64_t total = dims[0] * dims[1] * dims[2] * dims[3];
+        const auto at = [&](int64_t i) {
+            return std::vector<int64_t>{i / (dims[1] * dims[2] * dims[3]),
+                                        i / (dims[2] * dims[3]) % dims[1],
+                                        i / dims[3] % dims[2],
+                                        i % dims[3]};
+        };
+        for(int64_t i = 0; i < total; i += sampleStride)
+        {
+            checked.push_back(at(i));
+        }
+        for(int64_t c = 0; c < dims[1]; ++c)
+        {
+            for(int64_t q = 0; q < dims[3]; ++q)
+            {
+                checked.push_back({dims[0] - 1, c, dims[2] - 1, q});
+            }
+        }
+    }
+    std::vector<uint16_t> want;
+    want.reserve(checked.size());
+    for(const auto& o : checked)
+    {
+        want.push_back(expected(o));
+    }
+
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& config : configs)
+    {
+        const auto kernel = kernelFor(config, DataType::HALF, direction);
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(config.tag());
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        y.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        y.markDeviceModified();
+        const auto* actual = static_cast<const Half*>(y.rawHostData());
+        int64_t mismatches = 0;
+        for(size_t i = 0; i < checked.size(); ++i)
+        {
+            const auto& o = checked[i];
+            const uint16_t got = actual[offsetOf(o, y.strides())].data;
+            if(got != want[i] && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at output (" << o[0] << ", " << o[1] << ", " << o[2] << ", "
+                              << o[3] << "): bits " << got << ", single-rounding fmaf " << want[i];
+            }
+        }
+        EXPECT_EQ(mismatches, 0);
+    }
+    EXPECT_GE(ran, 1) << "no rowtile config serves this case";
+}
+
+TEST(TestGpuConvDepthwiseValuRowtile, HalfIsBitwiseTheFmafOfConvertedOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    // Even and odd channel counts (1 and 2 channels per lane, partial channel blocks), planes
+    // that no tile divides, padding past the filter's half, a narrow row, true convolution.
+    runRowtileBitwise(depthwise(130, {9, 11}, {5, 5}, {3, 3}, true));
+    runRowtileBitwise(depthwise(37, {13, 11}, {3, 3}, {1, 1}, true));
+    runRowtileBitwise(depthwise(136, {9, 21}, {7, 7}, {3, 3}, true));
+    runRowtileBitwise(depthwise(16, {10, 5}, {7, 7}, {3, 3}, true));
+    auto convolution = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    runRowtileBitwise(convolution);
+    auto stride3 = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    stride3.stride = {2, 2};
+    runRowtileBitwise(stride3);
+    auto stride5 = depthwise(37, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    runRowtileBitwise(stride5);
+}
+
+// The rowtile core has one body for every tensor size: x and y of 2^30 + 2^18 f16 elements (past
+// 2 GiB), rows rebased past 2^31 bytes, checked at sampled outputs and the whole last row.
+TEST(TestGpuConvDepthwiseValuRowtile, HalfServesTensorsPastTwoGiB)
+{
+    SKIP_IF_NO_DEVICES();
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+    if(freeBytes < (size_t{6} << 30))
+    {
+        GTEST_SKIP() << "needs 6 GiB of free device memory";
+    }
+    // 4097 rows of 4096 columns of 64 channels (512 KiB rows).
+    auto shape = depthwise(64, {4097, 4096}, {3, 3}, {1, 1}, true);
+    shape.n = 1;
+    runRowtileBitwise(shape, {rowtileConfig(3, 4, 4, 2)}, 4099);
 }
 
 // Host-only: the matrix-core (hankel) backward-weights gates, one field at a time from an

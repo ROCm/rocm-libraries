@@ -18,6 +18,10 @@ using conv_naive::ConvDirection;
 
 constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
 constexpr int SPATIAL = CONV_NAIVE_SPATIAL_DIMS;
+/// The rowtile block (DW_ROWTILE_BLOCK in the kernel).
+constexpr int64_t ROWTILE_BLOCK = 64;
+/// The largest second and third grid extent a launch may use.
+constexpr int64_t GRID_YZ_LIMIT = 65535;
 
 /// True when @p strides (ordered n, c, d, h, w) are the packed strides of @p extents in
 /// @p layout. Extent-1 axes may carry any stride: nothing is ever read through them.
@@ -61,6 +65,24 @@ bool fitsInt(long long value)
 int64_t divUp(int64_t value, int64_t divisor)
 {
     return (value + divisor - 1) / divisor;
+}
+
+/// Bytes per element of the dtypes the depthwise kernels take.
+int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? 4 : 2;
+}
+
+/// The kernel's 32-bit index form (dwTensorsFit32 in ConvDepthwiseValuCores.h): x and y below
+/// 2^31 bytes and the launched threads below 2^31. The tile variants (microtile, fused, LDS) have
+/// only that form; the floors serve larger tensors.
+bool fitsIndex32(const DepthwiseValuProblem& problem, const DepthwiseLaunch& launch)
+{
+    const auto& a = problem.args;
+    const int64_t bytes = elementBytes(problem.base.dataType);
+    return int64_t{a.n} * a.c * a.di * a.hi * a.wi * bytes < INT_LIMIT
+           && int64_t{a.n} * a.c * a.dOut * a.ho * a.wo * bytes < INT_LIMIT
+           && launch.grid * launch.gridY * launch.gridZ * launch.block < INT_LIMIT;
 }
 
 } // namespace
@@ -113,6 +135,10 @@ std::optional<DepthwiseVariant> variantNamed(const std::string& name)
     if(name == "gather")
     {
         return DepthwiseVariant::GATHER;
+    }
+    if(name == "rowtile")
+    {
+        return DepthwiseVariant::ROWTILE;
     }
     return std::nullopt;
 }
@@ -335,10 +361,44 @@ std::optional<DepthwiseLaunch> launchFor(const DepthwiseValuProblem& problem,
             launch.grid = n * divUp(ho, tile.bh) * divUp(wo, tile.bw) * divUp(c, tile.bk);
         }
         break;
+    case DepthwiseVariant::ROWTILE:
+    {
+        // 64 lanes over the channel groups of one spatial tile: grid (W tiles, channel blocks,
+        // N x H tiles). Channels-last 2-D, whole channel groups, and every x and y row below
+        // 2^31 bytes (the kernel's 32-bit lane offsets within a row). The tile sets th, tw, vec
+        // and stride (and the filter; the kernel match gates it and the stride against the
+        // graph); every other field is 0.
+        const int64_t rowLimit = INT_LIMIT / elementBytes(problem.base.dataType);
+        const bool unusedClear = tile.kd == 0 && tile.wstrip == 0 && tile.bd == 0 && tile.bh == 0
+                                 && tile.bw == 0 && tile.bk == 0 && tile.rd == 0 && tile.rh == 0
+                                 && tile.rw == 0;
+        if(problem.layout != DepthwiseLayout::CHANNELS_LAST || problem.ndims != 2 || !unusedClear
+           || (tile.vec != 1 && tile.vec != 2) || c % tile.vec != 0 || tile.th < 1 || tile.tw < 1
+           || tile.stride < 1 || int64_t{a.wi} * c >= rowLimit || wo * c >= rowLimit)
+        {
+            return std::nullopt;
+        }
+        launch.block = ROWTILE_BLOCK;
+        launch.grid = divUp(wo, tile.tw);
+        launch.gridY = divUp(c / tile.vec, ROWTILE_BLOCK);
+        launch.gridZ = n * divUp(ho, tile.th);
+        if(launch.gridY > GRID_YZ_LIMIT || launch.gridZ > GRID_YZ_LIMIT)
+        {
+            return std::nullopt;
+        }
+        break;
+    }
     default:
         return std::nullopt;
     }
     if(launch.grid < 1 || launch.grid > INT_LIMIT || launch.block < 1 || launch.block > 1024)
+    {
+        return std::nullopt;
+    }
+    const bool tileCore = tile.variant == DepthwiseVariant::MICROTILE
+                          || tile.variant == DepthwiseVariant::FUSED
+                          || tile.variant == DepthwiseVariant::LDS;
+    if(tileCore && !fitsIndex32(problem, launch))
     {
         return std::nullopt;
     }

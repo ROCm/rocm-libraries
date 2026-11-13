@@ -76,6 +76,31 @@ CONFIGS = [
     # Whole 14 x 14 / 16 x 16 planes (convnext) per block, 4 channels, 4 x 4 outputs per thread.
     cfg("NCHW", 2, "lds", kh=7, kw=7, bh=16, bw=16, bk=4, rh=4, rw=4),
 ]
+# Register tiles with the input rows streamed (v7_rowtile_core_nhwc): channels-last 2-D,
+# compile-time filter and stride, unit dilation; th x tw outputs of vec (1 or 2) channels per
+# lane. Unit stride: wide output rows for the small filters, square tiles up to 7 x 7 for the
+# large ones.
+ROWTILE_TILES = {
+    3: ((2, 8), (4, 4), (4, 8), (7, 7)),
+    5: ((4, 4), (4, 8), (7, 7)),
+    7: ((2, 14), (4, 4), (4, 8), (7, 7)),
+}
+for k, tiles in ROWTILE_TILES.items():
+    for th, tw in tiles:
+        for vec in (1, 2):
+            CONFIGS.append(
+                cfg("NHWC", 2, "rowtile", kh=k, kw=k, th=th, tw=tw, vec=vec, stride=1)
+            )
+# Stride 2 (the downsampling 3x3 and 5x5 layers of MobileNet and EfficientNet). Forward only:
+# a strided backward data runs as the gather or the phase blocks.
+ROWTILE_S2_TILES = {3: ((2, 8), (4, 4), (4, 8)), 5: ((2, 8), (4, 4))}
+FWD_ONLY = []
+for k, tiles in ROWTILE_S2_TILES.items():
+    for th, tw in tiles:
+        for vec in (1, 2):
+            FWD_ONLY.append(
+                cfg("NHWC", 2, "rowtile", kh=k, kw=k, th=th, tw=tw, vec=vec, stride=2)
+            )
 
 # Backward data only: the gather over the taps (v5_gather_bwd), the one form a strided backward
 # data runs in.
@@ -128,6 +153,9 @@ def tag(c):
     )
     if c["variant"] == "microtile":
         return f"{dims}.microtile_k{k}_t{c['th']}x{c['tw']}"
+    if c["variant"] == "rowtile":
+        s = f"_s{c['stride']}" if c["stride"] != 1 else ""
+        return f"{dims}.rowtile_k{k}_t{c['th']}x{c['tw']}{s}_c{c['vec']}"
     blk = "x".join(
         str(c[a])
         for a in (("bd", "bh", "bw", "bk") if c["ndims"] == 3 else ("bh", "bw", "bk"))
@@ -184,7 +212,7 @@ for d in ("fwd", "bwd"):
         },
     )
     kernels = []
-    for c in CONFIGS + (BWD_ONLY if d == "bwd" else []):
+    for c in CONFIGS + (BWD_ONLY if d == "bwd" else FWD_ONLY):
         for dtype, dt in (("FLOAT", "f32"), ("HALF", "f16"), ("BFLOAT16", "bf16")):
             assert lds_bytes(c, dtype) <= 65536, (tag(c), dtype)
             name = f"conv_depthwise_valu_{d}.{dt}.{tag(c)}"
@@ -218,4 +246,9 @@ for d in ("fwd", "bwd"):
             "kernelDescriptors": kernels,
         },
     )
-print(len(CONFIGS), "configs x 3 dtypes per direction")
+print(
+    len(CONFIGS + FWD_ONLY),
+    "forward and",
+    len(CONFIGS + BWD_ONLY),
+    "backward configs x 3 dtypes",
+)
