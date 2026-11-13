@@ -370,9 +370,12 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
 //
 // The CSC arrays are the CSR arrays of the transpose, so the CSR builder is
 // given the opposite fill mode. The CSC matrix then stores the requested
-// triangle. GEBSC has the same relation at block level only: its blocks are
-// not transposed. General generators ignore uplo, so a general matrix is
-// unchanged.
+// triangle. General generators ignore uplo, so a general matrix is unchanged.
+//
+// GEBSC has the same relation at block level only: its blocks are not
+// transposed. Only the rocalution GEBSR path honours matrix_type and uplo.
+// The other GEBSR generators ignore both, so their GEBSC matrices are general
+// whatever uplo says.
 //
 static rocsparse_fill_mode transposed_fill_mode(rocsparse_fill_mode uplo)
 {
