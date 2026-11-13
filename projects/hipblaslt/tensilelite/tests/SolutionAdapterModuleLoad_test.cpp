@@ -15,17 +15,77 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 #include <unistd.h>
+
+// The allocation-failure tests replace the global operator new, which the
+// sanitizers also replace, so they are left out of sanitizer builds.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define TENSILELITE_SANITIZED_ALLOCATOR 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) \
+    || __has_feature(memory_sanitizer)
+#define TENSILELITE_SANITIZED_ALLOCATOR 1
+#endif
+#endif
+
+namespace
+{
+    // When 0 or more, the number of allocations to let through before one
+    // fails with std::bad_alloc. -1 lets every allocation through. The
+    // replacement applies to the whole test program, and is a pass-through
+    // until a test arms it.
+    std::atomic<long> allocationsBeforeFailure{-1};
+}
+
+#ifndef TENSILELITE_SANITIZED_ALLOCATOR
+void* operator new(std::size_t size)
+{
+    if(allocationsBeforeFailure.load(std::memory_order_relaxed) >= 0
+       && allocationsBeforeFailure.fetch_sub(1, std::memory_order_relaxed) == 0)
+        throw std::bad_alloc();
+    if(void* p = std::malloc(size == 0 ? 1 : size))
+        return p;
+    throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size)
+{
+    return ::operator new(size);
+}
+
+void operator delete(void* p) noexcept
+{
+    std::free(p);
+}
+
+void operator delete[](void* p) noexcept
+{
+    std::free(p);
+}
+
+void operator delete(void* p, std::size_t) noexcept
+{
+    std::free(p);
+}
+
+void operator delete[](void* p, std::size_t) noexcept
+{
+    std::free(p);
+}
+#endif
 
 namespace fs = std::filesystem;
 
@@ -48,12 +108,24 @@ namespace
         std::map<hipModule_t, const char*>          images;
         unsigned                                    pathLoads            = 0;
         unsigned                                    dataLoads            = 0;
+        unsigned                                    modulesFromData      = 0;
         unsigned                                    imagesIntactAtUnload = 0;
         hipError_t                                  failNextDataLoad     = hipSuccess;
         hipError_t                                  lastError            = hipSuccess;
     };
 
     FakeModules* fake = nullptr;
+
+    // The HIP calls are C functions that never throw, so the fakes standing in
+    // for them pause any armed allocation failure while they run.
+    struct NoInjectedFailure
+    {
+        long saved = allocationsBeforeFailure.exchange(-1);
+        ~NoInjectedFailure()
+        {
+            allocationsBeforeFailure = saved;
+        }
+    };
 
     bool holdsCodeObject(const char* image)
     {
@@ -71,6 +143,7 @@ namespace
     // Opens the path it is given, as the runtime does.
     hipError_t fakeLoad(hipModule_t* module, const char* path)
     {
+        NoInjectedFailure noFailure;
         ++fake->pathLoads;
         std::ifstream file(path, std::ios::binary);
         if(!file)
@@ -84,6 +157,7 @@ namespace
 
     hipError_t fakeLoadData(hipModule_t* module, const void* image)
     {
+        NoInjectedFailure noFailure;
         ++fake->dataLoads;
         if(fake->failNextDataLoad != hipSuccess)
         {
@@ -94,12 +168,14 @@ namespace
         EXPECT_TRUE(holdsCodeObject(bytes)) << "the image loaded is not the file's contents";
         *module               = newModule();
         fake->images[*module] = bytes;
+        ++fake->modulesFromData;
         return hipSuccess;
     }
 
     hipError_t fakeUnload(hipModule_t module)
     {
-        auto image = fake->images.find(module);
+        NoInjectedFailure noFailure;
+        auto              image = fake->images.find(module);
         if(image != fake->images.end())
         {
             if(holdsCodeObject(image->second))
@@ -112,6 +188,7 @@ namespace
 
     hipError_t fakeGetLastError()
     {
+        NoInjectedFailure noFailure;
         return std::exchange(fake->lastError, hipSuccess);
     }
 
@@ -167,6 +244,48 @@ namespace
             if(redirected)
                 api.resolvePath = redirect;
             return api;
+        }
+
+        // Runs `load` on a fresh adapter with its first allocation failing,
+        // then its second, and so on, until a run gets through without a
+        // failure. `prepare` runs first with every allocation let through.
+        // After each run, every module the fake HIP loaded from memory must
+        // have been unloaded, with its image still intact at that point.
+        template <typename Prepare, typename Load>
+        void sweepAllocationFailures(Prepare prepare, Load load)
+        {
+#ifdef TENSILELITE_SANITIZED_ALLOCATOR
+            GTEST_SKIP() << "the sanitizer replaces operator new";
+#endif
+            for(long n = 0; n < 10000; ++n)
+            {
+                FakeModules attempt;
+                fake        = &attempt;
+                bool failed = false;
+                {
+                    SolutionAdapter adapter(api(true));
+                    prepare(adapter);
+                    allocationsBeforeFailure = n;
+                    try
+                    {
+                        load(adapter);
+                    }
+                    catch(std::bad_alloc const&)
+                    {
+                    }
+                    failed = allocationsBeforeFailure.exchange(-1) == -1;
+                }
+                fake = &modules;
+
+                EXPECT_TRUE(attempt.live.empty())
+                    << "with allocation " << n << " failing, a module was never unloaded";
+                EXPECT_EQ(attempt.imagesIntactAtUnload, attempt.modulesFromData)
+                    << "with allocation " << n
+                    << " failing, an image was released before its module was unloaded";
+                if(!failed || HasFailure())
+                    return;
+            }
+            FAIL() << "the load never ran without reaching an injected failure";
         }
     };
 } // namespace
@@ -247,7 +366,64 @@ TEST_F(SolutionAdapterModuleLoad, RecoveryReleasesImagesOnlyAfterUnload)
     EXPECT_EQ(modules.imagesIntactAtUnload, 3u);
 }
 
+// An allocation can fail after hipModuleLoadData has succeeded, while the
+// adapter records the module and its image. The module must still be
+// unloaded, and the image kept until it is. Repeating with up to 20 modules
+// already loaded makes the image map's insertion grow its hash table.
+constexpr int kMaxPreloaded = 20;
+
+TEST_F(SolutionAdapterModuleLoad, AllocationFailureWhileRecordingALoad)
+{
+    writeCodeObject("library.co.real");
+    for(int preloaded = 0; preloaded <= kMaxPreloaded && !HasFailure(); ++preloaded)
+    {
+        SCOPED_TRACE("modules already loaded: " + std::to_string(preloaded));
+        sweepAllocationFailures(
+            [&](SolutionAdapter& adapter) {
+                for(int i = 0; i < preloaded; ++i)
+                    ASSERT_EQ(adapter.loadCodeObjectFile(path("library.co")), hipSuccess);
+            },
+            [&](SolutionAdapter& adapter) { adapter.loadCodeObjectFile(path("library.co")); });
+    }
+}
+
+TEST_F(SolutionAdapterModuleLoad, AllocationFailureWhileRecordingARotationCopy)
+{
+    writeCodeObject("library.co.real");
+    for(int preloaded = 0; preloaded <= kMaxPreloaded && !HasFailure(); ++preloaded)
+    {
+        SCOPED_TRACE("modules already loaded: " + std::to_string(preloaded));
+        sweepAllocationFailures(
+            [&](SolutionAdapter& adapter) {
+                for(int i = 0; i < preloaded; ++i)
+                    ASSERT_EQ(adapter.loadCodeObjectFile(path("library.co")), hipSuccess);
+            },
+            [&](SolutionAdapter& adapter) {
+                adapter.loadCodeObjectFileExtraCopies(path("library.co"), 1);
+            });
+    }
+}
+
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+TEST_F(SolutionAdapterModuleLoad, AllocationFailureWhileRecordingALocalCodeObject)
+{
+    writeCodeObject("local.co.real");
+    for(int i = 0; i < kMaxPreloaded; ++i)
+        writeCodeObject("preloaded" + std::to_string(i) + ".co.real");
+    for(int preloaded = 0; preloaded <= kMaxPreloaded && !HasFailure(); ++preloaded)
+    {
+        SCOPED_TRACE("modules already loaded: " + std::to_string(preloaded));
+        sweepAllocationFailures(
+            [&](SolutionAdapter& adapter) {
+                for(int i = 0; i < preloaded; ++i)
+                    ASSERT_EQ(
+                        adapter.loadLocalCodeObject(path("preloaded" + std::to_string(i) + ".co")),
+                        hipSuccess);
+            },
+            [&](SolutionAdapter& adapter) { adapter.loadLocalCodeObject(path("local.co")); });
+    }
+}
+
 TEST_F(SolutionAdapterModuleLoad, LocalCodeObjectKeepsItsImage)
 {
     writeCodeObject("local.co.real");

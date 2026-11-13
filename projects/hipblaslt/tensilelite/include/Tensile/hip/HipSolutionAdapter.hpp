@@ -176,7 +176,10 @@ namespace TensileLite
             // Code objects read into memory because their path was too long for
             // hipModuleLoad. HIP keeps using the buffer passed to
             // hipModuleLoadData, so each one lives until its module is unloaded.
-            std::unordered_map<hipModule_t, std::vector<char>> m_moduleImages;
+            // Shared so the code that loads a module can keep its own reference
+            // until the module is recorded here or unloaded.
+            std::unordered_map<hipModule_t, std::shared_ptr<const std::vector<char>>>
+                m_moduleImages;
 
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds
