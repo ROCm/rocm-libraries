@@ -297,6 +297,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     unsigned uWave = 0;
     typedef unsigned k5u3 __attribute__((ext_vector_type(3)));
     k5u3 raw[JT][4][2]; // the next chunk's input
+    // The U fragments: with PF 1 the last chunk step loads the next item's chunk 0 here, so they
+    // must outlive the item (a per-item array would be a fresh, uninitialised one each item).
+    frag ufr[4][MT];
 
     for(long long item = blockIdx.x; item < items; item += gridDim.x)
     {
@@ -665,7 +668,6 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         if(PF == 0 || item == blockIdx.x)
             uWave = uOf(g, kRow0);
         const unsigned binBytes = static_cast<unsigned>(kbs * nChU) * UNIT;
-        frag ufr[4][MT];
         auto loadU = [&](int ch, int b) __attribute__((always_inline))
         {
             // uWave is wave-uniform (row is); readfirstlane says so. With PF 1 it is set under a
