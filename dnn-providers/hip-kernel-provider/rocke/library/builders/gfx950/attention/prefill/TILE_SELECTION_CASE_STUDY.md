@@ -282,19 +282,21 @@ the finding.
   rather than a perf change, and `tile_selection_diff.py` is the check that closes it.
 - No C++ twin of the rocKE dispatcher exists. That work is tracked separately and is
   not part of this change.
-- The trained rankers of §7 are validated but not installed. What remains is the shipped
-  layout: the house installs under `sort_kernel_catalog/<arch>/<metric>/`, which needs
-  the generator change that binds a per-arch key. On `develop` today the generator still
-  emits `default` for every descriptor engine, so promoting now would ship a path the
-  house has moved off. Stage V ran under `--arch-key default`, which decides where a
-  model installs rather than whether it works, so its verdict holds under `gfx950` too.
-  The manifest gains an `engine.trained_rankers.<arch>` block naming the per-metric UHD
-  ids and a `trained_catalog_sha256`, which is also the retrain trigger: the fingerprint
-  is of the KDP the rankers were trained on, so any catalog add, remove or rename
-  invalidates it. `tools/catalog_fingerprint.py` prints the value.
-- Promotion is additive rather than a replacement. The native UHD carries no
-  `score.metric`, so a trained model installs under its own metric and the native
-  scorer remains the metric-less fallback. Both ids then appear in the role map.
+- The trained rankers of §7 are installed. They ship under
+  `heuristics/<ued-id>/sort_kernel_catalog/gfx950/<metric>/`, one per metric, bound in
+  the config's `engine.heuristics` beside `trained_catalog_sha256`, which is also the
+  retrain trigger: the fingerprint is of the KDP the rankers were trained on, so any
+  catalog add, remove or rename invalidates it and the generator's gate fails.
+  `tools/catalog_fingerprint.py` prints the value. Stage V ran under
+  `--arch-key default`, which decides where a model installs rather than whether it
+  works, so its verdict carries to `gfx950`.
+- Promotion is additive in the role map but not in behaviour. All three ids appear, the
+  native one still under `default`, but on gfx950 the trained models are what rank the
+  catalog: the device suite caught two cold cases where a model picks a different tile
+  from `preferredTile`, both D128 non-causal and neither in the sweep, so which is
+  faster there is unmeasured. Both picks are correct, and the native scorer still ranks
+  every other arch. The rule of §2 therefore describes what ships off gfx950, and the
+  floor under gfx950 when no model is bound.
 - 26 of the 12,870 corpus rows carry no decided correctness verdict, which RFC 0019
   Open Question 19 leaves open per operation. Their timings trained the model without
   having been shown correct.

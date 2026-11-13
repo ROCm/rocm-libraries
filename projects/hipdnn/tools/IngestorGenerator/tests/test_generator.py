@@ -55,6 +55,14 @@ from tests.helpers import (
     render_resolved,
 )
 
+#: The shipped descriptor tree, which carries what `uhd_gen promote` installed under
+#: `heuristics/`. The generator does not write that subtree, so a test that needs a
+#: pack-time view of a bundle reads it from here rather than from a render.
+SHIPPED_DESCRIPTOR_ROOT = (
+    Path(__file__).resolve().parents[5]
+    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
+)
+
 
 def _distinct_from(value):
     """A value of the SAME declared type that is not ``value``: an untyped stand-in
@@ -736,21 +744,39 @@ class TestSpecializationContractEmission:
     ):
         """hkp_pack loads the rendered tree as it would at pack time: every id and
         cross-reference a packed bundle carries (the UED's `id` and `metadata` among
-        them) must be a UUID the packer resolves."""
+        them) must be a UUID the packer resolves.
+
+        Pack time sees the generator's output *and* whatever `uhd_gen promote` installed
+        under `heuristics/`, so the trained UHDs an `engine.heuristics` binding names are
+        copied in beside the render. Rendering alone would fail on an engine that ships a
+        trained ranker, since promote's output is not the generator's to write."""
         descriptors = _import_hkp_pack("descriptors")
         generic_targets = _import_hkp_pack("generic_targets")
         if descriptors is None or generic_targets is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         config = gfx950_attention_dense_config
         generator.render(config, tmp_path)
+        rendered = tmp_path / config.descriptor_dir
+        shipped_heuristics = (
+            SHIPPED_DESCRIPTOR_ROOT / config.authored_subpath / "heuristics"
+        )
+        if shipped_heuristics.is_dir():
+            shutil.copytree(shipped_heuristics, rendered / "heuristics")
         # The shipped generic target table, as the packer loads it at pack time.
         flat = descriptors.load_flat_input(
-            tmp_path / config.descriptor_dir,
+            rendered,
             generic_targets.GenericTargets.load(generic_targets.DEFAULT_TABLE_PATH),
             log=lambda _message: None,
         )
         # A wrong root would load nothing and pass vacuously.
         assert flat.by_type("ued") and flat.by_type("kmd")
+        # The binding is only real if the packer resolved the trained models too: a
+        # missing heuristics/ copy would otherwise leave this at the native UHD alone.
+        bound = config.engine.heuristics.get("sort_kernel_catalog", {})
+        promoted = {uhd for ids in bound.values() for uhd in ids}
+        if promoted:
+            loaded = {str(d.id) for d in flat.by_type("uhd")}
+            assert promoted <= loaded, f"unresolved trained UHDs: {promoted - loaded}"
 
 
 def _import_hkp_pack(module: str):

@@ -46,9 +46,17 @@ using namespace hip_kernel_provider::test_utilities;
  * Each expected kernel id is resolved at run time from the production descriptors by
  * expectedKernelId().
  *
+ * A cold case expects whatever ranks the catalog in the shipped configuration. Since the
+ * trained gfx950 rankers were promoted that is a trained model, not preferredTile, and the
+ * two disagree on a few shapes (see Cold_MmaBfloat16). Promoting or retraining a model can
+ * therefore move a cold expectation; a forced one it cannot touch.
+ *
  * A forced case earns its keep when its tile differs from the shape's no-knob winner: a
  * knob that failed to reach the plugin would then select that winner and fail the id
- * check. That holds for 49 of the 56 forced cases. The other seven force the tile their
+ * check. That holds for 49 of the 56 forced cases, counted against preferredTile, which is
+ * what ranks wherever no trained model is bound. On gfx950 the trained rankers decide, so
+ * the device-side split may differ from that count; this suite is what measures it. The
+ * other seven force the tile their
  * shape would have chosen anyway, so they still check numerics and that the class exists,
  * but they cannot catch a knob that never arrived.
  *
@@ -234,10 +242,15 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          COLD,
          Tile{128, 128}},
+        // The trained gfx950 ranker takes this one and Cold_D128Hq8Kv8_Bf16NoMask below
+        // somewhere the native rule does not (it wants 128/128 here). Both shapes are
+        // D128 non-causal, the cohort §6 of the case study calls the weak one, and
+        // neither was in the sweep, so which tile is faster is unmeasured. What is
+        // checked is that the pick is correct: the CPU reference compare runs either way.
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         {"Cold_CausalBottomRightFlag",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 2, 512, 512),
          COLD,
@@ -430,10 +443,11 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
          Tile{128, 128}},
+        // Trained ranker again, where the native rule wants 256/128. See Cold_MmaBfloat16.
         {"Cold_D128Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{256, 128}},
+         Tile{128, 128}},
         // An fp16 graph with each explicit mma_core_mode.
         {"Cold_Fp16MmaHalf",
          makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
