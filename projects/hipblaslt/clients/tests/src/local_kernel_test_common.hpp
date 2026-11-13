@@ -17,6 +17,7 @@
 #include <hipblaslt/hipblaslt-local-kernel.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -396,8 +397,8 @@ namespace local_kernel_test
         });
     }
 
-    // Runs `algo` on the current device with A and B all ones and D zeroed,
-    // and returns D in `hD`.
+    // Runs `algo` on the current device with A and B all ones and D and the
+    // workspace zeroed, and returns D in `hD`.
     inline void runMatmul(hipblasLtHandle_t            handle,
                           Problem const&               p,
                           hipblasLtMatmulAlgo_t const& algo,
@@ -418,6 +419,10 @@ namespace local_kernel_test
         ASSERT_EQ(hipMemcpy(dB.ptr, hB.data(), hB.size() * 2, hipMemcpyHostToDevice), hipSuccess);
         ASSERT_EQ(hipMemset(dC.ptr, 0, m * N * 2), hipSuccess);
         ASSERT_EQ(hipMemset(dD.ptr, 0, m * N * 2), hipSuccess);
+        // A kernel that splits K leaves partial sums here for a helper kernel
+        // to reduce into D. Freed memory can come back with an earlier run's
+        // sums, which would make a kernel that wrote nothing look correct.
+        ASSERT_EQ(hipMemset(dWs.ptr, 0, MAX_WORKSPACE), hipSuccess);
 
         float alpha = 1.0f, beta = 0.0f;
         ASSERT_EQ(hipblasLtMatmul(handle,
@@ -466,6 +471,18 @@ namespace local_kernel_test
             return {};
         std::string arch = prop.gcnArchName;
         return arch.substr(0, arch.find(':'));
+    }
+
+    inline bool haveTwoMatchingDevices()
+    {
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess || count < 2)
+            return false;
+        hipDeviceProp_t a, b;
+        if(hipGetDeviceProperties(&a, 0) != hipSuccess
+           || hipGetDeviceProperties(&b, 1) != hipSuccess)
+            return false;
+        return std::strcmp(a.gcnArchName, b.gcnArchName) == 0;
     }
 
     inline std::string otherArch()
@@ -555,10 +572,15 @@ namespace local_kernel_test
         }
     };
 
-    // Re-runs this executable with only the named DISABLED_ case enabled and
-    // returns its exit status, or -1 if it could not be run. Uses posix_spawn
-    // because forking after HIP initialization is unsafe.
-    inline int runWorker(std::string const& filter)
+    inline constexpr char LIBRARY_ENV[] = "HIPBLASLT_LOCAL_KERNEL_LIBRARY";
+
+    // Starts this executable with only the named DISABLED_ case enabled and
+    // returns its pid, or -1. Uses posix_spawn because forking after HIP
+    // initialization is unsafe. The child does not inherit LIBRARY_ENV; `env`
+    // adds "NAME=value" entries. A non-empty `errorLog` receives its stderr.
+    inline pid_t spawnWorker(std::string const&              filter,
+                             std::vector<std::string> const& env      = {},
+                             std::string const&              errorLog = {})
     {
         std::string exe = selfExe();
         if(exe.empty())
@@ -568,13 +590,50 @@ namespace local_kernel_test
         std::string filterArg    = "--gtest_filter=" + filter;
         char*       argv[]       = {exe.data(), alsoDisabled.data(), filterArg.data(), nullptr};
 
-        pid_t pid = 0;
-        if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, argv, environ) != 0)
-            return -1;
+        const std::string        prefix = std::string(LIBRARY_ENV) + "=";
+        std::vector<std::string> owned(env);
+        std::vector<char*>       envp;
+        for(char** entry = environ; *entry; ++entry)
+            if(std::strncmp(*entry, prefix.c_str(), prefix.size()) != 0)
+                envp.push_back(*entry);
+        for(auto& entry : owned)
+            envp.push_back(entry.data());
+        envp.push_back(nullptr);
 
+        posix_spawn_file_actions_t actions;
+        if(posix_spawn_file_actions_init(&actions) != 0)
+            return -1;
+        if(!errorLog.empty()
+           && posix_spawn_file_actions_addopen(
+                  &actions, STDERR_FILENO, errorLog.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)
+                  != 0)
+        {
+            posix_spawn_file_actions_destroy(&actions);
+            return -1;
+        }
+
+        pid_t      pid = 0;
+        const bool spawned
+            = posix_spawn(&pid, exe.c_str(), &actions, nullptr, argv, envp.data()) == 0;
+        posix_spawn_file_actions_destroy(&actions);
+        return spawned ? pid : -1;
+    }
+
+    // Exit status of a spawned worker, or -1.
+    inline int waitWorker(pid_t pid)
+    {
+        if(pid < 0)
+            return -1;
         int status = 0;
         if(waitpid(pid, &status, 0) < 0)
             return -1;
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+
+    inline int runWorker(std::string const&              filter,
+                         std::vector<std::string> const& env      = {},
+                         std::string const&              errorLog = {})
+    {
+        return waitWorker(spawnWorker(filter, env, errorLog));
     }
 } // namespace local_kernel_test
