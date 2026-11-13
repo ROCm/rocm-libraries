@@ -75,7 +75,7 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
 # HIPRTC and served by the kernel ingestor. OFF while the group is being built out; with
 # HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_CONV
-       "Build the conv engine group (naive convolution) for the kernel ingestor" OFF)
+       "Build the conv engine group for the kernel ingestor" OFF)
 # Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
 # targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
 option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
