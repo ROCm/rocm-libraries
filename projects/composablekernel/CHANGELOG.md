@@ -40,6 +40,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Optimized
 * Improved FMHA forward performance on gfx1250 for eligible scheduled BF16 head dimension 128 causal attention workloads by grouping workgroups within each XCD.
 * Improved FMHA forward performance on gfx1250 for the head dimension 128 qr_tdm_sched kernels by writing the output tile back from LDS with asynchronous stores, issuing the Q, K, and V prologue loads together, and removing a per-element scalar operation from the attention mask check.
+* Improved FMHA forward performance on gfx1250 for the FP16/BF16 qr_tdm_sched kernels by trying a 128-by-128 Q/K sequence tile for head dimension 64 and forming causal and sliding-window mask bounds once per row. Square top-left/bottom-right sliding windows with right window 0 now use the batch-local workgroup order of qr_tdm and scheduled head dimension 64/128 kernels, and the XCD grouping of eligible scheduled BF16 head dimension 128 MHA kernels.
 
 ### Resolved issues
 

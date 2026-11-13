@@ -257,7 +257,9 @@ std::vector<int> capture(int heads,
                          int hdim_q           = 128,
                          int hdim_v           = 128,
                          bool bhsd            = true,
-                         int variable_lengths = 0)
+                         int variable_lengths = 0,
+                         ck_tile::GenericAttentionMaskEnum mask_type =
+                             ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
 {
     using Kernel = MappingKernel<M, Mask, StoreLSE, DataType, BiasEnum, HasSink>;
     typename Kernel::Kargs args{};
@@ -271,7 +273,7 @@ std::vector<int> capture(int heads,
     {
         args.window_size_left  = left;
         args.window_size_right = 0;
-        args.mask_type         = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+        args.mask_type         = mask_type;
     }
     const auto grid = Kernel::GridSize(batches, heads, args.seqlen_q, args.hdim_v);
     std::vector<int> result(grid.x * grid.y * grid.z * 4);
@@ -315,14 +317,32 @@ TEST(QrTdmCausalMapping, DenseRetainsHeadMajorOrder)
     EXPECT_EQ(actual, expected);
 }
 
-TEST(QrTdmCausalMapping, OtherMasksAndRectangularInputsRetainTheirSchedule)
+TEST(QrTdmCausalMapping, SquareFiniteWindowUsesQMajorAndOtherMasksRetainHeadMajor)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
-    const std::vector<int> expected{2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-                                    2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
-    EXPECT_EQ((capture<128, true>(2, 1, 3, 127)), expected);
-    EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 128)), expected);
+    const std::vector<int> q_major{2, 0, 0, 0, 2, 0, 1, 0, 1, 0, 0, 0,
+                                   1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+    const std::vector<int> head_major{2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+                                      2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
+    EXPECT_EQ((capture<128, true>(2, 1, 3, 127)), q_major);
+    EXPECT_EQ((capture<128, true>(2,
+                                  1,
+                                  3,
+                                  127,
+                                  0,
+                                  128,
+                                  128,
+                                  true,
+                                  0,
+                                  ck_tile::GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT)),
+              q_major);
+    // MASK_GENERIC finite windows keep the fallback order (mapping only).
+    EXPECT_EQ(
+        (capture<128, true>(
+            2, 1, 3, 127, 0, 128, 128, true, 0, ck_tile::GenericAttentionMaskEnum::MASK_GENERIC)),
+        head_major);
+    EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 128)), head_major);
 }
 
 TEST(QrTdmCausalMapping, M64CoversEachBatchHeadAndTileExactlyOnce)
@@ -539,8 +559,15 @@ TEST(QrTdmCausalMapping, CausalOverridePrecedesUniformLengthCheck)
         EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 128, 128, true, pointer)), expected);
 }
 
-std::vector<int> capture_scheduled(
-    bool bhsd, int tiles = 4, int ratio = 1, int variable_lengths = 0, int batches = 128)
+std::vector<int> capture_scheduled(bool bhsd,
+                                   int tiles            = 4,
+                                   int ratio            = 1,
+                                   int variable_lengths = 0,
+                                   int batches          = 128,
+                                   int left             = -1,
+                                   ck_tile::GenericAttentionMaskEnum mask_type =
+                                       ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
+                                   int right = 0)
 {
     using Kernel = ScheduledMappingKernel;
     typename Kernel::Kargs args{};
@@ -550,9 +577,9 @@ std::vector<int> capture_scheduled(
     args.nhead_ratio_qk                     = ratio;
     args.stride_q                           = bhsd ? 128 : 256;
     args.nhead_stride_q                     = bhsd ? args.seqlen_q * 128 : 128;
-    args.window_size_left                   = -1;
-    args.window_size_right                  = 0;
-    args.mask_type                          = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+    args.window_size_left                   = left;
+    args.window_size_right                  = right;
+    args.mask_type                          = mask_type;
     const auto grid                         = Kernel::GridSize(batches, 2, args.seqlen_q, 128);
     std::vector<int> actual(batches * 2 * tiles * 4);
     ck_tile::DeviceMem device(actual.size() * sizeof(int));
@@ -679,6 +706,121 @@ TEST(QrTdmCausalMapping, ScheduledVarlenGqaAndLongSequencesRetainTheirFallbacks)
             }
             EXPECT_EQ(actual, expected);
         }
+}
+
+// Independent queue enumerations for capture_scheduled's two-head launches.
+// They index the expected coordinates directly and do not call the mapper.
+std::vector<int> expected_xcd_causal_groups(int batches, int tiles)
+{
+    const int rows         = 2 * batches;
+    const int rows_per_xcd = rows / 8;
+    const int group        = std::gcd(rows_per_xcd, 16);
+    std::vector<int> expected(rows * tiles * 4);
+    for(int xcd = 0; xcd < 8; ++xcd)
+    {
+        int slot = 0;
+        for(int first = xcd * rows_per_xcd; first < (xcd + 1) * rows_per_xcd; first += group)
+            for(int q = tiles - 1; q >= 0; --q)
+                for(int row = first; row < first + group; ++row, ++slot)
+                {
+                    const int l         = xcd + 8 * slot;
+                    expected[4 * l]     = q;
+                    expected[4 * l + 2] = row % 2;
+                    expected[4 * l + 3] = row / 2;
+                }
+    }
+    return expected;
+}
+
+std::vector<int> expected_head_major_xcd_segments(int batches, int tiles)
+{
+    const int rows         = 2 * batches;
+    const int rows_per_xcd = rows / 8;
+    std::vector<int> expected(rows * tiles * 4);
+    for(int xcd = 0; xcd < 8; ++xcd)
+    {
+        int slot = 0;
+        for(int row = xcd * rows_per_xcd; row < (xcd + 1) * rows_per_xcd; ++row)
+            for(int q = tiles - 1; q >= 0; --q, ++slot)
+            {
+                const int l         = xcd + 8 * slot;
+                expected[4 * l]     = q;
+                expected[4 * l + 2] = row % 2;
+                expected[4 * l + 3] = row / 2;
+            }
+    }
+    return expected;
+}
+
+std::vector<int> expected_batch_local(int batches, int tiles)
+{
+    std::vector<int> expected(2 * batches * tiles * 4);
+    int l = 0;
+    for(int batch = 0; batch < batches; ++batch)
+        for(int q = tiles - 1; q >= 0; --q)
+            for(int head = 0; head < 2; ++head, ++l)
+            {
+                expected[4 * l]     = q;
+                expected[4 * l + 2] = head;
+                expected[4 * l + 3] = batch;
+            }
+    return expected;
+}
+
+TEST(QrTdmCausalMapping, ScheduledFiniteLeftWindowUsesXcdGrouping)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP();
+    if(compiled_xcd_count() != 8 || !compiled_xcd_causal_enabled())
+        GTEST_SKIP();
+    // Top-left/bottom-right finite left windows keep Q-tile work nondecreasing, so
+    // they take the same grouping as full causal. Left 511 and 2047 cover a window that
+    // already spans the whole square sequence.
+    constexpr int tiles   = 4;
+    constexpr int batches = 128;
+    using ck_tile::GenericAttentionMaskEnum;
+    for(bool bhsd : {true, false})
+    {
+        SCOPED_TRACE(bhsd);
+        for(auto mask : {GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
+                         GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT})
+            for(int left : {127, 511, 2047})
+            {
+                SCOPED_TRACE(left);
+                EXPECT_EQ(capture_scheduled(bhsd, tiles, 1, 0, batches, left, mask),
+                          expected_xcd_causal_groups(batches, tiles));
+            }
+        // MASK_GENERIC finite windows keep contiguous head-major XCD segments, while
+        // MASK_GENERIC without a left window is full causal. A right window disables
+        // both causal orders. These check mapping only.
+        EXPECT_EQ(capture_scheduled(
+                      bhsd, tiles, 1, 0, batches, 127, GenericAttentionMaskEnum::MASK_GENERIC),
+                  expected_head_major_xcd_segments(batches, tiles));
+        EXPECT_EQ(capture_scheduled(
+                      bhsd, tiles, 1, 0, batches, -1, GenericAttentionMaskEnum::MASK_GENERIC),
+                  expected_xcd_causal_groups(batches, tiles));
+        EXPECT_EQ(
+            capture_scheduled(
+                bhsd, tiles, 1, 0, batches, 127, GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT, 7),
+            expected_head_major_xcd_segments(batches, tiles));
+    }
+}
+
+TEST(QrTdmCausalMapping, ScheduledFiniteLeftGqaRetainsItsFallbacks)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP();
+    if(compiled_xcd_count() != 8 || !compiled_xcd_causal_enabled())
+        GTEST_SKIP();
+    // XCD grouping requires MHA. Finite-left GQA keeps batch-local order for BHSD
+    // and the contiguous head-major XCD segments for BSHD.
+    constexpr int tiles   = 4;
+    constexpr int batches = 128;
+    const auto mask       = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+    EXPECT_EQ(capture_scheduled(true, tiles, 2, 0, batches, 127, mask),
+              expected_batch_local(batches, tiles));
+    EXPECT_EQ(capture_scheduled(false, tiles, 2, 0, batches, 127, mask),
+              expected_head_major_xcd_segments(batches, tiles));
 }
 
 } // namespace
