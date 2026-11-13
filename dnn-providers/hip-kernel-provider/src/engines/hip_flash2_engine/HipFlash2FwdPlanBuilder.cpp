@@ -64,6 +64,30 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout not supported");
+    // Operands the kernel never reads: the scale comes from attn_scale_value (1.0 when
+    // unset), and the dropout, block-mask and fp8 quantization tensors have no kernel input.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_tensor_uid(), "scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_q_tensor_uid() || attrs.descale_k_tensor_uid()
+                                   || attrs.descale_v_tensor_uid() || attrs.descale_s_tensor_uid(),
+                               "fp8 descale tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid() || attrs.amax_o_tensor_uid(),
+                               "fp8 amax tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid() || attrs.scale_o_tensor_uid(),
+                               "fp8 scale_s/scale_o tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.implementation()
+                                   != data_objects::AttentionImplementation::AUTO,
+                               "implementation must be AUTO");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");

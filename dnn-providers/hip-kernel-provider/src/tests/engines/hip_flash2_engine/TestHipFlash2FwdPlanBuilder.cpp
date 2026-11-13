@@ -13,6 +13,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaFwdUnservedAttributeCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -486,6 +487,109 @@ TEST(TestHipFlash2ExtractParamsWindow, GenuineWindowIsNotCausal)
 {
     EXPECT_FALSE(extractCausalForTopLeftWindow(255));
 }
+
+// -- isApplicable: attributes the kernel does not serve ----------------------------
+
+namespace
+{
+using asm_sdpa_engine::applyUnservedAttribute;
+using asm_sdpa_engine::SdpaFwdUnservedAttributeCase;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
+using hipdnn_test_sdk::utilities::sdpa::detail::appendIndexTensor;
+
+flatbuffers::FlatBufferBuilder createFlash2Fp16Graph()
+{
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims, strides, dims, strides, dims, strides, dims, strides, DataType::HALF);
+}
+
+// Cases specific to this engine: it reads no scale tensor and serves no fp8 quantization
+// tensors.
+std::vector<SdpaFwdUnservedAttributeCase> flash2UnservedAttributeCases()
+{
+    auto cases = asm_sdpa_engine::commonUnservedFwdAttributeCases();
+    cases.push_back({"ScaleTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_tensor_uid = appendIndexTensor(g, "scale");
+                     }});
+    cases.push_back({"DescaleQTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_q_tensor_uid = appendIndexTensor(g, "descale_q");
+                     }});
+    cases.push_back({"DescaleKTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_k_tensor_uid = appendIndexTensor(g, "descale_k");
+                     }});
+    cases.push_back({"DescaleVTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_v_tensor_uid = appendIndexTensor(g, "descale_v");
+                     }});
+    cases.push_back({"DescaleSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_s_tensor_uid = appendIndexTensor(g, "descale_s");
+                     }});
+    cases.push_back({"AmaxSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.amax_s_tensor_uid = appendIndexTensor(g, "amax_s");
+                     }});
+    cases.push_back({"AmaxOTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.amax_o_tensor_uid = appendIndexTensor(g, "amax_o");
+                     }});
+    cases.push_back({"ScaleSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_s_tensor_uid = appendIndexTensor(g, "scale_s");
+                     }});
+    cases.push_back({"ScaleOTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_o_tensor_uid = appendIndexTensor(g, "scale_o");
+                     }});
+    return cases;
+}
+} // namespace
+
+class TestHipFlash2FwdUnservedAttributes
+    : public ::testing::TestWithParam<SdpaFwdUnservedAttributeCase>
+{
+protected:
+    Handle _handle;
+    HipFlash2FwdPlanBuilder _builder;
+
+    bool servedArch()
+    {
+        return hip_kernel_provider_common::getDeviceString(_handle.getStream()) == "gfx942";
+    }
+};
+
+TEST_F(TestHipFlash2FwdUnservedAttributes, UnmutatedGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createFlash2Fp16Graph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestHipFlash2FwdUnservedAttributes, IsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createFlash2Fp16Graph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestHipFlash2FwdUnservedAttributes,
+                         ::testing::ValuesIn(flash2UnservedAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
 
 } // namespace
 } // namespace hip_flash2_engine
