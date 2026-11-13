@@ -212,13 +212,12 @@ void checkNodeAttrsTensors(
                 "Activation node input must be the bias node output tensor");
         }
 
-        const auto& biasInType
-            = biasAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid()
-                  ? hipblaslt_utils::findTensorAttributes(tensorMap,
-                                                          biasAttr->in_1_tensor_uid().value())
-                        .dataType()
-                  : hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid())
-                        .dataType();
+        // The bias is the operand that is not the matmul output.
+        const auto biasUid = biasAttr->in_0_tensor_uid() == matmulAttr.c_tensor_uid()
+                                 ? biasAttr->in_1_tensor_uid().value()
+                                 : biasAttr->in_0_tensor_uid();
+        const auto tBias = hipblaslt_utils::findTensorAttributes(tensorMap, biasUid);
+        const auto biasInType = tBias.dataType();
         const auto& biasOutType
             = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid())
                   .dataType();
@@ -231,6 +230,14 @@ void checkNodeAttrsTensors(
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Bias node input and output data types must be fp32, fp16 or bf16");
+        }
+
+        // hipBLASLt reads the bias as a packed vector, so any other stride pattern
+        // (padded, permuted or broadcast) would be read at the wrong offsets.
+        if(!hipblaslt_utils::isDenseRowMajor(tBias.dims(), tBias.strides()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           "Matmul: bias strides must be packed");
         }
     }
     else if(activAttr != nullptr)

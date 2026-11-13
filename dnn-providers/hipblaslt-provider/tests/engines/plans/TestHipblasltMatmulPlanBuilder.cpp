@@ -4,6 +4,7 @@
 #include <array>
 #include <set>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
@@ -48,6 +49,24 @@ flatbuffers::FlatBufferBuilder frontendVirtualLayout(const flatbuffers::FlatBuff
     return builder;
 }
 
+// Re-serializes the graph with the named tensor's strides replaced.
+flatbuffers::FlatBufferBuilder withTensorStrides(const flatbuffers::FlatBufferBuilder& source,
+                                                 const std::string& tensorName,
+                                                 const std::vector<int64_t>& strides)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->name == tensorName)
+        {
+            tensor->strides = strides;
+        }
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
 flatbuffers::FlatBufferBuilder createFusedGraph(bool doBias,
                                                 PointwiseMode activMode,
                                                 const std::set<std::string>& flipped = {})
@@ -58,12 +77,31 @@ flatbuffers::FlatBufferBuilder createFusedGraph(bool doBias,
         flipped);
 }
 
+// Re-serializes the graph with the named tensor's data type replaced.
+flatbuffers::FlatBufferBuilder
+    withTensorDataType(const flatbuffers::FlatBufferBuilder& source,
+                       const std::string& tensorName,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType type)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->name == tensorName)
+        {
+            tensor->data_type = type;
+        }
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
 } // namespace
 
-// Host-only fixture: the default handle is never used because the virtual checks
-// run before plan construction. Without a GPU handle every graph is eventually
-// rejected, so the decline cause is asserted from the plugin log.
-class TestHipblasltMatmulPlanBuilderVirtual : public ::testing::Test
+// Host-only fixture: the default handle is never used because the virtual and
+// bias checks run before plan construction. Without a GPU handle every graph is
+// eventually rejected, so the decline cause is asserted from the plugin log.
+class TestHipblasltMatmulPlanBuilderDecline : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -90,12 +128,12 @@ struct VirtualCase
     const char* role;
 };
 
-class TestHipblasltMatmulPlanBuilderVirtualRoles : public TestHipblasltMatmulPlanBuilderVirtual,
+class TestHipblasltMatmulPlanBuilderDeclineRoles : public TestHipblasltMatmulPlanBuilderDecline,
                                                    public ::testing::WithParamInterface<VirtualCase>
 {
 };
 
-TEST_P(TestHipblasltMatmulPlanBuilderVirtualRoles, IsApplicableDeclinesFlippedVirtualFlag)
+TEST_P(TestHipblasltMatmulPlanBuilderDeclineRoles, IsApplicableDeclinesFlippedVirtualFlag)
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
@@ -111,7 +149,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderVirtualRoles, IsApplicableDeclinesFlippedVi
 
 INSTANTIATE_TEST_SUITE_P(
     Roles,
-    TestHipblasltMatmulPlanBuilderVirtualRoles,
+    TestHipblasltMatmulPlanBuilderDeclineRoles,
     ::testing::Values(
         VirtualCase{"matmul", false, PointwiseMode::UNSET, "A", "A"},
         VirtualCase{"matmul", false, PointwiseMode::UNSET, "B", "B"},
@@ -137,7 +175,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 // The virtual layout a frontend emits for each fusion shape is not declined for
 // virtuality.
-TEST_F(TestHipblasltMatmulPlanBuilderVirtual, IsApplicableDoesNotDeclineFrontendVirtualLayout)
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontendVirtualLayout)
 {
     const std::array<std::pair<bool, PointwiseMode>, 4> shapes{{{false, PointwiseMode::UNSET},
                                                                 {true, PointwiseMode::UNSET},
@@ -155,6 +193,105 @@ TEST_F(TestHipblasltMatmulPlanBuilderVirtual, IsApplicableDoesNotDeclineFrontend
             << recorder.getRecordedLogsAsString();
     }
 }
+
+
+// The bias of a [4, 5] output has dims [1, 5]; hipBLASLt reads it as a packed
+// vector of 5 elements. Strides of size-1 dims do not affect the layout.
+struct BiasStridesCase
+{
+    std::vector<int64_t> strides;
+    bool packed;
+};
+
+class TestHipblasltMatmulPlanBuilderBiasStridesCases
+    : public TestHipblasltMatmulPlanBuilderDecline,
+      public ::testing::WithParamInterface<BiasStridesCase>
+{
+};
+
+TEST_P(TestHipblasltMatmulPlanBuilderBiasStridesCases, IsApplicableDeclinesNonPackedBias)
+{
+    using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    for(const auto activMode : {PointwiseMode::UNSET, PointwiseMode::RELU_FWD})
+    {
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        auto builder = withTensorStrides(
+            createValidMatmulBiasActivGraph(
+                {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, true, activMode),
+            "bias",
+            GetParam().strides);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        (void)_planBuilder.isApplicable(_handle, graph);
+        EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Matmul: bias strides must be packed"),
+                  !GetParam().packed)
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Strides,
+                         TestHipblasltMatmulPlanBuilderBiasStridesCases,
+                         ::testing::Values(BiasStridesCase{{5, 1}, true},
+                                           BiasStridesCase{{0, 1}, true},
+                                           BiasStridesCase{{99, 1}, true},
+                                           BiasStridesCase{{5, 2}, false},
+                                           BiasStridesCase{{5, 0}, false},
+                                           BiasStridesCase{{1, 5}, false}));
+
+// The bias input is validated on its own data type, independent of the matmul
+// output type (which stays fp32 here).
+struct BiasTypeCase
+{
+    hipdnn_flatbuffers_sdk::data_objects::DataType type;
+    bool served;
+};
+
+class TestHipblasltMatmulPlanBuilderBiasTypeCases
+    : public TestHipblasltMatmulPlanBuilderDecline,
+      public ::testing::WithParamInterface<BiasTypeCase>
+{
+};
+
+TEST_P(TestHipblasltMatmulPlanBuilderBiasTypeCases, IsApplicableDeclinesUnservedBiasType)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = withTensorDataType(
+        createValidMatmulBiasActivGraph({4, 8},
+                                        {8, 1},
+                                        {8, 5},
+                                        {5, 1},
+                                        {4, 5},
+                                        {5, 1},
+                                        true,
+                                        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET,
+                                        std::nullopt,
+                                        std::nullopt,
+                                        std::nullopt,
+                                        DataType::FLOAT),
+        "bias",
+        GetParam().type);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    (void)_planBuilder.isApplicable(_handle, graph);
+    EXPECT_EQ(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Bias node input and output data types must be"),
+        !GetParam().served)
+        << recorder.getRecordedLogsAsString();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Types,
+    TestHipblasltMatmulPlanBuilderBiasTypeCases,
+    ::testing::Values(BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true},
+                      BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::HALF, true},
+                      BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16, true},
+                      BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE, false},
+                      BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::INT8, false},
+                      BiasTypeCase{hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                                   false}));
 
 class TestHipblasltMatmulPlanBuilder : public ::testing::Test
 {

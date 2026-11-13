@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <string>
+#include <vector>
+
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -724,6 +727,62 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsDefaultScaleSign)
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
+
+// The plan reads each scale tensor as dense row-major data: the canonical A scale
+// is [32, 4] with strides [4, 1] and the B scale is [4, 32] with strides [32, 1].
+// The decline cause is asserted from the log because, without a GPU handle, every
+// graph that passes the constraint checks is also rejected later by plan construction.
+struct ScaleStridesCase
+{
+    const char* tensorName;
+    const char* role;
+    std::vector<int64_t> strides;
+    bool denseRowMajor;
+};
+
+class TestHipblasltMxMatmulPlanBuilderScaleStrides
+    : public TestHipblasltMxMatmulPlanBuilder,
+      public ::testing::WithParamInterface<ScaleStridesCase>
+{
+};
+
+TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesNonDenseScaleStrides)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto& param = GetParam();
+
+    auto source = createValidMxMatmulGraph();
+    auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->name == param.tensorName)
+        {
+            tensor->strides = param.strides;
+        }
+    }
+    flatbuffers::FlatBufferBuilder fb;
+    fb.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(fb, graphT.get()));
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+
+    (void)_builder.isApplicable(_handle, graph);
+    EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                        std::string("MX matmul: ") + param.role
+                                            + " scale strides must be dense"),
+              !param.denseRowMajor)
+        << recorder.getRecordedLogsAsString();
+}
+
+INSTANTIATE_TEST_SUITE_P(Strides,
+                         TestHipblasltMxMatmulPlanBuilderScaleStrides,
+                         ::testing::Values(ScaleStridesCase{"scale_a", "A", {4, 1}, true},
+                                           ScaleStridesCase{"scale_a", "A", {1, 32}, false},
+                                           ScaleStridesCase{"scale_a", "A", {8, 2}, false},
+                                           ScaleStridesCase{"scale_a", "A", {4, 0}, false},
+                                           ScaleStridesCase{"scale_b", "B", {32, 1}, true},
+                                           ScaleStridesCase{"scale_b", "B", {1, 4}, false},
+                                           ScaleStridesCase{"scale_b", "B", {64, 2}, false},
+                                           ScaleStridesCase{"scale_b", "B", {0, 1}, false}));
 
 // Scale-tensor contract: VEC32_UE8M0 requires the scales to be FP8_E8M0 and to
 // declare exactly one element per 32-element operand block (M*(K/32) for A,

@@ -322,8 +322,20 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
         }
     };
 
+    // The plan reads each scale tensor as dense row-major data.
+    const auto checkScaleStrides = [](const TensorWrapper& tScale, const char* operand) {
+        if(!hipblaslt_utils::isDenseRowMajor(tScale.dims(), tScale.strides()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("MX matmul: ") + operand + " scale strides must be dense row-major");
+        }
+    };
+
     checkScaleShape(tXA, tScaleA, 1, "A");
     checkScaleShape(tXB, tScaleB, 2, "B");
+    checkScaleStrides(tScaleA, "A");
+    checkScaleStrides(tScaleB, "B");
 }
 
 // hipBLASLt's own restrictions for the VEC32_UE8M0 scale mode.
