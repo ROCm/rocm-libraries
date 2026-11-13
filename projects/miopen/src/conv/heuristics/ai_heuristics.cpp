@@ -1808,12 +1808,15 @@ ConfigEmbeddingTable ParseConfigEmbeddingTable(const std::string& path, const st
         const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
         is.seekg(header_bytes, std::ios::beg);
         // v3 appends a variable-length kernel-id block after the rows, so its total size is only
-        // bounded below by the row region.
-        const std::uint64_t rows_end =
-            header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        // bounded below by the row region. Bound num_rows by division (num_rows * row_bytes can
+        // overflow u64 for a crafted header, wrapping the product small), and cap key_dim/emb_dim
+        // so a corrupt header cannot drive a huge per-row key/embedding allocation.
+        constexpr std::uint32_t max_dim = 1u << 16; // 65536 floats per key/embedding is ample
+        const std::uint64_t body_bytes  = file_size > header_bytes ? file_size - header_bytes : 0;
         bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 3 &&
-                         key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
-                         file_size >= rows_end;
+                         key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && key_dim <= max_dim &&
+                         emb_dim > 0 && emb_dim <= max_dim && row_bytes != 0 &&
+                         num_rows <= body_bytes / row_bytes;
         // Verify the table's embedded hash against the shipped input encoder, failing closed when
         // they differ (models refreshed but the table not regenerated, or a mixed/stale install).
         // The input encoder is always shipped, so this fires in production; a broken install

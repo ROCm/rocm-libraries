@@ -113,12 +113,11 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyTokenKTN(
             index     = heuristic_indexes[0];
 
             const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+            // Use the TF32-aware check (TF32 with an FP32 availability fallback) rather than a bare
+            // UseTF32() flag, so a float+TF32 problem whose KTN pick is FP32-only still validates.
             bool valid_split_k =
-                loader.IsLoaded() && loader.IsArgsSupported(CKSolverType::GrpConvWrw,
-                                                            problem,
-                                                            kernel_id,
-                                                            problem.GetInDataType(),
-                                                            problem.UseTF32());
+                loader.IsLoaded() &&
+                loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvWrw, problem, kernel_id);
 
             if(valid_split_k)
                 return true;

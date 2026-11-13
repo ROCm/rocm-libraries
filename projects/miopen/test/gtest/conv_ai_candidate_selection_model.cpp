@@ -727,6 +727,20 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabNoneApplicable_Test)
                      .has_value());
 }
 
+namespace {
+// RAII: restore an env var to "0" on scope exit, so a failed EXPECT mid-test cannot leak the
+// setting into later tests sharing the process.
+struct ScopedEnvVar
+{
+    const char* key;
+    ScopedEnvVar(const char* k, const char* v) : key(k)
+    {
+        miopen::debug::env::UpdateEnvVariable(key, v);
+    }
+    ~ScopedEnvVar() { miopen::debug::env::UpdateEnvVariable(key, "0"); }
+};
+} // namespace
+
 // Kill switch: MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB empties the vocab -> nullopt even
 // with an accept-all predicate.
 TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabKillSwitch_Test)
@@ -734,10 +748,9 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabKillSwitch_Test)
     const auto& params  = GetParam();
     const auto features = AllOnesFeatures(params.arch, params.solver);
     auto accept_all     = [](const std::string&, int, bool) { return true; };
-    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "1");
+    ScopedEnvVar guard("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "1");
     auto result = SelectBestVocabCandidate(
         params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
-    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "0");
     EXPECT_FALSE(result.has_value());
 }
 
@@ -747,11 +760,23 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabLgbmOnly_Test)
     const auto& params  = GetParam();
     const auto features = AllOnesFeatures(params.arch, params.solver);
     auto accept_all     = [](const std::string&, int, bool) { return true; };
-    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_LGBM_ONLY", "1");
+    ScopedEnvVar guard("MIOPEN_DEBUG_LGBM_ONLY", "1");
     auto result = SelectBestVocabCandidate(
         params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
-    miopen::debug::env::UpdateEnvVariable("MIOPEN_DEBUG_LGBM_ONLY", "0");
     EXPECT_FALSE(result.has_value());
+}
+
+// Deterministic split-k gate: a predicate that rejects any split_k != 1 must yield either no pick
+// (the vocab has no split_k=1 entry) or a pick with split_k == 1 -- never a split_k>1 kernel.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabRejectsNonUnitSplitK_Test)
+{
+    const auto& params     = GetParam();
+    const auto features    = AllOnesFeatures(params.arch, params.solver);
+    auto unit_split_k_only = [](const std::string&, int split_k, bool) { return split_k == 1; };
+    auto result            = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, unit_split_k_only);
+    if(result.has_value())
+        EXPECT_EQ(result->second, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
