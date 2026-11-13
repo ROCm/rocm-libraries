@@ -1,0 +1,172 @@
+problem:
+  type: And
+  value:
+  - type: AIGreaterThanEqual
+    value: 10
+  - type: AILessThanEqual
+    value: 500
+  - type: Free0SizeMultiple
+    index: 0
+    value: 8
+  - type: Free1SizeMultiple
+    index: 0
+    value: 4
+  - type: SizeEqual
+    index: 0
+    value: 64
+  - type: SizeGreaterThan
+    index: 1
+    value: 8
+  - type: SizeLessThan
+    index: 3
+    value: 16385
+  - type: StrideAEqual
+    index: 0
+    value: 1
+  - type: And
+    value:
+    - type: StrideBEqual
+      index: 0
+      value: 1
+    - type: StrideBEqual
+      index: 1
+      value: 64
+  - type: StrideCEqual
+    index: 1
+    value: 4
+  - type: StrideDEqual
+    index: 2
+    value: 7
+  - type: BoundSizeMultiple
+    index: -1
+    value: 2
+  - type: OperationIdentifierEqual
+    value: Contraction_l_Ailk_Bljk_Cijk_Dijk
+  - type: BiasDataTypeWhiteList
+    value:
+    - 0
+    - 4
+  - type: GateResidualDataTypeWhiteList
+    value: []
+  - type: BiasSrcWhiteList
+    value:
+    - 3
+  - type: AmaxDCheck
+    value: false
+  - type: TypesEqual
+    value:
+    - Half
+    - Half
+    - Half
+    - Half
+    - Half
+    - Half
+  - type: HighPrecisionAccumulate
+    value: true
+  - type: Activation
+    value: None
+  - type: ActivationComputeType
+    value: Float
+  - type: ActivationNoGuard
+    value: false
+  - type: UseGradient
+    value: false
+  - type: UseBias
+    value: 0
+  - type: UseE
+    value: false
+  - type: UseGateResidual
+    value: false
+  - type: DataTypeE
+    value: Half
+  - type: StridedBatched
+    value: true
+  - type: GroupedGemm
+    value: false
+  - type: UseScaleAB
+    value: ''
+  - type: UseScaleCD
+    value: false
+  - type: UseScaleAlphaVec
+    value: 0
+  - type: Sparse
+    value: 0
+  - type: F32XdlMathOp
+    value: Float
+  - type: SupportDeviceUserArguments
+    value: false
+  - type: SwizzleTensorA
+    value: true
+  - type: SwizzleTensorB
+    value: true
+  - type: FusedGemmA2A
+    value: true
+  - type: BatchSizeEqual
+    index: 0
+    value: 1
+  - type: MXBlockA
+    value: 0
+  - type: MXBlockB
+    value: 0
+  - type: BatchSizeEqual
+    index: 0
+    value: 1
+  - type: SynchronizerSizeCheck
+    index: 0
+    value:
+    - 32
+    - 16
+    - 1
+    - 4
+    - 1
+    - 4
+  - type: WorkgroupNumberCheck
+    index: 0
+    value:
+    - 32
+    - 16
+    - 4
+  - type: LeadingFree0SizesGreaterOrEqual
+    value: 4
+  - type: LeadingFree1SizesGreaterOrEqual
+    value: 1
+  - type: CDStridesEqual
+  - type: KernelLanguageCompatible
+    value: Assembly
+  - type: BufferLoadOffsetLimitCheck
+    value:
+      ShiftPtrElemB: 0
+      ShiftPtrElemA: 0
+      DUorMT1: 16
+      DUorMT0: 16
+  - type: BufferLoadOffsetLimitCheck_Beta
+    value: 16
+  - type: BufferStoreOffsetLimitCheck
+    value: 16
+  - type: GlobalSplitUCheckMinK
+    value:
+    - 32
+    - 4
+  - type: WorkgroupMappingXCCCheck
+    value:
+    - 1
+    - -1
+  - type: SwizzleTensorA
+    value: true
+  - type: SwizzleTensorB
+    value: true
+  - type: GemmA2AShape
+    value: 32
+  - type: SizeEqual
+    index: 0
+    value: 64
+task:
+  type: And
+  value:
+  - type: WorkspaceCheck
+  - type: LaunchLimits
+hardware:
+  type: AMDGPU
+  value:
+    type: Processor
+    value: gfx950

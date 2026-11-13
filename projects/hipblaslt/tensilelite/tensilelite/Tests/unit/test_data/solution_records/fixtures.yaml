@@ -1,0 +1,178 @@
+# The solution-state cases: a base state of states/ and the edits made to it.
+# A set value replaces the old one wholesale; set is applied before delete.
+# solution_state_fixtures.py reads this file. A data type is its enum value,
+# the form a derived ProblemType holds.
+
+gfx950-plain:
+  base: gfx950-plain
+
+# GlobalSplitU -1 on a single buffer, thread tiles without matrix instructions,
+# and KernelLanguage Source.
+gfx950-plain-gsu-thread-tile:
+  base: gfx950-plain
+  set:
+    GlobalSplitU: -1
+    _GlobalAccumulation: SingleBuffer
+    EnableMatrixInstruction: false
+    ThreadTile0: 4
+    ThreadTile1: 2
+    ThreadTile: [4, 2]
+    KernelLanguage: Source
+
+# No beta, bias from A, E and a gate residual, and the default bias and
+# gate-residual type lists. The default bias list then holds DataType,
+# ComputeDataType and DestDataType.
+gfx950-plain-epilogue-defaults:
+  base: gfx950-plain
+  set:
+    ProblemType.UseBeta: false
+    ProblemType.UseBias: 1
+    ProblemType.BiasSrc: A
+    ProblemType.UseE: true
+    ProblemType.UseGateResidual: true
+    ProblemType.DestDataType: 7  # BFloat16
+  delete: [ProblemType.BiasDataTypeList, ProblemType.GateResidualDataTypeList]
+
+# A 32x16 tile, so GemmA2AShape tells MacroTile0 from MacroTile1, every size and
+# stride assertion, GlobalSplitU 4 on multiple buffers, a batched FusedGemmA2A,
+# swizzled A and B, and an exact-size bound.
+gfx950-plain-size-constraints:
+  base: gfx950-plain
+  set:
+    MacroTile0: 32
+    AssertAIGreaterThanEqual: 10
+    AssertAILessThanEqual: 500
+    AssertFree0ElementMultiple: 8
+    AssertFree1ElementMultiple: 4
+    AssertSummationElementMultiple: 2
+    AssertSizeEqual: {0: 64, 1: -1}
+    AssertSizeGreaterThan: {1: 8}
+    AssertSizeLessThan: {3: 16385}
+    AssertStrideAEqual: {0: 1}
+    AssertStrideBEqual: {0: 1, 1: 64}
+    AssertStrideCEqual: {1: 4}
+    AssertStrideDEqual: {2: 7}
+    BatchSizeEqual: 1
+    PackedC0IndicesX: [0, 1]
+    GlobalSplitU: 4
+    _GlobalAccumulation: MultipleBuffer
+    CustomKernelSizePredicate: [{tag: SizeEqual, index: 0, value: 64}]
+    ProblemType.FusedGemmA2A: true
+    ProblemType.SwizzleTensorA: true
+    ProblemType.SwizzleTensorB: true
+
+# MX free-block counts that differ per operand, and PrefetchGL2 without
+# PrefetchGL2SAddr, which adds no GL2PrefetchSAddrOffsetLimitCheck.
+gfx950-mx-free-blocks:
+  base: gfx950-mx
+  set:
+    ProblemType.MXBlockFreeA: 7
+    ProblemType.MXBlockFreeB: 4
+    PrefetchGL2: 1
+    PrefetchGL2SAddr: false
+
+# Three DeviceNames (one upper-case; 75b2 is a supported gfx950 chip id and 1234
+# is not, so it is skipped), a CUCount, space-filling workgroup mapping, an
+# unscaled B with its own scale type, and a gradient.
+gfx950-mx-devices-sfc:
+  base: gfx950-mx
+  set:
+    DeviceNames: [Device 75A0, Device 75b2, Device 1234]
+    CUCount: 256
+    SpaceFillingAlgo: [0, 1]
+    SFCWGM: [[4, 2], [8, 129]]
+    ProblemType.MXBlockB: 0
+    ProblemType.DataTypeMXSB: 23  # E5M3
+    ProblemType.Gradient: true
+
+# GL2PrefetchSAddrOffsetLimitCheck, with every A field of its value different
+# from the B field: a 2x1 cluster on a square tile, TLUA only, a smaller
+# _DepthUA, and different MX block sizes and free-block counts.
+gfx950-mx-gl2-prefetch:
+  base: gfx950-mx
+  set:
+    PrefetchGL2: 1
+    PrefetchGL2SAddr: true
+    ClusterDim: [2, 1]
+    _DepthUA: 128
+    ProblemType.TLUA: true
+    ProblemType.MXBlockB: 16
+    ProblemType.MXBlockFreeA: 7
+    ProblemType.MXBlockFreeB: 4
+
+# The 128x4 scale format, the first one MXScaleFormatEquals matches exactly, and
+# an alpha assertion.
+gfx950-mx-scale-128x4:
+  base: gfx950-mx
+  set:
+    MXScaleFormat: HostPreSwizzle128x4
+    AssertAlphaValue: 1
+
+# Only B scaled, which still adds MXScaleFormatEquals, and the size-mapping
+# fields every other case leaves at their defaults.
+gfx950-mx-unscaled-a-hints:
+  base: gfx950-mx
+  set:
+    ProblemType.MXBlockA: 0
+    AdaptiveGemm: 1
+    TemporalHintD: 3
+    HalfPLR: 1
+
+# StreamKAtomic 1 and GlobalSplitU 2, which each add a DeterministicMode
+# predicate.
+gfx942-streamk-atomic-gsu:
+  base: gfx942-streamk-fp8
+  set:
+    StreamKAtomic: 1
+    GlobalSplitU: 2
+
+gfx1151-int4:
+  base: gfx1151-int4
+
+# The ProblemType flags every other case leaves at their defaults, a Double
+# compute type and an explicit Signed encoding.
+gfx1151-int4-flags:
+  base: gfx1151-int4
+  set:
+    ProblemType.Sparse: 1
+    ProblemType.MetadataLayout: 1
+    ProblemType.Gradient: true
+    ProblemType.UseScaleCD: true
+    ProblemType.OutputAmaxD: true
+    ProblemType.F32XdlMathOp: 10  # XFloat32
+    ProblemType.ComputeDataType: 1  # Double
+    ProblemType.ScaleZeroPointA: true
+    ProblemType.Int4EncodingA: Signed
+
+# DebugKernel, Ideals and LinearModel set.
+gfx942-stochastic-rounding:
+  base: gfx942-stochastic-rounding
+  set:
+    DebugKernel: true
+    Ideals: {1024: 1234.5, 4096: 0.1}
+    LinearModel: {slope: 0.00125, intercept: -1.5e-05, max: 98765.4321}
+
+# ReuseAcrossPersistent and the occupancy probe set.
+gfx1250-streamk-cluster-rap-probe:
+  base: gfx1250-streamk-cluster
+  set:
+    ReuseAcrossPersistent: 1
+    _RAPNumResidentKTiles: 3
+    InternalSupportParams.SupportOccupancyProbe: true
+
+# GL2PrefetchSAddrOffsetLimitCheck with TDM metadata on a non-square tile.
+# Sparse 2 takes the metadata cluster extent from ClusterDim[1], which differs
+# from ClusterDim[0]; _DepthUMetadata differs from DepthU; MXBlockFreeB -1 is
+# raised to 1.
+gfx1250-streamk-cluster-gl2-metadata:
+  base: gfx1250-streamk-cluster
+  set:
+    MacroTile1: 64
+    PrefetchGL2: 1
+    PrefetchGL2SAddr: true
+    enableTDMMetadata: true
+    MacroTileMetadata: 16
+    _DepthUMetadata: 32
+    ProblemType.Sparse: 2
+    ProblemType.TLUMetadata: true
+    ProblemType.MXBlockFreeB: -1
