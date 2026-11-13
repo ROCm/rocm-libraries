@@ -519,8 +519,8 @@ def _base_spec_for_request(
         dH=request.dilation_h,
         dW=request.dilation_w,
         groups=request.G,
-        dtype=request.dtype.lower(),
-        layout=request.layout.upper(),
+        dtype=request.dtype,
+        layout=request.layout,
     )
     error = _problem_error(base, decline_grouped_pointwise=decline_grouped_pointwise)
     if error:

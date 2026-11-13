@@ -483,9 +483,9 @@ protected:
 
 // ---- The AOT-instance engines' graphs ----
 //
-// hipkernel:Gfx950ConvFwdAot ships a curated list of rocKE sweep kernels
-// (IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt), each built once against
-// rocKE's probe problem and matched to a graph by capability.
+// hipkernel:Gfx950ConvFwdAot ships every instance rocKE's own forward dispatcher
+// lists (dispatch/grouped_convolution_instances/gfx950_fwd.json), each built once
+// against rocKE's probe problem and matched to a graph by capability.
 // hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a seed taken from the
 // sweep, per dtype 12 implicit-GEMM instances, 4 std and spatial direct depthwise
 // instances, and 22 each of the tiled, col, grouped and non-grouped direct kernels
