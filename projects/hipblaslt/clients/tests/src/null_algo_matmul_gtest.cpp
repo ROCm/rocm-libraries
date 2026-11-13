@@ -12,8 +12,10 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <memory>
 #include <string>
 
@@ -44,11 +46,25 @@ namespace
         hipDataType ab, cd;
     };
 
+    constexpr Types kFp32{"f32", HIP_R_32F, HIP_R_32F};
+
+    std::string describe(const Types&       types,
+                         hipblasOperation_t opA,
+                         hipblasOperation_t opB,
+                         int64_t            m,
+                         int64_t            n,
+                         int64_t            k)
+    {
+        return std::string(types.name) + " op " + (opA == HIPBLAS_OP_N ? "N" : "T") + "/"
+               + (opB == HIPBLAS_OP_N ? "N" : "T") + " " + std::to_string(m) + "x"
+               + std::to_string(n) + "x" + std::to_string(k);
+    }
+
     // A column-major D = op(A) * op(B) problem with no workspace. The buffers are sized for the
     // largest problem the tests use and hold zeros: the tests check statuses only.
     class NullAlgoMatmul : public ::testing::Test
     {
-    public:
+    protected:
         static constexpr size_t kBufferBytes = size_t(1) << 20;
 
         hipblasLtHandle_t           handle = nullptr;
@@ -160,21 +176,32 @@ namespace
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
             return status;
         }
+
+        // Over these types, all four op combinations and these sizes, a null algo runs wherever
+        // the heuristic finds an algorithm and reports HIPBLAS_STATUS_NOT_SUPPORTED where it finds
+        // none. Returns how many problems the heuristic found an algorithm for.
+        int expectNullAlgoAgreesWithHeuristic(std::initializer_list<Types>                  types,
+                                              std::initializer_list<std::array<int64_t, 3>> sizes)
+        {
+            int found = 0;
+            for(const Types& type : types)
+                for(auto opA : {HIPBLAS_OP_N, HIPBLAS_OP_T})
+                    for(auto opB : {HIPBLAS_OP_N, HIPBLAS_OP_T})
+                        for(const auto& [m, n, k] : sizes)
+                        {
+                            const Problem     p     = makeProblem(type, opA, opB, m, n, k);
+                            const std::string which = describe(type, opA, opB, m, n, k);
+                            if(heuristicCount(p) > 0)
+                            {
+                                found++;
+                                EXPECT_EQ(nullAlgoMatmul(p), HIPBLAS_STATUS_SUCCESS) << which;
+                            }
+                            else
+                                EXPECT_EQ(nullAlgoMatmul(p), HIPBLAS_STATUS_NOT_SUPPORTED) << which;
+                        }
+            return found;
+        }
     };
-
-    constexpr Types kFp32{"f32", HIP_R_32F, HIP_R_32F};
-
-    std::string describe(const Types&       types,
-                         hipblasOperation_t opA,
-                         hipblasOperation_t opB,
-                         int64_t            m,
-                         int64_t            n,
-                         int64_t            k)
-    {
-        return std::string(types.name) + " op " + (opA == HIPBLAS_OP_N ? "N" : "T") + "/"
-               + (opB == HIPBLAS_OP_N ? "N" : "T") + " " + std::to_string(m) + "x"
-               + std::to_string(n) + "x" + std::to_string(k);
-    }
 
     TEST_F(NullAlgoMatmul, smoke_NoAlgorithmIsNotSupported)
     {
@@ -206,49 +233,20 @@ namespace
             "no algorithm supports this problem: arch=.* m=64 n=64 k=64 .*type_a=f32_r");
     }
 
-    // Over these types, ops and sizes, a null algo runs wherever the heuristic finds an algorithm
-    // and reports HIPBLAS_STATUS_NOT_SUPPORTED where it finds none. Returns how many problems the
-    // heuristic found an algorithm for.
-    int expectNullAlgoAgreesWithHeuristic(NullAlgoMatmul& t)
-    {
-        const Types   types[]    = {kFp32,
-                                    {"f16", HIP_R_16F, HIP_R_16F},
-                                    {"f16->f32", HIP_R_16F, HIP_R_32F},
-                                    {"bf16", HIP_R_16BF, HIP_R_16BF},
-                                    {"bf16->f32", HIP_R_16BF, HIP_R_32F}};
-        const int64_t sizes[][3] = {{2, 4, 3}, {37, 19, 11}, {100, 60, 70}};
-        int           found      = 0;
-        for(const Types& types_ : types)
-            for(auto opA : {HIPBLAS_OP_N, HIPBLAS_OP_T})
-                for(auto opB : {HIPBLAS_OP_N, HIPBLAS_OP_T})
-                    for(const auto& s : sizes)
-                    {
-                        const auto p = t.makeProblem(types_, opA, opB, s[0], s[1], s[2]);
-                        const std::string which = describe(types_, opA, opB, s[0], s[1], s[2]);
-                        if(t.heuristicCount(p) > 0)
-                        {
-                            found++;
-                            EXPECT_EQ(t.nullAlgoMatmul(p), HIPBLAS_STATUS_SUCCESS) << which;
-                        }
-                        else
-                            EXPECT_EQ(t.nullAlgoMatmul(p), HIPBLAS_STATUS_NOT_SUPPORTED) << which;
-                    }
-        return found;
-    }
-
     // As for a problem no ranked library row covers, such as one outside an exact-size table:
     // the heuristic tops up with size-independent algorithms, and a null algo must too.
     TEST_F(NullAlgoMatmul, smoke_RankedMissUsesSizeIndependentAlgorithms)
     {
         const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_ranked);
-        if(expectNullAlgoAgreesWithHeuristic(*this) == 0)
+        if(expectNullAlgoAgreesWithHeuristic({kFp32}, {{2, 4, 3}, {37, 19, 11}, {100, 60, 70}}) == 0)
             GTEST_SKIP() << "the loaded library has no size-independent algorithm for these problems";
     }
 
     // With the libraries as shipped, at sizes outside the tuned tables.
     TEST_F(NullAlgoMatmul, smoke_RunsWhereverHeuristicFindsAnAlgorithm)
     {
-        if(expectNullAlgoAgreesWithHeuristic(*this) == 0)
+        const Types fp16{"f16", HIP_R_16F, HIP_R_16F}, bf16{"bf16", HIP_R_16BF, HIP_R_16BF};
+        if(expectNullAlgoAgreesWithHeuristic({kFp32, fp16, bf16}, {{2, 4, 3}, {37, 19, 11}}) == 0)
             GTEST_SKIP() << "the loaded library has no algorithm for any of these problems";
     }
 } // namespace

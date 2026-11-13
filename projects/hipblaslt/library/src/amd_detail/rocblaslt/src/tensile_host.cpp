@@ -6023,7 +6023,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             if(status != rocblaslt_status_success)
                 return rocblaslt_status_not_implemented;
             // As hipblasLtMatmulAlgoGetHeuristic does, so a problem the heuristic finds an
-            // algorithm for also runs with a null algo.
+            // algorithm for also runs with a null algo. Libraries that cannot be read add
+            // nothing, and the call then reports no algorithm, as the heuristic does.
             if(returnAlgoCount == 0 && !layoutRuledOut)
             {
                 RocblasltContractionProblem probe = prob;
