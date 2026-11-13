@@ -32,13 +32,8 @@
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename ExecutionPolicy, typename ForwardIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator stable_partition(
   thrust::execution_policy<ExecutionPolicy>& exec, ForwardIterator first, ForwardIterator last, Predicate pred);
@@ -56,7 +51,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -70,7 +65,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -96,7 +91,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -110,7 +105,7 @@ template <typename ExecutionPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -126,10 +121,7 @@ THRUST_HOST_DEVICE ForwardIterator partition_point(
 template <typename ExecutionPolicy, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE bool is_partitioned(
   thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, Predicate pred);
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/partition.inl>

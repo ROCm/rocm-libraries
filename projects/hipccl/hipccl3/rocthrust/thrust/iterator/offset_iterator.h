@@ -225,7 +225,7 @@ private:
 #ifndef THRUST_DOXYGEN_INVOKED
 template <typename Iterator>
 offset_iterator(Iterator) -> offset_iterator<Iterator>;
-#endif
+#endif // THRUST_DOXYGEN_INVOKED
 
 //! \} // end fancyiterators
 //! \} // end iterators

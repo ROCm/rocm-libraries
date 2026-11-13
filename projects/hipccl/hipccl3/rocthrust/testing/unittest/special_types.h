@@ -42,7 +42,12 @@ struct FixedVector
     }
   }
 
-  THRUST_HOST_DEVICE FixedVector operator+(const FixedVector& bs) const
+  THRUST_HOST_DEVICE
+#if _CCCL_COMPILER(NVHPC)
+  __attribute__((noinline))
+#endif
+  FixedVector
+  operator+(const FixedVector& bs) const
   {
     FixedVector output;
     for (unsigned int i = 0; i < N; i++)
@@ -183,7 +188,6 @@ struct my_tag : THRUST_NS_QUALIFIER::device_execution_policy<my_tag>
 
 namespace unittest
 {
-
 using std::int16_t;
 using std::int32_t;
 using std::int64_t;
@@ -193,5 +197,4 @@ using std::uint16_t;
 using std::uint32_t;
 using std::uint64_t;
 using std::uint8_t;
-
 } // namespace unittest

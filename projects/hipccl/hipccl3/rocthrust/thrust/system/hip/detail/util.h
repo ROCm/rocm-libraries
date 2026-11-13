@@ -37,8 +37,8 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/detail/execution_policy.h>
+#include <thrust/detail/type_traits.h>
 
 #if !THRUST_COMPILER(NVRTC)
 #  include <thrust/system/hip/error.h>
@@ -67,6 +67,8 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+template <class>
+struct execution_policy;
 
 inline THRUST_HOST_DEVICE hipStream_t default_stream()
 {
@@ -196,9 +198,9 @@ trivial_copy_from_device(Type* dst, Type const* src, size_t count, hipStream_t s
 // hipMemcpyWithStream is only supported on rocm 3.1 and above
 #if HIP_VERSION_MAJOR >= 3
 #  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
 #  else
-  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
   if (status != hipSuccess)
   {
     return status;
@@ -221,9 +223,9 @@ THRUST_HIP_HOST_FUNCTION hipError_t trivial_copy_to_device(Type* dst, Type const
 // hipMemcpyWithStream is only supported on rocm 3.1 and above
 #if HIP_VERSION_MAJOR >= 3
 #  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
 #  else
-  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
   if (status != hipSuccess)
   {
     return status;
@@ -324,3 +326,6 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
+
+// util.h only forward-declares execution_policy; bring in the full definitions (and par) for includers relying on it.
+#include <thrust/system/hip/detail/execution_policy.h>

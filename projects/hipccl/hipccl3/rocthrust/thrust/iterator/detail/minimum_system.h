@@ -25,12 +25,10 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
 #include <thrust/detail/type_traits/minimum_type.h>
-
-#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -54,6 +52,5 @@ THRUST_HOST_DEVICE auto minimum_system_impl(long) -> unrelated_systems<Ts...>;
 // otherwise, collect the arguments and report them as unrelated
 template <typename... Ts>
 using minimum_system_t = decltype(minimum_system_impl<Ts...>(0));
-
 } // namespace detail
 THRUST_NAMESPACE_END

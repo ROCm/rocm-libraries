@@ -37,15 +37,10 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace sequential
+namespace system::detail::sequential
 {
 namespace general_copy_detail
 {
-
 // sometimes OutputIterator's reference type is reported as void
 // in that case, just assume that we're able to assign to it OK
 template <typename InputIterator, typename OutputIterator>
@@ -90,7 +85,6 @@ inline THRUST_HOST_DEVICE
   // insert a temporary and hope for the best
   *dst = static_cast<value_type>(*src);
 }
-
 } // namespace general_copy_detail
 
 THRUST_EXEC_CHECK_DISABLE
@@ -126,8 +120,5 @@ THRUST_HOST_DEVICE OutputIterator general_copy_n(InputIterator first, Size n, Ou
 
   return result;
 } // end general_copy_n()
-
-} // end namespace sequential
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END

@@ -152,8 +152,6 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                              const hipStream_t         stream,
                                              const bool                debug_synchronous)
 {
-    using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
-
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
