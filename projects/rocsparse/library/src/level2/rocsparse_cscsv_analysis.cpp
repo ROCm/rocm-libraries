@@ -29,6 +29,7 @@
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 #include "rocsparse_dichotomic_search.hpp"
 #include "rocsparse_primitives.hpp"
 
@@ -392,6 +393,7 @@ rocsparse_status rocsparse::cscsv_build_tasks_find(rocsparse::cscsv_build_tasks_
     build[0] = it->second;
     return rocsparse_status_success;
 }
+#endif
 
 rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                            rocsparse_operation         trans,
@@ -404,6 +406,7 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     info->set_csc_analysis(trans == rocsparse_operation_none);
     if(trans == rocsparse_operation_none)
     {
@@ -498,6 +501,7 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
         info->set(rocsparse_operation_none, descr->fill_mode, trm_info.release());
         return rocsparse_status_success;
     }
+#endif
 
     rocsparse_csrsv_info csrsv_info{};
     switch(analysis_policy)
@@ -550,10 +554,12 @@ bool rocsparse::cscsv_is_analyzed(rocsparse_cscsv_info        info,
                                   rocsparse_operation         trans,
                                   rocsparse_const_spmat_descr A)
 {
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         return info->get(rocsparse_operation_none, A->descr->fill_mode) != nullptr;
     }
+#endif
     if(info->get_csrsv_info() == nullptr)
     {
         return false;
