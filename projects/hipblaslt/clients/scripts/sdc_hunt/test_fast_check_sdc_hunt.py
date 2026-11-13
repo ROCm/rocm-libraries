@@ -242,6 +242,24 @@ class CliTests(unittest.TestCase):
                 self.assert_child_stopped(ready)
 
 
+class LoadCommandTests(unittest.TestCase):
+    test_bin = Path("/build/clients/hipblaslt-test")
+
+    def test_cotenant_runs_launcher_beside_test_bin_until_stopped(self):
+        command = hunt.load_command(
+            "cotenant:64", self.test_bin, Path("/logs/c.log"), 30.0
+        )
+        self.assertEqual(command[0], "/build/clients/hipblaslt-cotenant")
+        self.assertEqual(command[command.index("--cus") + 1], "64")
+        self.assertEqual(command[command.index("--log") + 1], "/logs/c.log")
+        self.assertEqual(command[command.index("--wait") + 1], "30.0")
+        self.assertEqual(command[command.index("--") + 1 :], ["sleep", "infinity"])
+
+    def test_gemm_runs_bench_beside_test_bin(self):
+        command = hunt.load_command("gemm", self.test_bin, Path(), 30.0)
+        self.assertEqual(command[0], "/build/clients/hipblaslt-bench")
+
+
 class ParserTests(unittest.TestCase):
     def test_failure_summary_and_skips(self):
         record = hunt.parse_run(

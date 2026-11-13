@@ -124,7 +124,7 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
-  K: [89]
+  K: [1, 89]
   alpha_alphai: *alpha_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
@@ -154,7 +154,7 @@ Tests:
   K: [0, 1, 8]
   alpha_alphai: *alpha_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
   apol: [rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse]

@@ -10,9 +10,26 @@
 # DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
 # from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
 # output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
-# non-grouped DirectNongroupedConvSpec and from index 66 specs both engines
-# must reject), builds the kernel
-# via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
+# non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
+# must reject, from index 71 the runtime-channel DirectConvWgradSpec, from
+# index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
+# baked and runtime-channel, from index 95 the split-C non-grouped
+# DirectNongroupedConvSpec and its DirectSplitReduceSpec second pass, from
+# index 103 its grouped / group-merge mode, and from index 114 the direct
+# wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
+# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
+# from index 163 the bf16 DirectConv4cSpec, from index 166 the depthwise
+# forward kernels on the wave32 gfx1250, from index 171 their channel-packed
+# cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
+# DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
+# DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
+# per-axis padding, from index 201 the fp32-storage (fp32 / tf32)
+# DirectNongroupedConvSpec, from index 218 the fp32-storage configs of every
+# grouped kernel that serves them, see _f32_spec, from index 318 the gfx1250
+# wave32 and image-per-block DirectConvWgradSpec, from index 349
+# DirectDepthwiseWgradSpec and from index 356 the small-C wgrad stems of the
+# AOT grid), builds the kernel via the matching build_direct_conv_* function
+# (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
 import sys
@@ -29,7 +46,13 @@ from kernels.common.conv_direct_grouped import (
     DirectDepthwiseColSpec,
     DirectDepthwiseTiledSpec,
     DirectConvDgradSpec,
+    DirectConvSpec,
     DirectDepthwiseDgradSpec,
+    DirectDepthwiseDgradStreamSpec,
+    DirectDepthwiseWgradSpec,
+    DirectReorganizeWeightsSpec,
+    DirectTransposeWeightsDgradSpec,
+    build_direct_conv,
     build_direct_conv_16c,
     build_direct_conv_4c,
     build_direct_conv_8c,
@@ -41,10 +64,40 @@ from kernels.common.conv_direct_grouped import (
     build_direct_depthwise_tiled,
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
+    build_direct_depthwise_dgrad_streaming,
+    build_direct_depthwise_wgrad,
+    build_direct_reorganize_weights,
+    build_direct_transpose_weights_dgrad,
 )
 from kernels.common.conv_direct_nongrouped import (
     DirectNongroupedConvSpec,
+    DirectSplitReduceSpec,
     build_direct_conv_nongrouped,
+    build_direct_conv_split_reduce,
+)
+from kernels.common.conv_direct_dw_wgrad import (
+    DwWgradColsSpec,
+    DwWgradFoldSpec,
+    DwWgradLdsSpec,
+    build_dw_wgrad_cols,
+    build_dw_wgrad_fold,
+    build_dw_wgrad_lds,
+)
+from kernels.common.conv_direct_dw_wgrad_mfma import (
+    DwWgradMfmaSpec,
+    build_dw_wgrad_mfma,
+)
+from kernels.common.conv_direct_grouped_wgrad_mfma import (
+    GroupedWgradMfmaSpec,
+    build_grouped_wgrad_mfma,
+)
+from kernels.common.conv_direct_wgrad_gather import (
+    WgradGatherSpec,
+    build_wgrad_gather,
+)
+from kernels.common.conv_direct_wgrad_tiled import (
+    DirectWgradTiledSpec,
+    build_direct_wgrad_tiled,
 )
 
 try:
@@ -71,6 +124,1566 @@ _TILED_CFG_BASE = 57
 _NONGROUPED_DIL_CFG_BASE = 63
 # Specs both engines must reject follow the 3 dilated non-grouped ones.
 _REJECT_CFG_BASE = 66
+
+
+# ---------------------------------------------------------------------------
+# Parametric DirectConvSpec (the MFMA dgrad compute pass) and the dgrad weight
+# transforms, indices 75..94. Each pins a branch of build_direct_conv: the
+# plain-weight loops, the runtime K loop, the waves_k preload + LDS reduction,
+# fold_k32, waves_q, single buffering, the persistent grid, partial K-atoms and
+# M-tiles, a 5x5 filter; then the same with runtime channels; then the
+# transpose / reorganize transforms baked and with runtime channels.
+# ---------------------------------------------------------------------------
+_GENERIC_CFG_BASE = 75
+# Split-C non-grouped configs (split_c > 1) and the DirectSplitReduceSpec fold
+# follow the 20 generic ones.
+_NONGROUPED_SPLIT_CFG_BASE = 95
+# Grouped (grouped=True, group_merge) DirectNongroupedConvSpec configs follow the
+# 8 split-C ones.
+_NONGROUPED_GROUPED_CFG_BASE = 103
+
+
+# ---------------------------------------------------------------------------
+# The direct wgrad kernels, indices 114..162: DirectWgradTiledSpec (wave tiles,
+# unfold_n, row_unroll, q_groups with and without pingpong, 1x1 and 5x5), the
+# DwWgradFoldSpec partial-slot fold, DwWgradColsSpec (small C), DwWgradLdsSpec
+# (row rings, strided, cols_per_lane, a partial channel tile), WgradGatherSpec
+# (gathered and transpose-read X, with and without a phase), then two specs
+# both engines must reject; a small-C depthwise spec with more outputs than
+# threads; then eight more rejections (LDS footprints over budget, targets
+# without 16-byte LDS DMA, a negative row_unroll, no blocks, no dtype); then
+# WgradGatherSpec at valid padding over three k-waves; from 148 DwWgradMfmaSpec
+# (preshifted and plain windows, packed images, 3x3 tap groups, the
+# single-prologue PAD = KH - 1 case, a partial channel tile) and
+# GroupedWgradMfmaSpec (4 and 8 channels per group, wave splits, a partial
+# channel tile), each with a reject; then both with no blocks and with a
+# negative block budget. Follows the 11 grouped non-grouped configs.
+# ---------------------------------------------------------------------------
+_WGRAD_DIRECT_CFG_BASE = 114
+
+# bf16 4c (mfma_f32_4x4x4_bf16) configs, indices 163..165, after the direct
+# wgrad ones.
+_FOURC_BF16_CFG_BASE = 163
+
+
+def _fourc_bf16_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FOURC_BF16_CFG_BASE + idx``, or
+    None. 0: odd H/W (right-edge column mask, H-edge rows); 1: gfx942 (the
+    ``_1k`` atom is CDNA2+, so the kernel stays arch-neutral); 2: two waves per
+    block and four q-tiles per wave."""
+    # (N, H, W, groups, block_q, block_groups, arch)
+    table = {
+        0: (2, 13, 13, 32, 4, 16, "gfx950"),
+        1: (1, 8, 8, 16, 8, 16, "gfx942"),
+        2: (2, 15, 15, 32, 16, 32, "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    N, H, W, groups, bq, bg, arch = sel
+    p = DirectConvProblem(
+        N=N, H=H, W=W, groups=groups, cpg=4, kpg=4, KH=3, KW=3, PAD=1, dtype="bf16"
+    )
+    return ("4c", DirectConv4cSpec(problem=p, block_q=bq, block_groups=bg), arch)
+
+
+def _wp(**over):
+    kw = dict(
+        N=2,
+        H=16,
+        W=32,
+        groups=1,
+        cpg=64,
+        kpg=64,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=1,
+        dtype="bf16",
+    )
+    kw.update(over)
+    return DirectConvProblem(**kw)
+
+
+def _dwp(C, **over):
+    return _wp(groups=C, cpg=1, kpg=1, **over)
+
+
+def _wgrad_direct_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_DIRECT_CFG_BASE + idx``."""
+    ts, ls, cs, gs, dm, gm = (
+        DirectWgradTiledSpec,
+        DwWgradLdsSpec,
+        DwWgradColsSpec,
+        WgradGatherSpec,
+        DwWgradMfmaSpec,
+        GroupedWgradMfmaSpec,
+    )
+    table = {
+        0: ("wgrad_tiled", ts(problem=_wp(cpg=128, kpg=128, H=30))),
+        1: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(groups=2, cpg=64, kpg=32, dtype="fp16"),
+                wave_k16=1,
+                wave_c16=4,
+                waves_k=2,
+                waves_c=1,
+                rows_per_seg=12,
+                prefetch=1,
+            ),
+        ),
+        2: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(N=4, H=15, W=40),
+                unfold_n=4,
+                rows_per_seg=15,
+                row_unroll=3,
+            ),
+        ),
+        3: ("wgrad_tiled", ts(problem=_wp(), q_groups=2, waves_k=2, rows_per_seg=6)),
+        4: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(),
+                q_groups=2,
+                pingpong=True,
+                waves_k=2,
+                wave_k16=1,
+                rows_per_seg=12,
+                prefetch=3,
+                target_blocks=64,
+            ),
+        ),
+        5: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(KH=1, KW=1, PAD=0, cpg=32, kpg=32, dtype="fp16"),
+                waves_k=1,
+                waves_c=1,
+                rows_per_seg=6,
+                unfold_n=2,
+            ),
+        ),
+        6: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(KH=5, KW=5, PAD=2, cpg=48, kpg=40),
+                wave_k16=1,
+                wave_c16=1,
+                waves_k=2,
+                waves_c=2,
+                rows_per_seg=15,
+                unfold_n=2,
+            ),
+        ),
+        7: ("dw_wgrad_fold", DwWgradFoldSpec(taps=9)),
+        8: ("dw_wgrad_fold", DwWgradFoldSpec(taps=27, name="fold27")),
+        9: (
+            "dw_wgrad_cols",
+            cs(problem=_dwp(3, KH=7, KW=7, PAD=3, stride=2, H=20)),
+        ),
+        10: (
+            "dw_wgrad_cols",
+            cs(
+                problem=_dwp(3, KH=11, KW=11, PAD=5, H=12, W=48, dtype="fp16"),
+                strip=16,
+                threads=256,
+                target_blocks=4096,
+            ),
+        ),
+        11: (
+            "dw_wgrad_cols",
+            cs(problem=_dwp(8, H=10, W=24), threads=128),
+        ),
+        12: ("dw_wgrad_lds", ls(problem=_dwp(64))),
+        13: (
+            "dw_wgrad_lds",
+            ls(
+                problem=_dwp(192, stride=2, H=30, W=40, dtype="fp16"),
+                lanes_w=8,
+                prefetch=1,
+                target_blocks=2048,
+            ),
+        ),
+        14: (
+            "dw_wgrad_lds",
+            ls(
+                problem=_dwp(40, H=20, W=20),
+                lanes_c=4,
+                lanes_w=16,
+                cols_per_lane=2,
+                prefetch=3,
+                rows_per_seg=8,
+            ),
+        ),
+        15: (
+            "dw_wgrad_lds",
+            ls(
+                problem=_dwp(16, KH=3, KW=1, PAD=0, H=9, W=12),
+                lanes_c=2,
+                rows_per_seg=5,
+            ),
+        ),
+        # Gathered X (S * C = 6), the stem shape.
+        16: ("wgrad_gather", gs(problem=_wp(cpg=3, kpg=24, stride=2, H=32, W=64))),
+        # Transpose-read X, phase 0.
+        17: (
+            "wgrad_gather",
+            gs(
+                problem=_wp(cpg=24, kpg=96, stride=2, H=30, W=40),
+                wave_k16=1,
+                waves_k=6,
+                rows_per_seg=8,
+                target_blocks=256,
+            ),
+        ),
+        # Transpose-read X at phase 4.
+        18: (
+            "wgrad_gather",
+            gs(problem=_wp(cpg=4, kpg=32, dtype="fp16"), prefetch=1),
+        ),
+        # 7x7 stride 2: five leading X rows per segment, two k-waves.
+        19: (
+            "wgrad_gather",
+            gs(
+                problem=_wp(cpg=3, kpg=64, KH=7, KW=7, PAD=3, stride=2, H=40, W=64),
+                waves_k=2,
+                rows_per_seg=8,
+            ),
+        ),
+        # Must reject: the tiled kernel is stride 1 only.
+        20: ("wgrad_tiled", ts(problem=_wp(stride=2))),
+        # Must reject: no ds_read_b64_tr_b16 on gfx942.
+        21: ("wgrad_gather", gs(problem=_wp(cpg=3, kpg=24, stride=2, W=64)), "gfx942"),
+        # KW * C = 72 outputs over 64 threads: a second epilogue pass.
+        22: ("dw_wgrad_cols", cs(problem=_dwp(8, KH=9, KW=9, PAD=4))),
+        # Must reject: a 512 x 88 fp32 reduction buffer is 176 KiB of LDS.
+        23: (
+            "dw_wgrad_cols",
+            cs(problem=_dwp(8, KH=11, KW=11, PAD=5), threads=512),
+        ),
+        # Must reject: the padded rings are 200,704 B (logical rows 145,152).
+        24: ("dw_wgrad_lds", ls(problem=_dwp(64, stride=2), prefetch=5)),
+        # Must reject: gfx942 DMAs one dword per lane into LDS, gfx1250 is wave32.
+        25: ("dw_wgrad_lds", ls(problem=_dwp(64)), "gfx942"),
+        26: ("dw_wgrad_lds", ls(problem=_dwp(64)), "gfx1250"),
+        # Must reject: sixteen waves pad each X slot to 16 KiB (196,864 B).
+        27: (
+            "wgrad_gather",
+            gs(problem=_wp(cpg=3, kpg=64, stride=2), wave_k16=1, waves_k=16),
+        ),
+        # Must reject: six 32 KiB ring buffers.
+        28: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(cpg=256, kpg=256),
+                waves_k=8,
+                waves_c=2,
+                prefetch=5,
+                row_unroll=6,
+            ),
+        ),
+        # Must reject: row_unroll -3 divides by 3 but runs no rows.
+        29: ("wgrad_tiled", ts(problem=_wp(), row_unroll=-3)),
+        30: ("wgrad_tiled", ts(problem=_wp(), target_blocks=0)),
+        31: ("wgrad_tiled", ts(problem=_wp(dtype=None))),
+        # Valid padding, three k-waves of one atom (two k tiles).
+        32: (
+            "wgrad_gather",
+            gs(problem=_wp(cpg=8, kpg=96, PAD=0), wave_k16=1, waves_k=3),
+        ),
+        # Valid padding at stride 2, three k-waves of two atoms (a partial tile).
+        33: (
+            "wgrad_gather",
+            gs(
+                problem=_wp(cpg=3, kpg=104, PAD=0, stride=2, W=64),
+                waves_k=3,
+                prefetch=1,
+            ),
+        ),
+        # Depthwise 4x4x4 MFMA: 7x7 (preshifted window, both prologue bodies).
+        34: (
+            "dw_wgrad_mfma",
+            dm(problem=_dwp(64, KH=7, KW=7, PAD=3, W=20), q_tiles=4),
+        ),
+        # 3x3 fp16 (no preshift), a partial channel tile, prefetch 1.
+        35: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(72, H=9, W=30, dtype="fp16"),
+                rows_per_chunk=4,
+                prefetch=1,
+            ),
+        ),
+        # Three 7x7 images packed in one 32-wide tile.
+        36: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(128, KH=7, KW=7, PAD=3, N=5, H=7, W=7),
+                rows_per_chunk=14,
+                unfold_n=3,
+            ),
+        ),
+        # 5x5 "valid" padding, two packed images, three staging buffers.
+        37: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=5, KW=5, PAD=0, H=10, W=6),
+                q_tiles=5,
+                unfold_n=2,
+                prefetch=3,
+            ),
+        ),
+        # 11x11: 3x3 tap groups.
+        38: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=11, KW=11, PAD=5, H=12, W=12),
+                q_tiles=2,
+                rows_per_chunk=8,
+                target_blocks=64,
+            ),
+        ),
+        # PAD = KH - 1: one prologue body only.
+        39: ("dw_wgrad_mfma", dm(problem=_dwp(64, PAD=2), q_tiles=4)),
+        # Must reject: stride 2.
+        40: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=2))),
+        # Grouped 4x4x4 MFMA: 4 channels per group.
+        41: ("grouped_wgrad_mfma", gm(problem=_wp(groups=16, cpg=4, kpg=4))),
+        # 8 channels per group, fp16, a partial channel tile, 2x2 wave split.
+        42: (
+            "grouped_wgrad_mfma",
+            gm(
+                problem=_wp(groups=9, cpg=8, kpg=8, dtype="fp16", W=24),
+                waves_q=2,
+                wave_q4=2,
+                rows_per_chunk=8,
+                prefetch=3,
+            ),
+        ),
+        # 5x5, one wave over four column groups, four staging buffers.
+        43: (
+            "grouped_wgrad_mfma",
+            gm(
+                problem=_wp(groups=16, cpg=4, kpg=4, KH=5, KW=5, PAD=2),
+                waves_q=1,
+                wave_q4=4,
+                prefetch=4,
+                target_blocks=64,
+            ),
+        ),
+        # Must reject: 16 channels per group.
+        44: ("grouped_wgrad_mfma", gm(problem=_wp(groups=4, cpg=16, kpg=16))),
+        # Must reject: no blocks, and a negative block budget.
+        45: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=0)),
+        46: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=-1)),
+        47: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=0),
+        ),
+        48: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=-1),
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return (sel[0], sel[1], sel[2] if len(sel) > 2 else "gfx950")
+
+
+# ---------------------------------------------------------------------------
+# fp32-storage non-grouped configs (problem.dtype "fp32" / "tf32"), indices
+# 201..217. Each pins one branch of the fp32 path of build_direct_conv_nongrouped
+# on both CDNA targets: the TF32 atom (gfx950: one emulated BF16x3 xf32 atom per
+# 8-element fragment, a 4-element one zero-padded to it; gfx942: native xf32
+# atoms, 2 elements each, split and packed) against the exact fp32 atoms (one
+# scalar per 32x32x2 / 16x16x4); the two-plane weight LDS of an 8-element
+# fragment and the one-plane one of a 4-element fragment; dwordx4 staging,
+# reads and stores; the 4-float pad and the kernel-name tag of any other pad;
+# stride 2, dilation, 1x1 / 5x5 filters, partial tiles, double buffering, the
+# swizzle and iglp / waves_per_eu knobs. 213..217 are specs both engines must
+# reject: split-C, grouped, a 2-float pad and an fp32 A past the masked-access
+# offset (4-byte elements).
+# ---------------------------------------------------------------------------
+_NONGROUPED_F32_CFG_BASE = 201
+
+# The geometry the fp32 configs share unless they override it: the
+# conflict-free 4-float pad and a tile whose 4-byte staging fits gfx942's
+# 64 KiB of LDS.
+_NONGROUPED_F32_BASE = dict(tile_h=4, tile_k=32, ck=16, waves_m=1, lds_pad=4)
+
+# (arch, problem args, spec overrides), in index order.
+_NONGROUPED_F32_CFGS = (
+    # 0..3: 32x32x16, 8-element fragment, both dtypes on both arches.
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    # 4: gfx950 TF32 on a 4-element fragment (zero-padded to the emulated
+    # atom), stride 2, double-buffered LDS, no swizzle.
+    (
+        "gfx950",
+        dict(N=1, H=24, W=40, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, chiplet_swizzle=False),
+    ),
+    # 5: gfx942 TF32 on a 4-element fragment (two native atoms), double
+    # buffered.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=32, K=64, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, tile_h=2),
+    ),
+    # 6: fp32 16x16x32 on partial H / W tiles, waves_per_eu without iglp, and
+    # a 12-float pad (named p12).
+    (
+        "gfx950",
+        dict(N=1, H=10, W=40, C=64, K=64, dtype="fp32"),
+        dict(
+            atom="16x16x32",
+            tile_w=16,
+            ck=32,
+            waves_m=2,
+            iglp=None,
+            waves_per_eu=2,
+            lds_pad=12,
+        ),
+    ),
+    # 7: gfx942 TF32 16x16x32 (four native 16x16x8 atoms), stride 2.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="16x16x32", ck=32, tile_h=2, tile_w=16),
+    ),
+    # 8: gfx950 TF32 16x16x16 (zero-padded to 16x16x32), 1x1 filter, a
+    # partial K tile.
+    (
+        "gfx950",
+        dict(N=2, H=14, W=14, C=64, K=96, KH=1, KW=1, PAD=0, dtype="tf32"),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 9: gfx942 fp32 16x16x16, both axes dilated.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, PAD=2, dtype="fp32", dil_h=2, dil_w=2),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 10: gfx950 TF32, stride 2 with column dilation and the 16-bit pad of 8
+    # floats (named p8).
+    (
+        "gfx950",
+        dict(N=1, H=32, W=32, C=64, K=64, PAD=2, stride=2, dtype="tf32", dil_w=2),
+        dict(lds_pad=8),
+    ),
+    # 11: gfx942 fp32 32x32x8, stride 2, two channel-tile waves, no pad (p0).
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=128, stride=2, dtype="fp32"),
+        dict(atom="32x32x8", tile_h=2, tile_k=64, waves_m=2, lds_pad=0),
+    ),
+    # 12: gfx950 fp32, a 5x5 filter under a 64-wide tile over four waves,
+    # iglp 1.
+    (
+        "gfx950",
+        dict(N=1, H=20, W=64, C=128, K=64, KH=5, KW=5, PAD=2, dtype="fp32"),
+        dict(tile_h=8, tile_w=64, waves_n=4, iglp=1),
+    ),
+    # 13..16: must reject. split-C and the grouped mode are 16-bit only.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(split_c=2)),
+    ("gfx942", dict(N=1, H=16, W=32, C=64, K=64, dtype="fp32"), dict(grouped=True)),
+    # A 2-float pad is 8 bytes: ds_read_b128 needs 16.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(lds_pad=2)),
+    # A of 2**29 elements fits as fp16 but is 2 GiB in fp32.
+    ("gfx950", dict(N=16384, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+)
+
+
+def _nongrouped_f32_spec(idx: int):
+    """Return (spec, arch) for fp32-storage config ``idx`` (emitted as
+    ``_NONGROUPED_F32_CFG_BASE + idx``), or None past the last one."""
+    if not 0 <= idx < len(_NONGROUPED_F32_CFGS):
+        return None
+    arch, pa, kw = _NONGROUPED_F32_CFGS[idx]
+    pa = dict(pa)
+    p = _nongrouped_p(
+        pa.pop("N"), pa.pop("H"), pa.pop("W"), pa.pop("C"), pa.pop("K"), **pa
+    )
+    return _nongrouped_s(p, **{**_NONGROUPED_F32_BASE, **kw}), arch
+
+
+# ---------------------------------------------------------------------------
+# Depthwise forward on a wave32 target (gfx1250), indices 166..178: the
+# preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
+# the preloading kernel at wave_size 64: a logical wave of 64 threads, which
+# the wave32 target runs as two hardware waves. Indices 179..200 are the
+# depthwise dgrad kernels (see _dw_dgrad_spec).
+# ---------------------------------------------------------------------------
+_WAVE32_CFG_BASE = 166
+
+
+def _dwp_fwd(N, H, W, groups, KH, PAD, stride, dtype):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=1,
+        kpg=1,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _wave32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WAVE32_CFG_BASE + idx``, or None."""
+    if idx == 0:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 1:
+        p = _dwp_fwd(2, 14, 14, 3, 3, 1, 2, "bf16")
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 2:
+        p = _dwp_fwd(2, 16, 16, 96, 5, 2, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32
+            ),
+            "gfx1250",
+        )
+    if idx == 3:
+        p = _dwp_fwd(2, 12, 12, 96, 3, 1, 2, "fp16")
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p,
+                block_h=8,
+                block_w=2,
+                block_waves=1,
+                dtype="fp16",
+                wave_size=32,
+            ),
+            "gfx1250",
+        )
+    if idx == 4:
+        # wave64 (logical) spec on the wave32 target.
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx1250",
+        )
+    # Channel-packed (cpl > 1) depthwise forward: row-streaming and tiled.
+    if idx == 5:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 6:
+        p = _dwp_fwd(2, 15, 15, 96, 5, 2, 2, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=4, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 7:
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 8:
+        p = _dwp_fwd(2, 17, 17, 128, 7, 3, 2, "fp16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p,
+                block_w=4,
+                block_h=2,
+                block_waves=1,
+                unroll_rows=True,
+                wave_size=32,
+                cpl=4,
+            ),
+            "gfx1250",
+        )
+    if idx == 9:
+        p = _dwp_fwd(2, 12, 12, 64, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=1, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 10:
+        # wave64 target.
+        p = _dwp_fwd(2, 14, 14, 128, 3, 1, 1, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1, cpl=2),
+            "gfx950",
+        )
+    if idx == 11:
+        # Both engines reject: 98 channels are not a multiple of cpl 4.
+        p = _dwp_fwd(2, 14, 14, 98, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 12:
+        # Both engines reject: cpl must be 1, 2 or 4.
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=1, wave_size=32, cpl=3
+            ),
+            "gfx1250",
+        )
+    if 13 <= idx <= 34:
+        return _dw_dgrad_spec(idx - 13)
+    return None
+
+
+# fp32-storage configs of the grouped kernels (problem dtype "fp32": exact
+# fp32 math; "tf32": TF32 MMA operands), indices 218.., after the non-grouped
+# fp32 ones. Each MFMA kernel
+# kind runs on gfx942 (native XF32) and gfx950 (BF16x3 emulation) at both
+# dtypes, with fold_k32 on and off where the kernel has it.
+_F32_CFG_BASE = 218
+_F32_ARCHES = ("gfx942", "gfx950")
+_F32_DTYPES = ("fp32", "tf32")
+
+
+def _f32_axes(i: int):
+    """(arch, dtype) of the i-th (0..3) arch x dtype pair."""
+    return _F32_ARCHES[i // 2], _F32_DTYPES[i % 2]
+
+
+def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1, stride=1):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _f32dw(dtype, *, groups=64, KH=3, PAD=1):
+    """A depthwise (cpg = kpg = 1) fp32-storage problem, square KH x KH filter."""
+    return _f32p(groups, 1, 1, dtype, N=2, H=14, W=14, KH=KH, KW=KH, PAD=PAD)
+
+
+def _f32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_F32_CFG_BASE + idx``, or None."""
+    # 0..7: 16c, (arch, dtype) x fold_k32 on / off.
+    if idx < 8:
+        arch, dt = _f32_axes(idx // 2)
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, dt), block_groups=8, fold_k32=idx % 2 == 0
+        )
+        return ("16c", spec, arch)
+    # 8: 16c single-buffered over two q-subtiles.
+    if idx == 8:
+        spec = DirectConv16cSpec(
+            problem=_f32p(8, 16, 16, "tf32"),
+            block_q=32,
+            block_groups=4,
+            double_buffer=False,
+            fold_k32=False,
+        )
+        return ("16c", spec, "gfx950")
+    # 9: both engines reject: the fp32 row ring is over gfx942's LDS.
+    if idx == 9:
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, "fp32", W=64), block_q=64, block_groups=8
+        )
+        return ("16c", spec, "gfx942")
+    # 10..13: 8c, 14..17: 32c, each (arch, dtype).
+    if idx < 14:
+        arch, dt = _f32_axes(idx - 10)
+        return ("8c", DirectConv8cSpec(problem=_f32p(16, 8, 8, dt)), arch)
+    if idx < 18:
+        arch, dt = _f32_axes(idx - 14)
+        return ("32c", DirectConv32cSpec(problem=_f32p(8, 32, 32, dt)), arch)
+    # 18: 8c single-buffered over two q-subtiles; 19: 32c single-buffered.
+    if idx == 18:
+        spec = DirectConv8cSpec(
+            problem=_f32p(16, 8, 8, "tf32"), block_q=32, double_buffer=False
+        )
+        return ("8c", spec, "gfx950")
+    if idx == 19:
+        spec = DirectConv32cSpec(problem=_f32p(8, 32, 32, "fp32"), double_buffer=False)
+        return ("32c", spec, "gfx942")
+    # 20..23: both engines reject 4c, (arch, dtype): no 4x4 TF32 / fp32 atom.
+    if idx < 24:
+        arch, dt = _f32_axes(idx - 20)
+        return ("4c", DirectConv4cSpec(problem=_f32p(16, 4, 4, dt)), arch)
+    # 24..31: the generic DirectConvSpec, (arch, dtype) x fold_k32 on / off.
+    if idx < 32:
+        arch, dt = _f32_axes((idx - 24) // 2)
+        fold = idx % 2 == 0
+        spec = DirectConvSpec(
+            problem=_f32p(4, 32 if fold else 16, 16, dt),
+            block_groups=1,
+            block_h=4,
+            fold_k32=fold,
+        )
+        return ("generic", spec, arch)
+    # 32..37: generic knobs: a partial K-atom and M-tile (cpg=kpg=4, the
+    # 4c refusal's replacement), the waves_k cross-wave reduction, runtime
+    # channels, a runtime K loop over partial atoms, the persistent grid with
+    # an LDS column pad, and a fused-weights spec both engines reject.
+    table = {
+        32: lambda: (
+            DirectConvSpec(problem=_f32p(16, 4, 4, "tf32"), block_groups=1, block_h=4),
+            "gfx950",
+        ),
+        33: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 32, 16, "fp32"), block_groups=1, block_h=4, waves_k=2
+            ),
+            "gfx942",
+        ),
+        34: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_channels=True,
+                k_atoms=1,
+                m_tiles=1,
+            ),
+            "gfx950",
+        ),
+        35: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 20, 12, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_k_loop=True,
+            ),
+            "gfx942",
+        ),
+        36: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "fp32"),
+                block_groups=1,
+                block_h=4,
+                persistent_grid=True,
+                lds_pad=8,
+            ),
+            "gfx950",
+        ),
+        37: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                dgrad_fused_weights=True,
+            ),
+            "gfx942",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is not None:
+        spec, arch = sel()
+        return ("generic", spec, arch)
+    # 38..41: the MFMA dgrad weight transpose, (arch, dtype).
+    if idx < 42:
+        arch, dt = _f32_axes(idx - 38)
+        spec = DirectTransposeWeightsDgradSpec(problem=_f32p(2, 24, 40, dt))
+        return ("transpose", spec, arch)
+    # 42..49: the W_coa reorganize, (arch, dtype) x fold_k32 on / off.
+    if idx < 50:
+        arch, dt = _f32_axes((idx - 42) // 2)
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(2, 24, 64, dt), fold_k32=idx % 2 == 0
+        )
+        return ("reorganize", spec, arch)
+    # 50: runtime-channel transpose; 51: runtime-channel fold_k32 reorganize.
+    if idx == 50:
+        spec = DirectTransposeWeightsDgradSpec(
+            problem=_f32p(1, 48, 40, "tf32"), runtime_channels=True
+        )
+        return ("transpose", spec, "gfx950")
+    if idx == 51:
+        spec = DirectReorganizeWeightsSpec(
+            problem=_f32p(1, 24, 64, "fp32"), fold_k32=True, runtime_channels=True
+        )
+        return ("reorganize", spec, "gfx942")
+    # 52..59: the MFMA wgrad, (arch, dtype) x mfma_k 32 / 16 (gfx942 too: the
+    # fp32 gathers need no transpose read).
+    if idx < 60:
+        arch, dt = _f32_axes((idx - 52) // 2)
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, dt), mfma_k=32 if idx % 2 == 0 else 16
+        )
+        return ("wgrad", spec, arch)
+    # 60: K/C/Q wave splits; 61: runtime channels; 62: a 5x5 filter over
+    # ragged channel tiles.
+    if idx == 60:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(4, 64, 64, "tf32"),
+            waves_k=2,
+            waves_c=2,
+            waves_q=2,
+            ho_per_block=3,
+        )
+        return ("wgrad", spec, "gfx950")
+    if idx == 61:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, "tf32"), runtime_channels=True
+        )
+        return ("wgrad", spec, "gfx942")
+    if idx == 62:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 24, 20, "fp32", KH=5, KW=5, PAD=2),
+            mfma_k=16,
+            ho_per_block=2,
+        )
+        return ("wgrad", spec, "gfx950")
+    # 63..94: the scalar-FMA kernels, each (arch, dtype); fp32 and tf32 run the
+    # same exact fp32 math and share the "f32" kernel name.
+    scalar = (
+        ("dgrad", lambda dt: DirectConvDgradSpec(problem=_f32p(8, 16, 16, dt), block_q=16, block_groups=8)),
+        ("dw_dgrad", lambda dt: DirectDepthwiseDgradSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_dgrad_stream", lambda dt: DirectDepthwiseDgradStreamSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw", lambda dt: DirectDepthwiseSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt), block_w=8, block_h=2)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt, KH=5, PAD=2), block_w=8, block_h=2, dgrad=True)),
+        ("dwcol", lambda dt: DirectDepthwiseColSpec(problem=_f32dw(dt), block_h=8, block_w=2, block_waves=1, dtype=dt)),
+        ("spatial", lambda dt: DirectDepthwiseSpatialSpec(problem=_f32dw(dt, groups=16), block_waves=1)),
+    )  # fmt: skip
+    if idx < 63 + 4 * len(scalar):
+        kind, make = scalar[(idx - 63) // 4]
+        arch, dt = _f32_axes((idx - 63) % 4)
+        return (kind, make(dt), arch)
+    # 95..97: both engines reject the channel-packed (cpl > 1) depthwise
+    # kernels for fp32 storage; 98: the column kernel's dtype resolves
+    # "TF32" (any case) to f32 storage; 99: scalar dgrad at stride 2.
+    table = {
+        95: lambda: ("dw", DirectDepthwiseSpec(problem=_f32dw("fp32"), block_w=8, block_waves=1, cpl=2), "gfx950"),
+        96: lambda: ("dw_dgrad_stream", DirectDepthwiseDgradStreamSpec(problem=_f32dw("tf32"), block_w=8, block_waves=1, cpl=2), "gfx942"),
+        97: lambda: ("dw_tiled", DirectDepthwiseTiledSpec(problem=_f32dw("tf32"), block_w=8, block_h=2, cpl=2), "gfx950"),
+        98: lambda: ("dwcol", DirectDepthwiseColSpec(problem=_f32dw("tf32"), block_h=8, block_w=2, block_waves=1, dtype="TF32"), "gfx950"),
+        99: lambda: ("dgrad", DirectConvDgradSpec(problem=_f32p(8, 16, 8, "tf32", stride=2), block_q=16, block_groups=8), "gfx950"),
+    }  # fmt: skip
+    sel = table.get(idx)
+    return None if sel is None else sel()
+
+
+def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=1,
+        kpg=1,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+        pad_w=pad_w,
+    )
+
+
+def _dw_dgrad_spec(idx: int):
+    """Depthwise dgrad configs 179..200 (``idx`` 0..21): the row-streaming
+    DirectDepthwiseDgradStreamSpec (scalar, then channel-packed cpl 2 / 4 / 8),
+    the rotated-filter DirectDepthwiseTiledSpec(dgrad=True) on large, non-square
+    and per-axis-padded filters, and specs both engines reject."""
+
+    def stream(p, block_w, block_waves, cpl=1, wave_size=32, arch="gfx1250"):
+        return (
+            "dw_dgrad_stream",
+            DirectDepthwiseDgradStreamSpec(
+                problem=p,
+                block_w=block_w,
+                block_waves=block_waves,
+                wave_size=wave_size,
+                cpl=cpl,
+            ),
+            arch,
+        )
+
+    def tiled(p, block_w, block_h, dgrad=True, wave_size=32, arch="gfx1250", **kw):
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p,
+                block_w=block_w,
+                block_h=block_h,
+                block_waves=1,
+                wave_size=wave_size,
+                dgrad=dgrad,
+                **kw,
+            ),
+            arch,
+        )
+
+    table = {
+        # Row-streaming, one channel per lane.
+        0: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2),
+        1: lambda: stream(
+            _dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 2, "bf16"),
+            8,
+            1,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Channel-packed: cpl 2 / 4 / 8, fp16 and bf16, stride 1 and 2.
+        2: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2, cpl=2),
+        3: lambda: stream(_dwp_dg(2, 15, 15, 96, 5, 5, 2, -1, 2, "bf16"), 7, 1, cpl=2),
+        4: lambda: stream(_dwp_dg(2, 14, 14, 128, 3, 3, 1, -1, 2, "fp16"), 4, 1, cpl=4),
+        5: lambda: stream(_dwp_dg(2, 12, 12, 256, 3, 3, 1, -1, 1, "bf16"), 4, 1, cpl=8),
+        6: lambda: stream(
+            _dwp_dg(2, 14, 14, 128, 7, 7, 3, -1, 1, "bf16"),
+            4,
+            1,
+            cpl=4,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Rotated-filter tiled dgrad: 13x13, 31x31, 51x5, 5x51 and a padding
+        # that differs per axis and is not "same".
+        7: lambda: tiled(_dwp_dg(2, 20, 20, 64, 13, 13, 6, -1, 1, "fp16"), 8, 2),
+        8: lambda: tiled(_dwp_dg(2, 16, 16, 32, 31, 31, 15, -1, 1, "bf16"), 4, 1),
+        9: lambda: tiled(_dwp_dg(2, 24, 24, 64, 51, 5, 25, 2, 1, "fp16"), 8, 2),
+        10: lambda: tiled(
+            _dwp_dg(2, 24, 24, 64, 5, 51, 2, 25, 1, "bf16"), 4, 2, unroll_rows=True
+        ),
+        11: lambda: tiled(
+            _dwp_dg(2, 14, 14, 128, 7, 7, 1, 3, 1, "fp16"),
+            8,
+            2,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Both engines reject: per-axis padding on the forward tiled kernel.
+        12: lambda: tiled(
+            _dwp_dg(2, 16, 16, 64, 5, 5, 1, 2, 1, "fp16"), 8, 2, dgrad=False
+        ),
+        # Both engines reject: the dgrad mode is stride 1 only.
+        13: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 2, -1, 2, "fp16"), 8, 2),
+        # Both engines reject: a 65-row filter is past the dgrad mode's limit.
+        14: lambda: tiled(_dwp_dg(2, 80, 16, 64, 65, 3, 32, 1, 1, "fp16"), 4, 1),
+        # Both engines reject: 98 channels are not a multiple of cpl 4.
+        15: lambda: stream(_dwp_dg(2, 14, 14, 98, 3, 3, 1, -1, 1, "fp16"), 8, 1, cpl=4),
+        # Both engines reject: cpl must be 1, 2, 4 or 8.
+        16: lambda: stream(_dwp_dg(2, 14, 14, 96, 3, 3, 1, -1, 1, "bf16"), 8, 1, cpl=3),
+        # Both engines reject: cpl 8 x block_w 16 x KH 3 accumulator rows.
+        17: lambda: stream(
+            _dwp_dg(2, 14, 14, 256, 3, 3, 1, -1, 1, "fp16"), 16, 1, cpl=8
+        ),
+        # A 5x5 filter whose column padding (0) differs from its row padding
+        # (2): the kernel name carries the per-axis padding.
+        18: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 0, 1, "fp16"), 8, 2),
+        # Both engines reject: pad_w below -1 is no column padding.
+        19: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 1, -2, 1, "fp16"), 8, 2),
+        # Both engines reject: the row-streaming kernel takes one padding.
+        20: lambda: stream(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 1, 1, "fp16"), 8, 1),
+        # Both engines reject: pad_w below -1 on the row-streaming kernel.
+        21: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -3, 1, "bf16"), 8, 1),
+    }
+    sel = table.get(idx)
+    return None if sel is None else sel()
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 (wave32) direct wgrad, indices 318..348: the WMMA 16x16x32 port of
+# build_direct_conv_wgrad, the image-per-block variant with register blocking
+# and multi-row LDS staging, and two specs both engines must reject (318..325);
+# then the image-per-block row split (row_blocks) and the TDM-staged LDS ring
+# (tdm_stages), with two more must-reject specs (326..333); then the
+# replicated two-stage scratch (ws_replicas) and its must-reject (334..336);
+# then the LDS-staged coalesced epilogue (lds_epilogue) and its two
+# must-reject specs (337..341); then the small-channel variant (small_c) and
+# its three must-reject specs (342..348).
+# A ragged W (37) leaves a partial last wo tile.
+# ---------------------------------------------------------------------------
+_WGRAD_W32_CFG_BASE = 318
+
+
+def _wgrad_w32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_W32_CFG_BASE + idx``, or None."""
+
+    def prob(groups, cpg, kpg, *, KH=3, KW=3, PAD=1, dtype="fp16", H=8):
+        return DirectConvProblem(
+            N=2,
+            H=H,
+            W=37,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+
+    def sprob(cpg, kpg, *, F, stride, PAD, dtype="fp16"):
+        """Small-C problem: one group, F x F filter, any stride."""
+        return DirectConvProblem(
+            N=2,
+            H=13,
+            W=37,
+            groups=1,
+            cpg=cpg,
+            kpg=kpg,
+            KH=F,
+            KW=F,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    ws = DirectConvWgradSpec
+    table = {
+        # (a) The wave32 port, bf16, two groups.
+        0: (ws(problem=prob(2, 32, 32, dtype="bf16"), wave_size=32), "gfx1250"),
+        # (b) fp16, K/C/Q split (waves_c=3) with runtime channels.
+        1: (
+            ws(
+                problem=prob(1, 48, 64),
+                wave_size=32,
+                waves_k=2,
+                waves_c=3,
+                waves_q=2,
+                ho_per_block=3,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (c) 5x5 filter: three strip passes per row on wave32.
+        2: (
+            ws(
+                problem=prob(1, 32, 32, KH=5, KW=5, PAD=2),
+                wave_size=32,
+                ho_per_block=5,
+            ),
+            "gfx1250",
+        ),
+        # (d) Image per block, 4x4 waves, KH rows behind one barrier pair.
+        3: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=4,
+                waves_c=4,
+                image_per_block=True,
+                rows_per_sync=3,
+            ),
+            "gfx1250",
+        ),
+        # (e) Image per block with two k tiles per wave, one row per sync.
+        4: (
+            ws(
+                problem=prob(1, 32, 64),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                wave_tiles_k=2,
+            ),
+            "gfx1250",
+        ),
+        # (f) Image per block with two c tiles per wave and runtime channels.
+        5: (
+            ws(
+                problem=prob(2, 32, 32, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                wave_tiles_c=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (g) Must reject: wave32 has no 16-wide (mfma_k=16) atom.
+        6: (ws(problem=prob(2, 32, 32), wave_size=32, mfma_k=16), "gfx1250"),
+        # (h) Must reject: image_per_block is wave32-only.
+        7: (ws(problem=prob(2, 32, 32), image_per_block=True), "gfx950"),
+        # (i) Row split over three blocks, register staging, KH rows per sync.
+        8: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=3,
+            ),
+            "gfx1250",
+        ),
+        # (j) Row split over two blocks, one row per sync, runtime channels.
+        9: (
+            ws(
+                problem=prob(2, 32, 48, H=10),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                row_blocks=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (k) Two-stage TDM ring, one row per sync, 2x2 waves.
+        10: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                tdm_stages=2,
+            ),
+            "gfx1250",
+        ),
+        # (l) Three-stage TDM ring, KH rows per sync, 4x2 waves (one per
+        # transfer of a step).
+        11: (
+            ws(
+                problem=prob(1, 64, 64),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (m) Three-stage TDM ring with a row split and two k tiles per wave.
+        12: (
+            ws(
+                problem=prob(1, 64, 128, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                wave_tiles_k=2,
+                row_blocks=2,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (n) Two groups, ragged channels, runtime channels, TDM with KH rows
+        # per sync.
+        13: (
+            ws(
+                problem=prob(2, 48, 40),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (o) Must reject: a three-stage TDM ring needs a wave per transfer of
+        # a step (2 * rows_per_sync = 6), and this has 2.
+        14: (
+            ws(
+                problem=prob(1, 32, 32),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (p) Must reject: row_blocks needs image_per_block.
+        15: (ws(problem=prob(2, 32, 32), wave_size=32, row_blocks=2), "gfx1250"),
+        # (q) Four scratch replicas, register staging, a row split.
+        16: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (r) Eight scratch replicas over two groups, three-stage TDM ring,
+        # runtime channels.
+        17: (
+            ws(
+                problem=prob(2, 32, 64),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+                ws_replicas=8,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (s) Must reject: ws_replicas needs image_per_block.
+        18: (ws(problem=prob(2, 32, 32), wave_size=32, ws_replicas=2), "gfx1250"),
+        # (t) LDS-staged coalesced epilogue on the register path.
+        19: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (u) LDS epilogue into four scratch replicas, a row split and a
+        # three-stage TDM ring.
+        20: (
+            ws(
+                problem=prob(1, 64, 64, H=12),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                tdm_stages=3,
+                ws_replicas=4,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (v) LDS epilogue with runtime channels over two groups of ragged
+        # channel counts.
+        21: (
+            ws(
+                problem=prob(2, 48, 40),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                runtime_channels=True,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (w) Must reject: lds_epilogue needs image_per_block.
+        22: (ws(problem=prob(2, 32, 32), wave_size=32, lds_epilogue=True), "gfx1250"),
+        # (x) Must reject: the staged 128 x 9 x (64 + 4) fp32 dW tile is over
+        # the LDS epilogue budget.
+        23: (
+            ws(
+                problem=prob(1, 64, 128),
+                wave_size=32,
+                waves_k=8,
+                waves_c=2,
+                wave_tiles_c=2,
+                image_per_block=True,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),  # (y) Small-C stem: C=3, 3x3 stride 2, gathered X, a row split into four
+        # pixel blocks over four scratch replicas.
+        24: (
+            ws(
+                problem=sprob(3, 24, F=3, stride=2, PAD=1, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                small_c=True,
+                row_blocks=4,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (z) Small-C 7x7 stride 2: 16 B vector X runs padded 21 -> 24, two
+        # pixel chunks per sync, register blocking, two N tiles.
+        25: (
+            ws(
+                problem=sprob(3, 64, F=7, stride=2, PAD=3),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                wave_tiles_k=2,
+                wave_tiles_c=3,
+                small_c=True,
+                row_blocks=3,
+                ws_replicas=2,
+                sub_steps=2,
+                vec_x=8,
+            ),
+            "gfx1250",
+        ),
+        # (aa) Small-C patchify (4x4 stride 4): 8 B vector runs, a uniform wave
+        # index, three chunks per sync on a single wave.
+        26: (
+            ws(
+                problem=sprob(3, 32, F=4, stride=4, PAD=0, dtype="bf16"),
+                wave_size=32,
+                wave_tiles_k=2,
+                wave_tiles_c=3,
+                small_c=True,
+                row_blocks=2,
+                sub_steps=3,
+                vec_x=4,
+                uniform_wave=True,
+            ),
+            "gfx1250",
+        ),
+        # (ab) Small-C, C=1 at stride 1: runs padded 3 -> 4 and remapped in the
+        # epilogue.
+        27: (
+            ws(
+                problem=sprob(1, 16, F=3, stride=1, PAD=1),
+                wave_size=32,
+                waves_c=2,
+                small_c=True,
+                vec_x=4,
+            ),
+            "gfx1250",
+        ),
+        # (ac) Must reject: small_c needs groups=1.
+        28: (
+            ws(problem=prob(2, 3, 16), wave_size=32, small_c=True),
+            "gfx1250",
+        ),
+        # (ad) Must reject: vec_x needs small_c.
+        29: (ws(problem=prob(2, 32, 32), wave_size=32, vec_x=4), "gfx1250"),
+        # (ae) Must reject: small_c is wave32 gfx1250 only.
+        30: (
+            ws(problem=sprob(3, 24, F=3, stride=2, PAD=1), wave_size=32, small_c=True),
+            "gfx950",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad", sel[0], sel[1])
+
+
+def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=1,
+        dtype=dtype,
+    )
+
+
+def _generic_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_GENERIC_CFG_BASE + idx``, or None."""
+    gs = DirectConvSpec
+    table = {
+        # Baked channels.
+        0: ("generic", gs(problem=_gp(8, 16, 16))),
+        1: (
+            "generic",
+            gs(
+                problem=_gp(4, 24, 40, dtype="bf16"),
+                block_q=32,
+                block_groups=2,
+                double_buffer=False,
+                block_h=8,
+            ),
+        ),
+        2: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=4,
+            ),
+        ),
+        3: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=2,
+                fold_k32=True,
+            ),
+        ),
+        4: (
+            "generic",
+            gs(
+                problem=_gp(2, 48, 20),
+                block_q=32,
+                block_groups=1,
+                waves_q=2,
+                runtime_k_loop=True,
+            ),
+        ),
+        5: (
+            "generic",
+            gs(problem=_gp(16, 32, 32), block_groups=4, persistent_grid=True),
+        ),
+        6: ("generic", gs(problem=_gp(4, 16, 16, KH=5, PAD=2), block_groups=2)),
+        # Runtime channels: the problem only has to fit k_atoms / m_tiles.
+        7: (
+            "generic",
+            gs(
+                problem=_gp(1, 24, 24, dtype="bf16"),
+                block_q=32,
+                block_groups=1,
+                block_h=8,
+                runtime_channels=True,
+                k_atoms=2,
+                m_tiles=2,
+            ),
+        ),
+        8: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=2,
+                fold_k32=True,
+                runtime_channels=True,
+                k_atoms=6,
+                m_tiles=3,
+            ),
+        ),
+        9: (
+            "generic",
+            gs(
+                problem=_gp(1, 320, 4),
+                block_groups=1,
+                block_h=8,
+                waves_k=4,
+                runtime_channels=True,
+                k_atoms=20,
+                m_tiles=1,
+            ),
+        ),
+        10: (
+            "generic",
+            gs(
+                problem=_gp(4, 40, 20),
+                block_q=32,
+                block_groups=2,
+                waves_q=2,
+                runtime_k_loop=True,
+                runtime_channels=True,
+                k_atoms=3,
+                m_tiles=2,
+            ),
+        ),
+        11: (
+            "generic",
+            gs(
+                problem=_gp(8, 64, 64),
+                block_groups=2,
+                persistent_grid=True,
+                runtime_channels=True,
+                k_atoms=4,
+                m_tiles=4,
+            ),
+        ),
+        12: (
+            "generic",
+            gs(
+                problem=_gp(2, 16, 16, KH=5, PAD=2, dtype="bf16"),
+                block_groups=1,
+                double_buffer=False,
+                runtime_channels=True,
+                k_atoms=1,
+                m_tiles=1,
+            ),
+        ),
+        # Weight transforms (original dgrad problem).
+        13: ("transpose", DirectTransposeWeightsDgradSpec(problem=_gp(2, 24, 40))),
+        14: (
+            "transpose",
+            DirectTransposeWeightsDgradSpec(
+                problem=_gp(1, 48, 192, dtype="bf16"), runtime_channels=True
+            ),
+        ),
+        15: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(2, 24, 40, dtype="bf16")),
+        ),
+        16: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(1, 48, 192), fold_k32=True),
+        ),
+        17: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(1, 24, 40), runtime_channels=True),
+        ),
+        18: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(
+                problem=_gp(1, 4, 320, dtype="bf16"),
+                fold_k32=True,
+                runtime_channels=True,
+            ),
+        ),
+        19: (
+            "transpose",
+            DirectTransposeWeightsDgradSpec(
+                problem=_gp(1, 16, 16, KH=5, PAD=2), runtime_channels=True
+            ),
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return (sel[0], sel[1], "gfx950")
 
 
 def _nongrouped_p(
@@ -133,6 +1746,276 @@ _NONGROUPED_BASE = dict(
 
 def _nongrouped_s(problem, **kw):
     return DirectNongroupedConvSpec(problem=problem, **{**_NONGROUPED_BASE, **kw})
+
+
+def _nongrouped_split_spec(idx: int):
+    """Return (kind, spec, arch) for split-C config ``idx`` (emitted as
+    ``_NONGROUPED_SPLIT_CFG_BASE + idx``), or None past the last one. The
+    non-grouped ones pin the split grid decode, the per-split chunk range, the
+    split-offset prefetch and the fp32 workspace epilogue; 5 and 6 pin the
+    reduction pass and 7 a split both engines must reject."""
+    if idx == 0:
+        # bf16, stride 1, swizzled, two splits; partial W and H tiles.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(2, 14, 14, 256, 128), split_c=2),
+            "gfx950",
+        )
+    if idx == 1:
+        # fp16, stride 2, double-buffered LDS, four splits.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 24, 24, 128, 64, stride=2, dtype="fp16"),
+                ck=16,
+                double_buffer=True,
+                split_c=4,
+            ),
+            "gfx950",
+        )
+    if idx == 2:
+        # bf16, no swizzle, sixteen one-chunk splits, waves_per_eu.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 7, 7, 512, 64),
+                chiplet_swizzle=False,
+                waves_per_eu=3,
+                split_c=16,
+            ),
+            "gfx950",
+        )
+    if idx == 3:
+        # fp16, 12-row tile over four waves (three rows each), 16-wide atom
+        # (one accumulator quad), splits that do not divide the chunk count.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 12, 12, 320, 64, dtype="fp16"),
+                tile_h=12,
+                tile_w=16,
+                waves_n=4,
+                atom="16x16x32",
+                split_c=4,
+            ),
+            "gfx950",
+        )
+    if idx == 4:
+        # gfx942 32x32x8, fp16, double buffer (one channel tile per wave to fit
+        # the 64 KiB LDS), no swizzle, two splits.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 28, 28, 256, 64, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=16,
+                double_buffer=True,
+                chiplet_swizzle=False,
+                split_c=2,
+            ),
+            "gfx942",
+        )
+    if idx == 5:
+        # The fold: fp16, two slabs, default block.
+        return (
+            "split_reduce",
+            DirectSplitReduceSpec(dtype="fp16", split_c=2),
+            "gfx950",
+        )
+    if idx == 6:
+        # The fold: bf16, eight slabs, a 128-thread block.
+        return (
+            "split_reduce",
+            DirectSplitReduceSpec(dtype="bf16", split_c=8, threads=128),
+            "gfx950",
+        )
+    if idx == 7:
+        # Must reject: 16 splits of a C that has only 8 chunks of ck=32.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(1, 7, 7, 256, 64), split_c=16),
+            "gfx950",
+        )
+    return None
+
+
+def _grouped_p(N, H, W, groups, cpg, kpg, *, stride=1, dtype="bf16"):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _nongrouped_grouped_spec(idx: int):
+    """Return (kind, spec, arch) for grouped config ``idx`` (emitted as
+    ``_NONGROUPED_GROUPED_CFG_BASE + idx``), or None past the last one. They pin
+    the runtime cpg / kpg, the merged-group cell axis, the A channel base, both
+    weight paths (group_merge 1, and the per-4-channel pieces masked per chunk
+    for group_merge > 1) and the epilogue channel offset; 7..10 are specs both
+    engines must reject."""
+    if idx == 0:
+        # group_merge 1, fp16, cpg 32: plain weight path; tile_k above the
+        # merged K, so the K_M masks bite.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(2, 14, 20, 4, 32, 32, dtype="fp16"),
+                grouped=True,
+                group_merge=1,
+            ),
+            "gfx950",
+        )
+    if idx == 1:
+        # group_merge 8 of cpg 4, bf16, 16x16x32 (two 4-channel pieces per
+        # fragment), ck 32: one merged block per chunk.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 16, 4, 4),
+                tile_k=32,
+                atom="16x16x32",
+                ck=32,
+                grouped=True,
+                group_merge=8,
+            ),
+            "gfx950",
+        )
+    if idx == 2:
+        # group_merge 4 of cpg 8, fp16, stride 2, 32x32x16, ck 16: two chunks
+        # per merged block.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 24, 24, 8, 8, 8, stride=2, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x16",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 3:
+        # group_merge 4 of cpg 12, bf16, 16x16x16 (one piece per fragment):
+        # 16-channel chunks straddle the 12-channel groups; two channel tiles.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 8, 12, 12),
+                tile_k=32,
+                atom="16x16x16",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 4:
+        # Grouped + split_c 2 + double-buffered LDS: the split chunk range over
+        # the merged C and the fp32 workspace at the group's channel offset.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 14, 14, 4, 64, 32, dtype="fp16"),
+                double_buffer=True,
+                split_c=2,
+                grouped=True,
+                group_merge=2,
+            ),
+            "gfx950",
+        )
+    if idx == 5:
+        # Grouped without the chiplet swizzle (plain k_tile / cell decode),
+        # waves_per_eu, bf16, group_merge 2 of cpg 16.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(2, 12, 20, 6, 16, 16),
+                tile_k=32,
+                waves_m=1,
+                chiplet_swizzle=False,
+                waves_per_eu=3,
+                grouped=True,
+                group_merge=2,
+            ),
+            "gfx950",
+        )
+    if idx == 6:
+        # gfx942 32x32x8, fp16, group_merge 4 of cpg 8 (one piece per
+        # fragment), ck 16.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 20, 20, 8, 8, 8, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx942",
+        )
+    if idx == 7:
+        # Must reject: group_merge 3 does not divide 8 groups.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 8, 8, 8),
+                tile_k=32,
+                grouped=True,
+                group_merge=3,
+            ),
+            "gfx950",
+        )
+    if idx == 8:
+        # Must reject: cpg 6 is not a whole number of 4-channel weight loads
+        # (merged C 24 and K 32 pass their own checks).
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 4, 6, 8, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=8,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 9:
+        # Must reject: group_merge without grouped=True.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(1, 16, 16, 64, 64), group_merge=2),
+            "gfx950",
+        )
+    if idx == 10:
+        # Must reject: grouped=True with no groups (0 % group_merge is 0).
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 0, 8, 8),
+                tile_k=32,
+                grouped=True,
+                group_merge=1,
+            ),
+            "gfx950",
+        )
+    return None
 
 
 def _reject_spec(idx: int):
@@ -388,8 +2271,176 @@ def _nongrouped_spec(idx: int):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Direct depthwise wgrad (DirectDepthwiseWgradSpec), indices 349..355: wave32
+# gfx1250 and wave64 gfx950 builds over the filter-row split, the carried X
+# window and the prefetch, then three specs both engines must reject.
+# ---------------------------------------------------------------------------
+_DW_WGRAD_CFG_BASE = 349
+
+
+def _dw_wgrad_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_DW_WGRAD_CFG_BASE + idx``, or None."""
+
+    def prob(C, *, F, stride, PAD, dtype="fp16", cpg=1):
+        return DirectConvProblem(
+            N=2,
+            H=9,
+            W=13,
+            groups=C,
+            cpg=cpg,
+            kpg=cpg,
+            KH=F,
+            KW=F,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    ds = DirectDepthwiseWgradSpec
+    table = {
+        # (a) 3x3 stride 1, bf16, two rows per wave over four replicas.
+        0: (
+            ds(
+                problem=prob(64, F=3, stride=1, PAD=1, dtype="bf16"),
+                wave_size=32,
+                waves=4,
+                rows_per_wave=2,
+                wo_chunk=4,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (b) 7x7 over four filter-row groups (7 rows do not split evenly),
+        # 8 B loads, no prefetch.
+        1: (
+            ds(
+                problem=prob(32, F=7, stride=1, PAD=3),
+                wave_size=32,
+                chan_per_lane=4,
+                rows_per_wave=1,
+                r_split=4,
+                prefetch=False,
+            ),
+            "gfx1250",
+        ),
+        # (c) 3x3 stride 2 without the carried window, 16 B loads, three
+        # filter-row groups of one row.
+        2: (
+            ds(
+                problem=prob(48, F=3, stride=2, PAD=1, dtype="bf16"),
+                wave_size=32,
+                chan_per_lane=8,
+                waves=3,
+                rows_per_wave=3,
+                wo_chunk=3,
+                r_split=3,
+                carry=False,
+            ),
+            "gfx1250",
+        ),
+        # (d) wave64 (gfx950), 5x5 stride 2, a single replica.
+        3: (
+            ds(
+                problem=prob(128, F=5, stride=2, PAD=2),
+                waves=4,
+                rows_per_wave=2,
+                ws_replicas=1,
+            ),
+            "gfx950",
+        ),
+        # (e) Must reject: not depthwise (cpg = 2).
+        4: (ds(problem=prob(32, F=3, stride=1, PAD=1, cpg=2)), "gfx950"),
+        # (f) Must reject: wave_size 32 on wave64 gfx950.
+        5: (ds(problem=prob(64, F=3, stride=1, PAD=1), wave_size=32), "gfx950"),
+        # (g) Must reject: the 14 waves' 49-tap fp32 tiles exceed the LDS.
+        6: (
+            ds(
+                problem=prob(256, F=7, stride=1, PAD=3),
+                wave_size=32,
+                chan_per_lane=8,
+                waves=14,
+                r_split=7,
+            ),
+            "gfx1250",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("dw_wgrad", sel[0], sel[1])
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 small-C wgrad stems of the AOT grid, indices 356..358: a C=4 3x3
+# stride-1 stem on the 16-wave vec_x=4 / sub_steps=4 tile with the uniform wave
+# index off, the stride-1 and the unpadded stride-2 C=3 3x3 stems.
+# ---------------------------------------------------------------------------
+_WGRAD_STEM_CFG_BASE = 356
+
+
+def _wgrad_stem_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_STEM_CFG_BASE + idx``, or None."""
+
+    def sprob(cpg, kpg, *, stride, PAD, dtype):
+        return DirectConvProblem(
+            N=2,
+            H=13,
+            W=37,
+            groups=1,
+            cpg=cpg,
+            kpg=kpg,
+            KH=3,
+            KW=3,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    def ws(problem, waves_k, waves_c, tiles_k, tiles_c, vec_x, sub_steps, wsr, rb):
+        return DirectConvWgradSpec(
+            problem=problem,
+            wave_size=32,
+            small_c=True,
+            waves_k=waves_k,
+            waves_c=waves_c,
+            wave_tiles_k=tiles_k,
+            wave_tiles_c=tiles_c,
+            vec_x=vec_x,
+            sub_steps=sub_steps,
+            ws_replicas=wsr,
+            row_blocks=rb,
+            uniform_wave=False,
+        )
+
+    table = {
+        0: ws(sprob(4, 64, stride=1, PAD=1, dtype="fp16"), 4, 4, 2, 2, 4, 4, 4, 8),
+        1: ws(sprob(3, 32, stride=1, PAD=1, dtype="bf16"), 8, 1, 1, 3, 4, 2, 32, 4),
+        2: ws(sprob(3, 32, stride=2, PAD=0, dtype="fp16"), 2, 4, 2, 3, 8, 1, 32, 2),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad", sel, "gfx1250")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_STEM_CFG_BASE:
+        sel = _wgrad_stem_spec(idx - _WGRAD_STEM_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _DW_WGRAD_CFG_BASE:
+        sel = _dw_wgrad_spec(idx - _DW_WGRAD_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WGRAD_W32_CFG_BASE:
+        sel = _wgrad_w32_spec(idx - _WGRAD_W32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx == 0:
         p = DirectConvProblem(
             N=32, H=200, W=200, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
@@ -912,6 +2963,123 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _F32_CFG_BASE:
+        sel = _f32_spec(idx - _F32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_F32_CFG_BASE:
+        sel = _nongrouped_f32_spec(idx - _NONGROUPED_F32_CFG_BASE)
+        if sel is not None:
+            return ("nongrouped", *sel)
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WAVE32_CFG_BASE:
+        sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _FOURC_BF16_CFG_BASE:
+        sel = _fourc_bf16_spec(idx - _FOURC_BF16_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WGRAD_DIRECT_CFG_BASE:
+        sel = _wgrad_direct_spec(idx - _WGRAD_DIRECT_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_GROUPED_CFG_BASE:
+        sel = _nongrouped_grouped_spec(idx - _NONGROUPED_GROUPED_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_SPLIT_CFG_BASE:
+        sel = _nongrouped_split_spec(idx - _NONGROUPED_SPLIT_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _GENERIC_CFG_BASE:
+        sel = _generic_spec(idx - _GENERIC_CFG_BASE)
+        if sel is not None:
+            return sel
+    # ---- wgrad, runtime channels (indices 71..74) ----
+    # cpg/kpg come from p_total_c / p_total_k / p_groups: runtime k/c tile
+    # counts in the grid decode, a dynamic dW descriptor and runtime masks.
+    if idx == 71:
+        # Defaults otherwise: the baked config 25 with runtime channels.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(problem=p, runtime_channels=True),
+            "gfx950",
+        )
+    if idx == 72:
+        # bf16, K/C/Q split with a non-power-of-two block_c (waves_c=3).
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=1,
+            cpg=48,
+            kpg=192,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p,
+                waves_k=2,
+                waves_c=3,
+                waves_q=2,
+                ho_per_block=3,
+                runtime_channels=True,
+            ),
+            "gfx950",
+        )
+    if idx == 73:
+        # 1x1 filter, PAD 0, the narrow atom and four k-waves.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=4, cpg=64, kpg=64, KH=1, KW=1, PAD=0, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p,
+                waves_k=4,
+                mfma_k=16,
+                ho_per_block=2,
+                runtime_channels=True,
+            ),
+            "gfx950",
+        )
+    if idx == 74:
+        # 5x5 filter with valid padding, bf16, a ragged channel count.
+        p = DirectConvProblem(
+            N=1,
+            H=12,
+            W=12,
+            groups=1,
+            cpg=24,
+            kpg=24,
+            KH=5,
+            KW=5,
+            PAD=0,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p, waves_c=2, ho_per_block=5, runtime_channels=True
+            ),
+            "gfx950",
+        )
     if idx >= _REJECT_CFG_BASE:
         sel = _reject_spec(idx - _REJECT_CFG_BASE)
         if sel is not None:
@@ -949,6 +3117,8 @@ def main() -> int:
         kernel = build_direct_conv_8c(spec, arch=arch)
     elif kind == "32c":
         kernel = build_direct_conv_32c(spec, arch=arch)
+    elif kind == "dw_wgrad":
+        kernel = build_direct_depthwise_wgrad(spec, arch=arch)
     elif kind == "wgrad":
         kernel = build_direct_conv_wgrad(spec, arch=arch)
     elif kind == "spatial":
@@ -959,10 +3129,34 @@ def main() -> int:
         kernel = build_direct_conv_dgrad(spec, arch=arch)
     elif kind == "dw_dgrad":
         kernel = build_direct_depthwise_dgrad(spec, arch=arch)
+    elif kind == "dw_dgrad_stream":
+        kernel = build_direct_depthwise_dgrad_streaming(spec, arch=arch)
     elif kind == "nongrouped":
         kernel = build_direct_conv_nongrouped(spec, arch=arch)
+    elif kind == "generic":
+        kernel = build_direct_conv(spec, arch=arch)
+    elif kind == "transpose":
+        kernel = build_direct_transpose_weights_dgrad(spec, arch=arch)
+    elif kind == "reorganize":
+        kernel = build_direct_reorganize_weights(spec, arch=arch)
     elif kind == "dw_tiled":
         kernel = build_direct_depthwise_tiled(spec, arch=arch)
+    elif kind == "wgrad_tiled":
+        kernel = build_direct_wgrad_tiled(spec, arch=arch)
+    elif kind == "dw_wgrad_fold":
+        kernel = build_dw_wgrad_fold(spec, arch=arch)
+    elif kind == "dw_wgrad_cols":
+        kernel = build_dw_wgrad_cols(spec, arch=arch)
+    elif kind == "dw_wgrad_lds":
+        kernel = build_dw_wgrad_lds(spec, arch=arch)
+    elif kind == "wgrad_gather":
+        kernel = build_wgrad_gather(spec, arch=arch)
+    elif kind == "split_reduce":
+        kernel = build_direct_conv_split_reduce(spec, arch=arch)
+    elif kind == "dw_wgrad_mfma":
+        kernel = build_dw_wgrad_mfma(spec, arch=arch)
+    elif kind == "grouped_wgrad_mfma":
+        kernel = build_grouped_wgrad_mfma(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":

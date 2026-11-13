@@ -1,0 +1,26 @@
+{% extends "device_topk_air.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+    #include "benchmark_device_segmented_topk_air.parallel.hpp"
+{% endblock %}
+
+{% block config_constructor -%}
+    rocprim::segmented_topk_air_config<
+        {{ config.block_size_x }},
+        {{ config.ipt }},
+        {{ config.radix_bits }},
+        {{ config.adapt_coeff }},
+        {{ config.limit }}
+    >
+{%- endblock %}
+
+{% block benchmark_type %}
+        using benchmark_type = device_segmented_topk_air_benchmark<key_type, value_type, config>;
+{% endblock %}
+
+using key_type = {{ key_type }};
+using value_type = {{ value_type }};
+
+{% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings);
+{% endblock %}

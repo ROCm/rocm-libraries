@@ -11,6 +11,8 @@ real TensileLite assembly emitter end-to-end **without a GPU**:
                 ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
                 ->  KernelWriterAssembly.getSourceFileString  ->  assembly text
 
+Every kernel is emitted in-process with native rocisa.
+
 Only the *emit* is exercised here; assembling to a code object (amdclang++) and
 running on hardware are deliberately out of scope. The emitted text is
 deterministic given a pinned toolchain/ISA once random label suffixes are
@@ -33,7 +35,8 @@ import functools
 import re
 import shutil
 
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import shared_assembler, shared_full_isa_info_map
 
 # --- assembly canonicalization ---------------------------------------------
 
@@ -80,17 +83,8 @@ def canonicalize_asm(text):
 
 @functools.lru_cache(maxsize=1)
 def _toolchain():
-    """Build (assembler, isaInfoMap) once. Uses amdclang++; no GPU required."""
-    from Tensile.Common.Architectures import SUPPORTED_ISA
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    assembler = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    return assembler, iim
+    """The shared assembler and read-only map covering every supported ISA."""
+    return shared_assembler(), shared_full_isa_info_map()
 
 
 def get_assembler():
@@ -113,8 +107,8 @@ def get_isa_info_map():
 
 @contextlib.contextmanager
 def _isolated_globals():
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -146,11 +140,14 @@ def _init_rocisa_for(kernel):
     return ri
 
 
+# The gfx942/gfx950 basename fixtures include non-default StreamKAtomic and
+# MbskPrefetchMethod tags because these controls change the emitted assembly.
+# Compiler context: AMD clang 23.0.0git, ROCm llvm-project aa451e1fe6a7.
 # --- solution / kernel emit -------------------------------------------------
 
 
 def _solutions_from_logic_unguarded(logic_path):
-    import Tensile.LibraryIO as L
+    import tensilelite.LibraryIO as L
 
     asm = get_assembler()
     lib = L.parseLibraryLogicFile(str(logic_path), asm, False, False, False, get_isa_info_map(), False)
@@ -169,12 +166,47 @@ def solutions_from_logic(logic_path):
 
 def _prepare_kernel(kernel, splitGSU=False):
     """Set the per-kernel fields ``writeSolutionsAndKernels`` sets before emit."""
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     base = getKernelFileBase(splitGSU, kernel)
-    kernel.duplicate = False
     kernel["BaseName"] = base
     return base
+
+
+_GFX1250 = (12, 5)
+
+
+def _result_tuple(base, res, canonical):
+    src = res.src
+    if canonical:
+        src = canonicalize_asm(src)
+    elif isinstance(src, (bytes, bytearray)):
+        src = src.decode(errors="replace")
+    return base, src, res.err
+
+
+def _emit_in_process(kwa, kernel, splitGSU, canonical):
+    from tensilelite.create_library.run import processKernelSource
+
+    ri = _init_rocisa_for(kernel)
+    base = _prepare_kernel(kernel, splitGSU)
+    res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), splitGSU, kernel)
+    return _result_tuple(base, res, canonical)
+
+
+def emit_prepared_kernels(kwa, kernels, splitGSU=False, canonical=True):
+    """Return ``[(basename, source, err), ...]`` by emitting each kernel in-process."""
+    return [_emit_in_process(kwa, kernel, splitGSU, canonical) for kernel in kernels]
+
+
+def emit_one_kernel(kwa, kernel, splitGSU=False, canonical=True):
+    """Emit one kernel with the same ISA split as :func:`emit_prepared_kernels`."""
+    return emit_prepared_kernels(kwa, [kernel], splitGSU=splitGSU, canonical=canonical)[0]
+
+
+def run_where_backend_matches_isa(isa, fn, *args):
+    """Run ``fn(*args)`` in-process; native rocisa handles every ISA."""
+    return fn(*args)
 
 
 def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=None):
@@ -189,31 +221,13 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     name) — used to draw a few representative kernels from very large tuned
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
-    import rocisa
-    from Tensile.TensileCreateLibrary.Run import (
-        generateKernelObjectsFromSolutions,
-        processKernelSource,
-    )
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
     asm = get_assembler()
 
-    def _emit(kwa, kernel):
-        ri = _init_rocisa_for(kernel)  # independent of any prior arch's state
-        data = ri.getData()
-        outOptions = ri.getOutputOptions()
-        base = _prepare_kernel(kernel, splitGSU)
-        res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
-        src = res.src
-        if canonical:
-            src = canonicalize_asm(src)
-        elif isinstance(src, (bytes, bytearray)):
-            src = src.decode(errors="replace")
-        return base, src, res.err
-
-    results = []
     with _isolated_globals():
         sols = _solutions_from_logic_unguarded(logic_path)
         kernels = generateKernelObjectsFromSolutions(sols)
@@ -221,9 +235,7 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
             # stable subset by kernel name so the cap is deterministic
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(asm, DebugConfig())
-
-        for kernel in kernels:
-            results.append(_emit(kwa, kernel))
+        results = emit_prepared_kernels(kwa, kernels, splitGSU=splitGSU, canonical=canonical)
 
     results.sort(key=lambda t: t[0])
     return results
@@ -245,7 +257,7 @@ def emit_helpers_from_logic(logic_path):
     MMA scheduler state) but we still key the golden on identity + return code
     for consistency with the asm suites.
     """
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         generateKernelHelperObjects,
     )

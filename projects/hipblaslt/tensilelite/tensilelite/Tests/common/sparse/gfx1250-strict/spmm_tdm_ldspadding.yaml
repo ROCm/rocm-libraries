@@ -27,16 +27,18 @@ BenchmarkProblems:
     -
       OperationType: GEMM
       DataType: h
-      DestDataType: s
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: True
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -58,7 +60,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -86,6 +88,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -128,7 +132,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -199,7 +203,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -271,7 +275,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -309,16 +313,18 @@ BenchmarkProblems:
     -
       OperationType: GEMM
       DataType: h
-      DestDataType: s
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -340,7 +346,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -368,6 +374,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -411,7 +419,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -449,16 +457,18 @@ BenchmarkProblems:
     -
       OperationType: GEMM
       DataType: h
-      DestDataType: s
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
       TransposeB: True
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -480,7 +490,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -508,6 +518,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -551,7 +563,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -589,16 +601,18 @@ BenchmarkProblems:
     -
       OperationType: GEMM
       DataType: h
-      DestDataType: s
+      DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: True
       TransposeB: True
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -620,7 +634,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -648,6 +662,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -691,7 +707,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]

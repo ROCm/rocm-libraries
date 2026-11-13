@@ -120,7 +120,6 @@ class ToolchainDefaults(NamedTuple):
     OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
     DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() or inFFMEnv else "amdgpu-arch", windows="hipinfo")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
-    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig.exe")
 
 
 def _supportedComponent(component: str, targets: List[str]) -> bool:
@@ -132,7 +131,7 @@ def _supportedComponent(component: str, targets: List[str]) -> bool:
 
 def supportedCCompiler(compiler: str) -> bool:
     """
-    Determine if a C compiler/assembler is supported by Tensile.
+    Determine if a C compiler/assembler is supported by TensileLite.
 
     Args:
         compiler: The name of a compiler to test for support.
@@ -145,7 +144,7 @@ def supportedCCompiler(compiler: str) -> bool:
 
 def supportedCxxCompiler(compiler: str) -> bool:
     """
-    Determine if a C++/HIP compiler/assembler is supported by Tensile.
+    Determine if a C++/HIP compiler/assembler is supported by TensileLite.
 
     Args:
         compiler: The name of a compiler to test for support.
@@ -158,7 +157,7 @@ def supportedCxxCompiler(compiler: str) -> bool:
 
 def supportedOffloadBundler(bundler: str) -> bool:
     """
-    Determine if an offload bundler is supported by Tensile.
+    Determine if an offload bundler is supported by TensileLite.
 
     Args:
         bundler: The name of an offload bundler to test for support.
@@ -169,22 +168,9 @@ def supportedOffloadBundler(bundler: str) -> bool:
     return _supportedComponent(bundler, ["clang-offload-bundler"])
 
 
-def supportedHip(hip: str) -> bool:
-    """
-    Determine if a hip callable binary is supported by Tensile.
-
-    Args:
-        hip: The name of an offload bundler to test for support.
-
-    Return:
-        If supported True; otherwise, False.
-    """
-    return _supportedComponent(hip, ["hipcc", "hipconfig"])
-
-
 def supportedDeviceEnumerator(enumerator: str) -> bool:
     """
-    Determine if a device enumerator is supported by Tensile.
+    Determine if a device enumerator is supported by TensileLite.
 
     Args:
         enumerator: The name of a device enumerator to test for support.
@@ -227,7 +213,6 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file)
     )):
         raise ValueError(f"`{file}` is not a supported toolchain component on {'Windows' if os.name == 'nt' else 'Linux'}")

@@ -23,16 +23,16 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.Naming`` — the kernel /
+"""Characterization tests for ``tensilelite.SolutionStructs.Naming`` — the kernel /
 solution name builders. All pure string-building over a solution ``state`` dict;
 snapshot the returned name strings.
 """
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import ProblemType
-import Tensile.SolutionStructs.Naming as N
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
+from tensilelite.SolutionStructs.Problem import ProblemType
+import tensilelite.SolutionStructs.Naming as N
+from tensilelite.Common.Constants import MAX_FILENAME_LENGTH
 
 pytestmark = pytest.mark.unit
 
@@ -210,13 +210,11 @@ def test_kernel_name_min_split_gsu_unit(make_state, snapshot):
 
 
 @pytest.mark.parametrize("gsu", [4, -1], ids=["gsu4", "gsu_neg1"])
-def test_kernel_name_min_split_gsu_typeerror(make_state, gsu):
-    # CHARACTERIZED BUG: with ignoreInternalArgs=True (getKernelNameMin) and
-    # splitGSU=True, GSU>1 or GSU==-1 is rewritten to the string "M" at
-    # Naming.py:172, then compared with `"M" > 0` at Naming.py:177 -> TypeError.
-    # Pinned as current behaviour; see ADR 0003.
-    with pytest.raises(TypeError):
-        N.getKernelNameMin(make_state(GlobalSplitU=gsu), splitGSU=True)
+def test_kernel_name_min_split_gsu_multi_variant(make_state, gsu):
+    state = make_state(GlobalSplitU=gsu)
+
+    assert "GSUM" in N.getKernelNameMin(state, splitGSU=True).split("_")
+    assert state["GlobalSplitU"] == gsu
 
 
 def test_name_does_not_mutate_state(make_state):
@@ -351,6 +349,19 @@ def test_shorten_file_base_preserves_exact_length_boundary(monkeypatch):
     base = "x" * MAX_FILENAME_LENGTH
     monkeypatch.setattr(N, "getKernelNameMin", lambda kernel, split_gsu: base)
     assert N.shortenFileBase(False, {}) == base
+
+
+def test_gl2_address_modes_named_only_when_nondefault(make_state):
+    # PrefetchGL2Inc64Bit and PrefetchGL2SAddr are named only when they differ from
+    # their False defaults, so default kernels keep their existing names.
+    default_tokens = set(N.getSolutionNameFull(make_state(), splitGSU=False).split("_"))
+    assert "PGLIB1" not in default_tokens
+    assert "PGLSA1" not in default_tokens
+
+    nondefault = make_state(PrefetchGL2Inc64Bit=True, PrefetchGL2SAddr=True)
+    tokens = set(N.getSolutionNameFull(nondefault, splitGSU=False).split("_"))
+    assert "PGLIB1" in tokens
+    assert "PGLSA1" in tokens
 
 
 def test_workgroup_mapping_xcc_key_folds_fixed_but_preserves_auto(make_state):

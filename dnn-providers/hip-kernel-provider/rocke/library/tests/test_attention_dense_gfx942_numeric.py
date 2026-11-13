@@ -5,7 +5,8 @@
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
 gfx942 GPU and checks max_abs against an fp32 ``scaled_dot_product_attention``
-oracle, for both the default and the P4 persistent grid. This is the committed,
+oracle (the sink cohorts use an fp32 masked softmax with an appended sink column),
+for both the default and the P4 persistent grid. This is the committed,
 CI-collectable form of the acceptance criterion's "functional GPU-numeric bench,
 both variants, vs torch fp32 SDPA" -- previously only an out-of-tree verifier.
 
@@ -31,6 +32,7 @@ import pytest
 from kernels.gfx942.attention_dense import (
     _as_gfx942_spec,
     run_attention_dense_torch,
+    supports_attention_dense,
 )
 
 
@@ -64,8 +66,8 @@ _COHORT = [
     ("fp16", 128, 16, 4, False, True),  # flagship default (causal)
     ("fp16", 128, 16, 4, True, True),  # flagship persistent
     ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
-    # bf16 D128 default: the plain-exp2 arm -- the one config _use_exp2_fast turns
-    # off, and it does so on the grid, at every seqlen.
+    # bf16 D128 default: the plain-exp2 arm -- the one config default_use_exp2_fast
+    # turns off, and it does so on the grid, at every seqlen.
     ("bf16", 128, 16, 4, False, True),
     ("fp16", 64, 16, 16, False, True),  # D64 MHA default
     ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)
@@ -74,7 +76,7 @@ _COHORT = [
 ]
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window, scale)
-# -- STANDALONE sliding-window (no sinks; gfx942 dense has no sink support yet). All
+# -- STANDALONE sliding-window (no sinks; SWA-sink is _SWA_SINK_COHORT below). All
 # rows are causal (sliding_window > 0 requires causal). Window is a multiple of the
 # shipped block_n (64): 128, 256. Covers both dtypes, D64/D128, and BOTH grid
 # variants -- the persistent rows exercise the per-work-item start_tile prune that the
@@ -89,7 +91,27 @@ _SWA_COHORT = [
     ("bf16", 64, 16, 4, True, 128, None),
     ("bf16", 128, 16, 4, False, 128, 1.0),
     ("bf16", 64, 16, 4, True, 128, 1.0),
+    # W well past block_m: non-empty mask-free middle phase of the band loop.
+    ("bf16", 128, 16, 4, False, 512, None),
+    ("fp16", 128, 16, 4, True, 512, None),
 ]
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal): full-sink
+# cohort. Both dtypes, D64/D128, GQA + MHA, both grids, and non-causal on both grids.
+_SINK_COHORT = [
+    ("fp16", 128, 16, 4, False, True),
+    ("fp16", 128, 16, 4, True, True),
+    ("bf16", 128, 16, 4, False, True),
+    ("bf16", 128, 16, 4, True, True),
+    ("fp16", 64, 16, 16, False, True),
+    ("bf16", 64, 16, 4, True, True),
+    ("fp16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, True, False),
+]
+
+# SWA-sink: the standalone SWA rows with sinks on, scale column included.
+_SWA_SINK_COHORT = _SWA_COHORT
 
 # (head_size, dtype, persistent, scale) for test_dense_non_default_scale: every D128
 # combination, plus bf16 D64 at the larger scale on both grids. D64 has its own K
@@ -112,8 +134,12 @@ def _spec(
     causal=True,
     batch=1,
     sq=512,
+    sk=None,
     sliding_window=0,
+    use_sinks=False,
     persist_decode="auto",
+    bottom_right=False,
+    block_m=None,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -140,27 +166,41 @@ def _spec(
     shipped path folds in. ``persist_decode`` stays "auto" unless a test pins one
     order to hold it fixed across shapes "auto" would resolve differently; a pinned
     order is set on the spec, since the knob refuses one that restates "auto".
+
+    Pinning the persistent grid also pins ``kv_segments=1``: the KV-segment split
+    runs on the default grid only, and dispatch picks one (dropping persistent) for
+    short bottom-right chunks, so the persistent pin alone would ask for a
+    combination dispatch never produces.
+
+    ``block_m`` pins the query-tile height knob; ``None`` leaves the tile (and with it
+    ``block_n``) to dispatch, which picks it from the shape and the window.
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
+    knobs = (
+        {"persistent": True, "kv_segments": 1} if persistent else {"persistent": False}
+    )
+    if block_m is not None:
+        knobs["block_m"] = block_m
     spec = tuning_spec_with_knobs(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
-            mask_type=1 if causal else 0,
+            mask_type=(2 if bottom_right else 1) if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
+            use_sinks=use_sinks,
         ),
         "gfx942_dense",
-        {"persistent": bool(persistent)},
+        knobs,
     ).kernel_spec
     if persist_decode == "auto":
         return spec
@@ -201,7 +241,10 @@ def _sdpa_reference(q, k, v, scale, *, causal=True, attn_mask=None):
 def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     import torch
 
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    # Element-wise atol + rtol*|ref| rather than a raw max-abs bound: rounding the
+    # fp32 reference to the output dtype alone consumes most of a fixed absolute
+    # budget on randn inputs, which would leave the check seed-sensitive.
+    tol = 2e-3 if dtype == "fp16" else 1e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
     B, S = 1, 512
     scale = 1.0 / math.sqrt(d)
@@ -220,9 +263,15 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, causal):
     ref = _sdpa_reference(q, k, v, scale, causal=causal)
 
     max_abs = (ref - out.float()).abs().max().item()
-    assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
-        f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=tol,
+        rtol=tol,
+        msg=lambda m: (
+            f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}\n{m}"
+        ),
     )
 
 
@@ -300,6 +349,172 @@ def test_dense_fp16_d128_large_equal_scores(persistent):
         f"fp16 D128 equal scores scale=16 "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}"
     )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal_diag_split,
+# seqlen_q, seqlen_kv): bottom-right causal, seqlen_q < seqlen_kv (chunked prefill).
+# The diagonal offset seqlen_kv - seqlen_q is a runtime value: block-aligned (512,
+# 3584) and not (64, 576), both grids, with and without the unmasked-body split.
+_BOTTOM_RIGHT_COHORT = [
+    ("bf16", 128, 16, 4, False, False, 512, 1024),
+    ("bf16", 128, 16, 4, False, True, 512, 1088),
+    ("bf16", 128, 16, 4, True, False, 512, 576),
+    ("bf16", 128, 16, 4, True, True, 256, 3840),
+    ("fp16", 128, 16, 4, False, True, 512, 1024),
+    ("fp16", 128, 16, 4, True, True, 512, 1088),
+    ("bf16", 64, 16, 4, False, True, 512, 576),
+    ("bf16", 64, 16, 4, True, False, 256, 1024),
+]
+
+
+def _bottom_right_keep(sq, sk, device):
+    """Boolean keep-mask: query q sees key k iff k <= q + (sk - sq)."""
+    import torch
+
+    qi = torch.arange(sq, device=device).view(sq, 1)
+    ki = torch.arange(sk, device=device).view(1, sk)
+    return ki <= qi + (sk - sq)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,diag_split,sq,sk", _BOTTOM_RIGHT_COHORT
+)
+def test_dense_bottom_right_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, persistent, diag_split, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B = 1
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(dtype, d, hq, hkv, persistent, sq=sq, sk=sk, bottom_right=True)
+    assert spec.causal_bottom_right
+    spec = dataclasses.replace(spec, causal_diag_split=diag_split)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    keep = _bottom_right_keep(sq, sk, q.device)
+    ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} GQA{hq}/{hkv} bottom-right sq={sq} sk={sk} "
+        f"{'persist' if persistent else 'default'} split={diag_split}: "
+        f"max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, mask, causal_diag_split,
+# kv_segments, seqlen_q, seqlen_kv): the KV-segment split on the default grid. mask
+# is "br" (bottom-right causal), "tl" (top-left causal, where early query blocks
+# leave trailing segments empty) or "full".
+_KV_SEGMENT_COHORT = [
+    ("bf16", 128, 16, 4, "br", True, 4, 512, 4096),
+    ("bf16", 128, 16, 4, "br", False, 3, 256, 1088),
+    ("fp16", 128, 16, 4, "br", True, 8, 512, 2048),
+    ("bf16", 64, 16, 4, "br", True, 4, 512, 2048),
+    ("bf16", 128, 16, 4, "tl", True, 4, 1024, 1024),
+    ("fp16", 128, 16, 16, "full", False, 2, 1024, 1024),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,mask,diag_split,segments,sq,sk", _KV_SEGMENT_COHORT
+)
+def test_dense_kv_segments_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, mask, diag_split, segments, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        False,
+        causal=mask != "full",
+        sq=sq,
+        sk=sk,
+        bottom_right=mask == "br",
+    )
+    spec = dataclasses.replace(
+        spec,
+        causal_diag_split=diag_split,
+        kv_segments=segments,
+        block_m=128,
+    )
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    if mask == "br":
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+    else:
+        ref = _sdpa_reference(q, k, v, scale, causal=mask == "tl")
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} {mask} split={diag_split} segments={segments} sq={sq} "
+        f"sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_one_bottom_right_binary_serves_every_chunk_length():
+    """The diagonal offset is read from the shape params, so one compiled binary
+    must serve chunks with different seqlen_kv - seqlen_q, each correctly."""
+    import torch
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    dtype, d, hq, hkv = "bf16", 128, 16, 4
+    tol = 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    shapes = ((512, 1024), (256, 4096), (512, 576))
+    specs = [
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, sq=a, sk=c, bottom_right=True))
+        for a, c in shapes
+    ]
+    keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
+    assert len(keys) == 1, f"chunk lengths {shapes} did not share a cache key"
+    launchers = []
+    for (sq, sk), spec in zip(shapes, specs):
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"sq={sq} sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    assert launchers[0] is not None
+    assert all(x is launchers[0] for x in launchers)
 
 
 def _launcher_for(spec):
@@ -488,9 +703,9 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     ``ki > qi`` plus window ``ki <= qi - W`` masked out) and the kernel applies
     (``cmp_le(ktok, q)`` + ``cmp_gt(ktok, q - SW)``): keep key k for query q iff
     ``q - W < k <= q``. Expressed here as a boolean SDPA attn_mask -- matching this
-    file's SDPA-based base oracle -- rather than gfx950's manual masked-softmax,
-    which exists only because gfx950 also concatenates a sink column (gfx942 has no
-    sinks yet). The diagonal k==q is always kept (W>0), so no row is fully masked."""
+    file's SDPA-based base oracle. The sink cohorts use the manual masked-softmax
+    in :func:`_sink_reference` instead, since SDPA cannot append a sink column. The
+    diagonal k==q is always kept (W>0), so no row is fully masked."""
     import torch
 
     tol = 2e-2 if dtype == "fp16" else 4e-2
@@ -527,6 +742,409 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     assert max_abs < tol, (
         f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} scale={scale:g} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+def _sink_reference(q, k, v, sinks, scale, *, causal=True, sliding_window=0):
+    """fp32 ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, the gfx950 sibling's
+    oracle. The sink is one extra logit per query head with no value row, so it only
+    grows the softmax denominator. Full [B,Hq,Sq,Skv] matrix; fine at these sizes.
+    Causal is top-left aligned (key ki visible to query qi iff ki <= qi), so a row
+    whose window holds no key softmaxes over the sink alone and outputs 0."""
+    import torch
+
+    B, Sq, Hq, _ = q.shape
+    Skv = k.shape[1]
+    rep = Hq // k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
+    qi = torch.arange(Sq, device=q.device).view(-1, 1)
+    ki = torch.arange(Skv, device=q.device).view(1, -1)
+    mask = torch.zeros(Sq, Skv, dtype=torch.bool, device=q.device)
+    if causal:
+        mask |= ki > qi
+    if sliding_window > 0:
+        mask |= ki <= qi - sliding_window
+    attn.masked_fill_(mask.view(1, 1, Sq, Skv), float("-inf"))
+    sink_col = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, Sq, 1)
+    attn = torch.softmax(torch.cat([attn, sink_col], dim=-1), dim=-1)[..., :-1]
+    return torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
+
+
+_SINK_OFFSET = {"above_qk_max": 1.0, "below_qk_max": -1.0, "dominates_qk": 8.0}
+
+
+def _check_sinks(
+    dtype,
+    d,
+    hq,
+    hkv,
+    persistent,
+    causal,
+    sliding_window,
+    magnitude,
+    *,
+    sq=512,
+    sk=None,
+    scale=None,
+):
+    """Run the shipped sink spec and compare against :func:`_sink_reference`.
+
+    The sink is set relative to each head's max over the first (block_m x block_n)
+    tile. One logit above: the seeded m0 stays the running max through tile 0, so
+    alpha is 1 and the tile's p values carry the scaling. One below: tile 0 raises
+    the max and the seeded l0 = 1 must be rescaled by alpha on the first tile. Both
+    halves of the seed are exercised, which IR goldens cannot do. Eight above
+    (``dominates_qk``): the sink takes nearly all of every row's softmax, so the
+    non-vacuity check holds even with no causal mask."""
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, Sq, Skv = 1, sq, sq if sk is None else sk
+    scale = 1.0 / math.sqrt(d) if scale is None else scale
+    torch.manual_seed(0)
+
+    q = torch.randn(B, Sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, Sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        causal=causal,
+        batch=B,
+        sq=Sq,
+        sk=Skv,
+        sliding_window=sliding_window,
+        use_sinks=True,
+    )
+
+    bm, bn = spec.block_m, spec.block_n
+    qt = q[:, :bm].transpose(1, 2).float()
+    kt = k[:, :bn].transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    qk = torch.einsum("bhqd,bhkd->bhqk", qt, kt) * scale
+    if causal:
+        qi = torch.arange(bm, device="cuda").view(-1, 1)
+        ki = torch.arange(bn, device="cuda").view(1, -1)
+        qk.masked_fill_((ki > qi).view(1, 1, bm, bn), float("-inf"))
+    tile_max = qk.amax(dim=(-1, -2))[0]  # [Hq]
+    sinks = (tile_max + _SINK_OFFSET[magnitude]).to(tdt).contiguous()
+
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+    )
+    torch.cuda.synchronize()
+
+    ref = _sink_reference(
+        q, k, v, sinks, scale, causal=causal, sliding_window=sliding_window
+    )
+    label = (
+        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+        f"sq{Sq} sk{Skv} swa{sliding_window} scale={scale:g} "
+        f"{'persist' if persistent else 'default'} {magnitude}"
+    )
+    # max() propagates NaN and NaN < tol is False, so a NaN row fails here too.
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+
+    # Rows whose window holds no key (qi >= Skv + W - 1) see no key: the default grid runs a
+    # zero-trip KV loop for them, the persistent grid one fully masked tile. With sinks they
+    # softmax over the sink alone, so the output is exactly 0.
+    empty_rows = 0
+    if causal and sliding_window > 0 and Sq >= Skv + sliding_window:
+        first_empty = Skv + sliding_window - 1
+        tail = out[:, first_empty:]
+        empty_rows = tail.shape[1]
+        assert (
+            torch.count_nonzero(tail).item() == 0
+        ), f"{label}: rows >= {first_empty} have no visible key but are not all 0"
+
+    if causal or magnitude == "dominates_qk":
+        # Non-vacuity: under causal, query row 0 sees only key 0, so the sink takes a
+        # large share of its softmax; with dominates_qk it takes nearly all of every
+        # row. Either way the sink reference must move well past tol, so a kernel
+        # that ignored the sink would fail the parity assert above. Not asserted for
+        # non-causal at +/-1: with 512 visible keys the sink's share can sit under
+        # tol. Empty-window rows are NaN without a sink; they are checked above.
+        ref_nosink = _sink_reference(
+            q,
+            k,
+            v,
+            torch.full_like(sinks, float("-inf")),
+            scale,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
+        delta = (ref - ref_nosink).nan_to_num(0.0).abs().max().item()
+        assert delta > tol, f"{label}: sinks moved the reference only {delta:.3e}"
+
+    return empty_rows
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,causal", _SINK_COHORT)
+def test_dense_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, causal, sink_magnitude
+):
+    """Full-sink numeric parity (no sliding window), both grids."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, sink_magnitude)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,causal", [r for r in _SINK_COHORT if not r[-1]]
+)
+def test_dense_sinks_non_causal_sink_dominates(dtype, d, hq, hkv, persistent, causal):
+    """Non-causal sink parity with a non-vacuity check: the sink sits eight logits
+    above the QK max, so it takes nearly all of every row and a kernel that dropped
+    it would miss the reference by far more than tol."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, "dominates_qk")
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
+# sliding_window): SWA-sink with Sq > Skv so the trailing query blocks' windows
+# start past seqlen_kv. Those blocks have a zero-trip KV loop on the default grid;
+# the sink seeds l = 1, so their rows are 0 (without sinks the epilogue masks them,
+# see _SWA_KEYLESS_COHORT). The first empty row is Skv + W - 1 = 383; which blocks
+# straddle it or lie fully past it follows from the dispatch tile.
+_SWA_SINK_EMPTY_WINDOW_COHORT = [
+    ("bf16", 128, 16, 4, False, 1024, 256, 128),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128),
+    ("fp16", 128, 16, 4, False, 1024, 256, 128),
+    ("fp16", 128, 16, 4, True, 1024, 256, 128),
+    ("bf16", 64, 16, 4, False, 1024, 256, 128),
+    ("bf16", 64, 16, 4, True, 1024, 256, 128),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window", _SWA_SINK_EMPTY_WINDOW_COHORT
+)
+def test_dense_swa_sinks_empty_window_outputs_zero(
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window, sink_magnitude
+):
+    """Empty-window rows output exactly 0 (softmax over the sink alone) and every
+    other row keeps parity, on both grids."""
+    empty_rows = _check_sinks(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        True,
+        sliding_window,
+        sink_magnitude,
+        sq=sq,
+        sk=sk,
+    )
+    assert empty_rows > 0, "cohort row does not reach an empty window"
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
+# sliding_window, block_m): sliding window WITHOUT sinks and WITHOUT LSE, with
+# Sq > Skv so the trailing query rows see no key. The first keyless row is
+# Skv + W - 1 (383 for Skv 256, W 128). ``block_m`` None leaves the tile to dispatch;
+# 256 pins the wider 256-row tile, so both window loop shapes run. Which query blocks
+# straddle the first keyless row, or lie fully past the KV extent (a zero-trip KV loop
+# on the default grid), follows from the tile and Sq. The packaged catalog's window
+# sizes are 128, 512, 1024 and 2048; the rows below cover those, 256, and 64 (whose
+# first keyless row, Skv + 63, falls mid-block instead of at a multiple of 128).
+_SWA_KEYLESS_COHORT = [
+    ("bf16", 128, 16, 4, False, 512, 256, 128, None),
+    ("bf16", 128, 16, 4, True, 512, 256, 128, None),
+    ("bf16", 128, 16, 4, False, 1024, 256, 128, None),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128, None),
+    ("fp16", 64, 16, 4, False, 1024, 256, 128, None),
+    ("fp16", 64, 16, 4, True, 1024, 256, 128, None),
+    ("bf16", 64, 16, 4, False, 1024, 256, 128, None),
+    ("fp16", 128, 16, 4, True, 1024, 256, 128, None),
+    ("fp16", 128, 16, 4, False, 1024, 256, 256, None),
+    ("bf16", 128, 16, 4, True, 1024, 256, 256, None),
+    ("bf16", 128, 16, 4, False, 2048, 512, 512, None),
+    ("bf16", 128, 16, 4, True, 2048, 512, 512, None),
+    ("bf16", 128, 16, 4, False, 4096, 1024, 1024, None),
+    ("bf16", 128, 16, 4, True, 4096, 1024, 1024, None),
+    ("bf16", 128, 16, 4, False, 6144, 2048, 2048, None),
+    ("bf16", 128, 16, 4, True, 6144, 2048, 2048, None),
+    ("bf16", 128, 16, 4, False, 512, 256, 64, None),
+    ("bf16", 128, 16, 4, True, 512, 256, 64, None),
+    ("fp16", 64, 16, 4, False, 512, 256, 64, None),
+    ("fp16", 64, 16, 4, True, 512, 256, 64, None),
+    ("bf16", 128, 16, 4, False, 512, 256, 128, 256),
+    ("bf16", 128, 16, 4, True, 512, 256, 128, 256),
+    ("bf16", 128, 16, 4, False, 1024, 256, 128, 256),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128, 256),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window,block_m", _SWA_KEYLESS_COHORT
+)
+def test_dense_swa_keyless_rows_output_zero_without_lse(
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window, block_m
+):
+    """A row with no visible key outputs exactly 0 whether or not the LSE side output
+    is requested. Without the guard, such a row is the mean of V (every score equals
+    the mask sentinel) or NaN (zero-trip KV loop: 0 * rcp(0)). Rows that do see keys
+    keep parity, and the LSE-off output is bit-identical to LSE-on."""
+    import torch
+
+    tol = _tolerance(dtype)
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        sq=sq,
+        sk=sk,
+        sliding_window=sliding_window,
+        block_m=block_m,
+    )
+    assert not spec.emit_lse and not spec.use_sinks
+    if block_m is not None:
+        assert spec.block_m == block_m, "the block_m pin did not change what is built"
+    out = torch.empty_like(q)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    ref, _ = _lse_reference(q, k, v, scale, causal=True, window=sliding_window)
+    label = (
+        f"{dtype} D{d} sq{sq} sk{sk} swa{sliding_window} bm{block_m or 'auto'} "
+        f"{'persist' if persistent else 'default'}"
+    )
+    first_keyless = sk + sliding_window - 1
+    tail = out[:, first_keyless:]
+    assert tail.shape[1] > 0, f"{label}: cohort row has no keyless rows"
+    assert (
+        torch.count_nonzero(tail).item() == 0
+    ), f"{label}: rows >= {first_keyless} see no key but are not all 0"
+    # max() propagates NaN and NaN < tol is False, so a NaN row fails here too.
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+
+    on_spec = _lse_spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        sq=sq,
+        sk=sk,
+        sliding_window=sliding_window,
+        block_m=block_m,
+    )
+    on_out, _lse, off_out = _run_lse_and_off(on_spec, q, k, v, scale)
+    assert torch.equal(off_out, on_out), f"{label}: emit_lse changed the O output"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("persistent", [False, True], ids=["default", "persistent"])
+def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes(persistent):
+    """One runtime-shape binary serves shapes with and without keyless rows, at batch 1
+    and 2, on both grids. The row predicate reads the runtime seqlen_kv, so a shape with
+    keyless rows must not change what a keyed shape writes (or the reverse) through the
+    same launcher."""
+    import torch
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    dtype, d, hq, hkv, window = "bf16", 128, 16, 4, 128
+    tol = _tolerance(dtype)
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    base = _as_gfx942_spec(
+        _spec(dtype, d, hq, hkv, persistent, sq=1024, sliding_window=window)
+    )
+    # (batch, sq, sk): keyed, keyless, keyless at batch 2, keyless with a longer KV,
+    # keyed again.
+    shapes = (
+        (1, 1024, 1024),
+        (1, 1024, 256),
+        (2, 512, 256),
+        (2, 2048, 512),
+        (1, 1024, 1024),
+    )
+    specs = [
+        dataclasses.replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+        for b, sq, sk in shapes
+    ]
+    assert all(s.runtime_shape for s in specs), "a window config left the runtime path"
+    keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
+    assert len(keys) == 1, f"shapes {shapes} did not share a cache key"
+
+    launchers = []
+    for (b, sq, sk), spec in zip(shapes, specs):
+        torch.manual_seed(0)
+        q = torch.randn(b, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(b, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(b, sk, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty_like(q)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        label = f"B{b} sq{sq} sk{sk}"
+        ref, _ = _lse_reference(q, k, v, scale, causal=True, window=window)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+        first_keyless = sk + window - 1
+        if first_keyless < sq:
+            tail = out[:, first_keyless:]
+            assert torch.count_nonzero(tail).item() == 0, f"{label}: keyless rows != 0"
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(
+        lch is launchers[0] for lch in launchers
+    ), "shapes did not share a binary"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sliding_window,scale", _SWA_SINK_COHORT
+)
+def test_dense_swa_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, sliding_window, scale, sink_magnitude
+):
+    """SWA-sink numeric parity: the window prune and the sink seed together, on the
+    same rows as the standalone SWA cohort. Always causal (SWA requires it)."""
+    _check_sinks(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        True,
+        sliding_window,
+        sink_magnitude,
+        scale=scale,
     )
 
 
@@ -630,23 +1248,57 @@ _PERSIST_CONFIGS = (
     (2, 1024, 15, 5),
 )
 
-# (dtype, persist_decode, interleave, sliding_window). Both decode orders pinned
-# explicitly: "auto" resolves per shape, which would split the set across two keys.
-# interleave only changes the qb_major body, so it rides that order alone.
+# hq_minor_swz needs Hq divisible by the XCD count and an even NQB under causal
+# masking, so it gets its own set, straddling NP the same way:
+#   W=80 < NP; W=320 and W=608 (pair fold, even NQB); MHA W=384; W=1536, W % NP = 16
+_SWZ_CONFIGS = (
+    (1, 512, 40, 8),
+    (2, 1024, 40, 8),
+    (2, 1536, 32, 32),
+    (19, 512, 16, 4),
+    (3, 2048, 64, 8),
+)
+
+# (dtype, persist_decode, interleave, sliding_window, configs). Every decode order
+# pinned explicitly: "auto" resolves per shape, which would split the set across
+# keys. interleave only changes the qb_major body, so it rides that order alone. A
+# window of 1024 is at least as long as the keys for some configs and shorter for
+# others, so one binary balances causal work for some launches and not for others.
 _PERSIST_ONE_BINARY = [
-    pytest.param("fp16", "hkv_major", False, 0, id="hkv_major"),
-    pytest.param("fp16", "qb_major", False, 0, id="qb_major"),
-    pytest.param("fp16", "qb_major", True, 0, id="qb_major-interleave"),
-    pytest.param("bf16", "hkv_major", False, 128, id="hkv_major-swa128"),
-    pytest.param("bf16", "qb_major", False, 128, id="qb_major-swa128"),
+    pytest.param("fp16", "hkv_major", False, 0, _PERSIST_CONFIGS, id="hkv_major"),
+    pytest.param("fp16", "qb_major", False, 0, _PERSIST_CONFIGS, id="qb_major"),
+    pytest.param(
+        "fp16", "qb_major", True, 0, _PERSIST_CONFIGS, id="qb_major-interleave"
+    ),
+    pytest.param("fp16", "bt_hkv_minor", False, 0, _PERSIST_CONFIGS, id="bt_hkv_minor"),
+    pytest.param("fp16", "hq_minor_swz", False, 0, _SWZ_CONFIGS, id="hq_minor_swz"),
+    pytest.param(
+        "bf16", "hkv_major", False, 128, _PERSIST_CONFIGS, id="hkv_major-swa128"
+    ),
+    pytest.param(
+        "bf16", "qb_major", False, 128, _PERSIST_CONFIGS, id="qb_major-swa128"
+    ),
+    *(
+        pytest.param(
+            "bf16",
+            name,
+            False,
+            1024,
+            _SWZ_CONFIGS if name == "hq_minor_swz" else _PERSIST_CONFIGS,
+            id=f"{name}-swa1024",
+        )
+        for name in ("qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz")
+    ),
 ]
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,persist_decode,interleave,window", _PERSIST_ONE_BINARY)
+@pytest.mark.parametrize(
+    "dtype,persist_decode,interleave,window,configs", _PERSIST_ONE_BINARY
+)
 def test_one_persistent_binary_serves_every_shape_and_head_config(
-    dtype, persist_decode, interleave, window
+    dtype, persist_decode, interleave, window, configs
 ):
     """The persistent-grid twin of the one-binary tests above.
 
@@ -687,8 +1339,11 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
                 )
             ),
             interleave=interleave,
+            # One query tile for every config: the default picks a 128-row tile
+            # for under-filled shapes, which is a different binary.
+            block_m=256,
         )
-        for b, s, hq, hkv in _PERSIST_CONFIGS
+        for b, s, hq, hkv in configs
     ]
 
     # Preconditions: persistent, on the runtime path, the pinned order, one key --
@@ -705,13 +1360,13 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
     keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
     assert (
         len(set(keys)) == 1
-    ), f"persistent configs {_PERSIST_CONFIGS} did not share a cache key"
+    ), f"persistent configs {configs} did not share a cache key"
 
     _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
     before = set(_DENSE_LAUNCHER_CACHE)
 
     launchers = []
-    for (B, S, hq, hkv), spec in zip(_PERSIST_CONFIGS, specs):
+    for (B, S, hq, hkv), spec in zip(configs, specs):
         torch.manual_seed(0)
         q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
         k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
@@ -748,7 +1403,7 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
         "longer keyed by attention_dense_cache_key and this test is blind"
     )
     assert all(lau is launchers[0] for lau in launchers), (
-        f"persistent configs {_PERSIST_CONFIGS} share a cache key but were served "
+        f"persistent configs {configs} share a cache key but were served "
         "by DIFFERENT launcher objects -- the persistent kernel recompiled per config"
     )
     assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
@@ -861,12 +1516,14 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _lse_reference(q, k, v, scale, *, causal, window=0):
+def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
-    Scores use FP32 Q/K with the softmax scale applied in FP32.
+    Scores use FP32 Q/K with the softmax scale applied in FP32. ``sinks`` adds one
+    logit per query head with no value row, so a row with no key has the sink as
+    its LSE.
     """
-    sq, hq = q.shape[1:3]
+    batch, sq, hq = q.shape[:3]
     skv, hkv = k.shape[1:3]
     qh = q.transpose(1, 2).float()
     kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
@@ -880,12 +1537,15 @@ def _lse_reference(q, k, v, scale, *, causal, window=0):
     if window:
         allowed &= ki > qi - window
     scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
+    if sinks is not None:
+        sink_scores = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+        scores = torch.cat((scores, sink_scores), dim=-1)
     lse = torch.logsumexp(scores, dim=-1)
     has_mass = torch.isfinite(lse)
     safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
     probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
     probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
-    out = torch.matmul(probabilities, vh).transpose(1, 2)
+    out = torch.matmul(probabilities[..., :skv], vh).transpose(1, 2)
     return out, lse.unsqueeze(-1)
 
 
@@ -953,13 +1613,231 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
     )
 
 
+# Persistent grid size for independent CFVST, KDB and VPF tests. At the shipped
+# NP (304) every
+# shape below has fewer work items than workgroups, so no workgroup ever runs a
+# second item and the LDS hand-off between items (the next item's prologue writing
+# K slot 0 and V_lds after the previous item's epilogue) is never exercised.
+_MULTI_ITEM_NP = 3
+
+
+def _multi_item_persistent(spec):
+    """``spec`` on a small persistent grid: more than two work items per workgroup
+    and a ragged last round, the same preconditions as
+    ``test_one_persistent_binary_serves_every_shape_and_head_config``."""
+    spec = dataclasses.replace(spec, num_persistent=_MULTI_ITEM_NP)
+    work = (spec.seqlen_q // spec.block_m) * spec.num_query_heads * spec.batch
+    assert work > 2 * spec.num_persistent, (work, spec.num_persistent)
+    assert work % spec.num_persistent, (work, spec.num_persistent)
+    return spec
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("persistent", [False, True])
+@pytest.mark.parametrize(
+    "sq,skv",
+    [
+        (256, 64),  # n_up=1: zero-trip pipeline main loop
+        (256, 192),  # n_up=3: the loop runs, then the last tile is in K slot 0
+        (512, 512),  # Multiple KV tiles (even n_up: last tile in K slot 1)
+    ],
+)
+def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
+    import torch
+
+    B, Hq, Hkv, D = 1, 16, 4, 128
+    tol = 1e-2 if dtype == "bf16" else 2e-3
+    dt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(D)
+
+    torch.manual_seed(42)
+
+    q = torch.randn(B, sq, Hq, D, device="cuda", dtype=dt)
+    k = torch.randn(B, skv, Hkv, D, device="cuda", dtype=dt)
+    v = torch.randn_like(k)
+
+    # Explicit global causal mask, including non-square Sq/Skv.
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    mask = ki <= qi
+
+    ref = _sdpa_reference(
+        q,
+        k,
+        v,
+        scale,
+        causal=False,
+        attn_mask=mask,
+    )
+
+    base = _as_gfx942_spec(_spec(dtype, D, Hq, Hkv, persistent, batch=B, sq=sq))
+
+    # BF16 CFVST alone can run on either grid; KDB/VPF require persistent.
+    if dtype == "bf16":
+        variants = [
+            {"use_cfvst": False, "lds_num_buffers": 1, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": False},
+        ]
+        if persistent:
+            variants.extend(
+                [
+                    {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": False},
+                    {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": True},
+                    {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True},
+                ]
+            )
+    else:
+        variants = [{}]  # Preserve the existing FP16 path.
+
+    for knobs in variants:
+        spec = dataclasses.replace(base, seqlen_kv=skv, **knobs)
+        if persistent:
+            spec = _multi_item_persistent(spec)
+
+        out = torch.full_like(q, float("nan"))
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+
+        assert torch.isfinite(out).all(), (
+            f"Non-finite output: {dtype}, {knobs}, "
+            f"persistent={persistent}, Sq={sq}, Skv={skv}"
+        )
+
+        torch.testing.assert_close(
+            out.float(),
+            ref,
+            atol=tol,
+            rtol=tol,
+        )
+
+
+# Representative BF16 D128 CFVST numeric tests covering tile, scheduling,
+# output-store, and persistent-grid configurations with independently enabled
+# K double buffering and V register prefetch. Not an exhaustive sweep.
+# Each row is (id, (Hq, Hkv), Skv, persistent, knobs).
+_CFVST_KNOB_ROWS = [
+    ("bn32", (16, 4), 512, False, {"block_n": 32}),
+    ("bm128", (16, 4), 512, False, {"block_m": 128}),
+    # block_m=64 -> n_up = 1..8 across query blocks, so odd n_up > 1 is covered.
+    ("bm64", (16, 4), 512, False, {"block_m": 64}),
+    ("iglp0", (16, 4), 512, False, {"iglp": True}),
+    ("iglp1", (16, 4), 512, False, {"iglp": True, "iglp_mode": 1}),
+    ("kmajor", (16, 4), 512, False, {"pv_loop_order": "k_major"}),
+    ("ostore1", (16, 4), 512, False, {"o_store_width": 1}),
+    ("ostore2", (16, 4), 512, False, {"o_store_width": 2}),
+    ("pvprio", (16, 4), 512, False, {"pv_priority": 1}),
+    ("pvfence", (16, 4), 512, False, {"pv_sched_fence_mask": 0}),
+    ("persist_intl", (16, 4), 512, True, {"interleave": True}),
+    ("persist_qbmaj", (16, 4), 512, True, {"persist_decode": "qb_major"}),
+    ("persist_hkvmaj", (16, 4), 512, True, {"persist_decode": "hkv_major"}),
+    ("skv_gt_sq", (16, 4), 1024, False, {}),
+    ("mha", (16, 16), 512, False, {}),
+    ("gqa8", (32, 4), 512, False, {}),
+]
+
+
+# KDB/VPF require BOTH persistent=True and block_n=64. Keep the CFVST-only
+# coverage on either grid; never generate an illegal positive pipeline test.
+_CFVST_PIPELINE_MODES = (
+    (1, False, "cfvst_only"),
+    (2, False, "kdb_only"),
+    (1, True, "vpf_only"),
+    (2, True, "kdb_vpf"),
+)
+_CFVST_KNOB_CASES = [
+    pytest.param(*row[1:], nbuf, vpf, id=f"{row[0]}-{mode}")
+    for row in _CFVST_KNOB_ROWS
+    for nbuf, vpf, mode in _CFVST_PIPELINE_MODES
+    if (nbuf == 1 and not vpf) or (row[3] and row[4].get("block_n", 64) == 64)
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "heads,skv,persistent,knobs,lds_num_buffers,v_reg_prefetch",
+    _CFVST_KNOB_CASES,
+)
+def test_cfvst_knob_matrix_numeric(
+    heads, skv, persistent, knobs, lds_num_buffers, v_reg_prefetch
+):
+    import torch
+
+    hq, hkv = heads
+    sq, d = 512, 128
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(5)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, skv, hkv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn_like(k)
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    ref = _sdpa_reference(q, k, v, scale, causal=False, attn_mask=ki <= qi)
+
+    base = _as_gfx942_spec(_spec("bf16", d, hq, hkv, persistent, batch=1, sq=sq))
+    spec = dataclasses.replace(
+        base,
+        seqlen_kv=skv,
+        use_cfvst=True,
+        lds_num_buffers=lds_num_buffers,
+        v_reg_prefetch=v_reg_prefetch,
+        **knobs,
+    )
+    if persistent:
+        spec = _multi_item_persistent(spec)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, f"gate no longer accepts a row it used to open: {why}"
+    out = torch.full_like(q, float("nan"))
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=1e-2,
+        rtol=1e-2,
+    )
+    # KDB and VPF are performance-only changes. Compare their outputs
+    # against the same CFVST kernel with both optimizations disabled.
+    if lds_num_buffers == 2 or v_reg_prefetch:
+        baseline_spec = dataclasses.replace(
+            spec,
+            lds_num_buffers=1,
+            v_reg_prefetch=False,
+        )
+
+        baseline_out = torch.full_like(q, float("nan"))
+
+        run_attention_dense_torch(
+            spec=baseline_spec,
+            q=q,
+            k=k,
+            v=v,
+            out=baseline_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+
+        assert torch.equal(
+            out.view(torch.int16),
+            baseline_out.view(torch.int16),
+        ), (
+            f"KDB/VPF changed BF16 output bits: "
+            f"{knobs}, nbuf={lds_num_buffers}, "
+            f"vpf={v_reg_prefetch}"
+        )
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 class TestDenseLseNumericGfx942:
     """Direct-runner LSE coverage on gfx942; no dispatcher or hipDNN feature implied.
 
     Every random-input row also requires O to be bitwise identical to the LSE-off
-    kernel: those rows have no keyless query, so LSE must not perturb O.
+    kernel: LSE must not perturb O, keyless rows included (test_narrow_o_store runs
+    that comparison on a keyless shape).
     """
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -982,6 +1860,56 @@ class TestDenseLseNumericGfx942:
         ref, lse_ref = _lse_reference(q, k, v, scale, causal=causal)
         assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
         assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize(
+        "sq,skv", [(256, 64), (512, 512)], ids=["zero_trip", "multi_tile"]
+    )
+    @pytest.mark.parametrize(
+        "persistent,lds_num_buffers,v_reg_prefetch",
+        [
+            (False, 1, False),
+            (True, 1, False),
+            (True, 2, False),
+            (True, 1, True),
+            (True, 2, True),
+        ],
+        ids=[
+            "ordinary_cfvst",
+            "persistent_cfvst",
+            "persistent_kdb",
+            "persistent_vpf",
+            "persistent_kdb_vpf",
+        ],
+    )
+    def test_cfvst_pipeline_lse_modes(
+        self, persistent, sq, skv, lds_num_buffers, v_reg_prefetch
+    ):
+        """LSE uses the final tile's row max in all independent pipeline modes.
+
+        A stale max shifts LSE by (m_new - m_old) * ln2; at n_up=1
+        (zero_trip) the pipeline loop does not run at all. Both grids are
+        exercised, including the persistent multi-work-item handoff.
+        """
+        spec = dataclasses.replace(
+            _lse_spec("bf16", 128, 8, 2, persistent, batch=1, sq=512),
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            use_cfvst=True,
+            lds_num_buffers=lds_num_buffers,
+            v_reg_prefetch=v_reg_prefetch,
+        )
+        if persistent:
+            spec = _multi_item_persistent(spec)
+        scale = 1.0 / math.sqrt(128)
+        torch.manual_seed(7)
+        q = torch.randn(1, sq, 8, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 2, 128, device=q.device, dtype=torch.bfloat16)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert (lse - lse_ref).abs().max().item() < 1e-3
         assert torch.equal(out, off_out)
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -1008,53 +1936,73 @@ class TestDenseLseNumericGfx942:
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
     def test_narrow_o_store(self, width, persistent):
-        """BF16 store widths 1/2: keyless rows are zero, keyed rows match LSE-off."""
+        """BF16 store widths 1/2: keyless rows are zero, keyed rows match the
+        reference, and O is bitwise the LSE-off kernel's at the same width on the
+        same keyless shape."""
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
-        spec = dataclasses.replace(
-            tuning_spec_with_knobs(
-                AttentionRequest(
-                    batch=1,
-                    nhead_q=4,
-                    nhead_k=1,
-                    seqlen_q=256,
-                    seqlen_k=64,
-                    hdim_q=128,
-                    hdim_v=128,
-                    arch="gfx942",
-                    mask_type=1,
-                    dtype="bf16",
-                    sliding_window=64,
-                ),
-                "gfx942_dense",
-                {"persistent": bool(persistent), "o_store_width": width},
-            ).kernel_spec,
-            emit_lse=True,
-        )
+        def lse_spec(seqlen_k):
+            return dataclasses.replace(
+                tuning_spec_with_knobs(
+                    AttentionRequest(
+                        batch=1,
+                        nhead_q=4,
+                        nhead_k=1,
+                        seqlen_q=256,
+                        seqlen_k=seqlen_k,
+                        hdim_q=128,
+                        hdim_v=128,
+                        arch="gfx942",
+                        mask_type=1,
+                        dtype="bf16",
+                        sliding_window=64,
+                        emit_lse=True,
+                    ),
+                    "gfx942_dense",
+                    {"persistent": bool(persistent), "o_store_width": width},
+                ).kernel_spec,
+                emit_lse=True,
+            )
+
+        spec = lse_spec(64)
         assert spec.o_store_width == width
         scale = 0.5
         torch.manual_seed(17)
         q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
         k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
         v = torch.randn_like(k)
-        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        out = torch.empty_like(q)
+        lse = torch.full((1, 4, 256, 1), float("nan"), device=q.device)
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+        )
+        torch.cuda.synchronize()
         ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
         # Rows 0..126 see at least one key; rows 127.. see none.
         assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
             "bf16"
         )
-        assert torch.equal(out[:, :127], off_out[:, :127])
         assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
         finite = torch.isfinite(lse_ref)
         assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
         assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
 
+        # LSE off on the same keyless shape: the width-1/2 store must write O exactly
+        # as the LSE-on kernel does, keyless rows included.
+        on_out, _, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        assert torch.equal(on_out, out)
+        assert torch.equal(off_out, out)
+
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize(
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
-    def test_empty_window_rows(self, dtype, persistent):
-        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE)."""
+    @pytest.mark.parametrize("with_sink", [False, True], ids=["no-sink", "sink"])
+    def test_empty_window_rows(self, dtype, persistent, with_sink):
+        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE).
+
+        With sinks a row with no key has the sink as its only mass, so its LSE is
+        the sink logit rather than -inf."""
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
         spec = dataclasses.replace(
@@ -1071,6 +2019,8 @@ class TestDenseLseNumericGfx942:
                     mask_type=1,
                     dtype=dtype,
                     sliding_window=64,
+                    use_sinks=with_sink,
+                    emit_lse=True,
                 ),
                 "gfx942_dense",
                 {"persistent": bool(persistent)},
@@ -1085,7 +2035,14 @@ class TestDenseLseNumericGfx942:
         lse = torch.full(
             (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
         )
-        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5)
+        sinks = (
+            torch.tensor([-2.0, 0.0, 1.0, 2.0], device=q.device, dtype=tdt)
+            if with_sink
+            else None
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5, sinks=sinks
+        )
         torch.cuda.synchronize()
         rows = torch.arange(256, device=q.device)
         counts = (
@@ -1099,15 +2056,22 @@ class TestDenseLseNumericGfx942:
         assert counts[63].item() == 64
         assert counts[126].item() == 1
         assert counts[127].item() == 0
-        analytic_lse = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1).log()
-        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64)
+        mass = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1)
+        if with_sink:
+            mass = mass + sinks.float().exp().view(1, 4, 1, 1)
+        analytic_lse = mass.log()
+        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64, sinks=sinks)
         finite = torch.isfinite(analytic_lse)
         assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
         assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
         assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
         assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
         assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
-        assert torch.isneginf(lse[:, :, 127:]).all().item()
+        if with_sink:
+            expected = sinks.float().view(1, 4, 1, 1).expand(1, 4, 129, 1)
+            assert (lse[:, :, 127:] - expected).abs().max().item() < 1e-5
+        else:
+            assert torch.isneginf(lse[:, :, 127:]).all().item()
 
     @pytest.mark.parametrize(
         "failure",
@@ -1283,6 +2247,196 @@ class TestDenseLseNumericGfx942:
                 _DENSE_LAUNCHER_CACHE.pop(key, None)
                 if entry is not None:
                     _DENSE_LAUNCHER_CACHE[key] = entry
+
+
+# All following cases are within the BF16 D128 causal BN64 persistent gate.
+# Unlike the unsplit pipeline, diagonal split has TWO processing loops; K/V
+# publication and the running softmax state cross that loop boundary.
+@pytest.mark.parametrize(
+    "lds_num_buffers,v_reg_prefetch,lds_row_pad",
+    [
+        (1, False, 8),  # CFVST alone: no pipeline, split loops only.
+        (2, False, 8),
+        (1, True, 8),
+        (2, True, 8),
+        (2, True, 4),  # Measured full optimization (pad4 + dsplit).
+    ],
+    ids=["cfvst_only", "kdb", "vpf", "kdb_vpf", "winner_pad4"],
+)
+@pytest.mark.parametrize(
+    "sq,skv",
+    [(256, 64), (512, 192), (512, 512)],
+    ids=["single_tile", "odd_k_tiles", "split_loop_boundary"],
+)
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_cfvst_pipeline_diag_split_numeric(
+    sq, skv, lds_num_buffers, v_reg_prefetch, lds_row_pad
+):
+    """Validate CFVST alone, each pipeline and the pad4/dsplit winner on GPU.
+
+    NP=3 forces work-item LDS reuse and a ragged grid; the same Q/K/V inputs
+    exercise split and unsplit code paths against a true FP32 causal oracle.
+    """
+    hq, hkv, d = 16, 4, 128
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(47)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, skv, hkv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn_like(k)
+    qi = torch.arange(sq, device="cuda")[:, None]
+    ki = torch.arange(skv, device="cuda")[None, :]
+    ref = _sdpa_reference(q, k, v, scale, causal=False, attn_mask=ki <= qi)
+
+    base = _as_gfx942_spec(_spec("bf16", d, hq, hkv, True, sq=sq))
+    split = _multi_item_persistent(
+        dataclasses.replace(
+            base,
+            seqlen_kv=skv,
+            use_cfvst=True,
+            lds_num_buffers=lds_num_buffers,
+            v_reg_prefetch=v_reg_prefetch,
+            lds_row_pad=lds_row_pad,
+            causal_diag_split=True,
+        )
+    )
+    ok, why = supports_attention_dense(split, arch="gfx942")
+    assert ok, why
+    unsplit = dataclasses.replace(split, causal_diag_split=False)
+    out = torch.full_like(q, float("nan"))
+    control = torch.full_like(q, float("nan"))
+    for spec, output in ((split, out), (unsplit, control)):
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=output, scale=scale)
+    torch.cuda.synchronize()
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out.float(), ref, atol=1e-2, rtol=1e-2)
+    torch.testing.assert_close(control.float(), ref, atol=1e-2, rtol=1e-2)
+    assert torch.equal(out.view(torch.int16), control.view(torch.int16)), (
+        "causal_diag_split changed BF16 output bits in the pipeline: "
+        f"Sq={sq} Skv={skv} KDB={lds_num_buffers == 2} "
+        f"VPF={v_reg_prefetch} pad={lds_row_pad}"
+    )
+
+
+@pytest.mark.parametrize("sq,skv", [(256, 64), (512, 192), (512, 512)])
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_cfvst_pipeline_pad4_dsplit_lse_numeric(sq, skv):
+    """The full split pipeline must compute LSE from the FINAL tile's row max."""
+    hq, hkv, d = 16, 4, 128
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(53)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, skv, hkv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn_like(k)
+    spec = _multi_item_persistent(
+        dataclasses.replace(
+            _lse_spec("bf16", d, hq, hkv, True, sq=sq),
+            seqlen_kv=skv,
+            use_cfvst=True,
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+            lds_row_pad=4,
+            causal_diag_split=True,
+        )
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+    ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+    torch.testing.assert_close(out.float(), ref, atol=1e-2, rtol=1e-2)
+    torch.testing.assert_close(lse, lse_ref, atol=1e-3, rtol=1e-3)
+    assert torch.equal(out, off_out)
+
+
+@pytest.mark.parametrize("block_m", [64, 512])
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_cfvst_pipeline_extreme_legal_block_m_numeric(block_m):
+    """Keep the BN64 pipeline valid at both ends of the implemented BM tuning axis."""
+    hq, hkv, d, sq = 16, 4, 128, 512
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(59)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, sq, hkv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn_like(k)
+    spec = _multi_item_persistent(
+        dataclasses.replace(
+            _as_gfx942_spec(_spec("bf16", d, hq, hkv, True, sq=sq)),
+            block_m=block_m,
+            use_cfvst=True,
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+        )
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    out = torch.full_like(q, float("nan"))
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(
+        out.float(), _sdpa_reference(q, k, v, scale), atol=1e-2, rtol=1e-2
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_cfvst_kdb_vpf_pipeline_reuses_runtime_shape_binary():
+    """Same combined pipeline launcher, different B/S/Hq/Hkv and distinct inputs."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    shape_rows = [(1, 512, 16, 4), (2, 1024, 32, 8)]
+    specs = []
+    for batch, sq, hq, hkv in shape_rows:
+        base = _as_gfx942_spec(
+            _spec(
+                "bf16",
+                128,
+                hq,
+                hkv,
+                True,
+                batch=batch,
+                sq=sq,
+                persist_decode="qb_major",
+            )
+        )
+        spec = dataclasses.replace(
+            base,
+            num_persistent=3,
+            use_cfvst=True,
+            lds_num_buffers=2,
+            v_reg_prefetch=True,
+        )
+        assert supports_attention_dense(spec, arch="gfx942")[0]
+        assert spec.runtime_shape
+        specs.append(spec)
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert keys[0] == keys[1], "same runtime-shape kernel must have one cache key"
+    old_entry = _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    try:
+        launchers = []
+        for i, spec in enumerate(specs):
+            torch.manual_seed(61 + i)
+            shape = (spec.batch, spec.seqlen_q, spec.num_query_heads, 128)
+            kv_shape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, 128)
+            q = torch.randn(shape, device="cuda", dtype=torch.bfloat16)
+            k = torch.randn(kv_shape, device="cuda", dtype=torch.bfloat16)
+            v = torch.randn_like(k)
+            out = torch.full_like(q, float("nan"))
+            scale = 1.0 / math.sqrt(128)
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            torch.cuda.synchronize()
+            torch.testing.assert_close(
+                out.float(), _sdpa_reference(q, k, v, scale), atol=1e-2, rtol=1e-2
+            )
+            launchers.append(_launcher_for(spec))
+        assert launchers[0] is not None
+        assert launchers[0] is launchers[1], "pipeline recompiled across runtime shapes"
+    finally:
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        if old_entry is not None:
+            _DENSE_LAUNCHER_CACHE[keys[0]] = old_entry
 
 
 if __name__ == "__main__":

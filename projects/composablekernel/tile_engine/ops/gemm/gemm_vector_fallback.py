@@ -21,6 +21,7 @@ from codegen_common import (
     CommonTypeMappings,
     VECTOR_SIZE_VARIANTS,
     gemm_contiguous_dims,
+    gemm_pipeline_skips_launch_checks,
     gemm_problem_vector_sizes,
     gemm_tile_divides_problem,
     gemm_vector_size_sweep,
@@ -58,7 +59,15 @@ def _base_key(cfg):
 
 
 def _tile_fits(cfg, dims):
-    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple."""
+    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple.
+
+    Pipelines that skip the kernel's launch checks (TDM) clip their A/B loads and fit any
+    shape. So does C under the TDM epilogue; the CShuffle epilogue (Stream-K, row-major C
+    only) stores C through a view that does not clip N, so N must still be a tile multiple
+    (the hosting kernel's IsSupportedArgument).
+    """
+    if gemm_pipeline_skips_launch_checks(cfg.pipeline):
+        return cfg.epilogue == "tdm" or dims["n"] % cfg.tile_n == 0
     return gemm_tile_divides_problem(
         m=dims["m"],
         n=dims["n"],

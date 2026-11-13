@@ -4,9 +4,9 @@
 """
 Library module.
 
-This module provides tools to manage and manipulate Tensile solution libraries including
+This module provides tools to manage and manipulate TensileLite solution libraries including
 loading, merging, and creating optimized GEMM solution libraries. It handles YAML
-manipulation, solution library operations, and integration with the Tensile framework.
+manipulation, solution library operations, and integration with the TensileLite framework.
 
 The library module enables the final step of the optimization workflow by merging
 individual optimized solutions into hipBLASLt libraries.

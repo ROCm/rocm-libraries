@@ -129,6 +129,9 @@ struct HarnessMocks
         deps.claimObserver = nonOwning<ISupportClaimObserver>(claimObserver);
         deps.reporter = nonOwning<IVerificationReporter>(reporter);
         deps.policy = std::move(policy);
+        // Never synchronizes, so the suites that turn on --benchmark-reference need no
+        // device; a suite that wants the real synchronize installs it itself.
+        deps.referenceTimer = ReferenceBenchmarkTimer();
         return deps;
     }
 };
@@ -190,13 +193,22 @@ inline void captureReferenceErrors(::testing::NiceMock<MockVerificationReporter>
             [&out](const std::string&, const std::string& reason) { out.push_back(reason); });
 }
 
-/// Collects the verifier the harness reports for each test body.
+/// Collects the verifier the harness reports for each test body, and, when asked, the
+/// detail (an expected rejection's stage) printed with it.
 inline void captureVerifiers(::testing::NiceMock<MockVerificationReporter>& reporter,
-                             std::vector<Verifier>& out)
+                             std::vector<Verifier>& out,
+                             std::vector<std::string>* details = nullptr)
 {
     using ::testing::_;
-    ON_CALL(reporter, recordVerifier(_, _))
-        .WillByDefault([&out](const std::string&, Verifier verifier) { out.push_back(verifier); });
+    ON_CALL(reporter, recordVerifier(_, _, _))
+        .WillByDefault(
+            [&out, details](const std::string&, Verifier verifier, const std::string& detail) {
+                out.push_back(verifier);
+                if(details != nullptr)
+                {
+                    details->push_back(detail);
+                }
+            });
 }
 
 inline bool anyFailed(const ::testing::TestPartResultArray& results)

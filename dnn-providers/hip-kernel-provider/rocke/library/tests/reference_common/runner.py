@@ -25,6 +25,7 @@ def run_worker(
     library: Path | None,
     work: Path,
     module: str,
+    timeout: float = 300,
 ) -> tuple[list[np.ndarray], dict]:
     work.mkdir(parents=True, exist_ok=False)
     request = dict(request, platform_root=str(platform.resolve()))
@@ -45,7 +46,13 @@ def run_worker(
     )
     session = _ACTIVE.get()
     if session is not None:
-        session.execute(request["mode"], work / "request.json", env, module=module)
+        session.execute(
+            request["mode"],
+            work / "request.json",
+            env,
+            module=module,
+            timeout=timeout,
+        )
     else:
         completed = subprocess.run(
             [
@@ -60,21 +67,27 @@ def run_worker(
                 str(work),
             ],
             cwd=work,
+            check=False,
             env=env,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=timeout,
         )
         if completed.returncode:
             raise RuntimeError(
-                f"GPU reference {request['mode']} worker failed:\n"
+                f"GPU reference {request['mode']} worker failed with exit code "
+                f"{completed.returncode}:\n"
                 f"{completed.stdout[-4000:]}{completed.stderr[-12000:]}"
             )
     report = json.loads((work / "report.json").read_text())
     if report.get("torch_imported"):
-        raise RuntimeError("GPU reference worker imported Torch")
+        raise RuntimeError(f"GPU reference {request['mode']} worker imported Torch")
     if report["launches"] != request["repetitions"]:
-        raise RuntimeError("required GPU reference launches did not execute")
+        raise RuntimeError(
+            f"required GPU reference launches did not execute: the {request['mode']} "
+            f"worker reported {report['launches']} launches for "
+            f"{request['repetitions']} repetitions, one kernel launch each"
+        )
     with np.load(work / "outputs.npz", allow_pickle=False) as archive:
         outputs = [archive[f"out_{i}"] for i in range(request["repetitions"])]
     return outputs, report

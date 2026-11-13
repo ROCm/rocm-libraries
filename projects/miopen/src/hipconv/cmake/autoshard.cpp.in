@@ -2,8 +2,43 @@
 
 // clang-format off
 #include "@ARG_CONFIG_TABLE@"
+#include "@ARG_MATCHER_HPP@"
 // clang-format on
 #include "libautoshard.hpp"
+#include <concepts>
+#include <string>
+
+// clang-format off
+namespace hipconv::@ARG_ARCH@::@ARG_NAMESPACE@ {
+    // We expect that in ARG_MATCHER_HPP either the class ConfigMatcher is defined
+    // or the function config_fields. ConfigMatcher, if defined, gets the preference.
+    class ConfigMatcher;
+    hipconv::KVDescriptor config_fields(const Config& cfg);
+}
+using namespace hipconv::@ARG_ARCH@::@ARG_NAMESPACE@;
+// clang-format on
+
+template <typename T>
+concept is_complete = requires(T t)
+{
+    {
+        t.describe(true)
+    } -> std::same_as<std::string>;
+};
+
+template <typename T>
+struct please
+{
+    static auto describe(const auto& cfg) -> std::string
+    {
+        return config_fields(cfg).describe(true);
+    }
+};
+template <is_complete T>
+struct please<T>
+{
+    static auto describe(const auto& cfg) -> std::string { return T(cfg).describe(true); }
+};
 
 int main(int argc, char** argv)
 {
@@ -17,10 +52,12 @@ int main(int argc, char** argv)
     char const* kernel_class        = "@ARG_KERNEL_CLASS@";
     char const* config_table_header = "@ARG_CONFIG_TABLE@";
     char const* kernel_header       = "@ARG_KERNEL@";
-    const int num_configs           = hipconv::@ARG_ARCH@::@ARG_NAMESPACE@::num_configs;
     const int num_shards            = @ARG_NUM_SHARDS@;
     // clang-format on
 
+    const auto describe_config = [](int i) -> std::string {
+        return please<ConfigMatcher>::describe(configs[i]);
+    };
     return make_autoshard(target_dir,
                           arch_name,
                           kernel_namespace,
@@ -28,5 +65,6 @@ int main(int argc, char** argv)
                           config_table_header,
                           kernel_header,
                           num_configs,
-                          num_shards);
+                          num_shards,
+                          describe_config);
 }

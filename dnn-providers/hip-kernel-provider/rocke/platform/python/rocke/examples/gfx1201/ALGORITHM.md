@@ -126,9 +126,13 @@ passes. The probe therefore uses **random, asymmetric** `A` and `B`:
 
 > With random asymmetric operands, `A · Bᵀ ≠ (A · Bᵀ)ᵀ` almost surely, so any
 > row/col swap in the lane map shows up as a large `max_abs_diff` against the
-> numpy reference `C = A @ B.T`. A **PASS at multiple tile counts**
-> (`16×16×16`, `64×64×64`) uniquely confirms the mapping — an identity×constant
-> input could not.
+> numpy reference `C = A @ B.T`. A **PASS at multiple tile counts, including a
+> non-square one** (`16×16×16`, `64×64×64`, `32×64×48`) uniquely confirms the
+> mapping — an identity×constant input could not.
+
+The non-square shape guards the launch, not the lane map: with `M = N` the M and
+N tile counts are equal, so a launch grid whose x/y order disagrees with the
+kernel's `block_id` mapping still covers every tile and passes.
 
 Because WMMA accumulates in f32 in a different order than numpy, the probe judges
 the result **within a tolerance** (`--tol`, default `1e-2`), not bit-exact — a
@@ -205,7 +209,7 @@ requires `K` a multiple of `tile_k`.
 
 ---
 
-## 5. Deep-fused conv + maxpool (`deep_fused_conv_pool_verify.py`)
+## 5. Deep-fused conv + maxpool (`library/builders/gfx1201/deep_fused_conv_pool_verify.py`)
 
 This is the **same fused dataflow as the gfx950 prototype**, re-targeted to the
 gfx12 WMMA atom on wave32. One kernel computes, with **no HBM round-trip for the
@@ -224,7 +228,7 @@ maxpooled inline and only the **pooled** result is written to HBM. Both convs
 run as **implicit GEMM** — the conv is reshaped into a matmul over the WMMA atom
 — so this kernel is a third consumer of the §2 fragment layout.
 
-The kernel *body* is the arch-parametric one in `instances/common`; the gfx1201
+The kernel *body* is the arch-parametric one in `library/kernels/common`; the gfx1201
 driver only pins the WMMA geometry (`warp_tile_m/n/k = atom.m/n/k`,
 `wave_size`) and reuses the **gfx950 harness's numpy reference and verify/bench
 helpers** verbatim, because those are spec-generic (they read only
@@ -279,4 +283,4 @@ verifies.
   `MatMulNBits` body and per-arch fragment branch. The `--opt` body is the
   separate `instances/common/_matmul_nbits_large_n_opt.py`; the scalar GEMV is
   `instances/common/_matmul_nbits_decode_gemv.py`.
-- `instances/gfx1201/deep_fused_conv_pool.py` — the gfx1201 conv-pool spec.
+- `library/kernels/gfx1201/deep_fused_conv_pool.py` — the gfx1201 conv-pool spec.

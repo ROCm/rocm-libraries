@@ -269,7 +269,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                       in_cstride,
                                       ylocalsize,
                                       zlocalsize,
-                                      nelements);
+                                      nelements,
+                                      vectorsize);
 
         // WG size for Final kernels (NHWC)
         if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
@@ -317,6 +318,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+            {"MIO_BN_GFX117X", (StartsWith(handle.GetDeviceName(), "gfx117") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
@@ -332,6 +334,10 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         build_params.Define("MIO_BN_NCHW", in_nchw);
 
         build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
+        if(MIOPEN_USE_RNE_BFLOAT16)
+        {
+            build_params.Define("MIOPEN_USE_RNE_BFLOAT16");
+        }
 
         kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cpp";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";

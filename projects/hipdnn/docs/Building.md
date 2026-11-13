@@ -304,7 +304,7 @@ cmake --preset release   # or: cmake --preset debug
 ```bash
 cmake --preset release -DHIPDNN_ENABLE_COVERAGE=ON
 cmake --build build/release --target coverage
-# Unit tests are run and coverage reports are generated in build/release/coverage-report/
+# All tests (`check`) are run and coverage reports are generated in build/release/coverage-report/
 ```
 
 ### Address Sanitizer Build
@@ -313,9 +313,9 @@ Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with A
 
 > [!IMPORTANT]
 > Standalone ASAN tests are run manually. CI automation differs:
-> - Pull-request ASAN jobs build host-ASAN binaries but do not run their tests.
+> - Pull-request ASAN jobs run only on a PR labelled `ci:asan` (full ASAN build) or `ci:host-asan` (host-ASAN build). They build but do not run tests.
 > - Manual workflow runs can run full ASAN tests when matching GPU runners are available.
-> - The nightly ASAN workflow runs automatically and executes tests where external runner settings provide a test node.
+> - A nightly workflow builds `develop` with device ASAN for gfx94X and gfx950. The team runs ASAN tests itself every week on gfx942.
 > - **Linux** standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
 > - **Windows** standalone ASAN instruments code built in this project, not installed ROCm libraries.
 
@@ -328,16 +328,12 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
+> Any tier can be run under an ASAN build; `standard` is a suggested local check. CI coverage: [Sanitizers and Static Analysis](./TESTING.md#sanitizers-and-static-analysis).
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
 A known error in an upstream library is handled differently: rather than excluding the test, the report is **suppressed** so the test still runs. `__asan_default_suppressions()` in `test_sdk/src/AsanDefaultSuppressions.cpp` returns the patterns and is compiled into each test executable, so it needs no suppressions file and survives relocation of an installed tree. The list is fixed at compile time — seeing the errors it hides needs an edit there and a rebuild, and a user-supplied `ASAN_OPTIONS` suppressions file adds to it rather than replacing it. When auditing which tests ASAN holds back, read that list as well as grepping for `SKIP_IF_ASAN()`.
 
-**Current status:**
-
-- **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
-- **Windows** - ASAN is supported and builds/runs, but a few issues remain that are expected to be resolved soon, so a fully clean ASAN run is not yet available on Windows.
 
 #### Windows notes
 
@@ -351,7 +347,7 @@ By default, hipDNN includes JSON serialization support via [nlohmann_json](https
 ```bash
 cmake --preset release -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON
 ```
-This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
+This disables JSON-based graph serialization and deserialization. Binary serialization remains available. It also leaves the engine-query helpers `hipdnn_frontend/EngineQueryTypes.hpp` and `hipdnn_frontend/detail/EngineQueries.hpp` empty. In builds that keep them, `detail/EngineQueries.hpp` decodes FlatBuffers pages, so its consumers link `hipdnn_flatbuffers_sdk` themselves.
 
 ### Kernel packing (rocm_kpack)
 
@@ -513,8 +509,8 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md)) |
-| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
+| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all hipDNN core tests; provider tests are not included (see [Testing](./TESTING.md)) |
+| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `ffm-quick`, `unit`, and `integration` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
 | `hipdnn-tidy` | Run clang-tidy on hipDNN sources |
@@ -527,11 +523,11 @@ The following coverage targets are standalone-oriented and require `-DHIPDNN_ENA
 
 | Target | Description |
 |--------|-------------|
-| `coverage` | Run the tests and generate test coverage reports |
+| `coverage` | Run all tests (alias of `code_coverage`, which depends on `check`) and generate test coverage reports |
 | `unit-coverage` / `integration-coverage` | Run the unit or integration tests and generate coverage reports |
 | `current-coverage` | Generate coverage reports from coverage data already on disk (does not re-run the tests) |
 
-To build a target, for example `hipdnn-check` to build and run all tests:
+To build a target, for example `hipdnn-check` to build and run the core tests:
 ```bash
 cmake --build build/release --target hipdnn-check
 ```
@@ -556,10 +552,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Test Tiers](./TESTING.md#test-tiers) for current category behavior.
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Test Tiers](./TESTING.md#test-tiers) for the available tiers.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 
@@ -627,11 +623,12 @@ endif()
 | Component | Directory | Key Target | External Dependencies |
 |-----------|-----------|------------|-----------------------|
 | hipdnn | `projects/hipdnn/` | `hipdnn_backend` | ROCm/HIP |
+| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
+| hipdnn-integration-tests | `dnn-providers/integration-tests/` | `hipdnn_integration_tests` | Provider plugins at test runtime |
 | miopen-provider | `dnn-providers/miopen-provider/` | `miopen_plugin` | MIOpen |
 | hipblaslt-provider | `dnn-providers/hipblaslt-provider/` | `hipblaslt_plugin` | hipBLASLt |
 | hip-kernel-provider | `dnn-providers/hip-kernel-provider/` | `hip_kernel_provider` | HIP, HIP-RTC |
 | hipdnn-samples | `projects/hipdnn/samples/` | `hipdnn_samples` | ROCm/HIP; provider plugins at runtime |
-| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
 
 The configure presets above select the components for you. To choose components directly instead, set `ROCM_LIBS_ENABLE_COMPONENTS`:
 
@@ -753,6 +750,8 @@ Abbreviated quotation:
 >New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
 >```
 
+Every hipDNN executable embeds a `longPathAware` application manifest. The manifest takes effect only when the `LongPathsEnabled` setting above is `1`. An application that loads hipDNN needs its own long-path-aware manifest; hipDNN's manifest does not cover the host process. When building with the GNU-style `clang++` driver (`lld-link`), the Windows SDK `bin` directory that holds `mt.exe` must be on `PATH` at configure time (see [step 8](#8-setup-environment-variables)); otherwise configuration fails.
+
 #### 4. Enable Windows 10 Symlinks
 
 The instructions below are summarized from web content [here](https://portal.perforce.com/s/article/3472), [here](https://stackoverflow.com/questions/5917249/git-symbolic-links-in-windows/59761201#59761201), and [here](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links).
@@ -847,11 +846,13 @@ On Windows the `bin` folder is typically added to `PATH` so the built executable
    set HIP_PLATFORM=amd
    ```
 
-* **Resource compiler for version metadata.** hipDNN embeds a Windows VERSIONINFO resource in the backend, so the built binaries carry version metadata. Both the standalone and superbuild toolchains locate the resource compiler the same way: they prefer `llvm-rc` from the ROCm LLVM toolchain (found automatically next to `clang++`), and fall back to the Windows SDK's `rc.exe` if it is on your `PATH`. To make `rc.exe` available as the fallback, add the Windows SDK `bin` to `PATH`, e.g.:
+* **Windows SDK `bin` on `PATH` (required with the GNU-style `clang++` driver).** hipDNN embeds a long-path-aware manifest in every executable, and `lld-link` merges it with the Windows SDK's `mt.exe`. Configuration fails if `mt.exe` is not on `PATH`. The SDK `bin` directory also provides `rc.exe`, the fallback resource compiler described below. Add it to `PATH`, e.g.:
    ```cmd
    set PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64;%PATH%
    ```
    (adjust the SDK version number to match your installed Windows Kit)
+
+* **Resource compiler for version metadata.** hipDNN embeds a Windows VERSIONINFO resource in the backend, so the built binaries carry version metadata. Both the standalone and superbuild toolchains locate the resource compiler the same way: they prefer `llvm-rc` from the ROCm LLVM toolchain (found automatically next to `clang++`), and fall back to the Windows SDK's `rc.exe` if it is on your `PATH`.
 
    If the toolchain does not locate a resource compiler correctly, point CMake at one explicitly with `-DCMAKE_RC_COMPILER=<path-to-llvm-rc-or-rc>`. This is honored by both toolchains and skips their auto-detection.
 

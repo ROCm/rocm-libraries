@@ -17,6 +17,14 @@ that is killed still leaves what it measured), and
 file. ``benchmark_conv_compare.py`` uses that to seed the implicit-GEMM sweep
 with the direct-conv results. Cases are matched by their normalized geometry,
 dtype and direction, so the two scripts' problem types meet on one key.
+
+What is reported and what is pruned are measured differently. The pruning
+probes (the first launch, the warmup) are back-to-back block launches, cheap
+and the same for every kernel. The reported time is measured with the sweep's
+``--timing`` (:data:`benchmarks.common.batched_timing.TIMINGS`): by default
+one stalled event pair per launch and the median, as hipDNN measures. A staged
+time carries a fixed per-call cost a block probe does not, so the bound a
+block probe is held to is, if anything, looser -- pruning stays safe.
 """
 
 from __future__ import annotations
@@ -30,6 +38,16 @@ DEFAULT_FACTOR = 5.0
 # Kernels timed in full before early stopping engages: until then the best
 # result is too young to judge the rest against.
 DEFAULT_AFTER = 100
+# A kernel whose first launch alone is this many times past the stop bound
+# (factor x best) is skipped without the rest of its warmup. Grids hold
+# kernels hundreds of times off the best -- the wrong tile for the shape --
+# and on them the warmup is most of the sweep's clock. The margin keeps a
+# cold first launch from ever stopping a kernel the full warmup would keep.
+HOPELESS_MARGIN = 4.0
+# ...and only when it is also this far past the bound in absolute terms. A
+# first launch carries host-side setup a warmed-up launch does not, which next
+# to a tiny bound could alone exceed the margin.
+HOPELESS_MIN_EXCESS_MS = 1.0
 
 
 def add_early_stop_arg(parser) -> None:
@@ -52,7 +70,9 @@ def add_early_stop_arg(parser) -> None:
         metavar="N",
         help="time the first N kernels of a sweep in full before --early-stop "
         f"starts skipping (default: {DEFAULT_AFTER}); a seeded case skips from "
-        "the first kernel",
+        "the first kernel. A kernel whose first launch is far past the "
+        "--early-stop bound, by both a relative and an absolute margin, is "
+        "skipped either way",
     )
     parser.add_argument(
         "--early-stop-seed",
@@ -120,8 +140,11 @@ class EarlyStop:
     :meth:`measure` replaces ``time_launches``: it times the ``warmup``
     launches first (they also serve as the warmup) and, when their average is
     more than ``factor`` times the best result so far, returns ``None`` without
-    running the timed loop. The first ``after`` kernels of a sweep are always
-    measured in full, so the best result is established before it is used.
+    running the timed loop. The first ``after`` kernels of a sweep are measured
+    in full, so the best result is established before it is used -- except a
+    kernel whose first launch is already ``HOPELESS_MARGIN`` times (and
+    ``HOPELESS_MIN_EXCESS_MS``) past that bound, which no later best can
+    rescue.
     A kernel measured with ``passed=False`` (it failed verification) neither
     counts towards ``after`` nor updates the best result or the record file.
     """
@@ -133,7 +156,13 @@ class EarlyStop:
         *,
         seed_ms: Optional[float] = None,
         record_key: Optional[str] = None,
+        timing: str = "block",
     ) -> None:
+        from benchmarks.common.batched_timing import TIMINGS
+
+        if timing not in TIMINGS:
+            raise ValueError(f"timing must be one of {TIMINGS}, got {timing!r}")
+        self.timing = timing
         self.factor = factor
         self.after = after
         self.n_measured = 0
@@ -143,7 +172,14 @@ class EarlyStop:
         self.best_ms: Optional[float] = seed_ms
         self.n_stopped = 0
         self.last_warmup_ms: Optional[float] = None
+        # Whether the last stop came from the first launch alone
+        # (HOPELESS_MARGIN past the bound) rather than the full warmup.
+        self.last_hopeless = False
         self.record_key = record_key
+        # Checked once, lazily, so a device without hipStreamWaitValue32 fails
+        # with one clear error instead of retrying the gate's construction (and
+        # printing nothing to say why) on every kernel of the case.
+        self._gate_checked = False
 
     @classmethod
     def for_case(cls, args, problem: object, dtype: str, direction: str) -> "EarlyStop":
@@ -155,6 +191,7 @@ class EarlyStop:
             args.early_stop_after,
             seed_ms=seeds.get(key),
             record_key=key if getattr(args, "early_stop_record", None) else None,
+            timing=getattr(args, "timing", "block"),
         )
 
     def measure(
@@ -168,22 +205,50 @@ class EarlyStop:
     ) -> Optional[float]:
         from rocke.runtime import time_launches
 
-        engaged = (
+        # The one-launch hopeless probe needs only some best result: the best
+        # so far can only overstate the true best, so a kernel past
+        # HOPELESS_MARGIN x factor x it can never rank. The full warmup
+        # comparison waits for ``after`` kernels (or a seed), as it is the
+        # one a young best could mislead.
+        # A kernel that failed verification is timed in full: it is reported,
+        # never ranked, so skipping it would only drop its FAIL row.
+        probing = (
             self.factor > 0
             and self.best_ms is not None
-            and (self.seed_ms is not None or self.n_measured >= self.after)
             and warmup > 0
+            and passed is not False
         )
+        engaged = probing and (
+            self.seed_ms is not None or self.n_measured >= self.after
+        )
+        self.last_hopeless = False
+        if probing:
+            bound = self.factor * self.best_ms
+            probe = time_launches(fn, warmup=0, iters=1, stream=stream)
+            if (
+                probe > HOPELESS_MARGIN * bound
+                and probe - bound > HOPELESS_MIN_EXCESS_MS
+            ):
+                self.last_warmup_ms = probe
+                self.last_hopeless = True
+                self.n_stopped += 1
+                return None
         if engaged:
-            warm = time_launches(fn, warmup=0, iters=warmup, stream=stream)
+            warm = probe
+            if warmup > 1:
+                rest = time_launches(fn, warmup=0, iters=warmup - 1, stream=stream)
+                warm = (probe + rest * (warmup - 1)) / warmup
             self.last_warmup_ms = warm
-            if warm > self.factor * self.best_ms:
+            if warm > bound:
                 self.n_stopped += 1
                 return None
             # The probe was the warmup; only the timed loop is left.
-            ms = time_launches(fn, warmup=0, iters=iters, stream=stream)
+            ms = self._timed(fn, warmup=0, iters=iters, stream=stream)
+        elif probing:
+            # The probe was the first warmup launch.
+            ms = self._timed(fn, warmup=warmup - 1, iters=iters, stream=stream)
         else:
-            ms = time_launches(fn, warmup=warmup, iters=iters, stream=stream)
+            ms = self._timed(fn, warmup=warmup, iters=iters, stream=stream)
         if passed is False:
             return ms
         self.n_measured += 1
@@ -193,12 +258,61 @@ class EarlyStop:
             _record(self.record_key, ms)
         return ms
 
+    def _timed(self, fn, *, warmup: int, iters: int, stream: int) -> float:
+        """The reported time of ``fn``, measured with :attr:`timing`."""
+        if self.timing == "staged":
+            from statistics import median
+
+            from rocke.runtime import time_launches_staged
+            from rocke.runtime.hip_module import HipError
+            from rocke.runtime.stall_gate import default_gate
+
+            if not self._gate_checked:
+                self._gate_checked = True
+                try:
+                    default_gate()
+                except HipError as e:
+                    raise HipError(
+                        f"{e}; this device cannot be timed with --timing "
+                        f"staged, rerun with --timing block"
+                    ) from e
+            return median(
+                time_launches_staged(fn, warmup=warmup, iters=iters, stream=stream)
+            )
+        from rocke.runtime import time_launches
+
+        return time_launches(fn, warmup=warmup, iters=iters, stream=stream)
+
+    def note(self, ms: float, *, passed: Optional[bool] = None) -> None:
+        """Record a time this object did not measure itself.
+
+        For a sweep that ranks its kernels another way (see
+        :mod:`benchmarks.common.batched_timing`) and so never calls
+        :meth:`measure`, but still has to leave ``--early-stop-record`` the
+        case's best time -- ``benchmark_conv_compare.py`` seeds the
+        implicit-GEMM sweep from that file. A kernel that failed verification
+        is ignored here for the same reason it is in :meth:`measure`: a
+        wrong-but-fast kernel would prune every correct one in the seeded run.
+        """
+        if passed is False:
+            return
+        self.n_measured += 1
+        if self.best_ms is None or ms < self.best_ms:
+            self.best_ms = ms
+        if self.record_key is not None:
+            _record(self.record_key, ms)
+
     def report(self, label: str) -> None:
         """Print the line for a kernel :meth:`measure` just skipped."""
         seeded = " (seed)" if self.best_ms == self.seed_ms else ""
+        if self.last_hopeless:
+            what = "first launch"
+            factor = HOPELESS_MARGIN * self.factor
+        else:
+            what, factor = "warmup", self.factor
         print(
-            f"  [early-stop] {label}: warmup {self.last_warmup_ms:.3f} ms > "
-            f"{self.factor:g} x best {self.best_ms:.3f} ms{seeded}",
+            f"  [early-stop] {label}: {what} {self.last_warmup_ms:.3f} ms > "
+            f"{factor:g} x best {self.best_ms:.3f} ms{seeded}",
             flush=True,
         )
 

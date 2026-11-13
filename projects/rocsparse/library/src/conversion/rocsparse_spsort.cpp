@@ -30,6 +30,8 @@
 #include "rocsparse_csrsort.hpp"
 #include "rocsparse_spsort.hpp"
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+
 namespace rocsparse
 {
     // The values are reordered with gthr, which only supports these data types.
@@ -339,3 +341,5 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+#endif

@@ -20,14 +20,18 @@ target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomKernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AProblem_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HipUtilsCopyTensor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
@@ -42,24 +46,30 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/PersistentArgumentLayout_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PersistentExecutionPolicySerialization_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/W4A16Encoding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidatorLifecycle_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerWgmKernargs_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIteratorSelection_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerResidue_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidatorReporting_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
 # which is only defined when MSGPACK is the active serialization format
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
-if(NOT HIPBLASLT_ENABLE_YAML)
+if(NOT TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -67,10 +77,11 @@ if(NOT HIPBLASLT_ENABLE_YAML)
             # The indexed library layout is msgpack-only: its solution blob is a
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
     )
 endif()
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
@@ -99,6 +110,11 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
+
+if(HIPBLASLT_ENABLE_YAML)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
 
 # LaunchDimGuard_test asserts different outcomes for a cluster launch depending
 # on whether SolutionAdapter::launchKernel was compiled with the cluster path,

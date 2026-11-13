@@ -4,11 +4,12 @@
 
 The gate in ``library/tests/test_attention_builds.py`` asserts a min-occupancy
 floor computed by ``rocke.benchmark.perf.occupancy.estimate_occupancy_detail`` --
-a static, no-GPU model whose per-arch caps are PROVISIONAL (gfx942 in particular
-models a conservative 8 waves/SIMD, granularity 16, where CDNA3 is really 10 / 8).
-This tool closes the loop: it predicts occupancy for a spread of reference kernels
-and compares against rocprofv3's measured ``MeanOccupancyPerCU`` so the caps can be
-corrected, then promoted into ``core/arch/data/arch_specs.json``.
+a static, no-GPU model. Its VGPR files match the compiler's occupancy report
+(on gfx90a, gfx942 and gfx950: 512 per SIMD, allocated in steps of 8, at most 8
+waves); its AGPR, LDS and workgroup limiters are PROVISIONAL. This tool closes
+the loop: it predicts occupancy for a spread of reference kernels and compares
+against rocprofv3's measured ``MeanOccupancyPerCU`` so the caps can be corrected,
+then promoted into ``core/arch/data/arch_specs.json``.
 
 Two halves, split by what needs a GPU:
 
@@ -50,6 +51,7 @@ Usage::
     python -m benchmarks.common.calibrate_occupancy compare \
         --pred pred_gfx942.json --measured meas_prefill_gfx942.csv meas_decode_gfx942.csv
 """
+
 from __future__ import annotations
 
 import argparse
@@ -90,8 +92,6 @@ def _dense(arch: str, *, persistent: bool, head_size: int = 128, dtype: str = "b
 
 
 def _tiled(arch: str, *, head_size: int = 128, dtype: str = "fp16"):
-    from unittest import mock
-
     import kernels.common.attention_unified as au
     from kernels import UnifiedAttentionProblem, build_unified_attention_2d_tiled
 
@@ -107,10 +107,9 @@ def _tiled(arch: str, *, head_size: int = 128, dtype: str = "fp16"):
         dtype=dtype,
         sliding_window=0,
     )
-    with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
-        return build_unified_attention_2d_tiled(
-            au._tiled_spec_from_problem(prob), arch=arch
-        )
+    return build_unified_attention_2d_tiled(
+        au._tiled_spec_from_problem(prob, arch), arch=arch
+    )
 
 
 def _scalar(kind: str):
@@ -186,7 +185,7 @@ def _tiled_small_2d(arch: str):
 # (label, arch, build_fn). Chosen to span the occupancy curve and every limiter,
 # not just the high-VGPR regime the shipped kernels live in: the shipped budgeted
 # kernels (what the gate floors), a low-VGPR high-occupancy point (validates the
-# max waves/SIMD cap -- the gfx942 8-vs-10 question), mid-VGPR points (granularity),
+# max waves/SIMD cap), mid-VGPR points (granularity),
 # and LDS-limited kernels with AGPRs allocated (the LDS/AGPR branches). Build
 # failures on an unsupported arch are skipped by ``predict`` -- extend freely.
 # NB: build_attention_dense is gfx950-only; tiled-2d/3d and scalar run on both.
@@ -265,8 +264,12 @@ def predict(arch: Optional[str] = None) -> list[Prediction]:
                 file=sys.stderr,
             )
             continue
-        notes = parse_notes(hsaco)
-        det = estimate_occupancy_detail(hsaco, karch)
+        try:
+            notes = parse_notes(hsaco)
+            det = estimate_occupancy_detail(hsaco, karch)
+        except ValueError as e:  # unreadable code-object notes -- skip, don't abort
+            print(f"# skip {label} ({karch}): {e}", file=sys.stderr)
+            continue
         if not det:
             continue
         wg = notes.get("max_flat_workgroup_size", 0)
@@ -363,8 +366,8 @@ def compare(
     """Join predictions with measured occupancy; flag the direction of any gap.
 
     ``MODEL_LOW`` (measured > predicted) means the caps under-count residency --
-    e.g. gfx942 modeled at 8 waves/SIMD when hardware allows 10, or granularity too
-    coarse. ``MODEL_HIGH`` means the model is optimistic (a real limiter the caps
+    e.g. an AGPR pool counted more tightly than the hardware allows, or granularity
+    too coarse. ``MODEL_HIGH`` means the model is optimistic (a real limiter the caps
     miss). Either way the fix is a caps edit, re-run, converge."""
     out: list[Comparison] = []
     for p in predictions:

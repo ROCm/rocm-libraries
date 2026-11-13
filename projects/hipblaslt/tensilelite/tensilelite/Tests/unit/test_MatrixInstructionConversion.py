@@ -24,23 +24,13 @@
 ################################################################################
 import copy
 
-import pytest
 import yaml
 from pprint import pformat
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.Types import IsaVersion
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Toolchain.Validators import validateToolchain
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
-from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
-
-
-@pytest.fixture(scope="module")
-def isa_info_map():
-    cxxCompiler = validateToolchain("amdclang++")
-    return makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
+from tensilelite.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
 
 def test_convert_9_item_custom_kernel_config(isa_info_map):

@@ -3,11 +3,29 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
+## hipBLAS 3.9.0
+
+### Changed
+
+* `hipblas_clients_readme.txt` is installed under the hipBLAS data directory (`share/hipblas`) instead of `bin`.
+
+### Resolved issues
+
+* Fix the Fortran interface for `hipblasSyrkEx` omitting `computeType`. The installed Fortran module and the Fortran client wrapper both ended at `ldc`, so a Fortran call entered `hipblasSyrkEx` with `computeType` unset and returned `HIPBLAS_STATUS_INVALID_ENUM` before the handle was checked. The C API was already correct, as was `hipblasHerkEx`.
+* Fix `hipblas-test` failing to link in Debug, with undefined references to `ref_syrk_ex` and `ref_herk_ex`. The gtest type filter constructed a polymorphic filter object, which forced the compiler to instantiate reference calls for type combinations those tests never run. At `-O0` those references survived to the linker. 
+* Fix `hipblas-test` crashing during process teardown after the tests had passed, on a host whose installed googletest is newer than the 1.11 headers bundled with the clients. The clients compiled against the bundled headers and linked the system library, and googletest 1.12 added a virtual function that shifted the listener vtable. The client build now finds the bundled googletest ahead of the system one.
+* Fix the hipBLAS library build with libc++. `library/src/include/exceptions.hpp` catches `std::bad_alloc` and relied on a transitive `<new>` include that libstdc++ provides and libc++ does not.
+
 ## hipBLAS 3.8.0
+
+### Added
+
+* gfx1170 and gfx1171 support to clients.
 
 ### Changed
 
 * The minimum required CMake version is now 3.17, for the library and the clients. `FindCUDAToolkit`, used by the CUDA backend, was added in that release.
+* `hipblasSetWorkspace` chooses whether the rocBLAS backend may grow its device workspace. A non-null workspace with a nonzero size is a fixed limit and is never resized, which caps device memory for the handle. A later call that needs more, such as `trsmBatched` or `trsmStridedBatched` with a large `batchCount`, returns `HIPBLAS_STATUS_ALLOC_FAILED` even when free device memory remains. Passing `nullptr` or a size of 0 returns the handle to rocBLAS-managed memory, which starts from a default size and grows as needed. `HIPBLAS_WORKSPACE_CONFIG=:0:0` selects that same managed mode for callers that configure the workspace through the environment, such as PyTorch. With the rocBLAS backend, set `ROCBLAS_VERBOSE_ERROR=1` to print the required and available sizes when a fixed workspace is too small for `trsm`.
 
 ## hipBLAS 3.7.0
 

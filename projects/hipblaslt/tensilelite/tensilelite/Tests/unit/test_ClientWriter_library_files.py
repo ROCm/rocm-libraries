@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for Tensile.ClientWriter.clientLibraryFiles.
+Unit tests for tensilelite.ClientWriter.clientLibraryFiles.
 
 The LibraryClient step used to collect only `*.yaml` libraries, so with
 LibraryFormat=msgpack it found nothing and ClientWriter.main crashed on
@@ -16,9 +16,9 @@ import os
 
 import pytest
 
-import Tensile.ClientWriter as CW
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import globalParameters
+import tensilelite.ClientWriter as CW
+from tensilelite import LibraryIO
+from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
 

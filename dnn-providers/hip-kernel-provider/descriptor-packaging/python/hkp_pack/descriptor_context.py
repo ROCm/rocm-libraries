@@ -8,6 +8,7 @@ import json
 import os
 
 from . import agreement, provenance_sidecar
+from . import generic_targets as gtmod
 from .errors import HkpPackError
 
 _DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
@@ -98,10 +99,13 @@ class Index:
 
     def follow(self, document: Document, key: str, hop: str) -> Document:
         """Resolve a declared id reference, naming the hop when it dangles."""
-        ref = document.doc.get(key)
+        return self.follow_ref(document.doc.get(key), document.path, key, hop)
+
+    def follow_ref(self, ref, path: str, key: str, hop: str) -> Document:
+        """Resolve @p ref, read from `key` of the document at @p path."""
         if not isinstance(ref, str) or not ref:
             raise DescriptorContextError(
-                f"{os.path.basename(document.path)}: '{key}' is not an id reference "
+                f"{os.path.basename(path)}: '{key}' is not an id reference "
                 f"({ref!r}). The {hop} hop cannot be walked, and binding to a "
                 f"same-stem sibling instead would gate a schema nothing wires this "
                 f"bundle to."
@@ -109,7 +113,7 @@ class Index:
         target = self.by_id.get(ref)
         if target is None:
             raise DescriptorContextError(
-                f"{os.path.basename(document.path)}: unresolved '{key}' reference -- "
+                f"{os.path.basename(path)}: unresolved '{key}' reference -- "
                 f"id {ref!r} matches no descriptor under {self.root}."
             )
         return target
@@ -186,7 +190,23 @@ def resolve_bundles(index: Index) -> list[Bundle]:
     bundles = []
     for kdp in index.of_type("kdp"):
         engine = index.follow(kdp, "engine", "KDP -> engine (UED)")
-        kmd = index.follow(engine, "metadata", "UED -> metadata (KMD)")
+        # A slotted engine's KMD is its slot's, which the pack names (RFC 0021 §4).
+        try:
+            kmd_ref = agreement.pack_kmd_reference(
+                engine.doc, kdp.doc, os.path.basename(kdp.path)
+            )
+        except HkpPackError as exc:
+            raise DescriptorContextError(str(exc)) from exc
+        kmd = index.follow_ref(
+            kmd_ref,
+            engine.path,
+            "metadata",
+            (
+                "UED -> metadata (KMD)"
+                if "slots" not in engine.doc
+                else "UED slot -> metadata (KMD)"
+            ),
+        )
         if kmd.dtype != "kmd":
             raise DescriptorContextError(
                 f"{os.path.basename(engine.path)}: 'metadata' resolves to "
@@ -219,7 +239,19 @@ def declarations(bundles: list[Bundle], schemas: dict) -> dict:
     return found
 
 
-def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
+def archive_arch(entry_arch: list, target: str, generic_targets) -> str:
+    """The arch spelling of the kpack archive for @target (a generic copy is keyed by its generic)."""
+    if target in entry_arch:
+        return target
+    for entry in entry_arch:
+        if gtmod.entry_tier(entry, target, generic_targets) == gtmod.TIER_GENERIC:
+            return entry
+    return target
+
+
+def consumer_records(
+    bundles: list[Bundle], schemas: dict, arch: str, generic_targets
+) -> dict:
     """UKD id -> canonical records over EVERY consumer inside the caller root.
 
     Shared standalone UKDs carry all KDP/engine/KMD bindings, not just the selected
@@ -230,7 +262,12 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
         header = {k: v for k, v in bundle.kdp_doc.items() if k != "kernelDescriptors"}
         header["arch"] = [arch]
         for entry in bundle.entries:
-            if entry.arch and arch not in entry.arch:
+            # Literal test kept: a generic copy's @arch is the generic's own name, no device.
+            if (
+                entry.arch
+                and arch not in entry.arch
+                and not gtmod.admits_target(entry.arch, arch, generic_targets)
+            ):
                 continue
             enclosing = bundle.kdp_doc if entry.inline else None
             if agreement.resolved_contract(entry.ukd, enclosing) is None:

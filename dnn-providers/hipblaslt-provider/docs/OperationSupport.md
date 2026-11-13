@@ -18,6 +18,10 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 - Transposed inputs: supported
 - Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
+    - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
+    - Clamp: `relu_upper_clip` set; the lower bound is `relu_lower_clip`, or 0 if unset (so ReLU6 needs only the upper clip)
+    - Not supported: a non-zero `relu_lower_clip_slope` (leaky ReLU; hipBLASLt has no such epilogue), or a non-zero `relu_lower_clip` without an upper clip
 
 ### MX BlockScaleDequantize + GEMM (MX GEMM)
 
@@ -47,7 +51,12 @@ Matmul(a, b) → d
 > B currently returns incorrect results and is rejected as unsupported
 > (originally observed on gfx950; not yet arch-gated pending further testing).
 
-**Hardware support:** Supported on **gfx950** and **gfx1250** only.
+**Hardware support:** Supported on **gfx950** only.
+
+> **Known issue (#13715):** on **gfx1250**, hipBLASLt has MX GEMM kernels only for
+> `transA = T, transB = N`. The layout below reaches hipBLASLt as
+> `transA = N, transB = T` (after the row-major operand swap), so hipBLASLt
+> finds no algorithm and the engine declines every MX graph on gfx1250.
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the

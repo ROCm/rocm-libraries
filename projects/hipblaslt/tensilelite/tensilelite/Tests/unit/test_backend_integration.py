@@ -6,10 +6,10 @@ import types
 import numpy as np
 import pytest
 
-from Tensile.backends.base import BackendFactory, OptimizationBackend
-import Tensile.backends.ductile_backend as ductile_backend_mod
-from Tensile.backends.tensile_backend import TensileBackend
-from Tensile.backends.ductile_backend import DuctileBackend
+from tensilelite.backends.base import BackendFactory, OptimizationBackend
+import tensilelite.backends.ductile_backend as ductile_backend_mod
+from tensilelite.backends.tensile_backend import TensileBackend
+from tensilelite.backends.ductile_backend import DuctileBackend
 
 pytestmark = pytest.mark.unit
 
@@ -57,11 +57,11 @@ def test_tensile_backend_run_calls_benchmark_runner(monkeypatch):
     calls = {}
 
     monkeypatch.setattr(
-        "Tensile.backends.tensile_backend.constructForkPermutations",
+        "tensilelite.backends.tensile_backend.constructForkPermutations",
         lambda _fork_params, _param_groups: [{"x": 1}, {"x": 2}],
     )
 
-    import Tensile.BenchmarkProblems as bp
+    import tensilelite.BenchmarkProblems as bp
 
     monkeypatch.setattr(bp, "_generateForkedSolutions", lambda *_args, **_kwargs: ["fork_a", "fork_b"])
     monkeypatch.setattr(bp, "_generateCustomKernelSolutions", lambda *_args, **_kwargs: ["ck_a"])
@@ -100,7 +100,7 @@ def test_tensile_backend_run_calls_benchmark_runner(monkeypatch):
 def test_ductile_backend_warns_when_cache_or_build_only(monkeypatch, tmp_path):
     warnings = []
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.printWarning", lambda msg: warnings.append(msg))
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.printWarning", lambda msg: warnings.append(msg))
 
     class FakeGA:
         def __init__(self, *args, **kwargs):
@@ -112,7 +112,7 @@ def test_ductile_backend_warns_when_cache_or_build_only(monkeypatch, tmp_path):
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
 
     backend = DuctileBackend()
 
@@ -178,7 +178,7 @@ def test_tensile_backend_solution_pool_path_uses_pool_entries(monkeypatch):
     backend = TensileBackend()
     calls = {}
 
-    import Tensile.BenchmarkProblems as bp
+    import tensilelite.BenchmarkProblems as bp
     monkeypatch.setattr(
         bp,
         "_constructAllPoolSolutions",

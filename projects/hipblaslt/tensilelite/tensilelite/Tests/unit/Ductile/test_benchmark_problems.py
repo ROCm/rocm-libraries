@@ -12,8 +12,8 @@ import types
 
 import pytest
 
-import Tensile.BenchmarkProblems as BP
-from Tensile.Common import IsaVersion
+import tensilelite.BenchmarkProblems as BP
+from tensilelite.Common import IsaVersion
 
 pytestmark = pytest.mark.unit
 
@@ -249,7 +249,7 @@ class TestGenerateSingleSolution:
 
 class TestGenerateGaSolutions:
     def test_valid_solutions_appended(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         monkeypatch.setattr(
             dbmod,
@@ -271,7 +271,7 @@ class TestGenerateGaSolutions:
         assert all(r is not None for r in result)
 
     def test_invalid_candidates_become_none(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         monkeypatch.setattr(
             dbmod,
@@ -291,7 +291,7 @@ class TestGenerateGaSolutions:
         assert result == [None, None]
 
     def test_duplicate_solutions_become_none(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         shared_sol = _ValidSolution()
         call_count = [0]
@@ -317,7 +317,7 @@ class TestGenerateGaSolutions:
         assert result[1] is None
 
     def test_empty_individuals_returns_empty_list(self, monkeypatch):
-        import Tensile.backends.ductile_backend as dbmod
+        import tensilelite.backends.ductile_backend as dbmod
 
         result = dbmod._generate_ga_solutions(
             types.SimpleNamespace(state={}),
@@ -363,6 +363,7 @@ def _make_fake_step():
     class _Step:
         problemSizes = types.SimpleNamespace(totalProblemSizes=1)
         factorDimArgs = types.SimpleNamespace(totalProblemSizes=1)
+        deviceScalarAlphaModes = None
         biasTypeArgs = types.SimpleNamespace(totalProblemSizes=1)
         activationArgs = types.SimpleNamespace(totalProblemSizes=1)
         icacheFlushArgs = []
@@ -382,9 +383,16 @@ def _make_fake_step():
     return _Step()
 
 
-def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tmp_path):
+@pytest.mark.parametrize("alpha_modes", [None, [True, False]])
+def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tmp_path, alpha_modes):
     fake_backend = _FakeBackendForBenchmark()
     fake_step = _make_fake_step()
+    fake_step.deviceScalarAlphaModes = alpha_modes
+    client_modes = []
+
+    def run_client(*_args, **kwargs):
+        client_modes.append(kwargs["deviceScalarAlphaModes"])
+        return 0
 
     class _FakeBP:
         def __init__(self, *_args, **_kwargs):
@@ -405,7 +413,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: fake_backend)
     monkeypatch.setattr(BP, "_computeCacheKey", lambda *_a: "abc123")
     monkeypatch.setattr(BP, "_resetCacheDir", lambda _d: None)
-    monkeypatch.setattr(BP, "runClient", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(BP, "runClient", run_client)
     monkeypatch.setattr(BP, "writeBenchmarkFiles", lambda *_a, **_kw: (["k.co"], "lib.yaml"))
     monkeypatch.setattr(BP.LibraryIO, "writeYAML", lambda *_a, **_kw: None)
     monkeypatch.setattr(BP.LibraryIO, "writeSolutions", lambda *_a, **_kw: None)
@@ -441,6 +449,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
     )
 
     assert fails == 0
+    assert client_modes == [alpha_modes]
     assert result_base is not None
     assert len(fake_backend.calls) == 1
     seen_backend_cfg, seen_bench_cfg, seen_cache, seen_build_only = fake_backend.calls[0]
@@ -515,7 +524,7 @@ def test_main_invalid_backend_type_exits(monkeypatch, tmp_path):
     # Monkeypatch printExit in both BP and backends.config modules
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(BP, "printExit", exit_func)
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
     with pytest.raises(RuntimeError, match="'Backend' must be a dictionary"):
@@ -573,7 +582,7 @@ def test_main_backend_config_invalid_type_exits(monkeypatch, tmp_path):
     # Monkeypatch printExit in both BP and backends.config modules
     exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
     monkeypatch.setattr(BP, "printExit", exit_func)
-    from Tensile.backends import config as backend_config_module
+    from tensilelite.backends import config as backend_config_module
     monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
     with pytest.raises(RuntimeError, match="'Backend.Config' must be a dictionary"):

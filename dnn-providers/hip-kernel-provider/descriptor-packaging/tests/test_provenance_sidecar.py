@@ -16,7 +16,7 @@ import pytest
 
 from hkp_pack import descriptor_context, pipeline, provenance_sidecar
 from hkp_pack.errors import HkpPackError
-from pack_helpers import is_compact, write_shipped
+from pack_helpers import GENERIC_TARGETS_JSON, is_compact, write_shipped
 
 SHA = "a" * 64
 OTHER_SHA = "b" * 64
@@ -412,10 +412,39 @@ def test_decompression_is_capped(tmp_path, monkeypatch):
     write_shipped(path, _ukd("k0"))
     size = len(gzip.decompress(provenance_sidecar.sidecar_path(path).read_bytes()))
 
+    # The per-UKD allowance is off, so the floor alone decides.
+    monkeypatch.setattr(provenance_sidecar, "MAX_DECOMPRESSED_BYTES_PER_UKD", 0)
     monkeypatch.setattr(provenance_sidecar, "MAX_DECOMPRESSED_BYTES", size)
     assert _attach_fresh(path)["provenance"] == _ukd("k0")["provenance"]
 
     monkeypatch.setattr(provenance_sidecar, "MAX_DECOMPRESSED_BYTES", size - 1)
+    with pytest.raises(HkpPackError, match="inflates past"):
+        _attach_fresh(path)
+
+
+@pytest.mark.quick
+def test_the_decompression_cap_grows_with_the_descriptors_ukds(tmp_path, monkeypatch):
+    """A sidecar past the floor is read when its descriptor holds enough UKDs to
+    account for it: a large catalog is not mistaken for a decompression bomb."""
+    path = tmp_path / "pack.kdp.json"
+    ukds = [_ukd(f"k{index}") for index in range(4)]
+    write_shipped(path, _kdp(*ukds))
+    size = len(gzip.decompress(provenance_sidecar.sidecar_path(path).read_bytes()))
+    monkeypatch.setattr(provenance_sidecar, "MAX_DECOMPRESSED_BYTES", 1)
+
+    # Four UKDs at a quarter of the sidecar each: exactly enough.
+    monkeypatch.setattr(
+        provenance_sidecar, "MAX_DECOMPRESSED_BYTES_PER_UKD", -(-size // len(ukds))
+    )
+    attached = _attach_fresh(path)
+    assert [u["provenance"] for u in attached["kernelDescriptors"]] == [
+        u["provenance"] for u in ukds
+    ]
+
+    # One byte less per UKD, and the same sidecar is refused.
+    monkeypatch.setattr(
+        provenance_sidecar, "MAX_DECOMPRESSED_BYTES_PER_UKD", size // len(ukds) - 1
+    )
     with pytest.raises(HkpPackError, match="inflates past"):
         _attach_fresh(path)
 
@@ -645,7 +674,15 @@ def test_desk_check_fails_a_kdp_whose_sidecar_does_not_bind(tmp_path, mode):
     kdp = tmp_path / "shard.kdp.json"
     write_shipped(kdp, {"id": "pack-id", "kernelDescriptors": [_embedded_ukd("k0")]})
     control = subprocess.run(
-        [sys.executable, str(_DESK_CHECK), "--mode", "structural", str(kdp)],
+        [
+            sys.executable,
+            str(_DESK_CHECK),
+            "--mode",
+            "structural",
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            str(kdp),
+        ],
         capture_output=True,
         text=True,
     )
@@ -654,7 +691,15 @@ def test_desk_check_fails_a_kdp_whose_sidecar_does_not_bind(tmp_path, mode):
     )
 
     result = subprocess.run(
-        [sys.executable, str(_DESK_CHECK), "--mode", mode, str(kdp)],
+        [
+            sys.executable,
+            str(_DESK_CHECK),
+            "--mode",
+            mode,
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            str(kdp),
+        ],
         capture_output=True,
         text=True,
     )
@@ -683,6 +728,8 @@ def test_desk_check_reads_sidecars_from_a_provenance_root(tmp_path):
                 str(_DESK_CHECK),
                 "--mode",
                 "structural",
+                "--generic-targets-json",
+                str(GENERIC_TARGETS_JSON),
                 *flags,
                 str(kdp),
             ],
@@ -716,6 +763,8 @@ def test_desk_check_refuses_a_provenance_root_for_an_unmarked_kdp(tmp_path):
             str(_DESK_CHECK),
             "--mode",
             "structural",
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
             "--provenance-root",
             str(tmp_path / "provenance"),
             str(kdp),

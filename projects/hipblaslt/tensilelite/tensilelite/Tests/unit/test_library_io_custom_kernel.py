@@ -19,33 +19,13 @@ from typing import List
 
 import pytest
 
-import Tensile.LibraryIO as L
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 
 
 _FIXTURE = (Path(__file__).parent / "characterization" / "LibraryIO"
             / "data" / "logic_gfx942_HSS_BH.yaml")
-
-
-@pytest.fixture(scope="module")
-def cxx_compiler():
-    return validateToolchain("amdclang++")
-
-
-@pytest.fixture(scope="module")
-def isa_info_map(cxx_compiler):
-    return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
-
-
-@pytest.fixture(scope="module")
-def assembler(cxx_compiler):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
 
 
 def _raw_dict():

@@ -37,13 +37,15 @@ public:
                         int seqAxis,
                         std::shared_ptr<ITensor> raggedOffset,
                         std::optional<size_t> physicalElementCount = std::nullopt,
-                        int64_t raggedOffsetMultiplier = 1)
+                        int64_t raggedOffsetMultiplier = 1,
+                        const std::shared_ptr<ITensor>& raggedLength = nullptr)
         : RaggedTensorBase<T>(std::move(paddedDims),
                               std::move(strides),
                               seqAxis,
                               std::move(raggedOffset),
                               physicalElementCount,
-                              raggedOffsetMultiplier)
+                              raggedOffsetMultiplier,
+                              raggedLength)
     {
         _memory = ShallowHostOnlyMigratableMemory<T>(data, this->elementSpace());
     }

@@ -49,7 +49,7 @@ read), not by handing the intrinsic a swizzled destination pointer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ..core.ir import F16, I64, IRBuilder, Type, Value
 
@@ -347,6 +347,96 @@ class CoalescedTileLoader:
         for row, col, v in staged:
             self._store_tile(b, smem_dst, row, col, v)
 
+    # ---- address-prefetch split -------------------------------------------
+    #
+    # ``load`` and ``load_global`` derive every chunk's global address from the
+    # K offset right before its read, so in a K loop the descriptor arithmetic
+    # sits between the loop back-edge and the first ``buffer_load``. The three
+    # methods below split that work so a caller can carry the byte offsets
+    # across iterations instead: decode the per-thread (row, col) slots once
+    # (``plan_slots``), compute the offsets for a K position
+    # (``slot_offsets``), and later issue the reads from those offsets
+    # (``issue_slots``). The emitted per-chunk ops are the ones ``load_global``
+    # emits, just regrouped; nothing here changes an existing caller.
+
+    def plan_slots(self, b: IRBuilder, *, tid: Value) -> List[Tuple[Value, Value]]:
+        """Decode the tile-local ``(row, col)`` of every per-thread chunk.
+
+        The decode depends only on ``tid``, so a K loop can emit it once ahead
+        of the loop and reuse the slots in every iteration.
+        """
+        c_threads = b.const_i32(self.block_size)
+        c_load_vec = b.const_i32(self.load_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
+        slots: List[Tuple[Value, Value]] = []
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            slots.append(
+                self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+            )
+        return slots
+
+    def slot_offsets(
+        self,
+        b: IRBuilder,
+        *,
+        slots: Sequence[Tuple[Value, Value]],
+        descriptor: DescriptorFn,
+    ) -> List[Value]:
+        """Byte ``voffset`` of each slot, with invalid chunks sent to the sentinel.
+
+        Buffer-resource loads only: the sentinel relies on the resource's range
+        check to turn an out-of-bounds read into zero.
+        """
+        if not self.use_buffer_rsrc:
+            raise ValueError(
+                "CoalescedTileLoader.slot_offsets requires use_buffer_rsrc=True"
+            )
+        elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {self.elem_dtype.name!r}"
+            )
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c_oob = b.const_i32(self.oob_sentinel)
+        offsets: List[Value] = []
+        for row, col in slots:
+            off_elems, valid = descriptor(b, row, col)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
+            offsets.append(
+                off_bytes if valid is None else b.select(valid, off_bytes, c_oob)
+            )
+        return offsets
+
+    def issue_slots(
+        self,
+        b: IRBuilder,
+        *,
+        rsrc: Value,
+        slots: Sequence[Tuple[Value, Value]],
+        offsets: Sequence[Value],
+    ) -> list:
+        """Issue one buffer read per slot from precomputed byte offsets.
+
+        Returns ``(row, col, v)`` triples for :meth:`store_lds`.
+        """
+        if len(slots) != len(offsets):
+            raise ValueError(
+                f"CoalescedTileLoader.issue_slots: {len(slots)} slots but "
+                f"{len(offsets)} offsets"
+            )
+        c0 = b.const_i32(0)
+        staged = []
+        for (row, col), off in zip(slots, offsets):
+            if self.load_vec == 1:
+                v = b.buffer_load(rsrc, off, c0, self.elem_dtype)
+            else:
+                v = b.buffer_load_vN(rsrc, off, c0, self.elem_dtype, self.load_vec)
+            staged.append((row, col, v))
+        return staged
+
     def load(
         self,
         b: IRBuilder,
@@ -415,6 +505,68 @@ class CoalescedTileLoader:
                 else:
                     v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
                     self._store_tile(b, smem_dst, row, col, v)
+
+    def load_async_to_lds(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        smem_dst: Value,
+        descriptor: DescriptorFn,
+        ptr: Value,
+        num_bytes: Value,
+        coherency: int = 0,
+    ) -> None:
+        """gfx1250 async variant of :meth:`load` (``global_load_async_to_lds``).
+
+        Same slot partition and descriptor contract as :meth:`load` in
+        ``vector_axis="col"`` mode, but each in-range chunk is one per-lane
+        async global->LDS copy of ``load_vec`` elements to ``smem_dst[row, col]``
+        instead of a register round trip. The copy reads through a plain global
+        pointer with no buffer-resource range check, so the check the resource
+        would make -- byte offset below ``num_bytes``, compared unsigned as the
+        resource does, so an offset at or past 2 GiB (negative as i32) is out
+        of range -- is ANDed into the descriptor's ``valid``. Descriptors lean on that check: a reduction
+        tail past the tensor, or a free-axis overhang at its last element, is
+        reported valid and only the resource turns it into zero. A chunk that
+        fails either test is zero-filled with an ordinary LDS store. The caller
+        drains the copies with ``s_wait_asynccnt`` (and the zero stores with an
+        LDS barrier) before reading the tile.
+        """
+        if self.vector_axis != "col":
+            raise ValueError(
+                "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
+                "(the copy cannot transpose on store)"
+            )
+        elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {self.elem_dtype.name!r}"
+            )
+        width = self.load_vec * elem_bytes
+        if width not in (4, 8, 16):
+            raise ValueError(
+                f"global_load_async_to_lds moves 4, 8 or 16 bytes per lane; a "
+                f"{self.load_vec} x {elem_bytes} B chunk is {width} B"
+            )
+        zero = b.zero_vec(self.elem_dtype, self.load_vec)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        for row, col in self.plan_slots(b, tid=tid):
+            off_elems, valid = descriptor(b, row, col)
+            in_bounds = b.cmp_ult(b.mul(off_elems, c_elem_bytes), num_bytes)
+            valid = in_bounds if valid is None else b.land(valid, in_bounds)
+            with b.scf_if_else(valid) as (in_range, out_of_range):
+                with in_range:
+                    b.global_load_async_to_lds(
+                        ptr,
+                        off_elems,
+                        smem_dst,
+                        [row, col],
+                        width_bytes=width,
+                        coherency=coherency,
+                    )
+                with out_of_range:
+                    b.smem_store_vN(smem_dst, [row, col], zero, self.load_vec)
 
     def fetch(
         self,

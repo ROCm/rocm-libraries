@@ -25,7 +25,7 @@
 
 """Characterization tests for the numeric reads, the string/state forms, the
 comparison dunders, and the module-level ``_populateLookupTable`` of
-``Tensile.Common.DataType``.
+``tensilelite.Common.DataType``.
 
 * numeric: ``numRegisters`` / ``numBytes`` / ``MIOutputTypeNameAbbrev`` /
   ``flopsPerMac`` — table reads (and the real/complex branch of ``flopsPerMac``).
@@ -39,7 +39,7 @@ comparison dunders, and the module-level ``_populateLookupTable`` of
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import DataType, _populateLookupTable
+from tensilelite.Common.DataType import DataType, _populateLookupTable
 
 pytestmark = pytest.mark.unit
 

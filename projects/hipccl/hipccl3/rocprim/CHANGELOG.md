@@ -2,6 +2,20 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.1.0 for ROCm 10.3.0
+
+### Changed
+
+* Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
+* The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
+* Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+
+### Removed
+
+* Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
+### Resolved Issues
+* Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
@@ -20,6 +34,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Optimizations
 
 * Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250/gfx1250-strict.
+* `lookback_scan` has improved data padding/alignment to reduce false sharing.
 
 ### Changed
 
@@ -27,6 +42,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Resolved Issues
 
+* Fixed a crash in `histogram_even`, `histogram_range`, and the multi-channel histogram variants on gfx942 when the bin count does not fit in shared memory and the stream is `hipStreamLegacy`. The device is now resolved with `get_device_from_stream`, which accepts the default, per-thread, and legacy streams.
 * Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
 
 ## rocPRIM 4.7.0 for ROCm 10.1.0

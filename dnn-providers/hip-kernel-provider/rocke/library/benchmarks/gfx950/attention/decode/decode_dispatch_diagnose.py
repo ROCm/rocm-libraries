@@ -10,7 +10,7 @@ import traceback
 # exercise it; leave the variable unset to see the production default.
 
 from dispatch.attention import AttentionRequest, registered_attention_combos
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from kernels.common.attention_unified import (
     _enable_3d_graph_replay,
     _num_segments,
@@ -50,7 +50,7 @@ def dump_shape(label, req):
         print(
             f"    spec.kernel_name={spec.kernel_name() if hasattr(spec, 'kernel_name') else spec}"
         )
-    p = _problem(req)
+    p = attention_problem(req)
     n2d = p.total_num_q_blocks_upper_bound * p.num_kv_heads
     want_2d = use_2d_kernel(
         head_size=p.head_size,
@@ -66,14 +66,17 @@ def dump_shape(label, req):
         f"num_cus={p.num_cus} target_ctas={p._effective_target_ctas} "
         f"num_2d_prgms={n2d} use_2d_kernel={want_2d}"
     )
-    print(f"num_segments={_num_segments(p)} graph_replay={_enable_3d_graph_replay(p)}")
-    ok3, why3 = supports_native_unified_attention_3d_tiled(p)
-    ok2, why2 = supports_native_unified_attention_tiled(p)
+    _arch = req.arch
+    print(
+        f"num_segments={_num_segments(p, _arch)} graph_replay={_enable_3d_graph_replay(p, _arch)}"
+    )
+    ok3, why3 = supports_native_unified_attention_3d_tiled(p, _arch)
+    ok2, why2 = supports_native_unified_attention_tiled(p, _arch)
     print(f"supports 3d_tiled={ok3} ({why3})")
     print(f"supports 2d_tiled={ok2} ({why2})")
     from builders.common.attention_spec_builder import _tiled_3d_spec_from_problem
 
-    spec3 = _tiled_3d_spec_from_problem(p)
+    spec3 = _tiled_3d_spec_from_problem(p, _arch)
     print(
         f"3d builder kernel={spec3.kernel_name()} tile={spec3.tile_size} "
         f"seg={spec3.num_segments} wpe={spec3.waves_per_eu} "
@@ -87,7 +90,7 @@ def probe_graph():
     from rocke.runtime import no_fence, time_launches
 
     req = _req()
-    p = _problem(req)
+    p = attention_problem(req)
     dt = torch.bfloat16
     B, Hq, Hkv, D, Sk, page = 1, 32, 8, 128, 1024, 16
     q = torch.randn(B, Hq, D, dtype=dt, device="cuda")

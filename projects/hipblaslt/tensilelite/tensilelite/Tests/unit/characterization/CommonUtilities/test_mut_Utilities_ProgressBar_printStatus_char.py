@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ProgressBar.printStatus``.
+``tensilelite.Common.Utilities.ProgressBar.printStatus``.
 
 ``printStatus`` writes a progress line directly to ``sys.stdout`` using a fixed
 format. These tests pin the EXACT current output bytes so that mutations to the
@@ -19,7 +19,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 
