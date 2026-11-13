@@ -936,19 +936,31 @@ TEST(TestConvDirectPlan, Rows3dTilesWalkEveryOutputPlane)
 
 TEST(TestConvDirectKernelMatch, BatchUnfoldIsGfx950And2dOnly)
 {
+    // One wave column (16 / un columns of each image): the 2 x 2 x 2 tile's unfolded halo rows
+    // (2 x 18 pixels) would pass gfx950's 160 KiB.
     auto unfold = rowsFields();
+    unfold.wq = 1;
     unfold.un = 2;
     EXPECT_TRUE(admits(unfold, "gfx950"));
+    // Two images' halo rows of 8 + 2 pixels, 18 rows, 64 channels, two stages.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(unfold, "HALF"))),
+              2 * (2 * 8 + 2) * (2 * (8 + 2)) * 64 * 2);
     unfold.un = 4;
     EXPECT_TRUE(admits(unfold, "gfx950"));
+    auto wide = rowsFields();
+    wide.un = 2;
+    EXPECT_FALSE(admits(wide, "gfx950")) << "two 34-pixel halo rows of 64 channels: 162 KiB";
     // Off gfx950 (dword LDS DMA) even when the ship list and atom would run.
     auto gfx9 = rowsGfx9Fields();
+    gfx9.wq = 1;
     ASSERT_TRUE(admits(gfx9, "gfx90a"));
     gfx9.un = 2;
     EXPECT_FALSE(admits(gfx9, "gfx90a"));
     // 3-D rows configs walk planes, not image groups.
     auto rows3d = rowsFields();
     rows3d.kd = 3;
+    rows3d.wq = 1;
+    ASSERT_TRUE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
     rows3d.un = 2;
     EXPECT_FALSE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
 }
@@ -963,17 +975,18 @@ TEST(TestConvDirectPlan, BatchUnfoldTilesPackImagesAlongTheColumns)
     shape.k = 128;
     shape.input = {40, 40};
     auto unfold = rowsFields();
+    unfold.wq = 1;
     unfold.un = 2;
     const auto plan = planOf(shape, unfold, "HALF", 1024);
     ASSERT_TRUE(plan.has_value());
     const auto& a = plan->args;
-    // 2 x 16 columns per wave group: 8 columns of each of two images.
+    // 16 columns per wave column: 8 columns of each of two images.
     EXPECT_EQ(a.th, 16);
-    EXPECT_EQ(a.tw, 16);
-    EXPECT_EQ(a.tilesW, 3);
+    EXPECT_EQ(a.tw, 8);
+    EXPECT_EQ(a.tilesW, 5);
     EXPECT_EQ(a.tilesH, 3);
     // Image groups: 5 images -> 3 (the last holds one image).
-    EXPECT_EQ(plan->grid[0], 3u * 3u * 3u);
+    EXPECT_EQ(plan->grid[0], 5u * 3u * 3u);
     // Two images share the 32-bit buffer offsets: an image just under 1 GiB fits alone, not
     // unfolded.
     auto big = shape;
