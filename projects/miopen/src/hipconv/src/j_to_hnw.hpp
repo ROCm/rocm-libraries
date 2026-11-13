@@ -10,7 +10,7 @@ struct JConfig
     int tw;          // tile size w
     int wmma_size_j; // WMMA size of J-mode
     int tiles_j;     // Number of waves in J-direction
-    __device__ constexpr auto reg_stride_j() const -> int
+    __host__ __device__ constexpr auto reg_stride_j() const -> int
     {
         return tn * th * tw / (wmma_size_j * tiles_j);
     }
