@@ -53,7 +53,8 @@ from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
-from ..Components.TDMStore import emitTDMStoreFlush, emitTDMStoreLoadC, emitTDMStoreLoadCElement, emitTDMStoreSetup, emitTDMStoreStaging
+from ..Components.TDMStore import emitTDMStoreFlush, emitTDMStoreLoadC, emitTDMStoreLoadCElement, emitTDMStoreSetup, emitTDMStoreStaging, \
+  hasEpilogueSideEffects
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -276,7 +277,8 @@ class GlobalWriteBatchWriter:
     # VGPR holding this thread's LDS byte address in the staged D tile; None = buffer_store.
     self.tdmStoreLdsBase = tdmStoreLdsBase
     # With beta != 0 the TDM block loads the C tile into the staged tile and reads C from there.
-    self.tdmStoreLoadC = bool(beta) and tdmStoreLdsBase is not None
+    self.tdmStoreLoadC = bool(beta) and tdmStoreLdsBase is not None \
+      and not (edge and hasEpilogueSideEffects(kernel["ProblemType"]))
     # Only a buffer_store block remaps D through LDS; a TDM block stages D itself.
     self.storeRemap = self.kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
 
