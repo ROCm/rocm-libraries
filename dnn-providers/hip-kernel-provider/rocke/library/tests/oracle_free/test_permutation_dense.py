@@ -143,6 +143,11 @@ def test_joint_key_value_permutation(
             mutation, PERMUTATION_MUTATION_MAP, case.seqlen_k
         )
         mutated = analyze_permutation(case, bound, base, launch(key_map, value_map))
+        fewest = min(min(counts) for counts in mutated.head_exceed_counts)
+        print(
+            f"{label} {mutation.value}: max_abs={mutated.max_abs:.9g}; "
+            f"{mutated.exceed_count} beyond the bound, fewest in one head {fewest}"
+        )
         assert not mutated.unresponsive_heads, _unresponsive(
             label, mutation.value, mutated, positives
         )

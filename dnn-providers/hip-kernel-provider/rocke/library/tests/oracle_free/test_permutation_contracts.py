@@ -14,6 +14,11 @@ from __future__ import annotations
 import hashlib
 import itertools
 import math
+import re
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import cache
 
 import numpy as np
 import pytest
@@ -164,6 +169,21 @@ def test_quick_maps_leave_no_pairing_permutation_undetected(seqlen_k: int) -> No
 
     separated = dihedral & _commuting(pairings, token_map("adjacent_swap", seqlen_k))
     assert {tuple(row) for row in pairings[separated]} == {identity}
+
+
+@pytest.mark.parametrize("seqlen_k", [3, 4, 5, 6])
+def test_shift_and_swap_leave_no_pairing_map_undetected(seqlen_k: int) -> None:
+    """The criterion does not need the pairing to be a bijection. Over all
+    ``Sk**Sk`` maps, the ones commuting with ``shift_one`` are the ``Sk`` cyclic
+    shifts, and the identity alone also commutes with ``adjacent_swap``."""
+    pairings = np.array(list(itertools.product(range(seqlen_k), repeat=seqlen_k)))
+    shifts = _commuting(pairings, token_map("shift_one", seqlen_k))
+    index = np.arange(seqlen_k)
+    assert {tuple(row) for row in pairings[shifts]} == {
+        tuple((index + shift) % seqlen_k) for shift in range(seqlen_k)
+    }
+    separated = shifts & _commuting(pairings, token_map("adjacent_swap", seqlen_k))
+    assert {tuple(row) for row in pairings[separated]} == {tuple(index)}
 
 
 def test_quick_maps_hold_the_separating_set() -> None:
@@ -360,6 +380,17 @@ def test_bound_refuses_arguments_outside_its_derivation(override, match: str) ->
         permutation_bound("fp32", **args)
 
 
+def _head_scores(
+    case: PermutationCase, q: np.ndarray, k: np.ndarray, *, head: int
+) -> np.ndarray:
+    """Log2-domain scores ``[Sq, Sk]`` of one query head of batch 0, in FP64."""
+    kv_head = head // (case.nhead_q // case.nhead_k)
+    products = (
+        q[0, :, head, :].astype(np.float64) @ k[0, :, kv_head, :].astype(np.float64).T
+    )
+    return products * (softmax_scale(case) * _LOG2E)
+
+
 @pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
 def test_score_spread_bound_covers_every_row_of_the_fixture(
     case: PermutationCase,
@@ -367,14 +398,10 @@ def test_score_spread_bound_covers_every_row_of_the_fixture(
     q, k, _ = permutation_inputs(case)
     scale = softmax_scale(case)
     spread = score_spread_bound(q, k, scale)
-    group = case.nhead_q // case.nhead_k
-    largest = 0.0
-    for head in range(case.nhead_q):
-        scores = (
-            q[0, :, head, :].astype(np.float64)
-            @ k[0, :, head // group, :].astype(np.float64).T
-        ) * (scale * _LOG2E)
-        largest = max(largest, float(np.max(np.ptp(scores, axis=1))))
+    largest = max(
+        float(np.max(np.ptp(_head_scores(case, q, k, head=head), axis=1)))
+        for head in range(case.nhead_q)
+    )
     assert largest < spread < 4.0 * largest
 
     ones = np.ones((1, 1, 1, 4), dtype=np.float32)
@@ -540,14 +567,25 @@ def _model_pair(
     *,
     block_n: int = _MODEL_BLOCK_N,
     value_token_offset: int = 0,
+    inputs: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> PermutationResult:
-    q, k, v = permutation_inputs(case)
+    """Model a base launch and a transformed one and analyze the pair against
+    the bound evaluated for the same inputs and tile."""
+    q, k, v = permutation_inputs(case) if inputs is None else inputs
+    bound = permutation_case_bound(
+        case,
+        q,
+        k,
+        v,
+        key_tiles=-(-case.seqlen_k // block_n),
+        scale=softmax_scale(case),
+    )
     settings = {"block_n": block_n, "value_token_offset": value_token_offset}
     base = _model_dense_run(case, q, k, v, **settings)
     other = _model_dense_run(
         case, q, permute_tokens(k, key_map), permute_tokens(v, value_map), **settings
     )
-    return analyze_permutation(case, _quick_bound(case, block_n), base, other)
+    return analyze_permutation(case, bound, base, other)
 
 
 @pytest.mark.parametrize("block_n", [_MODEL_BLOCK_N, _MODEL_BLOCK_N // 2])
@@ -560,6 +598,65 @@ def test_modeled_joint_permutations_stay_inside_the_bound(
         result = _model_pair(case, source, source, block_n=block_n)
         assert not result.violations, (kind.value, format_permutation_result(result))
         assert result.bound_ratio < 1.0
+
+
+def _late_maximum_inputs(
+    case: PermutationCase, level: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Nonnegative Q and a last key that is ``level`` in every dimension, so that
+    key holds every row's largest score. The base launch meets the maximum in
+    its last tile and the reversed launch in its first."""
+    q, k, v = permutation_inputs(case)
+    k = k.copy()
+    k[:, -1] = level
+    return np.abs(q), k, v
+
+
+def _sharp_inputs(
+    case: PermutationCase,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Q doubled and clipped to the lattice range: a wider logit spread."""
+    q, k, v = permutation_inputs(case)
+    return np.clip(2.0 * q, -3.0, 3.0).astype(np.float32), k, v
+
+
+# Inputs away from the fixture. At level 1 the last key holds about half of a
+# row's probability; at level 1.5 nearly all of it, and a third of the other
+# weights fall below the FP16 normal range.
+_ADVERSARIAL_INPUTS = {
+    "late-maximum": lambda case: _late_maximum_inputs(case, 1.0),
+    "dominant-late-key": lambda case: _late_maximum_inputs(case, 1.5),
+    "sharp": _sharp_inputs,
+}
+
+
+@pytest.mark.parametrize("profile", sorted(_ADVERSARIAL_INPUTS))
+@pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
+def test_modeled_adversarial_rows_stay_inside_their_bound(
+    case: PermutationCase, profile: str
+) -> None:
+    """The bound is evaluated for the adversarial inputs, not for the fixture:
+    a wider score spread widens it only through the FP32 remainder."""
+    inputs = _ADVERSARIAL_INPUTS[profile](case)
+    for values in inputs:
+        encode_bits(values, case.dtype)
+    if profile != "sharp":
+        scores = _head_scores(case, inputs[0], inputs[1], head=0)
+        assert np.all(np.argmax(scores, axis=1) == case.seqlen_k - 1)
+        weights = np.exp2(scores - scores.max(axis=1, keepdims=True))
+        subnormal = float(np.mean(weights < 2.0**-14))
+        assert (subnormal > 0.25) == (profile == "dominant-late-key")
+    fixture = _quick_bound(case)
+    for kind in PERMUTATION_QUICK_MAPS:
+        source = token_map(kind, case.seqlen_k)
+        result = _model_pair(case, source, source, inputs=inputs)
+        assert not result.violations, (kind.value, format_permutation_result(result))
+        assert fixture.residual <= result.bound < 1.1 * fixture.residual
+    # The mutations stay visible on concentrated rows.
+    key_map, value_map = mutated_token_maps(
+        PairingMutation.KEY_ONLY, PERMUTATION_MUTATION_MAP, case.seqlen_k
+    )
+    assert not _model_pair(case, key_map, value_map, inputs=inputs).unresponsive_heads
 
 
 @pytest.mark.parametrize("mutation", list(PairingMutation))
@@ -625,6 +722,413 @@ def test_unresponsive_mutation_blames_failing_joint_permutations() -> None:
     message = _unresponsive("label", "key_only", mutated, failing)
     assert "joint permutations themselves fail" in message
     assert "reverse: violations=residual=0.5>0.002 at 9" in message
+
+
+# ---------------------------------------------------------------------------
+# Lowered arithmetic path of the unmasked specifications
+# ---------------------------------------------------------------------------
+
+_REDERIVE = "re-derive the bound"
+
+# LLVM spells FP32 constants as the hex of the equivalent double.
+_F32_LOG2E = "0x3FF7154760000000"
+_F32_ONE = "0x3FF0000000000000"
+_F32_ZERO = "0x0000000000000000"
+_F32_INITIAL_MAX = "0xC6293E5940000000"  # -1e30
+
+_MFMA_ATOM = {
+    "fp16": "llvm.amdgcn.mfma.f32.32x32x8f16",
+    "bf16": "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
+}
+_CAST_TYPE = {"fp16": "half", "bf16": "bfloat"}
+_EXP2 = "llvm.amdgcn.exp2.f32"
+_MAXNUM = "llvm.maxnum.f32"
+_BPERMUTE = "llvm.amdgcn.ds.bpermute"
+_FP_FLAGS = ("fast", "contract", "afn", "reassoc", "nnan", "ninf", "nsz", "arcp")
+_FP_MODE_ATTRIBUTES = (
+    "denormal-fp-math",
+    "unsafe-fp-math",
+    "no-nans-fp-math",
+    "no-infs-fp-math",
+    "approx-func-fp-math",
+    "no-signed-zeros-fp-math",
+)
+_FP_TYPE = re.compile(r"\b(float|half|bfloat|double)\b")
+_INSTRUCTION = re.compile(r"^\s*(%[-\w.]+) = (.+)$")
+_VALUE = re.compile(r"%[-\w.]+")
+_CALLEE = re.compile(r"@([-\w.]+)\(")
+_DECLARE = re.compile(r"^declare (.+?) @([-\w.]+)\((.*)\)")
+_NO_OP_BITCAST = re.compile(r"bitcast (\S+(?: x \S+>)?) %[-\w.]+ to (\S+(?: x \S+>)?)$")
+
+
+@dataclass(frozen=True)
+class _Instruction:
+    name: str
+    opcode: str
+    text: str
+    operands: tuple[str, ...]
+
+
+def _parse(ir: str) -> dict[str, _Instruction]:
+    """Map each SSA name to its defining instruction. ``opcode`` is the first
+    word, or the callee for a call; ``operands`` are the SSA values it reads."""
+    instructions: dict[str, _Instruction] = {}
+    for line in ir.splitlines():
+        match = _INSTRUCTION.match(line)
+        if not match:
+            continue
+        name, text = match.groups()
+        if re.match(r"(?:tail |musttail |notail )?call ", text):
+            callee = _CALLEE.search(text)
+            opcode = callee.group(1) if callee else "call"
+            arguments = text[callee.end() :] if callee else text
+        else:
+            opcode = text.split()[0]
+            arguments = text[len(opcode) :]
+        instructions[name] = _Instruction(
+            name, opcode, text, tuple(_VALUE.findall(arguments))
+        )
+    return instructions
+
+
+def _classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Counter]:
+    """Classify every floating-point instruction of one lowered unmasked kernel
+    against the path the bound is derived for, and return the violations and
+    the per-step instruction counts.
+
+    The path, per key tile and lane: scores ``fmul(acc, scale * LOG2E)`` with no
+    mask; ``exp2(fsub(x, m_new))``; each probability feeds the normalizer chain
+    uncast and the PV operand through one ``fptrunc``; one ``alpha`` rescales
+    the normalizer and every accumulator element; the key-tile loop runs
+    ``seqlen_kv / block_n`` times; the epilogue is one ``fdiv 1.0, l`` and
+    ``fptrunc(fmul(o, rcp))``. No fast-math flag, ``!fpmath`` or floating-point
+    mode attribute may appear."""
+    violations: list[str] = []
+    counts: Counter = Counter()
+    instructions = _parse(ir)
+    uses: dict[str, list[_Instruction]] = {}
+    for instruction in instructions.values():
+        for operand in instruction.operands:
+            uses.setdefault(operand, []).append(instruction)
+
+    def source(name: str) -> str:
+        """Follow type-preserving ``bitcast`` copies."""
+        while name in instructions:
+            item = instructions[name]
+            no_op = _NO_OP_BITCAST.match(item.text)
+            if not (no_op and no_op.group(1) == no_op.group(2)):
+                break
+            name = item.operands[0]
+        return name
+
+    def opcode(name: str) -> str | None:
+        item = instructions.get(source(name))
+        return item.opcode if item else None
+
+    def users(name: str) -> list[_Instruction]:
+        found: list[_Instruction] = []
+        for user in uses.get(name, []):
+            if user.opcode == "bitcast" and source(user.name) == source(name):
+                found.extend(users(user.name))
+            else:
+                found.append(user)
+        return found
+
+    for line in ir.splitlines():
+        stripped = line.strip()
+        match = re.search(r"= (?:f\w+|call|select|phi) ((?:\w+ )*)", stripped)
+        if match and set(match.group(1).split()) & set(_FP_FLAGS):
+            violations.append(f"fast-math flags: {stripped}")
+        if "!fpmath" in stripped:
+            violations.append(f"!fpmath metadata: {stripped}")
+        if stripped.startswith("attributes #"):
+            for attribute in _FP_MODE_ATTRIBUTES:
+                if f'"{attribute}' in stripped:
+                    violations.append(f"FP mode attribute {attribute}: {stripped}")
+        declared = _DECLARE.match(stripped)
+        if declared:
+            returned, callee, arguments = declared.groups()
+            modeled = callee in (_EXP2, _MAXNUM, _MFMA_ATOM[dtype])
+            if not modeled and (
+                _FP_TYPE.search(returned) or _FP_TYPE.search(arguments)
+            ):
+                violations.append(f"unmodeled floating-point intrinsic @{callee}")
+
+    # Loop-carried state: the running maximum and the normalizer. No mask.
+    running_max = normalizer = None
+    for item in instructions.values():
+        zeroed = item.text.count("zeroinitializer") == 2
+        if item.opcode == "select" and _FP_TYPE.search(item.text) and not zeroed:
+            violations.append(f"float select on an unmasked path: {item.text}")
+        if item.opcode == "phi" and item.text.startswith("phi float"):
+            initial = re.findall(r"\[ (0x[0-9A-F]+),", item.text)
+            if initial == [_F32_INITIAL_MAX] and running_max is None:
+                running_max = item.name
+            elif initial == [_F32_ZERO] and normalizer is None:
+                normalizer = item.name
+            else:
+                violations.append(f"unmodeled float phi: {item.text}")
+    if running_max is None or normalizer is None:
+        violations.append("no loop-carried running maximum or normalizer")
+
+    # The key-tile loop visits every tile: kt in [0, seqlen_kv / block_n).
+    compares = [item for item in instructions.values() if item.opcode == "icmp"]
+    bound = None
+    if len(compares) == 1:
+        match = re.fullmatch(r"icmp slt i32 (%[-\w.]+), (%[-\w.]+)", compares[0].text)
+        if match:
+            counter, bound = instructions.get(match.group(1)), match.group(2)
+            start = re.match(
+                r"phi i32 \[ 0, %[-\w.]+ \], \[ (%[-\w.]+), ", counter.text
+            )
+            step = instructions.get(start.group(1)) if start else None
+            if step is None or step.text != f"add nsw i32 {counter.name}, 1":
+                violations.append(f"key-tile counter is not 0, 1, ...: {counter.text}")
+    if bound is None or instructions[bound].text != f"sdiv i32 %seqlen_kv, {block_n}":
+        violations.append(
+            f"key-tile loop bound is not seqlen_kv / {block_n}: "
+            f"{[item.text for item in compares]}"
+        )
+
+    scale = [
+        item.name
+        for item in instructions.values()
+        if item.text
+        in (f"fmul float %scale, {_F32_LOG2E}", f"fmul float {_F32_LOG2E}, %scale")
+    ]
+    if len(scale) != 1:
+        violations.append(f"expected one fmul(scale, LOG2E), found {len(scale)}")
+    reciprocal = [item for item in instructions.values() if item.opcode == "fdiv"]
+    if (
+        len(reciprocal) != 1
+        or not reciprocal[0].text.startswith(f"fdiv float {_F32_ONE}, %")
+        or source(reciprocal[0].operands[0]) != normalizer
+    ):
+        violations.append(
+            f"expected one fdiv 1.0, l; found {[item.text for item in reciprocal]}"
+        )
+    rcp = reciprocal[0].name if reciprocal else None
+
+    # exp2: a probability (normalizer fadd + one cast) or the rescale alpha.
+    probabilities: set[str] = set()
+    alphas: set[str] = set()
+    for item in instructions.values():
+        if item.opcode == "fsub" and {u.opcode for u in users(item.name)} != {_EXP2}:
+            violations.append(f"fsub not consumed by exp2 only: {item.text}")
+        if item.opcode != _EXP2:
+            continue
+        argument = instructions.get(source(item.operands[0]))
+        if argument is None or argument.opcode != "fsub":
+            violations.append(f"exp2 argument is not an fsub: {item.text}")
+        elif opcode(argument.operands[1]) != _MAXNUM:
+            violations.append(f"exp2 does not subtract the row maximum: {item.text}")
+        kinds = Counter(user.opcode for user in users(item.name))
+        if kinds == Counter({"fadd": 1, "fptrunc": 1}):
+            probabilities.add(item.name)
+        elif kinds and set(kinds) == {"fmul"}:
+            alphas.add(item.name)
+        else:
+            violations.append(f"exp2 with unmodeled uses {dict(kinds)}: {item.text}")
+    counts["exp2_probability"] = len(probabilities)
+    counts["exp2_alpha"] = len(alphas)
+
+    def element_of(name: str, producer: str) -> bool:
+        item = instructions.get(source(name))
+        return (
+            item is not None
+            and item.opcode == "extractelement"
+            and opcode(item.operands[0]) == producer
+        )
+
+    for item in instructions.values():
+        if item.opcode != "fmul" or item.name in scale:
+            continue
+        left, right = item.operands
+        if right in scale and element_of(left, _MFMA_ATOM[dtype]):
+            counts["score"] += 1
+        elif source(right) in alphas and source(left) == normalizer:
+            counts["rescale_normalizer"] += 1
+        elif source(right) in alphas and element_of(left, "phi"):
+            counts["rescale_accumulator"] += 1
+        elif right == rcp and {u.opcode for u in users(item.name)} == {"fptrunc"}:
+            counts["output_product"] += 1
+        else:
+            violations.append(f"unmodeled fmul: {item.text}")
+
+    # Normalizer: a lane chain of uncast probabilities from +0, the partner
+    # lane's sum, then l * alpha + tile sum.
+    chain: dict[str, int] = {}
+    shuffles: set[str] = set()
+    for item in instructions.values():
+        if item.opcode != "fadd":
+            continue
+        left, right = item.operands[0], item.operands[-1]
+        rescaled = instructions.get(source(left))
+        if source(right) in probabilities and (
+            item.text.startswith(f"fadd float {_F32_ZERO}, ") or source(left) in chain
+        ):
+            chain[item.name] = chain.get(source(left), 0) + 1
+        elif source(left) in chain and opcode(right) == "bitcast":
+            shuffles.add(item.name)
+            counts["lane_chain"] = chain[source(left)]
+            if opcode(instructions[source(right)].operands[0]) != _BPERMUTE:
+                violations.append(f"partner sum is not a lane shuffle: {item.text}")
+        elif (
+            rescaled is not None
+            and rescaled.opcode == "fmul"
+            and source(rescaled.operands[0]) == normalizer
+            and source(right) in shuffles
+        ):
+            counts["combine"] += 1
+            if normalizer not in {user.name for user in users(item.name)}:
+                violations.append(f"combine is not the next normalizer: {item.text}")
+        else:
+            violations.append(f"unmodeled fadd: {item.text}")
+    counts["shuffle"] = len(shuffles)
+
+    cast_type = _CAST_TYPE[dtype]
+    for item in instructions.values():
+        if item.opcode == "fpext":
+            violations.append(f"unmodeled fpext: {item.text}")
+        if item.opcode != "fptrunc":
+            continue
+        if not item.text.endswith(f" to {cast_type}"):
+            violations.append(f"cast to a type other than {cast_type}: {item.text}")
+        operand = instructions.get(source(item.operands[0]))
+        if operand is not None and operand.name in probabilities:
+            counts["cast_probability"] += 1
+        elif (
+            operand is not None and operand.opcode == "fmul" and rcp in operand.operands
+        ):
+            counts["cast_output"] += 1
+        else:
+            violations.append(f"unmodeled cast: {item.text}")
+
+    for item in instructions.values():
+        if item.opcode == _MFMA_ATOM[dtype]:
+            counts["mfma"] += 1
+            if not item.text.endswith("i32 0, i32 0, i32 0)"):
+                violations.append(f"MFMA with nonzero controls: {item.text}")
+    return violations, counts
+
+
+@cache
+def _lowered_subject(arch: str, case: PermutationCase) -> tuple[str, object]:
+    """Lower one case's dispatch-resolved spec to LLVM IR text on the CPU."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    from kernels.gfx942.attention_dense import build_attention_dense
+
+    assert arch == "gfx942", "the path check models the gfx942 dense body"
+    spec = resolve_dense_subject(arch, case).tuning_spec.kernel_spec
+    return lower_kernel_to_llvm(build_attention_dense(spec, arch=arch), arch=arch), spec
+
+
+@pytest.mark.parametrize(
+    "subject_case",
+    PERMUTATION_SUBJECT_CASES,
+    ids=lambda item: f"{item[0]}-{item[1].case_id}",
+)
+def test_lowered_unmasked_path_is_the_one_the_bound_models(
+    subject_case: tuple[str, PermutationCase],
+) -> None:
+    """The bound is derived for one arithmetic path. Any floating-point
+    instruction outside it fails here: the bound is re-derived, never widened."""
+    arch, case = subject_case
+    ir, spec = _lowered_subject(arch, case)
+    violations, counts = _classify_unmasked_path(ir, case.dtype, spec.block_n)
+    assert not violations, f"{_REDERIVE}: " + "; ".join(violations)
+
+    # Two lane halves share a key tile; 16 accumulator elements per lane and
+    # 32-wide output tile; eight products per MFMA call.
+    lane_keys = spec.block_n // 2
+    output_elements = 16 * (spec.head_size // 32)
+    assert counts == {
+        "exp2_probability": lane_keys,
+        "exp2_alpha": 1,
+        "score": lane_keys,
+        "lane_chain": lane_keys,
+        "shuffle": 1,
+        "combine": 1,
+        "rescale_normalizer": 1,
+        "rescale_accumulator": output_elements,
+        "cast_probability": lane_keys,
+        "output_product": output_elements,
+        "cast_output": output_elements,
+        "mfma": (spec.block_n // 32) * (spec.head_size // 8)
+        + (spec.head_size // 32) * (spec.block_n // 8),
+    }
+
+
+def _replace_once(old: str, new: str) -> Callable[[str], str]:
+    def edit(ir: str) -> str:
+        assert old in ir, f"edit target {old!r} not in the lowered IR"
+        return ir.replace(old, new, 1)
+
+    return edit
+
+
+def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
+    def edit(ir: str) -> str:
+        edited, count = re.subn(pattern, replacement, ir, count=1)
+        assert count == 1, f"edit pattern {pattern!r} not in the lowered IR"
+        return edited
+
+    return edit
+
+
+@pytest.mark.parametrize(
+    "edit,match",
+    [
+        (_replace_once("= fadd float", "= fadd fast float"), "fast-math flags"),
+        (
+            _substitute_once(r"(= fdiv float [^\n]+)", r"\1, !fpmath !0"),
+            "!fpmath metadata",
+        ),
+        (
+            _replace_once("sdiv i32 %seqlen_kv, 64", "sdiv i32 %seqlen_kv, 128"),
+            "key-tile loop bound",
+        ),
+        (
+            _replace_once(f"fdiv float {_F32_ONE},", "fdiv float 0x4000000000000000,"),
+            "expected one fdiv 1.0",
+        ),
+        (_replace_once(" to half", " to bfloat"), "cast to a type other than half"),
+        (
+            # The normalizer sums the cast weight instead of the uncast one.
+            _substitute_once(
+                r"(%fadd\d+) = fadd float (%fadd\d+), (%exp2f\d+)\n"
+                r"(\s+)(%cast\d+) = fptrunc float \3 to half\n",
+                r"\5 = fptrunc float \3 to half\n"
+                r"\4%recast = fpext half \5 to float\n"
+                r"\4\1 = fadd float \2, %recast\n",
+            ),
+            "unmodeled fpext",
+        ),
+        (
+            # A score is masked after the scale.
+            _substitute_once(
+                r"(%fsub\d+) = fsub float (%fmul\d+), (%fmax\d+)\n",
+                rf"%masked = select i1 true, float \2, float {_F32_INITIAL_MAX}\n"
+                r"  \1 = fsub float %masked, \3\n",
+            ),
+            "float select on an unmasked path",
+        ),
+    ],
+    ids=[
+        "fast-math",
+        "fpmath",
+        "half-the-key-tiles",
+        "reciprocal-of-two",
+        "probability-cast-type",
+        "normalizer-sums-cast-weights",
+        "masked-score",
+    ],
+)
+def test_path_check_rejects_each_unmodeled_change(edit, match: str) -> None:
+    ir, spec = _lowered_subject("gfx942", PERMUTATION_SQUARE_FP16)
+    violations, _ = _classify_unmasked_path(edit(ir), "fp16", spec.block_n)
+    assert any(match in item for item in violations), violations
 
 
 # ---------------------------------------------------------------------------

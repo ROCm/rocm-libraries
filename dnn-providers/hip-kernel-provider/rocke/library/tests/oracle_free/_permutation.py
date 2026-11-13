@@ -569,4 +569,3 @@ def format_permutation_result(result: PermutationResult) -> str:
         f"at b:q:h:d={coordinate} signed={result.signed_at_worst:.9g}; "
         f"rms={result.rms:.9g}; mean={result.mean_signed:.9g}"
     )
-

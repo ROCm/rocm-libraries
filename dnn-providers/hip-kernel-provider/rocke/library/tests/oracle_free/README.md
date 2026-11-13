@@ -266,13 +266,23 @@ The bound holds for every single-pass dense variant, whatever its tile, grid,
 persistence or scheduling knobs, under these assumptions about the executed
 path:
 
-- FP32 addition, multiplication, MFMA accumulation and the reciprocal return one
-  of the two FP32 neighbours of their exact result;
+- FP32 addition, multiplication and the reciprocal return one of the two FP32
+  neighbours of their exact result, and each MFMA call accumulates its products
+  by such additions in some order;
 - `exp2` is within one FP32 ULP;
 - the probability cast and the output store round to nearest even and keep
   subnormals;
 - the normalizer sums uncast weights, the accumulator consumes cast ones, and
   both are rescaled by `exp2(m_old - m_new)` per key tile.
+
+The last item is checked on the CPU. A contract lowers each quick spec to LLVM
+IR and classifies every floating-point instruction against that path: no mask on
+the scores, a key-tile loop over `seqlen_kv / block_n`, uncast weights in the
+normalizer, one cast into the PV operand, one `alpha` for the normalizer and for
+every accumulator element, one `fdiv 1.0, l`, and no fast-math flag. An
+instruction outside the path fails with "re-derive the bound"; the bound is
+never widened to absorb it. The rounding behaviour of the compiled code object
+(the first three items) is not checked here.
 
 The subject adapter refuses the same specs as for the uniform lane (split-KV,
 sinks, LSE, ragged, bottom-right, paged, varlen) and additionally requires the
@@ -325,9 +335,10 @@ uniform lane: only a device of another architecture skips.
 
 The CPU contracts in `test_permutation_contracts.py` exercise the analyzer on
 an FP32 model of the kernel's single-pass online softmax: the modeled joint
-permutations stay inside the bound, the modeled mutations leave it in every
-head, and two modeled pairing defects are caught by the maps the group argument
-predicts. The model lives only in those contracts.
+permutations stay inside the bound, on the fixture and on rows with a late or
+dominant maximum; the modeled mutations leave it in every head; and two modeled
+pairing defects are caught by the maps the group argument predicts. The model
+lives only in those contracts.
 
 ## Oracle prohibition
 
