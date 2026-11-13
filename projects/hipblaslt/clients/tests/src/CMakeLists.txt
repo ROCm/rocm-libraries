@@ -38,6 +38,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocroller_checked_in_kernels_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_order_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_update_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
