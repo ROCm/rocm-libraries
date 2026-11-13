@@ -61,6 +61,7 @@ Datatypes:
         maf1_0: 1000
         maf2_0: 1001
         maf2_0_unit_scale: 1002
+        maf2_1: 1003
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:

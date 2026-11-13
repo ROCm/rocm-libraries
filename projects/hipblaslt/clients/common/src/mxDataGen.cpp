@@ -64,6 +64,8 @@ namespace
     // Base seed of the maf2_0 MX streams: 2^31 above the non-MX maf2_0 base (1713573849), so
     // the two families of mt19937(seed + 32 * index + thread) streams never meet.
     constexpr uint32_t kMaf2_0MXSeed = 1713573849u + 0x80000000u;
+    // maf2_1's MX streams start 2^30 above maf2_0's, clear of every other maf stream family.
+    constexpr uint32_t kMaf2_1MXSeed = kMaf2_0MXSeed + 0x40000000u;
 
     void applyInitMethodString(DataGeneratorOptions&  opt,
                                std::string_view const initMethod,
@@ -153,6 +155,12 @@ namespace
             mode.unitScaleNormalData = true;
             opt.initMode             = DataInitMode(mode);
         }
+        else if(initMethod == "maf2_1")
+        {
+            // MAF2.1: data U[-1, 1] rounded to the element format; E8M0 scales 2^e with e uniform
+            // over [-127, 0], UE4M3/UE5M3 scales U[0, 1] rounded to the scale format.
+            opt.initMode = DataInitMode(Maf2_1{});
+        }
         else
             throw std::runtime_error(
                 std::string("generateMXInput: unsupported initMethod '")
@@ -160,7 +168,7 @@ namespace
                 + "'. Supported methods: Bounded/uniform_01, hpl, "
                   "uniform_low_precision, "
                   "TrigonometricFromFloat/trig_float, norm_dist, rand_int, maf1_0, "
-                  "maf2_0, maf2_0_unit_scale, "
+                  "maf2_0, maf2_0_unit_scale, maf2_1, "
                   "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
                   "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
                   "DenormMins, DenormMaxs, NaNs, Infs.");
@@ -635,11 +643,14 @@ std::vector<float> generateMXInput(hipDataType            dataType,
         opt, initMethod, dataType, min_val, max_val, scaleType, row * col, seedIndex);
     applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
-    // maf2_0 salts the seed per matrix and batch (seedIndex = abc + 3 * batch) from its own
-    // base, so its streams differ between A and B and between batches, and stay clear of the
-    // non-MX maf2_0 streams that start at 1713573849. Other methods keep the single seed.
+    // maf2_0 and maf2_1 salt the seed per matrix and batch (seedIndex = abc + 3 * batch) from
+    // their own bases, so their streams differ between A and B and between batches, and stay clear
+    // of the non-MX streams that start at 1713573849. Other methods keep the single seed.
     const bool     maf2_0 = initMethod == "maf2_0" || initMethod == "maf2_0_unit_scale";
-    const uint32_t seed   = maf2_0 ? kMaf2_0MXSeed + 32u * seedIndex : 1713573849;
+    const bool     maf2_1 = initMethod == "maf2_1";
+    const uint32_t seed   = maf2_0   ? kMaf2_0MXSeed + 32u * seedIndex
+                            : maf2_1 ? kMaf2_1MXSeed + 32u * seedIndex
+                                     : 1713573849;
 
     std::vector<index_t> sizes = {row, col};
     std::vector<index_t> strides;

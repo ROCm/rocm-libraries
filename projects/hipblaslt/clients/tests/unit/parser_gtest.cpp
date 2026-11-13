@@ -57,7 +57,8 @@ namespace
     X(uniform_low_precision)         \
     X(maf1_0)                        \
     X(maf2_0)                        \
-    X(maf2_0_unit_scale)
+    X(maf2_0_unit_scale)             \
+    X(maf2_1)
 
     // Keep in sync with string_to_hipblaslt_activation_type().
 #define HIPBLASLT_TEST_ACTIVATIONS(X) \
@@ -262,7 +263,8 @@ TEST(HostUnitInitParser, smoke_GemmOnlyInitializations)
 {
     for(const auto& [name, init] : known_init_modes())
     {
-        const bool maf = name == "maf1_0" || name == "maf2_0" || name == "maf2_0_unit_scale";
+        const bool maf = name == "maf1_0" || name == "maf2_0" || name == "maf2_0_unit_scale"
+                         || name == "maf2_1";
         EXPECT_EQ(hipblaslt_initialization_is_gemm_only(init), maf) << name;
     }
 }

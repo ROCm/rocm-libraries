@@ -67,6 +67,11 @@ enum class hipblaslt_initialization
     // MAF2.0 X=1 rows: block-scaled (MX) FP8 and FP4 operands get every block scale 1.0 and N(0,1)
     // data rounded to the element type; other operands are filled as maf2_0
     maf2_0_unit_scale = 1002,
+    // MAF2.1 data init: U[-1,1] for the non-scaled types (FP64, FP32, FP16, BF16, FP8); for
+    // block-scaled (MX) operands, mxDataGenerator Maf2_1 (data U[-1,1] rounded to the element
+    // format; E8M0 scales 2^e with e uniform over [-127, 0]; UE4M3/UE5M3 scales U[0,1] rounded);
+    // deterministic, mxDataGenerator-style seeding apart from maf2_0
+    maf2_1 = 1003,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -287,7 +292,8 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
 constexpr bool hipblaslt_initialization_is_gemm_only(hipblaslt_initialization init)
 {
     return init == hipblaslt_initialization::maf1_0 || init == hipblaslt_initialization::maf2_0
-           || init == hipblaslt_initialization::maf2_0_unit_scale;
+           || init == hipblaslt_initialization::maf2_0_unit_scale
+           || init == hipblaslt_initialization::maf2_1;
 }
 
 constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
@@ -330,6 +336,8 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "maf2_0";
     case hipblaslt_initialization::maf2_0_unit_scale:
         return "maf2_0_unit_scale";
+    case hipblaslt_initialization::maf2_1:
+        return "maf2_1";
     }
     return "invalid";
 }
@@ -367,6 +375,7 @@ inline std::optional<hipblaslt_initialization>
         value == "maf1_0"     ? hipblaslt_initialization::maf1_0     :
         value == "maf2_0"     ? hipblaslt_initialization::maf2_0     :
         value == "maf2_0_unit_scale" ? hipblaslt_initialization::maf2_0_unit_scale :
+        value == "maf2_1"     ? hipblaslt_initialization::maf2_1     :
         std::optional<hipblaslt_initialization>{};
 }
 // clang-format on

@@ -269,6 +269,40 @@ static void maf2_0_fill_normal(
     CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
 }
 
+// maf2_1 uses maf2_0's seeding scheme from its own base, 2^30 above maf2_0's, so the two families
+// of mt19937(seed + 32 * index + thread) streams never meet.
+constexpr uint32_t kMaf2_1Seed = kMaf2_0Seed + 0x40000000u;
+
+static uint32_t maf2_1_seed(ABC_dims abc, size_t batch_index)
+{
+    return maf2_0_seed(abc, batch_index) - kMaf2_0Seed + kMaf2_1Seed;
+}
+
+// Fills every element up to the last one used, ld padding between columns and batches included:
+// M + lda*(N-1) + (batch_count-1)*stride (stride 0 broadcasts one matrix; a stride below lda
+// interleaves the batches). This is the extent TensileLite fills, so both projects draw the same
+// data. Values are U[-1, 1] drawn in double precision on the host and converted as in
+// maf2_0_fill_normal, then copied to the device.
+template <typename T>
+static void maf2_1_fill_uniform(
+    T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, uint32_t seed)
+{
+    if(batch_count == 0 || M == 0 || N == 0)
+        return;
+    const size_t   size_64 = M + lda * (N - 1) + size_t(batch_count - 1) * stride;
+    std::vector<T> h(size_64);
+    const int      num_threads = std::min(kMaf2_0MaxThreads, omp_get_max_threads());
+#pragma omp parallel num_threads(num_threads)
+    {
+        std::mt19937 gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+        std::uniform_real_distribution<double> dist(-1.0, 1.0);
+#pragma omp for schedule(static)
+        for(size_t i = 0; i < size_64; i++)
+            h[i] = T(dist(gen));
+    }
+    CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
+}
+
 __host__ __device__ uint32_t pseudo_random_device(size_t idx)
 {
     // Numerical Recipes ranqd1, Chapter 7.1, ?An Even Quicker Generator, Eq. 7.1.6. parameters from Knuth and H. W. Lewis
@@ -1169,6 +1203,23 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else
                 throw std::invalid_argument(
                     "hipblaslt_init_device: maf2_0 is not supported for this data type yet");
+            break;
+        case hipblaslt_initialization::maf2_1:
+            if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                         || std::is_same_v<T, hipblasLtHalf> || std::is_same_v<T, hip_bfloat16>
+#if HIP_FP8_TYPE_OCP
+                         || std::is_same_v<T, hipblaslt_f8> || std::is_same_v<T, hipblaslt_bf8>
+#endif
+#if HIP_FP8_TYPE_FNUZ
+                         || std::is_same_v<T, hipblaslt_f8_fnuz>
+                         || std::is_same_v<T, hipblaslt_bf8_fnuz>
+#endif
+                         )
+                maf2_1_fill_uniform(
+                    A, M, N, lda, stride, batch_count, maf2_1_seed(abc, batch_index));
+            else
+                throw std::invalid_argument(
+                    "hipblaslt_init_device: maf2_1 is not supported for this data type yet");
             break;
         case hipblaslt_initialization::uniform_01:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
