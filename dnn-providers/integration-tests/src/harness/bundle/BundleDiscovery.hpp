@@ -245,9 +245,7 @@ inline std::filesystem::path relativeToRoot(const std::filesystem::path& path,
     return path.lexically_normal().lexically_relative(root.lexically_normal());
 }
 
-// Generic recursive file scanner. It carries no bundle knowledge; graph vs
-// companion vs sweep filtering is layered on top by isGraphFile() and
-// discoverBundles().
+// Generic recursive file scanner. It carries no bundle knowledge.
 inline std::vector<std::filesystem::path>
     scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
 {
@@ -260,33 +258,6 @@ inline std::vector<std::filesystem::path>
     });
     std::sort(paths.begin(), paths.end());
     return paths;
-}
-
-// Returns every leaf directory at or under root. Leaf folders with no graph .json
-// are warned as likely incomplete bundles, except for recognized sweep roots and
-// sweep golden-data leaves.
-inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesystem::path& root)
-{
-    std::set<std::filesystem::path> withSubdir;
-    std::set<std::filesystem::path> allDirs;
-    allDirs.insert(root);
-    forEachBundleTreeEntry(root, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_directory())
-        {
-            allDirs.insert(entry.path());
-            withSubdir.insert(entry.path().parent_path());
-        }
-    });
-
-    std::vector<std::filesystem::path> leaves;
-    for(const auto& dir : allDirs)
-    {
-        if(withSubdir.find(dir) == withSubdir.end())
-        {
-            leaves.push_back(dir);
-        }
-    }
-    return leaves;
 }
 
 // Companion file kinds that mark a .json as metadata for a graph instead of a
@@ -410,6 +381,96 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     return {deriveSuiteName(relativeDir, jsonPath), sanitizeForGtest(jsonPath.stem().string())};
 }
 
+namespace detail
+{
+
+// What one walk of a bundle tree finds. Directories are keyed by the path that the
+// walk gives them. The entries directly in the root carry `rootContentsKey` as their
+// parent path, which can differ from the root as given (for example "data" for "data/").
+struct BundleTreeListing
+{
+    std::filesystem::path root;
+    std::filesystem::path rootContentsKey;
+    std::set<std::filesystem::path> directories; // the root and every walked directory
+    std::set<std::filesystem::path> parentsOfDirectories;
+    std::set<std::filesystem::path> parentsOfGraphFiles;
+    std::set<std::filesystem::path> parentsOfTemplateFiles;
+    std::set<std::filesystem::path> parentsOfManifestFiles;
+    std::vector<std::filesystem::path> jsonFiles; // every regular .json file, sorted
+
+    std::filesystem::path contentsKey(const std::filesystem::path& directory) const
+    {
+        return directory == root ? rootContentsKey : directory;
+    }
+
+    bool isLeaf(const std::filesystem::path& directory) const
+    {
+        return parentsOfDirectories.count(contentsKey(directory)) == 0;
+    }
+
+    bool holdsGraphFile(const std::filesystem::path& directory) const
+    {
+        return parentsOfGraphFiles.count(contentsKey(directory)) != 0;
+    }
+
+    // The same test as isSweepBundleRoot(), from the walked entries.
+    bool isSweepRoot(const std::filesystem::path& directory) const
+    {
+        const auto key = contentsKey(directory);
+        return parentsOfTemplateFiles.count(key) != 0 && parentsOfManifestFiles.count(key) != 0;
+    }
+};
+
+// Walks the tree at `root` once and records what discovery needs from it.
+inline BundleTreeListing listBundleTree(const std::filesystem::path& root)
+{
+    BundleTreeListing listing;
+    listing.root = root;
+    listing.rootContentsKey = (root / "entry").parent_path();
+    listing.directories.insert(root);
+    forEachBundleTreeEntry(root, [&](const std::filesystem::directory_entry& entry) {
+        const auto& path = entry.path();
+        if(entry.is_directory())
+        {
+            listing.directories.insert(path);
+            listing.parentsOfDirectories.insert(path.parent_path());
+        }
+        else if(entry.is_regular_file() && path.extension() == ".json")
+        {
+            listing.jsonFiles.push_back(path);
+            if(isGraphFile(path))
+            {
+                listing.parentsOfGraphFiles.insert(path.parent_path());
+            }
+        }
+        if(isSweepTemplateFile(path) && entry.exists())
+        {
+            listing.parentsOfTemplateFiles.insert(path.parent_path());
+        }
+        if(isSweepManifestFile(path) && entry.exists())
+        {
+            listing.parentsOfManifestFiles.insert(path.parent_path());
+        }
+    });
+    std::sort(listing.jsonFiles.begin(), listing.jsonFiles.end());
+    return listing;
+}
+
+inline std::vector<std::filesystem::path> sweepRootsIn(const BundleTreeListing& listing)
+{
+    std::vector<std::filesystem::path> sweepDirs;
+    for(const auto& directory : listing.directories)
+    {
+        if(listing.isSweepRoot(directory))
+        {
+            sweepDirs.push_back(directory);
+        }
+    }
+    return sweepDirs;
+}
+
+} // namespace detail
+
 // A sweep root is any directory with both graph.template.json and sweep.json.
 // It registers one logical test per cases[].id, and normal graph discovery skips
 // every JSON file below it so templates, manifests, and golden metadata do not
@@ -417,30 +478,17 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
 inline std::vector<std::filesystem::path>
     findSweepDirectories(const std::filesystem::path& bundleDir)
 {
-    std::set<std::filesystem::path> sweepDirs;
-    if(isSweepBundleRoot(bundleDir))
-    {
-        sweepDirs.insert(bundleDir);
-    }
-
-    forEachBundleTreeEntry(bundleDir, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_directory() && isSweepBundleRoot(entry.path()))
-        {
-            sweepDirs.insert(entry.path());
-        }
-    });
-
-    return {sweepDirs.begin(), sweepDirs.end()};
+    return detail::sweepRootsIn(detail::listBundleTree(bundleDir));
 }
 
 namespace detail
 {
 
-// Leaf folders at or under `bundleDir` that hold no graph .json. Sweep roots are
-// not reported. Golden tensor directories under a sweep are leaves by design; they
-// are data, not incomplete bundle folders, so they are not reported either.
+// Leaf folders of the listing that hold no graph .json. Sweep roots are not
+// reported. Golden tensor directories under a sweep are leaves by design; they are
+// data, not incomplete bundle folders, so they are not reported either.
 inline std::vector<std::filesystem::path>
-    findEmptyLeafFolders(const std::filesystem::path& bundleDir,
+    findEmptyLeafFolders(const BundleTreeListing& listing,
                          const std::vector<std::filesystem::path>& sweepDirs)
 {
     std::vector<std::filesystem::path> goldenDirs;
@@ -452,33 +500,34 @@ inline std::vector<std::filesystem::path>
     const auto normalizedGoldenDirs = lexicallyNormalSet(goldenDirs);
 
     std::vector<std::filesystem::path> emptyLeaves;
-    for(const auto& leaf : findLeafDirectories(bundleDir))
+    for(const auto& directory : listing.directories)
     {
-        if(isSweepBundleRoot(leaf) || hasAncestorIn(leaf, normalizedGoldenDirs))
+        if(!listing.isLeaf(directory) || listing.isSweepRoot(directory)
+           || hasAncestorIn(directory, normalizedGoldenDirs))
         {
             continue;
         }
-
-        const bool hasGraph
-            = std::any_of(std::filesystem::directory_iterator(leaf),
-                          std::filesystem::directory_iterator(),
-                          [](const std::filesystem::directory_entry& entry) {
-                              return entry.is_regular_file() && isGraphFile(entry.path());
-                          });
-        if(!hasGraph)
+        if(!listing.holdsGraphFile(directory))
         {
-            emptyLeaves.push_back(leaf);
+            emptyLeaves.push_back(directory);
         }
     }
     return emptyLeaves;
 }
 
+inline std::vector<std::filesystem::path>
+    findEmptyLeafFolders(const std::filesystem::path& bundleDir,
+                         const std::vector<std::filesystem::path>& sweepDirs)
+{
+    return findEmptyLeafFolders(listBundleTree(bundleDir), sweepDirs);
+}
+
 } // namespace detail
 
-inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
+inline void warnOnEmptyLeafFolders(const detail::BundleTreeListing& listing,
                                    const std::vector<std::filesystem::path>& sweepDirs)
 {
-    for(const auto& leaf : detail::findEmptyLeafFolders(bundleDir, sweepDirs))
+    for(const auto& leaf : detail::findEmptyLeafFolders(listing, sweepDirs))
     {
         HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
     }
@@ -777,8 +826,9 @@ inline BundleDiscoveryResult
     BundleDiscoveryResult result;
     std::unordered_map<std::string, std::filesystem::path> nameToPath;
 
-    const auto sweepDirs = findSweepDirectories(bundleDir);
-    warnOnEmptyLeafFolders(bundleDir, sweepDirs);
+    const auto listing = detail::listBundleTree(bundleDir);
+    const auto sweepDirs = detail::sweepRootsIn(listing);
+    warnOnEmptyLeafFolders(listing, sweepDirs);
 
     auto registerBundle = [&](DiscoveredBundle bundle) {
         const auto fullName = bundle.fullName();
@@ -811,7 +861,7 @@ inline BundleDiscoveryResult
     }
 
     const auto normalizedSweepDirs = detail::lexicallyNormalSet(sweepDirs);
-    for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
+    for(const auto& jsonPath : listing.jsonFiles)
     {
         if(detail::hasAncestorIn(jsonPath, normalizedSweepDirs))
         {

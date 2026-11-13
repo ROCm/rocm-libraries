@@ -552,6 +552,119 @@ TEST_F(TestBundleDiscoveryFixture, FindEmptyLeafFoldersReportsOnlyLeavesWithoutA
     EXPECT_EQ(emptyLeaves, expected);
 }
 
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtTheDataRootIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{_tempDir});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(_tempDir, sweepDirs).empty());
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().jsonPath, _tempDir / "sweep.json");
+}
+
+TEST_F(TestBundleDiscoveryFixture, DataRootWithATrailingSeparatorIsNotALeaf)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto root = _tempDir / "";
+
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, findSweepDirectories(root)).empty());
+}
+
+TEST_F(TestBundleDiscoveryFixture, EmptyLeafFoldersBesideAndInsideASweepAreReported)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Sweep";
+    createTemplateSweep(sweepDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto beside = _tempDir / "quick" / "Op" / "Empty";
+    std::filesystem::create_directories(beside);
+    const auto inside = sweepDir / "notes";
+    std::filesystem::create_directories(inside);
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{beside, inside};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// A directory named sweep.json marks a sweep root like a file does.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonMarksASweepRoot)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{sweepDir / "sweep.json"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootsAndEmptyLeavesBehindADirectorySymlinkAreFound)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside" / "Linked";
+    createTemplateSweep(outside / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    std::filesystem::create_directories(outside / "Empty");
+    std::filesystem::create_directories(outside / "MetaOnly");
+    std::ofstream(outside / "MetaOnly" / "meta.json") << "{}";
+    createMinimalBundle(outside / "Good", "good");
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside, root / "quick" / "Linked");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto linked = root / "quick" / "Linked";
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{linked / "Sweep"});
+    const std::vector<std::filesystem::path> expected{linked / "Empty", linked / "MetaOnly"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(root, sweepDirs), expected);
+}
+
+// The walk does not list a directory it may not read. Its parent then has no listed
+// subdirectory, so the parent is a leaf.
+TEST_F(TestBundleDiscoveryFixture, ParentOfAnUnlistableDirectoryIsALeaf)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto parent = _tempDir / "x";
+    const auto locked = parent / "locked";
+    createTemplateSweep(locked / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    };
+    const RestorePermissions restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              std::vector<std::filesystem::path>{parent});
+}
+
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
     auto result = discoverBundles(_tempDir);
