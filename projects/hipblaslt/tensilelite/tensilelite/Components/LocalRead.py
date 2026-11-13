@@ -809,7 +809,8 @@ class LocalReadMFMA(LocalRead):
         # buffer: off(n,k) = kO*kOStride + kM*blockOff + nI*innerK + kI. The WMMA 16x16x128 f8f6f4
         # K->thread map is lane L -> n=L%MI_N, k = kO*(kMcount*innerK) + (L//MI_N)*innerK + kI, so the
         # read-block index r == kO and the lane-half (L//MI_N) == kM (both set in
-        # lraTileAssignmentSwizzledTDM). All strides are element/byte counts (fp8).
+        # lraTileAssignmentSwizzledTDM). All strides below are ELEMENT counts; the ds_load immediate is
+        # bytes, so the element offset is scaled by bpeDS (like the normal reader). fp8: elems == bytes.
         imod        = Module("LocalReadDo%s_I%s_swizzledTDM" % (tP["tensorChar"], iui))
         tc          = tP["tensorChar"]
         tile01      = tP["tile01Idx"]
@@ -856,7 +857,8 @@ class LocalReadMFMA(LocalRead):
                 # localReadOffset carries the K-sub-iteration progression in the immediate (like the
                 # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
                 # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                off = vIdx * vw * nWaveN * nOStridePadded + eIdx * innerK + r * kOStride + swapByteOff + int(tP["localReadOffset"])
+                offElems = vIdx * vw * nWaveN * nOStridePadded + eIdx * innerK + r * kOStride + tP["localReadOffset"]
+                off = int(round(offElems * tP["bpeDS"])) + swapByteOff
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)

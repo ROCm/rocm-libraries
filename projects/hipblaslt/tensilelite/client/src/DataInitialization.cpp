@@ -369,8 +369,11 @@ namespace TensileLite
                                     size_t&          MiK,
                                     size_t&          MiKv,
                                     size_t&          PackK,
-                                    bool             isGfx1250F8 = false)
+                                    bool             isGfx1250 = false)
         {
+            // gfx1250 WMMA_V3 swizzle (TDM path) uses a 32-byte K block: one 16-byte ds_load_b128
+            // per lane-half x 2 lane-halves. In elements that is BK = 32/bpe (F8/I8: 32, F16/BF16: 16),
+            // i.e. MiK = BK/PackK with PackK = 2 below. gfx942 MFMA keeps the wider blocks.
             switch(datatype)
             {
             case rocisa::DataType::Float:
@@ -387,11 +390,11 @@ namespace TensileLite
                 break;
             case rocisa::DataType::Half:
             case rocisa::DataType::BFloat16:
-                MiK  = 16;
+                MiK  = isGfx1250 ? 8 : 16;
                 MiKv = 4;
                 break;
             case rocisa::DataType::Int8:
-                MiK  = 32;
+                MiK  = isGfx1250 ? 16 : 32;
                 MiKv = 8;
                 break;
             case rocisa::DataType::Float8_fnuz:
@@ -406,7 +409,7 @@ namespace TensileLite
             case rocisa::DataType::E5M3:
                 // gfx1250 F8 WMMA_V3 (16x16x128) swizzle uses BK=32 (MiK=16); gfx942 MFMA uses BK=64
                 // (MiK=32). PackK = 16/MiKv/1 = 2 for both, so gfx1250 gives BK=MiK*PackK=32.
-                MiK  = isGfx1250F8 ? 16 : 32;
+                MiK  = isGfx1250 ? 16 : 32;
                 MiKv = 8;
                 break;
             case rocisa::DataType::Float4:
