@@ -20,11 +20,16 @@ Entry-point contract under ``ROCKE_CODEOBJ_BACKEND=direct``:
 - ``compile_kernel`` compiles rocKE IR with the direct compiler; a refusal
   falls back to COMGR unless ``ROCKE_DIRECT_STRICT=1``.
 - The LLVM-IR entries (:func:`build_hsaco_from_llvm_ir`,
-  :func:`build_hsaco_from_llvm_modules`, ``compile_module``,
-  ``lower_kernel_for_code_object`` and the LLVM lowerers' flavor detection)
-  take LLVM text, which the direct compiler has no use for: they always use
-  COMGR. The environment never redirects them; asking one for
-  ``backend="direct"`` explicitly is an error.
+  :func:`build_hsaco_from_llvm_modules`, ``lower_kernel_for_code_object`` and
+  the LLVM lowerers' flavor detection) take LLVM text, which the direct
+  compiler has no use for: they always use COMGR. The environment never
+  redirects them; asking one for ``backend="direct"`` explicitly is an error.
+- ``compile_module`` builds a module of several kernels, which the direct
+  compiler (one kernel per code object) cannot, so it always uses COMGR. The
+  environment never redirects it; an explicit
+  ``code_object_backend="direct"`` is a refusal: it compiles with COMGR and
+  records the reason in ``ModuleArtifact.direct_fallback``, and under
+  ``ROCKE_DIRECT_STRICT=1`` raises :class:`DirectUnsupported`.
 - Which compiler built each kernel is observable: :func:`backend_usage` and
   ``ROCKE_DIRECT_LOG=1`` (see :func:`record_backend_use`).
 """
