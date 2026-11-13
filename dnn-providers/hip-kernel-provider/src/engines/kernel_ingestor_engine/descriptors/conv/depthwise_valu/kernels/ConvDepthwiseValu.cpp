@@ -13,8 +13,9 @@
 //                     5 = backward-data stride phase blocks (gather-term geometry; 2-D, compile-time
 //                     filter and stride CONV_DW_STRIDE, unit dilation; channels-last: CONV_DW_VEC
 //                     channels per thread, CONV_DW_BK channel vectors per block),
-//                     6 = rowtile (channels-last 2-D, unit stride and dilation, compile-time
-//                     filter; a CONV_DW_TH x CONV_DW_TW output tile of CONV_DW_VEC channels per lane)
+//                     6 = rowtile (channels-last 2-D, compile-time filter and stride CONV_DW_STRIDE,
+//                     unit dilation; a CONV_DW_TH x CONV_DW_TW output tile of CONV_DW_VEC channels
+//                     per lane)
 //   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor, 2-D LDS)
 //   CONV_DW_NDIMS     2 or 3 (3-D: floor or LDS)
 //   CONV_DW_FLIP      1 reflects the filter
@@ -204,7 +205,8 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
                              CONV_DW_KW,
                              CONV_DW_TH,
                              CONV_DW_TW,
-                             CONV_DW_VEC>(in, filter, out, p);
+                             CONV_DW_VEC,
+                             CONV_DW_STRIDE>(in, filter, out, p);
 #elif CONV_DW_VARIANT == 3
     dw::v3b_lds_core_nhwc<ElementType,
                           CONV_DW_KH,

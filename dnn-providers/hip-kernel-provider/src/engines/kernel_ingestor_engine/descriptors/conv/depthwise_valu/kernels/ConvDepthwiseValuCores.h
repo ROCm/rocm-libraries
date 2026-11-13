@@ -1614,10 +1614,10 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
 // ---- v7 rowtile: register tile, input rows streamed (no LDS, no barrier) ----
 // A lane computes a TH x TW output tile of CPL adjacent channels; a block is 64 lanes over the
 // channel groups of one spatial tile (grid: W tiles, channel blocks, N x H tiles), so every
-// address and predicate except the channel is wave-uniform. The tile's TH+KH-1 input rows are
-// streamed one at a time (TW+KW-1 pixels each), each added into every output row whose filter
-// row it is, so one input row is live. Per output the taps add in (ky, kx) order, as in the
-// other cores. s=d=1, compile-time KH/KW, C % CPL == 0.
+// address and predicate except the channel is wave-uniform. The tile's (TH-1)*S+KH input rows
+// are streamed one at a time ((TW-1)*S+KW pixels each), each added into every output row whose
+// filter row it is, so one input row is live. Per output the taps add in (ky, kx) order, as in
+// the other cores. Compile-time KH/KW and stride S (both axes), unit dilation, C % CPL == 0.
 //
 // x and y go through one buffer resource per row, based at the row's start (a 64-bit scalar)
 // with 32-bit lane offsets: a pixel left or right of the image row, or a row outside the image,
@@ -1700,13 +1700,14 @@ __device__ inline void dwRowStore(__amdgpu_buffer_rsrc_t r, unsigned off, const 
     }
 }
 
-template <typename T, int KH, int KW, int TH, int TW, int CPL>
+template <typename T, int KH, int KW, int TH, int TW, int CPL, int S>
 __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
                                             const T* __restrict__ Wt,
                                             T* __restrict__ D,
                                             ValuParams p)
 {
-    constexpr int SW = TW + KW - 1;
+    static_assert(S >= 1, "rowtile: a positive stride");
+    constexpr int SW = (TW - 1) * S + KW;
     constexpr unsigned EB = sizeof(T);
     const int G = p.C / CPL;
     const int Htiles = (p.Ho + TH - 1) / TH;
@@ -1718,8 +1719,8 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
         return;
     const int k0 = g * CPL;
 
-    typedef typename DwOperand<T>::type S;
-    S w[CPL][KH][KW];
+    typedef typename DwOperand<T>::type Op;
+    Op w[CPL][KH][KW];
 #pragma unroll
     for(int c = 0; c < CPL; ++c)
 #pragma unroll
@@ -1728,7 +1729,7 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
             for(int kx = 0; kx < KW; ++kx)
             {
                 const T e = Wt[(long)(k0 + c) * KH * KW + dwTap2(ky, kx, KH, KW)];
-                if constexpr(__is_same(S, float))
+                if constexpr(__is_same(Op, float))
                     w[c][ky][kx] = valu_to_f32(e);
                 else
                     w[c][ky][kx] = e;
@@ -1745,27 +1746,27 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
 
     // Lane byte offsets of the row's pixels, the same in every row: a column left of the image
     // wraps past 2^31, one right of it lands past the row's records.
-    const int ih0 = ht * TH - p.ph, iw0 = wt * TW - p.pw;
+    const int ih0 = ht * TH * S - p.ph, iw0 = wt * TW * S - p.pw;
     const unsigned rowBytes = static_cast<unsigned>(p.Wi) * p.C * EB;
     unsigned xo[SW];
 #pragma unroll
     for(int sx = 0; sx < SW; ++sx)
         xo[sx] = static_cast<unsigned>((iw0 + sx) * p.C + k0) * EB;
 #pragma unroll
-    for(int r = 0; r < TH + KH - 1; ++r)
+    for(int r = 0; r < (TH - 1) * S + KH; ++r)
     {
         const int ih = ih0 + r;
         const bool vy = dwIn(ih, p.Hi);
         const __amdgpu_buffer_rsrc_t xr
             = dwRsrc(A + ((long)n * p.Hi + (vy ? ih : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
-        S seg[SW][CPL];
+        Op seg[SW][CPL];
 #pragma unroll
         for(int sx = 0; sx < SW; ++sx)
             dwRowLoad<T, CPL>(xr, xo[sx], seg[sx]);
 #pragma unroll
         for(int ty = 0; ty < TH; ++ty)
         {
-            const int ky = r - ty;
+            const int ky = r - ty * S;
             if(ky < 0 || ky >= KH)
                 continue;
 #pragma unroll
@@ -1774,7 +1775,7 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
                 for(int tx = 0; tx < TW; ++tx)
 #pragma unroll
                     for(int c = 0; c < CPL; ++c)
-                        acc[c][ty][tx] = dwFma(w[c][ky][kx], seg[tx + kx][c], acc[c][ty][tx]);
+                        acc[c][ty][tx] = dwFma(w[c][ky][kx], seg[tx * S + kx][c], acc[c][ty][tx]);
         }
         // Keep the rows streamed: without the fence the scheduler hoists every row's loads and
         // keeps them all live.

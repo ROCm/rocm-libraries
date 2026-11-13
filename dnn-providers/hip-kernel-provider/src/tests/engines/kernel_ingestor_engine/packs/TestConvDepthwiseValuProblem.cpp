@@ -256,6 +256,7 @@ TEST(TestConvDepthwiseValuProblem, LaunchCoversTheProblemPerVariant)
     rowtile.th = 4;
     rowtile.tw = 2;
     rowtile.vec = 2;
+    rowtile.stride = 1;
     const auto rowtileLaunch = launchFor(*problem, rowtile);
     ASSERT_TRUE(rowtileLaunch.has_value());
     // 64 lanes over the channel groups of one spatial tile: (ceil(wo / 2), ceil(c / 2 / 64),
@@ -308,6 +309,7 @@ TEST(TestConvDepthwiseValuProblem, TileVariantsDeclineTensorsPastThe32BitForm)
     rowtile.kh = rowtile.kw = 3;
     rowtile.th = rowtile.tw = 4;
     rowtile.vec = 2;
+    rowtile.stride = 1;
     for(const auto& tile : {floor, rowtile})
     {
         EXPECT_TRUE(launchFor(*at, tile).has_value()) << static_cast<int>(tile.variant);

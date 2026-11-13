@@ -36,7 +36,7 @@ enum class DepthwiseVariant
     /// stride, unit dilation.
     PHASE = 5,
     /// Channels-last 2-D register tile with the input rows streamed (v7_rowtile_core_nhwc):
-    /// unit stride and dilation, the tile's filter, vec channels per lane.
+    /// the tile's filter and stride, unit dilation, vec channels per lane.
     ROWTILE = 6,
 };
 
@@ -113,8 +113,8 @@ struct DepthwiseTile
     int64_t rd = 0;
     int64_t rh = 0;
     int64_t rw = 0;
-    /// Phase: the stride (height and width) the tile bakes, and channels per thread
-    /// (channels-last; 0 channels-first). Rowtile: channels per lane (1 or 2).
+    /// Phase and rowtile: the stride (height and width) the tile bakes. Phase: channels per
+    /// thread (channels-last; 0 channels-first); rowtile: channels per lane (1 or 2).
     int64_t stride = 0;
     int64_t vec = 0;
 };

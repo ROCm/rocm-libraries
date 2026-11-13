@@ -365,15 +365,16 @@ std::optional<DepthwiseLaunch> launchFor(const DepthwiseValuProblem& problem,
     {
         // 64 lanes over the channel groups of one spatial tile: grid (W tiles, channel blocks,
         // N x H tiles). Channels-last 2-D, whole channel groups, and every x and y row below
-        // 2^31 bytes (the kernel's 32-bit lane offsets within a row). The tile sets th, tw and
-        // vec (and the filter, gated by the kernel match); every other field is 0.
+        // 2^31 bytes (the kernel's 32-bit lane offsets within a row). The tile sets th, tw, vec
+        // and stride (and the filter; the kernel match gates it and the stride against the
+        // graph); every other field is 0.
         const int64_t rowLimit = INT_LIMIT / elementBytes(problem.base.dataType);
         const bool unusedClear = tile.kd == 0 && tile.wstrip == 0 && tile.bd == 0 && tile.bh == 0
                                  && tile.bw == 0 && tile.bk == 0 && tile.rd == 0 && tile.rh == 0
-                                 && tile.rw == 0 && tile.stride == 0;
+                                 && tile.rw == 0;
         if(problem.layout != DepthwiseLayout::CHANNELS_LAST || problem.ndims != 2 || !unusedClear
            || (tile.vec != 1 && tile.vec != 2) || c % tile.vec != 0 || tile.th < 1 || tile.tw < 1
-           || int64_t{a.wi} * c >= rowLimit || wo * c >= rowLimit)
+           || tile.stride < 1 || int64_t{a.wi} * c >= rowLimit || wo * c >= rowLimit)
         {
             return std::nullopt;
         }

@@ -115,18 +115,19 @@ Config phaseConfig(const std::string& layout, int64_t k, int64_t bk)
     return config;
 }
 
-Config rowtileConfig(int64_t k, int64_t th, int64_t tw, int64_t vec)
+Config rowtileConfig(int64_t k, int64_t th, int64_t tw, int64_t vec, int64_t stride = 1)
 {
     Config config{"NHWC", 2, "rowtile"};
     config.kh = config.kw = k;
     config.th = th;
     config.tw = tw;
     config.vec = vec;
+    config.stride = stride;
     return config;
 }
 
-/// The rowtile tiles the generator ships (gen_depthwise_valu.py ROWTILE_TILES), each with 1 and 2
-/// channels per lane.
+/// The rowtile tiles the generator ships (gen_depthwise_valu.py ROWTILE_TILES, ROWTILE_S2_TILES),
+/// each with 1 and 2 channels per lane.
 const std::vector<Config>& rowtileConfigs()
 {
     static const std::vector<Config> s_configs = [] {
@@ -147,6 +148,16 @@ const std::vector<Config>& rowtileConfigs()
             for(const int64_t vec : {1, 2})
             {
                 configs.push_back(rowtileConfig(k, th, tw, vec));
+            }
+        }
+        // Stride 2, forward only.
+        const std::vector<std::array<int64_t, 3>> stride2{
+            {3, 2, 8}, {3, 4, 4}, {3, 4, 8}, {5, 2, 8}, {5, 4, 4}};
+        for(const auto& [k, th, tw] : stride2)
+        {
+            for(const int64_t vec : {1, 2})
+            {
+                configs.push_back(rowtileConfig(k, th, tw, vec, 2));
             }
         }
         return configs;
@@ -407,6 +418,9 @@ std::vector<DeviceCase> deviceCases()
     // padding past the filter's half (output rows and columns of padding only), one-row images.
     cases.push_back({"Nhwc5x5C130Pad3", depthwise(130, {9, 11}, {5, 5}, {3, 3}, true)});
     cases.push_back({"Nhwc3x3C64H1", depthwise(64, {1, 9}, {3, 3}, {1, 1}, true)});
+    auto stride5 = depthwise(40, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    cases.push_back({"Nhwc5x5Stride2C40", stride5});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
@@ -1160,10 +1174,26 @@ TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
     threeD.ndims = 3;
     EXPECT_FALSE(rowtileAdmits(threeD, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
     EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
-    // Stride and dilation, either axis.
+    // Stride and dilation, either axis; a stride-2 tile only stride 2 on both axes.
     auto strided = shape;
     strided.stride = {1, 2};
     EXPECT_FALSE(rowtileAdmits(base, strided));
+    const auto base2 = rowtileConfig(3, 4, 4, 2, 2);
+    auto stride2 = shape;
+    stride2.stride = {2, 2};
+    EXPECT_TRUE(rowtileAdmits(base2, stride2));
+    EXPECT_FALSE(rowtileAdmits(base, stride2));
+    EXPECT_FALSE(rowtileAdmits(base2, shape));
+    EXPECT_FALSE(rowtileAdmits(base2, strided));
+    auto stride21 = shape;
+    stride21.stride = {2, 1};
+    EXPECT_FALSE(rowtileAdmits(base2, stride21));
+    for(const int64_t stride : {0, -1})
+    {
+        auto other = base;
+        other.stride = stride;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << stride;
+    }
     auto dilated = shape;
     dilated.dilation = {2, 1};
     dilated.prePadding = dilated.postPadding = {2, 1};
@@ -1197,8 +1227,7 @@ TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
                       &Config::bk,
                       &Config::rd,
                       &Config::rh,
-                      &Config::rw,
-                      &Config::stride})
+                      &Config::rw})
     {
         auto other = base;
         other.*field = 2;
@@ -1224,7 +1253,11 @@ TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
 // must compute exactly what converting both operands to fp32 and calling fmaf computes: the f16
 // output of every rowtile config, bit for bit, against that sequence on the host (taps in (ky, kx)
 // order, one fp32 rounding per tap, a padding tap adding w * 0, one rounding to f16 at the end).
-void runRowtileBitwise(ConvShape shape)
+// sampleStride 1 checks every output; a larger one checks every sampleStride-th output (in
+// logical (n, c, h, w) order) and every output of the last image row.
+void runRowtileBitwise(ConvShape shape,
+                       const std::vector<Config>& configs = rowtileConfigs(),
+                       int64_t sampleStride = 1)
 {
     shape.dataType = DataType::HALF;
     const auto direction = ConvDirection::FORWARD;
@@ -1237,21 +1270,40 @@ void runRowtileBitwise(ConvShape shape)
     Tensor<Half> x(spec.x.dims, spec.x.strides);
     Tensor<Half> w(spec.w.dims, spec.w.strides);
     Tensor<Half> y(spec.y.dims, spec.y.strides);
-    x.fillTensorWithRandomValues(-1.0f, 1.0f, 97);
-    w.fillTensorWithRandomValues(-1.0f, 1.0f, 98);
+    if(sampleStride == 1)
+    {
+        x.fillTensorWithRandomValues(-1.0f, 1.0f, 97);
+        w.fillTensorWithRandomValues(-1.0f, 1.0f, 98);
+    }
+    else
+    {
+        // A hashed pattern in [-1, 1]: as varied as random values, and quick for 2^30 elements.
+        for(auto* tensor : {&x, &w})
+        {
+            auto* data = static_cast<Half*>(tensor->rawHostData());
+            const auto count = static_cast<size_t>(tensor->elementCount());
+            const uint32_t salt = tensor == &x ? 0x9e3779b9u : 0x85ebca6bu;
+            for(size_t i = 0; i < count; ++i)
+            {
+                const uint32_t h = (static_cast<uint32_t>(i) ^ salt) * 0x27d4eb2fu;
+                data[i]
+                    = Half(static_cast<float>(static_cast<int>((h >> 8) % 2001u) - 1000) / 1000.0f);
+            }
+            tensor->markHostModified();
+        }
+    }
     const auto* xs = static_cast<const Half*>(x.rawHostData());
     const auto* ws = static_cast<const Half*>(w.rawHostData());
     const int64_t kh = shape.filter[0], kw = shape.filter[1];
     const bool flip = shape.mode == ConvMode::CONVOLUTION;
-    std::vector<uint16_t> expected;
-    forEachIndex(y.dims(), [&](const std::vector<int64_t>& o) {
+    const auto expected = [&](const std::vector<int64_t>& o) {
         float acc = 0.0f;
         for(int64_t ky = 0; ky < kh; ++ky)
         {
             for(int64_t kx = 0; kx < kw; ++kx)
             {
-                const int64_t ih = o[2] - shape.prePadding[0] + ky;
-                const int64_t iw = o[3] - shape.prePadding[1] + kx;
+                const int64_t ih = o[2] * shape.stride[0] - shape.prePadding[0] + ky;
+                const int64_t iw = o[3] * shape.stride[1] - shape.prePadding[1] + kx;
                 const bool inside
                     = ih >= 0 && ih < shape.input[0] && iw >= 0 && iw < shape.input[1];
                 const float a
@@ -1262,12 +1314,46 @@ void runRowtileBitwise(ConvShape shape)
                 acc = std::fma(b, a, acc);
             }
         }
-        expected.push_back(Half(acc).data);
-    });
+        return Half(acc).data;
+    };
+    // The outputs checked, in logical (n, c, h, w) order.
+    const auto& dims = y.dims();
+    std::vector<std::vector<int64_t>> checked;
+    if(sampleStride == 1)
+    {
+        forEachIndex(dims, [&](const std::vector<int64_t>& o) { checked.push_back(o); });
+    }
+    else
+    {
+        const int64_t total = dims[0] * dims[1] * dims[2] * dims[3];
+        const auto at = [&](int64_t i) {
+            return std::vector<int64_t>{i / (dims[1] * dims[2] * dims[3]),
+                                        i / (dims[2] * dims[3]) % dims[1],
+                                        i / dims[3] % dims[2],
+                                        i % dims[3]};
+        };
+        for(int64_t i = 0; i < total; i += sampleStride)
+        {
+            checked.push_back(at(i));
+        }
+        for(int64_t c = 0; c < dims[1]; ++c)
+        {
+            for(int64_t q = 0; q < dims[3]; ++q)
+            {
+                checked.push_back({dims[0] - 1, c, dims[2] - 1, q});
+            }
+        }
+    }
+    std::vector<uint16_t> want;
+    want.reserve(checked.size());
+    for(const auto& o : checked)
+    {
+        want.push_back(expected(o));
+    }
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
-    for(const auto& config : rowtileConfigs())
+    for(const auto& config : configs)
     {
         const auto kernel = kernelFor(config, DataType::HALF, direction);
         if(!matchesKernel(pack, fixture.context(), kernel, *bound))
@@ -1290,17 +1376,16 @@ void runRowtileBitwise(ConvShape shape)
         y.markDeviceModified();
         const auto* actual = static_cast<const Half*>(y.rawHostData());
         int64_t mismatches = 0;
-        size_t i = 0;
-        forEachIndex(y.dims(), [&](const std::vector<int64_t>& o) {
+        for(size_t i = 0; i < checked.size(); ++i)
+        {
+            const auto& o = checked[i];
             const uint16_t got = actual[offsetOf(o, y.strides())].data;
-            if(got != expected[i] && ++mismatches <= 5)
+            if(got != want[i] && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at output (" << o[0] << ", " << o[1] << ", " << o[2] << ", "
-                              << o[3] << "): bits " << got << ", single-rounding fmaf "
-                              << expected[i];
+                              << o[3] << "): bits " << got << ", single-rounding fmaf " << want[i];
             }
-            ++i;
-        });
+        }
         EXPECT_EQ(mismatches, 0);
     }
     EXPECT_GE(ran, 1) << "no rowtile config serves this case";
@@ -1318,6 +1403,30 @@ TEST(TestGpuConvDepthwiseValuRowtile, HalfIsBitwiseTheFmafOfConvertedOperands)
     auto convolution = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     runRowtileBitwise(convolution);
+    auto stride3 = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    stride3.stride = {2, 2};
+    runRowtileBitwise(stride3);
+    auto stride5 = depthwise(37, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    runRowtileBitwise(stride5);
+}
+
+// The rowtile core has one body for every tensor size: x and y of 2^30 + 2^18 f16 elements (past
+// 2 GiB), rows rebased past 2^31 bytes, checked at sampled outputs and the whole last row.
+TEST(TestGpuConvDepthwiseValuRowtile, HalfServesTensorsPastTwoGiB)
+{
+    SKIP_IF_NO_DEVICES();
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+    if(freeBytes < (size_t{6} << 30))
+    {
+        GTEST_SKIP() << "needs 6 GiB of free device memory";
+    }
+    // 4097 rows of 4096 columns of 64 channels (512 KiB rows).
+    auto shape = depthwise(64, {4097, 4096}, {3, 3}, {1, 1}, true);
+    shape.n = 1;
+    runRowtileBitwise(shape, {rowtileConfig(3, 4, 4, 1), rowtileConfig(3, 4, 4, 2)}, 4099);
 }
 
 // Host-only: the matrix-core (hankel) backward-weights gates, one field at a time from an
