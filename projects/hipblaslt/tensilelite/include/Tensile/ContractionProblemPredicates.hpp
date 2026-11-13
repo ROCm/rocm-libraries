@@ -767,6 +767,179 @@ namespace TensileLite
                 }
             };
 
+            // Divisibility of one A or B stride, in elements. A zero (broadcast) stride never
+            // satisfies it, because the kernels that declare it take the stride as a byte kernarg.
+            template <typename Class, TensorDescriptor const& (ContractionProblemGemm::*tensor)() const>
+            struct OperandStrideMultiple : public Predicate_CRTP<Class, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index = 0;
+                size_t value = 0;
+
+                OperandStrideMultiple() = default;
+                OperandStrideMultiple(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    if(value == 0 || index >= strides.size() || strides[index] == 0)
+                        return false;
+                    return strides[index] % value == 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool                       rv      = (*this)(problem);
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    std::ostringstream         details;
+                    if(index >= strides.size())
+                        details << "index=" << index << " out of range, strides=" << strides.size();
+                    else
+                        details << "prob=" << strides[index] << " % sol=" << value << " == 0";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct StrideAMultiple
+                : public OperandStrideMultiple<StrideAMultiple, &ContractionProblemGemm::a>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideAMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideAMultiple";
+                }
+            };
+
+            struct StrideBMultiple
+                : public OperandStrideMultiple<StrideBMultiple, &ContractionProblemGemm::b>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideBMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideBMultiple";
+                }
+            };
+
+            // Handwritten kernels that address a whole tensor through one buffer resource
+            // declare the first byte extent they cannot address (the shipped skinny MXFP8
+            // kernels declare 2^31). Each tensor's allocated bytes and its leading stride in
+            // bytes must stay below it; the stride is passed as a 32-bit kernel argument and is
+            // not part of the allocated bytes when a dimension has size 1.
+            struct TensorBytesLessThan
+                : public Predicate_CRTP<TensorBytesLessThan, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                size_t value = 0;
+
+                TensorBytesLessThan() = default;
+                TensorBytesLessThan(size_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "TensorBytesLessThan";
+                }
+
+                // Leading stride in bytes, 0 for a tensor with no leading dimension.
+                static size_t leadingStrideBytes(TensorDescriptor const& tensor)
+                {
+                    if(tensor.dimensions() < 2)
+                        return 0;
+                    return multiplyElementSize(tensor.strides()[1], tensor.elementBytes());
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        if(tensor->empty())
+                            continue;
+                        if(tensor->totalAllocatedBytes() >= value)
+                            return false;
+                        if(leadingStrideBytes(*tensor) >= value)
+                            return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool const         rv = (*this)(problem);
+                    std::ostringstream details;
+                    char               name = 'A';
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        char const tensorName = name++;
+                        if(tensor->empty())
+                            continue;
+                        details << tensorName << " alloc bytes=" << tensor->totalAllocatedBytes()
+                                << " ld bytes=" << leadingStrideBytes(*tensor) << "; ";
+                    }
+                    details << "< sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // Handwritten kernels that read the padded HostPreSwizzle MX scale layout declare
+            // it. A caller that hands over compactly packed scales (hipBLASLt does for every
+            // format but Block_32_UE8M0_32_8_EXT) sets the custom-kernel packed flags, and the
+            // kernel would read the wrong scales.
+            struct MXScalesPreSwizzled
+                : public Predicate_CRTP<MXScalesPreSwizzled, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                static std::string Type()
+                {
+                    return "MXScalesPreSwizzled";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.customKernelMXScaleAIsPacked()
+                           && !problem.customKernelMXScaleBIsPacked();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "packed scaleA=" << problem.customKernelMXScaleAIsPacked()
+                            << " scaleB=" << problem.customKernelMXScaleBIsPacked()
+                            << " sol=pre-swizzled";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct StrideCEqual : public Predicate_CRTP<StrideCEqual, ContractionProblemGemm>
             {
                 enum

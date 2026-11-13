@@ -46,6 +46,13 @@ namespace TensileLite
         m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, 0});
     }
 
+    void RotatingMemory::setOriginalSizes(std::vector<size_t> sizes)
+    {
+        if(m_rotatingBufferNum != sizes.size())
+            throw std::runtime_error("rotating buffer number is not equal to original size number");
+        m_originalSizes = std::move(sizes);
+    }
+
     void RotatingMemory::createRotatingMemory(int32_t mode, size_t rotatingSize)
     {
         // Check how many rotating units are needed
@@ -53,11 +60,14 @@ namespace TensileLite
         size_t maxNumRotate = 0;
         for (auto& unit : m_rotatingInfo)
         {
-            size_t num = std::ceil((float)rotatingSize / unit.totalSize);
+            // A problem that copies nothing only needs the pristine slot, and must not divide by zero.
+            size_t num = unit.totalSize == 0 ? 1 : std::ceil((float)rotatingSize / unit.totalSize);
             unit.rotatingNum = num;
             maxNumRotate = std::max(maxNumRotate, num);
         }
 
+        // Not capped by maxRotatingBufferNum, which is unknown when GPU inputs are allocated;
+        // prepareRotatingGPUOutput only uses the slots it needs.
         m_rotatingMemory.resize(maxNumRotate);
         for(size_t i = 0; i < m_rotatingMemory.size(); i++)
         {
@@ -75,6 +85,11 @@ namespace TensileLite
                 }
             }
         }
+
+        // The first slot holds the pristine inputs, which are sized for the largest problem
+        // independently of how much each problem copies.
+        for(size_t j = 0; j < m_originalSizes.size(); j++)
+            m_rotatingMemory[0][j].size = std::max(m_originalSizes[j], m_rotatingMemory[0][j].size);
 
         size_t totalSize = 0;
         size_t largestUnitSize = 0;
@@ -133,7 +148,7 @@ namespace TensileLite
         }
     }
 
-    std::vector<std::vector<RotatingMemoryUnit>> RotatingMemory::getRotatingMemory() const
+    std::vector<std::vector<RotatingMemoryUnit>> const& RotatingMemory::getRotatingMemory() const
     {
         return m_rotatingMemory;
     }

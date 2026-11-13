@@ -25,6 +25,7 @@
 import os
 import re
 from copy import deepcopy
+from pathlib import Path
 from textwrap import dedent, indent
 
 import pytest
@@ -423,6 +424,24 @@ def test_valid_parameters_reject_assert_size_equal_bad_map():
         checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
 
 
+@pytest.mark.parametrize(
+    "key, tag", [("AssertStrideAMultiple", "StrideAMultiple"), ("AssertStrideBMultiple", "StrideBMultiple")]
+)
+def test_problem_predicate_emits_stride_multiple(key, tag):
+    pred = ProblemPredicate.FromOriginalKeyPair((key, {1: 4}))
+
+    assert pred is not None
+    assert pred.tag == tag
+    assert pred.index == 1
+    assert pred.value == 4
+    assert ProblemPredicate.FromOriginalKeyPair((key, {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair((key, {1: -1})) is None
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair((key, 4))
+    with pytest.raises(RuntimeError, match="Multiple must be > 0"):
+        ProblemPredicate.FromOriginalKeyPair((key, {1: 0}))
+
+
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
     yaml_path.write_text(dedent(f"""\
         BenchmarkProblems:
@@ -467,6 +486,97 @@ def test_parse_tensile_yaml_copies_assert_size_equal(tmp_path):
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
 
     assert config["AssertSizeEqual"] == {0: 1}
+
+
+def test_predicate_keys_round_trip_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "predicate_keys.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: predicated_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - AssertStrideAMultiple: [{1: 4}]
+              - AssertStrideBMultiple: [{1: 4}]
+              - AssertTensorBytesLessThan: [2147483648]
+              - AssertAnySizeLessThan: [{0: 5, 1: 5}]
+              - AssertMXScalesPreSwizzled: [True]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "AssertStrideAMultiple: { 1: 4 }" in rendered
+    assert "AssertStrideBMultiple: { 1: 4 }" in rendered
+    assert "AssertTensorBytesLessThan: 2147483648" in rendered
+    assert "AssertAnySizeLessThan: { 0: 5, 1: 5 }" in rendered
+    assert "AssertMXScalesPreSwizzled: true" in rendered
+
+    write_kernel(tmp_path / "predicate_keys.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertStrideAMultiple: {config["AssertStrideAMultiple"]}
+          AssertStrideBMultiple: {config["AssertStrideBMultiple"]}
+          AssertTensorBytesLessThan: {config["AssertTensorBytesLessThan"]}
+          AssertAnySizeLessThan: {config["AssertAnySizeLessThan"]}
+          AssertMXScalesPreSwizzled: {config["AssertMXScalesPreSwizzled"]}
+        """)
+    loaded = getCustomKernelConfig("predicate_keys", {}, str(tmp_path))
+
+    assert loaded["AssertStrideAMultiple"] == {1: 4}
+    assert loaded["AssertStrideBMultiple"] == {1: 4}
+    assert loaded["AssertTensorBytesLessThan"] == 2147483648
+    assert loaded["AssertAnySizeLessThan"] == {0: 5, 1: 5}
+    assert loaded["AssertMXScalesPreSwizzled"] is True
+
+
+def test_mx_scale_format_round_trips_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "mx_scale_format.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: swizzled_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - MXScaleFormat: [HostPreSwizzle]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "swizzled_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "MXScaleFormat: HostPreSwizzle" in rendered
+
+    write_kernel(tmp_path / "swizzled_kernel.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          MXScaleFormat: {config["MXScaleFormat"]}
+        """)
+    write_kernel(tmp_path / "plain_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    swizzled = getCustomKernelConfig("swizzled_kernel", {}, str(tmp_path))
+    plain = getCustomKernelConfig("plain_kernel", {}, str(tmp_path))
+
+    assert swizzled["MXScaleFormat"] == "HostPreSwizzle"
+    assert plain.get("MXScaleFormat", "NoSwizzle") == "NoSwizzle"
 
 
 def test_parse_tensile_yaml_rejects_multi_valued_predicate(tmp_path):
@@ -1691,3 +1801,109 @@ def test_metadata_loader_matches_pure_python_safe_loader():
     expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
 
     assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected
+
+
+# ---------------------------------------------------------------------------
+# AssertTensorBytesLessThan
+# ---------------------------------------------------------------------------
+
+def test_valid_parameters_tensor_bytes_limit():
+    for value in (2147483648, -1):
+        checkParametersAreValid(("AssertTensorBytesLessThan", [value]), validParameters)
+    for value in (0, 1.5):
+        with pytest.raises(Exception, match="positive int"):
+            checkParametersAreValid(("AssertTensorBytesLessThan", [value]), validParameters)
+
+
+def test_tensor_bytes_limit_emits_a_predicate_with_the_value():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", 4294967296))
+
+    assert pred.tag == "TensorBytesLessThan"
+    assert pred.value == 4294967296
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", -1)) is None
+    for bad in (0, -2, 1.5, "1"):
+        with pytest.raises(RuntimeError, match="positive int or -1"):
+            ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", bad))
+
+
+# ---------------------------------------------------------------------------
+# AssertMXScalesPreSwizzled
+# ---------------------------------------------------------------------------
+
+def test_valid_parameters_mx_scales_pre_swizzled():
+    for value in (True, -1):
+        checkParametersAreValid(("AssertMXScalesPreSwizzled", [value]), validParameters)
+    for value in (False, 0, 2, "True"):
+        with pytest.raises(Exception, match="True or -1"):
+            checkParametersAreValid(("AssertMXScalesPreSwizzled", [value]), validParameters)
+
+
+def test_mx_scales_pre_swizzled_emits_a_valueless_predicate():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", True))
+
+    assert pred.tag == "MXScalesPreSwizzled"
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", -1)) is None
+    for bad in (False, 0, 1, "True"):
+        with pytest.raises(RuntimeError, match="True or -1"):
+            ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", bad))
+
+
+# ---------------------------------------------------------------------------
+# AssertAnySizeLessThan
+# ---------------------------------------------------------------------------
+
+def test_valid_parameters_any_size_less_than():
+    for value in ({0: 5, 1: 5}, {1: 5}, {0: -1, 1: 5}):
+        checkParametersAreValid(("AssertAnySizeLessThan", [value]), validParameters)
+    for value in (5, {0: 0}, {0: -2}, {0: 5.0}, {"0": 5}, {-1: 5}):
+        with pytest.raises(Exception):
+            checkParametersAreValid(("AssertAnySizeLessThan", [value]), validParameters)
+
+
+def test_any_size_less_than_emits_an_or_of_size_less_than():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", {0: 5, 1: 5}))
+
+    assert pred.tag == "Or"
+    assert [(p.tag, p.index, p.value) for p in pred.value] == [
+        ("SizeLessThan", 0, 5),
+        ("SizeLessThan", 1, 5),
+    ]
+
+
+def test_any_size_less_than_skips_and_collapses():
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", -1)) is None
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", {0: -1})) is None
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", {0: -1, 1: 5}))
+    assert (pred.tag, pred.index, pred.value) == ("SizeLessThan", 1, 5)
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", {1: 5}))
+    assert (pred.tag, pred.index, pred.value) == ("SizeLessThan", 1, 5)
+
+
+@pytest.mark.parametrize("bad", [5, [0, 5], {0: 0}, {0: -2}, {0: 5.0}, {"0": 5}])
+def test_any_size_less_than_rejects_bad_values_when_building_the_predicate(bad):
+    with pytest.raises(RuntimeError):
+        ProblemPredicate.FromOriginalKeyPair(("AssertAnySizeLessThan", bad))
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("AssertStrideAMultiple", {1: 4}),
+        ("AssertStrideBMultiple", {1: 4}),
+        ("AssertTensorBytesLessThan", 2147483648),
+        ("AssertMXScalesPreSwizzled", True),
+    ],
+)
+def test_emitted_predicate_tags_are_registered_in_cpp(key, value):
+    include = Path(tensilelite.__file__).resolve().parents[1] / "include" / "Tensile"
+    serialization = include / "Serialization" / "ContractionPredicates.hpp"
+    predicates = include / "ContractionProblemPredicates.hpp"
+    if not (serialization.is_file() and predicates.is_file()):
+        pytest.skip("C++ headers are not part of this installation")
+
+    tag = ProblemPredicate.FromOriginalKeyPair((key, value)).tag
+
+    assert f"Pair<Predicates::Contraction::{tag}>" in serialization.read_text()
+    definition = re.search(rf'struct {tag}\b.*?return "([^"]*)";', predicates.read_text(), re.S)
+    assert definition is not None, f"{tag} is not defined in ContractionProblemPredicates.hpp"
+    assert definition.group(1) == tag

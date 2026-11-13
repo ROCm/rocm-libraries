@@ -141,6 +141,271 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# Skinny MXFP8 TN GEMMs (f8 E4M3 A/B, E8M0 32-block pre-swizzled scales, bf16 D, f32 compute,
+# gfx950, batch 1). Only the Equality ExactLogic shard selects the five skinny kernels, by
+# (m, n, batch, k). Each skinny solution's own ProblemType rejects bias, activation and scale-alpha-vec problems.
+# The kernels reduce K across lanes and MFMA steps, so their f32 sums need not be bit-identical to
+# the CPU reference: hence norm_check and no unit_check. These shard keys cover every routed
+# solution in each orientation the shard routes it in, and skinny extents 1 to 4. All five kernels
+# declare uniformSummationOrder, so every entry runs under the default mode.
+- name: matmul_skinny_mxfp8_tn_exact_logic
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 4096,   N: 1,      K: 1280 }
+    - { M: 8192,   N: 1,      K: 1280 }
+    - { M: 5120,   N: 1,      K: 1536 }
+    - { M: 1,      N: 1152,   K: 5120 }
+    - { M: 1,      N: 4096,   K: 1280 }
+    - { M: 1,      N: 5120,   K: 1536 }
+    - { M: 51200,  N: 4,      K: 5120 }
+    - { M: 4,      N: 51200,  K: 5120 }
+    - { M: 151936, N: 3,      K: 5120 }
+    - { M: 2,      N: 151936, K: 5120 }
+    - { M: 6144,   N: 4,      K: 4096 }
+    - { M: 4,      N: 6144,   K: 4096 }
+    - { M: 28672,  N: 1,      K: 4096 }
+    - { M: 32768,  N: 2,      K: 14336 }
+    - { M: 2,      N: 32768,  K: 14336 }
+    - { M: 3,      N: 16384,  K: 25600 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# The VALU kernel (ExactLogic solution 2), skinny n only.
+- name: matmul_skinny_mxfp8_tn_valu_exact_logic
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 28672, N: 1, K: 4096 }
+    - { M: 10240, N: 1, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# The VALU kernel with alpha and beta set.
+- name: matmul_skinny_mxfp8_tn_valu_alpha_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 25600, N: 1, K: 6144 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# The kernels compute D = bf16(alpha * A^T B + beta * C) for any alpha and beta, with C and D in
+# distinct buffers. Only ExactLogic shapes use the skinny kernels; the rest run the generic kernels,
+# and a generic MXFP8 kernel with beta != 0 and N % 16 != 0 over-reads C (AIHPBLAS-5511). The four
+# shapes that run a generic kernel (29584x4x8192, 4x16385x2304, 10240x3x9216 and 16384x2x5120) are
+# quarantined in known_bugs.yaml until that fix lands. The other shapes are ExactLogic shard keys or
+# their mirrors and run skinny kernels: the VALU kernel (solution 2) for 51200x1x5120, and MFMA kernels
+# for the rest, covering beta != 0 for solutions 0 (28672x4x4096), 1 (32768x2x14336) and 4 (3x16384x25600).
+- name: matmul_skinny_mxfp8_tn_alpha_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Wide H, skinny n.
+    - { M: 51200, N: 1, K: 5120  }
+    - { M: 29584, N: 4, K: 8192  }
+    # Wide H, skinny m.
+    - { M: 1, N: 51200, K: 5120 }
+    - { M: 4, N: 16385, K: 2304 }
+    # Large K, skinny n.
+    - { M: 4096,  N: 1, K: 14336 }
+    - { M: 10240, N: 3, K: 9216  }
+    # Medium, skinny n.
+    - { M: 28672, N: 4, K: 4096 }
+    - { M: 16384, N: 2, K: 5120 }
+    # Medium, skinny m.
+    - { M: 4, N: 10240, K: 5120 }
+    - { M: 2, N: 5120,  K: 8192 }
+    # Shard keys with one skinny extent of 1.
+    - { M: 10240, N: 1, K: 8192 }
+    - { M: 1, N: 10240, K: 8192 }
+    # Shard keys running MFMA kernels with beta != 0.
+    - { M: 32768, N: 2, K: 14336 }
+    - { M: 3, N: 16384, K: 25600 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Negative alpha and a beta of 2, over the same shape classes. The same C over-read applies to the
+# shapes that run generic kernels, which are quarantined in known_bugs.yaml: all but 5120x2x8192, a
+# shard key that runs a skinny kernel.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_negative
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Wide H, skinny n.
+    - { M: 51203, N: 4, K: 4096 }
+    # Wide H, skinny m.
+    - { M: 3, N: 20001, K: 5376 }
+    # Large K, skinny n.
+    - { M: 3001, N: 3, K: 12288 }
+    # Large K, skinny m.
+    - { M: 2, N: 10001, K: 16384 }
+    # Medium, skinny n.
+    - { M: 5120, N: 2, K: 8192 }
+    # Medium, skinny m.
+    - { M: 3, N: 2049, K: 2048 }
+  alpha: -1
+  beta: 2
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# A padded ldc with beta != 0: the kernels only require C to be contiguous along the leading
+# dimension (AssertStrideCEqual {0: 1}). Routing ignores the leading dimensions and both shapes
+# (5120x2x8192 and 4x10240x5120) are ExactLogic keys, so both still route to the skinny kernels.
+# Padded lda/ldb is not exercised: the client requires lda and ldb equal to the stored rows for MX
+# scales; the stride-multiple predicates are covered by the Predicates and Python unit tests.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_padded_ldc
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Medium, skinny n.
+    - { M: 5120, N: 2, K: 8192, lda: 8192, ldb: 8192, ldc: 5248, ldd: 5120 }
+    # Medium, skinny m.
+    - { M: 4, N: 10240, K: 5120, lda: 5120, ldb: 5120, ldc: 8, ldd: 4 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Not shard keys, so these run the generic kernels: skinny 5, and K a multiple of 32 but not of 256.
+- name: matmul_skinny_mxfp8_tn_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 5,    K: 5120 }
+    - { M: 5,    N: 5120, K: 5120 }
+    - { M: 5120, N: 2,    K: 5152 }
+    - { M: 2,    N: 5120, K: 4128 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Equality keys include the batch count and the shard only has batch-1 keys, so a batched problem
+# never matches a shard key and runs the existing kernels, even for sizes whose batch-1 form is in the
+# ExactLogic ({4,5120,5120} and {1152,2,5120}). The AssertSizeEqual {2: 1} guard only matters for forced solution indices;
+# test_skinny_mxfp8_logic.py checks the guard itself.
+- name: matmul_skinny_mxfp8_tn_fallback_batched
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 2
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Bias problems do reach the shard's library (its ProblemType has bias), but each skinny solution carries
+# its own ProblemType, built from its custom.config Features (SupportsBias false), that rejects them, so they
+# run the existing kernels even for sizes whose no-bias form is in the ExactLogic ({4,5120,5120} and {1152,2,5120}).
+- name: matmul_skinny_mxfp8_tn_fallback_bias
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Activation problems do reach the shard's library (its ProblemType has activation), but each skinny solution
+# carries its own ProblemType, built from its custom.config Features (SupportsActivation false), that rejects
+# them, so they run the existing kernels even for sizes whose no-activation form is in the ExactLogic
+# ({4,5120,5120} and {1152,2,5120}).
+- name: matmul_skinny_mxfp8_tn_fallback_activation
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  activation_type: relu
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

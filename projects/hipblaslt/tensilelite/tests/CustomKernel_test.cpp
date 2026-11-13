@@ -24,8 +24,11 @@
  *
  *******************************************************************************/
 
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -562,4 +565,147 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+}
+
+static uint32_t emittedUint32(KernelInvocation const& invocation, size_t index)
+{
+    uint32_t value = 0;
+    std::memcpy(&value,
+                static_cast<uint8_t const*>(invocation.args.data()) + index * sizeof(value),
+                sizeof(value));
+    return value;
+}
+
+// The byte strides must be computed in integers: a float product rounds to 24 bits.
+static std::array<uint32_t, 4> emittedByteStrides(rocisa::DataType abType,
+                                                  rocisa::DataType cdType,
+                                                  CustomArgType    type,
+                                                  size_t           lda,
+                                                  size_t           ldb,
+                                                  size_t           ldc,
+                                                  size_t           ldd)
+{
+    ContractionProblemGemm problem = ContractionProblemGemm::GEMM_Strides(true,
+                                                                          false,
+                                                                          abType,
+                                                                          abType,
+                                                                          cdType,
+                                                                          cdType,
+                                                                          4,
+                                                                          2,
+                                                                          64,
+                                                                          1,
+                                                                          lda,
+                                                                          -1,
+                                                                          ldb,
+                                                                          -1,
+                                                                          ldc,
+                                                                          -1,
+                                                                          ldd,
+                                                                          -1,
+                                                                          0.0);
+    problem.setComputeInputTypeA(abType);
+    problem.setComputeInputTypeB(abType);
+
+    ContractionSolution solution;
+    configureProbeKernel(solution, {type, CustomArgSemantic::StrideA0Bytes});
+    solution.customKernel.args = {{type, CustomArgSemantic::StrideA0Bytes},
+                                  {type, CustomArgSemantic::StrideB0Bytes},
+                                  {type, CustomArgSemantic::StrideC0Bytes},
+                                  {type, CustomArgSemantic::StrideD0Bytes}};
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    EXPECT_EQ(invocation.args.size(), 4 * sizeof(uint32_t));
+    return {emittedUint32(invocation, 0),
+            emittedUint32(invocation, 1),
+            emittedUint32(invocation, 2),
+            emittedUint32(invocation, 3)};
+}
+
+TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
+{
+    // 2-byte C/D: 2 * 16777219 = 33554438, which a float cannot represent.
+    std::array<uint32_t, 4> bf16 = emittedByteStrides(
+        rocisa::DataType::Float8, rocisa::DataType::BFloat16, CustomArgType::int32, 64, 64, 16777219, 16777219);
+    EXPECT_EQ(bf16[0], 64u);
+    EXPECT_EQ(bf16[1], 64u);
+    EXPECT_EQ(bf16[2], 33554438u);
+    EXPECT_EQ(bf16[3], 33554438u);
+
+    // 1-byte A/B: 2^26 + 4 needs 27 significant bits.
+    constexpr size_t big = (size_t(1) << 26) + 4;
+    std::array<uint32_t, 4> fp8
+        = emittedByteStrides(rocisa::DataType::Float8,
+                             rocisa::DataType::BFloat16,
+                             CustomArgType::int32,
+                             big,
+                             big,
+                             4,
+                             4);
+    EXPECT_EQ(fp8[0], 67108868u);
+    EXPECT_EQ(fp8[1], 67108868u);
+    EXPECT_EQ(fp8[2], 8u);
+    EXPECT_EQ(fp8[3], 8u);
+}
+
+// A byte stride must fit the integer type its kernel declares: int32 stops at 2^31 - 1, uint32 at 2^32 - 1.
+TEST(CustomKernelTest, ByteStridesMustFitTheirKernelArgumentType)
+{
+    constexpr size_t int32Elements = size_t(1) << 30;
+    std::array<uint32_t, 4> ok     = emittedByteStrides(rocisa::DataType::Float8,
+                                                    rocisa::DataType::BFloat16,
+                                                    CustomArgType::int32,
+                                                    64,
+                                                    64,
+                                                    int32Elements - 1,
+                                                    int32Elements - 1);
+    EXPECT_EQ(ok[2], 2 * (int32Elements - 1));
+    EXPECT_EQ(ok[3], 2 * (int32Elements - 1));
+    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
+                                    rocisa::DataType::BFloat16,
+                                    CustomArgType::int32,
+                                    64,
+                                    64,
+                                    int32Elements,
+                                    int32Elements),
+                 std::runtime_error);
+
+    constexpr size_t int32Bytes = size_t(1) << 31;
+    std::array<uint32_t, 4> fp8 = emittedByteStrides(rocisa::DataType::Float8,
+                                                     rocisa::DataType::BFloat16,
+                                                     CustomArgType::int32,
+                                                     int32Bytes - 1,
+                                                     64,
+                                                     64,
+                                                     64);
+    EXPECT_EQ(fp8[0], int32Bytes - 1);
+    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
+                                    rocisa::DataType::BFloat16,
+                                    CustomArgType::int32,
+                                    int32Bytes,
+                                    64,
+                                    64,
+                                    64),
+                 std::runtime_error);
+
+    constexpr size_t uint32Elements = size_t(1) << 31;
+    std::array<uint32_t, 4> wide    = emittedByteStrides(rocisa::DataType::Float8,
+                                                      rocisa::DataType::BFloat16,
+                                                      CustomArgType::uint32,
+                                                      64,
+                                                      64,
+                                                      uint32Elements - 1,
+                                                      uint32Elements - 1);
+    EXPECT_EQ(wide[2], 2 * (uint32Elements - 1));
+    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
+                                    rocisa::DataType::BFloat16,
+                                    CustomArgType::uint32,
+                                    size_t(1) << 32,
+                                    64,
+                                    64,
+                                    64),
+                 std::runtime_error);
 }

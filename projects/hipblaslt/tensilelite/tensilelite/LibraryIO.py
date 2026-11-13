@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .CustomKernels import getCustomKernelConfig
+from .CustomKernels import getCustomKernelConfig, readCustomKernelConfig
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
@@ -671,6 +671,55 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     return bundle["Solutions"][0]
 
 
+def _warnReplacedPredicates(customKernelName, customConfig, declared, srcFile):
+    """Warn when custom.config replaces a predicate value the logic file itself declares.
+
+    custom.config wins for every key it declares, so a logic file that narrows or widens
+    a predicate differently would otherwise change meaning without notice.
+    """
+    for key, value in customConfig.items():
+        if key.startswith("Assert") and key in declared and declared[key] != value:
+            printWarning(f"custom kernel '{customKernelName}': custom.config {key} = {value!r} "
+                         f"replaces {declared[key]!r} from {srcFile}")
+
+
+def _problemTypeForCustomKernel(problemType, features, printIndexAssignmentInfo, srcFile):
+    """Return the ProblemType one custom-kernel solution is built from.
+
+    The logic file's ProblemType is shared (UseBias and hipblaslt_all stay on for
+    every other solution). A handwritten kernel whose custom.config Features declare
+    SupportsBias, SupportsActivation or SupportsScaleAlpha false has no such kernargs,
+    so that one solution must reject those problems and fall through. A config
+    without Features, or with the flag absent or true, is never restricted. The
+    config ProblemType flags are deliberately not consulted, so kernels that predate
+    Features keep their behaviour.
+
+    Returns the shared problemType itself when Features apply no restriction or the
+    restriction changes nothing (the logic file already has bias, activation and
+    scale-alpha-vector off), otherwise a new ProblemType built from a copy of its
+    state with the restriction applied. Neither argument is modified.
+    """
+    if not isinstance(features, dict):
+        return problemType
+    restrictBias = features.get("SupportsBias", True) is False
+    restrictScaleAlphaVec = features.get("SupportsScaleAlpha", True) is False
+    restrictActivation = features.get("SupportsActivation", True) is False
+    if not (restrictBias or restrictActivation or restrictScaleAlphaVec):
+        return problemType
+    state = dict(problemType.state)
+    if restrictScaleAlphaVec:
+        state["UseScaleAlphaVec"] = 0
+    if restrictBias:
+        state["UseBias"] = 0
+    if restrictActivation:
+        # ProblemType treats a present Activation key as enabled even when the
+        # value is false, unless ActivationType is outside all/hipblaslt_all.
+        state.pop("Activation", None)
+        state["ActivationType"] = "none"
+    restricted = ProblemType(state, printIndexAssignmentInfo, srcFile=srcFile, raiseOnTypeMismatch=False)
+    return problemType if restricted.state == problemType.state else restricted
+
+
 def parseLibraryLogicData(
         data,
         srcFile,
@@ -715,6 +764,7 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
+        declared = dict(solutionState)
         solutionState = fillSolutionDefaults(solutionState, libDefaults)
 
         if "KernelLanguage" not in solutionState.keys():
@@ -736,16 +786,21 @@ def parseLibraryLogicData(
         elif solutionState.get("CustomKernelName", ""):
             customKernelName = solutionState["CustomKernelName"]
 
+        features = None
         if customKernelName:
             isp = {}
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
             try:
-                customConfig = getCustomKernelConfig(customKernelName, isp)
+                rawConfig = readCustomKernelConfig(customKernelName)
+                # getCustomKernelConfig drops Features, so keep the declaration.
+                features = rawConfig.get("Features")
+                customConfig = getCustomKernelConfig(customKernelName, isp, kernelConfig=rawConfig)
             except (RuntimeError, KeyError, TypeError) as e:
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
+            _warnReplacedPredicates(customKernelName, customConfig, declared, srcFile)
             solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
@@ -754,8 +809,10 @@ def parseLibraryLogicData(
             args = solutionState.get("CustomKernel", {}).get("args", [])
             if not any(a.get("semantic") == "ScaleBlockSizeA" for a in args):
                 raise ValueError("ScaleBlockSizesA requires a custom runtime group-size argument")
-        # overwrite problemType if any
-        solutionState["ProblemType"] = problemType
+        # A restricting custom.config must not leak into the library ProblemType
+        # that every other solution shares.
+        solutionState["ProblemType"] = _problemTypeForCustomKernel(
+            problemType, features, printIndexAssignmentInfo, srcFile)
         if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
             solutionState["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataType'])
 

@@ -52,9 +52,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <unordered_map>
 
 #include <sstream>
@@ -107,6 +109,46 @@ namespace TensileLite
                 " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
 #endif
         }
+    }
+
+    // A byte stride must fit the integer kernarg the kernel declares for it, because appendCustomType
+    // truncates silently.
+    static size_t checkedByteStride(size_t value, CustomArgType type, std::string const& name)
+    {
+        size_t limit = 0;
+        switch(type)
+        {
+        case CustomArgType::int8:
+            limit = std::numeric_limits<int8_t>::max();
+            break;
+        case CustomArgType::uint8:
+            limit = std::numeric_limits<uint8_t>::max();
+            break;
+        case CustomArgType::int16:
+            limit = std::numeric_limits<int16_t>::max();
+            break;
+        case CustomArgType::uint16:
+            limit = std::numeric_limits<uint16_t>::max();
+            break;
+        case CustomArgType::int32:
+            limit = std::numeric_limits<int32_t>::max();
+            break;
+        case CustomArgType::uint32:
+            limit = std::numeric_limits<uint32_t>::max();
+            break;
+        case CustomArgType::int64:
+            limit = std::numeric_limits<int64_t>::max();
+            break;
+        case CustomArgType::uint64:
+            limit = std::numeric_limits<uint64_t>::max();
+            break;
+        default:
+            throw std::runtime_error(concatenate(name, " needs an integer kernel argument"));
+        }
+        if(value > limit)
+            throw std::runtime_error(
+                concatenate(name, " ", value, " does not fit its kernel argument type"));
+        return value;
     }
 
     std::string toString(CustomArgSemantic arg)
@@ -3606,21 +3648,34 @@ namespace TensileLite
                 case CustomArgSemantic::StrideScaleB2:
                     rv.args.appendCustomType("StrideScaleB2", problem.mxsb().strides().at(descriptorStrideAB + 2), arg.type);
                     break;
+                // Computed in integers: a float product rounds to 24 bits and corrupts large strides.
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(descriptorA.strides()[1], descriptorA.elementBytes()),
+                                          arg.type,
+                                          "StrideA0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(descriptorB.strides()[1], descriptorB.elementBytes()),
+                                          arg.type,
+                                          "StrideB0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
-                        problem.c().strides()[1] * problem.c().elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(problem.c().strides()[1], problem.c().elementBytes()),
+                                          arg.type,
+                                          "StrideC0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideD0Bytes:
                     rv.args.appendCustomType("StrideD0Bytes",
-                        problem.d().strides()[1] * problem.d().elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(problem.d().strides()[1], problem.d().elementBytes()),
+                                          arg.type,
+                                          "StrideD0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideMetadata0:
                     rv.args.appendCustomType("StrideMetadata0", problem.metadata().strides()[descriptorStrideAB], arg.type);

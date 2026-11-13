@@ -33,6 +33,12 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertAnySizeLessThanIsValid,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -513,6 +519,8 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeLessThan": "SizeLessThan",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
@@ -581,11 +589,34 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAnySizeLessThan":
+            if value == -1:
+                return None
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            try:
+                checkAssertAnySizeLessThanIsValid(key, value)
+            except Exception as e:
+                raise RuntimeError(str(e)) from e
+            predicates = [
+                cls("SizeLessThan", index=pos, value=val) for pos, val in value.items() if val != -1
+            ]
+            return cls.Or(predicates) if predicates else None
         if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                try:
+                    checkAssertSizeMapIsValid(key, value)
+                    checkAssertMultipleMapIsValid(key, value)
+                except Exception as e:
+                    raise RuntimeError(str(e)) from e
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
         if key == "AssertAlphaValue":
             if value not in ASSERT_ALPHA_VALUE_NAMES:
@@ -593,6 +624,24 @@ class ProblemPredicate(Properties.Predicate):
                     "AssertAlphaValue must be one of {}, got {!r}".format(
                         sorted(ASSERT_ALPHA_VALUE_NAMES), value))
             return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
+
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
 
         if key.endswith('Multiple'):
             if value == 1:

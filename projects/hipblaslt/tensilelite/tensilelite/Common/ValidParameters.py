@@ -719,6 +719,25 @@ validParameters = { # we need to make sure this matches develop
     # predicate admits only a problem whose alpha restriction is that value. Unset
     # admits any alpha.
     "AssertAlphaValue": [1],
+    # Divisibility of an A/B stride, same {index: value} form: the predicate is
+    # stride(index) % value == 0, in elements. A kernel that issues wide loads
+    # along the leading dimension declares it. Fork YAML: AssertStrideAMultiple: [{1: 4}]
+    "AssertStrideAMultiple": -1,
+    "AssertStrideBMultiple": -1,
+    # First byte extent of any one tensor (A, B, C or D) that a kernel cannot
+    # address. Handwritten kernels that reach a whole tensor through a single buffer
+    # resource declare the first extent they cannot address here (2^31 = 2147483648 for
+    # the shipped skinny MXFP8 kernels); a problem with a tensor of at least this many
+    # bytes does not match. -1 skips. Fork YAML: AssertTensorBytesLessThan: [2147483648]
+    "AssertTensorBytesLessThan": -1,
+    # True requires the problem's MX scales to be in the pre-swizzled (padded HostPreSwizzle)
+    # layout, for handwritten kernels that read that layout only: a caller that hands over
+    # compactly packed scales does not match. -1 skips. Fork YAML: AssertMXScalesPreSwizzled: [True]
+    "AssertMXScalesPreSwizzled": -1,
+    # {index: value} where the predicate holds when at least one listed size is below its
+    # value (an Or of SizeLessThan), for kernels that serve a problem if either of two
+    # extents is small. -1 skips. Fork YAML: AssertAnySizeLessThan: [{0: 5, 1: 5}]
+    "AssertAnySizeLessThan": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1517,6 +1536,14 @@ ASSERT_DIM_MAP_PARAMETERS = (
     "AssertStrideBEqual",
     "AssertStrideCEqual",
     "AssertStrideDEqual",
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
+)
+
+# Subset of the above where the value is a divisor, so 0 would divide by zero.
+ASSERT_DIM_MULTIPLE_PARAMETERS = (
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
 )
 
 
@@ -1535,6 +1562,41 @@ def checkAssertSizeMapIsValid(name, value):
         if type(val) is not int:
             msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
             raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
+def checkAssertMultipleMapIsValid(name, value):
+    """Divisors must be positive; -1 is the skip sentinel."""
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nMultiple must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
+
+
+def checkAssertTensorBytesLessThanIsValid(name, value):
+    """The byte limit must be a positive int; -1 is the skip sentinel."""
+    if type(value) is int and (value == -1 or value > 0):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be a positive int or -1 to skip"
+    raise Exception(msgBase.format(name, value))
+
+
+def checkAssertMXScalesPreSwizzledIsValid(name, value):
+    """The flag must be True; -1 is the skip sentinel."""
+    if value is True or (type(value) is int and value == -1):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be True or -1 to skip"
+    raise Exception(msgBase.format(name, value))
+
+
+def checkAssertAnySizeLessThanIsValid(name, value):
+    """A size map whose limits are positive; -1 is the skip sentinel."""
+    checkAssertSizeMapIsValid(name, value)
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nLimit must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
 
 
 def checkSpaceFillAlgoIsValid(name, value):
@@ -1654,6 +1716,14 @@ def checkParametersAreValid(
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
         elif name in ASSERT_DIM_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
+            if name in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                checkAssertMultipleMapIsValid(name, value)
+        elif name == "AssertTensorBytesLessThan":
+            checkAssertTensorBytesLessThanIsValid(name, value)
+        elif name == "AssertMXScalesPreSwizzled":
+            checkAssertMXScalesPreSwizzledIsValid(name, value)
+        elif name == "AssertAnySizeLessThan":
+            checkAssertAnySizeLessThanIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
