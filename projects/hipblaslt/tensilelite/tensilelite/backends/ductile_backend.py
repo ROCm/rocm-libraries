@@ -305,7 +305,7 @@ class DuctileBackend(OptimizationBackend):
             
             # Build multi-dimensional fitness array: (n_sizes, len(individuals))
             # nGFlops[i, j] = performance of solution j at problem size i
-            nGFlops = np.zeros((n_sizes, len(individuals)), dtype=np.float32)
+            nGFlops = np.full((n_sizes, len(individuals)), -1.0, dtype=np.float32)
             idxs = [si.solIdx for si in solutions]
             nGFlops[:, idxs] = scores
             

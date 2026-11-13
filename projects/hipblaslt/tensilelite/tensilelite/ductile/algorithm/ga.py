@@ -151,7 +151,8 @@ class GeneticAlgorithm:
         # Guard against non-finite fitness values (e.g. inf from a zero-time benchmark
         # measurement) in addition to negative/failed scores, so a single bad sample
         # can't poison best.F for the rest of the run.
-        scores[~np.isfinite(scores)] = -1.0
+        scores[~np.isfinite(scores)] = 0
+        scores[np.isnan(scores)] = 0
         scores[scores < 0] = -1.0
         
         pop.G = scores
