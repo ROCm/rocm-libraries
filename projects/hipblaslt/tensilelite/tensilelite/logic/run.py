@@ -36,7 +36,7 @@ import rocisa
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
-from ..Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
+from ..Common import ParallelMap2, CPUThreadCount, print1, print2, IsaVersion, IsaInfo, setVerbosity
 from ..Common.Architectures import SUPPORTED_ISA
 from ..Common.Capabilities import makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, defaultSolution
@@ -240,6 +240,10 @@ def _setup():
     assignGlobalParameters(gp_config, isaInfoMap)
     if args.Verbose < 2:
         setVerbosity(args.Verbose)
+
+    # 0 (the default) or a negative value means every CPU in the budget.
+    if jobs < 1:
+        jobs = CPUThreadCount()
 
     return jobs, isaInfoMap, logicPath, files, check, args
 

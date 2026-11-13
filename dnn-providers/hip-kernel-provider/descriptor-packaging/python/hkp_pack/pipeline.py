@@ -2185,8 +2185,9 @@ def run_pipeline(
     `generic_targets_json` is the generic target table; generic passes are
     merged into member folders (descriptor-packaging/README.md).
 
-    `exclude_folders` names top-level child folders of the root this build does
-    not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
+    `exclude_folders` names folders of the root this build does not pack (a
+    top-level family folder or a `/`-separated bundle path), and `disabled_kinds`
+    the kernel_source kinds it has no producer for;
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
 

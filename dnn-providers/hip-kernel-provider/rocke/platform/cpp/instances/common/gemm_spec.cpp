@@ -886,7 +886,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                            arch);
         }
         /* The cshuffle epilogue is admitted on gfx1250 only. The emitter is
-         * arch-neutral (its scatter is driven by the op's c_layout() map); what
+         * arch-neutral (its scatter is driven by the op's dst_layout() map); what
          * the other WMMA targets lack is coverage, not capability. Lift the arch
          * test once gfx1151 / gfx1201 have gate configs of their own. */
         if(strcmp(spec->trait.epilogue, "default") != 0 && !is_gfx1250)

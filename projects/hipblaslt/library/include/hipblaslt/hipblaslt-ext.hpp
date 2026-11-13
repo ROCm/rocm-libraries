@@ -292,9 +292,12 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT             GemmTuning(GemmTuning&& tuning);
         HIPBLASLT_EXPORT GemmTuning& operator=(GemmTuning&& tuning);
 
-        HIPBLASLT_EXPORT void setSplitK(
-            uint16_t
-                splitK); //!< Set the value of splitK, 0 is off (use the splitK inside the solution).
+        /**
+         * Set splitK; 0 uses the solution default.
+         * Device-scalar-alpha-capable kernels support at most 2047,
+         * including in host/vector alpha mode.
+         */
+        HIPBLASLT_EXPORT void setSplitK(uint16_t splitK);
         HIPBLASLT_EXPORT void setWgm(
             int16_t
                 wgm); //!< Set the value of workgroup mapping, 0 is off (use the workgroup mapping inside the solution).

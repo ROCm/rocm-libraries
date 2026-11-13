@@ -143,6 +143,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(MIOPENPROVIDER_ENABLE_COVERAGE)
     message(STATUS "Enabling compile flags for coverage-mapping")
@@ -426,6 +427,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            # Five small batchnorm inference bundles: a few seconds on one GPU.
+            BENCHMARK_REFERENCE_SMOKE_FILTER "quick_BatchnormFwdInference_Inference.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
@@ -454,6 +457,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             apply_ctest_category_labels(
                 "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                               ${PROJECT_NAME}-external-integration-check-benchmark-reference-smoke
             )
         endif()
     else()
@@ -557,3 +561,4 @@ if(MIOPENPROVIDER_ENABLE_COVERAGE)
     add_custom_coverage_target(current-coverage "")
 
 endif()
+hipdnn_apply_long_path_manifest()

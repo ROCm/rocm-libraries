@@ -209,6 +209,8 @@ The MIOpen Provider plugin uses the ``global.benchmarking`` knob to control whet
 
 The ``HIPDNN_FORCE_BENCHMARKING`` environment variable overrides this knob for the whole process. See :ref:`engine-selection-variables`.
 
+The MIOpen provider does not report ``SUPPORTS_GRAPH_CAPTURE``. Benchmarking inside HIP stream capture fails. For a conditional workaround for convolutions, see :ref:`capture-miopen`.
+
 Caching
 ~~~~~~~
 

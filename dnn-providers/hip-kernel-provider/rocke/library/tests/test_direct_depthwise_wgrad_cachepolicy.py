@@ -6,7 +6,7 @@ CPOL_ATOMIC_CASCADE_DEV is the gfx12 th/scope encoding of the immediate. gfx11
 reads the same bits as glc/slc/dlc, and the cache builds this kernel for every
 wave32 target, so only the gfx12 targets may carry it. The C++ builder is
 checked the same way in
-``platform/tests/instances/conv_direct_wgrad_refusals_host.cpp``.
+``library/cpp/tests/conv_direct_wgrad_refusals_host.cpp``.
 """
 
 from __future__ import annotations

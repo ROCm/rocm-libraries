@@ -6,10 +6,11 @@
 Covers:
   - SchedulePolicy.for_pipeline("basic") attributes
   - CoalescedTileLoader.load_global() / .store_lds() IR structure
-  - is_valid_spec rejects pipeline="basic" with async_dma=True
-  - build_implicit_gemm_conv with pipeline="basic" produces a valid kernel
-    whose IR uses a bounded runtime scf.for_iter K-loop and contains both
-    buffer_load_vN and smem_store_vN ops
+
+The convolution consumers of pipeline="basic" (is_valid_spec rejecting it with
+async_dma=True; build_implicit_gemm_conv emitting a bounded runtime scf.for
+K-loop with buffer_load_vN and smem_store_vN ops) are tested in
+library/tests/test_conv_platform_regressions.py.
 """
 
 from __future__ import annotations
@@ -213,131 +214,6 @@ class TestCoalescedTileLoaderSplit:
                 descriptor=lambda b, r, c: (b.const_i32(0), None),
                 rsrc=None,
             )
-
-
-# ---------------------------------------------------------------------------
-# is_valid_spec: pipeline="basic" + async_dma=True must be rejected
-# ---------------------------------------------------------------------------
-
-
-class TestIsValidSpecBasicPipeline:
-    def _mk_basic_spec(self, async_dma=False):
-        from kernels.common.conv_implicit_gemm import (
-            ConvProblem,
-            ImplicitGemmConvSpec,
-        )
-
-        return ImplicitGemmConvSpec(
-            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            name="t",
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            wave_size=64,
-            pipeline="basic",
-            async_dma=async_dma,
-            vector_size_c=1,
-        )
-
-    def test_basic_sync_is_valid(self):
-        from kernels.common.conv_implicit_gemm import is_valid_spec
-
-        ok, why = is_valid_spec(self._mk_basic_spec(async_dma=False), "gfx950")
-        assert ok, f"pipeline='basic' with async_dma=False should be valid: {why}"
-
-    def test_basic_async_dma_is_rejected(self):
-        from kernels.common.conv_implicit_gemm import is_valid_spec
-
-        ok, why = is_valid_spec(self._mk_basic_spec(async_dma=True), "gfx950")
-        assert not ok, "pipeline='basic' with async_dma=True must be rejected"
-        assert (
-            "async_dma" in why.lower() or "basic" in why.lower()
-        ), f"rejection message should mention the conflict, got: {why!r}"
-
-
-# ---------------------------------------------------------------------------
-# build_implicit_gemm_conv: pipeline="basic" produces correct IR structure
-# ---------------------------------------------------------------------------
-
-
-class TestBuildConvBasicPipeline:
-    def _build(self, epilogue="default"):
-        from kernels.common.conv_implicit_gemm import (
-            ConvProblem,
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        spec = ImplicitGemmConvSpec(
-            problem=ConvProblem(N=1, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1),
-            name="basic_test",
-            tile_m=64,
-            tile_n=64,
-            tile_k=32,
-            warp_m=2,
-            warp_n=2,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            wave_size=64,
-            pipeline="basic",
-            epilogue=epilogue,
-            vector_size_c=1,
-        )
-        return build_implicit_gemm_conv(spec, arch="gfx950")
-
-    def test_build_produces_kernel(self):
-        kernel = self._build()
-        assert kernel is not None
-
-    def test_build_contains_buffer_load_ops(self):
-        """The basic pipeline uses CoalescedTileLoader.load_global which emits
-        tile.buffer_load_vN instructions."""
-        kernel = self._build()
-        ops = _flatten(kernel.body, [])
-        load_ops = [op for op in ops if "buffer_load" in op.name]
-        assert load_ops, "pipeline='basic' kernel must contain buffer_load ops"
-
-    def test_build_contains_smem_store_ops(self):
-        """After the global read, store_lds emits tile.smem_store_vN."""
-        kernel = self._build()
-        ops = _flatten(kernel.body, [])
-        store_ops = [op for op in ops if "smem_store" in op.name]
-        assert store_ops, "pipeline='basic' kernel must contain smem_store ops"
-
-    def test_build_contains_sync_ops(self):
-        """The basic pipeline emits workgroup barriers (sync) to order reads
-        and writes between tiles."""
-        kernel = self._build()
-        ops = _flatten(kernel.body, [])
-        sync_ops = [op for op in ops if "sync" in op.name or "barrier" in op.name]
-        assert sync_ops, "pipeline='basic' kernel must contain barrier/sync ops"
-
-    def test_build_cshuffle_epilogue(self):
-        """Ensure pipeline='basic' composes correctly with the cshuffle epilogue."""
-        kernel = self._build(epilogue="cshuffle")
-        assert kernel is not None
-        ops = _flatten(kernel.body, [])
-        # cshuffle allocates a C staging tile
-        c_allocs = [
-            op
-            for op in ops
-            if op.name == "tile.smem_alloc" and "C_smem" in op.results[0].name
-        ]
-        assert c_allocs, "cshuffle epilogue must allocate a C_smem tile"
-
-    def test_build_uses_scf_for_iter(self):
-        """pipeline='basic' now emits a bounded runtime scf.for K-loop
-        (same structure as 'mem') so IR size is independent of K_gemm."""
-        kernel = self._build()
-        ops = _flatten(kernel.body, [])
-        for_ops = [op for op in ops if op.name == "scf.for"]
-        assert for_ops, "pipeline='basic' K-loop must use scf.for (runtime loop)"
 
 
 if __name__ == "__main__":  # pragma: no cover

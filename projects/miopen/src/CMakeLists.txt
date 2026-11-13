@@ -11,6 +11,8 @@ endif()
 if(MIOPEN_USE_HIPCONV)
     # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed ones.
     set(HIPCONV_ENABLE_EXPLICIT_GEMM OFF CACHE BOOL "" FORCE)
+    # MIOpen installs only libMIOpen.so, so libhipconv must be linked into it.
+    set(HIPCONV_FORCE_STATIC ON)
     add_subdirectory(hipconv)
 endif()
 
@@ -773,7 +775,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         adam.cpp
         addlayernorm.cpp
         cat.cpp
-        exec_utils.cpp
         groupnorm.cpp
         getitem.cpp
         glu.cpp

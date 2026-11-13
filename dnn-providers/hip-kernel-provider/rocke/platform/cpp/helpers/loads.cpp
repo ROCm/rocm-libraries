@@ -726,9 +726,9 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
         return;
     }
 
-    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec). The C loader
-     * carries no elem_dtype, so the zero takes the destination LDS tile's
-     * element type (f16 or bf16: the 16-bit elements this port loads). */
+    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec). This port
+     * takes the zero's type from the destination LDS tile (f16 or bf16: the
+     * 16-bit elements this port loads). */
     const rocke_type_t* lds_elem
         = (smem_dst->type != NULL && smem_dst->type->kind == ROCKE_TYPE_SMEM) ? smem_dst->type->elem
                                                                               : NULL;
