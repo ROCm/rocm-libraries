@@ -117,7 +117,7 @@ namespace rocsparse
                                           x_inc,
                                           y + batch_index * y_stride,
                                           y_inc,
-                                          done_array + batch_index * m,
+                                          done_array + static_cast<int64_t>(batch_index) * m,
                                           map,
                                           offset,
                                           zero_pivot + batch_index * zero_pivot_stride,
@@ -147,7 +147,7 @@ namespace rocsparse
                                       x_inc,
                                       y + batch_index * y_stride,
                                       y_inc,
-                                      done_array + batch_index * m,
+                                      done_array + static_cast<int64_t>(batch_index) * m,
                                       map,
                                       offset,
                                       zero_pivot + batch_index * zero_pivot_stride,
@@ -268,53 +268,45 @@ namespace rocsparse
                                                 bool    is_host_mode)
     {
         auto          alpha = reinterpret_cast<const T*>(alpha_);
+        dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
         dim3          csrsv_threads(BLOCKSIZE);
         const int64_t csr_val_inc = static_cast<int64_t>(1);
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
-            handle,
-            rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
-            BLOCKSIZE,
-            [&](auto chunked, uint32_t grid) -> rocsparse_status {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::csrsv_kernel<BLOCKSIZE,
-                                             WF_SIZE,
-                                             SLEEP,
-                                             decltype(chunked)::value,
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsv_kernel<BLOCKSIZE,
+                                                                    WF_SIZE,
+                                                                    SLEEP,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                             A_OP_CONJUGATE,
+                                                                    A_OP_CONJUGATE,
 #endif
-                                             I,
-                                             J,
-                                             T>),
-                    dim3(grid, batch_count),
-                    csrsv_threads,
-                    0,
-                    handle->stream,
-                    static_cast<J>(m),
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                    alpha_stride,
-                    A->const_row_data,
-                    A->const_col_data,
-                    A->const_val_data,
-                    csr_val_inc,
-                    A->batch_stride,
-                    x->const_values,
-                    x->inc,
-                    x->batch_stride,
-                    y->values,
-                    y->inc,
-                    y->batch_stride,
-                    done_array,
-                    map,
-                    0,
-                    zero_pivot,
-                    zero_pivot_stride,
-                    A->descr->base,
-                    A->descr->fill_mode,
-                    A->descr->diag_type,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
-                return rocsparse_status_success;
-            }));
+                                                                    I,
+                                                                    J,
+                                                                    T>),
+                                           csrsv_blocks,
+                                           csrsv_threads,
+                                           0,
+                                           handle->stream,
+                                           static_cast<J>(m),
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                                           alpha_stride,
+                                           A->const_row_data,
+                                           A->const_col_data,
+                                           A->const_val_data,
+                                           csr_val_inc,
+                                           A->batch_stride,
+                                           x->const_values,
+                                           x->inc,
+                                           x->batch_stride,
+                                           y->values,
+                                           y->inc,
+                                           y->batch_stride,
+                                           done_array,
+                                           map,
+                                           0,
+                                           zero_pivot,
+                                           zero_pivot_stride,
+                                           A->descr->base,
+                                           A->descr->fill_mode,
+                                           A->descr->diag_type,
+                                           handle->pointer_mode == rocsparse_pointer_mode_host);
         return rocsparse_status_success;
     }
 

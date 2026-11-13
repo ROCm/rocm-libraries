@@ -357,9 +357,6 @@ namespace rocsparse
         }
     }
 
-    // The row blocks of a chunk reuse the block's shared memory, so a barrier
-    // separates them: no wavefront may reset the local done flags of the next
-    // row block while another one still spins on those of the current one.
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               bool     SLEEP,
@@ -388,6 +385,15 @@ namespace rocsparse
                                     last);
             for(int64_t block_id = first; block_id < last; ++block_id)
             {
+                // The row blocks of a chunk reuse the block's shared memory, so a
+                // barrier separates them. No wavefront may reset the local done
+                // flags of the next row block while another one still spins on
+                // those of the current one. Where has_noncoherent_xcd_l2 is true,
+                // thread 0 also resets block_max_nnz and block_rows_left at the
+                // start of each row block, while the wavefront that took the last
+                // row of the current one may still read block_max_nnz in
+                // csrsv_analysis_max_nnz before its device-scope atomic_max on
+                // max_nnz.
                 if(block_id > first)
                 {
                     __syncthreads();
@@ -448,6 +454,8 @@ namespace rocsparse
                                     last);
             for(int64_t block_id = first; block_id < last; ++block_id)
             {
+                // Same barrier, for the same shared state, as in
+                // csrsv_analysis_lower_kernel.
                 if(block_id > first)
                 {
                     __syncthreads();
