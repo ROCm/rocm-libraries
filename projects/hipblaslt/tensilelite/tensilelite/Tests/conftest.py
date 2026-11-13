@@ -36,6 +36,8 @@ except ImportError:
 testdir = os.path.dirname(__file__)
 moddir = os.path.dirname(testdir)
 rootdir = os.path.dirname(moddir)
+if testdir not in sys.path:
+    sys.path.insert(0, testdir)
 sys.path.append(rootdir)
 
 def pytest_addoption(parser):

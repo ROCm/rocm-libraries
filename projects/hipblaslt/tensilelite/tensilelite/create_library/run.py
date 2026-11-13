@@ -1379,7 +1379,7 @@ def _childEnvironment() -> Dict[str, str]:
     return env
 
 
-def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
+def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int, argv=None) -> None:
     """Builds each group in its own process, concurrently.
 
     A run names its target by the ISA it parses out of the gfx name, so a
@@ -1395,7 +1395,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
         f"# Architectures requested need {len(groups)} builds to cover: "
         + ", ".join("[" + ";".join(g) + "]" for g in groups)
     )
-    argv = sys.argv[1:]
+    argv = sys.argv[1:] if argv is None else list(argv)
     jobs = _jobsPerGroup(requestedJobs, groups)
     env = _childEnvironment()
     # Spawned inside the try so that a failure to start the second one still
@@ -1431,7 +1431,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
 
 @profile
-def main():
+def main(argv=None):
     start = timer()
     print1("")
     print1(HR)
@@ -1439,7 +1439,7 @@ def main():
     print2(HR)
     print2("")
 
-    arguments = parseArguments()
+    arguments = parseArguments() if argv is None else parseArguments(argv)
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
     cxxCompiler, _, offloadBundler, _ = validateToolchain(
@@ -1459,7 +1459,7 @@ def main():
     # takes the one path below, unchanged.
     groups = isaCollisionFreeGroups(archs)
     if len(groups) > 1:
-        _buildGroupsSeparately(groups, arguments["CpuThreads"])
+        _buildGroupsSeparately(groups, arguments["CpuThreads"], argv)
         return
 
     archs = expandAllArchitectures(archs)
@@ -1696,3 +1696,4 @@ def main():
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    return 0

@@ -16,7 +16,7 @@ import os
 import pytest
 
 from config_helpers import configMarks, findDeviceTags
-from tensilelite.Tests.gpu_detection import device_tags_from_rocminfo
+from gpu_detection import device_tags_from_rocminfo
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 _TESTS_ROOT = os.path.dirname(_COMMON_DIR)

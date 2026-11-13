@@ -5,7 +5,7 @@
 import pytest
 
 from tensilelite.SolutionStructs.Solution import Solution
-from tensilelite.Tests.unit.test_halfplr_streamk_rejects import _gp_gfx1250, _make_params  # noqa: F401
+from test_halfplr_streamk_rejects import _gp_gfx1250, _make_params  # noqa: F401
 
 pytestmark = pytest.mark.unit
 
