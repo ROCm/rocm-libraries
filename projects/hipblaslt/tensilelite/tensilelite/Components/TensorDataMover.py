@@ -71,6 +71,21 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(gsucLabelEnd)
         return mod
 
+    @staticmethod
+    def swizzledTileStride(tp: Mapping, dstSgprIdx: int, mt: int, bpe: float) -> Module:
+        """Bytes between consecutive macro-tiles of a swizzled-TDM operand.
+
+        The host lays the operand out densely as [tile/MI, paddedK/swzK, ..., MI, ...] with
+        paddedK = alignUp(SizeL, swzK) and ignores the leading-dimension stride, so one
+        macro-tile spans MT * paddedK elements rather than MT * Stride{tc}{free}.
+        """
+        mod = Module("swizzled-TDM tile stride")
+        swzK = tp["swizzleK"]
+        mod.add(SAddU32(sgpr(dstSgprIdx), sgpr("SizeL"), swzK - 1, f"paddedK = SizeL + swzK({swzK})-1"))
+        mod.add(SAndB32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK = alignUp(SizeL, swzK)"))
+        mod.add(SMulI32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), round(mt * bpe), f"swizzled tile stride = paddedK * MT({mt}) * bpe({bpe})"))
+        return mod
+
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -123,6 +138,8 @@ class TensorDataMoverLoad(TensorDataMover):
                     mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), round(mt), f"stride *= MT({mt})"))
                 else:
                     mod.add(SMovB32(sgpr(tmpSgprIdx), mt, f"stride = MT({mt})"))
+            elif tp.get("isSwizzledTDM"):
+                mod.add(self.swizzledTileStride(tp, tmpSgprIdx, mt, bpe))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
             mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
@@ -243,7 +260,10 @@ class TensorDataMoverLoad(TensorDataMover):
                     mtScale = mxTdmTileM(mt, mxTile)
                     mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mtScale * bpe), f"wgId * mxUnit({mxUnit}) * (MT({mt})/MXBlockFree({mxTile})) * bpe({bpe})"))
             else:
-                mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
+                if tp.get("isSwizzledTDM"):
+                    mod.add(self.swizzledTileStride(tp, tmpSgprIdx, mt, bpe))
+                else:
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
             if compShift is None:
