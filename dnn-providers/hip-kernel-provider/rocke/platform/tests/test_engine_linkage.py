@@ -6,6 +6,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -118,7 +119,8 @@ requires_cmake = pytest.mark.skipif(
 def configure_installed_ctest(tmp_path, *cmake_arguments):
     """Configure the platform with BUILD_TESTING and return the build directory
     and a directory holding its installed CTestTestfile, as an install lays it
-    out."""
+    out. A -D in cmake_arguments overrides the default
+    ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
     build = tmp_path / "build"
     subprocess.run(
         [
@@ -153,6 +155,100 @@ def list_installed_ctests(ctest_dir, env=None):
         env=env,
     )
     return json.loads(listed.stdout)["tests"]
+
+
+# How every installed pytest entry other than an explicit gate starts its
+# command, after the interpreter.
+PYTEST_WITH_SHARD_PLUGIN = [
+    "-m",
+    "pytest",
+    "-p",
+    "rocke.tests.ctest_shard",
+    "--rocke-shard-from-gtest-env",
+]
+EXPLICIT_GATES = {
+    "rocke_library_counted_structural_gate",
+    "rocke_library_counted_compiler_gate",
+}
+
+
+def runs_pytest(test):
+    """True when the installed CTest entry ``test`` runs ``python -m pytest``.
+    CTest omits the command of an entry whose program is not built."""
+    return test.get("command", [])[1:3] == ["-m", "pytest"]
+
+
+def reference_archives_missing():
+    """True when a GPU reference archive is not pulled from DVC, so a configure
+    with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON fails."""
+    bundles = PLATFORM.parent / "library/tests/reference_bundles"
+    pointers = list(bundles.glob("*/*/*.tar.gz.dvc"))
+    return not pointers or any(
+        not pointer.with_suffix("").is_file() for pointer in pointers
+    )
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    ("provider_subdir", "gpu_references"),
+    [
+        ("", False),
+        ("hip_kernel_provider", False),
+        pytest.param(
+            "hip_kernel_provider",
+            True,
+            marks=pytest.mark.skipif(
+                reference_archives_missing(),
+                reason="GPU reference archives need dvc pull",
+            ),
+        ),
+    ],
+    ids=["standalone", "provider", "provider-gpu-references"],
+)
+def test_installed_pytest_entries_run_the_ctest_shard_plugin(
+    tmp_path, provider_subdir, gpu_references
+):
+    """TheRock CI runs every installed entry on every hipkernelprovider shard.
+    Each pytest entry loads rocke.tests.ctest_shard with the flag that reads
+    the gtest shard variables, so it runs only the shard's share of its tests.
+    The explicit gates stop on a partial run, so they carry neither. The GPU
+    reference entries exist only when the references install."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        f"-DROCKE_INSTALL_TEST_GPU_REFERENCES={'ON' if gpu_references else 'OFF'}",
+    )
+    has_library = (
+        PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
+    ).is_file()
+    tests = list_installed_ctests(ctest_dir)
+    pytest_entries = {test["name"]: test for test in tests if runs_pytest(test)}
+
+    expected_names = {"rocke_pytest_other", "rocke_tiling_pytest"}
+    if has_library:
+        expected_names.add("rocke_library_sdpa_pytest")
+    assert expected_names <= pytest_entries.keys(), sorted(pytest_entries)
+    gpu_reference_names = {
+        name
+        for name in pytest_entries
+        if re.fullmatch(r"rocke_[a-z0-9]+_gpu_gfx[0-9a-z]+_pytest", name)
+    }
+    assert bool(gpu_reference_names) == gpu_references, gpu_reference_names
+
+    for name, test in pytest_entries.items():
+        if name not in EXPLICIT_GATES:
+            assert test["command"][1:6] == PYTEST_WITH_SHARD_PLUGIN, name
+    without_plugin = {
+        name
+        for name, test in pytest_entries.items()
+        if test["command"][1:6] != PYTEST_WITH_SHARD_PLUGIN
+    }
+    assert without_plugin == (EXPLICIT_GATES if has_library else set())
+    for name in without_plugin:
+        command = pytest_entries[name]["command"]
+        assert "rocke.tests.ctest_shard" not in command, name
+        assert "--rocke-shard-from-gtest-env" not in command, name
+        assert command[1:5] == ["-m", "pytest", "-p", "pytest_timeout"], name
 
 
 @requires_cmake
@@ -436,10 +532,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     selection_by_part = {}
     for part in parts:
         name, command = part["name"], part["command"]
-        assert command[1:3] == ["-m", "pytest"], name
+        assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
         assert command[-len(suite_options) :] == suite_options, name
         selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            3 : -len(suite_options)
+            6 : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # One label string, as the single entry had: the generated CTest text
