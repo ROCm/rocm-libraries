@@ -26,14 +26,14 @@
 # options the loaded compiler accepts. Both are registered in build-tree and
 # installed-artifact CTest, so developers and provider CI execute the same
 # logical gates against their respective package data. The python-standard
-# category holds Python entries that start at standard so that the quick tier
-# does not run them, for example rocke_ctest_shard_pytest, the tests of the
-# rocke.tests.ctest_shard plugin, which start many child pytest and CTest runs.
-# A category whose name is not a tier gets only its name as a tier label, so
-# python-standard lists the standard, comprehensive and full labels itself.
-# The pytest-scaling
-# runner and counted-sync entries start at comprehensive so nightly/full runs
-# own them without adding work to quick/standard pre-merge and post-merge runs.
+# category holds Python entries that start at the standard tier. Thus the quick
+# tier does not run them. An example is rocke_ctest_shard_pytest, the tests of
+# the rocke.tests.ctest_shard plugin. These tests start many child pytest and
+# CTest runs. The tier rule gives a category whose name is not a tier only its
+# own name as a label. Thus python-standard lists the standard, comprehensive
+# and full labels itself. The pytest-scaling runner and counted-sync entries
+# start at comprehensive so nightly/full runs own them without adding work to
+# quick/standard pre-merge and post-merge runs.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers

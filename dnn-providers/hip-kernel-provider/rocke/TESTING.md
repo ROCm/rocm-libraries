@@ -774,10 +774,10 @@ PYTHONPATH=python ROCKE_TEST_SHARD=1/4 \
 ```
 
 Run each shard index of the same total, and compare the split lines.
-An installed tree and a source checkout collect slightly different tests
-(installed-only hipDNN golden-bundle cases, and source-only tests that do not
-install), so the split total of an entry can differ between them, but a test in
-both has the same id and lands on the same shard.
+An installed tree and a source checkout collect slightly different tests. Only
+the installed tree has the hipDNN golden-bundle cases, and some source tests do
+not install. Thus the split total of an entry can differ between the two trees.
+A test in both trees has the same id and lands on the same shard.
 The tests of the plugin, `platform/tests/test_ctest_shard.py`, run in their own
 installed entry, `rocke_ctest_shard_pytest`, in the standard tier.
 
