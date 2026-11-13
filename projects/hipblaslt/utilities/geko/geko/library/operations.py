@@ -58,6 +58,7 @@ from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
 from geko.constants import GEMM_LOG_FIELDS, INDEX_TYPE_MAP
 from geko.library import _bank
+from geko.library.uid_uniqueness import assign_fresh_solution_uids
 
 logger = logging.getLogger("GEKO")
 
@@ -138,6 +139,8 @@ def merge_solutions(
 
     Processes all 3_LibraryLogic/*.yaml files in build_* subdirectories,
     merging solutions by library type and deduplicating based on performance.
+    Input files are not edited. A caller that merges logic its own Tensile
+    jobs just wrote runs ``uniquify_generated_logic`` on those files first.
 
     Args:
         input_dir (str | Path): Directory containing build_* subdirectories with optimized solutions.
@@ -523,6 +526,8 @@ def from_dataframe(
 ) -> LibraryCollection:
     """Create filtered libraries from a DataFrame of selected solutions.
 
+    Fresh SolutionUIDs come from the installed ``tensilelite`` package.
+
     Args:
         df (pd.DataFrame): DataFrame with solution selection results, must include 'lib' column.
         lib_dir (str | Path): Directory containing source library files.
@@ -532,6 +537,7 @@ def from_dataframe(
 
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
+        ImportError: If ``tensilelite`` is not installed.
 
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
@@ -539,6 +545,8 @@ def from_dataframe(
     Note:
         Groups solutions by GEMM type and creates separate library files
         with only the selected solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``. ``TensileMergeLibrary``
+        keeps the base UID when ``SolutionNameMin`` already exists.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -594,6 +602,7 @@ def from_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
 
 
@@ -604,19 +613,27 @@ def from_full_dataframe(
     type_override: str = None,
 ) -> LibraryCollection:
     """Create full libraries from a DataFrame of solutions.
+
+    Fresh SolutionUIDs come from the installed ``tensilelite`` package.
+
     Args:
         df (pd.DataFrame): DataFrame with solution selection results, must include 'lib' column.
         lib_dir (str | Path): Directory containing source library files.
         match_table_path (str | Path): Path to the MatchTable.yaml file.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
+
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
+        ImportError: If ``tensilelite`` is not installed.
+
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
     Note:
         Groups solutions by GEMM type and creates separate library files
         with the best of tuned, reference solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``, including a solution
+        copied from another library such as Origami.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -705,6 +722,7 @@ def from_full_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
     
 

@@ -13,6 +13,23 @@ import yaml
 
 from geko.library import Library
 from geko.library import operations
+from tests.uid_codec import install_codec
+
+
+@pytest.fixture(autouse=True)
+def _solution_id_gen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide the SolutionUID codec without installing tensilelite.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    install_codec(monkeypatch)
 
 
 def _make_min_library() -> Library:
@@ -84,6 +101,28 @@ def test_load_collection_missing_dir_raises(tmp_path: Path) -> None:
         operations.load_collection(tmp_path / "missing")
 
 
+def test_merge_solutions_rejects_hipblaslt_path(tmp_path: Path) -> None:
+    """Library merge and dataframe helpers do not take a hipBLASLt path.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a hipBLASLt path argument is accepted.
+    """
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.merge_solutions(tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_dataframe(pd.DataFrame(), tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_full_dataframe(
+            pd.DataFrame(), tmp_path, tmp_path, hipblaslt_path=tmp_path
+        )
+
+
 def test_merge_solutions_no_files_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="No valid YAML libraries"):
         operations.merge_solutions(tmp_path)
@@ -97,6 +136,54 @@ def test_merge_solutions_happy_path(tmp_path: Path) -> None:
     merged = operations.merge_solutions(tmp_path, epilogues=False)
     assert len(merged) == 1
     assert merged[0].name == "x.yaml"
+
+
+def test_merge_solutions_leaves_shared_uids_on_disk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Merging does not rewrite SolutionUID lines in its input files.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the rewriter runs or an input file changes.
+    """
+
+    def _rewrite(_paths: list[Path]) -> int:
+        """Fail if the merge asks for a UID rewrite.
+
+        Args:
+            _paths: Logic files that would be rewritten.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AssertionError: Always.
+        """
+        raise AssertionError("merge_solutions must not rewrite UIDs")
+
+    install_codec(monkeypatch, rewrite=_rewrite)
+    paths = []
+    for build in ("b1", "b2"):
+        ldir = tmp_path / build / "lib"
+        ldir.mkdir(parents=True)
+        path = _write_library_yaml(ldir, "x.yaml")
+        data = yaml.safe_load(path.read_text())
+        data[5][0]["SolutionUID"] = "0u5"
+        yaml.safe_dump(data, path.open("w"), sort_keys=False)
+        paths.append(path)
+    before = [path.read_text() for path in paths]
+
+    merged = operations.merge_solutions(tmp_path, epilogues=False, pattern="*/lib/*.yaml")
+
+    assert len(merged) == 1
+    assert [path.read_text() for path in paths] == before
 
 
 def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
@@ -208,6 +295,90 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
     assert libs[0].name == "a.yaml"
     assert len(libs[0].solutions) == 1
     assert len(libs[0].sizes) == 1
+
+
+def test_from_full_dataframe_replaces_a_copied_reference_uid(tmp_path: Path) -> None:
+    """A reference solution copied into full_libs must not keep its source UID.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the copied Origami UID is still stored.
+    """
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    tuned = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+    ]
+    yaml.safe_dump(tuned, (lib_dir / "a.yaml").open("w"), sort_keys=False)
+
+    origami = tmp_path / "origami.yaml"
+    origami_data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {"TransposeA": 0, "TransposeB": 0, "DataType": 0, "DestDataType": 0, "ComputeDataType": 0},
+        [{"SolutionIndex": 0, "SolutionUID": "0u5", "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Origami",
+    ]
+    yaml.safe_dump(origami_data, origami.open("w"), sort_keys=False)
+    match_table = _write_match_table(tmp_path, {0: [str(origami), 0]})
+
+    df = pd.DataFrame(
+        [
+            {
+                "lib": "a.yaml",
+                "M": 16,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
+                "winner": "reference",
+                "solutionIdx_reference": 0,
+            }
+        ]
+    )
+
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
+
+    uid = libs[0].solutions[0]["SolutionUID"]
+    assert uid != "0u5"
+    assert uid.startswith("0u")
 
 
 def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> None:
