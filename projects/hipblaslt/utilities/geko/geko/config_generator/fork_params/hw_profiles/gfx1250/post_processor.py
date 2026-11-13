@@ -261,7 +261,7 @@ def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
     """True when an MI group entry's MatrixInstruction has M == N.
 
     Entries whose MatrixInstruction cannot be read count as square, so the
-    SourceSwap coupling never narrows something it cannot parse.
+    SourceSwap split never acts on something it cannot parse.
     """
     mi = getattr(entry.get("MatrixInstruction"), "values", None)
     if not isinstance(mi, list) or len(mi) < 2:
@@ -269,24 +269,33 @@ def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
     return mi[0] == mi[1]
 
 
-class _GFX1250SourceSwapCoupling:
-    """Pin SourceSwap to False on non-square MI groups (32x16 on gfx1250).
+def _cluster_dim_is_coupled(fork_params: Dict[str, ForkParameter]) -> bool:
+    """True when _GFX1250ClusterDimCoupling will move ClusterDim into the MI groups."""
+    fp = fork_params.get("ClusterDim")
+    return fp is not None and fp.active and len(fp.values) >= 2
+
+
+class _GFX1250SourceSwapSplit:
+    """Split SourceSwap into the MI groups so ClusterDim is ranked per tile.
 
     SourceSwap=True on a non-square MI swaps the effective M and N, so the
     kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2] is
-    512x128 with SourceSwap=False but 256x256 with SourceSwap=True.
-    _GFX1250ClusterDimCoupling ranks ClusterDim shapes on the tile of the
-    MatrixInstruction as written, so SourceSwap=True kernels on these MIs would
-    get shapes ranked for the wrong tile (on 4096x3072 the [4, 4] that 256x256
-    needs is dropped for [2, 8]). Until that coupling ranks each SourceSwap
-    tile, SourceSwap moves into the MI groups: non-square groups keep only
-    False, square groups keep every profile value, one entry per value so each
-    group entry stays single-valued. A profile without SourceSwap=True, or MI
-    groups that are all square, leaves the flat parameter untouched.
+    512x128 with SourceSwap=False but 256x256 with SourceSwap=True, and the
+    best ClusterDim shape differs (on 4096x3072, [2, 8] versus [4, 4]).
+    _GFX1250ClusterDimCoupling ranks an entry on the tile of the entry's own
+    SourceSwap, so every MI group entry is repeated once per SourceSwap value,
+    each copy single-valued, and the flat parameter is dropped. Each
+    (MI, SourceSwap) entry then gets only the shapes of the tile it builds, and
+    the GA draws SourceSwap together with a shape chosen for it.
+
+    The split runs only where it changes the shapes: the profile offers
+    SourceSwap=True, some MI is non-square, and ClusterDim is coupled. With
+    all-square MIs both values build the same tile, and without a ClusterDim
+    axis nothing is ranked, so the flat parameter stays.
     """
 
     @mark_post_process
-    def pin_non_square_source_swap(
+    def split_source_swap(
         self,
         fork_params: Dict[str, ForkParameter],
         mi_groups: GroupDimension,
@@ -295,13 +304,11 @@ class _GFX1250SourceSwapCoupling:
         fp = fork_params.get("SourceSwap")
         if fp is None or not fp.active or not isinstance(fp.values, list) or True not in fp.values:
             return fork_params, mi_groups
-        if all(_mi_is_square(e) for e in mi_groups):
+        if all(_mi_is_square(e) for e in mi_groups) or not _cluster_dim_is_coupled(fork_params):
             return fork_params, mi_groups
-        non_square = [v for v in fp.values if v is False] or [False]
         coupled = []
         for entry in mi_groups:
-            values = list(fp.values) if _mi_is_square(entry) else non_square
-            for v in values:
+            for v in fp.values:
                 coupled.append({**entry, "SourceSwap": self._make_param("SourceSwap", [v])})
         del fork_params["SourceSwap"]
         return fork_params, coupled
@@ -371,7 +378,7 @@ class _GFX1250ClusterDimCoupling:
     and the best shape of a size differs with it: at 4096x3072,
     ``[32,16,128,1,1,8,4,2,2]`` prefers ``[2, 8]`` as 512x128 but
     ``[4, 4]`` as 256x256. An entry that carries its own single SourceSwap
-    (as _GFX1250SourceSwapCoupling leaves them) is ranked on its own tile.
+    (as _GFX1250SourceSwapSplit leaves them) is ranked on its own tile.
     When SourceSwap is still a flat parameter that can be True, the shapes
     selected for each buildable tile are merged, so the swapped kernel can
     still draw its own best shape.
@@ -389,9 +396,9 @@ class _GFX1250ClusterDimCoupling:
         mi_groups,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], list]:
-        fp = fork_params.get("ClusterDim")
-        if fp is None or not fp.active or len(fp.values) < 2:
+        if not _cluster_dim_is_coupled(fork_params):
             return fork_params, mi_groups
+        fp = fork_params["ClusterDim"]
         coupled = []
         for entry in mi_groups:
             shapes = set()
@@ -412,13 +419,14 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapCoupling
-# runs just before it and _GFX1250TDMFuseOneWave before that, so each per-shape
+# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapSplit
+# runs just before it, so the coupling ranks every (MI, SourceSwap) entry on
+# the tile it builds, and _GFX1250TDMFuseOneWave before that; each per-shape
 # copy inherits its group's SourceSwap and TDMFuse.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
-    _GFX1250SourceSwapCoupling,
+    _GFX1250SourceSwapSplit,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
