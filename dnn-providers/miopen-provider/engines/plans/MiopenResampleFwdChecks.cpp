@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "Workarounds.hpp"
 #include "engines/plans/MiopenResampleFwdChecks.hpp"
 
 namespace miopen_plugin::resample_fwd_applicability
@@ -412,6 +413,15 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
         {
             decline("max pooling with generate_index requires channels-first (NCHW/NCDHW) X and "
                     "Y");
+        }
+
+        // Workaround for ALMIOPEN-3295 (see Workarounds.hpp): MIOpen's BFLOAT16 max pooling
+        // can select a padded position and write an index outside the window.
+        if(WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding))
+        {
+            decline("max pooling with generate_index on BFLOAT16 tensors requires zero padding "
+                    "until MIOpen issue ALMIOPEN-3295 is fixed; MIOpen can select a padded "
+                    "position and write an index outside the window");
         }
 
         if(*indexUid == x.uid || *indexUid == y.uid)

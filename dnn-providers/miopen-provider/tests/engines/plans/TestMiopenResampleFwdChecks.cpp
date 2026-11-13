@@ -450,6 +450,38 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForIndexWithChannelsLastTensor
     expectDeclined(spec, "requires channels-first");
 }
 
+// Workaround for ALMIOPEN-3295 (see Workarounds.hpp): MIOpen's BFLOAT16 max pooling can write an
+// index into the padding, so an index with padding is declined. Remove this test with the
+// workaround; the two accept tests below stay.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForBfloat16IndexWithPadding)
+{
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {2, 3, 6, 6},
+                                                {3, 3},
+                                                {2, 2},
+                                                {1, 1},
+                                                DataType::BFLOAT16,
+                                                DataType::INT32),
+                   "on BFLOAT16 tensors requires zero padding");
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForBfloat16IndexWithoutPadding)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {2, 3, 6, 6},
+                                                {3, 3},
+                                                {2, 2},
+                                                {0, 0},
+                                                DataType::BFLOAT16,
+                                                DataType::INT32));
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForBfloat16PaddingWithoutIndex)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(
+        ResampleMode::MAXPOOL, {2, 3, 6, 6}, {3, 3}, {2, 2}, {1, 1}, DataType::BFLOAT16));
+}
+
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForIndexAliasingX)
 {
     auto spec = defaultSpec(ResampleMode::MAXPOOL, DataType::INT32);
@@ -531,7 +563,7 @@ TEST(TestMiopenResampleFwdChecks, ResolveReportsDataTypeUidsAndDims)
                                              {2, 3, 6, 6},
                                              {3, 3},
                                              {2, 2},
-                                             {1, 1},
+                                             {0, 0},
                                              DataType::BFLOAT16,
                                              DataType::INT32);
     spec.x.uid = 10;
@@ -544,7 +576,7 @@ TEST(TestMiopenResampleFwdChecks, ResolveReportsDataTypeUidsAndDims)
     EXPECT_EQ(config.yUid, 20);
     EXPECT_EQ(config.indexUid, std::optional<int64_t>(30));
     EXPECT_EQ(config.xDims, (std::vector<int64_t>{2, 3, 6, 6}));
-    EXPECT_EQ(config.yDims, (std::vector<int64_t>{2, 3, 3, 3}));
+    EXPECT_EQ(config.yDims, (std::vector<int64_t>{2, 3, 2, 2}));
 }
 
 TEST(TestMiopenResampleFwdChecks, ResolveReportsIndexTypes)

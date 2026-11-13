@@ -34,8 +34,8 @@
 // Do NOT use in non-CBA tests — `GRAPH_NOT_SUPPORTED` outside the CBA path
 // would indicate a real regression, not a known capability gap.
 //
-// To remove after the fix: delete this header alongside the production-side
-// `Workarounds.hpp`, drop includes, and remove all macro call sites.
+// To remove after the fix: delete this header, drop includes, and remove all
+// macro call sites.
 // `git grep WORKAROUND_ISSUE_6979` finds them all.
 //
 // `<hipdnn_frontend.hpp>` is header-only, so this header has no linkage
