@@ -1891,6 +1891,67 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # fp32 sinks (sink_dtype="f32"): both bodies, both dtypes, D64 and D128,
+        # wide DMA, and the keyless-row LSE load on each body.
+        ("sinks_f32_d128_sq512", {"use_sinks": True, "sink_dtype": "f32"}),
+        (
+            "persist_sinks_f32_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "head_size": 64,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
+        (
+            "swa_sinks_f32_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "sliding_window": 128,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
+        (
+            "persist_wdma_gqapair_sinks_f32_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "num_query_heads": 32,
+                "num_kv_heads": 8,
+                "persistent": True,
+                "num_persistent": 16,
+                "persist_decode": "gqa_pair",
+                "wide_lds_dma": True,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
+        (
+            "lse_empty_window_sinks_f32_sq256",
+            {
+                "emit_lse": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
+        (
+            "lse_persist_empty_window_sinks_f32_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
     ):
         add(
             "attention_dense",

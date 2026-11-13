@@ -197,6 +197,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
     wide_lds_dma: bool = False
     emit_lse: bool = field(default=False, kw_only=True)
+    # Element type of the per-head sink logits: "q" (the query dtype) or "f32".
+    # Requires use_sinks; "f32" names its kernel with a "sinkf32" token.
+    sink_dtype: str = field(default="q", kw_only=True)
     # Keys the query may see AHEAD of its diagonal: key ``k`` is visible to the query
     # at diagonal position ``d`` iff ``k <= d + right_bound``. Only meaningful with
     # ``causal=True`` (0 = plain causal, the default; R > 0 = lookahead). ``causal=False``
@@ -313,6 +316,12 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        if self.sink_dtype not in ("q", "f32"):
+            raise ValueError(
+                f"sink_dtype must be 'q' or 'f32', got {self.sink_dtype!r}"
+            )
+        if self.sink_dtype == "f32" and not self.use_sinks:
+            raise ValueError("sink_dtype='f32' requires use_sinks=True")
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -527,6 +536,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append("lse")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
+        if self.sink_dtype == "f32":
+            parts.append("sinkf32")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -741,8 +752,26 @@ def _pv_steps(order: str, d_tiles: int, kk_steps: int) -> Tuple[Tuple[int, int],
     return tuple((dt, kk) for dt in range(d_tiles) for kk in range(kk_steps))
 
 
+def _sink_dtype_name(spec):
+    """Storage dtype name of ``sink_ptr``: ``"f32"`` for ``sink_dtype='f32'``, else
+    the input dtype. The one place this choice is made."""
+    return "f32" if spec.sink_dtype == "f32" else spec.dtype
+
+
+def _sink_ir_type(spec):
+    """IR element type of ``sink_ptr`` (see :func:`_sink_dtype_name`)."""
+    return F32 if _sink_dtype_name(spec) == "f32" else spec.dtype_ir
+
+
+def _load_sink_f32(b, sinks, head, sink_ty):
+    """Query head ``head``'s sink logit as f32: one 4-byte load for f32 sinks,
+    else a 2-byte load widened to f32 (cast_to_f32 emits nothing for f32)."""
+    align = 4 if sink_ty.name == "f32" else 2
+    return b.cast_to_f32(b.global_load(sinks, head, sink_ty, align=align))
+
+
 def _dense_lse_output(
-    b, dst, index, m, l, row_exists, row_has_key, lane_half, *, sinks, head, dtype
+    b, dst, index, m, l, row_exists, row_has_key, lane_half, *, sinks, head, sink_ty
 ):
     """Emit stats from one half-wave while both halves retain their O stores."""
     owner = b.land(row_exists, b.cmp_eq(lane_half, b.const_i32(0)))
@@ -751,7 +780,7 @@ def _dense_lse_output(
             lse_store(b, dst, index, m, l, row_has_mass=row_has_key)
         with b.scf_if(b.lnot(row_has_key)):
             if sinks is not None:
-                sink = b.cast_to_f32(b.global_load(sinks, head, dtype, align=2))
+                sink = _load_sink_f32(b, sinks, head, sink_ty)
                 sink_m = b.fmul(sink, b.const_f32(LOG2E))
                 mass = b.cmp_eq(b.const_i32(1), b.const_i32(1))
                 lse_store(b, dst, index, sink_m, b.const_f32(1.0), row_has_mass=mass)
@@ -814,6 +843,7 @@ def build_attention_dense(
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
+    sink_ty = _sink_ir_type(spec)
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -897,7 +927,11 @@ def build_attention_dense(
 
     if use_sinks:
         sinks = b.param(
-            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+            "sink_ptr",
+            PtrType(sink_ty, "global"),
+            noalias=True,
+            readonly=True,
+            align=16,
         )
     if varlen:
         cu_q = b.param(
@@ -1532,8 +1566,7 @@ def build_attention_dense(
 
     if use_sinks:
         # Load sink value for this query head and convert to log2 domain
-        sink_h = b.global_load(sinks, hq, dtype, align=2)
-        sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+        sink_f = b.fmul(_load_sink_f32(b, sinks, hq, sink_ty), rcp_ln2)
         m_init = sink_f
         l_init = one_f
     else:
@@ -1828,7 +1861,7 @@ def build_attention_dense(
             lane_h,
             sinks=sinks if use_sinks else None,
             head=hq,
-            dtype=dtype,
+            sink_ty=sink_ty,
         )
     # ragged: drop padded query rows (qtok >= seqlen_q) via a per-lane guard so
     # they never write (and never clobber a neighbouring batch's real rows). A
@@ -1950,6 +1983,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     EMPTY_ROWS = WINDOW_EMPTY and Sq > Skv + SW - 1
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
+    sink_ty = _sink_ir_type(spec)
     WIDE_DMA = spec.wide_lds_dma
     # Without a sliding window the softmax scale is folded into the exp2
     # argument, as on the grid body: the row max is taken on unscaled scores
@@ -2019,7 +2053,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
     if use_sinks:
         sinks = b.param(
-            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+            "sink_ptr",
+            PtrType(sink_ty, "global"),
+            noalias=True,
+            readonly=True,
+            align=16,
         )
     if spec.emit_lse:
         lse = b.param(
@@ -2790,8 +2828,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         if use_sinks:
             # Load sink value for this query head and convert to log2 domain
-            sink_h = b.global_load(sinks, hq, dtype, align=2)
-            sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+            sink_f = b.fmul(_load_sink_f32(b, sinks, hq, sink_ty), rcp_ln2)
             m_init = sink_f
             l_init = one_f
             m0, _alpha0, p0, l0 = softmax_stats(s0, m_init, l_init)
@@ -2968,7 +3005,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 lane_h,
                 sinks=sinks if use_sinks else None,
                 head=hq_e,
-                dtype=dtype,
+                sink_ty=sink_ty,
             )
         # ragged: guard padded query rows (qtok >= seqlen_q) so they never write.
         o_store_ctx = (
@@ -3079,7 +3116,7 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     for field in _shape_kernarg_fields(spec):
         sig = sig.scalar(field, "i32")
     if spec.use_sinks:
-        sig = sig.ptr("sink_ptr", spec.dtype)
+        sig = sig.ptr("sink_ptr", _sink_dtype_name(spec))
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     if spec.paged:
@@ -3211,7 +3248,8 @@ def run_attention_dense_torch(
 
     Sinks (``spec.use_sinks``): Attention sinks -- learned scalar
     logits that participate in the softmax denominator but have no value vector.
-    Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
+    Pass ``sinks`` ``[num_query_heads]`` in ``spec.dtype``, or as ``torch.float32``
+    when ``spec.sink_dtype == "f32"`` (loaded as is, never rounded); a ``ValueError`` is
     raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
     ``sinks`` is provided when ``spec.use_sinks`` is False."""
     ok, why = supports_attention_dense(spec, arch=arch)
@@ -3299,7 +3337,13 @@ def run_attention_dense_torch(
             raise ValueError(
                 f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
             )
-        if sinks.dtype != q.dtype:
+        if spec.sink_dtype == "f32":
+            if str(sinks.dtype) != "torch.float32":
+                raise ValueError(
+                    f"sinks dtype {sinks.dtype} must be torch.float32 for "
+                    "sink_dtype='f32'"
+                )
+        elif sinks.dtype != q.dtype:
             raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
         if not sinks.is_contiguous():
             raise ValueError("sinks must be contiguous")

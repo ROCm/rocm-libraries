@@ -472,6 +472,7 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         ),
         dict(persistent=True, num_persistent=256, wide_lds_dma=True, waves_per_eu=1),
         dict(emit_lse=True, pv_loop_order="k_major", lazy_rescale_threshold=4.0),
+        dict(use_sinks=True, sink_dtype="f32", emit_lse=True),  # "sinkf32" name part
         dict(batch=0),  # preflight reason carries the gfx950 type name
         # Auto-decode boundaries (review, 10-29).
         dict(seqlen_q=512, seqlen_kv=512, sliding_window=512, persistent=True),

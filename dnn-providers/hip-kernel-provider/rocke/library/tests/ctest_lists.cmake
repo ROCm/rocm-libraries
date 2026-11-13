@@ -213,6 +213,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
+    "tests/library/tests/test_attention_dense_sink_dtype.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_varlen_keys.py"
     "tests/library/tests/test_attention_dense_varlen_keys.py"

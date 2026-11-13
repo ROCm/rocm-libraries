@@ -465,7 +465,10 @@ bound. `use_attn_bias=True` adds the `attn_bias` feature and requires an
 `attn_bias` tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
 `attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
 expanded, permuted, and row-padded views are accepted without copies; invalid
-dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
+dtype, rank, extent, or key stride raises `ValueError`. `sink_dtype` is `"q"`
+(default: `tensors["sinks"]` in the Q dtype) or `"f32"` (a `float32` `[Hq]`
+sink, loaded unrounded); `"f32"` is the `sinks_f32` feature, which only the
+gfx950 dense candidates declare. `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
 contract uses rank-4 stats. Fully masked rows store `-inf` (the sink with

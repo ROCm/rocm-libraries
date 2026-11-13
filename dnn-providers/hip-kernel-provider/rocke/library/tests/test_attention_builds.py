@@ -1642,6 +1642,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 block_size=16,
                 num_kv_blocks=128,
             ),
+            "sinks": AttentionDenseSpec(**base, use_sinks=True),
+            "sinks-f32": AttentionDenseSpec(**base, use_sinks=True, sink_dtype="f32"),
+            "persistent-sinks-f32": AttentionDenseSpec(
+                **base,
+                persistent=True,
+                num_persistent=256,
+                use_sinks=True,
+                sink_dtype="f32",
+            ),
+            "lse-sinks-f32": AttentionDenseSpec(
+                **base, emit_lse=True, use_sinks=True, sink_dtype="f32"
+            ),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
@@ -1674,6 +1686,18 @@ class TestAttentionHelpers(unittest.TestCase):
                     "num_query_heads" in attention_dense_runtime_args(spec),
                     spec.runtime_shape,
                 )
+        sink_type = {
+            arm: next(
+                a["type"]
+                for a in attention_dense_signature(s)
+                if a["name"] == "sink_ptr"
+            )
+            for arm, s in arms.items()
+            if s.use_sinks
+        }
+        self.assertEqual(sink_type["sinks"], ptr_type_str("f16", "global"))
+        for arm in ("sinks-f32", "persistent-sinks-f32", "lse-sinks-f32"):
+            self.assertEqual(sink_type[arm], ptr_type_str("f32", "global"), arm)
         # The predicates really diverge on the bottom-right arm (shape is a param
         # AND baked). A sliding window is runtime-shape, so that arm checks the
         # runtime-shape ABI (shape and head kernargs) under a window.

@@ -29,6 +29,16 @@ from kernels.gfx950.attention_dense import (
     supports_attention_dense,
 )
 
+from ._dense_sink_cases import (
+    EXACT_LSE_ATOL,
+    EXACT_SINKS,
+    EXACT_SKV,
+    EXACT_SQ,
+    EXACT_WINDOW,
+    exact_lse,
+    exact_out,
+)
+
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
@@ -955,6 +965,390 @@ class TestDenseSinksNumeric:
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'} {mask_str} sink_{sink_magnitude}: "
             f"max_abs={max_abs:.3e} >= {tol}"
+        )
+
+
+_FP32_SINK_LSE_TOL = 1e-4  # random-data LSE bound; calibrated on silicon
+
+
+def _fp64_sink_oracle(q, k, v, scale, sinks, *, causal, window=0, right=0, diagonal=0):
+    """Float64 O and natural-log LSE on the host, sink in the denominator only.
+    ``diagonal`` shifts the query position (bottom-right), ``right`` admits keys
+    past the diagonal (causal only), ``window`` keeps keys k > d - window."""
+    batch, sq, hq, _ = q.shape
+    skv, hkv = k.shape[1:3]
+    qh = q.transpose(1, 2).double()
+    kh = k.transpose(1, 2).double().repeat_interleave(hq // hkv, dim=1)
+    vh = v.transpose(1, 2).double().repeat_interleave(hq // hkv, dim=1)
+    scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
+    d = torch.arange(sq).view(-1, 1) + diagonal
+    key = torch.arange(skv).view(1, -1)
+    allowed = torch.ones(sq, skv, dtype=torch.bool)
+    if causal:
+        allowed &= key <= d + right
+    if window:
+        allowed &= key > d - window
+    scores = scores.masked_fill(~allowed, float("-inf"))
+    sink_col = sinks.double().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+    scores = torch.cat((scores, sink_col), dim=-1)
+    lse = torch.logsumexp(scores, dim=-1)
+    probabilities = torch.exp(scores - lse.unsqueeze(-1))[..., :skv]
+    return torch.matmul(probabilities, vh).transpose(1, 2), lse.unsqueeze(-1)
+
+
+def _off_grid(x, dtype):
+    """``x`` moved 0.4 input-dtype ulp away from zero off the grid: rounding it to
+    the input dtype returns the grid point and loses 0.4 ulp."""
+    grid = x.to(getattr(torch, _TORCH_DT[dtype])).float()
+    mantissa = 7 if dtype == "bf16" else 10
+    ulp = torch.exp2(torch.floor(torch.log2(grid.abs())) - mantissa)
+    return grid + 0.4 * ulp * torch.sign(grid)
+
+
+def _fp32_sinks(q, k, scale, dtype):
+    """Per-head fp32 sinks off the input-dtype grid. Even heads sit one above the
+    head's largest first-tile score, so they mix with the keys; odd heads sit at
+    20 + 0.37 h, so they dominate every row."""
+    hq, hkv = q.shape[2], k.shape[2]
+    qf = q[0, :256].double().transpose(0, 1)
+    kf = k[0, :64].double().transpose(0, 1).repeat_interleave(hq // hkv, 0)
+    first = (qf @ kf.transpose(-1, -2) * scale).amax(dim=(-1, -2))
+    heads = torch.arange(hq, dtype=torch.float64)
+    base = torch.where(heads % 2 == 0, first + 1.0, 20.0 + 0.37 * heads)
+    return _off_grid(base.float(), dtype)
+
+
+# (id, dtype, head_size, spec overrides). Batch 1, Sq = Skv = 512, GQA 8/2,
+# causal, unless the row says otherwise.
+_FP32_SINK_MODES = [
+    (
+        "grid-d64-bn128-window",
+        "bf16",
+        64,
+        dict(
+            block_m=128,
+            block_n=128,
+            nonpersist_decode="qb_minor",
+            exp_per_pv_step=1,
+            sliding_window=128,
+        ),
+    ),
+    (
+        "persist-d64-bn128-np512",
+        "bf16",
+        64,
+        dict(block_m=256, block_n=128, persistent=True, num_persistent=512),
+    ),
+    ("grid-causal", "bf16", 128, {}),
+    ("persist-causal-fp16", "fp16", 128, dict(persistent=True, num_persistent=256)),
+    ("grid-window", "bf16", 128, dict(sliding_window=128)),
+    (
+        "persist-window-fp16-d64",
+        "fp16",
+        64,
+        dict(persistent=True, num_persistent=256, sliding_window=128),
+    ),
+    ("grid-full", "bf16", 128, dict(causal=False)),
+    (
+        "persist-left-window",
+        "bf16",
+        128,
+        dict(causal=False, sliding_window=128, persistent=True, num_persistent=256),
+    ),
+    ("grid-two-sided", "bf16", 128, dict(sliding_window=128, right_bound=64)),
+    (
+        "persist-lookahead",
+        "bf16",
+        128,
+        dict(right_bound=64, persistent=True, num_persistent=256),
+    ),
+    (
+        "grid-bottom-right",
+        "bf16",
+        128,
+        dict(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True),
+    ),
+    ("grid-ragged", "bf16", 128, dict(seqlen_q=273, seqlen_kv=273, ragged=True)),
+    (
+        "persist-ragged-fp16",
+        "fp16",
+        128,
+        dict(
+            seqlen_q=273,
+            seqlen_kv=273,
+            ragged=True,
+            persistent=True,
+            num_persistent=256,
+        ),
+    ),
+    (
+        "persist-wide-dma-fp16",
+        "fp16",
+        128,
+        dict(
+            num_query_heads=32,
+            num_kv_heads=8,
+            block_n=64,
+            persistent=True,
+            num_persistent=16,
+            persist_decode="gqa_pair",
+            wide_lds_dma=True,
+        ),
+    ),
+    (
+        "grid-bm128-batch2",
+        "bf16",
+        128,
+        dict(block_m=int(DENSE_TILE_GEOMETRIES["bm128"]["block_m"]), batch=2),
+    ),
+]
+
+
+def _mask_args(spec):
+    return dict(
+        causal=spec.causal,
+        window=spec.sliding_window,
+        right=spec.right_bound,
+        diagonal=(spec.seqlen_kv - spec.seqlen_q) if spec.causal_bottom_right else 0,
+    )
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+class TestDenseFp32SinkNumeric:
+    """fp32 sinks (``sink_dtype='f32'``): the kernel must use every bit of the sink.
+
+    LSE is the observable: perturbing the sink by ds moves a row's LSE by
+    p_sink * ds, but its output by at most a quarter of that. Every test also runs
+    the controls on the input-dtype kernel -- the sink rounded to the input dtype,
+    and the 16-bit halves a 2-byte load of the fp32 buffer reads -- and requires
+    them to break the same bound, so each run shows the bound can fail."""
+
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    @pytest.mark.parametrize("head_size", [64, 128])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persistent"])
+    def test_exact_rows(self, dtype, head_size, persistent):
+        hq = EXACT_SINKS.size
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=EXACT_SQ,
+            seqlen_kv=EXACT_SKV,
+            num_query_heads=hq,
+            num_kv_heads=1,
+            head_size=head_size,
+            dtype=dtype,
+            persistent=persistent,
+            sliding_window=EXACT_WINDOW,
+            use_sinks=True,
+            sink_dtype="f32",
+            emit_lse=True,
+        )
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.zeros(1, EXACT_SQ, hq, head_size, device="cuda", dtype=tdt)
+        k = torch.zeros(1, EXACT_SKV, 1, head_size, device="cuda", dtype=tdt)
+        v = torch.ones_like(k)
+        sinks = torch.from_numpy(EXACT_SINKS).cuda()
+        want_lse = torch.from_numpy(exact_lse(EXACT_SINKS)).view(1, hq, EXACT_SQ, 1)
+        want_out = torch.from_numpy(exact_out(EXACT_SINKS))  # [hq, sq]
+
+        def run(run_spec, run_sinks):
+            out = torch.full_like(q, float("nan"))
+            lse = torch.full(
+                (1, hq, EXACT_SQ, 1), float("nan"), device="cuda", dtype=torch.float32
+            )
+            run_attention_dense_torch(
+                spec=run_spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                lse=lse,
+                scale=0.5,
+                sinks=run_sinks,
+            )
+            torch.cuda.synchronize()
+            return out, lse
+
+        def lse_err(lse):
+            err = (lse.double().cpu() - want_lse).abs()
+            return (
+                torch.where(
+                    torch.isfinite(err), err, torch.full_like(err, float("inf"))
+                )
+                .max()
+                .item()
+            )
+
+        out, lse = run(spec, sinks)
+        err = lse_err(lse)
+        print(
+            f"exact {dtype} d{head_size} persistent={persistent}: "
+            f"fp32-sink LSE err {err:.3e}"
+        )
+        assert err < EXACT_LSE_ATOL
+        got = out.float().cpu()[0].transpose(0, 1).double()  # [hq, sq, d]
+        assert (got - want_out.unsqueeze(-1)).abs().max().item() < _tolerance(dtype)
+        q_spec = replace(spec, sink_dtype="q")
+        _, lse_rounded = run(q_spec, sinks.to(tdt))
+        assert lse_err(lse_rounded) >= EXACT_LSE_ATOL, "rounded-sink control passed"
+        _, lse_halves = run(q_spec, sinks.view(tdt)[:hq])
+        assert lse_err(lse_halves) >= EXACT_LSE_ATOL, "2-byte-load control passed"
+
+    @pytest.mark.parametrize(
+        "_id,dtype,head_size,over",
+        _FP32_SINK_MODES,
+        ids=[m[0] for m in _FP32_SINK_MODES],
+    )
+    def test_modes_vs_fp64_oracle(self, _id, dtype, head_size, over):
+        spec = Gfx950AttentionDenseSpec(
+            **{
+                **dict(
+                    batch=1,
+                    seqlen_q=512,
+                    seqlen_kv=512,
+                    num_query_heads=8,
+                    num_kv_heads=2,
+                    head_size=head_size,
+                    dtype=dtype,
+                    causal=True,
+                    use_sinks=True,
+                    sink_dtype="f32",
+                    emit_lse=True,
+                ),
+                **over,
+            }
+        )
+        b, sq, skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
+        hq, hkv = spec.num_query_heads, spec.num_kv_heads
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(head_size)
+        gen = torch.Generator().manual_seed(29)
+        q = torch.randn(b, sq, hq, head_size, generator=gen).to(tdt)
+        k = torch.randn(b, skv, hkv, head_size, generator=gen).to(tdt)
+        v = torch.randn(b, skv, hkv, head_size, generator=gen).to(tdt)
+        sinks = _fp32_sinks(q, k, scale, dtype)
+        mask = _mask_args(spec)
+        ref_out, ref_lse = _fp64_sink_oracle(q, k, v, scale, sinks, **mask)
+        _, rounded_lse = _fp64_sink_oracle(
+            q, k, v, scale, sinks.to(tdt).float(), **mask
+        )
+        predicted = (rounded_lse - ref_lse).abs().max().item()
+        assert (
+            predicted >= 4 * _FP32_SINK_LSE_TOL
+        ), f"setup: rounding moves LSE {predicted:.2e}"
+        qd, kd, vd = q.cuda(), k.cuda(), v.cuda()
+
+        def run(run_spec, run_sinks):
+            out = torch.empty_like(qd)
+            lse = (
+                torch.full(
+                    (b, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+                )
+                if run_spec.emit_lse
+                else None
+            )
+            run_attention_dense_torch(
+                spec=run_spec,
+                q=qd,
+                k=kd,
+                v=vd,
+                out=out,
+                lse=lse,
+                scale=scale,
+                sinks=run_sinks.contiguous().cuda(),
+            )
+            torch.cuda.synchronize()
+            return out, lse
+
+        def lse_err(lse):
+            err = (lse.double().cpu() - ref_lse).abs()
+            return (
+                torch.where(
+                    torch.isfinite(err), err, torch.full_like(err, float("inf"))
+                )
+                .max()
+                .item()
+            )
+
+        out, lse = run(spec, sinks)
+        err = lse_err(lse)
+        print(
+            f"[{_id}] fp32-sink LSE err {err:.3e} (rounding predicted {predicted:.2e})"
+        )
+        assert err < _FP32_SINK_LSE_TOL
+        assert (out.float().cpu().double() - ref_out).abs().max().item() < _tolerance(
+            dtype
+        )
+        q_spec = replace(spec, sink_dtype="q")
+        assert lse_err(run(q_spec, sinks.to(tdt))[1]) >= _FP32_SINK_LSE_TOL
+        assert lse_err(run(q_spec, sinks.view(tdt)[:hq])[1]) >= _FP32_SINK_LSE_TOL
+        # An input-dtype value gives the same bits through either kernel.
+        on_grid = sinks.to(tdt)
+        out_q, lse_q = run(q_spec, on_grid)
+        out_f, lse_f = run(spec, on_grid.float())
+        assert torch.equal(out_q, out_f) and torch.equal(lse_q, lse_f)
+        # LSE off writes the same O bits as LSE on.
+        out_off, _ = run(replace(spec, emit_lse=False), sinks)
+        assert torch.equal(out_off, out)
+
+    @pytest.mark.parametrize(
+        "spec_id",
+        ["gfx950_dense_grid", "gfx950_dense_persist", "gfx950_dense_persist_widedma"],
+    )
+    def test_dispatched_fp32_sinks(self, spec_id):
+        """Request -> dispatch -> bind -> launch with a float32 sink tensor."""
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_execution_candidates,
+            dispatch_attention,
+        )
+
+        candidate = next(
+            c for c in attention_execution_candidates() if c.spec_id == spec_id
+        )
+        result = dispatch_attention(
+            AttentionRequest(
+                batch=2,
+                nhead_q=8,
+                nhead_k=2,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
+                arch="gfx950",
+                mask_type=1,
+                dtype="bf16",
+                algorithm=candidate.algorithm,
+                spec_id=spec_id,
+                emit_lse=True,
+                use_sinks=True,
+                sink_dtype="f32",
+            )
+        )
+        assert result.spec.kernel_spec.sink_dtype == "f32"
+        gen = torch.Generator().manual_seed(31)
+        q = torch.randn(2, 512, 8, 128, generator=gen).to(torch.bfloat16)
+        k = torch.randn(2, 512, 2, 128, generator=gen).to(torch.bfloat16)
+        v = torch.randn(2, 512, 2, 128, generator=gen).to(torch.bfloat16)
+        sinks = _fp32_sinks(q, k, 0.5, "bf16")
+        ref_out, ref_lse = _fp64_sink_oracle(q, k, v, 0.5, sinks, causal=True)
+        out = torch.empty(2, 512, 8, 128, device="cuda", dtype=torch.bfloat16)
+        lse = torch.full(
+            (2, 8, 512, 1), float("nan"), device="cuda", dtype=torch.float32
+        )
+        tensors = {
+            "q": q.cuda(),
+            "k": k.cuda(),
+            "v": v.cuda(),
+            "out": out,
+            "lse": lse,
+            "sinks": sinks.cuda(),
+        }
+        result.bind_torch(tensors, scale=0.5).launch()
+        torch.cuda.synchronize()
+        assert (lse.double().cpu() - ref_lse).abs().max().item() < _FP32_SINK_LSE_TOL
+        assert (out.float().cpu().double() - ref_out).abs().max().item() < _tolerance(
+            "bf16"
         )
 
 

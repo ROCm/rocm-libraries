@@ -202,6 +202,10 @@ class AttentionRequest(OperatorRequest):
     # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
+    # Element type of ``tensors["sinks"]``: "q" (the Q dtype) or "f32". "f32" is
+    # reported as the ``sinks_f32`` feature, so only candidates whose kernels load
+    # a 32-bit sink (gfx950 dense) admit it.
+    sink_dtype: str = "q"
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -233,6 +237,10 @@ class AttentionRequest(OperatorRequest):
             if isinstance(self.tensor_layout, str)
             else ""
         )
+        # Left out at its default, so a request that does not set it keeps the
+        # request_hash it had before the field existed.
+        if d["sink_dtype"] == "q":
+            del d["sink_dtype"]
         return d
 
     def dims(self) -> dict[str, int]:
@@ -307,6 +315,8 @@ class AttentionRequest(OperatorRequest):
             active.add("runtime_head_dims")
         if bool(self.use_sinks):
             active.add("sinks")
+            if self.sink_dtype == "f32":
+                active.add("sinks_f32")
         if bool(self.use_fp8):
             active.add("fp8")
         if bool(self.use_softcap):
@@ -411,6 +421,10 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
+    if type(req.sink_dtype) is not str or req.sink_dtype not in ("q", "f32"):
+        errors.append(f"sink_dtype must be 'q' or 'f32', got {req.sink_dtype!r}")
+    elif req.sink_dtype == "f32" and not bool(req.use_sinks):
+        errors.append("sink_dtype='f32' requires use_sinks")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
