@@ -36,8 +36,8 @@
 
 #include <cub/device/device_reduce.cuh> // IWYU pragma: export
 
-#include _HIPCUB_STD_INCLUDE(limits)
-#include _HIPCUB_STD_INCLUDE(execution)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -74,7 +74,7 @@ public:
              typename T,
              typename NumItemsT,
              typename EnvT = _HIPCUB_STD_EXEC::env<>>
-    HIPCUB_RUNTIME_FUNCTION
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
     static hipError_t Reduce(InputIteratorT  d_in,
                              OutputIteratorT d_out,
                              NumItemsT       num_items,
@@ -106,7 +106,7 @@ public:
              typename OutputIteratorT,
              typename NumItemsT,
              typename EnvT = _HIPCUB_STD_EXEC::env<>>
-    HIPCUB_RUNTIME_FUNCTION
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
     static hipError_t
         Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
     {
@@ -127,6 +127,17 @@ public:
                                                                d_out,
                                                                num_items,
                                                                stream));
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t
+        Min(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceReduce::Min(d_in, d_out, num_items, env));
     }
 
     template<typename InputIteratorT,
@@ -180,6 +191,22 @@ public:
                                                                   d_index_out,
                                                                   num_items,
                                                                   stream));
+    }
+
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t ArgMin(InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_min_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             EnvT                 env = {})
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceReduce::ArgMin(d_in, d_min_out, d_index_out, num_items, env));
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
@@ -250,6 +277,17 @@ public:
     }
 
     template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t
+        Max(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceReduce::Max(d_in, d_out, num_items, env));
+    }
+
+    template<typename InputIteratorT,
              typename ExtremumOutIteratorT,
              typename IndexOutIteratorT,
              typename NumItemsT>
@@ -302,6 +340,22 @@ public:
                                                                   d_index_out,
                                                                   num_items,
                                                                   stream));
+    }
+
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t ArgMax(InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_max_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             EnvT                 env = {})
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceReduce::ArgMax(d_in, d_max_out, d_index_out, num_items, env));
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>

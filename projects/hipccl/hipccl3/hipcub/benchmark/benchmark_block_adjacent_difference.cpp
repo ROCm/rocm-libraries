@@ -69,7 +69,7 @@ struct subtract_left
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 adjacent_difference.SubtractLeft(input, output, minus<T>{}, T(123));
             }
@@ -116,7 +116,7 @@ struct subtract_left_partial_tile
         {
             T output[ItemsPerThread];
 
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 adjacent_difference.SubtractLeftPartialTile(input,
                                                             output,
@@ -163,7 +163,7 @@ struct subtract_right
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 adjacent_difference.SubtractRight(input, output, minus<T>{}, T(123));
             }

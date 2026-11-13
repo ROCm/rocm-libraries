@@ -30,14 +30,34 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added env-based API for `hipcub::DeviceReduce::Reduce`.
 * Added env-based API for `hipcub::DeviceReduce::Sum`.
 * Feature parity with CCCL/CUB 3.1.4.
+* Added env-based API for `hipcub::DeviceReduce::(Arg)MinMax`.
+* Added env-based API for `hipcub::DeviceScan::ExclusiveScan` and `hipcub::DeviceScan::ExclusiveSum`.
+* Added new `hipcub::DeviceTopK::{Max,Min}Keys` and `hipcub::DeviceTopK::{Max,Min}Pairs`.
+* Added `hipcub::DeviceFor::ForEachInLayout`.
+* Added `hipcub::DeviceCopy::Copy`.
+* Added `hipcub::WarpScan::InclusiveScanPartial`, `hipcub::WarpScan::ExclusiveScanPartial` and `hipcub::WarpScan::ScanPartial`.
+* Added `hipcub::DeviceTransform::TransformIf`, `hipcub::DeviceTransform::Generate` and `hipcub::DeviceTransform::Fill`.
+* Added env-based API for `hipcub::DeviceTransform::*`.
+* Feature parity with CCCL/CUB 3.2.0.
+* Feature parity with CCCL/CUB 3.2.1.
 
 ### Changed
 
-* Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
+* Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
+* Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
+* Changed `CCCL_MINIMUM_VERSION` to `3.2.1` to align with CUB.
+* `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
+* Removed deprecated `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
+* Fixed handling of invalid inputs ($\leq 0$) in `hipcub::GridEvenShare::DispatchInit()`, which now sets all relevant members to 0 when any of the inputs is invalid.
 
 ### Removed
 
-* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Removed the deprecated thread operators `Equality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Removed the `HIPCUB_TRAIT` macro in favor of the equivalent `_CCCL_TRAIT` from libhipcxx.
+* Deprecated `hipcub::PowerOfTwo`, use `hip::is_power_of_two(N)` instead.
+* Removed `WARP_SORT` template argument from `hipcub::BlockMergeSortStrategy`.
+* Removed the deprecated `hipcub::AliasTemporaries`.
+* Deprecated `hipcub::MergePathSearch`.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
@@ -55,6 +75,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * The block merge sort and thread sort algorithms now perform optional loop unrolling via `_CCCL_SORT_MAYBE_UNROLL()`.
 
 ### Removed
+
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
   * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
   * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.

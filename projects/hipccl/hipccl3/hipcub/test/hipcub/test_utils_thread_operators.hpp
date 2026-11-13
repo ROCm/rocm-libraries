@@ -143,26 +143,6 @@ struct ExtendedFloatBinOp
 };
 
 /**
- * \brief Common type specialization - Because min and max don't work with
- * <float, test_utils::half>.
- */
-template<>
-struct std::common_type<float, test_utils::half>
-{
-    using type = float;
-};
-
-/**
- * \brief Common type specialization - Because min and max don't work with
- * <float, test_utils::bfloat16>.
- */
-template<>
-struct std::common_type<float, test_utils::bfloat16>
-{
-    using type = float;
-};
-
-/**
  * \brief ArgMax functor - Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
  */
 struct ArgMax
@@ -209,16 +189,6 @@ struct ArgMin
             return b;
         return a;
     }
-};
-
-/**
- * \brief Common type specialization - Because some thread operators do not work with
- * <custom_test_type<T>, custom_test_type<U>> for different types T and U.
- */
-template<class T, class U>
-struct std::common_type<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
-{
-    using type = test_utils::custom_test_type<typename std::common_type<T, U>::type>;
 };
 
 /**

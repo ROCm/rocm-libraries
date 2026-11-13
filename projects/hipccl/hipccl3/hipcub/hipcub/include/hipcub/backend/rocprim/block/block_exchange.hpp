@@ -37,28 +37,19 @@
 BEGIN_HIPCUB_NAMESPACE
 
 template<typename InputT,
-         int  BLOCK_DIM_X,
-         int  ITEMS_PER_THREAD,
-         bool WARP_TIME_SLICING = false, /* ignored */
-         int  BLOCK_DIM_Y       = 1,
-         int  BLOCK_DIM_Z       = 1>
+         int  BlockDimX,
+         int  ItemsPerThread,
+         bool WarpTimeSlicing = false, /* ignored */
+         int  BlockDimY       = 1,
+         int  BlockDimZ       = 1>
 class BlockExchange
-    : private ::rocprim::
-          block_exchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, BLOCK_DIM_Y, BLOCK_DIM_Z>
+    : private ::rocprim::block_exchange<InputT, BlockDimX, ItemsPerThread, BlockDimY, BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_exchange<
-            InputT,
-            BLOCK_DIM_X,
-            ITEMS_PER_THREAD,
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_exchange<InputT, BlockDimX, ItemsPerThread, BlockDimY, BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -77,130 +68,145 @@ public:
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE inline
-    void StripedToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
-                          OutputT (&output_items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void StripedToBlocked(InputT (&input_items)[ItemsPerThread],
+                                 OutputT (&output_items)[ItemsPerThread])
     {
         base_type::striped_to_blocked(input_items, output_items, temp_storage_);
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE inline
-    void BlockedToStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
-                          OutputT (&output_items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void BlockedToStriped(InputT (&input_items)[ItemsPerThread],
+                                 OutputT (&output_items)[ItemsPerThread])
     {
         base_type::blocked_to_striped(input_items, output_items, temp_storage_);
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE inline
-    void WarpStripedToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
-                              OutputT (&output_items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void WarpStripedToBlocked(InputT (&input_items)[ItemsPerThread],
+                                     OutputT (&output_items)[ItemsPerThread])
     {
         base_type::warp_striped_to_blocked(input_items, output_items, temp_storage_);
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE inline
-    void BlockedToWarpStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
-                              OutputT (&output_items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void BlockedToWarpStriped(InputT (&input_items)[ItemsPerThread],
+                                     OutputT (&output_items)[ItemsPerThread])
     {
         base_type::blocked_to_warp_striped(input_items, output_items, temp_storage_);
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE inline
-    void ScatterToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
-                          OutputT (&output_items)[ITEMS_PER_THREAD],
-                          OffsetT (&ranks)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void ScatterToBlocked(InputT (&input_items)[ItemsPerThread],
+                                 OutputT (&output_items)[ItemsPerThread],
+                                 OffsetT (&ranks)[ItemsPerThread])
     {
         base_type::scatter_to_blocked(input_items, output_items, ranks, temp_storage_);
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE inline
-    void ScatterToStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
-                          OutputT (&output_items)[ITEMS_PER_THREAD],
-                          OffsetT (&ranks)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void ScatterToStriped(InputT (&input_items)[ItemsPerThread],
+                                 OutputT (&output_items)[ItemsPerThread],
+                                 OffsetT (&ranks)[ItemsPerThread])
     {
         base_type::scatter_to_striped(input_items, output_items, ranks, temp_storage_);
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE inline
-    void ScatterToStripedGuarded(InputT  (&input_items)[ITEMS_PER_THREAD],
-                                 OutputT (&output_items)[ITEMS_PER_THREAD],
-                                 OffsetT (&ranks)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void ScatterToStripedGuarded(InputT (&input_items)[ItemsPerThread],
+                                        OutputT (&output_items)[ItemsPerThread],
+                                        OffsetT (&ranks)[ItemsPerThread])
     {
         base_type::scatter_to_striped_guarded(input_items, output_items, ranks, temp_storage_);
     }
 
     template<typename OutputT, typename OffsetT, typename ValidFlag>
-    HIPCUB_DEVICE inline
-    void ScatterToStripedFlagged(InputT    (&input_items)[ITEMS_PER_THREAD],
-                                 OutputT   (&output_items)[ITEMS_PER_THREAD],
-                                 OffsetT   (&ranks)[ITEMS_PER_THREAD],
-                                 ValidFlag (&is_valid)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void ScatterToStripedFlagged(InputT (&input_items)[ItemsPerThread],
+                                        OutputT (&output_items)[ItemsPerThread],
+                                        OffsetT (&ranks)[ItemsPerThread],
+                                        ValidFlag (&is_valid)[ItemsPerThread])
     {
         base_type::scatter_to_striped_flagged(input_items, output_items, ranks, is_valid, temp_storage_);
     }
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
-
-    HIPCUB_DEVICE inline void StripedToBlocked(
-        InputT      (&items)[ITEMS_PER_THREAD])   ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    HIPCUB_DEVICE
+    inline void StripedToBlocked(
+        InputT (&items)
+            [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
     {
         StripedToBlocked(items, items);
     }
 
-    HIPCUB_DEVICE inline void BlockedToStriped(
-        InputT      (&items)[ITEMS_PER_THREAD])   ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    HIPCUB_DEVICE
+    inline void BlockedToStriped(
+        InputT (&items)
+            [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
     {
         BlockedToStriped(items, items);
     }
 
-    HIPCUB_DEVICE inline void WarpStripedToBlocked(
-        InputT      (&items)[ITEMS_PER_THREAD])    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    HIPCUB_DEVICE
+    inline void WarpStripedToBlocked(
+        InputT (&items)
+            [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
     {
         WarpStripedToBlocked(items, items);
     }
 
-    HIPCUB_DEVICE inline void BlockedToWarpStriped(
-        InputT      (&items)[ITEMS_PER_THREAD])    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    HIPCUB_DEVICE
+    inline void BlockedToWarpStriped(
+        InputT (&items)
+            [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
     {
         BlockedToWarpStriped(items, items);
     }
 
-    template <typename OffsetT>
-    HIPCUB_DEVICE inline void ScatterToBlocked(
-        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
-        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    template<typename OffsetT>
+    HIPCUB_DEVICE
+    inline void ScatterToBlocked(
+        InputT (&items)
+            [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT (&ranks)[ItemsPerThread]) ///< [in] Corresponding scatter ranks
     {
         ScatterToBlocked(items, items, ranks);
     }
 
-    template <typename OffsetT>
-    HIPCUB_DEVICE inline void ScatterToStriped(
-        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
-        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    template<typename OffsetT>
+    HIPCUB_DEVICE
+    inline void ScatterToStriped(
+        InputT (&items)
+            [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT (&ranks)[ItemsPerThread]) ///< [in] Corresponding scatter ranks
     {
         ScatterToStriped(items, items, ranks);
     }
 
-    template <typename OffsetT>
-    HIPCUB_DEVICE inline void ScatterToStripedGuarded(
-        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
-        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    template<typename OffsetT>
+    HIPCUB_DEVICE
+    inline void ScatterToStripedGuarded(
+        InputT (&items)
+            [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT (&ranks)[ItemsPerThread]) ///< [in] Corresponding scatter ranks
     {
         ScatterToStripedGuarded(items, items, ranks);
     }
 
-    template <typename OffsetT, typename ValidFlag>
-    HIPCUB_DEVICE inline void ScatterToStripedFlagged(
-        InputT      (&items)[ITEMS_PER_THREAD],        ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
-        OffsetT     (&ranks)[ITEMS_PER_THREAD],        ///< [in] Corresponding scatter ranks
-        ValidFlag   (&is_valid)[ITEMS_PER_THREAD])     ///< [in] Corresponding flag denoting item validity
+    template<typename OffsetT, typename ValidFlag>
+    HIPCUB_DEVICE
+    inline void ScatterToStripedFlagged(
+        InputT (&items)
+            [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT (&ranks)[ItemsPerThread], ///< [in] Corresponding scatter ranks
+        ValidFlag (&is_valid)[ItemsPerThread]) ///< [in] Corresponding flag denoting item validity
     {
         ScatterToStripedFlagged(items, items, ranks, is_valid);
     }

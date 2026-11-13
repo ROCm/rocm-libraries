@@ -376,7 +376,7 @@ TYPED_TEST(RocprimDeviceTransformTests, TernaryTransform)
             // Calculate expected results on host
             std::vector<U> expected(input1.size());
 
-            transform_nary(ternary_transform<T1, T2, T1, U>(),
+            transform_nary(ternary_transform<T1, T2, T2, U>(),
                            input1.size(),
                            expected.begin(),
                            input1.begin(),
@@ -394,9 +394,301 @@ TYPED_TEST(RocprimDeviceTransformTests, TernaryTransform)
                 rocprim::tuple(d_input1.get(), d_input2.get(), d_input3.get()),
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
                 input1.size(),
-                ternary_transform<T1, T2, T1, U>(),
+                ternary_transform<T1, T2, T2, U>(),
                 stream,
                 debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output = d_output.load();
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
+template<class T>
+struct predicate_t
+{
+    __device__ __host__
+    inline constexpr bool operator()(const T& value) const
+    {
+        return (value > T{10});
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, TransformPredicate)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T                                     = typename TestFixture::input_type;
+    using U                                     = T;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
+
+            common::device_ptr<T> d_input(input);
+            common::device_ptr<U> d_output(input);
+            auto                  predicate    = predicate_t<T>{};
+            auto                  transform_op = transform<U>{};
+
+            // Calculate expected results on host
+            std::vector<U> expected(input.size());
+            std::transform(input.begin(),
+                           input.end(),
+                           expected.begin(),
+                           [&](const auto value) -> U
+                           { return predicate(value) ? transform_op(value) : value; });
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::transform<Config>(
+                d_input.get(),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                input.size(),
+                predicate,
+                transform_op,
+                stream,
+                TestFixture::debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output = d_output.load();
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
+template<class T1, class T2, class T3>
+struct ternary_predicate
+{
+    __device__ __host__
+    inline constexpr bool operator()(const T1& a, const T2& b, const T3& c) const
+    {
+        return (a > T1{10}) && (b > T2{10}) && (c > T3{10});
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, TernaryTransformPredicate)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T1                                    = typename TestFixture::input_type;
+    using T2                                    = typename TestFixture::input_type;
+    using T3                                    = T2;
+    using U                                     = T1;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            debug_synchronous     = TestFixture::debug_synchronous;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T1> input1
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+            std::vector<T2> input2
+                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value + 1);
+            std::vector<T2> input3
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value + 2);
+
+            common::device_ptr<T1> d_input1(input1);
+            common::device_ptr<T2> d_input2(input2);
+            common::device_ptr<T2> d_input3(input3);
+            common::device_ptr<U>  d_output(input1);
+            auto                   predicate    = ternary_predicate<T1, T2, T3>{};
+            auto                   transform_op = ternary_transform<T1, T2, T3, U>{};
+
+            // Calculate expected results on host
+            std::vector<U> expected(input1.size());
+
+            transform_nary(
+                [&](const auto& a, const auto& b, const auto& c) -> U
+                {
+                    if(predicate(a, b, c))
+                    {
+                        return transform_op(a, b, c);
+                    }
+                    // rocprim::transform should not write to output if predicate is false
+                    return a;
+                },
+                input1.size(),
+                expected.begin(),
+                input1.begin(),
+                input2.begin(),
+                input3.begin());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::transform<Config>(
+                rocprim::tuple(d_input1.get(), d_input2.get(), d_input3.get()),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                input1.size(),
+                predicate,
+                transform_op,
+                stream,
+                debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output = d_output.load();
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
+template<class T>
+struct generate
+{
+    T        value;
+    __device__ __host__
+    inline T operator()() const
+    {
+        return T(value);
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, Generate)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using U                                     = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            common::device_ptr<U> d_output(size);
+            const U               value = test_utils::get_random_value<U>(1, 100, seed_value);
+
+            // Calculate expected results on host
+            std::vector<U> expected(size, value);
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::generate<Config>(
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                size,
+                generate<U>{value},
+                stream,
+                TestFixture::debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
