@@ -143,10 +143,9 @@ namespace hiptensor
         return hipSuccess;
     }
 
-    bool HipDevice::isSupported() const
+    hipDeviceProp_t const& HipDevice::getProperties() const
     {
-        return mGcnArch != hipGcnArch_t::UNSUPPORTED_ARCH
-               && mWarpSize != hipWarpSize_t::UNSUPPORTED_WARP_SIZE;
+        return mProps;
     }
 
     hipDevice_t HipDevice::getDeviceId() const

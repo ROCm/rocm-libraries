@@ -122,15 +122,20 @@ namespace hiptensor
     {
         void operator()(void* ptr)
         {
-            CHECK_HIP_ERROR(hipFree(ptr));
+            // A deleter cannot report errors; a failed free must not terminate the process.
+            (void)hipFree(ptr);
         }
     };
 
+    // Returns an empty pointer if the allocation fails.
     template <typename T>
     auto allocDevice(int64_t numElements)
     {
-        T* data;
-        CHECK_HIP_ERROR(hipMalloc(&data, numElements * sizeof(T)));
+        T* data = nullptr;
+        if(hipMalloc(&data, numElements * sizeof(T)) != hipSuccess)
+        {
+            data = nullptr;
+        }
         return std::unique_ptr<T, DeviceDeleter>(data, DeviceDeleter());
     }
 

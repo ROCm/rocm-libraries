@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -123,14 +124,15 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     auto& logger = Logger::instance();
 
     // Log API access
-    char msg[128];
+    char msg[384];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    (*handle) = new hiptensorHandle;
+    *handle = nullptr;
 
-    if(*handle == nullptr)
+    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
+    if(newHandle == nullptr)
     {
         auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
         snprintf(msg,
@@ -138,7 +140,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization Error : handle = nullptr (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_ALLOC_FAILED;
+        return errorCode;
     }
 
     auto hip_status = hipInit(0);
@@ -151,9 +153,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization error: invalid device (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
     else if(hip_status == hipErrorInvalidValue)
     {
@@ -161,21 +161,18 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         snprintf(
             msg, sizeof(msg), "Initialization error: (%s)", hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_INVALID_VALUE;
+        return errorCode;
     }
     else if(hip_status != hipSuccess)
     {
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization error: hipInit failed: %s (%s)",
                  hipGetErrorString(hip_status),
-                 hiptensorGetErrorString(HIPTENSOR_STATUS_HIP_ERROR));
+                 hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
 
     // The handle is bound to the device that is current on the calling thread.
@@ -183,33 +180,44 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     hip_status           = hipGetDevice(&deviceId);
     if(hip_status == hipSuccess)
     {
-        hip_status = (*handle)->initDevice(deviceId);
+        hip_status = newHandle->initDevice(deviceId);
     }
 
     if(hip_status != hipSuccess)
     {
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization error: cannot query current device: %s (%s)",
                  hipGetErrorString(hip_status),
-                 hiptensorGetErrorString(HIPTENSOR_STATUS_HIP_ERROR));
+                 hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
 
-    if(!(*handle)->getDevice().isSupported())
+    auto device = newHandle->getDevice();
+    if(device.getGcnArch() == hiptensor::HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
     {
         auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
         snprintf(msg,
                  sizeof(msg),
-                 "Initialization error: device %d is not supported by hipTensor (%s)",
+                 "Initialization error: device %d has unsupported architecture %s (%s)",
                  (int)deviceId,
+                 device.getProperties().gcnArchName,
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
+        return errorCode;
+    }
+    else if(device.warpSize() == hiptensor::HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported warp size %d (%s)",
+                 (int)deviceId,
+                 device.getProperties().warpSize,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
         return errorCode;
     }
 
@@ -220,11 +228,12 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     }
     else
     {
-        (*handle)->setPlanCache(std::make_unique<hiptensor::PlanCache>());
+        newHandle->setPlanCache(std::make_unique<hiptensor::PlanCache>());
         snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    *handle = newHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
 

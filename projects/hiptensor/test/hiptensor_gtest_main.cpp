@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <hiptensor/hiptensor.h>
 
 #include "llvm/command_line_parser.hpp"
 
@@ -53,6 +54,34 @@ int main(int argc, char** argv)
             deviceCount);
         return 1;
     }
+
+    // hiptensorCreate rejects GPUs hipTensor does not support. Report that with the text the
+    // ctest SKIP_REGULAR_EXPRESSION matches so the binary is skipped rather than failed.
+    hiptensorHandle_t handle       = nullptr;
+    auto              createStatus = hiptensorCreate(&handle);
+    if(createStatus == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        int             deviceId = 0;
+        hipDeviceProp_t props{};
+        (void)hipGetDevice(&deviceId);
+        (void)hipGetDeviceProperties(&props, deviceId);
+        fprintf(stderr,
+                "Cannot proceed: unsupported host device detected: device %d, %s, warp size %d "
+                "(%s). Skipping tests.\n",
+                deviceId,
+                props.gcnArchName,
+                props.warpSize,
+                hiptensorGetErrorString(createStatus));
+        return 0;
+    }
+    if(createStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        fprintf(stderr,
+                "hiptensorCreate failed (%s) — aborting before tests run.\n",
+                hiptensorGetErrorString(createStatus));
+        return 1;
+    }
+    hiptensorDestroy(handle);
 
     // Initialize Google Tests
     testing::InitGoogleTest(&argc, argv);

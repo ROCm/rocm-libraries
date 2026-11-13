@@ -53,8 +53,11 @@ namespace
         return count;
     }
 
-    // Creates a plan for a small f32 contraction D[m,n] = A[m,k] * B[n,k] using the given handle
+    // Creates a plan for a small f16 contraction D[m,n] = A[m,k] * B[n,k] using the given handle
     // and returns the status of hiptensorCreatePlan, which validates the handle's device.
+    // 16F compute has matrix-core support on every architecture hipTensor supports. A failure in
+    // any earlier step is reported as a test failure and returned as INTERNAL_ERROR, so that it
+    // cannot be mistaken for the ARCH_MISMATCH a device check produces.
     hiptensorStatus_t createContractionPlan(hiptensorHandle_t handle)
     {
         int64_t lensA[2] = {8, 8};
@@ -64,41 +67,48 @@ namespace
         int32_t modeB[2] = {'n', 'k'};
         int32_t modeD[2] = {'m', 'n'};
 
-        hiptensorTensorDescriptor_t descA{}, descB{}, descD{};
-        EXPECT_EQ(hiptensorCreateTensorDescriptor(
-                      handle, &descA, 2, lensA, nullptr, HIPTENSOR_R_32F, 128),
-                  HIPTENSOR_STATUS_SUCCESS);
-        EXPECT_EQ(hiptensorCreateTensorDescriptor(
-                      handle, &descB, 2, lensB, nullptr, HIPTENSOR_R_32F, 128),
-                  HIPTENSOR_STATUS_SUCCESS);
-        EXPECT_EQ(hiptensorCreateTensorDescriptor(
-                      handle, &descD, 2, lensD, nullptr, HIPTENSOR_R_32F, 128),
-                  HIPTENSOR_STATUS_SUCCESS);
-
+        hiptensorTensorDescriptor_t    descA{}, descB{}, descD{};
         hiptensorOperationDescriptor_t opDesc{};
-        EXPECT_EQ(hiptensorCreateContraction(handle,
-                                             &opDesc,
-                                             descA,
-                                             modeA,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descB,
-                                             modeB,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             nullptr,
-                                             nullptr,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descD,
-                                             modeD,
-                                             HIPTENSOR_COMPUTE_DESC_32F),
-                  HIPTENSOR_STATUS_SUCCESS);
+        hiptensorPlanPreference_t      pref{};
+        hiptensorPlan_t                plan{};
+        auto                           status = HIPTENSOR_STATUS_INTERNAL_ERROR;
 
-        hiptensorPlanPreference_t pref{};
-        EXPECT_EQ(hiptensorCreatePlanPreference(
-                      handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
-                  HIPTENSOR_STATUS_SUCCESS);
+        bool setupOk = hiptensorCreateTensorDescriptor(
+                           handle, &descA, 2, lensA, nullptr, HIPTENSOR_R_16F, 128)
+                           == HIPTENSOR_STATUS_SUCCESS
+                       && hiptensorCreateTensorDescriptor(
+                              handle, &descB, 2, lensB, nullptr, HIPTENSOR_R_16F, 128)
+                              == HIPTENSOR_STATUS_SUCCESS
+                       && hiptensorCreateTensorDescriptor(
+                              handle, &descD, 2, lensD, nullptr, HIPTENSOR_R_16F, 128)
+                              == HIPTENSOR_STATUS_SUCCESS
+                       && hiptensorCreateContraction(handle,
+                                                     &opDesc,
+                                                     descA,
+                                                     modeA,
+                                                     HIPTENSOR_OP_IDENTITY,
+                                                     descB,
+                                                     modeB,
+                                                     HIPTENSOR_OP_IDENTITY,
+                                                     nullptr,
+                                                     nullptr,
+                                                     HIPTENSOR_OP_IDENTITY,
+                                                     descD,
+                                                     modeD,
+                                                     HIPTENSOR_COMPUTE_DESC_16F)
+                              == HIPTENSOR_STATUS_SUCCESS
+                       && hiptensorCreatePlanPreference(
+                              handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE)
+                              == HIPTENSOR_STATUS_SUCCESS;
 
-        hiptensorPlan_t plan{};
-        auto            status = hiptensorCreatePlan(handle, &plan, opDesc, pref, 0);
+        if(setupOk)
+        {
+            status = hiptensorCreatePlan(handle, &plan, opDesc, pref, 0);
+        }
+        else
+        {
+            ADD_FAILURE() << "Failed to set up the contraction before creating the plan";
+        }
 
         hiptensorDestroyPlan(plan);
         hiptensorDestroyPlanPreference(pref);
@@ -118,10 +128,16 @@ TEST(DeviceInitTest, CreateOnCurrentDevice)
         GTEST_SKIP() << "Runs only in the parent process";
     }
 
-    hiptensorHandle_t handle = nullptr;
-    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorHandle_t handle = reinterpret_cast<hiptensorHandle_t>(0x1);
+    auto              status = hiptensorCreate(&handle);
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        EXPECT_EQ(handle, nullptr);
+        GTEST_SKIP() << "Cannot proceed: unsupported host device detected";
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
-    EXPECT_NE(createContractionPlan(handle), HIPTENSOR_STATUS_ARCH_MISMATCH);
+    EXPECT_EQ(createContractionPlan(handle), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(hiptensorDestroy(handle), HIPTENSOR_STATUS_SUCCESS);
 }
 
@@ -136,20 +152,38 @@ TEST(DeviceInitTest, HandleIsBoundToCreationDevice)
         GTEST_SKIP() << "Requires at least two visible devices";
     }
 
+    hiptensorHandle_t handle0 = nullptr;
     hiptensorHandle_t handle1 = nullptr;
-    ASSERT_EQ(hipSetDevice(1), hipSuccess);
-    ASSERT_EQ(hiptensorCreate(&handle1), HIPTENSOR_STATUS_SUCCESS);
-
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    auto status0 = hiptensorCreate(&handle0);
+    ASSERT_EQ(hipSetDevice(1), hipSuccess);
+    auto status1 = hiptensorCreate(&handle1);
+    if(status0 == HIPTENSOR_STATUS_ARCH_MISMATCH || status1 == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        hiptensorDestroy(handle0);
+        hiptensorDestroy(handle1);
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        GTEST_SKIP() << "Requires devices 0 and 1 to be supported by hipTensor";
+    }
+    ASSERT_EQ(status0, HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(status1, HIPTENSOR_STATUS_SUCCESS);
+
+    // handle0 succeeding on device 0 shows the contraction is supported there, so the
+    // ARCH_MISMATCH for handle1 on device 0 can only come from the device check.
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    EXPECT_EQ(createContractionPlan(handle0), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(createContractionPlan(handle1), HIPTENSOR_STATUS_ARCH_MISMATCH);
 
     ASSERT_EQ(hipSetDevice(1), hipSuccess);
-    EXPECT_NE(createContractionPlan(handle1), HIPTENSOR_STATUS_ARCH_MISMATCH);
+    EXPECT_EQ(createContractionPlan(handle1), HIPTENSOR_STATUS_SUCCESS);
 
+    EXPECT_EQ(hiptensorDestroy(handle0), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(hiptensorDestroy(handle1), HIPTENSOR_STATUS_SUCCESS);
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 }
 
+// Each thread selects its own device. An unsupported device must be rejected for that thread only,
+// without affecting the threads that selected a supported device.
 TEST(DeviceInitTest, ThreadsSelectTheirOwnDevice)
 {
     if(std::getenv(kNoDeviceChildEnv) != nullptr)
@@ -164,17 +198,19 @@ TEST(DeviceInitTest, ThreadsSelectTheirOwnDevice)
 
     std::vector<hiptensorStatus_t> createStatus(numThreads, HIPTENSOR_STATUS_INTERNAL_ERROR);
     std::vector<hiptensorStatus_t> planStatus(numThreads, HIPTENSOR_STATUS_INTERNAL_ERROR);
+    std::vector<char>              handleCleared(numThreads, 0);
     std::vector<std::thread>       threads;
 
     for(int i = 0; i < numThreads; ++i)
     {
-        threads.emplace_back([i, &createStatus, &planStatus]() {
+        threads.emplace_back([i, &createStatus, &planStatus, &handleCleared]() {
             if(hipSetDevice(i) != hipSuccess)
             {
                 return;
             }
             hiptensorHandle_t handle = nullptr;
             createStatus[i]          = hiptensorCreate(&handle);
+            handleCleared[i]         = handle == nullptr;
             if(createStatus[i] == HIPTENSOR_STATUS_SUCCESS)
             {
                 planStatus[i] = createContractionPlan(handle);
@@ -187,10 +223,21 @@ TEST(DeviceInitTest, ThreadsSelectTheirOwnDevice)
         t.join();
     }
 
+    int supported = 0;
     for(int i = 0; i < numThreads; ++i)
     {
+        if(createStatus[i] == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        {
+            EXPECT_TRUE(handleCleared[i]) << "device " << i;
+            continue;
+        }
+        ++supported;
         EXPECT_EQ(createStatus[i], HIPTENSOR_STATUS_SUCCESS) << "device " << i;
-        EXPECT_NE(planStatus[i], HIPTENSOR_STATUS_ARCH_MISMATCH) << "device " << i;
+        EXPECT_EQ(planStatus[i], HIPTENSOR_STATUS_SUCCESS) << "device " << i;
+    }
+    if(supported == 0)
+    {
+        GTEST_SKIP() << "Cannot proceed: unsupported host device detected";
     }
 }
 

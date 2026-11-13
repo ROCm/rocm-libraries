@@ -71,8 +71,7 @@ namespace hiptensor
         // Queries the properties of the given device. Leaves the object unchanged on failure.
         hipError_t initialize(hipDevice_t deviceId);
 
-        // True when both the architecture and the warp size are supported by hipTensor.
-        bool isSupported() const;
+        hipDeviceProp_t const& getProperties() const;
 
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;

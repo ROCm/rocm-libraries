@@ -93,6 +93,12 @@ namespace
             return checkResult;
         }
 
+        checkResult = hiptensor::checkHandleDevice(handle, "hiptensorReduce");
+        if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return checkResult;
+        }
+
         const hiptensor::Hash            hashGenerator;
         const std::unordered_set<size_t> supportedTypes = {
             hashGenerator(

@@ -61,40 +61,48 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
     return false;
 }
 
-// Ensure the HIP device current on the calling thread is the one the handle was created on.
-static hiptensorStatus_t checkHandleDevice(const hiptensorHandle_t handle, char const* apiFuncName)
+// Measures kernel selection time for the performance log. The measurement is diagnostic only, so
+// a HIP failure here reports the time as unavailable (-1) instead of failing plan creation.
+class SelectionTimer
 {
-    char msg[128];
-    int  currentDeviceId = -1;
-
-    auto hipStatus = hipGetDevice(&currentDeviceId);
-    if(hipStatus != hipSuccess)
+public:
+    SelectionTimer()
     {
-        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Cannot query current device: %s (%s)",
-                 hipGetErrorString(hipStatus),
-                 hiptensorGetErrorString(errorCode));
-        hiptensor::Logger::instance()->logError(apiFuncName, msg);
-        return errorCode;
+        mValid = hipEventCreate(&mStart) == hipSuccess && hipEventCreate(&mStop) == hipSuccess
+                 && hipEventRecord(mStart) == hipSuccess;
     }
 
-    if(currentDeviceId != handle->getDevice().getDeviceId())
+    ~SelectionTimer()
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 currentDeviceId,
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-        hiptensor::Logger::instance()->logError(apiFuncName, msg);
-        return errorCode;
+        if(mStart != nullptr)
+        {
+            (void)hipEventDestroy(mStart);
+        }
+        if(mStop != nullptr)
+        {
+            (void)hipEventDestroy(mStop);
+        }
     }
 
-    return HIPTENSOR_STATUS_SUCCESS;
-}
+    SelectionTimer(SelectionTimer const&)            = delete;
+    SelectionTimer& operator=(SelectionTimer const&) = delete;
+
+    float elapsedMs()
+    {
+        float elapsed = 0.0f;
+        if(mValid && hipEventRecord(mStop) == hipSuccess && hipEventSynchronize(mStop) == hipSuccess
+           && hipEventElapsedTime(&elapsed, mStart, mStop) == hipSuccess)
+        {
+            return elapsed;
+        }
+        return -1.0f;
+    }
+
+private:
+    hipEvent_t mStart = nullptr;
+    hipEvent_t mStop  = nullptr;
+    bool       mValid = false;
+};
 
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
@@ -401,7 +409,7 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     }
 
     // Ensure current HIP device is same as the handle.
-    checkResult = checkHandleDevice(handle, "hiptensorContraction");
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorContraction");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
@@ -544,7 +552,7 @@ hiptensorStatus_t contractionCreatePlanPreference(const hiptensorHandle_t   hand
     }
 
     // Ensure current HIP device is same as the handle.
-    checkResult = checkHandleDevice(handle, "contractionCreatePlanPreference");
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionCreatePlanPreference");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
@@ -613,7 +621,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     }
 
     // Ensure current HIP device is same as the handle.
-    checkResult = checkHandleDevice(handle, "contractionInitPlan");
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionInitPlan");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
@@ -665,11 +673,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     candidates = toContractionSolutionVec(solutionQ.solutions());
 
     // Measure timing for solution selection
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
-
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    SelectionTimer selectionTimer;
 
     // Launch selection algorithm
     hiptensor::ContractionSolution* winner = nullptr;
@@ -768,14 +772,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
-
-    auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    auto elapsedTimeMs = selectionTimer.elapsedMs();
 
     if(result != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -1209,7 +1206,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
         return checkResult;
     }
 
-    checkResult = checkHandleDevice(handle, "contractionTrinaryInitPlan");
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionTrinaryInitPlan");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
@@ -1274,10 +1271,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
     // The winner is chosen using the step 2 problem shape (T * C -> E
     // with bias D).  The same kernel is reused for step 1 at execution
     // time with different alpha/beta and tensor arguments.
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    SelectionTimer selectionTimer;
 
     hiptensor::ContractionSolution* winner = nullptr;
     auto                            result = HIPTENSOR_STATUS_INTERNAL_ERROR;
@@ -1370,13 +1364,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
-
-    auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    auto elapsedTimeMs = selectionTimer.elapsedMs();
 
     if(result != HIPTENSOR_STATUS_SUCCESS || winner == nullptr)
     {
@@ -1509,7 +1497,7 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     }
 
     // Ensure current HIP device is same as the handle.
-    checkResult = checkHandleDevice(handle, "hiptensorContractTrinary");
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorContractTrinary");
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
