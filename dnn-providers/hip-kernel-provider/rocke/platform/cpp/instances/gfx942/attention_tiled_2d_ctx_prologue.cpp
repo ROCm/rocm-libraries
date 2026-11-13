@@ -132,6 +132,14 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     const rocke_type_t* dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
     ctx->dtype = dtype;
 
+    /* The gfx942 spec has no lse_layout: refuse rather than write token-major. */
+    if(spec->lse_head_major)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err, ROCKE_ERR_MSG_CAP, "lse_layout='head_major' is gfx950-only");
+        return false;
+    }
+
     /* ---- narrow 16x16x16 atom select (lines 1147-1159) ---- */
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
     ctx->target = target;
