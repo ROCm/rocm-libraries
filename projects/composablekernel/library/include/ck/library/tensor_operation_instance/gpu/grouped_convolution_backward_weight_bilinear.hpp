@@ -81,6 +81,20 @@ void add_device_grouped_conv3d_bwd_weight_xdl_bilinear_ndhwgc_gkzyxc_ndhwgk_bf16
                                                                     PassThrough>>>& instances);
 #endif
 #ifdef CK_ENABLE_FP16
+void add_device_grouped_conv3d_bwd_weight_xdl_bilinear_ndhwgc_gkzyxc_ndhwgk_f16_f32_f16_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeightMultipleD<3,
+                                                                    NDHWGC,
+                                                                    GKZYXC,
+                                                                    NDHWGK,
+                                                                    Tuple<GKZYXC>,
+                                                                    F16,
+                                                                    F32,
+                                                                    F16,
+                                                                    Tuple<F32>,
+                                                                    PassThrough,
+                                                                    Bilinear,
+                                                                    PassThrough>>>& instances);
+
 void add_device_grouped_conv3d_bwd_weight_xdl_bilinear_ndhwgc_gkzyxc_ndhwgk_f16_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeightMultipleD<3,
                                                                     NDHWGC,
@@ -252,6 +266,15 @@ struct DeviceOperationInstanceFactory<
 #endif
                 }
 #ifdef CK_ENABLE_FP16
+                if constexpr(is_same_v<InDataType, ck::half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, ck::half_t> &&
+                             is_same_v<ComputeTypeA, ck::half_t> &&
+                             is_same_v<ComputeTypeB, ck::half_t>)
+                {
+                    add_device_grouped_conv3d_bwd_weight_xdl_bilinear_ndhwgc_gkzyxc_ndhwgk_f16_f32_f16_instances(
+                        op_ptrs);
+                }
+
                 if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, half_t> &&
                              is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
                              is_same_v<ComputeTypeB, half_t>)
