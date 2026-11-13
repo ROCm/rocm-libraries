@@ -20,6 +20,9 @@ stages.
 - [Build, test, and package integration](docs/build_and_test.md).
 - [Error handling](docs/error_handling.md).
 - [Scalar metadata and dispatch](include/roc/hostnumerics/scalar_type.hpp).
+- [Scalar storage](include/roc/hostnumerics/scalar_storage.hpp), which encodes
+  and decodes elements of every scalar type, including FP16, BF16, FP8, FP6,
+  FP4 and scales.
 - [Core tests and compiled usage example](tests/core_test.cpp).
 - [Permutations](include/roc/hostnumerics/permutation.hpp), which order
   axes from slowest to fastest, and the Python `Permutation` docstrings.

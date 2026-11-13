@@ -103,6 +103,8 @@ positive_patterns: &positive_patterns
   # so they carry no "Prefix/" and the leading "*/" above would not match them.
   - "GPU_StreamTracker_FP32*"
   - "GPU_NaiveTimeout_FP32*"
+  - "GPU_ConvHipConv*"
+  - "GPU_PerfConfig_ConvHipConv*"
   # Added for Jenkins parity. Single-instantiation TEST/TEST_F suites, each <= ~10 s.
   # Only the dtypes Jenkins validates for HipBLASLt GEMM (FP8/BFP8/FP64/I* are left out).
   - "GPU_BN_Spatial_FP32*"

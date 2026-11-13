@@ -104,6 +104,9 @@ class LogicalInstruction : public IRBase {
     std::optional<std::string>
         longBranchLabel;  ///< s_setpc_b64 long-branch target label (forwarded to LabelData so
                           ///< CFGBuilderPass can build the CFG edge for the computed jump)
+    std::optional<std::vector<std::string>>
+        callTargets;  ///< s_swappc_b64 callee labels (forwarded to CallTargetData for call-graph
+                      ///< analysis only, not CFG edges) -- mirrors rocisa SSwapPCB64::calleeFuncs
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {
