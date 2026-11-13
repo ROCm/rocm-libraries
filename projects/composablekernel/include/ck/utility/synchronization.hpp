@@ -102,26 +102,36 @@ __device__ void block_sync_lds_direct_load()
 }
 
 // Completes the outstanding asynchronous global->LDS DMA loads and publishes the LDS to the
-// workgroup with a barrier. On the asyncmark path this is arch-agnostic -- wait_asyncmark(0) drains
-// the async loads and is visible to the LLVM memory model (no manual fence/waitcnt needed other
-// than what you get from block_sync_lds), then block_sync_lds() barriers. The #else fallbacks
-// reproduce the pre-asyncmark behavior per arch.
+// workgroup with a barrier. On the asyncmark path this is arch-agnostic -- wait_asyncmark() is
+// visible to the LLVM memory model (no manual fence/waitcnt needed other than what you get from
+// block_sync_lds), then block_sync_lds() barriers. The #else fallbacks reproduce the pre-asyncmark
+// behavior per arch.
+//
+// The two counts let software-pipelined callers leave later loads in flight, and are in different
+// units:
+// - `asyncmarks`: async DMAs (one asyncmark each) issued after the ones being waited on that may
+//   stay outstanding. Used by wait_asyncmark() and by gfx125's s_wait_asynccnt, which only count
+//   async DMAs.
+// - `vmcnt`: all VMEM loads (async DMAs *and* ordinary loads to VGPRs) issued after the ones being
+//   waited on that may stay outstanding. Used by the gfx9 fallback, where DMAs share vmcnt with
+//   ordinary loads. On the asyncmark path the compiler derives the equivalent vmcnt itself.
+template <index_t asyncmarks = 0, index_t vmcnt = asyncmarks>
 __device__ void block_sync_lds_async_load()
 {
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_wait_asyncmark(0);
+    __builtin_amdgcn_wait_asyncmark(asyncmarks);
     block_sync_lds();
 #elif defined(__gfx125__)
     // Fallback: async-engine completion wait + "local" fences + manual barrier (avoids the
     // redundant s_wait_loadcnt_dscnt that __syncthreads would inject).
-    __builtin_amdgcn_s_wait_asynccnt(0);
+    __builtin_amdgcn_s_wait_asynccnt(asyncmarks);
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
-    // Fallback (gfx9, no asyncmark): explicit vmcnt(0) + "global" ordering fence + LDS barrier.
-    __builtin_amdgcn_s_waitcnt(3952); // vmcnt(0)
+    // Fallback (gfx9, no asyncmark): explicit vmcnt(vmcnt) + "global" ordering fence + LDS barrier.
+    __builtin_amdgcn_s_waitcnt(3952 + vmcnt % 16 + vmcnt / 16 * 16384); // vmcnt(vmcnt)
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
     block_sync_lds();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
