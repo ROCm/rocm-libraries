@@ -284,6 +284,31 @@ def resolve_dense_subject(arch: str, case: DenseCase) -> ResolvedDenseSubject:
     )
 
 
+def compile_dense_subject(arch: str, resolved: ResolvedDenseSubject):
+    """Compile a resolved subject as its dense launcher does and return the
+    artifact: the LLVM IR it is built from and the code object.
+
+    The launcher keeps its compiled kernel to itself, so a lane that must read
+    the artifact under test repeats the compile: the same builder, spec, target
+    and engine, in the same process and with the same compiler. Needs the
+    compiler the launch needs; nothing is launched."""
+    from rocke.helpers.compile import compile_kernel
+
+    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
+    spec = resolved.tuning_spec.kernel_spec
+    artifact = compile_kernel(
+        runner.build_attention_dense(spec, arch=arch),
+        arch=arch,
+        backend="python",
+        capture_ir_text=False,
+    )
+    if artifact.kernel_name != spec.kernel_name():
+        raise AssertionError(
+            f"compiled {artifact.kernel_name!r}, expected {spec.kernel_name()!r}"
+        )
+    return artifact
+
+
 def run_dense_case(
     arch: str,
     case: DenseCase,

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """CPU-only contracts for the key-permutation relation: token maps, fixture,
-derived bound, analyzer and subject scope.
+derived bound, analyzer, subject scope, and the checks of the compiled artifact.
 
 The analyzer is exercised on outputs of ``_model_dense_run``, an FP32 model of
 the dense kernel's single-pass online softmax. The model exists only in these
@@ -15,13 +15,15 @@ import hashlib
 import itertools
 import math
 import re
-from collections import Counter
+import struct
 from collections.abc import Callable
-from dataclasses import dataclass
+from decimal import Decimal, localcontext
+from fractions import Fraction
 from functools import cache
 
 import numpy as np
 import pytest
+from rocke.core.llvm_profile import LLVM_FLAVORS
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
 from ._analytical import _FORMAT, decode_bits, encode_bits
@@ -34,6 +36,7 @@ from ._dense_subject import (
 )
 from ._permutation import (
     _LATTICE_LIMIT,
+    _LOG2E_UPPER,
     CANONICAL_SPAN,
     PERMUTATION_MUTATION_MAP,
     PERMUTATION_QUICK_CASES,
@@ -47,6 +50,7 @@ from ._permutation import (
     TokenMap,
     analyze_permutation,
     format_permutation_result,
+    format_slice_diagnostics,
     mutated_token_maps,
     permutation_bound,
     permutation_case_bound,
@@ -54,6 +58,19 @@ from ._permutation import (
     permute_tokens,
     score_spread_bound,
     token_map,
+)
+from ._permutation_path import (
+    _F32_INITIAL_MAX,
+    _F32_ONE,
+    REDERIVE,
+    classify_unmasked_path,
+    expected_chain_counts,
+    expected_path_counts,
+    fp_mode_violations,
+    kernel_descriptor_words,
+    trace_mfma_operands,
+    unmasked_path_violations,
+    verified_key_tiles,
 )
 from .test_contracts import _fake_tuning_spec
 from .test_permutation_dense import _unresponsive
@@ -332,7 +349,8 @@ def test_bound_pinned_values_at_the_quick_shape(
     case: PermutationCase, residual: float, magnitude: float
 ) -> None:
     """Four 64-key tiles, sign-valued V. A change here is a change of the
-    derivation, never an adjustment to a measurement."""
+    derivation, never an adjustment to a measurement. The absolute budgets of
+    FP32 underflow are below the resolution of these values."""
     bound = _quick_bound(case)
     assert bound.keys == 256 and bound.key_tiles == 4 and bound.value_max == 1.0
     assert bound.residual == pytest.approx(residual, rel=1e-9)
@@ -382,13 +400,17 @@ def test_bound_grows_with_every_input_statistic() -> None:
     "override,match",
     [
         ({"keys": 1, "key_tiles": 1}, "at least two keys"),
+        ({"keys": 250}, "multiple of 8"),
         ({"key_tiles": 0}, "key_tiles"),
         ({"key_tiles": 257}, "key_tiles"),
         ({"value_max": 0.0}, "value_max"),
         ({"value_max": 4096.0}, "value_max"),
         ({"score_spread": -1.0}, "score_spread"),
         ({"score_spread": math.inf}, "score_spread"),
+        # (keys + key_tiles) u must stay below one, and the normalizer error
+        # below one, so that the computed normalizer is positive.
         ({"keys": 1 << 23, "key_tiles": 1}, "too many keys"),
+        ({"keys": 1 << 22, "key_tiles": 1}, "normalizer error bound"),
     ],
 )
 def test_bound_refuses_arguments_outside_its_derivation(override, match: str) -> None:
@@ -468,6 +490,85 @@ def test_score_spread_bound_covers_every_row_of_the_fixture(
         score_spread_bound(ones, ones, 0.0)
 
 
+def _log2e_enclosure() -> tuple[Fraction, Fraction]:
+    """Rationals below and above ``log2(e) = 1 / ln(2)``, from ``ln(2)``
+    correctly rounded to 50 digits."""
+    with localcontext() as context:
+        context.prec = 50
+        ln2 = Fraction(Decimal(2).ln())
+    slack = Fraction(1, 10**45)
+    return 1 / (ln2 + slack), 1 / (ln2 - slack)
+
+
+def _largest_squared_norm(values: np.ndarray) -> Fraction:
+    """Largest squared row norm, exactly. Each square is a multiple of 1/64 and
+    a row sum stays far below 2**53 of them, so FP64 adds them without error."""
+    squares = np.square(values.astype(np.float64))
+    assert np.array_equal(squares * 64.0, np.rint(squares * 64.0))
+    return Fraction(float(np.max(squares.sum(axis=-1))))
+
+
+# The certified spread of the quick fixture, in log2 units.
+_QUICK_SPREAD = 31.850582527868095
+
+
+def test_score_spread_bound_is_certified_from_above() -> None:
+    """The tolerance grows with the spread, so the host value must not fall
+    below the mathematical bound ``2 |q| |k| scale log2(e) (1 + 2**-20)``. The
+    comparison is between exact rationals: both sides squared, the norms from
+    exact sums, ``log2(e)`` from an enclosure the implementation does not use."""
+    case = PERMUTATION_SQUARE_FP16
+    q, k, _ = permutation_inputs(case)
+    scale = softmax_scale(case)
+    spread = score_spread_bound(q, k, scale)
+    log2e_low, log2e_high = _log2e_enclosure()
+    assert log2e_high <= _LOG2E_UPPER < log2e_low * (1 + Fraction(1, 10**15))
+
+    norms = _largest_squared_norm(q) * _largest_squared_norm(k)
+    factor = 2 * Fraction(scale) * (1 + Fraction(1, 2**20))
+    exact = norms * factor**2 * log2e_high**2
+    assert Fraction(spread) ** 2 >= exact
+    assert Fraction(spread) ** 2 < exact * (1 + Fraction(1, 10**9)) ** 2
+    # The value the quick bounds are evaluated at; the dtype does not enter.
+    assert spread == pytest.approx(_QUICK_SPREAD, rel=1e-12)
+    q_bf16, k_bf16, _ = permutation_inputs(PERMUTATION_SQUARE_BF16)
+    assert spread == score_spread_bound(q_bf16, k_bf16, scale)
+
+
+@pytest.mark.parametrize(
+    "value,match",
+    [
+        (0.3, "is not on the lattice"),
+        (1.0 / 16.0, "is not on the lattice"),
+        (3.125, "is not on the lattice"),
+        (math.inf, "is not finite"),
+        (math.nan, "is not finite"),
+    ],
+)
+def test_score_spread_bound_refuses_what_it_cannot_certify(
+    value: float, match: str
+) -> None:
+    """An input off the lattice has no exact norm here, so there is no spread
+    and no bound: the lane fails before it launches."""
+    case = PERMUTATION_SQUARE_FP16
+    q, k, v = permutation_inputs(case)
+    scale = softmax_scale(case)
+    for name in ("Q", "K"):
+        changed = {"Q": q.copy(), "K": k.copy()}
+        changed[name][0, 3, 1, 2] = value
+        with pytest.raises(ValueError, match=f"{name} {match}"):
+            score_spread_bound(changed["Q"], changed["K"], scale)
+        with pytest.raises(ValueError, match="cannot certify the score spread"):
+            permutation_case_bound(
+                case, changed["Q"], changed["K"], v, key_tiles=4, scale=scale
+            )
+    if not math.isfinite(value):
+        bad = v.copy()
+        bad[0, 3, 1, 2] = value
+        with pytest.raises(ValueError, match="V is not finite"):
+            permutation_case_bound(case, q, k, bad, key_tiles=4, scale=scale)
+
+
 # ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
@@ -536,6 +637,55 @@ def test_analyzer_rejects_invalid_and_oversized_outputs(case: PermutationCase) -
     # One representable step above one is still inside the guard.
     top = _constant_output(case, 1.0 + 2.0 ** -_FORMAT[case.dtype][0])
     assert not analyze_permutation(case, bound, top, top.copy()).violations
+
+
+@pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
+def test_analyzer_reports_drift_diagnostics_per_head(case: PermutationCase) -> None:
+    """Per (batch, query head): the largest and the root-mean-square residual
+    over the bound, the largest stored magnitude over the guard, and the count
+    of residuals beyond half the bound. None of them is a verdict."""
+    bound = _quick_bound(case)
+    base = _constant_output(case, 0.25)
+    inside = 2.0 ** math.floor(math.log2(bound.residual))
+    other = _with_value(base, (0, 17, 5, 33), 0.25 + inside, case.dtype)
+    other = _with_value(other, (0, 40, 5, 2), 0.25 - inside / 4.0, case.dtype)
+    result = analyze_permutation(case, bound, base, other)
+    assert not result.violations
+    assert [(item.batch, item.head) for item in result.slices] == [
+        (batch, head) for batch in range(case.batch) for head in range(case.nhead_q)
+    ]
+
+    size = case.seqlen_q * case.head_dim
+    moved = result.slices[5]
+    assert moved.max_ratio == inside / bound.residual and 0.5 < moved.max_ratio <= 1.0
+    assert moved.worst_coordinate == (17, 33) and moved.signed_at_worst == -inside
+    # Only the larger of the two residuals is beyond half the bound.
+    assert moved.half_count == 1
+    assert moved.rms_ratio == pytest.approx(
+        math.sqrt((inside**2 + (inside / 4.0) ** 2) / size) / bound.residual
+    )
+    assert moved.mean_signed == pytest.approx((-inside + inside / 4.0) / size)
+    assert moved.guard_ratio == (0.25 + inside) / bound.magnitude
+
+    still = result.slices[0]
+    assert still.max_ratio == still.rms_ratio == 0.0 and still.half_count == 0
+    assert still.mean_signed == 0.0 and still.guard_ratio == 0.25 / bound.magnitude
+
+    lines = format_slice_diagnostics(result).splitlines()
+    assert len(lines) == case.batch * case.nhead_q
+    assert lines[5].startswith(f"  b0:h5 r_max={moved.max_ratio:.3g} ")
+    assert "n_half=1 at q:d=17:33" in lines[5]
+
+    # The diagnostics do not replace the verdicts: a residual beyond the bound
+    # and a magnitude beyond the guard are still violations.
+    failing = analyze_permutation(
+        case, bound, base, _with_value(base, (0, 17, 5, 33), 1.5, case.dtype)
+    )
+    assert failing.slices[5].max_ratio > 1.0 and failing.slices[5].guard_ratio > 1.0
+    assert {item.split("=")[0].split(">")[0] for item in failing.violations} == {
+        "magnitude",
+        "residual",
+    }
 
 
 def test_analyzer_validates_its_inputs() -> None:
@@ -922,591 +1072,21 @@ def test_unresponsive_mutation_blames_failing_joint_permutations() -> None:
 # Lowered arithmetic path of the unmasked specifications
 # ---------------------------------------------------------------------------
 
-_REDERIVE = "re-derive the bound"
-
-# LLVM spells FP32 constants as the hex of the equivalent double.
-_F32_LOG2E = "0x3FF7154760000000"
-_F32_ONE = "0x3FF0000000000000"
-_F32_ZERO = "0x0000000000000000"
-_F32_INITIAL_MAX = "0xC6293E5940000000"  # -1e30
-
-_MFMA_ATOM = {
-    "fp16": "llvm.amdgcn.mfma.f32.32x32x8f16",
-    "bf16": "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
-}
-_CAST_TYPE = {"fp16": "half", "bf16": "bfloat"}
-_EXP2 = "llvm.amdgcn.exp2.f32"
-_MAXNUM = "llvm.maxnum.f32"
-_BPERMUTE = "llvm.amdgcn.ds.bpermute"
-_FP_FLAGS = ("fast", "contract", "afn", "reassoc", "nnan", "ninf", "nsz", "arcp")
-_FP_MODE_ATTRIBUTES = (
-    "denormal-fp-math",
-    "unsafe-fp-math",
-    "no-nans-fp-math",
-    "no-infs-fp-math",
-    "approx-func-fp-math",
-    "no-signed-zeros-fp-math",
-)
-_FP_TYPE = re.compile(r"\b(float|half|bfloat|double)\b")
-_INSTRUCTION = re.compile(r"^\s*(%[-\w.]+) = (.+)$")
-_VALUE = re.compile(r"%[-\w.]+")
-_CALLEE = re.compile(r"@([-\w.]+)\(")
-_DECLARE = re.compile(r"^declare (.+?) @([-\w.]+)\((.*)\)")
-_NO_OP_BITCAST = re.compile(r"bitcast (\S+(?: x \S+>)?) %[-\w.]+ to (\S+(?: x \S+>)?)$")
-
-
-@dataclass(frozen=True)
-class _Instruction:
-    name: str
-    opcode: str
-    text: str
-    operands: tuple[str, ...]
-
-
-def _parse(ir: str) -> dict[str, _Instruction]:
-    """Map each SSA name to its defining instruction. ``opcode`` is the first
-    word, or the callee for a call; ``operands`` are the SSA values it reads."""
-    instructions: dict[str, _Instruction] = {}
-    for line in ir.splitlines():
-        match = _INSTRUCTION.match(line)
-        if not match:
-            continue
-        name, text = match.groups()
-        if re.match(r"(?:tail |musttail |notail )?call ", text):
-            callee = _CALLEE.search(text)
-            opcode = callee.group(1) if callee else "call"
-            arguments = text[callee.end() :] if callee else text
-        else:
-            opcode = text.split()[0]
-            arguments = text[len(opcode) :]
-        instructions[name] = _Instruction(
-            name, opcode, text, tuple(_VALUE.findall(arguments))
-        )
-    return instructions
-
-
-def _classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Counter]:
-    """Classify every floating-point instruction of one lowered unmasked kernel
-    against the path the bound is derived for, and return the violations and
-    the per-step instruction counts.
-
-    The path, per key tile and lane: scores ``fmul(acc, scale * LOG2E)`` with no
-    mask; ``exp2(fsub(x, m_new))``; each probability feeds the normalizer chain
-    uncast and the PV operand through one ``fptrunc``; one ``alpha`` rescales
-    the normalizer and every accumulator element; the key-tile loop runs
-    ``seqlen_kv / block_n`` times; the epilogue is one ``fdiv 1.0, l`` and
-    ``fptrunc(fmul(o, rcp))``. No fast-math flag, ``!fpmath`` or floating-point
-    mode attribute may appear."""
-    violations: list[str] = []
-    counts: Counter = Counter()
-    instructions = _parse(ir)
-    uses: dict[str, list[_Instruction]] = {}
-    for instruction in instructions.values():
-        for operand in instruction.operands:
-            uses.setdefault(operand, []).append(instruction)
-
-    def source(name: str) -> str:
-        """Follow type-preserving ``bitcast`` copies."""
-        while name in instructions:
-            item = instructions[name]
-            no_op = _NO_OP_BITCAST.match(item.text)
-            if not (no_op and no_op.group(1) == no_op.group(2)):
-                break
-            name = item.operands[0]
-        return name
-
-    def opcode(name: str) -> str | None:
-        item = instructions.get(source(name))
-        return item.opcode if item else None
-
-    def users(name: str) -> list[_Instruction]:
-        found: list[_Instruction] = []
-        for user in uses.get(name, []):
-            if user.opcode == "bitcast" and source(user.name) == source(name):
-                found.extend(users(user.name))
-            else:
-                found.append(user)
-        return found
-
-    for line in ir.splitlines():
-        stripped = line.strip()
-        match = re.search(r"= (?:f\w+|call|select|phi) ((?:\w+ )*)", stripped)
-        if match and set(match.group(1).split()) & set(_FP_FLAGS):
-            violations.append(f"fast-math flags: {stripped}")
-        if "!fpmath" in stripped:
-            violations.append(f"!fpmath metadata: {stripped}")
-        if stripped.startswith("attributes #"):
-            for attribute in _FP_MODE_ATTRIBUTES:
-                if f'"{attribute}' in stripped:
-                    violations.append(f"FP mode attribute {attribute}: {stripped}")
-        declared = _DECLARE.match(stripped)
-        if declared:
-            returned, callee, arguments = declared.groups()
-            modeled = callee in (_EXP2, _MAXNUM, _MFMA_ATOM[dtype])
-            if not modeled and (
-                _FP_TYPE.search(returned) or _FP_TYPE.search(arguments)
-            ):
-                violations.append(f"unmodeled floating-point intrinsic @{callee}")
-
-    # Loop-carried state: the running maximum and the normalizer. No mask.
-    running_max = normalizer = None
-    for item in instructions.values():
-        zeroed = item.text.count("zeroinitializer") == 2
-        if item.opcode == "select" and _FP_TYPE.search(item.text) and not zeroed:
-            violations.append(f"float select on an unmasked path: {item.text}")
-        if item.opcode == "phi" and item.text.startswith("phi float"):
-            initial = re.findall(r"\[ (0x[0-9A-F]+),", item.text)
-            if initial == [_F32_INITIAL_MAX] and running_max is None:
-                running_max = item.name
-            elif initial == [_F32_ZERO] and normalizer is None:
-                normalizer = item.name
-            else:
-                violations.append(f"unmodeled float phi: {item.text}")
-    if running_max is None or normalizer is None:
-        violations.append("no loop-carried running maximum or normalizer")
-
-    # The key-tile loop visits every tile: kt in [0, seqlen_kv / block_n).
-    compares = [item for item in instructions.values() if item.opcode == "icmp"]
-    bound = None
-    if len(compares) == 1:
-        match = re.fullmatch(r"icmp slt i32 (%[-\w.]+), (%[-\w.]+)", compares[0].text)
-        if match:
-            counter, bound = instructions.get(match.group(1)), match.group(2)
-            start = re.match(
-                r"phi i32 \[ 0, %[-\w.]+ \], \[ (%[-\w.]+), ", counter.text
-            )
-            step = instructions.get(start.group(1)) if start else None
-            if step is None or step.text != f"add nsw i32 {counter.name}, 1":
-                violations.append(f"key-tile counter is not 0, 1, ...: {counter.text}")
-    if bound is None or instructions[bound].text != f"sdiv i32 %seqlen_kv, {block_n}":
-        violations.append(
-            f"key-tile loop bound is not seqlen_kv / {block_n}: "
-            f"{[item.text for item in compares]}"
-        )
-
-    scale = [
-        item.name
-        for item in instructions.values()
-        if item.text
-        in (f"fmul float %scale, {_F32_LOG2E}", f"fmul float {_F32_LOG2E}, %scale")
-    ]
-    if len(scale) != 1:
-        violations.append(f"expected one fmul(scale, LOG2E), found {len(scale)}")
-    reciprocal = [item for item in instructions.values() if item.opcode == "fdiv"]
-    if (
-        len(reciprocal) != 1
-        or not reciprocal[0].text.startswith(f"fdiv float {_F32_ONE}, %")
-        or source(reciprocal[0].operands[0]) != normalizer
-    ):
-        violations.append(
-            f"expected one fdiv 1.0, l; found {[item.text for item in reciprocal]}"
-        )
-    rcp = reciprocal[0].name if reciprocal else None
-
-    # exp2: a probability (normalizer fadd + one cast) or the rescale alpha.
-    probabilities: set[str] = set()
-    alphas: set[str] = set()
-    for item in instructions.values():
-        if item.opcode == "fsub" and {u.opcode for u in users(item.name)} != {_EXP2}:
-            violations.append(f"fsub not consumed by exp2 only: {item.text}")
-        if item.opcode != _EXP2:
-            continue
-        argument = instructions.get(source(item.operands[0]))
-        if argument is None or argument.opcode != "fsub":
-            violations.append(f"exp2 argument is not an fsub: {item.text}")
-        elif opcode(argument.operands[1]) != _MAXNUM:
-            violations.append(f"exp2 does not subtract the row maximum: {item.text}")
-        kinds = Counter(user.opcode for user in users(item.name))
-        if kinds == Counter({"fadd": 1, "fptrunc": 1}):
-            probabilities.add(item.name)
-        elif kinds and set(kinds) == {"fmul"}:
-            alphas.add(item.name)
-        else:
-            violations.append(f"exp2 with unmodeled uses {dict(kinds)}: {item.text}")
-    counts["exp2_probability"] = len(probabilities)
-    counts["exp2_alpha"] = len(alphas)
-
-    def element_of(name: str, producer: str) -> bool:
-        item = instructions.get(source(name))
-        return (
-            item is not None
-            and item.opcode == "extractelement"
-            and opcode(item.operands[0]) == producer
-        )
-
-    for item in instructions.values():
-        if item.opcode != "fmul" or item.name in scale:
-            continue
-        left, right = item.operands
-        if right in scale and element_of(left, _MFMA_ATOM[dtype]):
-            counts["score"] += 1
-        elif source(right) in alphas and source(left) == normalizer:
-            counts["rescale_normalizer"] += 1
-        elif source(right) in alphas and element_of(left, "phi"):
-            counts["rescale_accumulator"] += 1
-        elif right == rcp and {u.opcode for u in users(item.name)} == {"fptrunc"}:
-            counts["output_product"] += 1
-        else:
-            violations.append(f"unmodeled fmul: {item.text}")
-
-    # Normalizer: a lane chain of uncast probabilities from +0, the partner
-    # lane's sum, then l * alpha + tile sum.
-    chain: dict[str, int] = {}
-    shuffles: set[str] = set()
-    for item in instructions.values():
-        if item.opcode != "fadd":
-            continue
-        left, right = item.operands[0], item.operands[-1]
-        rescaled = instructions.get(source(left))
-        if source(right) in probabilities and (
-            item.text.startswith(f"fadd float {_F32_ZERO}, ") or source(left) in chain
-        ):
-            chain[item.name] = chain.get(source(left), 0) + 1
-        elif source(left) in chain and opcode(right) == "bitcast":
-            shuffles.add(item.name)
-            counts["lane_chain"] = chain[source(left)]
-            if opcode(instructions[source(right)].operands[0]) != _BPERMUTE:
-                violations.append(f"partner sum is not a lane shuffle: {item.text}")
-        elif (
-            rescaled is not None
-            and rescaled.opcode == "fmul"
-            and source(rescaled.operands[0]) == normalizer
-            and source(right) in shuffles
-        ):
-            counts["combine"] += 1
-            if normalizer not in {user.name for user in users(item.name)}:
-                violations.append(f"combine is not the next normalizer: {item.text}")
-        else:
-            violations.append(f"unmodeled fadd: {item.text}")
-    counts["shuffle"] = len(shuffles)
-
-    cast_type = _CAST_TYPE[dtype]
-    for item in instructions.values():
-        if item.opcode == "fpext":
-            violations.append(f"unmodeled fpext: {item.text}")
-        if item.opcode != "fptrunc":
-            continue
-        if not item.text.endswith(f" to {cast_type}"):
-            violations.append(f"cast to a type other than {cast_type}: {item.text}")
-        operand = instructions.get(source(item.operands[0]))
-        if operand is not None and operand.name in probabilities:
-            counts["cast_probability"] += 1
-        elif (
-            operand is not None and operand.opcode == "fmul" and rcp in operand.operands
-        ):
-            counts["cast_output"] += 1
-        else:
-            violations.append(f"unmodeled cast: {item.text}")
-
-    for item in instructions.values():
-        if item.opcode == _MFMA_ATOM[dtype]:
-            counts["mfma"] += 1
-            if not item.text.endswith("i32 0, i32 0, i32 0)"):
-                violations.append(f"MFMA with nonzero controls: {item.text}")
-    return violations, counts
-
-
-_INSERT = re.compile(
-    r"insertelement <(\d+) x \w+> (undef|%[-\w.]+), \w+ (%[-\w.]+), i32 (\d+)$"
-)
-_EXTRACT = re.compile(r"extractelement <\d+ x \w+> (%[-\w.]+), i32 (\d+)$")
-_LDS_FILL = re.compile(
-    r"call void @llvm\.amdgcn\.raw\.ptr\.buffer\.load\.lds\("
-    r"ptr addrspace\(8\) (%[-\w.]+), ptr addrspace\(3\) (%[-\w.]+),"
-)
-_LDS_ARRAY = re.compile(
-    r"getelementptr inbounds \[1 x \[(\d+) x \[(\d+) x \w+\]\]\], "
-    r"ptr addrspace\(3\) (@[-\w.]+|%[-\w.]+),"
-)
-_LDS_OFFSET = re.compile(
-    r"getelementptr inbounds i8, ptr addrspace\(3\) @[-\w.]+, i32 (\d+)$"
-)
-_LDS_BASE = re.compile(r"ptrtoint ptr addrspace\(3\) (@[-\w.]+|%[-\w.]+) to i64$")
-_BUFFER = "llvm.amdgcn.make.buffer.rsrc.p1"
-
-
-def _trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
-    """Trace every MFMA operand of one lowered unmasked kernel back to the
-    tensor it is loaded from, and measure every chain of MFMA calls.
-
-    The score chains start from a zero vector, multiply K tiles read from the K
-    region of the LDS by Q read from ``q_ptr``, and end in the 16 scores of a
-    lane. The value chains start from the accumulator rescaled by ``alpha``,
-    multiply V read from the V region of the LDS by the cast probabilities,
-    each of which enters every chain once, and end in the accumulator the loop
-    carries. The K region is filled from ``k_ptr`` only and the V region from
-    ``v_ptr`` only. Which token lands in which LDS row is index arithmetic and
-    is not traced; the relation itself tests it on the device."""
-    violations: list[str] = []
-    counts: Counter = Counter()
-    instructions = _parse(ir)
-    uses: dict[str, list[_Instruction]] = {}
-    for instruction in instructions.values():
-        for operand in instruction.operands:
-            uses.setdefault(operand, []).append(instruction)
-
-    def through(name: str) -> str:
-        """Follow every ``bitcast``, type-changing ones included."""
-        while name in instructions and instructions[name].opcode == "bitcast":
-            name = instructions[name].operands[0]
-        return name
-
-    def users(name: str) -> list[_Instruction]:
-        found: list[_Instruction] = []
-        for user in uses.get(name, []):
-            found.extend(users(user.name) if user.opcode == "bitcast" else [user])
-        return found
-
-    def elements(name: str) -> list[str] | None:
-        """The values at positions ``0..n-1`` of an ``insertelement`` chain."""
-        found: dict[int, str] = {}
-        width = None
-        name = through(name)
-        while name != "undef":
-            item = instructions.get(name)
-            match = _INSERT.match(item.text) if item else None
-            if match is None:
-                return None
-            width, index = int(match.group(1)), int(match.group(4))
-            if index in found:
-                return None
-            found[index] = through(match.group(3))
-            name = match.group(2)
-            if name != "undef":
-                name = through(name)
-        if width is None or sorted(found) != list(range(width)):
-            return None
-        return [found[index] for index in range(width)]
-
-    def scalar(name: str) -> str:
-        """Follow ``extractelement`` of an ``insertelement`` chain to the value."""
-        name = through(name)
-        while name in instructions:
-            match = _EXTRACT.match(instructions[name].text)
-            packed = elements(match.group(1)) if match else None
-            if packed is None or int(match.group(2)) >= len(packed):
-                break
-            name = packed[int(match.group(2))]
-        return name
-
-    def lds_offset(base: str) -> int | None:
-        """Byte offset of an LDS base inside the pool: the pool itself, or an
-        ``i8`` offset from it."""
-        if base.startswith("@"):
-            return 0
-        item = instructions.get(base)
-        match = _LDS_OFFSET.match(item.text) if item else None
-        return int(match.group(1)) if match else None
-
-    def loaded_from(name: str) -> tuple[str, object]:
-        """``("lds", (offset, bytes of the array))`` or ``("global", pointer)``
-        for a ``load``; ``("other", text)`` otherwise."""
-        item = instructions.get(through(name))
-        if item is None or item.opcode != "load" or not item.operands:
-            return ("other", name if item is None else item.text)
-        address = instructions.get(item.operands[0])
-        if address is None or address.opcode != "getelementptr":
-            return ("other", item.text)
-        if "ptr addrspace(3)" in item.text:
-            array = _LDS_ARRAY.match(address.text)
-            offset = lds_offset(array.group(3)) if array else None
-            if offset is None:
-                return ("other", address.text)
-            return ("lds", (offset, 2 * int(array.group(1)) * int(array.group(2))))
-        match = re.search(r"ptr addrspace\(1\) (%[-\w.]+),", address.text)
-        return ("global", match.group(1)) if match else ("other", address.text)
-
-    # Chains: an MFMA call continues the chain of its accumulator operand.
-    atom = _MFMA_ATOM[dtype]
-    calls = [item for item in instructions.values() if item.opcode == atom]
-    successor: dict[str, list[str]] = {}
-    starts: list[_Instruction] = []
-    for call in calls:
-        previous = through(call.operands[2])
-        if previous in instructions and instructions[previous].opcode == atom:
-            successor.setdefault(previous, []).append(call.name)
-        else:
-            starts.append(call)
-    chains: list[list[_Instruction]] = []
-    for start in starts:
-        chain = [start]
-        while len(successor.get(chain[-1].name, [])) == 1:
-            chain.append(instructions[successor[chain[-1].name][0]])
-        if successor.get(chain[-1].name):
-            violations.append(f"MFMA result feeds two MFMA calls: {chain[-1].text}")
-        chains.append(chain)
-    if sum(len(chain) for chain in chains) != len(calls):
-        violations.append("an MFMA call is in no chain that starts outside the MFMA")
-
-    probabilities = {
-        item.name
-        for item in instructions.values()
-        if item.opcode == "fptrunc"
-        and through(item.operands[0]) in instructions
-        and instructions[through(item.operands[0])].opcode == _EXP2
-    }
-    alphas = {
-        item.name
-        for item in instructions.values()
-        if item.opcode == _EXP2
-        and {user.opcode for user in users(item.name)} == {"fmul"}
-    }
-    k_region: set[tuple[int, int]] = set()
-    v_region: set[tuple[int, int]] = set()
-    packs_by_step: dict[int, set[tuple[str, ...]]] = {}
-    for chain in chains:
-        start = instructions.get(through(chain[0].operands[2]))
-        if start is not None and start.text.count("zeroinitializer") == 2:
-            # Score chain: K from the LDS times Q from q_ptr, from zero.
-            counts["score_chains"] += 1
-            counts[f"score_chain_length_{len(chain)}"] += 1
-            for call in chain:
-                kind, where = loaded_from(call.operands[0])
-                if kind == "lds":
-                    k_region.add(where)
-                else:
-                    violations.append(
-                        f"score MFMA does not read K from the LDS: {where}"
-                    )
-                if loaded_from(call.operands[1]) != ("global", "%q_ptr"):
-                    violations.append(
-                        f"score MFMA does not read Q from q_ptr: {call.text}"
-                    )
-            ends = users(chain[-1].name)
-            indices = sorted(
-                int(match.group(2))
-                for match in (_EXTRACT.match(user.text) for user in ends)
-                if match
-            )
-            if len(ends) != 16 or indices != list(range(16)):
-                violations.append(
-                    f"score chain does not end in the 16 scores of a lane: {chain[-1].text}"
-                )
-            continue
-
-        # Value chain: the rescaled accumulator, then V times cast probabilities.
-        carried = elements(chain[0].operands[2])
-        state = None
-        if carried is not None and len(carried) == 16:
-            sources = set()
-            for index, name in enumerate(carried):
-                product = instructions.get(name)
-                element = (
-                    _EXTRACT.match(instructions[through(product.operands[0])].text)
-                    if product is not None
-                    and product.opcode == "fmul"
-                    and through(product.operands[0]) in instructions
-                    else None
-                )
-                if (
-                    element is None
-                    or int(element.group(2)) != index
-                    or through(product.operands[1]) not in alphas
-                ):
-                    sources.add(None)
-                else:
-                    sources.add(through(element.group(1)))
-            if len(sources) == 1:
-                state = sources.pop()
-        loop_state = instructions.get(state) if state else None
-        if loop_state is None or not loop_state.text.startswith("phi <16 x float>"):
-            violations.append(
-                f"value chain does not start from the rescaled accumulator: {chain[0].text}"
-            )
-        elif chain[-1].name not in {through(name) for name in loop_state.operands}:
-            violations.append(
-                f"value chain does not end in the accumulator it started from: {chain[-1].text}"
-            )
-        counts["value_chains"] += 1
-        counts[f"value_chain_length_{len(chain)}"] += 1
-        for step, call in enumerate(chain):
-            rows = elements(call.operands[0])
-            if rows is None or len(rows) != 4:
-                violations.append(
-                    f"value MFMA operand is not four V elements: {call.text}"
-                )
-            else:
-                for row in rows:
-                    kind, where = loaded_from(scalar(row))
-                    if kind == "lds":
-                        v_region.add(where)
-                    else:
-                        violations.append(
-                            f"value MFMA does not read V from the LDS: {where}"
-                        )
-            pack = elements(call.operands[1])
-            if pack is None or len(pack) != 4 or not set(pack) <= probabilities:
-                violations.append(
-                    f"value MFMA operand is not four cast probabilities: {call.text}"
-                )
-            else:
-                packs_by_step.setdefault(step, set()).add(tuple(pack))
-
-    # Every cast probability enters every value chain exactly once, at the
-    # same step in each.
-    packed: list[str] = []
-    for step, packs in sorted(packs_by_step.items()):
-        if len(packs) != 1:
-            violations.append(
-                f"value chains disagree on the probabilities of atom {step}"
-            )
-        packed.extend(next(iter(packs)))
-    counts["probability_packs"] = len(packs_by_step)
-    if sorted(packed) != sorted(probabilities):
-        violations.append(
-            f"the value chains use {len(set(packed))} of {len(probabilities)} cast "
-            f"probabilities, {len(packed) - len(set(packed))} of them twice"
-        )
-
-    # The two LDS regions are disjoint: V starts where the K array ends.
-    k_offsets = {offset for offset, _ in k_region}
-    v_offsets = {offset for offset, _ in v_region}
-    k_bytes = {size for _, size in k_region}
-    if k_offsets != {0} or len(k_bytes) != 1 or v_offsets != k_bytes:
-        violations.append(
-            f"K is read at LDS offsets {sorted(k_offsets)} (array bytes "
-            f"{sorted(k_bytes)}) and V at {sorted(v_offsets)}"
-        )
-
-    def fill_offset(pointer: str) -> int | None:
-        """LDS region a fill writes: follow its address arithmetic to the
-        ``ptrtoint`` of the region's base."""
-        item = instructions.get(through(pointer))
-        while item is not None:
-            base = _LDS_BASE.match(item.text)
-            if base:
-                return lds_offset(base.group(1))
-            item = instructions.get(item.operands[0]) if item.operands else None
-        return None
-
-    # LDS fills: the K region from k_ptr only, the V region from v_ptr only.
-    for match in _LDS_FILL.finditer(ir):
-        buffer = instructions.get(match.group(1))
-        source = buffer.operands[0] if buffer and buffer.opcode == _BUFFER else None
-        offset = fill_offset(match.group(2))
-        if source == "%k_ptr" and offset in k_offsets:
-            counts["k_fills"] += 1
-        elif source == "%v_ptr" and offset in v_offsets and offset not in k_offsets:
-            counts["v_fills"] += 1
-        else:
-            violations.append(
-                f"LDS fill from {source} into the region at offset {offset}"
-            )
-    if not counts["k_fills"] or not counts["v_fills"]:
-        violations.append("no LDS fill of the K or of the V region")
-    return violations, counts
-
 
 @cache
-def _lowered_subject(arch: str, case: PermutationCase) -> tuple[str, object]:
-    """Lower one case's dispatch-resolved spec to LLVM IR text on the CPU."""
+def _lowered_subject(
+    arch: str, case: PermutationCase, llvm_flavor: str | None = None
+) -> tuple[str, object]:
+    """Lower one case's dispatch-resolved spec to LLVM IR text on the CPU, for
+    the host's compiler lane or for a named one."""
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     from kernels.gfx942.attention_dense import build_attention_dense
 
     assert arch == "gfx942", "the path check models the gfx942 dense body"
     spec = resolve_dense_subject(arch, case).tuning_spec.kernel_spec
-    return lower_kernel_to_llvm(build_attention_dense(spec, arch=arch), arch=arch), spec
+    kernel = build_attention_dense(spec, arch=arch)
+    return lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=llvm_flavor), spec
 
 
 @pytest.mark.parametrize(
@@ -1521,27 +1101,34 @@ def test_lowered_unmasked_path_is_the_one_the_bound_models(
     instruction outside it fails here: the bound is re-derived, never widened."""
     arch, case = subject_case
     ir, spec = _lowered_subject(arch, case)
-    violations, counts = _classify_unmasked_path(ir, case.dtype, spec.block_n)
-    assert not violations, f"{_REDERIVE}: " + "; ".join(violations)
+    violations, counts = classify_unmasked_path(ir, case.dtype, spec.block_n)
+    assert not violations, f"{REDERIVE}: " + "; ".join(violations)
+    assert counts == expected_path_counts(spec.block_n, spec.head_size)
 
-    # Two lane halves share a key tile; 16 accumulator elements per lane and
-    # 32-wide output tile; eight products per MFMA call.
-    lane_keys = spec.block_n // 2
-    output_elements = 16 * (spec.head_size // 32)
-    assert counts == {
-        "exp2_probability": lane_keys,
+
+def test_modeled_path_counts_at_the_shipped_tile() -> None:
+    """A 64-key tile and 64 output columns: two lane halves of 32 keys, 32
+    accumulator elements per lane, and eight products per MFMA call."""
+    assert expected_path_counts(64, 64) == {
+        "exp2_probability": 32,
         "exp2_alpha": 1,
-        "score": lane_keys,
-        "lane_chain": lane_keys,
+        "score": 32,
+        "lane_chain": 32,
         "shuffle": 1,
         "combine": 1,
         "rescale_normalizer": 1,
-        "rescale_accumulator": output_elements,
-        "cast_probability": lane_keys,
-        "output_product": output_elements,
-        "cast_output": output_elements,
-        "mfma": (spec.block_n // 32) * (spec.head_size // 8)
-        + (spec.head_size // 32) * (spec.block_n // 8),
+        "rescale_accumulator": 32,
+        "cast_probability": 32,
+        "output_product": 32,
+        "cast_output": 32,
+        "mfma": 32,
+    }
+    assert expected_chain_counts(64, 64) == {
+        "score_chains": 2,
+        "score_chain_length_8": 2,
+        "value_chains": 2,
+        "value_chain_length_8": 2,
+        "probability_packs": 8,
     }
 
 
@@ -1612,7 +1199,7 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
 )
 def test_path_check_rejects_each_unmodeled_change(edit, match: str) -> None:
     ir, spec = _lowered_subject("gfx942", PERMUTATION_SQUARE_FP16)
-    violations, _ = _classify_unmasked_path(edit(ir), "fp16", spec.block_n)
+    violations, _ = classify_unmasked_path(edit(ir), "fp16", spec.block_n)
     assert any(match in item for item in violations), violations
 
 
@@ -1629,19 +1216,11 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
     one value. This pins the chains and where their operands come from."""
     arch, case = subject_case
     ir, spec = _lowered_subject(arch, case)
-    violations, counts = _trace_mfma_operands(ir, case.dtype)
-    assert not violations, f"{_REDERIVE}: " + "; ".join(violations)
+    violations, counts = trace_mfma_operands(ir, case.dtype)
+    assert not violations, f"{REDERIVE}: " + "; ".join(violations)
     fills = {name: counts.pop(name) for name in ("k_fills", "v_fills")}
     assert all(fills.values()), fills
-    assert counts == {
-        # Two 32-key halves of a tile; head_size / 8 atoms of eight products.
-        "score_chains": spec.block_n // 32,
-        f"score_chain_length_{spec.head_size // 8}": spec.block_n // 32,
-        # One chain per 32 output columns; block_n / 8 atoms of eight keys.
-        "value_chains": spec.head_size // 32,
-        f"value_chain_length_{spec.block_n // 8}": spec.head_size // 32,
-        "probability_packs": spec.block_n // 8,
-    }
+    assert counts == expected_chain_counts(spec.block_n, spec.head_size)
 
 
 @pytest.mark.parametrize(
@@ -1659,7 +1238,8 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
         (
             # The V region is filled from K.
             _substitute_once(
-                r"(make\.buffer\.rsrc\.p1\(ptr addrspace\(1\) )%v_ptr", r"\1%k_ptr"
+                r"(make\.buffer\.rsrc\.[\w.]+\(ptr addrspace\(1\) )%v_ptr",
+                r"\1%k_ptr",
             ),
             "LDS fill from %k_ptr",
         ),
@@ -1701,8 +1281,132 @@ def test_lowered_mfma_operands_reach_the_stored_tensors(
 )
 def test_operand_trace_rejects_each_misrouted_operand(edit, match: str) -> None:
     ir, _ = _lowered_subject("gfx942", PERMUTATION_SQUARE_FP16)
-    violations, _ = _trace_mfma_operands(edit(ir), "fp16")
+    violations, _ = trace_mfma_operands(edit(ir), "fp16")
     assert any(match in item for item in violations), violations
+
+
+# ---------------------------------------------------------------------------
+# Artifact under test: tile count and floating-point mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "subject_case",
+    PERMUTATION_SUBJECT_CASES,
+    ids=lambda item: f"{item[0]}-{item[1].case_id}",
+)
+def test_key_tile_count_is_read_from_the_lowered_kernel(
+    subject_case: tuple[str, PermutationCase],
+) -> None:
+    """The bound's tile count comes from the kernel a launch compiles, after the
+    whole path check: the GPU lane calls this on the artifact before launching."""
+    arch, case = subject_case
+    ir, spec = _lowered_subject(arch, case)
+    shape = {"block_n": spec.block_n, "head_size": spec.head_size}
+    assert not unmasked_path_violations(ir, case.dtype, **shape)
+    tiles = verified_key_tiles(ir, case.dtype, seqlen_k=case.seqlen_k, **shape)
+    assert tiles == case.seqlen_k // spec.block_n
+    assert tiles == resolve_dense_subject(arch, case).key_tiles(case.seqlen_k)
+
+    # A kernel that visits half of the tiles, or a key count that is not whole
+    # tiles, has no verified count: the caller must not launch.
+    halved = ir.replace(
+        f"sdiv i32 %seqlen_kv, {spec.block_n}",
+        f"sdiv i32 %seqlen_kv, {2 * spec.block_n}",
+        1,
+    )
+    assert halved != ir
+    with pytest.raises(AssertionError, match="key-tile loop bound"):
+        verified_key_tiles(halved, case.dtype, seqlen_k=case.seqlen_k, **shape)
+    with pytest.raises(AssertionError, match="are not whole tiles"):
+        verified_key_tiles(ir, case.dtype, seqlen_k=case.seqlen_k + 8, **shape)
+    # The structure is part of the path: another tile size is another kernel.
+    with pytest.raises(AssertionError, match="counts"):
+        verified_key_tiles(
+            ir,
+            case.dtype,
+            seqlen_k=case.seqlen_k,
+            block_n=spec.block_n,
+            head_size=2 * spec.head_size,
+        )
+
+
+@pytest.mark.parametrize("llvm_flavor", LLVM_FLAVORS)
+@pytest.mark.parametrize(
+    "subject_case",
+    PERMUTATION_SUBJECT_CASES,
+    ids=lambda item: f"{item[0]}-{item[1].case_id}",
+)
+def test_path_checks_read_every_compiler_lane(
+    subject_case: tuple[str, PermutationCase], llvm_flavor: str
+) -> None:
+    """The IR text differs between compiler lanes, in intrinsic suffixes and
+    operand types; the modeled path does not. The GPU lane applies the checks
+    to whatever its compiler lane lowers, so they must read all of them."""
+    arch, case = subject_case
+    ir, spec = _lowered_subject(arch, case, llvm_flavor)
+    assert not unmasked_path_violations(
+        ir, case.dtype, block_n=spec.block_n, head_size=spec.head_size
+    )
+
+
+# compute_pgm_rsrc1 with both rounding fields nearest-even and both subnormal
+# fields "flush none", as the shipped dense kernels are compiled.
+_MODELED_MODE = 0x00AF0310
+
+
+def _code_object(name: str, word: int) -> bytes:
+    """A minimal ELF64 object with one 64-byte kernel descriptor ``<name>.kd``
+    whose ``compute_pgm_rsrc1`` is ``word``."""
+    strings = b"\0" + f"{name}.kd".encode() + b"\0"
+    descriptor = bytes(48) + struct.pack("<I", word) + bytes(12)
+    symbols = bytes(24) + struct.pack("<IBBHQQ", 1, 0x11, 0, 1, 0x1000, 64)
+    data_at = 64
+    symbols_at = data_at + len(descriptor)
+    strings_at = symbols_at + len(symbols)
+
+    def section(kind: int, address: int, offset: int, size: int, link=0, entry=0):
+        return struct.pack(
+            "<IIQQQQIIQQ", 0, kind, 0, address, offset, size, link, 0, 1, entry
+        )
+
+    sections = (
+        bytes(64)
+        + section(1, 0x1000, data_at, len(descriptor))
+        + section(2, 0, symbols_at, len(symbols), link=3, entry=24)
+        + section(3, 0, strings_at, len(strings))
+    )
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    struct.pack_into("<Q", header, 0x28, strings_at + len(strings))
+    struct.pack_into("<HH", header, 0x3A, 64, 4)
+    return bytes(header) + descriptor + symbols + strings + sections
+
+
+def test_fp_mode_is_read_from_the_kernel_descriptor() -> None:
+    """The bound assumes round-to-nearest-even with subnormals kept, for FP32
+    and for the 16-bit conversions. The mode is a property of the code object."""
+    modeled = _code_object("kernel", _MODELED_MODE)
+    assert kernel_descriptor_words(modeled) == {"kernel.kd": _MODELED_MODE}
+    assert not fp_mode_violations(modeled, "kernel")
+
+    toward_zero = _code_object("kernel", _MODELED_MODE | (3 << 12))
+    assert fp_mode_violations(toward_zero, "kernel") == [
+        "float_round_mode_32=3, expected 0 (compute_pgm_rsrc1=0x00af3310)"
+    ]
+    flushing = _code_object("kernel", _MODELED_MODE & ~(0xF << 16))
+    assert [item.split("=")[0] for item in fp_mode_violations(flushing, "kernel")] == [
+        "float_denorm_mode_32",
+        "float_denorm_mode_16_64",
+    ]
+    half_rounding = _code_object("kernel", _MODELED_MODE | (1 << 14))
+    assert len(fp_mode_violations(half_rounding, "kernel")) == 1
+
+    assert fp_mode_violations(modeled, "other") == [
+        "no kernel descriptor other.kd in the code object"
+    ]
+    with pytest.raises(ValueError, match="ELF64"):
+        kernel_descriptor_words(b"not a code object")
 
 
 # ---------------------------------------------------------------------------

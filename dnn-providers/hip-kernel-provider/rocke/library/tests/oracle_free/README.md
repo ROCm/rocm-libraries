@@ -270,14 +270,31 @@ The verdict is conditional on the assumptions listed below. A passing launch
 is consistent with the bound as a whole. It does not validate any single
 assumption, and no primitive-level check of them exists in this lane.
 
-`permutation_bound` evaluates it from the dtype, the key count, the key-tile
-count of the spec dispatch resolved, `max|V|`, and a bound on the spread of a
-row's scores taken from the row norms of Q and K. It reads no output, so a
-faulty kernel cannot widen its own tolerance, and it is not fitted to any
-measurement. The worst case needs the rounding of every weight to line up, so a
-correct kernel sits well inside the bound. The largest residual is reported as
-a fraction of the bound; a fraction that grows over time is a drift signal even
-while the test passes.
+`permutation_bound` evaluates it from the dtype, the key count, the number of
+key tiles a query row visits in the kernel under test, `max|V|`, and a bound on
+the spread of a row's scores taken from the row norms of Q and K. It reads no
+output, so a faulty kernel cannot widen its own tolerance, and it is not fitted
+to any measurement. The worst case needs the rounding of every weight to line
+up, so a correct kernel sits well inside the bound.
+
+The tolerance grows with the score spread, so the spread is certified from
+above, not estimated. Q and K are multiples of 1/8, so their squared row norms
+are exact integers; the product of the two largest norms is enclosed from above
+by an integer square root, the remaining factors are exact rationals with
+`log2(e)` replaced by a rational that is not below it, and the result is the
+first float that is not below that rational. `score_spread_bound` refuses inputs
+that are not finite or not on the lattice.
+
+FP32 results below the normal range carry absolute errors, not relative ones.
+They are kept apart from the relative terms and from the cast of the weight to
+the subject dtype: one budget each for the weights, the accumulator and the
+normalizer. At the quick shape all three are far below the resolution of the
+tolerance.
+
+The bound is derived for `max|V| > 0`, a key count that is a multiple of the
+eight products of an MFMA call, `(keys + key_tiles) * 2^-23 < 1`, and a
+normalizer error below one, which keeps the computed normalizer positive.
+`permutation_bound` refuses anything else.
 
 The bound holds for every single-pass dense variant, whatever its tile, grid,
 persistence or scheduling knobs, under these assumptions about the executed
@@ -286,13 +303,15 @@ path:
 - FP32 addition, multiplication and the reciprocal return one of the two FP32
   neighbours of their exact result;
 - each MFMA call returns its accumulator plus its eight products with an error
-  of at most eight FP32 units of the summed magnitudes of those nine terms. It
-  is not assumed to add them one by one: the gfx942 MFMA rounds once, after
-  aligning its terms, and its result need not be an FP32 neighbour of the exact
-  sum;
-- `exp2` is within one FP32 ULP;
-- the probability cast and the output store round to nearest even and keep
-  subnormals;
+  of at most eight FP32 units of the summed magnitudes of those nine terms.
+  This inequality is the whole assumption: the call is not assumed to add its
+  products one by one, nor to round their exact sum;
+- `exp2` is within one FP32 ULP where its exact value is a normal FP32 number,
+  and within `2^-126` below that range;
+- the probability cast and the output store round to nearest even and keep the
+  subnormals of the subject dtype;
+- no NaN or infinity enters the path: Q, K and V are finite, and so is every
+  score, weight and accumulator;
 - the normalizer sums uncast weights, the accumulator consumes cast ones, and
   both are rescaled by `exp2(m_old - m_new)` per key tile.
 
@@ -306,12 +325,36 @@ region by Q, the value chains start from the rescaled accumulator and multiply V
 from its LDS region by the cast weights, each weight enters every value chain
 once, and the chain lengths are `head_size / 8` and `block_n / 8`. An
 instruction or operand outside the path fails with "re-derive the bound"; the
-bound is never widened to absorb it. The rounding behaviour of the compiled code
-object (the other items) is not checked here.
+bound is never widened to absorb it.
 
-The MFMA item is a property of the hardware. An architecture whose FP16 MFMA
-reads operands below the smallest normal as zero does not satisfy it, so a new
-architecture needs that property established before its cases are added.
+The other items are assumptions about the hardware and the compiler. Of the
+compiled code object this suite reads only the floating-point mode; how each
+instruction rounds is not checked here. The MFMA item in particular is a
+property of the hardware: an architecture whose FP16 MFMA reads operands below
+the smallest normal as zero does not satisfy it, so a new architecture needs
+that property established before its cases are added.
+
+### Scope checked before a launch
+
+The bound holds for one path, one tile count and certified input statistics.
+The GPU lane establishes them for the kernel under test before it launches
+anything, and fails, never skips, when one is missing:
+
+- The resolved spec is the unmasked single-pass dense kernel (see below).
+- The kernel is compiled as the launcher compiles it, and the path checks above
+  run on the LLVM IR of that artifact, not on an earlier build.
+- The number of key tiles a query row visits is taken from that IR: one KV loop
+  over `seqlen_kv / block_n` whole tiles, with no mask and no early exit. A
+  count inferred from the requested shape alone is not used.
+- The kernel descriptor of the code object selects round-to-nearest-even and
+  keeps subnormals, for FP32 and for the 16-bit conversions.
+- Q, K and V are finite, Q and K are on the lattice, and the score spread is
+  certified from above.
+- Every map is a permutation of the key tokens, applied to whole token vectors
+  of K and V alike, in every batch element and KV head.
+
+The lane prints the SHA-256 of the code object and the compiler that produced
+it. Evidence gathered on one code object does not carry over to another digest.
 
 The subject adapter refuses the same specs as for the uniform lane (split-KV,
 sinks, LSE, ragged, bottom-right, paged, varlen) and additionally requires the
@@ -326,6 +369,20 @@ For every map, each of these is a hard violation:
 - a stored magnitude exceeds the largest output the inputs admit
   (`magnitude`); a blow-up both launches share would otherwise cancel;
 - `|O_A - O_B|` exceeds the bound at any coordinate (`residual`).
+
+For every map and every (batch, query head) the lane also prints four drift
+diagnostics. None of them is a verdict:
+
+| Diagnostic | Meaning |
+|---|---|
+| `r_max` | largest residual over the bound; the residual verdict is `r_max <= 1` everywhere |
+| `r_rms` | root-mean-square residual over the bound |
+| `r_guard` | largest stored magnitude of either output over the magnitude guard |
+| `n_half` | coordinates whose residual exceeds half the bound |
+
+The line also gives the coordinate and the signed residual at `r_max`, and the
+mean signed residual. Ratios that grow from one release to the next are a
+signal while the verdicts still pass.
 
 ### Pairing mutations
 
@@ -381,6 +438,11 @@ pairing defects are caught by the maps the group argument predicts. Further
 contracts check the stored residual of a single mispaired slot against the
 two-run formula above, and keep the three limits of the previous section as
 executable examples. The model lives only in those contracts.
+
+The same file certifies the score spread of the fixture against an exact
+rational bound, and applies the artifact checks of `_permutation_path.py` to the
+lowered quick kernels of every compiler lane and to edited copies that each
+check must reject.
 
 ## Oracle prohibition
 

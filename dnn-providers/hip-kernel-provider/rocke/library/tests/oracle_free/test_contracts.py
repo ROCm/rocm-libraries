@@ -1354,6 +1354,7 @@ sys.path[:0] = config["path"]
 package = config["package"]
 importlib.import_module(package + "._analytical")
 importlib.import_module(package + "._permutation")
+importlib.import_module(package + "._permutation_path")
 subject = importlib.import_module(package + "._dense_subject")
 importlib.import_module(package + ".test_analytical_dense")
 importlib.import_module(package + ".test_permutation_dense")
