@@ -87,20 +87,21 @@ TILES_MMA = {
     F5: {"pass": [(1, 4, 4, 2)]},
 }
 # Depthwise (one input and one output channel a group, cb = kb = 1), channels-first, every
-# architecture: a wave owns one channel's filter, its lanes along the output row.
+# architecture: a wave owns one channel's filter, its lanes along the output row. At least two
+# output columns a lane (the kernel's 16-bit windows are whole dwords).
 F5S2 = (5, 5, 2, 1, 2)
 F7 = (7, 7, 1, 1, 3)
 DW_TILES = {
     F3: {
-        "pass": [(1, 1, 1, 2), (1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 1, 4)],
-        "ring": [(1, 1, 1, 2), (1, 1, 2, 2), (1, 1, 4, 2)],
+        "pass": [(1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 8, 2), (1, 1, 2, 4)],
+        "ring": [(1, 1, 2, 2), (1, 1, 4, 2)],
     },
-    F3S2: {"pass": [(1, 1, 1, 2), (1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 1, 4)]},
+    F3S2: {"pass": [(1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 2, 4)]},
     F5: {
         "pass": [(1, 1, 2, 2), (1, 1, 4, 2)],
         "ring": [(1, 1, 2, 2), (1, 1, 4, 2)],
     },
-    F5S2: {"pass": [(1, 1, 1, 2), (1, 1, 2, 2), (1, 1, 1, 4)]},
+    F5S2: {"pass": [(1, 1, 2, 2), (1, 1, 4, 2)]},
     F7: {"pass": [(1, 1, 4, 2), (1, 1, 8, 2)], "ring": [(1, 1, 4, 2)]},
 }
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
