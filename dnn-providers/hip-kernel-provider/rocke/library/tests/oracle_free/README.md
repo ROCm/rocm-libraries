@@ -193,7 +193,8 @@ and no reference: the tolerance follows from the kernel's arithmetic path.
 The relation needs mask mode none. Under a causal or window mask the legal keys
 of a row depend on the token index that the map moves. The gfx942 dense kernel
 serves unmasked attention only at `seqlen_q == seqlen_k` with whole tiles, so
-the cases are square.
+the cases are square. A case needs more than 16 key tokens, so that every map
+the lane applies exists.
 
 ### Inputs
 
@@ -228,13 +229,25 @@ The 16-token span is a boundary of the test, not the kernel's tile size.
 `partial_final_tile` needs a ragged key length, which the whole-tile gfx942
 kernel does not take; the quick cases run the other four.
 
-`adjacent_swap` closes a gap the other maps leave. A kernel that pairs the
-score of key `j` with the value of key `sigma(j)` satisfies the relation under a
-map exactly when `sigma` commutes with that map. The shifts and the reverse
+`adjacent_swap` closes a gap the other maps leave. Take a kernel that pairs the
+score of key slot `j` with the value of slot `f(j)`, for a fixed map `f` that
+does not depend on the inputs. It satisfies the relation under a map for all
+inputs exactly when `f` commutes with that map. The shifts and the reverse
 generate a dihedral group, and for even `Sk` the shift by `Sk / 2` commutes with
 all of it: a value read half a sequence away from its key would pass every one
 of them. No nontrivial shift commutes with the adjacent swap, so with it the
-only such pairing that passes every map is the correct one.
+only fixed pairing that satisfies every map for all inputs is the correct one.
+The argument needs at least three tokens: with two, the three maps are one
+exchange, and exchanging the two values commutes with it.
+
+That is a statement in exact arithmetic. On a faulty kernel the lane measures
+the difference of two faulty runs, `sum_i P_i (V[f(i)] - V[g(i)])` with
+`g = map o f o map^-1`, not the distance to a correct output. A defect in slot
+`a` contributes at key `a` in the base run and at the key sitting in slot `a` in
+the permuted run, and the two contributions can add or cancel. Each stored run
+is within the per-run bound of its own exact value, so a defect is certain to
+fail only when that exact difference exceeds twice the tolerance at some
+coordinate.
 
 ### Bound
 
@@ -252,6 +265,10 @@ summation order. Each launch's stored output is within `per_run` of the ideal
 
 For the quick shape (256 keys in four tiles, `max|V| = 1`) the tolerance is
 `2.14e-3` in FP16 and `1.58e-2` in BF16.
+
+The verdict is conditional on the assumptions listed below. A passing launch
+is consistent with the bound as a whole. It does not validate any single
+assumption, and no primitive-level check of them exists in this lane.
 
 `permutation_bound` evaluates it from the dtype, the key count, the key-tile
 count of the spec dispatch resolved, `max|V|`, and a bound on the spread of a
@@ -316,10 +333,21 @@ reports their violations as the diagnosis.
 
 ### What the relation cannot see
 
-A defect applied identically to both launches cancels. A wrong scale, a wrong
-KV-head routing, a wrong output placement or any fixed transformation of the
-output satisfies the identity. The uniform-probability lane and the pinned SDPA
-lane cover those.
+- A defect applied identically to both launches cancels. A wrong scale, a wrong
+  KV-head routing, a wrong output placement or any fixed transformation of the
+  output satisfies the identity. The uniform-probability lane and the pinned
+  SDPA lane cover those.
+- A fixed pairing defect whose difference stays below the tolerance. On rows
+  where one key holds nearly all the probability, a single mispaired slot among
+  the others moves the BF16 output by less than the tolerance and passes every
+  map; the FP16 tolerance rejects the same defect.
+- A wrong pairing that is chosen from the inputs and is carried along by every
+  permutation, for example "the value of the highest-scoring key". It satisfies
+  every joint permutation and responds to every mutation.
+
+What a pass shows is therefore limited: no fixed, input-independent pairing
+defect moved this fixture's outputs by more than twice the tolerance under any
+applied map.
 
 ### Cases
 
@@ -337,8 +365,10 @@ The CPU contracts in `test_permutation_contracts.py` exercise the analyzer on
 an FP32 model of the kernel's single-pass online softmax: the modeled joint
 permutations stay inside the bound, on the fixture and on rows with a late or
 dominant maximum; the modeled mutations leave it in every head; and two modeled
-pairing defects are caught by the maps the group argument predicts. The model
-lives only in those contracts.
+pairing defects are caught by the maps the group argument predicts. Further
+contracts check the stored residual of a single mispaired slot against the
+two-run formula above, and keep the three limits of the previous section as
+executable examples. The model lives only in those contracts.
 
 ## Oracle prohibition
 

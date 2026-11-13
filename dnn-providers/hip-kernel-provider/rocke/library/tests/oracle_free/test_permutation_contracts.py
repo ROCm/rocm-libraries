@@ -153,11 +153,13 @@ def _commuting(pairings: np.ndarray, source: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("seqlen_k", [6, 7, 8])
 def test_quick_maps_leave_no_pairing_permutation_undetected(seqlen_k: int) -> None:
-    """A kernel that pairs the score of key ``j`` with the value of key
-    ``sigma(j)`` satisfies the relation under a map exactly when ``sigma``
-    commutes with it. The shifts and the reverse generate a dihedral group whose
-    even-length centralizer still holds the half-sequence shift; the adjacent
-    swap leaves only the identity."""
+    """A kernel that pairs the score of key slot ``j`` with the value of slot
+    ``sigma(j)``, for a fixed ``sigma``, satisfies the relation under a map for
+    all inputs exactly when ``sigma`` commutes with it. The shifts and the
+    reverse generate a dihedral group whose even-length centralizer still holds
+    the half-sequence shift; the adjacent swap leaves only the identity. This is
+    a statement in exact arithmetic about fixed slot maps: whether one fixture
+    shows a given defect beyond the bound is a separate question."""
     pairings = np.array(list(itertools.permutations(range(seqlen_k))))
     dihedral = _commuting(pairings, token_map("shift_one", seqlen_k)) & _commuting(
         pairings, token_map("reverse", seqlen_k)
@@ -184,6 +186,20 @@ def test_shift_and_swap_leave_no_pairing_map_undetected(seqlen_k: int) -> None:
     }
     separated = shifts & _commuting(pairings, token_map("adjacent_swap", seqlen_k))
     assert {tuple(row) for row in pairings[separated]} == {tuple(index)}
+
+
+def test_two_tokens_are_outside_the_separation_argument() -> None:
+    """With two tokens the three maps are one exchange, and exchanging the two
+    values commutes with it: that pairing defect passes every map. A case must
+    therefore have more than two tokens, and the lane requires more than 16."""
+    exchange = token_map("shift_one", 2)
+    assert np.array_equal(exchange, token_map("reverse", 2))
+    assert np.array_equal(exchange, token_map("adjacent_swap", 2))
+    pairings = np.array(list(itertools.product(range(2), repeat=2)))
+    survivors = {tuple(row) for row in pairings[_commuting(pairings, exchange)]}
+    assert survivors == {(0, 1), (1, 0)}
+    with pytest.raises(ValueError, match="more than 16 key tokens"):
+        PermutationCase(1, 4, 2, 2, 2, 8, "fp16").require_scope()
 
 
 def test_quick_maps_hold_the_separating_set() -> None:
@@ -271,10 +287,13 @@ def test_case_scope_refuses_what_the_bound_does_not_cover() -> None:
     for case in PERMUTATION_QUICK_CASES:
         case.require_scope()
         assert case.mask == "none" and case.window == 0
-    with pytest.raises(ValueError, match="one key token"):
-        PermutationCase(1, 4, 1, 2, 2, 8, "fp16").require_scope()
+    # Every quick map must exist; cross_tile needs more than 16 key tokens.
+    for seqlen_k in (1, 2, CANONICAL_SPAN):
+        with pytest.raises(ValueError, match="more than 16 key tokens"):
+            PermutationCase(1, 4, seqlen_k, 2, 2, 8, "fp16").require_scope()
+    PermutationCase(1, 4, CANONICAL_SPAN + 1, 2, 2, 8, "fp16").require_scope()
     with pytest.raises(ValueError, match="exact in FP32"):
-        PermutationCase(1, 4, 4, 2, 2, 1 << 15, "fp16").require_scope()
+        PermutationCase(1, 4, 32, 2, 2, 1 << 15, "fp16").require_scope()
     with pytest.raises(ValueError, match="multiple of nhead_k"):
         PermutationCase(1, 4, 4, 3, 2, 8, "fp16")
     with pytest.raises(ValueError, match="dtype must be one of"):
@@ -389,6 +408,43 @@ def _head_scores(
         q[0, :, head, :].astype(np.float64) @ k[0, :, kv_head, :].astype(np.float64).T
     )
     return products * (softmax_scale(case) * _LOG2E)
+
+
+def _ideal_weights(
+    case: PermutationCase, q: np.ndarray, k: np.ndarray, *, head: int
+) -> np.ndarray:
+    """Normalized ideal weights ``[Sq, Sk]`` of one query head of batch 0:
+    ``exp2(s - max)`` on the FP32 scores, evaluated in FP64."""
+    kv_head = head // (case.nhead_q // case.nhead_k)
+    products = (
+        q[0, :, head, :].astype(np.float64) @ k[0, :, kv_head, :].astype(np.float64).T
+    )
+    scale = np.float32(np.float32(softmax_scale(case)) * np.float32(_LOG2E))
+    scores = (products.astype(np.float32) * scale).astype(np.float64)
+    weights = np.exp2(scores - scores.max(axis=1, keepdims=True))
+    return weights / weights.sum(axis=1, keepdims=True)
+
+
+def _exact_defect_residual(
+    case: PermutationCase,
+    inputs: tuple[np.ndarray, np.ndarray, np.ndarray],
+    pairing: np.ndarray,
+    source: np.ndarray,
+) -> np.ndarray:
+    """Exact-arithmetic residual ``[Sq, Hq, D]`` between the base and the
+    permuted run of a kernel with the fixed pairing defect ``pairing``:
+    ``sum_i P_i (V[pairing[i]] - V[conjugated[i]])``, where ``conjugated`` is
+    ``source o pairing o source^-1``."""
+    q, k, v = inputs
+    conjugated = source[pairing[np.argsort(source)]]
+    group = case.nhead_q // case.nhead_k
+    residual = np.empty(case.output_shape[1:], dtype=np.float64)
+    for head in range(case.nhead_q):
+        values = v[0, :, head // group, :].astype(np.float64)
+        residual[:, head, :] = _ideal_weights(case, q, k, head=head) @ (
+            values[pairing] - values[conjugated]
+        )
+    return residual
 
 
 @pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
@@ -520,21 +576,25 @@ def _model_dense_run(
     *,
     block_n: int = _MODEL_BLOCK_N,
     value_token_offset: int = 0,
+    pairing: np.ndarray | None = None,
 ) -> np.ndarray:
     """Model one launch: per KV tile the running maximum, ``exp2(s - m)`` in FP32,
     the normalizer over uncast weights, the accumulator over weights cast to the
     subject dtype, both rescaled by ``exp2(m_old - m_new)``; then one reciprocal
     and one output conversion.
 
-    ``value_token_offset`` models a pairing defect: the score of key ``j`` meets
-    the value of key ``j + offset``."""
+    ``pairing`` models a fixed pairing defect: the score of key slot ``j`` meets
+    the value of slot ``pairing[j]``. ``value_token_offset`` is the cyclic case
+    ``pairing[j] = j + offset``."""
     out = np.empty(case.output_shape, dtype=np.uint16)
     group = case.nhead_q // case.nhead_k
     qk_scale = np.float32(np.float32(softmax_scale(case)) * np.float32(_LOG2E))
+    if pairing is None:
+        pairing = (np.arange(case.seqlen_k) + value_token_offset) % case.seqlen_k
     for batch in range(case.batch):
         for head in range(case.nhead_q):
             keys = k[batch, :, head // group, :].astype(np.float64)
-            values = np.roll(v[batch, :, head // group, :], -value_token_offset, axis=0)
+            values = v[batch, :, head // group, :][pairing]
             scores = (q[batch, :, head, :].astype(np.float64) @ keys.T).astype(
                 np.float32
             ) * qk_scale
@@ -567,6 +627,7 @@ def _model_pair(
     *,
     block_n: int = _MODEL_BLOCK_N,
     value_token_offset: int = 0,
+    pairing: np.ndarray | None = None,
     inputs: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> PermutationResult:
     """Model a base launch and a transformed one and analyze the pair against
@@ -580,7 +641,11 @@ def _model_pair(
         key_tiles=-(-case.seqlen_k // block_n),
         scale=softmax_scale(case),
     )
-    settings = {"block_n": block_n, "value_token_offset": value_token_offset}
+    settings = {
+        "block_n": block_n,
+        "value_token_offset": value_token_offset,
+        "pairing": pairing,
+    }
     base = _model_dense_run(case, q, k, v, **settings)
     other = _model_dense_run(
         case, q, permute_tokens(k, key_map), permute_tokens(v, value_map), **settings
@@ -657,6 +722,135 @@ def test_modeled_adversarial_rows_stay_inside_their_bound(
         PairingMutation.KEY_ONLY, PERMUTATION_MUTATION_MAP, case.seqlen_k
     )
     assert not _model_pair(case, key_map, value_map, inputs=inputs).unresponsive_heads
+
+
+def _single_slot_defect(case: PermutationCase) -> np.ndarray:
+    """A fixed pairing defect in one slot: key slot 5 meets the value of slot
+    200. Every other slot is paired correctly."""
+    pairing = np.arange(case.seqlen_k)
+    pairing[5] = 200
+    return pairing
+
+
+def _stored_residual(
+    case: PermutationCase,
+    inputs: tuple[np.ndarray, np.ndarray, np.ndarray],
+    pairing: np.ndarray,
+    source: np.ndarray,
+) -> np.ndarray:
+    """Stored base-minus-permuted residual ``[Sq, Hq, D]`` of the modeled kernel
+    with the pairing defect."""
+    q, k, v = inputs
+    base = _model_dense_run(case, q, k, v, pairing=pairing)
+    other = _model_dense_run(
+        case, q, permute_tokens(k, source), permute_tokens(v, source), pairing=pairing
+    )
+    return (decode_bits(base, case.dtype) - decode_bits(other, case.dtype))[0]
+
+
+@pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
+def test_fixed_pairing_defect_residual_follows_the_conjugated_map(
+    case: PermutationCase,
+) -> None:
+    """What the relation measures on a faulty kernel is the difference of two
+    faulty runs, not the distance to a correct output. A defect in slot ``a``
+    moves key ``a`` in the base run and the key that sits in slot ``a`` in the
+    permuted run; the two contributions add or cancel. The stored residual is
+    within the bound of that exact residual, so a defect is certainly visible
+    only when its exact residual exceeds twice the bound."""
+    inputs = permutation_inputs(case)
+    bound = _quick_bound(case)
+    pairing = _single_slot_defect(case)
+    values = inputs[2][0].astype(np.float64)
+    for kind in PERMUTATION_QUICK_MAPS:
+        source = token_map(kind, case.seqlen_k)
+        conjugated = source[pairing[np.argsort(source)]]
+        moved = np.flatnonzero(pairing != conjugated).tolist()
+        exact = _exact_defect_residual(case, inputs, pairing, source)
+        stored = _stored_residual(case, inputs, pairing, source)
+        assert np.max(np.abs(stored - exact)) <= bound.residual
+        result = _model_pair(case, source, source, pairing=pairing)
+        if kind is TokenMap.ADJACENT_SWAP:
+            # Slots 5 and 200 are fixed by this map: the defect commutes with it.
+            assert moved == [] and not np.any(exact)
+            assert not result.violations
+            continue
+        assert moved == sorted({5, int(source[5])})
+        assert np.max(np.abs(exact)) > 2.0 * bound.residual
+        assert result.violations, (kind.value, format_permutation_result(result))
+        if kind is TokenMap.SHIFT_ONE:
+            # Head 0: the base-run term alone, against the two-term residual.
+            first = _ideal_weights(case, inputs[0], inputs[1], head=0)[:, 5:6] * (
+                values[200, 0] - values[5, 0]
+            )
+            assert np.any(np.abs(exact[:, 0]) < np.abs(first))
+            assert np.any(np.abs(exact[:, 0]) > np.abs(first))
+
+
+def test_pairing_defect_on_low_weight_keys_stays_inside_the_bound() -> None:
+    """The limit of the relation. On rows where one key holds nearly all the
+    probability, the same single-slot defect moves the BF16 output by less than
+    the bound under every map and passes; the FP16 bound is tight enough to
+    reject it."""
+    for case, visible in (
+        (PERMUTATION_SQUARE_BF16, False),
+        (PERMUTATION_SQUARE_FP16, True),
+    ):
+        inputs = _ADVERSARIAL_INPUTS["dominant-late-key"](case)
+        pairing = _single_slot_defect(case)
+        for kind in (TokenMap.SHIFT_ONE, TokenMap.REVERSE, TokenMap.CROSS_TILE):
+            source = token_map(kind, case.seqlen_k)
+            result = _model_pair(case, source, source, pairing=pairing, inputs=inputs)
+            exact = np.max(
+                np.abs(_exact_defect_residual(case, inputs, pairing, source))
+            )
+            assert exact > 0.0
+            assert bool(result.violations) == visible, (case.dtype, kind.value)
+            assert (exact > 2.0 * result.bound) == visible
+
+
+def _argmax_value_outputs(
+    case: PermutationCase, q: np.ndarray, k: np.ndarray, v: np.ndarray
+) -> np.ndarray:
+    """Outputs of a kernel that returns the value of each row's highest-scoring
+    key, averaged over ties: a pairing that depends on the inputs and moves with
+    them. Breaking ties by slot index instead would not move with them."""
+    out = np.empty(case.output_shape, dtype=np.float32)
+    group = case.nhead_q // case.nhead_k
+    for head in range(case.nhead_q):
+        scores = _head_scores(case, q, k, head=head)
+        best = (scores == scores.max(axis=1, keepdims=True)).astype(np.float64)
+        values = v[0, :, head // group, :].astype(np.float64)
+        out[0, :, head, :] = (best @ values) / best.sum(axis=1, keepdims=True)
+    return _store(out, case.dtype)
+
+
+@pytest.mark.parametrize("case", PERMUTATION_QUICK_CASES, ids=_case_id)
+def test_equivariant_pairing_defect_is_outside_the_relation(
+    case: PermutationCase,
+) -> None:
+    """The separation argument covers fixed slot maps only. A wrong pairing that
+    is chosen from the inputs and is carried along by every permutation, here
+    "the value of the highest-scoring key", satisfies every joint permutation
+    exactly and responds to every mutation: the lane passes it."""
+    q, k, v = permutation_inputs(case)
+    bound = _quick_bound(case)
+    base = _argmax_value_outputs(case, q, k, v)
+    for kind in PERMUTATION_QUICK_MAPS:
+        source = token_map(kind, case.seqlen_k)
+        other = _argmax_value_outputs(
+            case, q, permute_tokens(k, source), permute_tokens(v, source)
+        )
+        result = analyze_permutation(case, bound, base, other)
+        assert not result.violations and result.max_abs == 0.0
+    for mutation in PairingMutation:
+        key_map, value_map = mutated_token_maps(
+            mutation, PERMUTATION_MUTATION_MAP, case.seqlen_k
+        )
+        other = _argmax_value_outputs(
+            case, q, permute_tokens(k, key_map), permute_tokens(v, value_map)
+        )
+        assert not analyze_permutation(case, bound, base, other).unresponsive_heads
 
 
 @pytest.mark.parametrize("mutation", list(PairingMutation))

@@ -121,10 +121,17 @@ class PermutationCase:
         )
 
     def require_scope(self) -> None:
-        """Refuse a case the bound's derivation does not cover."""
-        if self.seqlen_k < 2:
+        """Refuse a case the lane's maps or the bound's derivation do not cover.
+
+        Every quick map must exist, and ``cross_tile`` needs more than
+        ``CANONICAL_SPAN`` key tokens. That also keeps the case away from the
+        short lengths where the maps coincide: with two tokens ``shift_one``,
+        ``reverse`` and ``adjacent_swap`` are one map, and exchanging the two
+        values commutes with it."""
+        if self.seqlen_k <= CANONICAL_SPAN:
             raise ValueError(
-                f"case {self.case_id} has one key token; a permutation needs two"
+                f"case {self.case_id} needs more than {CANONICAL_SPAN} key tokens "
+                "for the lane's map set"
             )
         if self.head_dim * _LATTICE_LIMIT**2 > 1 << 24:
             raise ValueError(
