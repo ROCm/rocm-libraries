@@ -1060,7 +1060,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # Reject output with no tensor-count gate; otherwise missing patterns pass vacuously.
     if not any(DCP_TENSORCNT_RE.match(l) for l in lines):
-      self.states.overflowedResources = 11
+      self.setOverflowedResources(kernel, 11)
       return "".join(lines)
 
     uncovered = dcpThickGateUncoveredSites(lines, marker, relaxed, accepted)
@@ -1069,7 +1069,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           "%s: uncovered decoupled-PGR thick wait for %s (%d/%d LDS blocks): %s"
           % (getattr(self.states, "kernelName", "?"), thickTc, numLdsBlkA, numLdsBlkB,
              "; ".join("line %d %s" % (i, why) for i, why in uncovered)))
-      self.states.overflowedResources = 11
+      self.setOverflowedResources(kernel, 11)
     return "".join(lines)
 
   ##############################################################################
@@ -1980,7 +1980,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               vacancy["items"].add(localRead)
               localReadItemsThisLoop.remove(localRead)
               if vacancy["atMfmaIndex"] > self.states.sync1LdsMfmaIndex and oneBufferScheduling:
-                self.states.overflowedResources = 5
+                self.setOverflowedResources(kernel, 5)
               # update waitCnt
               if self.states.numItersPLR:
                 for readsIter in range(vacancy["atIter"], iteration + self.states.numItersPLR):
@@ -2168,7 +2168,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # If DTLA and DTLB we can ignore this, since the global reads will be scheduled following
           # the local reads, and there is an lgkmcnt(0) to wait for the remaining local reads
           if not ((iteration == isBarrier - 1) and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
-            self.states.overflowedResources = 5
+            self.setOverflowedResources(kernel, 5)
         for j in range(readLeft):
           if localReadItemsThisLoop:
             item = localReadItemsThisLoop.pop(0)
@@ -11457,6 +11457,64 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def checkResources(self, kernel, mkb) -> None:
     pass
 
+  @abc.abstractmethod
+  def printRejectionReason(self, kernel, mkb=None, afterAllocation: bool = False) -> None:
+    """Print why overflowedResources rejects the kernel (PrintSolutionRejectionReason only)."""
+    pass
+
+  def _rejectStaticVgprOverflow(self, kernel) -> None:
+    """Stop before generating a kernel whose static VGPR allocation already exceeds MaxVgpr.
+
+    _initKernel creates the VGPR pool with the static allocation and the pool only grows, so
+    checkResources is certain to reject the kernel (overflowedResources 1, "too many vgprs")
+    after the whole kernel has been generated. Raise the same error now instead, unless
+    ForceGenerateKernel asks for the source anyway.
+
+    Not under force-apply register allocation (mode 3): there the pool estimate is only a
+    proposal, which deferRegisterOverflowForAllocation reopens and allocation may still fit.
+    """
+    if self.debugConfig.forceGenerateKernel:
+      return
+    if self.vgprPool.size() <= self.states.regCaps["MaxVgpr"]:
+      return
+    if self.stinkyTofuRegisterAllocationMode(kernel) >= 3:
+      return
+    self.setOverflowedResources(kernel, 1)
+
+  def setOverflowedResources(self, kernel, code: int) -> None:
+    """Reject the kernel with overflowedResources `code` and stop generating it."""
+    self.states.overflowedResources = code
+    self.stopOnOverflowedResources(kernel)
+
+  def _overflowAwaitsAllocation(self, kernel) -> bool:
+    """Whether the recorded overflow is a register budget proposal that register allocation
+    still has to settle (see KernelWriterAssembly.deferRegisterOverflowForAllocation)."""
+    return False
+
+  def stopOnOverflowedResources(self, kernel, mkb=None, afterAllocation: bool = False) -> None:
+    """Stop generating a kernel once overflowedResources is set.
+
+    _getKernelSource rejects every kernel that ends with a code set, so the rest of the kernel
+    would usually be generated only to be discarded. Raise the same error now instead, unless
+    ForceGenerateKernel asks for the source anyway, or the code is a register budget verdict
+    that allocation may still clear. A code set during an emission whose states
+    a later restore discards (the ReuseAcrossPersistent fill copy, rapRestoreEmitterState; the
+    earlier AdaptiveGemmNTAB bodies, _restoreNtabState) used to be dropped; it now rejects
+    the kernel too.
+
+    mkb and afterAllocation are printRejectionReason's.
+    """
+    if not self.states.overflowedResources:
+      return
+    # Under force-apply allocation a register budget verdict is raised, like the others, when
+    # code generation ends (a verdict allocation already ruled on included).
+    if self._overflowAwaitsAllocation(kernel):
+      return
+    if self.debugConfig.forceGenerateKernel:
+      return
+    self.printRejectionReason(kernel, mkb, afterAllocation)
+    raise RuntimeError("Generating kernel source resulted in error {}".format(self.states.overflowedResources))
+
   ##############################################################################
   # Global Read Addresses: Work-Group
   ##############################################################################
@@ -12453,11 +12511,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         guard[4].update(tokens)
 
     if unsafeBarriers:
-      self.states.overflowedResources = 10
       if self.debugConfig.printSolutionRejectionReason:
         for tokens, why in unsafeBarriers:
           printWarning("%s: no workgroup-wide LDS-barrier position for tokens %s: %s"
                        % (self.states.kernelName, tokens, why))
+      self.setOverflowedResources(kernel, 10)
       return
 
     # Two transitions relocated to the same point want one barrier, not two
@@ -12477,10 +12535,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     ambiguousOwners = sorted({owner.name for ownerId, (owner, _entries)
                               in barriersByOwner.items() if ownerId in aliasedModules})
     if ambiguousOwners:
-      self.states.overflowedResources = 10
       if self.debugConfig.printSolutionRejectionReason:
         printWarning("%s: no workgroup-wide LDS-barrier position; modules %s occur multiple times"
                      % (self.states.kernelName, ambiguousOwners))
+      self.setOverflowedResources(kernel, 10)
       return
 
     for owner, entries in barriersByOwner.values():
@@ -12697,6 +12755,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     tensorParametersA = {}
     tensorParametersB = {}
     self._initKernel(kernel, tensorParametersA, tensorParametersB)
+    self._rejectStaticVgprOverflow(kernel)
+    # _initKernel only records a rejection (subtile LDS layout), so that validating a solution
+    # with _initKernel alone (ductile) does not raise; stop here instead.
+    self.stopOnOverflowedResources(kernel)
 
     self._registerKernelArgs(kernel)
     gridX = "TilesXYBatchGSU"
