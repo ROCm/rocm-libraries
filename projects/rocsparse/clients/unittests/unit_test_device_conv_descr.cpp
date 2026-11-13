@@ -593,7 +593,8 @@ namespace
         none,
         host,
         device,
-        device_batched
+        device_batched,
+        host_batched
     };
 
     constexpr int64_t M = 5, N = 4;
@@ -632,6 +633,8 @@ namespace
         {{col, M, B, M * N}, {col, M, B, M * N}, Alpha::device_batched},
         {{col, M, 1, 0}, {col, M, B, M * N}, Alpha::host},
         {{row, N, 1, 0}, {col, M, 1, 0}, Alpha::host},
+        // A host alpha uses its first value for every batch, whatever its batch count.
+        {{col, M, B, M * N}, {col, M, B, M * N}, Alpha::host_batched},
     };
     // clang-format on
 
@@ -658,7 +661,8 @@ namespace
 
         const T        sentinel = make_val<T>(-99, 99);
         std::vector<T> halpha;
-        for(int b = 0; b < (kind == Alpha::device_batched ? dst.batch : kind != Alpha::none); ++b)
+        const bool     batched = kind == Alpha::device_batched || kind == Alpha::host_batched;
+        for(int b = 0; b < (batched ? dst.batch : kind != Alpha::none); ++b)
             halpha.push_back(make_val<T>(2 + b, 1));
 
         DevBuf<T> dsrc(hsrc), ddst(std::vector<T>(layout_size(dst), sentinel)), dalpha(halpha);
@@ -673,7 +677,7 @@ namespace
         Dnvec alpha;
         if(kind != Alpha::none)
         {
-            const bool  host = kind == Alpha::host;
+            const bool  host = kind == Alpha::host || kind == Alpha::host_batched;
             T*          dev  = dalpha;
             const void* ptr  = host ? static_cast<const void*>(halpha.data()) : dev;
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(handle,
@@ -685,7 +689,7 @@ namespace
                                                           nullptr,
                                                           nullptr),
                       st_ok);
-            if(kind == Alpha::device_batched)
+            if(batched)
             {
                 ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, dst.batch, 1), st_ok);
             }
@@ -790,6 +794,17 @@ namespace
                   st_ok);
         EXPECT_EQ(copy(alpha_double, src, dst_row), rocsparse_status_not_implemented);
         EXPECT_EQ(copy(alpha, src, dst_row), st_val);
+        // A scalar batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_val);
     }
 
     TEST_F(ConvDescr, DnmatTransposeInvalid)
@@ -855,6 +870,17 @@ namespace
         EXPECT_EQ(transpose(alpha, src, dst), st_val);
         // The same checks when the orders differ.
         EXPECT_EQ(transpose(alpha_double, src, dst_row), rocsparse_status_not_implemented);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
+        // A scalar batch count of one is broadcast only with a zero stride.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 0), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 1, 1), st_ok);
         EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
     }
 } // namespace

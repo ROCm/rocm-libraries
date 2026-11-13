@@ -50,13 +50,17 @@ extern "C" {
  *  as \f$X\f$, stored in the order of \f$Y\f$.
  *
  *  \p alpha is not a plain scalar but a dense vector descriptor, so that a batched copy can use
- *  a different scaling factor for each batch. Only the first value of each batch of \p alpha is
- *  read. To scale by a single value, create \p alpha with \ref rocsparse_dnvec_descr_create_scalar,
- *  which records whether the value is in host or device memory. To scale each batch by its own
- *  value, create \p alpha with \ref rocsparse_create_dnvec_descr over device memory and set its
- *  batch count and batch stride with \ref rocsparse_dnvec_set_strided_batch; the factor of batch
- *  \f$k\f$ is then the value at offset \f$k\f$ times the batch stride. The pointer mode of the
- *  handle does not apply to \p alpha.
+ *  a different scaling factor for each batch. The factor of batch \f$k\f$ is the single value at
+ *  index \f$k\f$ times the batch stride. Values that are not at those indices are not read. For
+ *  example, the device values \f$1, 2, 3, 4\f$ with a batch count of 4 and a batch stride of 1
+ *  scale the four batches by \f$1\f$, \f$2\f$, \f$3\f$, and \f$4\f$. A batch stride greater than
+ *  1 skips the entries between those indices. A batch stride of 0 uses the value at index 0 for
+ *  every batch. To scale by a single value, create \p alpha with
+ *  \ref rocsparse_dnvec_descr_create_scalar, which records whether the value is in host or device
+ *  memory. To scale each batch by its own value, create \p alpha with
+ *  \ref rocsparse_create_dnvec_descr over device memory and set its batch count and batch stride
+ *  with \ref rocsparse_dnvec_set_strided_batch. The pointer mode of the handle does not apply to
+ *  \p alpha.
  *
  *  \p rocsparse_dnmat_copy_data supports strided batched computation. The number of batches
  *  \f$b\f$ is the batch count of \f$Y\f$, and for \f$k = 0, 1, \ldots, b - 1\f$ there are four
@@ -73,11 +77,11 @@ extern "C" {
  *  same matrix or factor for every batch; otherwise the batch count must be \f$b\f$:
  *
  *  <table>
- *  <tr><th>Batch mode                    <th>Batch count of X   <th>Batch stride of X <th>Batch count of alpha <th>Batch stride of alpha
- *  <tr><td>Y_k = alpha_k * X_k</td>      <td>b</td>             <td>any</td>          <td>b</td>               <td>any</td>
- *  <tr><td>Y_k = alpha_k * X</td>        <td>1</td>             <td>0</td>            <td>b</td>               <td>any</td>
- *  <tr><td>Y_k = alpha * X_k</td>        <td>b</td>             <td>any</td>          <td>1</td>               <td>0</td>
- *  <tr><td>Y_k = alpha * X</td>          <td>1</td>             <td>0</td>            <td>1</td>               <td>0</td>
+ *  <tr><th>Batch mode                        <th>Batch count of \f$X\f$ <th>Batch stride of \f$X\f$ <th>Batch count of \f$\alpha\f$ <th>Batch stride of \f$\alpha\f$
+ *  <tr><td>\f$Y_k = \alpha_k \cdot X_k\f$</td><td>\f$b\f$</td>           <td>any</td>                <td>\f$b\f$</td>                 <td>any</td>
+ *  <tr><td>\f$Y_k = \alpha_k \cdot X\f$</td>  <td>\f$1\f$</td>           <td>\f$0\f$</td>            <td>\f$b\f$</td>                 <td>any</td>
+ *  <tr><td>\f$Y_k = \alpha \cdot X_k\f$</td>  <td>\f$b\f$</td>           <td>any</td>                <td>\f$1\f$</td>                 <td>\f$0\f$</td>
+ *  <tr><td>\f$Y_k = \alpha \cdot X\f$</td>    <td>\f$1\f$</td>           <td>\f$0\f$</td>            <td>\f$1\f$</td>                 <td>\f$0\f$</td>
  *  </table>
  *
  *  A null \p alpha behaves like a factor of one in every batch. When \p alpha is in host memory
