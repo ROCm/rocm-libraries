@@ -254,38 +254,17 @@ jobs:
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
 
       # Optional dnn-benchmarking workload graphs (workloads/*.tar.gz.dvc, see
-      # dnn-providers/integration-tests/docs/running-tests.md). Configure extracts whatever
-      # was pulled, so this MUST also precede configure. This lane builds on a
-      # runner with no GPU and does not execute the workloads, so what it proves
-      # is that the pinned pointers can be fetched and the archives extract. On a
-      # GPU machine, run them with the workloads category
-      # (`ctest -L workloads`); the `full` category excludes them.
-      # This runs on the nightly schedule and on manual runs, and on a PR only
-      # when it changes the pinned pointers.
-      - name: Select dnn-benchmarking workloads
-        id: workloads
+      # dnn-providers/integration-tests/docs/running-tests.md). This runner has no
+      # GPU, so the lane only checks that pinned pointers a pull request changes
+      # fetch and extract; the script skips the pull when they are unchanged.
+      # Configure extracts whatever was pulled, so this MUST precede configure.
+      - name: Fetch dnn-benchmarking workloads
+        if: github.event_name == 'pull_request'
         env:
-          EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          fetch=true
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
-            if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              fetch=false
-            fi
-          fi
-          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch dnn-benchmarking workloads
-        if: steps.workloads.outputs.fetch == 'true'
-        run: |
-          set -euo pipefail
-          dvc pull --recursive dnn-providers/integration-tests/workloads
-          count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
-          test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
-          echo "Fetched $count workload archive(s)"
+          "$VENV_PYTHON" .github/scripts/fetch_dnn_workloads.py --base-sha "$BASE_SHA"
 
       # The gfx950 dgrad AOT instance lists are DVC-tracked too (same `ingestor`
       # remote), and hipdnn_ingestor_generator_pytest reads them straight from
@@ -582,30 +561,14 @@ jobs:
           echo "Fetched $count rocKE KDP(s)"
 
       # Optional dnn-benchmarking workload graphs. See the Windows lane above.
-      - name: Select dnn-benchmarking workloads
-        id: workloads
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          fetch=true
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 --filter=blob:none origin "$BASE_SHA"
-            if [ -z "$(git diff --name-only "$BASE_SHA" HEAD -- dnn-providers/integration-tests/workloads)" ]; then
-              fetch=false
-            fi
-          fi
-          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
-
       - name: Fetch dnn-benchmarking workloads
-        if: steps.workloads.outputs.fetch == 'true'
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LOGNAME: github-runner
         run: |
           set -euo pipefail
-          LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/workloads
-          count=$(find dnn-providers/integration-tests/workloads -name '*.tar.gz' | wc -l)
-          test "$count" -gt 0 || { echo "dvc pull produced no workload archives" >&2; exit 1; }
-          echo "Fetched $count workload archive(s)"
+          "$VENV_PYTHON" .github/scripts/fetch_dnn_workloads.py --base-sha "$BASE_SHA"
 
       # Same reasoning as the Windows lane: the gfx950 dgrad AOT instance lists
       # are DVC-tracked (same `ingestor` remote), and hipdnn_ingestor_generator_pytest

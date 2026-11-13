@@ -665,28 +665,12 @@ MIOpen share takes about 30 minutes, which alone fills TheRock's 30-minute
 provider job. MIOpen's category runs `conv`, `bnorm` and `rocke_conv`;
 hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
 `ctest -L workloads` in that provider's build. `attn`, `norm`, `moe` and
-`rocke_sdpa` are not in any engine's category yet. The superbuild CI builds on a
-runner with no GPU, so it only proves the pointers fetch and the archives
-extract.
+`rocke_sdpa` are not in any engine's category yet.
 
-To run the category on GPU runners in CI, start **TheRock Multi-Arch CI**
-(`therock-multi-arch-ci.yml`) by hand with a `test_filter:workloads`
-label:
-
-```bash
-gh workflow run therock-multi-arch-ci.yml --repo ROCm/rocm-libraries --ref develop \
-  -f pr_labels=test:miopenprovider,test:hipblasltprovider,test_filter:workloads \
-  -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none
-```
-
-On a manual run, a `test_filter:` label sets the test category; only the
-components that opt in to `workloads` in TheRock
-(`miopenprovider`, `hipblasltprovider`) run it. Pull requests, pushes and the
-nightly schedule never select it. TheRock accepts `workloads` only from
-the TheRock commit that adds it (ROCm/TheRock#9312); with an older TheRock pin
-the run stops in setup with `Unrecognized test_filter value`. A manual run
-shares a concurrency group with the push run for the same commit, so the later
-run cancels the earlier one. Start it after that commit's push run finishes.
+The superbuild CI fetches the archives and extracts them only on pull requests
+that change `workloads/`. Its runners have no GPU, so it proves only that the
+pointers fetch and the archives extract. No CI job runs the `workloads`
+category on a GPU yet; ROCm/TheRock#9959 discusses where it should run.
 
 hipBLASLt matmul graphs verify on the GPU reference (`GpuMatmulPlan`). On gfx90a
 the 578 `hipblaslt_*` graphs took about 4 minutes. `HIPBLASLT_ENGINE.toml` skips
