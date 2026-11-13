@@ -320,6 +320,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level2_ell_sell.cpp
   # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
   unit_test_internal_level2_bsrxmv_grid.cpp
+  # csrsv analysis and solve chunk loops on a forced grid.x clamp [AISPARSE-931]
+  unit_test_internal_level2_csrsv_grid_x_chunk.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
