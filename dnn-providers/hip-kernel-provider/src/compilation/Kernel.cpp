@@ -19,6 +19,7 @@ namespace hip_kernel_provider::compilation
 Kernel::Kernel(const Program& program, const std::string& kernelName)
     : _kernelName(kernelName)
     , _kernel(program.getKernel(kernelName))
+    , _deviceOrdinal(program.deviceOrdinal())
 {
 }
 

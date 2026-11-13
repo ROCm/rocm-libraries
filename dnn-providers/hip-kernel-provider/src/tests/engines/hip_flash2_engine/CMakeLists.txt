@@ -5,4 +5,5 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestFlash2Dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHipFlash2Engine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHipFlash2FwdPlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestHipFlash2KernelResolver.cpp
 )

@@ -300,6 +300,14 @@ using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;
 
 using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
 
+/// Runs a case on the current device and then, in the same process, on a second device of
+/// the same architecture under a handle of its own. The provider's module caches are
+/// process-wide and every device has its own HIP context, so the second device's plan must
+/// load that device's modules rather than be handed the first device's.
+class IntegrationGpuSdpaBwdSecondDeviceBf16 : public SdpaBackward<bfloat16>
+{
+};
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
@@ -343,4 +351,28 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdFp16,
+                         testing::ValuesIn(getSdpaBwdTestCases()));
+
+TEST_P(IntegrationGpuSdpaBwdSecondDeviceBf16, Correctness)
+{
+    const int peer = peerDeviceOfSameArch();
+    if(peer < 0)
+    {
+        GTEST_SKIP() << "needs a second device of the current device's architecture";
+    }
+
+    // The BF16 bound of IntegrationGpuSdpaBwdBf16.Correctness; see the rationale there.
+    constexpr float K_TOLERANCE = 5e-1f;
+    runGraphTest(K_TOLERANCE);
+    if(IsSkipped() || HasFailure())
+    {
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(rebindToDevice(peer));
+    runGraphTest(K_TOLERANCE);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaBwdSecondDeviceBf16,
                          testing::ValuesIn(getSdpaBwdTestCases()));

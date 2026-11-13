@@ -15,13 +15,16 @@ class Program;
 class Kernel : public IRunnableKernel
 {
 public:
-    /// Carried by Program-sourced kernels, which launch on whatever device is current: a
-    /// Program loads its module without binding and HipMlopsModuleCache keys on (file,
-    /// options) with no ordinal, so one Program is legitimately shared across every device.
-    /// Remembering an ordinal here would pin every launch to whichever device compiled
-    /// first; giving that cache a device is ALMIOPEN-2550's job.
+    /// Carried by a kernel that names no device and launches on whatever device is
+    /// current. Every constructor below names one; the value remains for callers that
+    /// share it as "no device".
     static constexpr int NO_DEVICE = -1;
 
+    /// Resolves @p kernelName from @p program. Launches rebind to the device the program
+    /// was loaded on, like any other device-bound kernel. A program that must follow the
+    /// launch device instead is served by DeviceResolvedKernel.
+    ///
+    /// The caller must keep @p program alive for this Kernel's lifetime.
     Kernel(const Program& program, const std::string& kernelName);
 
     /// Wraps a function handle resolved elsewhere -- by a kpack archive's module rather

@@ -2,10 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaFwdPlanBuilder.hpp"
-#include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
 #include "plans/SdpaFwdPlan.hpp"
+#include "plans/SdpaKernelResolvers.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
@@ -211,33 +212,6 @@ static bool hasAiterCompatibleRaggedAddressing(
     return true;
 }
 
-static bool isMi308Device(hipStream_t stream)
-{
-    // Seeded, not left indeterminate: a concrete stream's hipStreamGetDevice query can
-    // report hipSuccess without writing the out-parameter. Default tokens query the
-    // current device; either path must produce an ordinal.
-    int deviceId = -1;
-    auto status = hipdnn_plugin_sdk::getDeviceFromStream(stream, &deviceId);
-    if(status != hipSuccess || deviceId < 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "Stream device query produced no device ordinal, error code: " + std::to_string(status)
-                + ", ordinal: " + std::to_string(deviceId));
-    }
-    int chipId;
-    status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "hipDeviceGetAttribute failed with error code: " + std::to_string(status));
-    }
-
-    HIPDNN_PLUGIN_LOG_INFO("pciDeviceID  = " << std::hex << std::to_string(chipId));
-    return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
-}
-
 // True when the SDPA attributes request stats (LSE) output.
 // Shared by isApplicable and buildPlan so the predicate never drifts.
 static bool hasStatsOutput(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
@@ -327,23 +301,6 @@ static bool wouldFwdByteStridesFitUint32(
     }
 
     return ok;
-}
-
-static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
-{
-    if(archId == "gfx942")
-    {
-        auto pos = coName.rfind('/');
-        if(isMi308)
-        {
-            coName = coName.substr(0, pos + 1) + "MI308/" + coName.substr(pos + 1);
-        }
-        else
-        {
-            coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
-        }
-    }
-    return asm_kernels::getAsmKernelTocKey(coName);
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -723,7 +680,9 @@ void SdpaFwdPlanBuilder::buildPlan(
             "SdpaFwdPlanBuilder::buildPlan: failed to query device string");
     }
     const std::string& deviceString = *deviceStringOpt;
-    const bool isMi308 = isMi308Device(handle.getStream());
+    // The device the plan is built under; execute() resolves its own from the handle it
+    // is given, by the same rule.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(handle.getStream());
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
@@ -916,21 +875,14 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
-    // Load kernel module from kpack archive
-    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
+    // Load the kernel for the build device now, so a kernel that cannot load fails the
+    // build rather than the first execute, and that execute is a memo hit. Another device
+    // of this architecture loads its own module on first use.
+    auto kernels = std::make_unique<SdpaFwdKernelResolver>(
+        moduleCache(), deviceString, config.co_name, config.knl_name);
+    kernels->forOrdinal(deviceOrdinal);
 
-    HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
-
-    auto kernel = moduleCache().getOrLoad(tocKey, deviceString, config.knl_name.c_str());
-    if(!kernel)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel tocKey='" + tocKey + "' arch='"
-                + deviceString + "'");
-    }
-
-    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));
+    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernels), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(

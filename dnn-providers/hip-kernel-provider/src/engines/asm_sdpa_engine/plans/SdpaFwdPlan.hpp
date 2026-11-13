@@ -6,7 +6,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "SdpaFwdParams.hpp"
-#include "SdpaModuleCache.hpp"
+#include "SdpaKernelResolvers.hpp"
 #include "core/Handle.hpp"
 
 #include <memory>
@@ -21,9 +21,12 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     /**
-     * @brief Construct a plan with kernel module and precomputed metadata.
+     * @brief Construct a plan with its per-device kernels and precomputed metadata.
+     *
+     * @p kernels answers for the device each execute() runs on; plan build seeds it
+     * with the build device's module.
      */
-    SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params);
+    SdpaFwdPlan(std::unique_ptr<SdpaFwdKernels> kernels, SdpaFwdParams params);
 
     ~SdpaFwdPlan() override = default;
 
@@ -31,7 +34,8 @@ public:
     SdpaFwdPlan(const SdpaFwdPlan&) = delete;
     SdpaFwdPlan& operator=(const SdpaFwdPlan&) = delete;
 
-    // Move operations (defaulted — HipModuleGuard handles resource cleanup)
+    // Move operations (defaulted — the resolver is held by pointer, HipModuleGuard
+    // handles resource cleanup)
     SdpaFwdPlan(SdpaFwdPlan&&) noexcept = default;
     SdpaFwdPlan& operator=(SdpaFwdPlan&&) noexcept = default;
 
@@ -43,7 +47,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    CachedModule _kernel;
+    std::unique_ptr<SdpaFwdKernels> _kernels;
     SdpaFwdParams _params;
 };
 

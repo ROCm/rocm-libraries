@@ -5,7 +5,9 @@
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Utils.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
 #include "plans/SdpaBwdPlan.hpp"
+#include "plans/SdpaKernelResolvers.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <algorithm>
@@ -1009,6 +1011,9 @@ void SdpaBwdPlanBuilder::buildPlan(
             "SdpaBwdPlanBuilder::buildPlan: failed to query device string");
     }
     const std::string& deviceString = *deviceStringOpt;
+    // The device the plan is built under; execute() resolves its own from the handle it
+    // is given, by the same rule.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(handle.getStream());
 
     // -------------------------------------------------------------------------
     // 1. Extract SDPA backward attributes and tensor metadata from graph
@@ -1277,40 +1282,21 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     // 5. Load kernel modules for resolved stages (from kpack archive)
     // -------------------------------------------------------------------------
-    auto odoKernel
-        = moduleCache().getOrLoad(odoResolved.tocKey, deviceString, odoResolved.knlName.c_str());
-    if(!odoKernel)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaBwdPlanBuilder::buildPlan: failed to load odo kernel tocKey='" + odoResolved.tocKey
-                + "' arch='" + deviceString + "'");
-    }
-
-    auto dqdkdvKernel = moduleCache().getOrLoad(
-        dqdkdvResolved.tocKey, deviceString, dqdkdvResolved.knlName.c_str());
-    if(!dqdkdvKernel)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaBwdPlanBuilder::buildPlan: failed to load dqdkdv kernel tocKey='"
-                + dqdkdvResolved.tocKey + "' arch='" + deviceString + "'");
-    }
-
-    std::optional<CachedModule> postKernel;
+    // Loaded for the build device now, so a kernel that cannot load fails the build
+    // rather than the first execute, and that execute is a memo hit. Another device of
+    // this architecture loads its own modules on first use.
+    std::optional<SdpaKernelRef> postRef;
     if(dqConvertResolved)
     {
-        auto loaded = moduleCache().getOrLoad(
-            dqConvertResolved->tocKey, deviceString, dqConvertResolved->knlName.c_str());
-        if(!loaded)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel tocKey='"
-                    + dqConvertResolved->tocKey + "' arch='" + deviceString + "'");
-        }
-        postKernel = std::move(loaded);
+        postRef = SdpaKernelRef{dqConvertResolved->tocKey, dqConvertResolved->knlName};
     }
+    auto kernels = std::make_unique<SdpaBwdKernelResolver>(
+        moduleCache(),
+        deviceString,
+        SdpaKernelRef{odoResolved.tocKey, odoResolved.knlName},
+        SdpaKernelRef{dqdkdvResolved.tocKey, dqdkdvResolved.knlName},
+        std::move(postRef));
+    kernels->forOrdinal(deviceOrdinal);
 
     // -------------------------------------------------------------------------
     // 6. Build params and create plan
@@ -1383,16 +1369,7 @@ void SdpaBwdPlanBuilder::buildPlan(
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 
-    if(postKernel)
-    {
-        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-            std::move(odoKernel), std::move(dqdkdvKernel), std::move(*postKernel), params));
-    }
-    else
-    {
-        executionContext.setPlan(
-            std::make_unique<SdpaBwdPlan>(std::move(odoKernel), std::move(dqdkdvKernel), params));
-    }
+    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(std::move(kernels), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(

@@ -103,6 +103,13 @@ protected:
     }
 };
 
+/// Runs a case on the current device and then, in the same process, on a second device of
+/// the same architecture under a handle of its own. Every device has its own HIP context,
+/// so the second device's plan must load that device's module.
+class IntegrationGpuHipFlash2ForwardSecondDevice : public IntegrationGpuHipFlash2Forward
+{
+};
+
 std::vector<Flash2TestConfig> getFlash2TestConfigs()
 {
     // K3: all seq_q must be multiples of 64
@@ -125,6 +132,31 @@ TEST_P(IntegrationGpuHipFlash2Forward, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuHipFlash2Forward,
+                         testing::ValuesIn(getFlash2TestConfigs()),
+                         [](const testing::TestParamInfo<Flash2TestConfig>& info) {
+                             return info.param.name;
+                         });
+
+TEST_P(IntegrationGpuHipFlash2ForwardSecondDevice, Correctness)
+{
+    const int peer = peerDeviceOfSameArch();
+    if(peer < 0)
+    {
+        GTEST_SKIP() << "needs a second device of the current device's architecture";
+    }
+
+    runFlash2Test(1e-2f);
+    if(IsSkipped() || HasFailure())
+    {
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(rebindToDevice(peer));
+    runFlash2Test(1e-2f);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuHipFlash2ForwardSecondDevice,
                          testing::ValuesIn(getFlash2TestConfigs()),
                          [](const testing::TestParamInfo<Flash2TestConfig>& info) {
                              return info.param.name;

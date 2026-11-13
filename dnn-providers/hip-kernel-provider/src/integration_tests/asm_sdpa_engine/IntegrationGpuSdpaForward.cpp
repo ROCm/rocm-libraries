@@ -172,6 +172,14 @@ protected:
 
 using IntegrationGpuSdpaFwdBf16 = IntegrationSdpaFwd<bfloat16>;
 
+/// Runs a case on the current device and then, in the same process, on a second device of
+/// the same architecture under a handle of its own. The provider's module caches are
+/// process-wide and every device has its own HIP context, so the second device's plan must
+/// load that device's modules rather than be handed the first device's.
+class IntegrationGpuSdpaFwdSecondDeviceBf16 : public IntegrationSdpaFwd<bfloat16>
+{
+};
+
 /**
  * @brief Test fixture for shape-sweep tests parameterized on SdpaFwdTestCase.
  *
@@ -498,6 +506,30 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp8,
 INSTANTIATE_TEST_SUITE_P(SmokeStats,
                          IntegrationGpuSdpaFwdBf16,
                          testing::ValuesIn(getBatchModeStatsTestCases()),
+                         GraphTestCase::getName);
+
+TEST_P(IntegrationGpuSdpaFwdSecondDeviceBf16, Correctness)
+{
+    const int peer = peerDeviceOfSameArch();
+    if(peer < 0)
+    {
+        GTEST_SKIP() << "needs a second device of the current device's architecture";
+    }
+
+    constexpr float K_TOLERANCE = 1e-2f;
+    runGraphTest(K_TOLERANCE);
+    if(IsSkipped() || HasFailure())
+    {
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(rebindToDevice(peer));
+    runGraphTest(K_TOLERANCE);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaFwdSecondDeviceBf16,
+                         testing::ValuesIn(getGraphTestCasesByPrecision(/*fp8=*/false)),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

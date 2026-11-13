@@ -21,10 +21,14 @@ namespace asm_sdpa_engine
 // Process-level cache for loaded kernel modules.  hipModuleLoad() is expensive
 // (~97% of SDPA execution time in profiling), but the set of distinct .co files
 // is small (bounded by CSV config count).  Each SdpaModuleCache instance maps
-// (tocKey, arch, funcName) triples to shared_ptr<HipModuleGuard>: on the first
-// call the kernel is extracted from the .kpack archive, loaded into HIP, and
-// cached; subsequent calls return the cached shared_ptr.  Modules are never
-// unloaded until the cache is destroyed.
+// (tocKey, arch, device ordinal, funcName) to shared_ptr<HipModuleGuard>: on the
+// first call the kernel is extracted from the .kpack archive, loaded into HIP on
+// that device, and cached; subsequent calls return the cached shared_ptr.  Modules
+// are never unloaded until the cache is destroyed.
+//
+// The ordinal is in the key because a module belongs to the device it was loaded
+// on: every device has its own HIP context, so two devices of one architecture
+// must not share an entry.
 
 using CachedModule = std::shared_ptr<HipModuleGuard>;
 
@@ -32,21 +36,27 @@ class SdpaModuleCache : public hip_kernel_provider::compilation::ModuleCache<Sdp
                                                                              CachedModule,
                                                                              const std::string&,
                                                                              const std::string&,
+                                                                             int,
                                                                              const char*>
 {
 public:
-    static std::string
-        makeKey(const std::string& tocKey, const std::string& arch, const char* funcName)
+    static std::string makeKey(const std::string& tocKey,
+                               const std::string& arch,
+                               int deviceOrdinal,
+                               const char* funcName)
     {
-        return arch + "/" + tocKey + "::" + funcName;
+        return arch + "/" + tocKey + "@" + std::to_string(deviceOrdinal) + "::" + funcName;
     }
 
-    static CachedModule
-        load(const std::string& tocKey, const std::string& arch, const char* funcName)
+    static CachedModule load(const std::string& tocKey,
+                             const std::string& arch,
+                             int deviceOrdinal,
+                             const char* funcName)
     {
         auto& archive = asm_kernels::AsmKpackArchive::instance();
         auto kernelData = archive.getKernel(tocKey, arch);
-        auto loaded = loadKernelModuleFromMemory(kernelData.data, kernelData.size, funcName);
+        auto loaded
+            = loadKernelModuleFromMemory(kernelData.data, kernelData.size, funcName, deviceOrdinal);
         if(!loaded)
         {
             return nullptr;

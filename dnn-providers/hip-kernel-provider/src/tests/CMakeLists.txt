@@ -23,9 +23,11 @@ add_executable(
     core/TestContext.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
+    compilation/TestDeviceResolvedKernel.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
+    device/TestPerDeviceResolver.cpp
     device/TestScopedDevice.cpp
     utilities/TestDigest.cpp
 )
