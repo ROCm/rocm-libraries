@@ -3148,7 +3148,7 @@ def issueSaluFirst(module):
     return module
 
 
-def readInOpeningBarrierGap(module):
+def readInOpeningBarrierGap(module, dataReads):
     """Give the gap behind a body's first barrier one local read.
 
     Every wave then issues an LDS op as the barrier releases. When the gap
@@ -3157,7 +3157,9 @@ def readInOpeningBarrierGap(module):
     branch, LDS op or scalar load, so every lgkm count stays exact, and
     no instruction it crosses and no earlier MFMA of the body touches its
     registers. Only one read moves: a second one in the gap costs issue.
-    Otherwise the body stays as it is.
+    It must be one of dataReads, the body's A/B reads, matched by identity:
+    a scale read is floored against the other body's MFMAs across the loop
+    edge, which this check does not see. Otherwise the body stays as it is.
     """
     leaves = _bodyLeaves(module)
     barrier = next((i for i, (_c, inst) in enumerate(leaves) if _isBarrier(inst)), None)
@@ -3171,7 +3173,7 @@ def readInOpeningBarrierGap(module):
         return module
     read = next((i for i in range(mfma + 1, len(leaves))
                  if _incrementsLgkm(leaves[i][1]) or _isOrderFence(leaves[i][1])), None)
-    if read is None or not _isDsRead(leaves[read][1]):
+    if read is None or not any(leaves[read][1] is inst for inst in dataReads):
         return module
     checked = [i for i in range(read) if _isMfma(leaves[i][1]) or (
         i > mfma and not isinstance(leaves[i][1], TextBlock))]

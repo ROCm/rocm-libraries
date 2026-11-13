@@ -1039,6 +1039,8 @@ class LogicalScheduler:
         # gfx950 dual-period uniform epoch.
         self._scaleShadowPlan = None
         self._mainloopC0Schedule = None
+        # The A/B ds_reads emitted into _mainloopC0Schedule.
+        self._mainloopC0DataReads = []
         # (tensor, atom tile start) -> half its GR issues in, or None when the
         # body keeps the uniform epoch cohorts.  Set by place_LRs.
         self._halfLoadHalf: Optional[Dict[Tuple[str, int], int]] = None
@@ -5800,8 +5802,21 @@ class LogicalScheduler:
         # that sync); the wait is appended at the end to hide its cross-CU latency.
         from .ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
+
+        def lr_reads(selected):
+            return [inst
+                    for partition_emitted in emitted_3d
+                    for em_list in partition_emitted
+                    for em in em_list
+                    if em.opType == "lr" and selected(em.source)
+                    for inst in em.instructions if _isDsRead(inst)]
+
+        def is_data_lr(lr):
+            return lr.tensor in ("A", "B")
+
         if label == "MAINLOOP_C0":
             self._mainloopC0Schedule = module
+            self._mainloopC0DataReads = lr_reads(is_data_lr)
             if self._scaleShadowPlan and self.halfDisjoint:
                 assert lateScaleReadsPrecedeSecondHalf(
                     module,
@@ -5815,13 +5830,7 @@ class LogicalScheduler:
         # The deferral removes a drain and moves reads behind it, so it runs
         # before dropDominatedLgkmWaits proves drops against the final order.
         if self.halfDisjoint and label.startswith("MAINLOOP"):
-            balanced_reads = [
-                inst
-                for partition_emitted in emitted_3d
-                for em_list in partition_emitted
-                for em in em_list
-                if em.opType == "lr" and em.source.balancedCurrentCell
-                for inst in em.instructions if _isDsRead(inst)]
+            balanced_reads = lr_reads(lambda lr: lr.balancedCurrentCell)
             # planHalfDisjointBalance only pays off once the reads leave the
             # partition-0 prefix; kept there they are slower than no balance.
             if balanced_reads and not deferBalancedCurrentCellWait(module, balanced_reads):
@@ -5838,8 +5847,8 @@ class LogicalScheduler:
             # C1 still places scale refreshes in C0, so C0 is final only here.
             if (label == "MAINLOOP_C1" and self.config.dualPeriodScale
                     and self._mainloopC0Schedule is not None):
-                readInOpeningBarrierGap(self._mainloopC0Schedule)
-                readInOpeningBarrierGap(module)
+                readInOpeningBarrierGap(self._mainloopC0Schedule, self._mainloopC0DataReads)
+                readInOpeningBarrierGap(module, lr_reads(is_data_lr))
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):

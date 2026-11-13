@@ -7626,10 +7626,14 @@ class TestReadInOpeningBarrierGap:
         ri.setKernel((9, 5, 0), 64)
 
     @staticmethod
-    def _run(*gaps):
+    def _run(*gaps, scale=()):
+        """Every ds_read is a data read except those named in scale."""
         from tensilelite.Components.Subtile.InstructionScheduler import (
-            readInOpeningBarrierGap)
-        body = readInOpeningBarrierGap(TestKeepValuBehindLeader._body(*gaps))
+            _isDsRead, readInOpeningBarrierGap)
+        body = TestKeepValuBehindLeader._body(*gaps)
+        data = [inst for inst in body.flatitems()
+                if _isDsRead(inst) and inst.comment not in scale]
+        body = readInOpeningBarrierGap(body, data)
         return [[inst.comment for inst in gap]
                 for gap in TestHalfDisjointClumping._gaps(body)]
 
@@ -7643,6 +7647,11 @@ class TestReadInOpeningBarrierGap:
         gaps = self._run(self._opener(), [salu._add("add"), salu._carry(),
                                           TestKeepValuBehindLeader._read(7)])
         assert gaps[:2] == [["vmcnt", "barrier", "R"], ["add", "carry"]]
+
+    def test_scale_read_stays(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener(), [read(7, "S")], [read(9, "R")], scale=("S",))
+        assert gaps[:3] == [["vmcnt", "barrier"], ["S"], ["R"]]
 
     def test_only_one_read_moves(self):
         read = TestKeepValuBehindLeader._read
