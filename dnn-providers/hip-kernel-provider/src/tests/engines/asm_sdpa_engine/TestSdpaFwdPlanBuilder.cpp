@@ -28,6 +28,7 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaFwdUnservedAttributeCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -2350,6 +2351,84 @@ TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettingsIsNoOp)
     // Must not throw or log an error — forward has no knobs.
     EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));
 }
+
+// =============================================================================
+// Attributes the forward kernels do not serve
+// =============================================================================
+
+class TestSdpaFwdUnservedAttributes : public ::testing::TestWithParam<SdpaFwdUnservedAttributeCase>
+{
+protected:
+    SdpaFwdPlanBuilder _planBuilder;
+    Handle _handle;
+
+    bool servedArch()
+    {
+        const std::string deviceString
+            = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+        return deviceString == "gfx942" || deviceString == "gfx950";
+    }
+};
+
+TEST_F(TestSdpaFwdUnservedAttributes, UnmutatedGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+}
+
+class TestSdpaFwdInertAttributes : public TestSdpaFwdUnservedAttributes
+{
+};
+
+TEST_P(TestSdpaFwdInertAttributes, IsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestSdpaFwdUnservedAttributes, IsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestSdpaFwdUnservedAttributes,
+                         ::testing::ValuesIn(asmUnservedFwdAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestSdpaFwdInertAttributes,
+                         ::testing::ValuesIn(asmInertFwdAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
 
 } // namespace
 } // namespace asm_sdpa_engine

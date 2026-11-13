@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <memory>
+#include <string>
+#include <utility>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -4123,5 +4126,194 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
         { checkBatchnormBackwardTensorConfigSupported(*attrs, graph.getTensorMap()); },
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+// --- Running Statistics Validation ---
+
+namespace
+{
+
+namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+constexpr int64_t NEXT_RUNNING_MEAN_UID = 11;
+constexpr int64_t NEXT_RUNNING_VARIANCE_UID = 12;
+
+// A single-node training graph that carries every running-statistics operand: the test-sdk
+// graph holds prev mean/variance and momentum, and the next mean/variance outputs are added.
+flatbuffers::FlatBufferBuilder createTrainingGraphWithAllRunningStats()
+{
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+            {588, 196, 14, 1}, {1, 3, 14, 14}, true, false, false, true),
+        [](fb::GraphT& graph) {
+            for(const auto& [uid, name] :
+                {std::pair<int64_t, const char*>{NEXT_RUNNING_MEAN_UID, "next_running_mean"},
+                 {NEXT_RUNNING_VARIANCE_UID, "next_running_variance"}})
+            {
+                auto tensor = std::make_unique<fb::TensorAttributesT>();
+                tensor->uid = uid;
+                tensor->name = name;
+                tensor->data_type = fb::DataType::FLOAT;
+                tensor->dims = {1, 3, 1, 1};
+                tensor->strides = {3, 1, 1, 1};
+                graph.tensors.push_back(std::move(tensor));
+            }
+            auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+            attrs->next_running_mean_tensor_uid = NEXT_RUNNING_MEAN_UID;
+            attrs->next_running_variance_tensor_uid = NEXT_RUNNING_VARIANCE_UID;
+        });
+}
+
+struct RunningStatisticCase
+{
+    const char* tensorName;
+};
+
+class TestCheckBatchnormTrainingRunningStatistics
+    : public ::testing::TestWithParam<RunningStatisticCase>
+{
+protected:
+    // Throws when the training tensor config declines the graph.
+    static bool isSupported(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto* attrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+        EXPECT_NE(attrs, nullptr);
+        try
+        {
+            checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap());
+            return true;
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        {
+            return false;
+        }
+    }
+
+    template <typename Mutate>
+    flatbuffers::FlatBufferBuilder withRunningStatistic(Mutate&& mutate) const
+    {
+        return hipdnn_test_sdk::utilities::mutateGraph(
+            createTrainingGraphWithAllRunningStats(), [&](fb::GraphT& graph) {
+                for(auto& tensor : graph.tensors)
+                {
+                    if(tensor->name == GetParam().tensorName)
+                    {
+                        mutate(*tensor);
+                    }
+                }
+            });
+    }
+};
+
+TEST_P(TestCheckBatchnormTrainingRunningStatistics, AcceptsMatchingDataTypeAndShape)
+{
+    EXPECT_TRUE(isSupported(createTrainingGraphWithAllRunningStats()));
+}
+
+TEST_P(TestCheckBatchnormTrainingRunningStatistics, DeclinesWrongDataType)
+{
+    const auto builder
+        = withRunningStatistic([](fb::TensorAttributesT& t) { t.data_type = fb::DataType::HALF; });
+    EXPECT_FALSE(isSupported(builder));
+}
+
+TEST_P(TestCheckBatchnormTrainingRunningStatistics, DeclinesWrongShape)
+{
+    const auto builder = withRunningStatistic([](fb::TensorAttributesT& t) {
+        t.dims = {1, 3, 2, 1};
+        t.strides = {6, 2, 1, 1};
+    });
+    EXPECT_FALSE(isSupported(builder));
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryRunningStatistic,
+                         TestCheckBatchnormTrainingRunningStatistics,
+                         ::testing::Values(RunningStatisticCase{"prev_running_mean"},
+                                           RunningStatisticCase{"prev_running_variance"},
+                                           RunningStatisticCase{"next_running_mean"},
+                                           RunningStatisticCase{"next_running_variance"}),
+                         [](const ::testing::TestParamInfo<RunningStatisticCase>& info) {
+                             return std::string(info.param.tensorName);
+                         });
+
+// The fused batchnorm-training + activation node validates the same running statistics.
+class TestCheckBatchnormTrainingActivationRunningStatistics
+    : public ::testing::TestWithParam<RunningStatisticCase>
+{
+protected:
+    // Throws when the fused training tensor config declines the graph.
+    static bool isSupported(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto* bnAttrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+        const auto* actAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+        EXPECT_NE(bnAttrs, nullptr);
+        EXPECT_NE(actAttrs, nullptr);
+        try
+        {
+            checkBatchnormFwdTrainingActivationTensorConfigSupported(
+                *bnAttrs, *actAttrs, graph.getTensorMap());
+            return true;
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        {
+            return false;
+        }
+    }
+
+    static flatbuffers::FlatBufferBuilder createGraph()
+    {
+        return hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true);
+    }
+
+    template <typename Mutate>
+    flatbuffers::FlatBufferBuilder withRunningStatistic(Mutate&& mutate) const
+    {
+        return hipdnn_test_sdk::utilities::mutateGraph(createGraph(), [&](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == GetParam().tensorName)
+                {
+                    mutate(*tensor);
+                }
+            }
+        });
+    }
+};
+
+TEST_P(TestCheckBatchnormTrainingActivationRunningStatistics, AcceptsMatchingDataTypeAndShape)
+{
+    EXPECT_TRUE(isSupported(createGraph()));
+}
+
+TEST_P(TestCheckBatchnormTrainingActivationRunningStatistics, DeclinesWrongDataType)
+{
+    const auto builder
+        = withRunningStatistic([](fb::TensorAttributesT& t) { t.data_type = fb::DataType::HALF; });
+    EXPECT_FALSE(isSupported(builder));
+}
+
+TEST_P(TestCheckBatchnormTrainingActivationRunningStatistics, DeclinesWrongShape)
+{
+    const auto builder = withRunningStatistic([](fb::TensorAttributesT& t) {
+        t.dims = {1, 3, 2, 1};
+        t.strides = {6, 2, 1, 1};
+    });
+    EXPECT_FALSE(isSupported(builder));
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryRunningStatistic,
+                         TestCheckBatchnormTrainingActivationRunningStatistics,
+                         ::testing::Values(RunningStatisticCase{"prev_running_mean"},
+                                           RunningStatisticCase{"prev_running_variance"},
+                                           RunningStatisticCase{"next_running_mean"},
+                                           RunningStatisticCase{"next_running_variance"}),
+                         [](const ::testing::TestParamInfo<RunningStatisticCase>& info) {
+                             return std::string(info.param.tensorName);
+                         });
+
+} // namespace
 
 } // namespace

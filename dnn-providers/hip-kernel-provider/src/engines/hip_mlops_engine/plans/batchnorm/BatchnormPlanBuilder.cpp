@@ -8,6 +8,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 #include "BatchnormPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
@@ -180,6 +181,95 @@ bool batchnormBwdFusionCheckTensorsLogErrors(
     {
         HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
+    }
+}
+
+// A one-node graph reads and writes every operand through a device buffer, so none may be
+// virtual. Fused graphs carry virtual intermediates and are checked per fusion instead.
+void checkOneNodeOperandsNotVirtual(
+    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+
+    std::vector<int64_t> uids;
+    switch(node.attributes_type())
+    {
+    case NodeAttributes::BatchnormAttributes:
+    {
+        const auto& attr = *node.attributes_as_BatchnormAttributes();
+        uids = {attr.x_tensor_uid(),
+                attr.y_tensor_uid(),
+                attr.scale_tensor_uid(),
+                attr.bias_tensor_uid()};
+        for(const auto& optionalUid : {attr.mean_tensor_uid(),
+                                       attr.inv_variance_tensor_uid(),
+                                       attr.prev_running_mean_tensor_uid(),
+                                       attr.prev_running_variance_tensor_uid(),
+                                       attr.next_running_mean_tensor_uid(),
+                                       attr.next_running_variance_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                uids.push_back(optionalUid.value());
+            }
+        }
+        break;
+    }
+    case NodeAttributes::BatchnormInferenceAttributes:
+    {
+        const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+        uids = {attr.x_tensor_uid(),
+                attr.mean_tensor_uid(),
+                attr.inv_variance_tensor_uid(),
+                attr.scale_tensor_uid(),
+                attr.bias_tensor_uid(),
+                attr.y_tensor_uid()};
+        break;
+    }
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+    {
+        const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+        uids = {attr.x_tensor_uid(),
+                attr.mean_tensor_uid(),
+                attr.variance_tensor_uid(),
+                attr.scale_tensor_uid(),
+                attr.bias_tensor_uid(),
+                attr.y_tensor_uid()};
+        break;
+    }
+    case NodeAttributes::BatchnormBackwardAttributes:
+    {
+        const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
+        uids = {attr.dy_tensor_uid(),
+                attr.x_tensor_uid(),
+                attr.scale_tensor_uid(),
+                attr.dx_tensor_uid(),
+                attr.dscale_tensor_uid(),
+                attr.dbias_tensor_uid()};
+        for(const auto& optionalUid : {attr.mean_tensor_uid(), attr.inv_variance_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                uids.push_back(optionalUid.value());
+            }
+        }
+        break;
+    }
+    default:
+        return;
+    }
+
+    for(const auto uid : uids)
+    {
+        if(findTensorAttributes(tensorMap, uid).virtual_())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm tensors must be non-virtual for a one-node graph");
+        }
     }
 }
 
@@ -363,6 +453,8 @@ bool BatchnormPlanBuilder::isApplicable(
 
         try
         {
+            checkOneNodeOperandsNotVirtual(node, opGraph.getTensorMap());
+
             BatchnormValidator validator(opGraph.getTensorMap());
             switch(node.attributes_type())
             {

@@ -27,6 +27,8 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& resampleBwdAttr);
 
 private:
+    void checkTensorsNotVirtual(const std::vector<int64_t>& tensorIds);
+
     void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) override;
 
     void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,

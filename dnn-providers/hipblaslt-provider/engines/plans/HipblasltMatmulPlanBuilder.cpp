@@ -24,6 +24,14 @@ bool isBias(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& att
     return attr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD;
 }
 
+// The bias is the operand of the bias node that is not the matmul output.
+int64_t biasOperandUid(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& biasAttr,
+                       int64_t matmulOutputUid)
+{
+    return biasAttr.in_0_tensor_uid() == matmulOutputUid ? biasAttr.in_1_tensor_uid().value()
+                                                         : biasAttr.in_0_tensor_uid();
+}
+
 bool isSupportedActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attr)
 {
     using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
@@ -212,13 +220,9 @@ void checkNodeAttrsTensors(
                 "Activation node input must be the bias node output tensor");
         }
 
-        const auto& biasInType
-            = biasAttr->in_0_tensor_uid() != matmulAttr.c_tensor_uid()
-                  ? hipblaslt_utils::findTensorAttributes(tensorMap,
-                                                          biasAttr->in_1_tensor_uid().value())
-                        .dataType()
-                  : hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid())
-                        .dataType();
+        const auto biasUid = biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid());
+        const auto tBias = hipblaslt_utils::findTensorAttributes(tensorMap, biasUid);
+        const auto biasInType = tBias.dataType();
         const auto& biasOutType
             = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid())
                   .dataType();
@@ -231,6 +235,14 @@ void checkNodeAttrsTensors(
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Bias node input and output data types must be fp32, fp16 or bf16");
+        }
+
+        // hipBLASLt reads the bias as a packed vector, so any other stride pattern
+        // (padded, permuted or broadcast) would be read at the wrong offsets.
+        if(!hipblaslt_utils::isDenseRowMajor(tBias.dims(), tBias.strides()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           "Matmul: bias strides must be packed");
         }
     }
     else if(activAttr != nullptr)
@@ -283,13 +295,74 @@ void checkComputeTypes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGrap
     }
 }
 
+// Validate the virtual/non-virtual contract of the fused graph. The plan resolves
+// A, B, the bias input and the final output to device buffers at execute time, so
+// they must be non-virtual. The plan writes only the final output: every earlier
+// output (matmul output when bias or activation follows, bias output when
+// activation follows) is a fused intermediate it never materializes, so it must be
+// virtual.
+void checkVirtualTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& matmulAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto requireNonVirtual = [&tensorMap](int64_t uid, const char* name) {
+        if(hipblaslt_utils::findTensorAttributes(tensorMap, uid).isVirtual())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Matmul: ") + name
+                    + " tensor must be non-virtual (it needs a device buffer)");
+        }
+    };
+    const auto requireVirtual = [&tensorMap](int64_t uid, const char* name) {
+        if(!hipblaslt_utils::findTensorAttributes(tensorMap, uid).isVirtual())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Matmul: ") + name
+                    + " tensor must be virtual (the plan does not write it)");
+        }
+    };
+
+    requireNonVirtual(matmulAttr.a_tensor_uid(), "A");
+    requireNonVirtual(matmulAttr.b_tensor_uid(), "B");
+
+    if(biasAttr != nullptr)
+    {
+        const auto biasUid = biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid());
+        requireNonVirtual(biasUid, "bias input");
+        requireVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+        if(activAttr != nullptr)
+        {
+            requireVirtual(biasAttr->out_0_tensor_uid(), "bias output");
+            requireNonVirtual(activAttr->out_0_tensor_uid(), "activation output");
+        }
+        else
+        {
+            requireNonVirtual(biasAttr->out_0_tensor_uid(), "bias output");
+        }
+    }
+    else if(activAttr != nullptr)
+    {
+        requireVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+        requireNonVirtual(activAttr->out_0_tensor_uid(), "activation output");
+    }
+    else
+    {
+        requireNonVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+    }
+}
+
 } // namespace
 
 bool HipblasltMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto nodeAttrs = getNodeAttrs(opGraph);
@@ -298,12 +371,21 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                               std::get<2>(nodeAttrs),
                               opGraph.getTensorMap());
 
+        checkVirtualTensors(std::get<0>(nodeAttrs),
+                            std::get<1>(nodeAttrs),
+                            std::get<2>(nodeAttrs),
+                            opGraph.getTensorMap());
+
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 
+        // Graph-property checks, including the epilogue mapping in MatmulParams, need no
+        // device; the arch query comes after them.
         MatmulParams params(std::get<0>(nodeAttrs),
                             std::get<1>(nodeAttrs),
                             std::get<2>(nodeAttrs),
                             opGraph.getTensorMap());
+        REJECT_IF_WORKAROUND_ISSUE_9962(handle);
+
         MatmulPlan const plan(handle, std::move(params));
         return true;
     }

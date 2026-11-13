@@ -3,6 +3,8 @@
 
 #include <cstdio>
 #include <gtest/gtest.h>
+#include <ostream>
+#include <string>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -150,3 +152,58 @@ TEST_F(TestResampleBwdPlanBuilder, GetCustomKnobsReturnsEmpty)
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
+
+// ============================================================================
+// Attributes the kernel reads or writes: a graph that changes them is declined
+// ============================================================================
+
+namespace
+{
+struct ResampleBwdMutation
+{
+    std::string name;
+    int64_t virtualUid;
+};
+
+std::ostream& operator<<(std::ostream& os, const ResampleBwdMutation& value)
+{
+    return os << value.name;
+}
+
+flatbuffers::FlatBufferBuilder mutatedResampleBwdGraph(int64_t virtualUid)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    return hipdnn_test_sdk::utilities::mutateGraph(base, [virtualUid](GraphT& graph) {
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->uid == virtualUid)
+            {
+                tensor->virtual_ = true;
+            }
+        }
+    });
+}
+} // namespace
+
+class TestResampleBwdDecline : public TestResampleBwdPlanBuilder,
+                               public ::testing::WithParamInterface<ResampleBwdMutation>
+{
+};
+
+TEST_P(TestResampleBwdDecline, VirtualOperandIsNotApplicable)
+{
+    auto builder = mutatedResampleBwdGraph(GetParam().virtualUid);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Mutations,
+                         TestResampleBwdDecline,
+                         ::testing::Values(ResampleBwdMutation{"VirtualDy", 1},
+                                           ResampleBwdMutation{"VirtualDx", 2},
+                                           ResampleBwdMutation{"VirtualIndex", 3}),
+                         [](const ::testing::TestParamInfo<ResampleBwdMutation>& info) {
+                             return info.param.name;
+                         });

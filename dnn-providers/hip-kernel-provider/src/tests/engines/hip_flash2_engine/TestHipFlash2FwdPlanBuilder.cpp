@@ -8,18 +8,23 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaFwdUnservedAttributeCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <array>
 #include <cctype>
+#include <ostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hip_flash2_engine
@@ -486,6 +491,232 @@ TEST(TestHipFlash2ExtractParamsWindow, GenuineWindowIsNotCausal)
 {
     EXPECT_FALSE(extractCausalForTopLeftWindow(255));
 }
+
+// -- isApplicable: attributes the kernel does not serve ----------------------------
+
+namespace
+{
+using asm_sdpa_engine::applyUnservedAttribute;
+using asm_sdpa_engine::SdpaFwdUnservedAttributeCase;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
+using hipdnn_test_sdk::utilities::sdpa::detail::appendIndexTensor;
+
+flatbuffers::FlatBufferBuilder createFlash2Fp16Graph()
+{
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims, strides, dims, strides, dims, strides, dims, strides, DataType::HALF);
+}
+
+// Cases specific to this engine: it reads no scale tensor and serves no fp8 quantization
+// tensors.
+std::vector<SdpaFwdUnservedAttributeCase> flash2UnservedAttributeCases()
+{
+    auto cases = asm_sdpa_engine::commonUnservedFwdAttributeCases();
+    cases.push_back({"ScaleTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_tensor_uid = appendIndexTensor(g, "scale");
+                     }});
+    cases.push_back({"DescaleQTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_q_tensor_uid = appendIndexTensor(g, "descale_q");
+                     }});
+    cases.push_back({"DescaleKTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_k_tensor_uid = appendIndexTensor(g, "descale_k");
+                     }});
+    cases.push_back({"DescaleVTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_v_tensor_uid = appendIndexTensor(g, "descale_v");
+                     }});
+    cases.push_back({"DescaleSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.descale_s_tensor_uid = appendIndexTensor(g, "descale_s");
+                     }});
+    cases.push_back({"AmaxSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.amax_s_tensor_uid = appendIndexTensor(g, "amax_s");
+                     }});
+    cases.push_back({"AmaxOTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.amax_o_tensor_uid = appendIndexTensor(g, "amax_o");
+                     }});
+    cases.push_back({"ScaleSTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_s_tensor_uid = appendIndexTensor(g, "scale_s");
+                     }});
+    cases.push_back({"ScaleOTensor", [](SdpaAttributesT& a, GraphT& g) {
+                         a.scale_o_tensor_uid = appendIndexTensor(g, "scale_o");
+                     }});
+    return cases;
+}
+} // namespace
+
+class TestHipFlash2FwdUnservedAttributes
+    : public ::testing::TestWithParam<SdpaFwdUnservedAttributeCase>
+{
+protected:
+    Handle _handle;
+    HipFlash2FwdPlanBuilder _builder;
+
+    bool servedArch()
+    {
+        return hip_kernel_provider_common::getDeviceString(_handle.getStream()) == "gfx942";
+    }
+};
+
+TEST_F(TestHipFlash2FwdUnservedAttributes, UnmutatedGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createFlash2Fp16Graph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestHipFlash2FwdUnservedAttributes, SeedAndOffsetAtZeroDropoutAreApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createFlash2Fp16Graph(),
+                                          asm_sdpa_engine::seedAndOffsetAtZeroDropoutCase());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestHipFlash2FwdUnservedAttributes, IsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = applyUnservedAttribute(createFlash2Fp16Graph(), GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestHipFlash2FwdUnservedAttributes,
+                         ::testing::ValuesIn(flash2UnservedAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
+
+// -- isApplicable: buffer roles must not be virtual -----------------------------
+
+namespace
+{
+enum class BufferRole
+{
+    Q,
+    K,
+    V,
+    O
+};
+
+std::ostream& operator<<(std::ostream& os, BufferRole role)
+{
+    constexpr std::array<const char*, 4> NAMES{"Q", "K", "V", "O"};
+    return os << NAMES.at(static_cast<size_t>(role));
+}
+
+// Q, K, V and O are read or written through device pointers, so none may be virtual.
+flatbuffers::FlatBufferBuilder createFp16GraphWithVirtual(BufferRole role)
+{
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto base = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    const auto& attrs = hipdnn_test_sdk::utilities::sdpa::detail::getSdpaAttributes(*graph);
+    const std::array<int64_t, 4> uids{
+        attrs.q_tensor_uid, attrs.k_tensor_uid, attrs.v_tensor_uid, attrs.o_tensor_uid};
+    const int64_t target = uids.at(static_cast<size_t>(role));
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == target)
+        {
+            tensor->virtual_ = true;
+        }
+    }
+    return hipdnn_test_sdk::utilities::sdpa::detail::repack(*graph);
+}
+} // namespace
+
+class TestHipFlash2FwdVirtualRole : public ::testing::TestWithParam<BufferRole>
+{
+protected:
+    Handle _handle;
+    HipFlash2FwdPlanBuilder _builder;
+
+    bool servedArch()
+    {
+        return hip_kernel_provider_common::getDeviceString(_handle.getStream()) == "gfx942";
+    }
+};
+
+TEST_F(TestHipFlash2FwdVirtualRole, NonVirtualGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestHipFlash2FwdVirtualRole, VirtualTensorIsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createFp16GraphWithVirtual(GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Roles,
+    TestHipFlash2FwdVirtualRole,
+    ::testing::Values(BufferRole::Q, BufferRole::K, BufferRole::V, BufferRole::O),
+    [](const ::testing::TestParamInfo<BufferRole>& info) {
+        return std::string(1, std::string_view("QKVO").at(static_cast<size_t>(info.param)));
+    });
 
 } // namespace
 } // namespace hip_flash2_engine

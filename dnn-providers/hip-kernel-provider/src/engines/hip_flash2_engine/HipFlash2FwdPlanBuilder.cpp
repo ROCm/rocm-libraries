@@ -64,6 +64,26 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout not supported");
+    // Operands the kernel never reads: the scale comes from attn_scale_value (1.0 when
+    // unset), and the dropout, block-mask and fp8 quantization tensors have no kernel input.
+    // seed and offset are inert at dropout_probability 0, which is the only value served.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_tensor_uid(), "scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_q_tensor_uid() || attrs.descale_k_tensor_uid()
+                                   || attrs.descale_v_tensor_uid() || attrs.descale_s_tensor_uid(),
+                               "fp8 descale tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid() || attrs.amax_o_tensor_uid(),
+                               "fp8 amax tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid() || attrs.scale_o_tensor_uid(),
+                               "fp8 scale_s/scale_o tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
@@ -82,6 +102,12 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     auto* kTensor = tensorMap.at(attrs.k_tensor_uid());
     auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
     auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
+
+    // Every buffer is read or written through a device pointer; a virtual tensor has none.
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->virtual_(), "Q tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->virtual_(), "K tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->virtual_(), "V tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->virtual_(), "O tensor must not be virtual");
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->size() != 4, "Q must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");

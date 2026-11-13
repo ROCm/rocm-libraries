@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <gtest/gtest.h>
 
 #include "core/Context.hpp"
@@ -13,12 +14,16 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 #include <optional>
+#include <ostream>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -904,6 +909,84 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, TwoNodeVirtualActOutTensorInval
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// Fused training + activation: running and saved statistics must be complete
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT;
+
+struct FusedStatsMutation
+{
+    std::string name;
+    std::function<void(BatchnormAttributesT&)> mutate;
+};
+
+std::ostream& operator<<(std::ostream& os, const FusedStatsMutation& value)
+{
+    return os << value.name;
+}
+
+flatbuffers::FlatBufferBuilder
+    mutatedFusedTrainingGraph(const std::function<void(BatchnormAttributesT&)>& mutate)
+{
+    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        base, [&mutate](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            mutate(*graph.nodes.at(0)->attributes.AsBatchnormAttributes());
+        });
+}
+
+std::vector<FusedStatsMutation> fusedStatsMutations()
+{
+    return {
+        {"MissingPrevRunningMean", [](auto& a) { a.prev_running_mean_tensor_uid.reset(); }},
+        {"MissingPrevRunningVariance", [](auto& a) { a.prev_running_variance_tensor_uid.reset(); }},
+        {"MissingMomentum", [](auto& a) { a.momentum_tensor_uid.reset(); }},
+        {"MissingNextRunningMean", [](auto& a) { a.next_running_mean_tensor_uid.reset(); }},
+        {"MissingNextRunningVariance", [](auto& a) { a.next_running_variance_tensor_uid.reset(); }},
+        {"SaveMeanWithoutInvVariance", [](auto& a) { a.inv_variance_tensor_uid.reset(); }},
+        {"SaveInvVarianceWithoutMean", [](auto& a) { a.mean_tensor_uid.reset(); }},
+    };
+}
+} // namespace
+
+class TestBatchnormFusedTrainingStatsDecline : public ::testing::TestWithParam<FusedStatsMutation>
+{
+protected:
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormFwdTrainingPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    Handle _dummyHandle;
+};
+
+TEST_P(TestBatchnormFusedTrainingStatsDecline, IsNotApplicable)
+{
+    auto builder = mutatedFusedTrainingGraph(GetParam().mutate);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Mutations,
+                         TestBatchnormFusedTrainingStatsDecline,
+                         ::testing::ValuesIn(fusedStatsMutations()),
+                         [](const ::testing::TestParamInfo<FusedStatsMutation>& info) {
+                             return info.param.name;
+                         });
+
+TEST_F(TestBatchnormFusedTrainingStatsDecline, GraphWithoutSavedStatisticsIsApplicable)
+{
+    auto builder = mutatedFusedTrainingGraph([](BatchnormAttributesT& a) {
+        a.mean_tensor_uid.reset();
+        a.inv_variance_tensor_uid.reset();
+    });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

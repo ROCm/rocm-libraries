@@ -1,17 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <gtest/gtest.h>
+#include <ostream>
+#include <string>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -850,5 +856,313 @@ TEST_F(TestBatchnormPlanBuilder, BwdFusionVirtualActOutTensorInvalid)
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
+
+// ============================================================================
+// One-node training graph: operands and running statistics every builder must honor
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributesT;
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+constexpr int64_t PREV_MEAN_UID = 8;
+constexpr int64_t PREV_VARIANCE_UID = 9;
+constexpr int64_t NEXT_MEAN_UID = 11;
+constexpr int64_t NEXT_VARIANCE_UID = 12;
+
+struct TrainingGraphMutation
+{
+    std::string name;
+    std::function<void(GraphT&)> mutate;
+};
+
+std::ostream& operator<<(std::ostream& os, const TrainingGraphMutation& value)
+{
+    return os << value.name;
+}
+
+TensorAttributesT& tensorByUid(GraphT& graph, int64_t uid)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("tensor uid not found");
+}
+
+BatchnormAttributesT& batchnormAttrs(GraphT& graph)
+{
+    return *graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+}
+
+flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(GraphT&)>& mutate
+                                                    = nullptr)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/false,
+        /*withRunningStatsAndMomentum=*/true);
+    return hipdnn_test_sdk::utilities::mutateGraph(base, [&mutate](GraphT& graph) {
+        // The factory emits prev stats and momentum only; add the next stats outputs so
+        // the baseline carries a complete running-statistics set.
+        for(const auto [uid, name] : {std::pair<int64_t, const char*>{NEXT_MEAN_UID, "next_mean"},
+                                      {NEXT_VARIANCE_UID, "next_variance"}})
+        {
+            auto tensor = std::make_unique<TensorAttributesT>(tensorByUid(graph, PREV_MEAN_UID));
+            tensor->uid = uid;
+            tensor->name = name;
+            graph.tensors.push_back(std::move(tensor));
+        }
+        auto& attrs = batchnormAttrs(graph);
+        attrs.next_running_mean_tensor_uid = NEXT_MEAN_UID;
+        attrs.next_running_variance_tensor_uid = NEXT_VARIANCE_UID;
+
+        if(mutate)
+        {
+            mutate(graph);
+        }
+    });
+}
+
+std::vector<TrainingGraphMutation> trainingGraphMutations()
+{
+    std::vector<TrainingGraphMutation> rows;
+    const std::vector<std::pair<std::string, int64_t>> operands
+        = {{"X", 1},
+           {"Y", 2},
+           {"Scale", 3},
+           {"Bias", 4},
+           {"SaveMean", 6},
+           {"SaveInvVariance", 7},
+           {"PrevRunningMean", PREV_MEAN_UID},
+           {"PrevRunningVariance", PREV_VARIANCE_UID},
+           {"NextRunningMean", NEXT_MEAN_UID},
+           {"NextRunningVariance", NEXT_VARIANCE_UID}};
+    for(const auto& [name, uid] : operands)
+    {
+        const auto tensorUid = uid;
+        rows.push_back({"Virtual" + name, [tensorUid](GraphT& graph) {
+                            tensorByUid(graph, tensorUid).virtual_ = true;
+                        }});
+    }
+
+    rows.push_back({"SaveMeanWithoutInvVariance",
+                    [](GraphT& g) { batchnormAttrs(g).inv_variance_tensor_uid.reset(); }});
+    rows.push_back({"SaveInvVarianceWithoutMean",
+                    [](GraphT& g) { batchnormAttrs(g).mean_tensor_uid.reset(); }});
+    rows.push_back({"MissingPrevRunningMean",
+                    [](GraphT& g) { batchnormAttrs(g).prev_running_mean_tensor_uid.reset(); }});
+    rows.push_back({"MissingPrevRunningVariance",
+                    [](GraphT& g) { batchnormAttrs(g).prev_running_variance_tensor_uid.reset(); }});
+    rows.push_back(
+        {"MissingMomentum", [](GraphT& g) { batchnormAttrs(g).momentum_tensor_uid.reset(); }});
+    rows.push_back({"MissingNextRunningMean",
+                    [](GraphT& g) { batchnormAttrs(g).next_running_mean_tensor_uid.reset(); }});
+    rows.push_back({"MissingNextRunningVariance",
+                    [](GraphT& g) { batchnormAttrs(g).next_running_variance_tensor_uid.reset(); }});
+    return rows;
+}
+} // namespace
+
+class TestBatchnormTrainingGraphDecline : public ::testing::TestWithParam<TrainingGraphMutation>
+{
+protected:
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormPlanBuilder _batchnormBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    BatchnormFwdTrainingPlanBuilder _trainingBuilder{_mockKernelCompiler,
+                                                     _mockDevicePropertyProvider};
+    Handle _dummyHandle;
+};
+
+TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByBothBuilders)
+{
+    auto builder = mutatedTrainingGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedByBothBuilders)
+{
+    auto builder = mutatedTrainingGraph([](GraphT& g) {
+        batchnormAttrs(g).mean_tensor_uid.reset();
+        batchnormAttrs(g).inv_variance_tensor_uid.reset();
+    });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_P(TestBatchnormTrainingGraphDecline, BothBuildersDecline)
+{
+    auto builder = mutatedTrainingGraph(GetParam().mutate);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(Mutations,
+                         TestBatchnormTrainingGraphDecline,
+                         ::testing::ValuesIn(trainingGraphMutations()),
+                         [](const ::testing::TestParamInfo<TrainingGraphMutation>& info) {
+                             return info.param.name;
+                         });
+
+// ============================================================================
+// One-node inference and backward graphs: every operand is a device buffer
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+struct OneNodeVirtualOperandCase
+{
+    std::string name;
+    std::function<flatbuffers::FlatBufferBuilder()> makeGraph;
+    std::function<int64_t(GraphT&)> operandUid;
+};
+
+std::ostream& operator<<(std::ostream& os, const OneNodeVirtualOperandCase& value)
+{
+    return os << value.name;
+}
+
+std::vector<OneNodeVirtualOperandCase> oneNodeVirtualOperandCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributesT;
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesT;
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT;
+
+    std::vector<OneNodeVirtualOperandCase> cases;
+
+    const auto addInference
+        = [&](const std::string& role, int64_t BatchnormInferenceAttributesT::*field) {
+              cases.push_back(
+                  {"Inference" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(); },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormInferenceAttributes()->*field;
+                   }});
+          };
+    addInference("X", &BatchnormInferenceAttributesT::x_tensor_uid);
+    addInference("Mean", &BatchnormInferenceAttributesT::mean_tensor_uid);
+    addInference("InvVariance", &BatchnormInferenceAttributesT::inv_variance_tensor_uid);
+    addInference("Scale", &BatchnormInferenceAttributesT::scale_tensor_uid);
+    addInference("Bias", &BatchnormInferenceAttributesT::bias_tensor_uid);
+    addInference("Y", &BatchnormInferenceAttributesT::y_tensor_uid);
+
+    const auto addVarianceExt
+        = [&](const std::string& role, int64_t BatchnormInferenceAttributesVarianceExtT::*field) {
+              cases.push_back(
+                  {"InferenceWithVariance" + role,
+                   [] {
+                       return hipdnn_test_sdk::utilities::
+                           createValidBatchnormWithVarianceInferenceGraph();
+                   },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormInferenceAttributesVarianceExt()
+                                  ->*field;
+                   }});
+          };
+    addVarianceExt("X", &BatchnormInferenceAttributesVarianceExtT::x_tensor_uid);
+    addVarianceExt("Mean", &BatchnormInferenceAttributesVarianceExtT::mean_tensor_uid);
+    addVarianceExt("Variance", &BatchnormInferenceAttributesVarianceExtT::variance_tensor_uid);
+    addVarianceExt("Scale", &BatchnormInferenceAttributesVarianceExtT::scale_tensor_uid);
+    addVarianceExt("Bias", &BatchnormInferenceAttributesVarianceExtT::bias_tensor_uid);
+    addVarianceExt("Y", &BatchnormInferenceAttributesVarianceExtT::y_tensor_uid);
+
+    const auto addBackward
+        = [&](const std::string& role, int64_t BatchnormBackwardAttributesT::*field) {
+              cases.push_back(
+                  {"Backward" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(); },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormBackwardAttributes()->*field;
+                   }});
+          };
+    addBackward("Dy", &BatchnormBackwardAttributesT::dy_tensor_uid);
+    addBackward("X", &BatchnormBackwardAttributesT::x_tensor_uid);
+    addBackward("Scale", &BatchnormBackwardAttributesT::scale_tensor_uid);
+    addBackward("Dx", &BatchnormBackwardAttributesT::dx_tensor_uid);
+    addBackward("Dscale", &BatchnormBackwardAttributesT::dscale_tensor_uid);
+    addBackward("Dbias", &BatchnormBackwardAttributesT::dbias_tensor_uid);
+
+    const auto addBackwardOptional
+        = [&](const std::string& role,
+              ::flatbuffers::Optional<int64_t> BatchnormBackwardAttributesT::*field) {
+              cases.push_back(
+                  {"Backward" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(); },
+                   [field](GraphT& g) {
+                       return (g.nodes.at(0)->attributes.AsBatchnormBackwardAttributes()->*field)
+                           .value();
+                   }});
+          };
+    addBackwardOptional("Mean", &BatchnormBackwardAttributesT::mean_tensor_uid);
+    addBackwardOptional("InvVariance", &BatchnormBackwardAttributesT::inv_variance_tensor_uid);
+    return cases;
+}
+} // namespace
+
+class TestBatchnormOneNodeVirtualOperand
+    : public ::testing::TestWithParam<OneNodeVirtualOperandCase>
+{
+protected:
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormPlanBuilder _batchnormBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    Handle _dummyHandle;
+};
+
+TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
+{
+    auto builder = GetParam().makeGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
+{
+    auto base = GetParam().makeGraph();
+    auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
+        const int64_t uid = GetParam().operandUid(graph);
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->uid == uid)
+            {
+                tensor->virtual_ = true;
+            }
+        }
+    });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        mutated.GetBufferPointer(), mutated.GetSize());
+
+    EXPECT_FALSE(_batchnormBuilder.isApplicable(_dummyHandle, wrapper));
+}
+
+INSTANTIATE_TEST_SUITE_P(Operands,
+                         TestBatchnormOneNodeVirtualOperand,
+                         ::testing::ValuesIn(oneNodeVirtualOperandCases()),
+                         [](const ::testing::TestParamInfo<OneNodeVirtualOperandCase>& info) {
+                             return info.param.name;
+                         });
 
 } // namespace hip_kernel_provider::batchnorm::test

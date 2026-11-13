@@ -17,6 +17,8 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 - Compute data type: FP32
 - Transposed inputs: supported
 - Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
+- Tensor roles: the plan writes only the final output, so every fused intermediate (the matmul output when a bias or activation follows, the bias output when an activation follows) must be `virtual`; all other tensors must not be. A graph with any other layout is declined
+- Bias: a bias tensor must have packed strides (hipBLASLt reads it as a vector; strides of size-1 dimensions are ignored) and data type FP32, FP16 or BF16, independent of the matmul output type
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
 - ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
     - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
@@ -64,6 +66,8 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
 - Scale tensors: dtype `FP8_E8M0`, with one scale per 32-element block — element count `M*(K/32)` for `scale_a`, `(K/32)*N` for `scale_b`
 - Layout: `opA = T` (A is col-major, i.e., `stride[-2] == 1`), `opB = N` (B is row-major, i.e., `stride[-1] == 1`)
+- Scale layout: scale tensors must be dense row-major (the A scale `[M, K/32]` with strides `[K/32, 1]`, the B scale `[K/32, N]` with strides `[N, 1]`; strides of size-1 dimensions are ignored)
+- Dequantize attributes: `is_negative_scale` is declined; the plan scales by 2^(scale) only
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
 - Block size: innermost `block_size == 32` for both scale tensors (VEC32)
 - Batch: single batch only (`batch == 1`); hipBLASLt requires `B == 1` for this scale mode

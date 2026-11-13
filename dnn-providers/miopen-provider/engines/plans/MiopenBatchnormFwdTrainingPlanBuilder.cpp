@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <string>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -79,6 +82,36 @@ const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes&
     }
 
     return activAttr;
+}
+
+// The training plan honours running statistics only as a complete set, and saved mean /
+// inv_variance only as a pair; any other subset would be dropped silently at execute time.
+void checkTrainingStatisticsComplete(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
+{
+    const std::array<bool, 5> runningStatsPresent
+        = {bnAttr.prev_running_mean_tensor_uid().has_value(),
+           bnAttr.prev_running_variance_tensor_uid().has_value(),
+           bnAttr.momentum_tensor_uid().has_value(),
+           bnAttr.next_running_mean_tensor_uid().has_value(),
+           bnAttr.next_running_variance_tensor_uid().has_value()};
+    const auto runningStatsCount
+        = std::count(runningStatsPresent.begin(), runningStatsPresent.end(), true);
+    if(runningStatsCount != 0
+       && runningStatsCount != static_cast<std::ptrdiff_t>(runningStatsPresent.size()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm running statistics require prev/next running mean, prev/next running "
+            "variance and momentum together");
+    }
+
+    if(!hasPairedSavedStatistics(bnAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm saved mean and inv_variance must be provided together");
+    }
 }
 
 void checkRunningStatisticsTensorVirtuality(
@@ -273,6 +306,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     {
         // Common batchnorm validation
         const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
+        checkTrainingStatisticsComplete(bnAttr);
 
         auto hasFloatComputeDataType = [](const auto& node) {
             return node->computeDataType() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;

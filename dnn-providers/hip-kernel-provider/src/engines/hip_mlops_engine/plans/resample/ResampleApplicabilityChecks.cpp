@@ -16,6 +16,19 @@ using namespace hip_kernel_provider::core::utils;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
+void ResampleValidator::checkTensorsNotVirtual(const std::vector<int64_t>& tensorIds)
+{
+    for(const auto& id : tensorIds)
+    {
+        if(findTensorAttributes(_tensorMap, id).virtual_())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Resample operands are read or written by the kernel and must not be virtual.");
+        }
+    }
+}
+
 void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     std::vector<TensorDescriptor> tensors;
@@ -154,6 +167,14 @@ void ResampleValidator::checkTensorConfigSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ResampleFwd index tensor is supported only for maxpool mode.");
     }
+    // The kernel writes the index tensor whenever one is present, so an index tensor
+    // without generate_index would be written against the graph's stated intent.
+    if(resampleAttr.index_tensor_uid().has_value() && !generateIndex)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd index tensor requires generate_index to be true.");
+    }
 
     std::vector<int64_t> tensorIds{resampleAttr.x_tensor_uid(), resampleAttr.y_tensor_uid()};
     if(resampleAttr.index_tensor_uid().has_value())
@@ -161,6 +182,7 @@ void ResampleValidator::checkTensorConfigSupported(
         tensorIds.push_back(resampleAttr.index_tensor_uid().value());
     }
 
+    checkTensorsNotVirtual(tensorIds);
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleAttr.index_tensor_uid());
     checkTensorShapesSupported(resampleAttr);
@@ -207,6 +229,7 @@ void ResampleValidator::checkBwdTensorConfigSupported(
         tensorIds.push_back(resampleBwdAttr.index_tensor_uid().value());
     }
 
+    checkTensorsNotVirtual(tensorIds);
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleBwdAttr.index_tensor_uid());
     checkBwdTensorShapesSupported(resampleBwdAttr);
