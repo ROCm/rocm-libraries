@@ -17,12 +17,29 @@ using U4  = uint32_t __attribute__((ext_vector_type(4)));
 using I4  = int32_t __attribute__((ext_vector_type(4)));
 using I8  = int32_t __attribute__((ext_vector_type(8)));
 
+template <int Width, int PadBytes>
+struct LdsLayout
+{
+    // Preserve the tuned D128 row layout; other widths pad each 64- or
+    // 32-element chunk so the WMMA fragments never straddle padding.
+    static constexpr int kChunk       = Width == 128 ? 128 : Width % 64 == 0 ? 64 : 32;
+    static constexpr int kPitch       = Width + Width / kChunk * (PadBytes / 2);
+    static constexpr int kPadInterval = kChunk == 128 ? 5 : kChunk == 64 ? 4 : 3;
+
+    CK_TILE_HOST_DEVICE static constexpr int Column(int column)
+    {
+        return column + column / kChunk * (PadBytes / 2);
+    }
+};
+
 // TDM descriptor for a native BSHD slice; row padding matches the WMMA LDS readers.
-// A [sequence, 128] slice of native BSHD memory. Source row_stride is in
+// A [sequence, Width] slice of native BSHD memory. Source row_stride is in
 // halfword elements; the destination remains densely packed with LDS padding.
+// TDM zero-fills columns beyond valid_width. Q/K head tails rely on this even
+// when Q and K reuse LDS containing values from an earlier transfer.
 template <int Rows, int CacheHint = 0, int PadBytes = 16, int Width = 128, class T>
 __device__ __forceinline__ void
-load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
+load_strided(T* lds, const T* global, int remaining, uint32_t row_stride, int valid_width = Width)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
     static_assert(sizeof(T) == 2);
@@ -30,15 +47,15 @@ load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
     const uintptr_t addr = reinterpret_cast<uintptr_t>(global);
     const uint32_t local = uint32_t(reinterpret_cast<uintptr_t>(lds));
     U4 g0                = {1, local, uint32_t(addr), uint32_t(addr >> 32) | (2u << 30)};
-    I8 g1                = {int((1u << 16) | (1u << 20) | ((Width == 128 ? 5u : 4u) << 22) |
+    I8 g1 = {int((1u << 16) | (1u << 20) | (LdsLayout<Width, PadBytes>::kPadInterval << 22) |
                  ((PadBytes / 4 - 1u) << 25)),
-                            Width << 16,
-                            int(uint32_t(remaining) << 16),
-                            (Width << 16) | (remaining >> 16),
-                            Rows,
-                            int(row_stride),
-                            0,
-                            0};
+             valid_width << 16,
+             int(uint32_t(remaining) << 16),
+             (Width << 16) | (remaining >> 16),
+             Rows,
+             int(row_stride),
+             0,
+             0};
 #pragma unroll
     for(int i = 0; i < 4; ++i)
         g0[i] = __builtin_amdgcn_readfirstlane(g0[i]);
@@ -51,6 +68,7 @@ load_strided(T* lds, const T* global, int remaining, uint32_t row_stride)
     (void)global;
     (void)remaining;
     (void)row_stride;
+    (void)valid_width;
 #endif
 }
 
@@ -64,14 +82,14 @@ __device__ __forceinline__ void store_strided(T* lds, T* global, int remaining, 
     static_assert(sizeof(T) == 2);
     static_assert(sizeof(TDM_GROUP0) == 16 && sizeof(TDM_GROUP1) == 32);
     static_assert(Rows > 0 && Rows <= 16);
-    static_assert(Width == 64 || Width == 128);
+    static_assert(Width >= 32 && Width <= 160 && Width % 32 == 0);
     static_assert(LdsPitch >= Width);
     const int count = remaining < Rows ? remaining : Rows;
     TDM_GROUP0 address(reinterpret_cast<uintptr_t>(lds), reinterpret_cast<uintptr_t>(global), 0, 0);
     TDM_GROUP1 shape;
-    // Two 64-byte subrows avoid the intermittent D64 corruption observed with
-    // a single 128-byte TDM row. Keep the 256-byte D128 transfer unchanged.
-    constexpr int Chunk  = Width == 64 ? 32 : Width;
+    // Use 64-byte subrows, avoiding the intermittent D64 corruption observed
+    // with a single 128-byte TDM row. Preserve the tuned 256-byte D128 transfer.
+    constexpr int Chunk  = Width == 128 ? Width : 32;
     shape.data_size      = 1; // 16-bit elements
     shape.iterate_enable = 1;
     shape.tensorDim0(Chunk);
@@ -122,12 +140,12 @@ __device__ __forceinline__ V8<T> transpose8(const T* lds)
 #endif
 }
 
-template <int Pitch = 136, class T>
+template <int Pitch = 136, int Width = 128, class T>
 __device__ __forceinline__ V16<T> read_v32(const T* lds, int d, int k)
 {
     const int lane = threadIdx.x % 32;
     const int row  = k + lane / 16 * 8 + lane % 8;
-    const int col  = d + (lane % 16) / 8 * 8;
+    const int col  = LdsLayout<Width, 32>::Column(d + (lane % 16) / 8 * 8);
     V8<T> a        = transpose8(lds + row * Pitch + col);
     V8<T> b        = transpose8(lds + (row + 16) * Pitch + col);
     V16<T> result{};

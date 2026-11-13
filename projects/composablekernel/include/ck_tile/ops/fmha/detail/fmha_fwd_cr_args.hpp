@@ -3,12 +3,29 @@
 
 #pragma once
 
+#include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <initializer_list>
+#include <type_traits>
+#include <utility>
 
 namespace ck_tile::detail {
+
+template <typename Args, typename = void>
+struct FmhaFwdCrHasHeadRange : std::false_type
+{
+};
+
+template <typename Args>
+struct FmhaFwdCrHasHeadRange<Args,
+                             std::void_t<decltype(std::declval<Args>().head_start),
+                                         decltype(std::declval<Args>().num_head_q_total)>>
+    : std::true_type
+{
+};
 
 // Host-only view used to validate native kernel arguments with the same rules
 // as the uncompressed API input. This type is never a device argument ABI.
@@ -26,7 +43,35 @@ struct FmhaFwdCrInput
     int64_t batch_stride_q{}, batch_stride_k{}, batch_stride_v{}, batch_stride_o{},
         batch_stride_lse{};
     float scale_s{};
+    const void* bias_ptr{};
+    int64_t stride_bias{}, nhead_stride_bias{}, batch_stride_bias{};
+    float logits_soft_cap{};
+    int sink_size{}, min_seqlen_q{};
 };
+
+template <typename Args>
+bool fmha_fwd_cr_sink_args(const Args& a)
+{
+    return a.sink_size >= 0 && a.sink_size <= std::numeric_limits<int32_t>::max() - 128;
+}
+
+template <BlockAttentionBiasEnum Bias, bool SoftCap, typename Args>
+bool fmha_fwd_cr_score_args(const Args& a)
+{
+    if constexpr(Bias != BlockAttentionBiasEnum::NO_BIAS)
+    {
+        constexpr auto alignment = Bias == BlockAttentionBiasEnum::ALIBI ? alignof(float) : 2;
+        if(!a.bias_ptr || reinterpret_cast<uintptr_t>(a.bias_ptr) % alignment || a.stride_bias < 0)
+            return false;
+        if constexpr(Bias == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            if(a.nhead_stride_bias < 0 || (!a.seqstart_q_ptr && a.batch_stride_bias < 0))
+                return false;
+    }
+    if constexpr(SoftCap)
+        if(!std::isfinite(a.logits_soft_cap) || a.logits_soft_cap <= 0)
+            return false;
+    return true;
+}
 
 // Fixed tuning variants take priority over CK's existing dispatch heuristics.
 // Generic CR stays available as a fallback, including CR-only filtered builds.
@@ -84,8 +129,9 @@ bool fmha_fwd_cr_vector_output(const Args& a)
            a.nhead_stride_o % 8 == 0 && (a.seqstart_q_ptr || a.batch_stride_o % 8 == 0);
 }
 
-// Default preference is measured for vector-aligned views. Scalar views remain
-// eligible fallbacks without replacing a faster existing pipeline selection.
+// The default dispatcher applies this alignment preference to native
+// D64/D128/D192 without bias, soft cap, sink, or skip. Expanded CR families
+// prefer all supported views.
 template <typename Args>
 bool fmha_fwd_cr_preferred_args(const Args& a)
 {
@@ -110,18 +156,23 @@ bool fmha_fwd_cr_preferred_args(const Args& a)
 template <typename Args>
 bool fmha_fwd_cr_supported_args(const Args& a)
 {
+    if constexpr(FmhaFwdCrHasHeadRange<Args>::value)
+        if(a.head_start != 0 || (a.num_head_q_total != 0 && a.num_head_q_total != a.nhead_q))
+            return false;
     const bool group = a.seqstart_q_ptr != nullptr;
     if(!a.q_ptr || !a.o_ptr || ((group || a.seqlen_k > 0) && (!a.k_ptr || !a.v_ptr)) ||
        a.batch <= 0 || a.nhead_q <= 0 || a.nhead_k <= 0 || a.nhead_q % a.nhead_k ||
        a.seqlen_q < 0 || a.seqlen_k < 0 || a.max_seqlen_q < 1 || !std::isfinite(a.scale_s) ||
-       a.sink_ptr || group != (a.seqstart_k_ptr != nullptr) || a.mask_type < 0 || a.mask_type > 3)
+       reinterpret_cast<uintptr_t>(a.sink_ptr) % alignof(float) ||
+       group != (a.seqstart_k_ptr != nullptr) || a.mask_type < 0 || a.mask_type > 3)
         return false;
     // Batch mode represents logical lengths with cumulative pointers only.
     // Per-sequence length pointers are part of the group-mode contract.
-    if(!group && (a.seqlen_q_ptr || a.seqlen_k_ptr))
+    // The batch launch grid and tensor bounds must describe the same Q extent.
+    if(!group && (a.seqlen_q_ptr || a.seqlen_k_ptr || a.max_seqlen_q != a.seqlen_q))
         return false;
-    if(!((a.hdim_q == 64 && a.hdim_v == 64) || (a.hdim_q == 128 && a.hdim_v == 128) ||
-         (a.hdim_q == 192 && a.hdim_v == 128)))
+    if(a.hdim_q <= 0 || a.hdim_v <= 0 ||
+       !((a.hdim_q <= 160 && a.hdim_v <= 160) || (a.hdim_q <= 192 && a.hdim_v <= 128)))
         return false;
     // Tile coordinates and the swizzled linear grid use signed 32-bit indices.
     // Check the smallest tile so both generated geometries are safe to launch.

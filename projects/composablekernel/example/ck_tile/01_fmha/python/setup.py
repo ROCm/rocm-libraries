@@ -133,24 +133,34 @@ class FmhaBuildExtension(BuildExtension):
         if any(target.startswith(("gfx11", "gfx12")) for target in targets):
             definitions.append("-DCK_TILE_USE_WMMA=1")
         archive = kernel_dir / "libck_tile_fmha_kernels.a"
-        extension = CUDAExtension(
-            "ck_tile_fmha._C",
-            sources=sources,
-            include_dirs=[
-                str(binding_dir),
-                str(root / "include"),
-                str(root / "library/include"),
-                str(root / "example/ck_tile/01_fmha"),
-                str(kernel_dir / "include"),
-            ],
-            extra_objects=[str(archive)],
-            extra_compile_args={
-                "cxx": ["-O3", "-std=c++20"] + definitions,
-                "nvcc": ["-O3", "-std=c++20", "-fbracket-depth=1024"]
-                + [f"--offload-arch={target}" for target in targets]
-                + definitions,
-            },
-        )
+        # CUDAExtension scopes hipify to the current directory. The persistent
+        # cache may live outside the checkout, so scope it to our private copies.
+        previous_cwd = Path.cwd()
+        try:
+            os.chdir(binding_dir)
+            extension = CUDAExtension(
+                "ck_tile_fmha._C",
+                sources=sources,
+                include_dirs=[
+                    str(binding_dir),
+                    str(root / "include"),
+                    str(root / "library/include"),
+                    str(root / "example/ck_tile/01_fmha"),
+                    str(kernel_dir / "include"),
+                ],
+                extra_objects=[str(archive)],
+                extra_compile_args={
+                    "cxx": ["-O3", "-std=c++20"] + definitions,
+                    "nvcc": ["-O3", "-std=c++20", "-fbracket-depth=1024"]
+                    + [f"--offload-arch={target}" for target in targets]
+                    + definitions,
+                },
+            )
+            extension.sources = [
+                str((binding_dir / source).resolve()) for source in extension.sources
+            ]
+        finally:
+            os.chdir(previous_cwd)
         # Keep the extension object finalized by setuptools (including its
         # editable-install bookkeeping), and replace its build inputs.
         self.extensions[0].__dict__.update(extension.__dict__)

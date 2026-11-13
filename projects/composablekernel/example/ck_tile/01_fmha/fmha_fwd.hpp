@@ -751,12 +751,24 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
 template <typename Kernel>
 using fmha_fwd_native_kargs = decltype(Kernel::MakeKargs(std::declval<const fmha_fwd_args&>()));
 
+template <typename Kernel>
+using fmha_fwd_native_grid =
+    decltype(Kernel::GridSize(std::declval<const typename Kernel::Kargs&>()));
+
 template <typename FmhaKernel,
           std::enable_if_t<ck_tile::is_detected<fmha_fwd_native_kargs, FmhaKernel>::value, int> = 0>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
     auto kargs = FmhaKernel::MakeKargs(args);
-    return ck_tile::make_tuple(kargs, FmhaKernel::GridSize(kargs));
+    if constexpr(ck_tile::is_detected<fmha_fwd_native_grid, FmhaKernel>::value)
+        return ck_tile::make_tuple(kargs, FmhaKernel::GridSize(kargs));
+    else
+        return ck_tile::make_tuple(kargs,
+                                   FmhaKernel::GridSize(args.batch,
+                                                        args.nhead_q,
+                                                        args.max_seqlen_q,
+                                                        args.hdim_v,
+                                                        args.seqlen_k_ptr != nullptr));
 }
 
 template <

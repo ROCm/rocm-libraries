@@ -27,7 +27,7 @@ def main():
         ["gfx1250"],
         "fmha_fwd_d*_[bf][fp]16_*_nlogits_nbias*_ndropout_nskip_nqscale*",
         0,
-        [64, 128, 192],
+        [32, 64, 96, 128, 160, 192],
         "simplified",
     )
     for kernel in kernels:

@@ -12,14 +12,15 @@ function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
   endif()
   # CR's operand prefetch and barrier placement were tuned with these
   # scheduling costs. Scope them to this pipeline's translation units.
-  if(fwd_blob_name MATCHES "^fmha_fwd_d(64|128|192)_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$")
+  if(fwd_blob_name MATCHES "^fmha_fwd_d(32|64|96|128|160|192)_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$")
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode
       -mllvm -amdgpu-sched-strategy=max-ilp
       -mllvm -amdgpu-barrier-signal-wait-latency=32)
   endif()
-  # D64's WMMA operands are packed 32-bit pairs. Allocating their halves as
-  # separate 16-bit registers adds moves between LDS reads and WMMA uses.
-  if(fwd_blob_name MATCHES "^fmha_fwd_d64_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$")
+  # D64 and these D32 geometries favor packed register allocation in
+  # same-device measurements. Keep this setting tied to their tile shapes.
+  if(fwd_blob_name MATCHES "^fmha_fwd_d64_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$" OR
+     fwd_blob_name MATCHES "^fmha_fwd_d32_(fp16|bf16)_.*_b(64x128|128x(64|128))x.*_qr_tdm_cr_.*_gfx125\\.cpp$")
     list(APPEND compile_options -Xclang -target-feature -Xclang -real-true16)
   endif()
   set(${out_var} "${compile_options}" PARENT_SCOPE)

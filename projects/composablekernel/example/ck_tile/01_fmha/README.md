@@ -46,13 +46,11 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 ### Conditional rescaling TDM forward pipeline
 
 `qr_tdm_cr` uses conditional rescaling (CR) to avoid unnecessary softmax
-rescaling and maximum reductions. On gfx1250 it supports FP16/BF16 with
-D64/V64, D128/V128, or D192/V128, GQA/MQA, independent tensor strides,
-batch and variable-length group mode, dense and causal/local masks, and
-optional LSE. Head elements must be contiguous, with vector-aligned rows.
-See [codegen](codegen/ops/fmha_fwd.py) for dispatch selection and
+rescaling and maximum reductions. It uses the shared `FmhaFwdKernel` for
+FP16/BF16 forward attention on gfx1250.
+See [codegen](codegen/ops/fmha_fwd.py) for supported configurations and dispatch selection, and
 [argument validation](../../../include/ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp)
-for runtime requirements.
+for tensor layout requirements.
 
 ### Basic TDM forward feature coverage
 
@@ -76,11 +74,11 @@ Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
 or D192/V128, and row-major V. They use no bias, dropout, logits
 soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
 the existing pipeline candidates.
-Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
-logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
-of the compile-time sink-token flag.
+Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; other candidates
+handle virtual-sink logits. This runtime pointer is independent of the
+compile-time sink-token flag.
 
-After checking CR's fixed tuning variants, the generated API tries matching scheduled traits first. D64/V64 uses a
+After checking preferred CR configurations, the generated API tries matching scheduled traits first. D64/V64 uses a
 128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
 compiler minimum-waves-per-EU hint of three. The launch API retains the
 historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
