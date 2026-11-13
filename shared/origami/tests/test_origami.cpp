@@ -395,10 +395,10 @@ TEST_CASE("Origami: gfx1250 select_workgroup_mapping maps WGM only", "[origami]"
     REQUIRE(select(make_problem(36912, 62832, 4448), config) > 1);
   }
 
-  SECTION("non-temporal per-lane loads tie; tensor-DMA operands count as temporal") {
+  SECTION("cache hints are not read: every operand is priced as temporal") {
     const auto problem = make_problem(36912, 62832, 4448);
     auto nt            = make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 4, 4);
-    REQUIRE(select(problem, nt) == 1);
+    REQUIRE(select(problem, nt) == select(problem, config));
     auto temporal               = config;
     temporal.tensile().tdm_inst = 3;
     nt.tensile().tdm_inst       = 3;

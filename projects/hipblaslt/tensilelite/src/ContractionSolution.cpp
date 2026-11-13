@@ -2143,6 +2143,8 @@ namespace TensileLite
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
                                           static_cast<size_t>(sizeMapping.depthU)},
+                        .cache_hints_a = sizeMapping.cacheHintA(),
+                        .cache_hints_b = sizeMapping.cacheHintB(),
                     };
 
                     origami::workgroup_mapping_t prediction_results
@@ -2272,6 +2274,8 @@ namespace TensileLite
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
                                           static_cast<size_t>(sizeMapping.depthU)},
+                        .cache_hints_a = sizeMapping.cacheHintA(),
+                        .cache_hints_b = sizeMapping.cacheHintB(),
                     };
 
                     origami::staggerU_t prediction_results
