@@ -28,7 +28,8 @@
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
-#include <miopen/env_debug.hpp>                     // debug::env::UpdateEnvVariable (table toggle)
+#include <miopen/solver/ck_impl_lib_loader.hpp> // CkImplLibLoader, CKSolverType (CK enumeration)
+#include <miopen/env_debug.hpp>                 // debug::env::UpdateEnvVariable (table toggle)
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/md5.hpp> // miopen::md5 (loader md5-mismatch test)
@@ -777,6 +778,81 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabRejectsNonUnitSplitK_Test)
         params.arch, params.solver, features, /*use_tf32=*/false, unit_split_k_only);
     if(result.has_value())
         EXPECT_EQ(result->second, 1);
+}
+
+namespace {
+// Map a candidate-selection solver name to its CK loader solver type.
+std::optional<miopen::solver::CKSolverType> CKSolverTypeForSolver(const std::string& s)
+{
+    using miopen::solver::CKSolverType;
+    if(s == "ConvHipImplicitGemmGroupFwdXdlops")
+        return CKSolverType::GrpConvFwd;
+    if(s == "ConvHipImplicitGemmGroupBwdXdlops")
+        return CKSolverType::GrpConvBwd;
+    if(s == "ConvHipImplicitGemmGroupWrwXdlops")
+        return CKSolverType::GrpConvWrw;
+    if(s == "ConvHipImplicitGemm3DGroupFwdXdlops")
+        return CKSolverType::GrpConv3dFwd;
+    if(s == "ConvHipImplicitGemm3DGroupBwdXdlops")
+        return CKSolverType::GrpConv3dBwd;
+    if(s == "ConvHipImplicitGemm3DGroupWrwXdlops")
+        return CKSolverType::GrpConv3dWrw;
+    return std::nullopt;
+}
+
+// Strip the "+<split_k>" suffix a split-k solver appends after the final '>' (mirrors the loader).
+std::string VocabBaseId(const std::string& id)
+{
+    const auto gt   = id.rfind('>');
+    const auto plus = id.find('+', gt == std::string::npos ? 0 : gt);
+    return plus == std::string::npos ? id : id.substr(0, plus);
+}
+} // namespace
+
+// The shipped config-embedding vocab must cover the build's live CK instance set: the lazy walk
+// only ranks kernels that are in the vocab, so a regeneration that truncated or mismatched it would
+// silently make those kernels unselectable. ASSERT the vocab is present, and EXPECT most live CK
+// instances are covered (lenient, to tolerate modest CK version drift between the shipped table and
+// the build's CK plugin). Runs for the current device arch only.
+TEST_P(GPU_CandidateSelection_FP32, ShippedVocabCoversCKInstances_Test)
+{
+    const auto& params      = GetParam();
+    const auto current_arch = handle.GetDeviceName();
+    if(params.arch != current_arch)
+        GTEST_SKIP() << "CK enumeration uses the current device's plugin; skipping foreign arch "
+                     << params.arch;
+
+    const auto ck_solver = CKSolverTypeForSolver(params.solver);
+    ASSERT_TRUE(ck_solver.has_value()) << "No CKSolverType mapping for solver " << params.solver;
+
+    const auto ck_instances =
+        miopen::solver::CkImplLibLoader::Get(current_arch).GetAllKernelTypeStrings(*ck_solver);
+    ASSERT_FALSE(ck_instances.empty()) << "No CK instances enumerated for " << params.solver;
+
+    const auto& vocab = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty()) << "Shipped config-embedding vocab is empty for " << params.arch
+                                << "_" << params.solver
+                                << " -- the table is missing or was truncated to nothing.";
+
+    std::set<std::string> vocab_bases;
+    for(const auto& id : vocab)
+        vocab_bases.insert(VocabBaseId(id));
+
+    std::size_t covered = 0;
+    std::string first_missing;
+    for(const auto& k : ck_instances)
+    {
+        if(vocab_bases.count(k) != 0)
+            ++covered;
+        else if(first_missing.empty())
+            first_missing = k;
+    }
+    const double fraction = static_cast<double>(covered) / static_cast<double>(ck_instances.size());
+    EXPECT_GE(fraction, 0.5)
+        << "Shipped vocab covers only " << covered << " / " << ck_instances.size()
+        << " live CK instances for " << params.arch << "_" << params.solver
+        << " -- likely a stale or truncated table; regenerate it. First uncovered: "
+        << first_missing;
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
