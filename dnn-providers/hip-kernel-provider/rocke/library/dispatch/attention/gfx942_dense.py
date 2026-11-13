@@ -46,6 +46,9 @@ _QBMINOR_VARIANT_ID = "qbminor"
 PERSIST_AOT_SPEC_ID = "gfx942_dense_persist_aot"
 BTMINOR_AOT_SPEC_ID = "gfx942_dense_btminor_aot"
 HQSWZ_AOT_SPEC_ID = "gfx942_dense_hqswz_aot"
+# What a candidate that pins the block order fixes with it: the grid kind and the
+# KV split (see ``DenseSpace.pinned_axes``).
+_PINNED_GRID_AXES = frozenset({"persistent", "nonpersist_decode", "kv_segments"})
 _AOT_GRIDS = (
     (
         "attention_gfx942_dense_persist_aot",
@@ -483,6 +486,7 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
             }
         ),
         recorded=frozenset({"waves_per_eu"}),
+        pinned_axes=_PINNED_GRID_AXES,
     )
 
 
@@ -514,6 +518,7 @@ def _make_gfx942_attention_dense_aot_candidate(
         ),
         recorded=frozenset({"waves_per_eu"}),
         axis_names=None if persistent else frozenset(),
+        pinned_axes=_PINNED_GRID_AXES,
     )
 
 
