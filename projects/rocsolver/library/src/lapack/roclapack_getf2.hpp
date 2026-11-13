@@ -603,7 +603,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
 
 #ifdef OPTIMAL
     int spker = select_spkernel<ISBATCHED, T>(m, n, inca, pivot);
-    if(!std::is_same<I, int64_t>::value && spker > 0)
+    if(spker > 0)
     {
         // Use specialized kernels for small matrices
         if(spker == 1)
