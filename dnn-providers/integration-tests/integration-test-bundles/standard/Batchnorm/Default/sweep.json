@@ -9349,7 +9349,7 @@
           }
         },
         "seed": 42,
-        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x16x65x65; X drawn from [999.99, 1000.01] so a large mean with tiny variance exercises catastrophic cancellation in the naive E[x^2] - mean^2 accumulation",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x16x65x65; X drawn from [999.0, 1001.0] so a large mean with tiny variance exercises catastrophic cancellation in the naive E[x^2] - mean^2 accumulation",
         "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training variant 1 Welford variance fix for large-mean inputs (MIOpen PR #5013)"
       }
     }
