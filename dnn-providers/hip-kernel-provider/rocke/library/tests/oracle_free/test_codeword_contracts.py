@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only contracts for the coordinate-codeword placement probe (P10)."""
+"""CPU-only contracts for the coordinate-codeword placement probe."""
 
 from __future__ import annotations
 
@@ -30,18 +30,17 @@ from ._analytical import (
     legal_interval,
     legal_keys,
 )
-from ._dense_subject import DENSE_SUBJECTS
-from ._p10_analytical import (
+from ._codeword_analytical import (
     CANARY_BITS,
+    CODEWORD_COORDINATE_LANES,
+    CODEWORD_GROUPED_CASES,
+    CODEWORD_QUICK_CASES,
+    CODEWORD_UNGROUPED_CASES,
     LANE_BATCH,
     LANE_KEY,
     LANE_KV_HEAD,
     LANE_PARITY,
     MASKED_EXPONENTIALS,
-    P10_COORDINATE_LANES,
-    P10_GROUPED_CASES,
-    P10_QUICK_CASES,
-    P10_UNGROUPED_CASES,
     SENTINEL_BITS,
     GuardedOutput,
     GuardLayout,
@@ -57,29 +56,29 @@ from ._p10_analytical import (
     exact_target_bits,
     guard_layout,
     masked_leading_tiles,
-    require_p10_scope,
+    require_codeword_scope,
     row_codeword_collisions,
     row_moments,
     visited_tiles,
 )
-from ._p10_controls import (
-    P10_BLIND_CONTROL_CASES,
-    P10_EMITTED_CONTROL_CASES,
-    P10_EMITTED_CONTROLS,
-    P10_ROW_BOUND_CASES,
-    P10_SUBJECT_CONTROLS,
+from ._codeword_controls import (
+    CODEWORD_BLIND_CONTROL_CASES,
+    CODEWORD_EMITTED_CONTROL_CASES,
+    CODEWORD_EMITTED_CONTROLS,
+    CODEWORD_ROW_BOUND_CASES,
+    CODEWORD_SUBJECT_CONTROLS,
     _mutant_builder,
     lowered_ir,
     private_build,
     row_bound_bypass_spec,
 )
-from ._p10_policy import (
-    P10_KILL_MATRIX,
+from ._codeword_policy import (
+    CODEWORD_KILL_MATRIX,
     AdmissibleBits,
     Channel,
+    CodewordMutation,
     CodewordResult,
     DecodedSource,
-    P10Mutation,
     Scope,
     _placement_mutant_bits,
     analyze_codeword,
@@ -90,17 +89,18 @@ from ._p10_policy import (
     in_scope,
     path_exact_admissible,
 )
-from ._p10_subject import (
-    P10_ARCHES,
-    P10_SUBJECT_CASES,
+from ._codeword_subject import (
+    CODEWORD_ARCHES,
+    CODEWORD_SUBJECT_CASES,
     _launch_guarded,
-    _verify_p10_resolved_spec,
-    p10_kernel_key,
-    p10_schedule,
-    resolve_p10_subject,
+    _verify_codeword_resolved_spec,
+    codeword_kernel_key,
+    codeword_schedule,
+    resolve_codeword_subject,
 )
+from ._dense_subject import DENSE_SUBJECTS
+from .test_codeword_dense import _judge_output, _not_rejected
 from .test_contracts import _SKIP_CALLS, _dotted_name
-from .test_p10_dense import _judge_output, _not_rejected
 
 # Literal, so a change of the uniform-probability lane's specifications does not
 # silently change what the placement probe covers.
@@ -120,27 +120,27 @@ def _subject_case_id(item: tuple[str, UniformCase]) -> str:
 
 
 def test_quick_matrix_pins_the_grouped_and_ungrouped_cases() -> None:
-    assert tuple(case.case_id for case in P10_QUICK_CASES) == _QUICK_CASE_IDS
-    assert {replace(case, batch=1) for case in P10_GROUPED_CASES} == set(
+    assert tuple(case.case_id for case in CODEWORD_QUICK_CASES) == _QUICK_CASE_IDS
+    assert {replace(case, batch=1) for case in CODEWORD_GROUPED_CASES} == set(
         UNIFORM_QUICK_CASES
     )
     # Batch placement needs batch 2, and output-head placement needs one query
     # head per KV head, on every dtype and mask of the lane.
     pairings = {(case.dtype, case.mask) for case in UNIFORM_QUICK_CASES}
     assert {
-        (case.dtype, case.mask) for case in P10_GROUPED_CASES if case.batch == 2
+        (case.dtype, case.mask) for case in CODEWORD_GROUPED_CASES if case.batch == 2
     } == pairings
-    assert {(case.dtype, case.mask) for case in P10_UNGROUPED_CASES} == pairings
-    for case in P10_GROUPED_CASES:
+    assert {(case.dtype, case.mask) for case in CODEWORD_UNGROUPED_CASES} == pairings
+    for case in CODEWORD_GROUPED_CASES:
         assert case.nhead_q > case.nhead_k
-    for case in P10_UNGROUPED_CASES:
+    for case in CODEWORD_UNGROUPED_CASES:
         assert case.nhead_q == case.nhead_k
         assert case.batch == 2
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_scope_admits_the_quick_matrix(case: UniformCase) -> None:
-    require_p10_scope(case)
+    require_codeword_scope(case)
 
 
 @pytest.mark.parametrize(
@@ -178,26 +178,26 @@ def test_scope_refuses_cases_outside_the_codeword(
     case: UniformCase, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        require_p10_scope(case)
+        require_codeword_scope(case)
 
 
 def test_subject_matrix_runs_every_quick_case_on_each_derived_arch() -> None:
-    assert set(P10_ARCHES) <= set(DENSE_SUBJECTS)
-    assert P10_SUBJECT_CASES == tuple(
-        (arch, case) for arch in P10_ARCHES for case in P10_QUICK_CASES
+    assert set(CODEWORD_ARCHES) <= set(DENSE_SUBJECTS)
+    assert CODEWORD_SUBJECT_CASES == tuple(
+        (arch, case) for arch in CODEWORD_ARCHES for case in CODEWORD_QUICK_CASES
     )
-    assert len(set(P10_SUBJECT_CASES)) == len(P10_SUBJECT_CASES)
+    assert len(set(CODEWORD_SUBJECT_CASES)) == len(CODEWORD_SUBJECT_CASES)
 
 
 def test_subject_refuses_an_arch_without_a_derivation() -> None:
     assert "gfx950" in DENSE_SUBJECTS
     with pytest.raises(ValueError, match=r"arch='gfx950', expected one of"):
-        resolve_p10_subject("gfx950", P10_QUICK_CASES[0])
+        resolve_codeword_subject("gfx950", CODEWORD_QUICK_CASES[0])
 
 
 def test_subject_refuses_a_case_outside_the_codeword_before_dispatch() -> None:
     with pytest.raises(ValueError, match=r"batch=3, expected at most 2"):
-        resolve_p10_subject(
+        resolve_codeword_subject(
             "gfx942", UniformCase(3, 256, 256, 8, 2, 64, "bf16", "causal")
         )
 
@@ -212,9 +212,9 @@ def _fake_tuning_spec(**overrides) -> SimpleNamespace:
 
 
 def test_subject_refuses_the_wave_skipping_window_schedule() -> None:
-    _verify_p10_resolved_spec(_fake_tuning_spec())
+    _verify_codeword_resolved_spec(_fake_tuning_spec())
     with pytest.raises(AssertionError, match=r"window_wave_skip=True"):
-        _verify_p10_resolved_spec(_fake_tuning_spec(window_wave_skip=True))
+        _verify_codeword_resolved_spec(_fake_tuning_spec(window_wave_skip=True))
 
 
 @pytest.mark.parametrize(
@@ -223,21 +223,21 @@ def test_subject_refuses_the_wave_skipping_window_schedule() -> None:
 def test_tile_and_grid_knobs_stay_free(name: str, value) -> None:
     """The schedule is read from the resolved spec, so a retune inside the scope
     keeps running instead of failing a pinned geometry."""
-    _verify_p10_resolved_spec(_fake_tuning_spec(**{name: value}))
+    _verify_codeword_resolved_spec(_fake_tuning_spec(**{name: value}))
 
 
-@pytest.mark.parametrize("subject_case", P10_SUBJECT_CASES, ids=_subject_case_id)
+@pytest.mark.parametrize("subject_case", CODEWORD_SUBJECT_CASES, ids=_subject_case_id)
 def test_quick_cases_resolve_inside_the_scope(
     subject_case: tuple[str, UniformCase],
 ) -> None:
     arch, case = subject_case
-    subject = resolve_p10_subject(arch, case)
+    subject = resolve_codeword_subject(arch, case)
     assert (subject.arch, subject.case_id) == (arch, case.case_id)
     assert subject.candidate_name == DENSE_SUBJECTS[arch].candidate_name
     assert not subject.tuning_spec.kernel_spec.window_wave_skip
 
 
-@pytest.mark.parametrize("subject_case", P10_SUBJECT_CASES, ids=_subject_case_id)
+@pytest.mark.parametrize("subject_case", CODEWORD_SUBJECT_CASES, ids=_subject_case_id)
 def test_batch_and_head_counts_are_kernel_arguments(
     subject_case: tuple[str, UniformCase],
 ) -> None:
@@ -245,7 +245,7 @@ def test_batch_and_head_counts_are_kernel_arguments(
     count, so the grouped and ungrouped cases of a dtype differ only in kernel
     arguments. A baked-shape kernel must instead split its identity on them."""
     arch, case = subject_case
-    spec = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    spec = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
     heads = (4, 4) if case.nhead_q != case.nhead_k else (8, 2)
     other = replace(
         spec,
@@ -253,7 +253,7 @@ def test_batch_and_head_counts_are_kernel_arguments(
         num_query_heads=heads[0],
         num_kv_heads=heads[1],
     )
-    same_kernel = p10_kernel_key(arch, other) == p10_kernel_key(arch, spec)
+    same_kernel = codeword_kernel_key(arch, other) == codeword_kernel_key(arch, spec)
     assert same_kernel == bool(spec.runtime_shape)
 
 
@@ -319,7 +319,7 @@ def test_codeword_restates_the_profile_values() -> None:
     ]
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_inputs_are_zero_q_finite_k_and_the_exact_codeword(case: UniformCase) -> None:
     q, k, v = codeword_inputs(case)
     assert q.shape == case.output_shape
@@ -340,7 +340,7 @@ def test_inputs_are_zero_q_finite_k_and_the_exact_codeword(case: UniformCase) ->
     for key in range(case.seqlen_k):
         for lane in (LANE_KEY, LANE_PARITY):
             assert _only(v[:, key, :, lane]) == codeword_value(0, 0, key, lane)
-    for dim in range(P10_COORDINATE_LANES, case.head_dim):
+    for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim):
         assert _only(v[..., dim]) == codeword_value(0, 0, 0, dim)
 
     # Exact in both dtypes, and key 0 of the key lane is stored as -0.
@@ -379,10 +379,10 @@ def test_row_moments_refuse_a_row_without_a_key() -> None:
         row_moments(case, 319)
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_targets_are_codeword_means_over_the_legal_keys(case: UniformCase) -> None:
     group = case.nhead_q // case.nhead_k
-    dims = (*range(P10_COORDINATE_LANES + 2), case.head_dim - 1)
+    dims = (*range(CODEWORD_COORDINATE_LANES + 2), case.head_dim - 1)
     for batch, head, query in itertools.product(
         range(case.batch), range(case.nhead_q), UNIFORM_FOCUSED_ROWS
     ):
@@ -434,7 +434,7 @@ def test_pairing_maxima_and_unrepresentable_rows(case: UniformCase) -> None:
     assert not any(_is_midpoint(value, case.dtype) for value in key_lane + parity)
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_target_bits_round_each_coordinate_and_keep_plus_zero(
     case: UniformCase,
 ) -> None:
@@ -445,7 +445,7 @@ def test_target_bits_round_each_coordinate_and_keep_plus_zero(
         target = codeword_target(case, batch, query, head, dim)
         return exact_target_bits(target, case.dtype)
 
-    dims = (*range(P10_COORDINATE_LANES + 2), case.head_dim - 1)
+    dims = (*range(CODEWORD_COORDINATE_LANES + 2), case.head_dim - 1)
     for batch, query, head, dim in itertools.product(
         range(case.batch), UNIFORM_FOCUSED_ROWS, range(case.nhead_q), dims
     ):
@@ -459,7 +459,7 @@ def test_target_bits_round_each_coordinate_and_keep_plus_zero(
         assert (bits[..., lane] == bits[:1, :, :1, lane]).all()
     assert (bits[..., LANE_BATCH] == bits[:, :1, :1, LANE_BATCH]).all()
     assert (bits[..., LANE_KV_HEAD] == bits[:1, :1, :, LANE_KV_HEAD]).all()
-    dimension_lanes = bits[..., P10_COORDINATE_LANES:]
+    dimension_lanes = bits[..., CODEWORD_COORDINATE_LANES:]
     assert (dimension_lanes == dimension_lanes[:1, :1, :1]).all()
 
     # The one zero target is the key lane of row 0, and it is +0. Every other
@@ -471,7 +471,7 @@ def test_target_bits_round_each_coordinate_and_keep_plus_zero(
     assert (bits[:, 1:, :, LANE_KEY] & 0x8000).all()
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_query_heads_of_one_kv_group_share_every_target(case: UniformCase) -> None:
     """Why the grouped cases cannot own output-head placement, and the ungrouped
     ones can: the stored values distinguish KV heads, not query heads."""
@@ -483,21 +483,22 @@ def test_query_heads_of_one_kv_group_share_every_target(case: UniformCase) -> No
     assert len(distinct) == case.nhead_k
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_lane_classes_are_disjoint_and_nonzero_targets_are_normal(
     case: UniformCase,
 ) -> None:
     bits = codeword_target_bits(case)
     classes = [
-        set(np.unique(bits[..., lane]).tolist()) for lane in range(P10_COORDINATE_LANES)
+        set(np.unique(bits[..., lane]).tolist())
+        for lane in range(CODEWORD_COORDINATE_LANES)
     ]
-    classes.append(set(np.unique(bits[..., P10_COORDINATE_LANES:]).tolist()))
+    classes.append(set(np.unique(bits[..., CODEWORD_COORDINATE_LANES:]).tolist()))
     for index, first in enumerate(classes):
         for second in classes[index + 1 :]:
             assert not first & second
     assert len(classes[LANE_BATCH]) == case.batch
     assert len(classes[LANE_KV_HEAD]) == case.nhead_k
-    assert len(classes[-1]) == case.head_dim - P10_COORDINATE_LANES
+    assert len(classes[-1]) == case.head_dim - CODEWORD_COORDINATE_LANES
 
     fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
     magnitude = bits & 0x7FFF
@@ -506,7 +507,7 @@ def test_lane_classes_are_disjoint_and_nonzero_targets_are_normal(
     assert normal[magnitude != 0].all()
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_lane_value_ranges_match_the_derivation(case: UniformCase) -> None:
     rows = range(case.seqlen_q)
     batch_lane = {codeword_target(case, b, 0, 0, LANE_BATCH) for b in range(case.batch)}
@@ -517,7 +518,7 @@ def test_lane_value_ranges_match_the_derivation(case: UniformCase) -> None:
     parity = [codeword_target(case, 0, query, 0, LANE_PARITY) for query in rows]
     dimension = [
         codeword_target(case, 0, 0, 0, dim)
-        for dim in range(P10_COORDINATE_LANES, case.head_dim)
+        for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim)
     ]
     assert batch_lane == {Fraction(81, 4), Fraction(41, 2)} or (
         case.batch == 1 and batch_lane == {Fraction(81, 4)}
@@ -553,7 +554,7 @@ def _lane_totals(case: UniformCase, dim: int) -> list[Fraction]:
     ]
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_lane_sums_stay_on_a_grid_within_exact_fp32_accumulation(
     case: UniformCase,
 ) -> None:
@@ -575,7 +576,7 @@ def test_largest_lane_sums_of_the_matrix() -> None:
     def largest(dims) -> Fraction:
         return max(
             total
-            for case in P10_QUICK_CASES
+            for case in CODEWORD_QUICK_CASES
             for dim in dims
             for total in _lane_totals(case, dim)
         )
@@ -584,16 +585,16 @@ def test_largest_lane_sums_of_the_matrix() -> None:
     assert largest([LANE_KV_HEAD]) == 6912
     assert largest([LANE_KEY]) == 16320
     assert largest([LANE_PARITY]) == 48
-    assert largest(range(P10_COORDINATE_LANES, 64)) == 1024
+    assert largest(range(CODEWORD_COORDINATE_LANES, 64)) == 1024
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_quick_cases_have_pairwise_distinct_row_codewords(case: UniformCase) -> None:
     assert row_codeword_collisions(case) == ()
     bits = codeword_target_bits(case)
     for batch, head in itertools.product(range(case.batch), range(case.nhead_q)):
         words = {
-            bits[batch, query, head, :P10_COORDINATE_LANES].tobytes()
+            bits[batch, query, head, :CODEWORD_COORDINATE_LANES].tobytes()
             for query in range(case.seqlen_q)
         }
         assert len(words) == case.seqlen_q
@@ -601,7 +602,7 @@ def test_quick_cases_have_pairwise_distinct_row_codewords(case: UniformCase) -> 
     key_lane = [
         codeword_target(case, 0, query, 0, LANE_KEY) for query in range(case.seqlen_q)
     ]
-    assert all(first > second for first, second in zip(key_lane, key_lane[1:]))
+    assert all(first > second for first, second in itertools.pairwise(key_lane))
 
 
 def test_bf16_window_fixture_loses_47_adjacent_row_pairs() -> None:
@@ -614,7 +615,7 @@ def test_bf16_window_fixture_loses_47_adjacent_row_pairs() -> None:
         match=r"47 pair\(s\) of query rows store the same rounded codeword, "
         r"first rows 161 and 162",
     ):
-        require_p10_scope(case)
+        require_codeword_scope(case)
 
     exact = [codeword_target(case, 0, query, 0, LANE_KEY) for query in range(256)]
     stored = [
@@ -651,12 +652,13 @@ def test_reflected_key_lane_separates_the_colliding_bf16_window_rows() -> None:
     magnitudes = [abs(value) for value in exact]
     assert (min(magnitudes), max(magnitudes)) == (Fraction(63, 4), Fraction(253, 4))
     assert all(
-        after - before == Fraction(1, 2) for before, after in zip(exact, exact[1:])
+        after - before == Fraction(1, 2) for before, after in itertools.pairwise(exact)
     )
     rounded = [stored(value) for value in exact]
     assert all(abs(new - old) <= Fraction(1, 8) for old, new in zip(exact, rounded))
     assert all(
-        after - before >= Fraction(1, 4) for before, after in zip(rounded, rounded[1:])
+        after - before >= Fraction(1, 4)
+        for before, after in itertools.pairwise(rounded)
     )
 
     # The key lane separates the rows below 160, so the two lanes together give
@@ -757,7 +759,7 @@ def test_fully_masked_leading_tiles_of_the_derived_schedule() -> None:
 @pytest.mark.parametrize(
     "masked_exponential", MASKED_EXPONENTIALS, ids=_MASKED_EXPONENTIAL_IDS
 )
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_path_exact_emulation_stores_every_target(
     case: UniformCase, masked_exponential: float
 ) -> None:
@@ -785,7 +787,7 @@ def test_path_exact_emulation_does_not_depend_on_the_tile_geometry(
 
 @pytest.mark.parametrize(
     "case",
-    [case for case in P10_QUICK_CASES if case.dtype == "fp16"],
+    [case for case in CODEWORD_QUICK_CASES if case.dtype == "fp16"],
     ids=lambda case: case.case_id,
 )
 def test_fp16_single_rounded_store_keeps_every_target(case: UniformCase) -> None:
@@ -799,12 +801,12 @@ def test_fp16_single_rounded_store_keeps_every_target(case: UniformCase) -> None
         assert np.array_equal(stored, codeword_target_bits(case))
 
 
-@pytest.mark.parametrize("subject_case", P10_SUBJECT_CASES, ids=_subject_case_id)
+@pytest.mark.parametrize("subject_case", CODEWORD_SUBJECT_CASES, ids=_subject_case_id)
 def test_emulation_on_the_dispatch_resolved_schedule_stores_every_target(
     subject_case: tuple[str, UniformCase],
 ) -> None:
     arch, case = subject_case
-    schedule = p10_schedule(resolve_p10_subject(arch, case))
+    schedule = codeword_schedule(resolve_codeword_subject(arch, case))
     stored = emulate_path_exact(case, schedule)
     assert np.array_equal(stored, codeword_target_bits(case))
 
@@ -819,7 +821,7 @@ def test_emulation_moves_when_masked_keys_keep_weight() -> None:
         assert differing[..., LANE_KEY].any()
         # The lanes that do not depend on the key are means of a constant.
         assert not differing[..., LANE_BATCH].any()
-        assert not differing[..., P10_COORDINATE_LANES:].any()
+        assert not differing[..., CODEWORD_COORDINATE_LANES:].any()
 
 
 _UNIT_ROUNDOFF = Fraction(1, 1 << 24)
@@ -860,7 +862,7 @@ def _constant_lane_values() -> list[Fraction]:
     return [
         *(codeword_value(batch, 0, 0, LANE_BATCH) for batch in range(2)),
         *(codeword_value(0, head, 0, LANE_KV_HEAD) for head in range(4)),
-        *(codeword_value(0, 0, 0, dim) for dim in range(P10_COORDINATE_LANES, 64)),
+        *(codeword_value(0, 0, 0, dim) for dim in range(CODEWORD_COORDINATE_LANES, 64)),
     ]
 
 
@@ -972,7 +974,7 @@ def test_guard_patterns_are_a_finite_canary_and_a_nan_sentinel() -> None:
     assert canary_bf16 == pytest.approx(-2.86e-16, rel=1e-2)
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_no_input_or_admissible_output_has_a_guard_pattern(case: UniformCase) -> None:
     """A changed canary is then always a stray write, and a sentinel is never a
     value a correct kernel stores. Admissible outputs are taken generously: each
@@ -987,7 +989,7 @@ def test_no_input_or_admissible_output_has_a_guard_pattern(case: UniformCase) ->
     assert not np.isin(admissible, patterns).any()
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_guard_holds_one_query_tile_on_each_side(case: UniformCase) -> None:
     layout = guard_layout(case, _DERIVED_SCHEDULE)
     assert layout.guard == 128 * case.nhead_q * case.head_dim
@@ -1033,7 +1035,7 @@ def test_guarded_output_rejects_a_buffer_that_is_not_the_allocation() -> None:
         GuardedOutput(layout, layout.new_buffer().astype(np.int32))
     output = GuardedOutput(layout, layout.new_buffer())
     with pytest.raises(ValueError, match=r"has 131072 elements, expected 16"):
-        output.bits(P10_QUICK_CASES[0])
+        output.bits(CODEWORD_QUICK_CASES[0])
 
 
 class _FakeDevice:
@@ -1111,7 +1113,7 @@ def _fake_launch(case: UniformCase, kernel) -> tuple[GuardedOutput, _FakeDevice,
 
 
 def test_guarded_launch_hands_the_kernel_the_interior_of_the_allocation() -> None:
-    case = P10_UNGROUPED_CASES[0]
+    case = CODEWORD_UNGROUPED_CASES[0]
     targets = codeword_target_bits(case)
     output, device, seen = _fake_launch(
         case, lambda device, out: device.store(out, targets)
@@ -1138,7 +1140,7 @@ def test_guarded_launch_hands_the_kernel_the_interior_of_the_allocation() -> Non
 
 
 def test_store_safety_counts_a_write_before_the_tensor() -> None:
-    case = P10_UNGROUPED_CASES[0]
+    case = CODEWORD_UNGROUPED_CASES[0]
     targets = codeword_target_bits(case)
 
     def kernel(device: _FakeDevice, out: int) -> None:
@@ -1152,7 +1154,7 @@ def test_store_safety_counts_a_write_before_the_tensor() -> None:
     assert np.array_equal(output.bits(case), targets)
 
 
-@pytest.mark.parametrize("case", P10_GROUPED_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_GROUPED_CASES, ids=lambda case: case.case_id)
 def test_store_safety_counts_one_extra_query_tile_after_the_tensor(
     case: UniformCase,
 ) -> None:
@@ -1176,7 +1178,7 @@ def test_store_safety_counts_one_extra_query_tile_after_the_tensor(
 
 
 def test_store_safety_separates_missing_stores_from_non_finite_values() -> None:
-    case = P10_UNGROUPED_CASES[0]
+    case = CODEWORD_UNGROUPED_CASES[0]
     assert case.dtype == "fp16"
     targets = codeword_target_bits(case)
     flat = targets.ravel().copy()
@@ -1203,7 +1205,7 @@ def test_store_safety_separates_missing_stores_from_non_finite_values() -> None:
 def test_a_write_past_the_guard_is_not_contained() -> None:
     """The guard bounds what the counts can show, not where a kernel can write:
     the fake device faults on a store beyond the allocation, a real one may not."""
-    case = P10_UNGROUPED_CASES[0]
+    case = CODEWORD_UNGROUPED_CASES[0]
     targets = codeword_target_bits(case)
 
     def kernel(device: _FakeDevice, out: int) -> None:
@@ -1242,7 +1244,7 @@ def _judge(case: UniformCase, bits: np.ndarray) -> CodewordResult:
     return analyze_codeword(case, _with_bits(case, bits), path_exact_admissible(case))
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_path_exact_admissible_adds_only_the_other_zero_sign(
     case: UniformCase,
 ) -> None:
@@ -1264,7 +1266,7 @@ def test_admissible_bits_reject_arrays_that_are_not_two_bit_tables() -> None:
         AdmissibleBits(bits, bits.T.copy())
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_correct_output_passes_with_clean_guards(case: UniformCase) -> None:
     result = analyze_codeword(case, _correct_output(case), path_exact_admissible(case))
     assert result.violations == ()
@@ -1278,7 +1280,7 @@ def test_correct_output_passes_with_clean_guards(case: UniformCase) -> None:
 
 
 def test_analyzer_requires_the_admissible_bits_of_the_case() -> None:
-    grouped, ungrouped = P10_GROUPED_CASES[0], P10_UNGROUPED_CASES[0]
+    grouped, ungrouped = CODEWORD_GROUPED_CASES[0], CODEWORD_UNGROUPED_CASES[0]
     with pytest.raises(ValueError, match=r"admissible shape \(2, 256, 4, 64\)"):
         analyze_codeword(
             grouped, _correct_output(grouped), path_exact_admissible(ungrouped)
@@ -1286,7 +1288,7 @@ def test_analyzer_requires_the_admissible_bits_of_the_case() -> None:
 
 
 def test_negative_zero_is_admissible_only_where_it_is_listed() -> None:
-    case = P10_UNGROUPED_CASES[1]
+    case = CODEWORD_UNGROUPED_CASES[1]
     targets = codeword_target_bits(case)
     stored = targets.copy()
     stored[:, 0, :, LANE_KEY] = 0x8000
@@ -1344,7 +1346,7 @@ def test_one_step_off_the_target_fails_as_near_in_its_lane_channel(
 
 
 def test_a_value_of_another_coordinate_is_misplaced_and_decoded() -> None:
-    case = P10_UNGROUPED_CASES[1]
+    case = CODEWORD_UNGROUPED_CASES[1]
     targets = codeword_target_bits(case)
     moves = [
         ((0, 5, 0, LANE_KEY), (0, 7, 0, LANE_KEY), DecodedSource(Channel.ROW, 7)),
@@ -1368,7 +1370,7 @@ def test_a_value_of_another_coordinate_is_misplaced_and_decoded() -> None:
 
 
 def test_a_value_of_no_lane_is_foreign() -> None:
-    case = P10_UNGROUPED_CASES[1]
+    case = CODEWORD_UNGROUPED_CASES[1]
     stored = codeword_target_bits(case).copy()
     stored[1, 200, 2, 30] = _rounded(case, Fraction(1000))
     result = _judge(case, stored)
@@ -1378,7 +1380,7 @@ def test_a_value_of_no_lane_is_foreign() -> None:
 
 
 def test_decoder_names_each_lane_and_marks_shared_values() -> None:
-    grouped = P10_GROUPED_CASES[3]
+    grouped = CODEWORD_GROUPED_CASES[3]
     assert (grouped.dtype, grouped.mask, grouped.batch) == ("bf16", "causal", 2)
     decoder = codeword_decoder(grouped)
     assert decoder[_rounded(grouped, Fraction(41, 2))] == DecodedSource(
@@ -1404,81 +1406,81 @@ def test_decoder_names_each_lane_and_marks_shared_values() -> None:
 
 
 def test_kill_matrix_has_a_row_for_every_mutation_and_a_case_for_every_scope() -> None:
-    assert set(P10_KILL_MATRIX) == set(P10Mutation)
+    assert set(CODEWORD_KILL_MATRIX) == set(CodewordMutation)
     for scope in Scope:
-        assert any(in_scope(case, scope) for case in P10_QUICK_CASES), scope
-    for case in P10_QUICK_CASES:
+        assert any(in_scope(case, scope) for case in CODEWORD_QUICK_CASES), scope
+    for case in CODEWORD_QUICK_CASES:
         applicable = applicable_mutations(case)
         assert set(applicable) == {
             mutation
-            for mutation, row in P10_KILL_MATRIX.items()
+            for mutation, row in CODEWORD_KILL_MATRIX.items()
             if in_scope(case, row.scope)
         }
-        assert (P10Mutation.BATCH_SWAP in applicable) == (case.batch == 2)
+        assert (CodewordMutation.BATCH_SWAP in applicable) == (case.batch == 2)
         grouped = case.nhead_q > case.nhead_k
-        assert (P10Mutation.GROUP_MAP_INTERLEAVED in applicable) == grouped
-        assert (P10Mutation.OUT_HEAD_SWAP in applicable) == (not grouped)
+        assert (CodewordMutation.GROUP_MAP_INTERLEAVED in applicable) == grouped
+        assert (CodewordMutation.OUT_HEAD_SWAP in applicable) == (not grouped)
 
 
 _MUTATION_CELLS = [
     pytest.param(case, mutation, id=f"{case.case_id}-{mutation.value}")
-    for case in P10_QUICK_CASES
+    for case in CODEWORD_QUICK_CASES
     for mutation in applicable_mutations(case)
 ]
 
 
 @pytest.mark.parametrize("case, mutation", _MUTATION_CELLS)
 def test_every_owned_mutation_is_rejected_through_its_channel(
-    case: UniformCase, mutation: P10Mutation
+    case: UniformCase, mutation: CodewordMutation
 ) -> None:
     mutant = apply_mutation(case, _DERIVED_SCHEDULE, mutation, _correct_output(case))
     result = analyze_codeword(case, mutant, path_exact_admissible(case))
     assert result.violations, mutation
-    assert P10_KILL_MATRIX[mutation].channel in result.channels, (
-        format_codeword_result(result)
-    )
+    assert (
+        CODEWORD_KILL_MATRIX[mutation].channel in result.channels
+    ), format_codeword_result(result)
 
 
 @pytest.mark.parametrize(
     "case, mutation",
     [
-        (P10_GROUPED_CASES[1], P10Mutation.OUT_HEAD_SWAP),
-        (P10_GROUPED_CASES[3], P10Mutation.OUT_HEAD_SWAP),
-        (P10_UNGROUPED_CASES[0], P10Mutation.GROUP_MAP_INTERLEAVED),
-        (P10_GROUPED_CASES[0], P10Mutation.BATCH_SWAP),
+        (CODEWORD_GROUPED_CASES[1], CodewordMutation.OUT_HEAD_SWAP),
+        (CODEWORD_GROUPED_CASES[3], CodewordMutation.OUT_HEAD_SWAP),
+        (CODEWORD_UNGROUPED_CASES[0], CodewordMutation.GROUP_MAP_INTERLEAVED),
+        (CODEWORD_GROUPED_CASES[0], CodewordMutation.BATCH_SWAP),
     ],
     ids=lambda value: getattr(value, "case_id", getattr(value, "value", value)),
 )
 def test_a_mutation_outside_its_scope_stores_the_correct_output(
-    case: UniformCase, mutation: P10Mutation
+    case: UniformCase, mutation: CodewordMutation
 ) -> None:
     """Why the scopes exist. Query heads of one KV group store the same values,
     so swapping two of them changes nothing; with one query head per KV head the
     interleaved and the blocked group maps coincide; and one batch has nothing to
     swap. The mutation is not owned on such a case, and applying it is refused."""
-    assert not in_scope(case, P10_KILL_MATRIX[mutation].scope)
+    assert not in_scope(case, CODEWORD_KILL_MATRIX[mutation].scope)
     bits = codeword_target_bits(case)
     assert np.array_equal(_placement_mutant_bits(case, mutation, bits), bits)
     with pytest.raises(ValueError, match=rf"mutation='{mutation.value}' on case"):
         apply_mutation(case, _DERIVED_SCHEDULE, mutation, _correct_output(case))
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_store_mutations_change_exactly_the_predicted_counts(
     case: UniformCase,
 ) -> None:
     correct = _correct_output(case)
     admissible = path_exact_admissible(case)
 
-    def result(mutation: P10Mutation) -> CodewordResult:
+    def result(mutation: CodewordMutation) -> CodewordResult:
         mutant = apply_mutation(case, _DERIVED_SCHEDULE, mutation, correct)
         return analyze_codeword(case, mutant, admissible)
 
-    dropped = result(P10Mutation.DROPPED_STORE)
+    dropped = result(CodewordMutation.DROPPED_STORE)
     assert dropped.safety == StoreSafety(prefix=0, suffix=0, unwritten=4, nonfinite=0)
     assert dropped.channels == frozenset({Channel.UNWRITTEN})
 
-    bypass = result(P10Mutation.ROW_BOUND_BYPASS)
+    bypass = result(CodewordMutation.ROW_BOUND_BYPASS)
     overrun = 127 * case.nhead_q * case.head_dim
     assert bypass.safety == StoreSafety(
         prefix=0, suffix=overrun, unwritten=0, nonfinite=0
@@ -1486,18 +1488,18 @@ def test_store_mutations_change_exactly_the_predicted_counts(
     # Every logical row is stored correctly; only the guard shows the defect.
     assert bypass.channels == frozenset({Channel.SUFFIX})
 
-    underrun = result(P10Mutation.BASE_UNDERRUN)
+    underrun = result(CodewordMutation.BASE_UNDERRUN)
     assert (underrun.safety.prefix, underrun.safety.unwritten) == (4, 4)
     assert Channel.PREFIX in underrun.channels
 
     # One legal key and a denominator of N - 1: row 0 divides by zero.
-    minus_one = result(P10Mutation.DENOMINATOR_MINUS_ONE)
+    minus_one = result(CodewordMutation.DENOMINATOR_MINUS_ONE)
     assert minus_one.safety.nonfinite == case.batch * case.nhead_q * case.head_dim
     assert Channel.NONFINITE in minus_one.channels
 
 
 def _gap(
-    case: UniformCase, mutation: P10Mutation, lanes: slice | int
+    case: UniformCase, mutation: CodewordMutation, lanes: slice | int
 ) -> tuple[int, int]:
     """Smallest and largest target-format distance between the correct output
     and a mutant, over the outputs of the given lanes that the mutant changes."""
@@ -1510,28 +1512,30 @@ def _gap(
     return int(changed.min()), int(changed.max())
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_placement_gaps_match_the_derivation(case: UniformCase) -> None:
     """The thinnest margin of each placement channel, in target-format values."""
     fp16 = case.dtype == "fp16"
     step = 16 if fp16 else 2
-    assert _gap(case, P10Mutation.KV_HEAD_ROTATE, LANE_KV_HEAD)[0] == step
+    assert _gap(case, CodewordMutation.KV_HEAD_ROTATE, LANE_KV_HEAD)[0] == step
     if case.batch == 2:
-        assert _gap(case, P10Mutation.BATCH_SWAP, LANE_BATCH)[0] == step
+        assert _gap(case, CodewordMutation.BATCH_SWAP, LANE_BATCH)[0] == step
     if case.nhead_q == case.nhead_k:
-        assert _gap(case, P10Mutation.OUT_HEAD_SWAP, LANE_KV_HEAD)[0] == step
-    dimension_lanes = slice(P10_COORDINATE_LANES, None)
-    assert _gap(case, P10Mutation.DIM_ROTATE_IN_VECTOR, dimension_lanes)[0] == (
+        assert _gap(case, CodewordMutation.OUT_HEAD_SWAP, LANE_KV_HEAD)[0] == step
+    dimension_lanes = slice(CODEWORD_COORDINATE_LANES, None)
+    assert _gap(case, CodewordMutation.DIM_ROTATE_IN_VECTOR, dimension_lanes)[0] == (
         32 if fp16 else 4
     )
     # FP16 window: adjacent rows are at least 1/2 apart where the spacing is
     # 1/16. BF16 causal: 1/4 apart, which is one BF16 spacing from row 128 on.
-    assert _gap(case, P10Mutation.ADJACENT_ROW_SWAP, LANE_KEY)[0] == (8 if fp16 else 1)
+    assert _gap(case, CodewordMutation.ADJACENT_ROW_SWAP, LANE_KEY)[0] == (
+        8 if fp16 else 1
+    )
 
 
 @pytest.mark.parametrize(
     "case",
-    [case for case in P10_QUICK_CASES if case.dtype == "bf16"],
+    [case for case in CODEWORD_QUICK_CASES if case.dtype == "bf16"],
     ids=lambda case: case.case_id,
 )
 def test_bf16_rows_past_128_are_one_step_apart_and_still_rejected(
@@ -1561,11 +1565,11 @@ def test_bf16_rows_past_128_are_one_step_apart_and_still_rejected(
 
 # Each GPU module and the case matrices its tests may be parametrized over.
 _GPU_LANES = {
-    "test_p10_dense.py": {"P10_SUBJECT_CASES"},
-    "test_p10_dense_controls.py": {
-        "P10_EMITTED_CONTROL_CASES",
-        "P10_BLIND_CONTROL_CASES",
-        "P10_ROW_BOUND_CASES",
+    "test_codeword_dense.py": {"CODEWORD_SUBJECT_CASES"},
+    "test_codeword_dense_controls.py": {
+        "CODEWORD_EMITTED_CONTROL_CASES",
+        "CODEWORD_BLIND_CONTROL_CASES",
+        "CODEWORD_ROW_BOUND_CASES",
     },
 }
 
@@ -1613,7 +1617,7 @@ def test_gpu_lanes_skip_only_through_the_require_aware_arch_gate(filename: str) 
         assert [_dotted_name(item) for item in arches.elts] == ["arch"]
 
 
-@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", CODEWORD_QUICK_CASES, ids=lambda case: case.case_id)
 def test_gpu_lane_judgement_passes_the_emulated_output(case: UniformCase) -> None:
     control = _judge_output("label", case, _DERIVED_SCHEDULE, _correct_output(case))
     assert control.violations == ()
@@ -1621,7 +1625,7 @@ def test_gpu_lane_judgement_passes_the_emulated_output(case: UniformCase) -> Non
 
 
 def test_gpu_lane_judgement_fails_an_output_one_step_off_its_target() -> None:
-    case = P10_UNGROUPED_CASES[1]
+    case = CODEWORD_UNGROUPED_CASES[1]
     stored = codeword_target_bits(case).copy()
     stored[1, 200, 2, LANE_BATCH] += 1
     with pytest.raises(AssertionError, match=r"label: batch lanes: 1 output\(s\)"):
@@ -1632,8 +1636,8 @@ def test_gpu_lane_judgement_blames_the_output_for_a_cancelled_mutation() -> None
     """A kernel that swaps adjacent rows stores exactly what that mutation turns
     back into the correct output, so the mutation is not rejected. The message
     must then point at the output's own violations rather than at the analyzer."""
-    case = P10_UNGROUPED_CASES[1]
-    mutation = P10Mutation.ADJACENT_ROW_SWAP
+    case = CODEWORD_UNGROUPED_CASES[1]
+    mutation = CodewordMutation.ADJACENT_ROW_SWAP
     correct = _correct_output(case)
     buggy = apply_mutation(case, _DERIVED_SCHEDULE, mutation, correct)
     with pytest.raises(AssertionError) as raised:
@@ -1651,53 +1655,57 @@ def test_gpu_lane_judgement_blames_the_output_for_a_cancelled_mutation() -> None
 
 
 def test_subject_controls_cover_every_seam_of_the_kill_matrix_once() -> None:
-    seams = [P10_KILL_MATRIX[mutation].seam for mutation in P10_SUBJECT_CONTROLS]
+    seams = [
+        CODEWORD_KILL_MATRIX[mutation].seam for mutation in CODEWORD_SUBJECT_CONTROLS
+    ]
     assert len(set(seams)) == len(seams)
-    assert set(seams) == {row.seam for row in P10_KILL_MATRIX.values()}
+    assert set(seams) == {row.seam for row in CODEWORD_KILL_MATRIX.values()}
     # Every control is emitted but the row bound, which the host enforces.
-    assert P10_EMITTED_CONTROLS == P10_SUBJECT_CONTROLS[:-1]
-    assert P10_SUBJECT_CONTROLS[-1] is P10Mutation.ROW_BOUND_BYPASS
+    assert CODEWORD_EMITTED_CONTROLS == CODEWORD_SUBJECT_CONTROLS[:-1]
+    assert CODEWORD_SUBJECT_CONTROLS[-1] is CodewordMutation.ROW_BOUND_BYPASS
 
 
 def test_control_matrices_run_each_control_where_it_can_be_separated() -> None:
-    batch_two = [case for case in P10_QUICK_CASES if case.batch == 2]
-    assert P10_EMITTED_CONTROL_CASES == tuple(
+    batch_two = [case for case in CODEWORD_QUICK_CASES if case.batch == 2]
+    assert CODEWORD_EMITTED_CONTROL_CASES == tuple(
         (arch, case, mutation)
-        for arch in P10_ARCHES
+        for arch in CODEWORD_ARCHES
         for case in batch_two
-        for mutation in P10_EMITTED_CONTROLS
+        for mutation in CODEWORD_EMITTED_CONTROLS
         if mutation in applicable_mutations(case)
     )
     # Both dtypes, and both head configurations where the control is owned.
-    for mutation in P10_EMITTED_CONTROLS:
+    for mutation in CODEWORD_EMITTED_CONTROLS:
         cases = [
-            case for _, case, found in P10_EMITTED_CONTROL_CASES if found is mutation
+            case
+            for _, case, found in CODEWORD_EMITTED_CONTROL_CASES
+            if found is mutation
         ]
         assert {case.dtype for case in cases} == {"fp16", "bf16"}
         grouped = {case.nhead_q > case.nhead_k for case in cases}
-        owned_grouped = mutation is not P10Mutation.OUT_HEAD_SWAP
+        owned_grouped = mutation is not CodewordMutation.OUT_HEAD_SWAP
         assert grouped == ({True, False} if owned_grouped else {False})
     # The head swap that the grouped cases cannot see is still launched on them,
     # as a control that must pass.
-    assert P10_BLIND_CONTROL_CASES == tuple(
-        (arch, case, P10Mutation.OUT_HEAD_SWAP)
-        for arch in P10_ARCHES
+    assert CODEWORD_BLIND_CONTROL_CASES == tuple(
+        (arch, case, CodewordMutation.OUT_HEAD_SWAP)
+        for arch in CODEWORD_ARCHES
         for case in batch_two
         if case.nhead_q > case.nhead_k
     )
-    assert P10_ROW_BOUND_CASES == tuple(
+    assert CODEWORD_ROW_BOUND_CASES == tuple(
         (arch, case)
-        for arch in P10_ARCHES
-        for case in P10_GROUPED_CASES
+        for arch in CODEWORD_ARCHES
+        for case in CODEWORD_GROUPED_CASES
         if case.batch == 1
     )
-    assert len(P10_EMITTED_CONTROL_CASES) == 34
-    assert len(P10_BLIND_CONTROL_CASES) == len(P10_ROW_BOUND_CASES) == 2
+    assert len(CODEWORD_EMITTED_CONTROL_CASES) == 34
+    assert len(CODEWORD_BLIND_CONTROL_CASES) == len(CODEWORD_ROW_BOUND_CASES) == 2
 
 
 @pytest.mark.parametrize(
     "subject_case",
-    [item for item in P10_SUBJECT_CASES if item[1].batch == 2],
+    [item for item in CODEWORD_SUBJECT_CASES if item[1].batch == 2],
     ids=_subject_case_id,
 )
 def test_emitted_controls_change_the_lowered_ir(
@@ -1712,44 +1720,46 @@ def test_emitted_controls_change_the_lowered_ir(
     controls = [
         mutation
         for found_arch, found_case, mutation in (
-            *P10_EMITTED_CONTROL_CASES,
-            *P10_BLIND_CONTROL_CASES,
+            *CODEWORD_EMITTED_CONTROL_CASES,
+            *CODEWORD_BLIND_CONTROL_CASES,
         )
         if (found_arch, found_case) == (arch, case)
     ]
-    assert len(controls) == len(P10_EMITTED_CONTROLS)
+    assert len(controls) == len(CODEWORD_EMITTED_CONTROLS)
     texts = [lowered_ir(arch, case, mutation) for mutation in controls]
     assert shipped not in texts
     assert len(set(texts)) == len(texts)
 
 
 def test_private_build_restores_the_runner_also_after_a_failure() -> None:
-    arch, case = P10_SUBJECT_CASES[1]
+    arch, case = CODEWORD_SUBJECT_CASES[1]
     runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
     builder, cache = runner.IRBuilder, runner._DENSE_LAUNCHER_CACHE
-    with pytest.raises(RuntimeError, match="stop"):
-        with private_build(arch, case, P10Mutation.D_HALF_SWAP):
-            assert issubclass(runner.IRBuilder, builder)
-            assert runner.IRBuilder is not builder
-            # A cache of its own: the shipped launchers are not served to it.
-            assert runner._DENSE_LAUNCHER_CACHE == {}
-            assert runner._DENSE_LAUNCHER_CACHE is not cache
-            raise RuntimeError("stop")
+    control = private_build(arch, case, CodewordMutation.D_HALF_SWAP)
+    with pytest.raises(RuntimeError, match="stop"), control:
+        assert issubclass(runner.IRBuilder, builder)
+        assert runner.IRBuilder is not builder
+        # A cache of its own: the shipped launchers are not served to it.
+        assert runner._DENSE_LAUNCHER_CACHE == {}
+        assert runner._DENSE_LAUNCHER_CACHE is not cache
+        raise RuntimeError("stop")
     assert runner.IRBuilder is builder
     assert runner._DENSE_LAUNCHER_CACHE is cache
 
 
 def test_emitted_control_refuses_what_it_cannot_keep_inside_the_tensor() -> None:
-    case = P10_SUBJECT_CASES[1][1]
+    case = CODEWORD_SUBJECT_CASES[1][1]
     with pytest.raises(ValueError, match=r"mutation='row_bound_bypass'"):
-        _mutant_builder(object, P10Mutation.ROW_BOUND_BYPASS, case)
+        _mutant_builder(object, CodewordMutation.ROW_BOUND_BYPASS, case)
     # Flipping one index bit swaps neighbours only when the extent is a power of
     # two; otherwise it would address past the tensor.
     with pytest.raises(ValueError, match=r"seqlen_q=384, expected a power of two"):
-        _mutant_builder(object, P10Mutation.BATCH_SWAP, replace(case, seqlen_q=384))
+        _mutant_builder(
+            object, CodewordMutation.BATCH_SWAP, replace(case, seqlen_q=384)
+        )
 
 
-@pytest.mark.parametrize("control", P10_ROW_BOUND_CASES, ids=_subject_case_id)
+@pytest.mark.parametrize("control", CODEWORD_ROW_BOUND_CASES, ids=_subject_case_id)
 def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     control: tuple[str, UniformCase],
 ) -> None:
@@ -1757,7 +1767,7 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     the query length is a kernel argument. Its identity is host-side instead."""
     arch, case = control
     runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
-    shipped = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    shipped = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
     mutant = row_bound_bypass_spec(arch, case)
 
     # The host refuses the shape twice: on construction and in the predicate.
@@ -1778,7 +1788,7 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     # So it compiles to the shipped kernel and is launched as it: same launcher
     # key, same IR, and kernel arguments that differ in the query length only.
     assert mutant.runtime_shape and not mutant.persistent
-    assert p10_kernel_key(arch, mutant) == p10_kernel_key(arch, shipped)
+    assert codeword_kernel_key(arch, mutant) == codeword_kernel_key(arch, shipped)
     arguments = runner.attention_dense_runtime_args(mutant)
     shipped_arguments = runner.attention_dense_runtime_args(shipped)
     assert {
@@ -1790,7 +1800,7 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
     # What the launch must then show: every logical row stored, and the rest of
     # the second query tile after the tensor, inside the guard.
     ragged = replace(case, seqlen_q=mutant.seqlen_q)
-    require_p10_scope(ragged)
+    require_codeword_scope(ragged)
     schedule = TileSchedule(int(shipped.block_m), int(shipped.block_n))
     layout = guard_layout(ragged, schedule)
     assert (layout.guard, layout.logical) == (65536, 129 * 8 * 64)
@@ -1799,7 +1809,9 @@ def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
         ragged
     ).ravel()
     stored = GuardedOutput(layout, raw)
-    overrun = apply_mutation(ragged, schedule, P10Mutation.ROW_BOUND_BYPASS, stored)
+    overrun = apply_mutation(
+        ragged, schedule, CodewordMutation.ROW_BOUND_BYPASS, stored
+    )
     result = analyze_codeword(ragged, overrun, path_exact_admissible(ragged))
     assert result.safety == StoreSafety(0, 65024, 0, 0)
     assert result.channels == frozenset({Channel.SUFFIX})
