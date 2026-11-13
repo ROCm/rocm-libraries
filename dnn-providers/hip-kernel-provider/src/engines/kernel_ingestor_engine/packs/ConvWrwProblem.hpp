@@ -266,6 +266,28 @@ int64_t splitsWanted(int64_t blocksXY,
                      int64_t partialElems,
                      int64_t dispatchUnits);
 
+/// A row ring's tracks (loops 1, 2, 3 at height stride 1): `len` steps a track for the height
+/// classes rho < `longClasses`, len - 1 for the others (K3Track).
+struct RingTrack
+{
+    int64_t len = 0;
+    int64_t longClasses = 0;
+};
+
+/**
+ * @brief The tracks of a row ring over @p ho output rows of @p hi input rows, height padding
+ *        @p ph, dilation @p dh and @p filterRows filter rows.
+ *
+ * Class rho's track runs steps m = 0, 1, ... (x row rho - ph + m dh, dy row rho + m dh) up to
+ * its last step with both an x row in the image and a dy row for some tap: min(rows + fr - 1,
+ * ceil((hi + ph - rho) / dh)) steps, rows = ceil((ho - rho) / dh). The later steps would only
+ * stage zeros (a third of a 3-row filter's steps at dilation 36 on 128 rows). Those lengths
+ * never increase with rho and, while every class has a dy row, drop at most once, by one:
+ * {len, longClasses} then; otherwise (or a track of no steps) every class keeps the
+ * untrimmed ceil(ho / dh) + fr - 1 steps (longClasses = dh).
+ */
+RingTrack ringTrackOf(int64_t ho, int64_t hi, int64_t ph, int64_t dh, int64_t filterRows);
+
 /// The direct loop's work (loop 5): units are (channel tile, item), an item one image plane's
 /// 32-column block over a segment of its rows; a persistent grid of about one workgroup per
 /// dispatch unit takes them in pieces of `per` items.

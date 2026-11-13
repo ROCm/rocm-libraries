@@ -374,6 +374,14 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, false, 1, 1)},
         {"Deeplab3x3Dilation12Nhwc",
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, true, 1, 1)},
+        // Ring tracks of two lengths (ringTrackOf): dilation 24 on 41 rows (classes below 17
+        // one step longer) over three images, so splits start in long and short tracks and in
+        // a later image; and dilation 36 on a 65 x 65 map (2 dy rows below class 29, else 1)
+        // with partial channel tiles.
+        {"Deeplab3x3Dilation24ThreeImages",
+         conv(24, 40, {41, 45}, {3, 3}, {24, 24}, {24, 24}, {1, 1}, {24, 24}, false, 1, 3)},
+        {"Deeplab65Dilation36PartialTiles",
+         conv(24, 40, {65, 65}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 2)},
         {"Stride2", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1})},
         {"Stride2Nhwc", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, true)},
         {"Stride2Pad0OddChannels", conv(5, 7, {9, 10}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
