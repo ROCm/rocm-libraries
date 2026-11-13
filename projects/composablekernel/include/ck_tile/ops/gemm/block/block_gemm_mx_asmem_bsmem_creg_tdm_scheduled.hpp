@@ -5,7 +5,6 @@
 #include <type_traits>
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
 namespace ck_tile {
@@ -134,13 +133,8 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     CK_TILE_DEVICE static void Mma(CVec& c, const AFrag& a, const BFrag& b, int32_t as, int32_t bs)
     {
 #if defined(__gfx125__)
-        using WarpGemm    = WarpGemmDispatcher<ADataType,
-                                               BDataType,
-                                               float,
-                                               kAtomM,
-                                               kAtomN,
-                                               mx_tdm_scheduled::kAtomK,
-                                               false>;
+        using WarpGemm =
+            WarpGemmDispatcher<ADataType, BDataType, float, kAtomM, kAtomN, Policy::kAtomK, false>;
         using AVec        = typename WarpGemm::WarpGemmAttribute::AVecType;
         using BVec        = typename WarpGemm::WarpGemmAttribute::BVecType;
         constexpr auto I0 = number<0>{};
@@ -191,14 +185,14 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
         }
         else
         {
-            constexpr MxTdmScheduledOperand as_lds =
-                Policy::template GetLdsOperand<Problem, true, true>();
-            const index_t a_lane = kMma32 ? lane : lane_col;
-            ScaleWords<kRm>(h.as,
-                            buffer + static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
-                                         as_lds,
-                                         static_cast<uint32_t>(step),
-                                         static_cast<uint32_t>(MRow(0, a_lane)))));
+            constexpr auto as_lds = Policy::template GetLdsOperand<Problem, true, true>();
+            const index_t a_lane  = kMma32 ? lane : lane_col;
+            ScaleWords<kRm>(
+                h.as,
+                buffer + static_cast<index_t>(Policy::template GetLdsScaleByteOffset<uint32_t>(
+                             as_lds,
+                             static_cast<uint32_t>(step),
+                             static_cast<uint32_t>(MRow(0, a_lane)))));
         }
         if constexpr(kTileReadBScale)
         {
@@ -206,13 +200,13 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
         }
         else
         {
-            constexpr MxTdmScheduledOperand bs_lds =
-                Policy::template GetLdsOperand<Problem, false, true>();
-            ScaleWords<kRn>(h.bs,
-                            buffer + static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(
-                                         bs_lds,
-                                         static_cast<uint32_t>(step),
-                                         static_cast<uint32_t>(NRow(0, lane_col)))));
+            constexpr auto bs_lds = Policy::template GetLdsOperand<Problem, false, true>();
+            ScaleWords<kRn>(
+                h.bs,
+                buffer + static_cast<index_t>(Policy::template GetLdsScaleByteOffset<uint32_t>(
+                             bs_lds,
+                             static_cast<uint32_t>(step),
+                             static_cast<uint32_t>(NRow(0, lane_col)))));
         }
         static_for<0, kRm, 1>{}([&](auto rm) { h.a[rm] = AFragment(buffer, rm, step); });
         return h;
@@ -270,19 +264,19 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
 
     CK_TILE_DEVICE index_t LaneK(index_t step) const
     {
-        return step * kStepBytes + lane_half * mx_tdm_scheduled::kChunkBytes;
+        return step * kStepBytes + lane_half * Policy::kChunkBytes;
     }
 
     CK_TILE_DEVICE RowFrag RowFragment(index_t buffer, bool is_a, index_t row, index_t lane_k) const
     {
-        constexpr MxTdmScheduledOperand a_lds = Policy::template GetLdsOperand<Problem, true>();
-        constexpr MxTdmScheduledOperand b_lds = Policy::template GetLdsOperand<Problem, false>();
-        const uint32_t urow                   = static_cast<uint32_t>(row);
+        constexpr auto a_lds = Policy::template GetLdsOperand<Problem, true>();
+        constexpr auto b_lds = Policy::template GetLdsOperand<Problem, false>();
+        const uint32_t urow  = static_cast<uint32_t>(row);
         const index_t base =
             buffer +
             static_cast<index_t>(
-                is_a ? mx_tdm_scheduled_row_offset<uint32_t>(a_lds, kLdsRowBytes, urow)
-                     : mx_tdm_scheduled_row_offset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
+                is_a ? Policy::template GetLdsRowByteOffset<uint32_t>(a_lds, kLdsRowBytes, urow)
+                     : Policy::template GetLdsRowByteOffset<uint32_t>(b_lds, kLdsRowBytes, urow)) +
             lane_k;
         constexpr index_t o0 = Policy::template GetChunkOffset<Problem>(0);
         constexpr index_t o1 = Policy::template GetChunkOffset<Problem>(1);
@@ -409,9 +403,11 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     template <bool IsA, index_t Count>
     CK_TILE_DEVICE void LdsScaleWords(int32_t (&out)[Count], index_t buffer, index_t step) const
     {
-        constexpr MxTdmScheduledOperand op = Policy::template GetLdsOperand<Problem, IsA, true>();
+        constexpr auto op = Policy::template GetLdsOperand<Problem, IsA, true>();
         constexpr index_t step_words =
-            static_cast<index_t>(mx_tdm_scheduled_scale_offset<uint32_t>(op, 1u, 0u) - op.base) / 4;
+            static_cast<index_t>(Policy::template GetLdsScaleByteOffset<uint32_t>(op, 1u, 0u) -
+                                 op.base) /
+            4;
         const auto& window = [&]() -> const auto& {
             if constexpr(IsA)
                 return as_window;

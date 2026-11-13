@@ -3,7 +3,7 @@
 
 // Host-only checks of MxGemmPipelineAgBgCrCompTDMScheduled's compile-time rules against rocKE: the
 // LDS layout of the hipBLASLt solutions, the lane chunks of a K step, and the policy building and
-// rejecting specs from a Problem and a tuning as rocKE does.
+// rejecting Problems and policies as rocKE does.
 
 #include <algorithm>
 #include <string>
@@ -12,92 +12,121 @@
 #include <gtest/gtest.h>
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp"
-#include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
+#include "ck_tile/ops/gemm.hpp"
 
 namespace {
 
 using ck_tile::index_t;
 using ck_tile::MxTdmScheduledReason;
-using ck_tile::MxTdmScheduledSpec;
 
-using D = ck_tile::MxTdmScheduledDtype;
-using A = ck_tile::MxTdmScheduledMma;
 using H = ck_tile::MxTdmScheduledHalfPlr;
+using O = ck_tile::MxTdmScheduledHalfBOrder;
 
-// rocKE's test_lds_layout_matches_the_hipblaslt_solutions: LdsOffsetA / ldsBaseB with the
-// component stride, LdsOffsetMXSA / MXSB, LdsOffsetA_Blk and LdsNumBytes (Tensile A = rocKE B).
+template <typename P, typename Policy>
+using PipelineOf = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<P, Policy>;
+
+/// A comp_tdm_scheduled Problem: types, tile, wave group, atom rows, cluster (CX N tiles by CY
+/// M tiles) and traits.
+template <typename AB,
+          typename Out,
+          index_t TileM,
+          index_t TileN,
+          index_t TileK,
+          index_t WarpM,
+          index_t WarpN,
+          index_t AtomM,
+          index_t CX      = 4,
+          index_t CY      = 4,
+          typename Traits = ck_tile::MxTdmScheduledGemmTraits<>>
+using ProblemOf = ck_tile::MxGemmTdmScheduledProblem<
+    AB,
+    AB,
+    Out,
+    ck_tile::ClusterTileGemmShape<ck_tile::sequence<CY, CX, 1>,
+                                  ck_tile::sequence<TileM, TileN, TileK>,
+                                  ck_tile::sequence<WarpM, WarpN, 1>,
+                                  ck_tile::sequence<AtomM, 16, 128>>,
+    Traits>;
+
+/// LdsOffsetA / ldsBaseB with the component stride, LdsOffsetMXSA / MXSB, LdsOffsetA_Blk and
+/// LdsNumBytes of a Problem and policy that build and run M x N x K.
+template <typename P, typename Policy>
+void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
+{
+    EXPECT_EQ((Policy::template Validate<P>()), nullptr);
+    const char* why = PipelineOf<P, Policy>::GetUnsupportedReason(M, N, K);
+    EXPECT_EQ(why, nullptr) << why;
+    constexpr auto a       = Policy::template GetLdsOperand<P, true>();
+    constexpr auto b       = Policy::template GetLdsOperand<P, false>();
+    constexpr auto a_scale = Policy::template GetLdsOperand<P, true, true>();
+    constexpr auto b_scale = Policy::template GetLdsOperand<P, false, true>();
+    const index_t got[8]   = {b.base,
+                              b.stride,
+                              a.base,
+                              a.stride,
+                              b_scale.base,
+                              a_scale.base,
+                              Policy::template GetLdsBufferStride<P>(),
+                              Policy::template GetSmemSize<P>()};
+    for(int i = 0; i < 8; ++i)
+        EXPECT_EQ(got[i], want[i]) << "field " << i;
+}
+
+// rocKE's test_lds_layout_matches_the_hipblaslt_solutions (Tensile A = rocKE B).
 TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
 {
-    MxTdmScheduledSpec maf{4096, 4096, 65536};
-    MxTdmScheduledSpec mab{65536, 16, 65536};
-    mab.tile_n                 = 16;
-    mab.warp_m                 = 4;
-    mab.warp_n                 = 1;
-    mab.cluster_x              = 1;
-    mab.cluster_y              = 4;
-    mab.half_plr               = H::None;
-    mab.lds_segment_interleave = false;
-    mab.mma                    = A::M16N16;
-    MxTdmScheduledSpec mab8    = mab;
-    mab8.a_dtype = mab8.b_dtype = D::Fp8;
-    mab8.tile_k                 = 256;
-    MxTdmScheduledSpec medium{2048, 2048, 65536};
-    medium.a_dtype = medium.b_dtype = D::Fp8;
-    medium.tile_m = medium.tile_n = 128;
-    medium.tile_k                 = 256;
-    medium.mma                    = A::M16N16;
-    medium.half_plr               = H::None;
-    struct Case
+    using ck_tile::fp8_t;
+    using ck_tile::pk_fp4_t;
+    using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using MabTu =
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None, O::Ahead, false>;
+    using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None>;
     {
-        const char* label;
-        MxTdmScheduledSpec spec;
-        index_t want[8];
-    };
-    const Case cases[] = {
-        {"maf fp4", maf, {0, 99584, 33024, 33280, 132608, 137216, 141312, 282624}},
-        {"mab fp4", mab, {0, 2176, 9216, 33280, 4608, 5120, 131072, 206848}},
-        {"mab fp8", mab8, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288}},
-        {"medium fp8", medium, {0, 65536, 16640, 65536, 98816, 99840, 131072, 231936}},
-    };
-    for(const Case& c : cases)
+        SCOPED_TRACE("maf fp4");
+        check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32>, Default>(
+            4096, 4096, 65536, {0, 99584, 33024, 33280, 132608, 137216, 141312, 282624});
+    }
     {
-        SCOPED_TRACE(c.label);
-        ASSERT_EQ(ck_tile::mx_tdm_scheduled_validate(c.spec), MxTdmScheduledReason::Ok);
-        const ck_tile::MxTdmScheduledLdsLayout L = ck_tile::mx_tdm_scheduled_lds_layout(c.spec);
-        const index_t got[8]                     = {L.b.base,
-                                                    L.b.stride,
-                                                    L.a.base,
-                                                    L.a.stride,
-                                                    L.b_scale.base,
-                                                    L.a_scale.base,
-                                                    L.buffer_stride,
-                                                    L.lds_bytes};
-        for(int i = 0; i < 8; ++i)
-            EXPECT_EQ(got[i], c.want[i]) << "field " << i;
+        SCOPED_TRACE("mab fp4");
+        check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 16, 512, 4, 1, 16, 1, 4>, MabTu>(
+            65536, 16, 65536, {0, 2176, 9216, 33280, 4608, 5120, 131072, 206848});
+    }
+    {
+        SCOPED_TRACE("mab fp8");
+        using WideA = ck_tile::MxTdmScheduledGemmTraits<false, false, true>;
+        check_layout<ProblemOf<fp8_t, fp8_t, 256, 16, 256, 4, 1, 16, 1, 4, WideA>, MabTu>(
+            65536, 16, 65536, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288});
+    }
+    {
+        SCOPED_TRACE("medium fp8");
+        check_layout<ProblemOf<fp8_t, fp8_t, 128, 128, 256, 2, 2, 16>, MediumTu>(
+            2048, 2048, 65536, {0, 65536, 16640, 65536, 98816, 99840, 131072, 231936});
     }
 }
 
 // Lane group g reads chunk j of a row's K step at g * 16 + chunk_offset(j): (0, 32) for FP4 and
 // (0, 32, 64, 96) for the 8-bit types, which tile the K step.
+template <typename P>
+void check_lane_chunks()
+{
+    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    std::vector<index_t> bytes;
+    for(index_t g = 0; g < Policy::kLaneGroups; ++g)
+        for(index_t j = 0; j < Policy::GetChunksPerLane<P>(); ++j)
+            for(index_t b = 0; b < Policy::kChunkBytes; ++b)
+                bytes.push_back(g * Policy::kChunkBytes + Policy::GetChunkOffset<P>(j) + b);
+    std::sort(bytes.begin(), bytes.end());
+    ASSERT_EQ(static_cast<index_t>(bytes.size()), Policy::GetStepBytes<P>());
+    for(index_t i = 0; i < Policy::GetStepBytes<P>(); ++i)
+        EXPECT_EQ(bytes[i], i);
+    EXPECT_EQ(Policy::GetChunkOffset<P>(1), 32);
+}
+
 TEST(MxGemmTdmScheduledHost, LaneChunksTileTheKStep)
 {
-    for(D t : {D::Fp4, D::Fp8, D::Bf8})
-    {
-        MxTdmScheduledSpec s{};
-        s.a_dtype = s.b_dtype = t;
-        s.mma                 = t == D::Fp4 ? A::M32N16 : A::M16N16;
-        std::vector<index_t> bytes;
-        for(index_t g = 0; g < 2; ++g)
-            for(index_t j = 0; j < s.chunks_per_lane(); ++j)
-                for(index_t b = 0; b < s.chunk_bytes(); ++b)
-                    bytes.push_back(g * s.chunk_bytes() + s.chunk_offset(j) + b);
-        std::sort(bytes.begin(), bytes.end());
-        ASSERT_EQ(static_cast<index_t>(bytes.size()), s.step_bytes());
-        for(index_t i = 0; i < s.step_bytes(); ++i)
-            EXPECT_EQ(bytes[i], i);
-        EXPECT_EQ(s.chunk_offset(1), 32);
-    }
+    check_lane_chunks<ProblemOf<ck_tile::pk_fp4_t, ck_tile::fp8_t, 256, 256, 512, 2, 2, 32>>();
+    check_lane_chunks<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>();
+    check_lane_chunks<ProblemOf<ck_tile::bf8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>();
 }
 
 // The cluster multicast masks hold exactly the workgroups sharing the coordinate, with bit
@@ -122,94 +151,80 @@ TEST(MxGemmTdmScheduledHost, ClusterMasksHoldTheWorkgroupsSharingACoordinate)
                 }
 }
 
-// The policy builds the spec from a Problem and a tuning, both ways of writing a tuning agree,
-// and the compile-time validator and name follow.
-struct MafLateTuning : ck_tile::MxTdmScheduledDefaultTuning
-{
-    static constexpr index_t kGl2PrefetchDistance = 2;
-    static constexpr ck_tile::MxTdmScheduledHalfBOrder kHalfBOrder =
-        ck_tile::MxTdmScheduledHalfBOrder::Late;
-};
-
-using MafShape   = ck_tile::TileGemmShape<ck_tile::sequence<256, 256, 512>,
-                                          ck_tile::sequence<2, 2, 1>,
-                                          ck_tile::sequence<32, 16, 128>>;
+// The policy derives the schedule from a Problem (its cluster) and its parameters, and the
+// compile-time validator and the names follow.
+using MafShape   = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 4, 1>,
+                                                 ck_tile::sequence<256, 256, 512>,
+                                                 ck_tile::sequence<2, 2, 1>,
+                                                 ck_tile::sequence<32, 16, 128>>;
 using MafProblem = ck_tile::
     MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::fp8_t, MafShape>;
-using MabShape   = ck_tile::TileGemmShape<ck_tile::sequence<128, 16, 512>,
-                                          ck_tile::sequence<4, 1, 1>,
-                                          ck_tile::sequence<16, 16, 128>>;
+using MabShape   = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 1, 1>,
+                                                 ck_tile::sequence<128, 16, 512>,
+                                                 ck_tile::sequence<4, 1, 1>,
+                                                 ck_tile::sequence<16, 16, 128>>;
 using MabProblem = ck_tile::
     MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::half_t, MabShape>;
-using MabTuning = ck_tile::MxTdmScheduledTuningT<1,
-                                                 4,
-                                                 0,
-                                                 -1,
-                                                 0,
-                                                 ck_tile::MxTdmScheduledHalfPlr::None,
-                                                 ck_tile::MxTdmScheduledHalfBOrder::Ahead,
-                                                 true>;
 
-TEST(MxGemmTdmScheduledHost, PolicyBuildsTheSpecFromProblemAndTuning)
+TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
 {
     using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
     static_assert(Default::GetSmemSize<MafProblem>() == 282624);
     static_assert(Default::GetReason<MafProblem>() == MxTdmScheduledReason::Ok);
-    static_assert(ck_tile::MxTdmScheduledValidate<MafProblem>() == nullptr);
+    static_assert(Default::Validate<MafProblem>() == nullptr);
     // 3 scale reads and 2 chunks of 4 x 2 A rows and 8 B fragments.
     static_assert(Default::GetDscntWait<MafProblem>(0) == 35);
     static_assert(Default::GetSignalWmmas<MafProblem>() == 6);
-    const MxTdmScheduledSpec s = Default::GetSpec<MafProblem>(4096, 4096, 65536);
-    EXPECT_EQ(ck_tile::mx_tdm_scheduled_kernel_name(s, "mxfp4_gemm"),
+    EXPECT_EQ((PipelineOf<MafProblem, Default>::GetRockeName(4096, 4096, 65536, "mxfp4_gemm")),
               "mxfp4_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4");
-    EXPECT_EQ(ck_tile::MxTdmScheduledTuningName<ck_tile::MxTdmScheduledDefaultTuning>(), "_c4x4");
+    EXPECT_EQ(Default::GetTuningName<MafProblem>(), "_c4x4");
 
-    using Late = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<MafLateTuning>;
-    static_assert(Late::GetSpec<MafProblem>().half_b_late());
-    EXPECT_EQ(ck_tile::MxTdmScheduledTuningName<MafLateTuning>(), "_c4x4_pf2_hblate");
-    using LateT = ck_tile::MxTdmScheduledTuningT<4,
-                                                 4,
-                                                 2,
-                                                 -1,
-                                                 1,
-                                                 ck_tile::MxTdmScheduledHalfPlr::B,
-                                                 ck_tile::MxTdmScheduledHalfBOrder::Late,
-                                                 true>;
-    EXPECT_EQ(ck_tile::MxTdmScheduledTuningName<LateT>(),
-              ck_tile::MxTdmScheduledTuningName<MafLateTuning>());
+    using Late = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<
+        2,
+        -1,
+        1,
+        ck_tile::MxTdmScheduledHalfPlr::B,
+        ck_tile::MxTdmScheduledHalfBOrder::Late>;
+    static_assert(Late::GetHalfBLate<MafProblem>());
+    EXPECT_EQ(Late::GetTuningName<MafProblem>(), "_c4x4_pf2_hblate");
 
-    using Mab = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<MabTuning>;
+    using Mab = ck_tile::
+        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, -1, 0, ck_tile::MxTdmScheduledHalfPlr::None>;
     static_assert(Mab::GetReason<MabProblem>() == MxTdmScheduledReason::Ok);
-    const MxTdmScheduledSpec m = Mab::GetSpec<MabProblem>(65536, 16, 65536);
     EXPECT_EQ(
-        ck_tile::mx_tdm_scheduled_kernel_name(m, "mxfp4_gemm"),
+        (PipelineOf<MabProblem, Mab>::GetRockeName(65536, 16, 65536, "mxfp4_gemm")),
         "mxfp4_gemm_mxfp4_M65536N16K65536_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16");
-    EXPECT_EQ(ck_tile::MxTdmScheduledTuningName<MabTuning>(), "_c1x4_pf0_lp0_hplrnone");
+    EXPECT_EQ(Mab::GetTuningName<MabProblem>(), "_c1x4_pf0_lp0_hplrnone");
 }
-
-struct Cluster8x4 : ck_tile::MxTdmScheduledDefaultTuning
-{
-    static constexpr index_t kClusterDimX = 8;
-};
 
 TEST(MxGemmTdmScheduledHost, PolicyRejectsWhatRockeRejects)
 {
-    using Shape1x1 = ck_tile::TileGemmShape<ck_tile::sequence<16, 16, 128>,
-                                            ck_tile::sequence<2, 2, 1>,
-                                            ck_tile::sequence<32, 16, 128>>;
+    using Default  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Shape1x1 = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 4, 1>,
+                                                   ck_tile::sequence<16, 16, 128>,
+                                                   ck_tile::sequence<2, 2, 1>,
+                                                   ck_tile::sequence<32, 16, 128>>;
     using Small    = ck_tile::
         MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::fp8_t, Shape1x1>;
-    EXPECT_STREQ((ck_tile::MxTdmScheduledValidate<Small>()), "tile_atoms");
+    EXPECT_STREQ((Default::Validate<Small>()), "tile_atoms");
     using Fp8Atom32 = ck_tile::
         MxGemmTdmScheduledProblem<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t, MafShape>;
-    EXPECT_STREQ((ck_tile::MxTdmScheduledValidate<Fp8Atom32>()), "tile_k");
+    EXPECT_STREQ((Default::Validate<Fp8Atom32>()), "tile_k");
     using Mixed = ck_tile::
         MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::fp8_t, ck_tile::fp8_t, MafShape>;
-    EXPECT_STREQ((ck_tile::MxTdmScheduledValidate<Mixed>()), "dtype_width");
+    EXPECT_STREQ((Default::Validate<Mixed>()), "dtype_width");
     using F32Out =
         ck_tile::MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, float, MafShape>;
-    EXPECT_STREQ((ck_tile::MxTdmScheduledValidate<F32Out>()), "out_dtype");
-    EXPECT_STREQ((ck_tile::MxTdmScheduledValidate<MafProblem, Cluster8x4>()), "cluster_size");
+    EXPECT_STREQ((Default::Validate<F32Out>()), "out_dtype");
+    using Cluster4x8Shape = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 8, 1>,
+                                                          ck_tile::sequence<256, 256, 512>,
+                                                          ck_tile::sequence<2, 2, 1>,
+                                                          ck_tile::sequence<32, 16, 128>>;
+    using Cluster8x4      = ck_tile::MxGemmTdmScheduledProblem<ck_tile::pk_fp4_t,
+                                                               ck_tile::pk_fp4_t,
+                                                               ck_tile::fp8_t,
+                                                               Cluster4x8Shape>;
+    EXPECT_STREQ((Default::Validate<Cluster8x4>()), "cluster_size");
 }
 
 } // namespace

@@ -32,21 +32,22 @@ std::vector<index_t> sample_rows(index_t M, index_t tile_m)
 template <typename Kernel>
 void check_sampled(index_t M, index_t N, index_t K)
 {
-    constexpr auto s = spec_of<Kernel>();
+    using Pipeline = typename Kernel::GemmPipeline;
+    using O        = typename Pipeline::ODataType;
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K));
-    const Inputs in = make_inputs(s.a_dtype, s.b_dtype, M, N, K, s.tile_k);
+    const Inputs in = make_kernel_inputs<Kernel>(M, N, K);
     const auto got  = run_device<Kernel>(in, M, N, K);
 #ifdef MX_TDM_SCHEDULED_DRY_RUN
     return;
 #endif
-    const auto rows              = sample_rows(M, s.tile_m);
-    const auto want              = run_reference(s.a_dtype, s.b_dtype, s.out, in, M, N, K, &rows);
-    const long_index_t row_bytes = static_cast<long_index_t>(N) * sched::out_bytes(s.out);
+    const auto rows              = sample_rows(M, Pipeline::kTileM);
+    const auto want              = run_reference<Kernel>(in, M, N, K, &rows);
+    const long_index_t row_bytes = static_cast<long_index_t>(N) * sched::out_bytes<O>();
     std::vector<uint8_t> got_rows(want.size());
     for(std::size_t i = 0; i < rows.size(); ++i)
         std::memcpy(got_rows.data() + i * row_bytes, got.data() + rows[i] * row_bytes, row_bytes);
-    EXPECT_EQ(first_mismatch(got_rows, want, s.out, N), "");
+    EXPECT_EQ(first_mismatch<O>(got_rows, want, N), "");
 }
 
 // A past 2^31 bytes: the MAB shape (tile_n 16) at M 65536, K 81920 (2.5 GiB of FP4 A).

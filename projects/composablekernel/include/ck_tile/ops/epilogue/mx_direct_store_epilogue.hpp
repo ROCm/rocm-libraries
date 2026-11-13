@@ -56,12 +56,13 @@ struct MxDirectStoreEpilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetVectorSizeC() { return kStoreWidth; }
     /// The stores go from the accumulators straight to E.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
-    static constexpr MxTdmScheduledSpec kSpec =
-        Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
-    static constexpr bool kFp8         = kSpec.out == MxTdmScheduledOutDtype::Fp8E4M3;
-    static constexpr bool kFp16        = kSpec.out == MxTdmScheduledOutDtype::Fp16;
-    static constexpr index_t kOutBytes = kSpec.out_bytes();
-    static constexpr index_t kFp8Width = kSpec.fp8_convert_width();
+    using PipelinePolicy               = typename Pipeline::Policy;
+    using PipelineProblem              = typename Pipeline::Problem;
+    static constexpr bool kFp8         = std::is_same_v<typename Pipeline::ODataType, fp8_t>;
+    static constexpr bool kFp16        = std::is_same_v<typename Pipeline::ODataType, half_t>;
+    static constexpr index_t kOutBytes = PipelinePolicy::template GetOutBytes<PipelineProblem>();
+    static constexpr index_t kFp8Width =
+        PipelinePolicy::template GetFp8ConvertWidth<PipelineProblem>();
     /// Rows past M lie past the buffer, which drops or zeroes them; the 64-bit global path and
     /// columns past N (inside the next row) need the windows' checks.
     static constexpr bool kCheckBounds =
@@ -73,7 +74,8 @@ struct MxDirectStoreEpilogue
                                           !(Pipeline::LargeTensors && Pipeline::kPadM);
 
     static_assert(
-        kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
+        kStoreWidth >= 1 &&
+            kStoreWidth <= PipelinePolicy::template GetMaxStoreWidth<PipelineProblem>() &&
             Pipeline::kRn % kStoreWidth == 0 && (kStoreWidth & (kStoreWidth - 1)) == 0,
         "comp_tdm_scheduled: the E store width must be a power of 2 dividing the N repeat, "
         "<= 16 B");

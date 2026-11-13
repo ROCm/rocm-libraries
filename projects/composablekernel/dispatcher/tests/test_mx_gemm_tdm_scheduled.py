@@ -86,10 +86,15 @@ class TestTuning(unittest.TestCase):
             "lds_segment_interleave": False,
         }
         spec = sched.spec_from_tile(TILE, t, out_dtype="fp16")
+        self.assertEqual(sched.cpp_cluster_sequence(t), "ck_tile::sequence<2, 2, 1>")
         self.assertEqual(
-            sched.cpp_tuning_type(t),
-            "ck_tile::MxTdmScheduledTuningT<2, 2, 4, -1, 1, ck_tile::MxTdmScheduledHalfPlr::B, "
-            "ck_tile::MxTdmScheduledHalfBOrder::Late, false>",
+            sched.cpp_cluster_sequence({"cluster_dim": [1, 4]}),
+            "ck_tile::sequence<4, 1, 1>",
+        )
+        self.assertEqual(
+            sched.cpp_policy_type(t),
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, "
+            "ck_tile::MxTdmScheduledHalfPlr::B, ck_tile::MxTdmScheduledHalfBOrder::Late, false>",
         )
         self.assertEqual(
             sched.cpp_kernel_traits(
@@ -441,7 +446,10 @@ class TestDispatcher(unittest.TestCase):
             path = codegen.generate_kernel(Path(out), _cfg(cluster_dim=[2, 2]))
             header = path.read_text()
         self.assertTrue(path.name.endswith("_c2x2.hpp"))
-        self.assertIn("ck_tile::MxTdmScheduledTuningT<2, 2, 4, -1, 1", header)
+        self.assertIn("using Cluster = ck_tile::sequence<2, 2, 1>;", header)
+        self.assertIn(
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1", header
+        )
         self.assertIn("KMajorScales = true", header)
         self.assertIn("ck_tile::MxDirectStoreEpilogue<", header)
 

@@ -20,31 +20,6 @@ inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::SE_NT;
 #else
 inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::coherence_default;
 #endif
-
-/// The MxTdmScheduledGemmTraits values rocKE derives from `spec`'s shape, as host values.
-struct ShapeTraits
-{
-    bool edge_m;
-    bool edge_n;
-    bool wide_a;
-    bool wide_b;
-    bool wide_d;
-    index_t odd_tiles;
-    index_t tail_steps;
-    index_t store_width;
-};
-
-CK_TILE_HOST_DEVICE constexpr ShapeTraits shape_traits(const MxTdmScheduledSpec& s)
-{
-    return {s.edge_m(),
-            s.edge_n(),
-            s.wide_a(),
-            s.wide_b(),
-            s.wide_d(),
-            static_cast<index_t>(s.K / s.tile_k % 2),
-            s.tail_steps(),
-            s.store_width()};
-}
 } // namespace mx_tdm_scheduled
 
 /**
@@ -71,7 +46,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     using Problem   = remove_cvref_t<Problem_>;
     using Policy    = remove_cvref_t<Policy_>;
     using Traits    = typename Problem::Traits;
-    using Tuning    = typename Policy::TuningType;
     using ADataType = typename Problem::ADataType;
     using BDataType = typename Problem::BDataType;
     using ODataType = typename Problem::ODataType;
@@ -91,7 +65,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
 
     static_assert(mx_tdm_scheduled::InvalidTuning<Policy::template GetReason<Problem>()>::value,
-                  "comp_tdm_scheduled: the Problem and tuning break a rule of rocKE's validate()");
+                  "comp_tdm_scheduled: the Problem and policy break a rule of rocKE's validate()");
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr index_t BlockSize      = Problem::kBlockSize;
@@ -135,7 +109,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     /// The workgroup's threads: kBlockSize of the device pass (4 waves of 32).
     static constexpr index_t kThreads = Policy::template GetBlockSize<Problem>();
     /// The LDS the workgroup may take, for the pipeline and the epilogue together.
-    static constexpr index_t kLdsCapacityBytes = mx_tdm_scheduled::kLdsCapacityBytes;
+    static constexpr index_t kLdsCapacityBytes = Policy::kLdsCapacityBytes;
     static constexpr index_t kTileM            = BlockGemmShape::kM;
     static constexpr index_t kTileN            = BlockGemmShape::kN;
     static constexpr index_t kTileK            = BlockGemmShape::kK;
@@ -151,12 +125,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr bool kHalfB               = Policy::template GetHalfB<Problem>();
     static constexpr bool kHalfBLate           = Policy::template GetHalfBLate<Problem>();
     static constexpr index_t kHalf             = kRn / 2;
-    static constexpr bool kHasCluster          = Policy::HasCluster();
-    static constexpr index_t kClusterX         = Tuning::kClusterDimX;
-    static constexpr index_t kClusterY         = Tuning::kClusterDimY;
-    static constexpr index_t kClusterZ         = Tuning::kClusterDimZ;
+    static constexpr bool kHasCluster          = Policy::template HasCluster<Problem>();
+    static constexpr index_t kClusterX         = BlockGemmShape::kclusterN;
+    static constexpr index_t kClusterY         = BlockGemmShape::kclusterM;
+    static constexpr index_t kClusterZ         = BlockGemmShape::kclusterK;
     static constexpr index_t kSignalWmmas      = Policy::template GetSignalWmmas<Problem>();
-    static constexpr index_t kGl2Distance      = Tuning::kGl2PrefetchDistance;
+    static constexpr index_t kGl2Distance      = Policy::kGl2PrefetchDistance;
     static constexpr index_t kReadsPerStep     = Policy::template GetReadsPerStep<Problem>();
     static constexpr index_t kLdsRowBytes      = Policy::template GetLdsRowBytes<Problem>();
     static constexpr index_t kLdsBufferStride  = Policy::template GetLdsBufferStride<Problem>();
@@ -181,19 +155,46 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
     CK_TILE_HOST static std::string GetName()
     {
-        return std::string("pipeline_AgBgCrCompTDMScheduled") + MxTdmScheduledTuningName<Tuning>();
+        return std::string("pipeline_AgBgCrCompTDMScheduled") +
+               Policy::template GetTuningName<Problem>();
+    }
+
+    /// rocKE's name of an A or B type.
+    template <typename T>
+    CK_TILE_HOST static const char* GetDtypeName()
+    {
+        return std::is_same_v<T, pk_fp4_t> ? "fp4" : std::is_same_v<T, fp8_t> ? "fp8" : "bf8";
+    }
+    /// rocKE's MxGemmSpec dtype tag: mx, A's type, then B's if it differs.
+    CK_TILE_HOST static std::string GetDtypeTag()
+    {
+        std::string tag = std::string("mx") + GetDtypeName<ADataType>();
+        if(!std::is_same_v<ADataType, BDataType>)
+            tag += GetDtypeName<BDataType>();
+        return tag;
+    }
+    CK_TILE_HOST static std::string GetTileName()
+    {
+        return "_t" + std::to_string(kTileM) + "x" + std::to_string(kTileN) + "x" +
+               std::to_string(kTileK);
+    }
+
+    /// rocKE's MxGemmSpec.kernel_name() of an M x N x K problem for a spec named `prefix`.
+    CK_TILE_HOST static std::string GetRockeName(long_index_t M,
+                                                 long_index_t N,
+                                                 long_index_t K,
+                                                 const std::string& prefix = "mx_gemm")
+    {
+        return prefix + "_" + GetDtypeTag() + "_M" + std::to_string(M) + "N" + std::to_string(N) +
+               "K" + std::to_string(K) + GetTileName() +
+               Policy::template GetTuningName<Problem>(true);
     }
 
     /// The name of an MxGemmKernel of this pipeline: data types, tile, tuning and traits.
     [[nodiscard]] CK_TILE_HOST static std::string GetKernelName()
     {
-        constexpr MxTdmScheduledSpec spec = Policy::template GetSpec<Problem>();
-        std::string name =
-            std::string("mx_gemm_tdm_scheduled_mx") + mx_tdm_scheduled_dtype_name(spec.a_dtype);
-        if(spec.b_dtype != spec.a_dtype)
-            name += mx_tdm_scheduled_dtype_name(spec.b_dtype);
-        name += "_t" + std::to_string(spec.tile_m) + "x" + std::to_string(spec.tile_n) + "x" +
-                std::to_string(spec.tile_k) + mx_tdm_scheduled_tuning_name(spec);
+        std::string name = "mx_gemm_tdm_scheduled_" + GetDtypeTag() + GetTileName() +
+                           Policy::template GetTuningName<Problem>(true);
         if(Traits::kEdgeM || Traits::kEdgeN)
             name += "_edge";
         if(Traits::kWideA || Traits::kWideB || Traits::kWideD)
@@ -205,15 +206,31 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return name + "_w" + std::to_string(Traits::kStoreWidth);
     }
 
-    /// nullptr if this instance runs an M x N x K problem, else why not: rocKE's validate() of the
-    /// full spec, or a shape path the traits lack.
+    /// nullptr if this instance runs an M x N x K problem, else why not: a shape rule of rocKE's
+    /// validate() (the others hold at compile time), or a shape path the traits lack.
     CK_TILE_HOST static const char* GetUnsupportedReason(index_t M, index_t N, index_t K)
     {
-        const MxTdmScheduledSpec spec     = Policy::template GetSpec<Problem>(M, N, K);
-        const MxTdmScheduledReason reason = mx_tdm_scheduled_validate(spec);
-        if(reason != MxTdmScheduledReason::Ok)
+        using R  = MxTdmScheduledReason;
+        R reason = R::Ok;
+        // A, B and D offsets switch to i64 past 2^31; the scales' stay i32. A partial last tile's
+        // rows reach the next whole tile.
+        const long_index_t span_m  = integer_least_multiple(long_index_t{M}, kTileM);
+        const long_index_t span_n  = integer_least_multiple(long_index_t{N}, kTileN);
+        const long_index_t mn_span = span_m > span_n ? span_m : span_n;
+        if(M <= 0 || N <= 0 || K <= 0)
+            reason = R::ShapePositive;
+        else if(K % 32)
+            reason = R::KScaleBlock;
+        else if(mn_span * integer_divide_ceil(long_index_t{K}, Policy::kAtomK) * 4 > (1ll << 31))
+            reason = R::ScaleSpan;
+        else if(K < kTileK)
+            reason = R::KShort;
+        else if(integer_divide_ceil(N, kTileN) % kClusterX ||
+                integer_divide_ceil(M, kTileM) % kClusterY)
+            reason = R::ClusterGrid;
+        if(reason != R::Ok)
             return mx_tdm_scheduled_reason_message(reason);
-        const mx_tdm_scheduled::ShapeTraits need = mx_tdm_scheduled::shape_traits(spec);
+        const MxTdmScheduledShapeTraits need = MxTdmScheduledSelectTraits<Problem>(M, N, K);
         if(need.edge_m && !Traits::kEdgeM)
             return "M is not a multiple of tile_m: needs an EdgeM instance";
         if(need.edge_n && !Traits::kEdgeN)
@@ -292,7 +309,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               N(Lengths(b_dram_)[number<0>{}]),
               K(Lengths(a_dram_)[number<1>{}]),
               tid(get_thread_id()),
-              lane(integer_modulo_nonnegative<mx_tdm_scheduled::kWave>(tid)),
+              lane(integer_modulo_nonnegative<Policy::kWaveSize>(tid)),
               // Wave-uniform, so the TDM descriptors built from it stay scalar.
               wave(get_warp_id()),
               wave_m(integer_divide_nonnegative<kWarpN>(wave)),
@@ -302,8 +319,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               smem(smem_),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
-              k_atoms(integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(
-                  Traits::kHasTail ? K + mx_tdm_scheduled::kAtomK - 1 : K)),
+              k_atoms(integer_divide_nonnegative<Policy::kAtomK>(
+                  Traits::kHasTail ? K + Policy::kAtomK - 1 : K)),
               a_scale_stride(opaque_scalar(M * 4)),
               b_scale_stride(opaque_scalar(N * 4)),
               block_gemm(smem_, lane, wave_m, wave_n)
@@ -367,12 +384,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE auto DramComponentWindow(index_t component) const
         {
-            using DataType = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
-            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
-            constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
-            constexpr index_t packed          = numeric_traits<DataType>::PackedSize;
-            constexpr index_t box_rows        = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
-            constexpr auto lengths            = make_tuple(number<box_rows>{}, number<kTileK>{});
+            using DataType             = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
+            constexpr auto L           = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr bool wide        = IsA ? Traits::kWideA : Traits::kWideB;
+            constexpr index_t packed   = numeric_traits<DataType>::PackedSize;
+            constexpr index_t box_rows = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
+            constexpr auto lengths     = make_tuple(number<box_rows>{}, number<kTileK>{});
             constexpr auto dstr = Policy::template MakeDramTdmTileDistribution<Problem, IsA>();
             using RowOffset     = std::conditional_t<wide, long_index_t, index_t>;
             const auto& dram    = DramWindow<IsA>();
@@ -394,10 +411,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE auto LdsComponentWindow(index_t component) const
         {
-            using DataType = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
-            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
-            constexpr index_t box_rows        = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
-            constexpr auto desc = Policy::template MakeLdsTdmBlockDescriptor<Problem, IsA>();
+            using DataType             = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
+            constexpr auto L           = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr index_t box_rows = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
+            constexpr auto desc        = Policy::template MakeLdsTdmBlockDescriptor<Problem, IsA>();
             // The view starts at the component, offset in words as the block GEMM's reads offset
             // their rows, so the two share the wave's base.
             auto* const base = reinterpret_cast<CK_TILE_LDS_ADDR uint32_t*>(smem + L.base) +
@@ -421,8 +438,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE auto ScaleDramComponentWindow(index_t component) const
         {
-            constexpr MxTdmScheduledOperand L =
-                Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr auto L = Policy::template GetLdsOperand<Problem, IsA, true>();
             constexpr auto dstr =
                 Policy::template MakeDramTdmTileDistribution<Problem, IsA, true>();
             const auto& dram = ScaleDramWindow<IsA>();
@@ -438,9 +454,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE auto LdsScaleComponentWindow(index_t component) const
         {
-            using DataType = remove_cvref_t<typename ScaleDramWindowType<IsA>::DataType>;
-            constexpr MxTdmScheduledOperand L =
-                Policy::template GetLdsOperand<Problem, IsA, true>();
+            using DataType      = remove_cvref_t<typename ScaleDramWindowType<IsA>::DataType>;
+            constexpr auto L    = Policy::template GetLdsOperand<Problem, IsA, true>();
             constexpr auto desc = Policy::template MakeLdsScaleTdmBlockDescriptor<Problem, IsA>();
             const auto view     = make_tensor_view<address_space_enum::lds>(
                 reinterpret_cast<CK_TILE_LDS_ADDR DataType*>(smem + L.base + component * L.stride),
@@ -463,10 +478,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
-            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
-            constexpr bool edge               = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            constexpr bool iterate            = L.iterate_rows > 0;
-            const auto dram_window            = DramComponentWindow<IsA>(component);
+            constexpr auto L       = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr bool edge    = IsA ? Traits::kEdgeM : Traits::kEdgeN;
+            constexpr bool iterate = L.iterate_rows > 0;
+            const auto dram_window = DramComponentWindow<IsA>(component);
 
             TDMConfig config = Config<IsA, false>();
             if constexpr(iterate)
@@ -533,7 +548,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 data_lds + static_cast<uint32_t>(BufferBase(parity)),
                 data_global + static_cast<uint32_t>(k_byte),
                 static_cast<uint32_t>(remaining_k));
-            const index_t k_step     = integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(k0);
+            const index_t k_step     = integer_divide_nonnegative<Policy::kAtomK>(k0);
             const index_t steps_left = k_atoms - k_step;
             PipelineImplBase::template GlobalPrefetchTDM<1>(
                 scale,
@@ -568,7 +583,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             if constexpr(kGl2Distance != 0)
             {
-                constexpr index_t line = mx_tdm_scheduled::kGl2LineBytes;
+                constexpr index_t line = Policy::kGl2LineBytes;
                 k_ahead                = k_ahead < K ? k_ahead : K - kTileK;
                 const index_t k_byte   = integer_divide_nonnegative<kKPerByte>(k_ahead);
                 constexpr index_t data_lines =
@@ -594,8 +609,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     kHasCluster ? (cluster_wx + cluster_wy * kClusterX) * kThreads + tid : tid;
                 // A partial last tile has fewer K steps than the k_steps rows prefetched for it;
                 // a partial M/N tile has lines past the end.
-                const index_t k_step =
-                    integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(k_ahead);
+                const index_t k_step = integer_divide_nonnegative<Policy::kAtomK>(k_ahead);
 
                 const auto address = [&](auto cat, index_t index) -> const uint8_t* {
                     constexpr index_t kCat = decltype(cat)::value;

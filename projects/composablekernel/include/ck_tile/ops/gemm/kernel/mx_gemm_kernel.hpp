@@ -1002,8 +1002,9 @@ struct MxGemmKernel
             bs_scale_ptr[i] = reinterpret_cast<ScalePtrType>(kargs.bs_scale_ptr[i]);
         });
 
-        // cluster launch pads grid to cluster boundaries; skip out-of-bound blocks
-        if constexpr(BaseKernel::ClusterLaunch)
+        // cluster launch pads grid to cluster boundaries; skip out-of-bound blocks. The 2D
+        // partitioner's grid is exact (its pipeline rejects a grid the cluster does not divide).
+        if constexpr(BaseKernel::ClusterLaunch && !BaseKernel::kPartitionerGrid2D)
         {
             if(block_idx_m_ >= kargs.M || block_idx_n >= kargs.N)
                 return;

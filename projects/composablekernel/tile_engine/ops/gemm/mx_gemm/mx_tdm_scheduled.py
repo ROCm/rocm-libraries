@@ -3,8 +3,10 @@
 
 """comp_tdm_scheduled (the rocKE gfx1250 mx_gemm kernel) in Python: spec, validator, names, tuning.
 
-A port of include/ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp, itself
-a port of rocKE's MxGemmSpec (instances/gfx1250/mx_gemm.py at b32989439dc).
+The Python side of MxGemmPipelineAgBgCrCompTDMScheduledPolicy's compile-time rules (in
+include/ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp) and
+the pipeline's shape rules, both ports of rocKE's MxGemmSpec (instances/gfx1250/mx_gemm.py at
+b32989439dc).
 
 Field names and defaults are rocKE's. The tuning knobs (TUNING_DEFAULTS) are what tile_engine's
 ``tuning_config`` section and the dispatcher's config carry; the rest comes from the tile config
@@ -687,7 +689,7 @@ class MxTdmScheduledSpec:
 
     # Names.
     def tuning_name(self, with_shape_parts: bool = True) -> str:
-        """rocKE's name after the tile: cluster, then each non-default value (MxTdmScheduledTuningName)."""
+        """rocKE's name after the tile: cluster, then each non-default value (the policy's GetTuningName)."""
         cx, cy, _ = self.cluster_dim
         name = f"_c{cx}x{cy}"
         if with_shape_parts and self.out_dtype != "fp8e4m3":
@@ -1017,17 +1019,22 @@ def instance_unsupported_reason(
     return ""
 
 
-def cpp_tuning_type(tuning: Optional[Dict]) -> str:
-    """The MxTdmScheduledTuningT<...> spelling of a tuning."""
+def cpp_cluster_sequence(tuning: Optional[Dict]) -> str:
+    """The ClusterTileGemmShape cluster of a tuning: (M tiles, N tiles, 1) = (y, x, 1)."""
+    cx, cy, _ = normalize_tuning(tuning)["cluster_dim"]
+    return f"ck_tile::sequence<{cy}, {cx}, 1>"
+
+
+def cpp_policy_type(tuning: Optional[Dict]) -> str:
+    """The MxGemmPipelineAgBgCrCompTDMScheduledPolicy<...> spelling of a tuning's other knobs."""
     t = normalize_tuning(tuning)
-    cx, cy, _ = t["cluster_dim"]
     signal = -1 if t["cluster_signal_wmmas"] is None else t["cluster_signal_wmmas"]
     plr = "B" if t["half_plr"] == "b" else "None"
     order = "Late" if t["half_b_order"] == "late" else "Ahead"
     lsi = "true" if t["lds_segment_interleave"] else "false"
     return (
-        f"ck_tile::MxTdmScheduledTuningT<{cx}, {cy}, {t['gl2_prefetch_distance']}, {signal}, "
-        f"{t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, "
+        f"ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<{t['gl2_prefetch_distance']}, "
+        f"{signal}, {t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, "
         f"ck_tile::MxTdmScheduledHalfBOrder::{order}, {lsi}>"
     )
 
@@ -1085,8 +1092,9 @@ __all__ = [
     "REASONS",
     "SHAPE_DEFAULTS",
     "TUNING_DEFAULTS",
+    "cpp_cluster_sequence",
     "cpp_kernel_traits",
-    "cpp_tuning_type",
+    "cpp_policy_type",
     "decode_tuning",
     "encode_tuning",
     "expand_tuning_config",

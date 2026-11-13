@@ -8,13 +8,152 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_asmem_bsmem_creg_tdm_scheduled.hpp"
-#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_spec.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
-#include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_tuning.hpp"
-#include "ck_tile/ops/gemm/pipeline/tdm_multicast_direction.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp"
 
 namespace ck_tile {
+
+/// How the K loop of MxGemmPipelineAgBgCrCompTDMScheduled reads B from LDS. B: in two halves, two
+/// s_wait_dscnt per K step, B-outer WMMAs (needs local prefetch and an even N repeat). None: whole.
+enum class MxTdmScheduledHalfPlr : int
+{
+    B    = 0,
+    None = 1
+};
+
+/// Where the half-B reads of the next K step go (HalfPlr::B only). Ahead: everything but B's second
+/// half before the first wait; three B half-sets live. Late: scales and A after the first wait, B's
+/// halves one half later; two B half-sets live.
+enum class MxTdmScheduledHalfBOrder : int
+{
+    Ahead = 0,
+    Late  = 1
+};
+
+/// Why a Problem and policy do not build, or an M x N x K problem does not run, in the order
+/// rocKE's validate() (instances/gfx1250/mx_gemm.py at commit b32989439dc) checks. Ok when it
+/// builds.
+enum class MxTdmScheduledReason : int
+{
+    Ok,
+    ShapePositive,
+    KScaleBlock,
+    OutDtype,
+    TileMN,
+    Dtype,
+    DtypeWidth,
+    TileK,
+    WaveGroup,
+    Mma,
+    TileAtoms,
+    ScaleSpan,
+    KShort,
+    LocalPrefetch,
+    HalfPlr,
+    HalfPlrB,
+    HalfBOrder,
+    HalfBLate,
+    SignalWmmas,
+    Gl2Distance,
+    ClusterDim,
+    ClusterSize,
+    ClusterGrid,
+    LdsPad,
+    Accumulators,
+    LsiRepeat,
+    LsiBaselineSplit,
+    LsiCapacity,
+    LdsCapacity
+};
+
+/// The short code of a reason, as in the Python validator.
+CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmScheduledReason r)
+{
+    switch(r)
+    {
+    case MxTdmScheduledReason::Ok: return "ok";
+    case MxTdmScheduledReason::ShapePositive: return "shape_positive";
+    case MxTdmScheduledReason::KScaleBlock: return "k_scale_block";
+    case MxTdmScheduledReason::OutDtype: return "out_dtype";
+    case MxTdmScheduledReason::TileMN: return "tile_mn";
+    case MxTdmScheduledReason::Dtype: return "dtype";
+    case MxTdmScheduledReason::DtypeWidth: return "dtype_width";
+    case MxTdmScheduledReason::TileK: return "tile_k";
+    case MxTdmScheduledReason::WaveGroup: return "wave_group";
+    case MxTdmScheduledReason::Mma: return "mma";
+    case MxTdmScheduledReason::TileAtoms: return "tile_atoms";
+    case MxTdmScheduledReason::ScaleSpan: return "scale_span";
+    case MxTdmScheduledReason::KShort: return "k_short";
+    case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch";
+    case MxTdmScheduledReason::HalfPlr: return "half_plr";
+    case MxTdmScheduledReason::HalfPlrB: return "half_plr_b";
+    case MxTdmScheduledReason::HalfBOrder: return "half_b_order";
+    case MxTdmScheduledReason::HalfBLate: return "half_b_late";
+    case MxTdmScheduledReason::SignalWmmas: return "signal_wmmas";
+    case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
+    case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
+    case MxTdmScheduledReason::ClusterSize: return "cluster_size";
+    case MxTdmScheduledReason::ClusterGrid: return "cluster_grid";
+    case MxTdmScheduledReason::LdsPad: return "lds_pad";
+    case MxTdmScheduledReason::Accumulators: return "accumulators";
+    case MxTdmScheduledReason::LsiRepeat: return "lsi_repeat";
+    case MxTdmScheduledReason::LsiBaselineSplit: return "lsi_baseline_split";
+    case MxTdmScheduledReason::LsiCapacity: return "lsi_capacity";
+    case MxTdmScheduledReason::LdsCapacity: return "lds_capacity";
+    }
+    return "unknown";
+}
+
+/// rocKE's message for a reason, without the values it formats in.
+CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmScheduledReason r)
+{
+    switch(r)
+    {
+    case MxTdmScheduledReason::Ok: return "ok";
+    case MxTdmScheduledReason::ShapePositive: return "M, N and K must be positive";
+    case MxTdmScheduledReason::KScaleBlock:
+        return "K must be a multiple of 32: each E8M0 scale covers 32 K values";
+    case MxTdmScheduledReason::OutDtype: return "out_dtype must be one of fp8e4m3, fp16, bf16";
+    case MxTdmScheduledReason::TileMN: return "tile_m and tile_n must be in 16, 32, 64, 128, 256";
+    case MxTdmScheduledReason::Dtype: return "a_dtype and b_dtype must be in fp4, fp8, bf8";
+    case MxTdmScheduledReason::DtypeWidth:
+        return "a_dtype and b_dtype must have the same width (no FP4 x 8-bit)";
+    case MxTdmScheduledReason::TileK:
+        return "tile_k must be in 128, 256, 512, 1024 for fp4 and 128, 256 for 8-bit types";
+    case MxTdmScheduledReason::WaveGroup: return "wave_group must be 2x2, 4x1 or 1x4 (4 waves)";
+    case MxTdmScheduledReason::Mma: return "mma must be 32x16 or 16x16 for fp4 and 16x16 for 8-bit";
+    case MxTdmScheduledReason::TileAtoms: return "the tile must hold whole WMMA atoms per wave";
+    case MxTdmScheduledReason::ScaleSpan:
+        return "A and B scale bytes must each be at most 2^31 (i32 offsets)";
+    case MxTdmScheduledReason::KShort: return "K must hold at least one full tile";
+    case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch must be 0 or 1";
+    case MxTdmScheduledReason::HalfPlr: return "half_plr must be 'b' or 'none'";
+    case MxTdmScheduledReason::HalfPlrB:
+        return "half_plr 'b' needs local_prefetch 1 and an even wave_repeat_n";
+    case MxTdmScheduledReason::HalfBOrder: return "half_b_order must be 'ahead' or 'late'";
+    case MxTdmScheduledReason::HalfBLate: return "half_b_order 'late' needs half_plr 'b'";
+    case MxTdmScheduledReason::SignalWmmas:
+        return "cluster_signal_wmmas must be in 0..signal_limit";
+    case MxTdmScheduledReason::Gl2Distance:
+        return "gl2_prefetch_distance must be 0 (off) or 2..8 tiles";
+    case MxTdmScheduledReason::ClusterDim: return "cluster_dim must be a positive (x, y, z) triple";
+    case MxTdmScheduledReason::ClusterSize:
+        return "cluster_dim must be 2D with at most 16 workgroups";
+    case MxTdmScheduledReason::ClusterGrid: return "the grid must be divisible by cluster_dim";
+    case MxTdmScheduledReason::LdsPad: return "an LDS pad does not encode as TDM padding";
+    case MxTdmScheduledReason::Accumulators: return "the accumulators per lane exceed 1024 VGPRs";
+    case MxTdmScheduledReason::LsiRepeat:
+        return "segment interleave needs the split operand's wave repeat to cover its wave's rows";
+    case MxTdmScheduledReason::LsiBaselineSplit:
+        return "segment interleave: the baseline layout already splits B's components across "
+               "segments";
+    case MxTdmScheduledReason::LsiCapacity:
+        return "segment interleave: the aligned layout needs more LDS than fits";
+    case MxTdmScheduledReason::LdsCapacity: return "LDS bytes exceed the 327680 B of gfx1250";
+    }
+    return "unknown";
+}
 
 /**
  * @brief The GEMM traits of a MxGemmPipelineAgBgCrCompTDMScheduled instance: RCR
@@ -30,6 +169,7 @@ namespace ck_tile {
  * paths are supersets of the ones they replace (an edge kernel runs whole tiles, a wide one
  * narrow offsets) and any store width dividing N works, so one instance serves every problem its
  * traits cover; OddTiles (unless -1) and TailSteps must be the problem's.
+ * MxTdmScheduledSelectTraits gives the values an M x N x K problem needs.
  */
 template <bool EdgeM_         = false,
           bool EdgeN_         = false,
@@ -68,6 +208,53 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
     static constexpr index_t kStoreWidth = StoreWidth_;
 };
 
+/// The MxTdmScheduledGemmTraits values of one M x N x K problem, as host values.
+struct MxTdmScheduledShapeTraits
+{
+    bool edge_m;
+    bool edge_n;
+    bool wide_a;
+    bool wide_b;
+    bool wide_d;
+    index_t odd_tiles;
+    index_t tail_steps;
+    index_t store_width;
+};
+
+/**
+ * @brief The MxTdmScheduledGemmTraits an M x N x K problem needs from an instance of Problem's
+ *        tile and types, as rocKE derives them from its compile-time M, N and K.
+ *
+ * The store width is the widest of at most 16 B and the N repeat that divides N, so a vector is
+ * wholly inside or outside N and stays aligned.
+ */
+template <typename Problem>
+CK_TILE_HOST_DEVICE constexpr MxTdmScheduledShapeTraits
+MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
+{
+    using Shape                 = typename Problem::BlockGemmShape;
+    constexpr long_index_t span = 1ll << 31;
+    constexpr index_t k_per_byte =
+        std::is_same_v<remove_cvref_t<typename Problem::ADataType>, pk_fp4_t> ? 2 : 1;
+    constexpr index_t out_bytes =
+        std::is_same_v<remove_cvref_t<typename Problem::ODataType>, fp8_t> ? 1 : 2;
+    constexpr index_t repeat_n  = Shape::kN / (Shape::BlockWarps::at(number<1>{}) * 16);
+    const long_index_t span_m   = integer_least_multiple(M, Shape::kM);
+    const long_index_t span_n   = integer_least_multiple(N, Shape::kN);
+    const long_index_t packed_k = K / k_per_byte;
+    index_t width               = repeat_n < 16 / out_bytes ? repeat_n : 16 / out_bytes;
+    while(width > 1 && N % width)
+        width /= 2;
+    return {M % Shape::kM != 0,
+            N % Shape::kN != 0,
+            span_m * packed_k > span,
+            span_n * packed_k > span,
+            span_m * span_n > span,
+            static_cast<index_t>(K / Shape::kK % 2),
+            static_cast<index_t>(integer_divide_ceil(K % Shape::kK, 128)),
+            width};
+}
+
 /**
  * @brief Problem of MxGemmPipelineAgBgCrCompTDMScheduled: E = A @ B^T.
  *
@@ -77,7 +264,9 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
  * (saturating), half_t or bf16_t.
  *
  * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,
- * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom.
+ * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom. A
+ * ClusterTileGemmShape adds the cluster (kclusterM M tiles by kclusterN N tiles, kclusterK 1):
+ * A tiles are multicast along N, B tiles along M. A TileGemmShape is no cluster launch.
  *
  * An MxGemmPipelineProblem with float accumulators, PassThrough element functions and E8M0
  * scales per 32 K values, plus ODataType; kBlockSize follows its convention (warps x
@@ -105,36 +294,6 @@ struct MxGemmTdmScheduledProblem
 
 namespace mx_tdm_scheduled {
 
-/// The MxTdmScheduledDtype of an A or B type; an out-of-range value (rejected as "dtype")
-/// otherwise.
-template <typename T>
-CK_TILE_HOST_DEVICE constexpr MxTdmScheduledDtype dtype_of()
-{
-    if constexpr(std::is_same_v<T, pk_fp4_t>)
-        return MxTdmScheduledDtype::Fp4;
-    else if constexpr(std::is_same_v<T, fp8_t>)
-        return MxTdmScheduledDtype::Fp8;
-    else if constexpr(std::is_same_v<T, bf8_t>)
-        return MxTdmScheduledDtype::Bf8;
-    else
-        return static_cast<MxTdmScheduledDtype>(-1);
-}
-
-/// The MxTdmScheduledOutDtype of C and D; an out-of-range value (rejected as "out_dtype")
-/// otherwise.
-template <typename T>
-CK_TILE_HOST_DEVICE constexpr MxTdmScheduledOutDtype out_dtype_of()
-{
-    if constexpr(std::is_same_v<T, fp8_t>)
-        return MxTdmScheduledOutDtype::Fp8E4M3;
-    else if constexpr(std::is_same_v<T, half_t>)
-        return MxTdmScheduledOutDtype::Fp16;
-    else if constexpr(std::is_same_v<T, bf16_t>)
-        return MxTdmScheduledOutDtype::Bf16;
-    else
-        return static_cast<MxTdmScheduledOutDtype>(-1);
-}
-
 /// Instantiating this with a reason other than Ok fails, and the compiler names the reason.
 template <MxTdmScheduledReason R>
 struct InvalidTuning;
@@ -147,75 +306,354 @@ struct InvalidTuning<MxTdmScheduledReason::Ok>
 } // namespace mx_tdm_scheduled
 
 /**
- * @brief Policy of MxGemmPipelineAgBgCrCompTDMScheduled: the tuning (see
- * MxTdmScheduledDefaultTuning) and everything derived from it and the Problem's tile, at compile
- * time.
+ * @brief Policy of MxGemmPipelineAgBgCrCompTDMScheduled: the scheduling choices that are not part
+ * of the Problem's shape, with the names and defaults of rocKE's gfx1250 MxGemmSpec, and
+ * everything derived from them and the Problem at compile time: the rules of rocKE's validate(),
+ * the K step's reads and waits, and the LDS layout.
+ *
+ * @tparam Gl2PrefetchDistance  GL2 prefetch of the tile this many K tiles ahead; 0 is off, else
+ *                              2..8.
+ * @tparam ClusterSignalWmmas   WMMAs of the second-to-last K step before wave 0 signals the
+ *                              cluster; -1 derives it (6, clamped to the K step's WMMAs, or half
+ *                              of them with HalfPlr::B).
+ * @tparam LocalPrefetch        1: K step s + 1 is read from LDS during K step s. 0: each K step
+ *                              reads, drains, computes.
+ * @tparam LdsSegmentInterleave TensileLite's LDSSegmentInterleave 1 (true) or 0 (the baseline
+ *                              region order).
  */
-template <typename Tuning = MxTdmScheduledDefaultTuning>
+template <index_t Gl2PrefetchDistance         = 4,
+          index_t ClusterSignalWmmas          = -1,
+          index_t LocalPrefetch               = 1,
+          MxTdmScheduledHalfPlr HalfPlr       = MxTdmScheduledHalfPlr::B,
+          MxTdmScheduledHalfBOrder HalfBOrder = MxTdmScheduledHalfBOrder::Ahead,
+          bool LdsSegmentInterleave           = true>
 struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 {
-    using TuningType = Tuning;
+    static constexpr index_t kGl2PrefetchDistance         = Gl2PrefetchDistance;
+    static constexpr index_t kClusterSignalWmmas          = ClusterSignalWmmas;
+    static constexpr index_t kLocalPrefetch               = LocalPrefetch;
+    static constexpr MxTdmScheduledHalfPlr kHalfPlr       = HalfPlr;
+    static constexpr MxTdmScheduledHalfBOrder kHalfBOrder = HalfBOrder;
+    static constexpr bool kLdsSegmentInterleave           = LdsSegmentInterleave;
 
-    /// The compile-time part of the spec: M, N and K are 0.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledSpec GetSpec()
+    /// K of the scaled WMMA atom, the warp tile's K.
+    static constexpr index_t kAtomK = 128;
+    /// gfx1250 runs wave32; get_warp_size() is the compiler pass's wave size, 64 in the host pass.
+    static constexpr index_t kWaveSize = 32;
+    /// A lane's K chunk of a row and K step; the lane groups (lane / 16) read side by side.
+    static constexpr index_t kChunkBytes = 16;
+    static constexpr index_t kLaneGroups = 2;
+    /// The GL2 prefetch's granule.
+    static constexpr index_t kGl2LineBytes = 256;
+    /// LDS of a gfx1250 workgroup; get_smem_capacity() reports 64 KiB for gfx1250.
+    static constexpr index_t kLdsCapacityBytes = 327680;
+    /// The largest s_wait_dscnt immediate.
+    static constexpr index_t kDscntMax = 63;
+    /// VGPRs per lane, which bound the accumulators.
+    static constexpr index_t kVgprs = 1024;
+    /// The cluster signal's WMMAs when ClusterSignalWmmas is -1, before clamping.
+    static constexpr index_t kDefaultSignalWmmas = 6;
+
+    /// Whether T is an A or B type: pk_fp4_t, fp8_t or bf8_t.
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr bool IsMxDataType()
     {
-        using Shape              = typename Problem::BlockGemmShape;
-        using WarpTile           = typename Shape::WarpTile;
-        using Warps              = typename Shape::BlockWarps;
-        constexpr index_t atom_m = WarpTile::at(number<0>{});
-        constexpr index_t atom_n = WarpTile::at(number<1>{});
-        constexpr index_t atom_k = WarpTile::at(number<2>{});
-        constexpr bool warp_k_ok =
-            Warps::at(number<2>{}) == 1 && atom_k == mx_tdm_scheduled::kAtomK;
-
-        MxTdmScheduledSpec s{};
-        s.out                    = mx_tdm_scheduled::out_dtype_of<typename Problem::ODataType>();
-        s.tile_m                 = Shape::kM;
-        s.tile_n                 = Shape::kN;
-        s.tile_k                 = Shape::kK;
-        s.warp_m                 = warp_k_ok ? Warps::at(number<0>{}) : 0;
-        s.warp_n                 = warp_k_ok ? Warps::at(number<1>{}) : 0;
-        s.mma                    = (atom_m == 32 && atom_n == 16)   ? MxTdmScheduledMma::M32N16
-                                   : (atom_m == 16 && atom_n == 16) ? MxTdmScheduledMma::M16N16
-                                                                    : static_cast<MxTdmScheduledMma>(-1);
-        s.a_dtype                = mx_tdm_scheduled::dtype_of<typename Problem::ADataType>();
-        s.b_dtype                = mx_tdm_scheduled::dtype_of<typename Problem::BDataType>();
-        s.cluster_x              = Tuning::kClusterDimX;
-        s.cluster_y              = Tuning::kClusterDimY;
-        s.cluster_z              = Tuning::kClusterDimZ;
-        s.gl2_distance           = Tuning::kGl2PrefetchDistance;
-        s.signal_wmmas_in        = Tuning::kClusterSignalWmmas;
-        s.local_prefetch         = Tuning::kLocalPrefetch;
-        s.half_plr               = Tuning::kHalfPlr;
-        s.half_b_order           = Tuning::kHalfBOrder;
-        s.lds_segment_interleave = Tuning::kLdsSegmentInterleave;
-        return s;
+        return std::is_same_v<T, pk_fp4_t> || std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>;
+    }
+    /// Bits of an A or B element.
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetElemBits()
+    {
+        return std::is_same_v<T, pk_fp4_t> ? 4 : 8;
+    }
+    /// Whether ODataType is fp8_t, half_t or bf16_t.
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr bool IsOutDataType()
+    {
+        return std::is_same_v<T, fp8_t> || std::is_same_v<T, half_t> || std::is_same_v<T, bf16_t>;
     }
 
-    /// The spec of one problem, for the run-time checks.
+    /// The WMMA atom: 32x16 (FP4 only) or 16x16 rows by columns, from the warp tile. Any other
+    /// warp tile reads as 16x16 and is rejected as "mma".
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledSpec
-    GetSpec(long_index_t M, long_index_t N, long_index_t K)
+    CK_TILE_HOST_DEVICE static constexpr bool IsMma32()
     {
-        MxTdmScheduledSpec s = GetSpec<Problem>();
-        s.M                  = M;
-        s.N                  = N;
-        s.K                  = K;
-        return s;
+        using WarpTile = typename Problem::BlockGemmShape::WarpTile;
+        return WarpTile::at(number<0>{}) == 32 && WarpTile::at(number<1>{}) == 16;
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetAtomM()
+    {
+        return IsMma32<Problem>() ? 32 : 16;
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetAtomN()
+    {
+        return 16;
+    }
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetAtom()
+    {
+        return IsA ? GetAtomM<Problem>() : GetAtomN<Problem>();
     }
 
-    /// The first compile-time rule the Problem and tuning break, or Ok.
+    /// Waves along M and N; 0 unless the wave group is one wave deep in K on 128-wide atoms
+    /// (rejected as "wave_group").
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetWarps()
+    {
+        using Shape = typename Problem::BlockGemmShape;
+        using Warps = typename Shape::BlockWarps;
+        constexpr bool k_ok =
+            Warps::at(number<2>{}) == 1 && Shape::WarpTile::at(number<2>{}) == kAtomK;
+        return k_ok ? Warps::at(number < IsA ? 0 : 1 > {}) : 0;
+    }
+
+    /// WMMA atoms per wave along M and N.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatM()
+    {
+        return Problem::BlockGemmShape::kM / (GetWarps<Problem, true>() * GetAtomM<Problem>());
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatN()
+    {
+        return Problem::BlockGemmShape::kN / (GetWarps<Problem, false>() * GetAtomN<Problem>());
+    }
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetRepeats()
+    {
+        return IsA ? GetWaveRepeatM<Problem>() : GetWaveRepeatN<Problem>();
+    }
+
+    /// Threads of the device pass: the waves times 32.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBlockSize()
+    {
+        return kWaveSize * Problem::BlockGemmShape::NumWarps;
+    }
+
+    /// 128-wide K steps per K tile.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetKSteps()
+    {
+        return Problem::BlockGemmShape::kK / kAtomK;
+    }
+
+    /// Floats of one WMMA C fragment per lane.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetCFragLen()
+    {
+        return IsMma32<Problem>() ? 16 : 8;
+    }
+
+    /// K values per byte of A and B (2 for FP4).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetKPerByte()
+    {
+        return 8 / GetElemBits<typename Problem::ADataType>();
+    }
+
+    /// Bytes of a 128-wide K step in an A or B row.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetStepBytes()
+    {
+        return kAtomK / GetKPerByte<Problem>();
+    }
+
+    /// 16-byte LDS reads per lane per A or B row fragment, and the byte offset of read i; lane
+    /// group g reads kChunkBytes * g further.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetChunksPerLane()
+    {
+        return GetStepBytes<Problem>() / (kLaneGroups * kChunkBytes);
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetChunkOffset(index_t i)
+    {
+        return i * kLaneGroups * kChunkBytes;
+    }
+
+    /// Whether the next K step's fragments are read while this one's WMMAs run.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetLocalPrefetch()
+    {
+        return kLocalPrefetch == 1;
+    }
+
+    /// Whether the B fragments are read in two halves, and whether the second half is read late.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetHalfB()
+    {
+        return kLocalPrefetch == 1 && kHalfPlr == MxTdmScheduledHalfPlr::B;
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool GetHalfBLate()
+    {
+        return GetHalfB<Problem>() && kHalfBOrder == MxTdmScheduledHalfBOrder::Late;
+    }
+
+    /// The most WMMAs the cluster signal may wait for: a K step's, half of them with half B.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalLimit()
+    {
+        const index_t per_step = GetWaveRepeatM<Problem>() * GetWaveRepeatN<Problem>();
+        return GetHalfB<Problem>() ? per_step / 2 : per_step;
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalWmmas()
+    {
+        return kClusterSignalWmmas >= 0 ? kClusterSignalWmmas
+                                        : min_i(kDefaultSignalWmmas, GetSignalLimit<Problem>());
+    }
+
+    /// Bytes of an E element (fp8_t 1, half_t and bf16_t 2).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetOutBytes()
+    {
+        return std::is_same_v<typename Problem::ODataType, fp8_t> ? 1 : 2;
+    }
+    /// Elements per D store and C load at most: 16 B and the N repeat.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetMaxStoreWidth()
+    {
+        return min_i(GetWaveRepeatN<Problem>(), 16 / GetOutBytes<Problem>());
+    }
+    /// Floats per FP8 conversion of the direct-store epilogue.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetFp8ConvertWidth()
+    {
+        return GetWaveRepeatN<Problem>() % 8 == 0 ? 8 : 4;
+    }
+
+    /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
+    {
+        return min_i(GetLdsReads<Problem>(), kDscntMax);
+    }
+
+    /// The K loop's s_wait_dscnt count i (0 or 1), clamped to the 6-bit immediate: the reads
+    /// issued after the ones each wait needs.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetDscntWait(index_t i)
+    {
+        index_t wait = 0;
+        if(!kLocalPrefetch)
+            wait = 0;
+        else if(GetHalfBLate<Problem>())
+            wait = i == 0 ? GetBHalfReads<Problem>() : GetHeadReads<Problem>();
+        else
+            wait = i == 0 ? GetLdsReads<Problem>() : 0;
+        return min_i(wait, kDscntMax);
+    }
+
+    /// Reads of the other buffer left in flight at the cluster late wait, clamped.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
+    {
+        index_t pending = 0;
+        if(kLocalPrefetch)
+            pending = GetHalfBLate<Problem>() ? GetHeadReads<Problem>() : GetLdsReads<Problem>();
+        return min_i(pending, kDscntMax);
+    }
+
+    /// The first compile-time rule of rocKE's validate() the Problem and this policy break, or
+    /// Ok. The rules that need M, N and K are the pipeline's GetUnsupportedReason.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledReason GetReason()
     {
-        return mx_tdm_scheduled_validate(GetSpec<Problem>(), false);
+        using R                  = MxTdmScheduledReason;
+        using Shape              = typename Problem::BlockGemmShape;
+        using WarpTile           = typename Shape::WarpTile;
+        using ADataType          = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType          = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t tile_m = Shape::kM;
+        constexpr index_t tile_n = Shape::kN;
+        constexpr index_t tile_k = Shape::kK;
+        if(!IsOutDataType<typename Problem::ODataType>())
+            return R::OutDtype;
+        if(!IsValidTileMN(tile_m) || !IsValidTileMN(tile_n))
+            return R::TileMN;
+        if(!IsMxDataType<ADataType>() || !IsMxDataType<BDataType>())
+            return R::Dtype;
+        if(GetElemBits<BDataType>() != GetElemBits<ADataType>())
+            return R::DtypeWidth;
+        constexpr bool fp4 = std::is_same_v<ADataType, pk_fp4_t>;
+        if(!(tile_k == 128 || tile_k == 256 || (fp4 && (tile_k == 512 || tile_k == 1024))))
+            return R::TileK;
+        constexpr index_t warp_m = GetWarps<Problem, true>();
+        constexpr index_t warp_n = GetWarps<Problem, false>();
+        if(!((warp_m == 2 && warp_n == 2) || (warp_m == 4 && warp_n == 1) ||
+             (warp_m == 1 && warp_n == 4)))
+            return R::WaveGroup;
+        constexpr index_t wt_m = WarpTile::at(number<0>{});
+        constexpr index_t wt_n = WarpTile::at(number<1>{});
+        if(!((wt_m == 16 && wt_n == 16) || (fp4 && wt_m == 32 && wt_n == 16)))
+            return R::Mma;
+        if(tile_m % (warp_m * GetAtomM<Problem>()) || tile_n % (warp_n * GetAtomN<Problem>()))
+            return R::TileAtoms;
+        const index_t rm = GetWaveRepeatM<Problem>();
+        const index_t rn = GetWaveRepeatN<Problem>();
+        if(kLocalPrefetch != 0 && kLocalPrefetch != 1)
+            return R::LocalPrefetch;
+        if(kHalfPlr != MxTdmScheduledHalfPlr::B && kHalfPlr != MxTdmScheduledHalfPlr::None)
+            return R::HalfPlr;
+        if(kHalfPlr == MxTdmScheduledHalfPlr::B && (kLocalPrefetch != 1 || rn % 2))
+            return R::HalfPlrB;
+        if(kHalfBOrder != MxTdmScheduledHalfBOrder::Ahead &&
+           kHalfBOrder != MxTdmScheduledHalfBOrder::Late)
+            return R::HalfBOrder;
+        if(kHalfBOrder == MxTdmScheduledHalfBOrder::Late && !GetHalfB<Problem>())
+            return R::HalfBLate;
+        if(GetSignalWmmas<Problem>() < 0 || GetSignalWmmas<Problem>() > GetSignalLimit<Problem>())
+            return R::SignalWmmas;
+        if(kGl2PrefetchDistance != 0 && !(2 <= kGl2PrefetchDistance && kGl2PrefetchDistance <= 8))
+            return R::Gl2Distance;
+        if(Shape::kclusterN < 1 || Shape::kclusterM < 1 || Shape::kclusterK < 1)
+            return R::ClusterDim;
+        if(Shape::kclusterK != 1 || Shape::kclusterN * Shape::kclusterM > 16)
+            return R::ClusterSize;
+        const DerivedPads pads  = GetDerivedLdsPads<Problem>();
+        const index_t row_bytes = tile_k / GetKPerByte<Problem>();
+        struct PadCheck
+        {
+            LdsPad pad;
+            index_t rows;
+            index_t chunk;
+            bool data;
+        };
+        const PadCheck checks[4] = {{pads.a, tile_m / 2, 16, true},
+                                    {pads.b, tile_n / 2, 16, true},
+                                    {pads.a_scale, tile_m / 2, min_i(16, 4 * rm), false},
+                                    {pads.b_scale, tile_n / 2, min_i(16, 4 * rn), false}};
+        for(const PadCheck& c : checks)
+        {
+            const R reason = GetPadReason(c.pad, c.data ? row_bytes : 0, c.rows, c.chunk);
+            if(reason != R::Ok)
+                return reason;
+            if(c.data && c.pad.on() && c.pad.block_bytes <= kTdmPadPeriodMax &&
+               c.pad.block_bytes % row_bytes)
+                return R::LdsPad;
+        }
+        if(rm * rn * GetCFragLen<Problem>() > kVgprs)
+            return R::Accumulators;
+        const LdsLayout layout = GetLdsLayout<Problem>();
+        if(layout.reason != R::Ok)
+            return layout.reason;
+        if(layout.lds_bytes > kLdsCapacityBytes)
+            return R::LdsCapacity;
+        return R::Ok;
     }
 
+    /// rocKE's validate() at compile time: nullptr if the Problem and this policy build, else the
+    /// reason code (see mx_tdm_scheduled_reason_code). The rules that need M, N and K are the
+    /// pipeline's GetUnsupportedReason.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledLdsLayout GetLdsLayout()
+    CK_TILE_HOST_DEVICE static constexpr const char* Validate()
     {
-        return mx_tdm_scheduled_lds_layout(GetSpec<Problem>());
+        constexpr MxTdmScheduledReason r = GetReason<Problem>();
+        return r == MxTdmScheduledReason::Ok ? nullptr : mx_tdm_scheduled_reason_code(r);
     }
 
     /// Bytes of LDS: both buffers.
@@ -223,114 +661,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return GetLdsLayout<Problem>().lds_bytes;
-    }
-
-    /// The K loop's s_wait_dscnt count i (0 or 1), clamped to the 6-bit immediate.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetDscntWait(index_t i)
-    {
-        return mx_tdm_scheduled::min_i(GetSpec<Problem>().dscnt_wait(i),
-                                       mx_tdm_scheduled::kDscntMax);
-    }
-
-    /// Reads of the other buffer left in flight at the cluster late wait, clamped.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
-    {
-        return mx_tdm_scheduled::min_i(GetSpec<Problem>().late_pending_reads(),
-                                       mx_tdm_scheduled::kDscntMax);
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalWmmas()
-    {
-        return GetSpec<Problem>().signal_wmmas();
-    }
-
-    /// Threads of the device pass: the waves times 32.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetBlockSize()
-    {
-        return GetSpec<Problem>().block_size();
-    }
-
-    /// WMMA atoms per wave along M and N.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatM()
-    {
-        return GetSpec<Problem>().wave_repeat_m();
-    }
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetWaveRepeatN()
-    {
-        return GetSpec<Problem>().wave_repeat_n();
-    }
-
-    /// 128-wide K steps per K tile.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetKSteps()
-    {
-        return GetSpec<Problem>().k_steps();
-    }
-
-    /// Floats of one WMMA C fragment per lane.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetCFragLen()
-    {
-        return GetSpec<Problem>().c_frag_len();
-    }
-
-    /// K values per byte of A and B (2 for FP4).
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetKPerByte()
-    {
-        return GetSpec<Problem>().k_per_byte();
-    }
-
-    /// Bytes of a 128-wide K step in an A or B row.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetStepBytes()
-    {
-        return GetSpec<Problem>().step_bytes();
-    }
-
-    /// 16-byte LDS reads per lane per A or B row fragment, and the byte offset of read i.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetChunksPerLane()
-    {
-        return GetSpec<Problem>().chunks_per_lane();
-    }
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetChunkOffset(index_t i)
-    {
-        return GetSpec<Problem>().chunk_offset(i);
-    }
-
-    /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
-    {
-        return mx_tdm_scheduled::min_i(GetSpec<Problem>().reads_per_step(),
-                                       mx_tdm_scheduled::kDscntMax);
-    }
-
-    /// Whether the next K step's fragments are read while this one's WMMAs run.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool GetLocalPrefetch()
-    {
-        return GetSpec<Problem>().local_prefetch == 1;
-    }
-
-    /// Whether the B fragments are read in two halves, and whether the second half is read late.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool GetHalfB()
-    {
-        return GetSpec<Problem>().half_b();
-    }
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool GetHalfBLate()
-    {
-        return GetSpec<Problem>().half_b_late();
     }
 
     /// Bytes between the two LDS buffers.
@@ -347,11 +677,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return GetLdsLayout<Problem>().row_bytes;
     }
 
-    /// The LDS placement of A's or B's data or scales.
+    /// The LDS placement of A's or B's data or scales in one buffer: two TDM components (one per
+    /// wave pair) of `rows` rows, component c at base + c * stride, padded by pad_bytes after every
+    /// block_bytes; a data load in iterate mode (a pad period above 1024 B) writes iterate_rows
+    /// rows per iteration, iterate_stride apart.
     template <typename Problem, bool IsA, bool IsScale = false>
-    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledOperand GetLdsOperand()
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsOperand()
     {
-        constexpr MxTdmScheduledLdsLayout l = GetLdsLayout<Problem>();
+        constexpr LdsLayout l = GetLdsLayout<Problem>();
         if constexpr(IsScale)
             return IsA ? l.a_scale : l.b_scale;
         else
@@ -363,7 +696,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr bool GetLdsPadEnable()
     {
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
+        constexpr LdsOperand op = GetLdsOperand<Problem, IsA, IsScale>();
         return (IsScale || op.iterate_rows == 0) && op.pad_bytes > 0;
     }
 
@@ -372,8 +705,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfig()
     {
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
-        constexpr bool enable              = GetLdsPadEnable<Problem, IsA, IsScale>();
+        constexpr LdsOperand op = GetLdsOperand<Problem, IsA, IsScale>();
+        constexpr bool enable   = GetLdsPadEnable<Problem, IsA, IsScale>();
         constexpr TDMLdsPaddingConfig padding =
             enable ? make_tdm_lds_padding_config(op.block_bytes, op.pad_bytes)
                    : TDMLdsPaddingConfig{};
@@ -410,12 +743,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeDramTdmTileDistribution()
     {
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
-        constexpr index_t box_rows         = op.iterate_rows > 0 ? op.iterate_rows : op.rows;
-        constexpr index_t len0             = IsScale ? GetKSteps<Problem>() : box_rows;
-        constexpr index_t len1             = IsScale ? op.rows : GetSpec<Problem>().tile_k;
+        constexpr LdsOperand op    = GetLdsOperand<Problem, IsA, IsScale>();
+        constexpr index_t box_rows = op.iterate_rows > 0 ? op.iterate_rows : op.rows;
+        constexpr index_t len0     = IsScale ? GetKSteps<Problem>() : box_rows;
+        constexpr index_t len1     = IsScale ? op.rows : Problem::BlockGemmShape::kK;
         return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<mx_tdm_scheduled::kWaves>,
+            tile_distribution_encoding<sequence<Problem::BlockGemmShape::NumWarps>,
                                        tuple<sequence<len0>, sequence<len1>>,
                                        tuple<sequence<0>>,
                                        tuple<sequence<0>>,
@@ -427,21 +760,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
     /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (as
     /// MRow / NRow), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte words,
-    /// is mx_tdm_scheduled_row_offset's less the operand's base.
+    /// is GetLdsRowByteOffset's less the operand's base.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
     {
-        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t row_bytes        = GetLdsRowBytes<Problem>();
-        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t rows             = warps * atom * repeats;
-        constexpr index_t words            = row_bytes / 4;
-        constexpr auto naive               = MakeLdsRunsDescriptor<Problem, IsA>();
-        constexpr index_t inner            = naive.get_lengths()[number<2>{}];
-        constexpr auto by_row              = transform_tensor_descriptor(
+        constexpr LdsOperand op     = GetLdsOperand<Problem, IsA>();
+        constexpr index_t row_bytes = GetLdsRowBytes<Problem>();
+        constexpr index_t warps     = GetWarps<Problem, IsA>();
+        constexpr index_t atom      = GetAtom<Problem, IsA>();
+        constexpr index_t repeats   = GetRepeats<Problem, IsA>();
+        constexpr index_t rows      = warps * atom * repeats;
+        constexpr index_t words     = row_bytes / 4;
+        constexpr auto naive        = MakeLdsRunsDescriptor<Problem, IsA>();
+        constexpr index_t inner     = naive.get_lengths()[number<2>{}];
+        constexpr auto by_row       = transform_tensor_descriptor(
             naive,
             make_tuple(make_merge_transform(make_tuple(
                            number<rows / op.rows>{}, number<op.rows / inner>{}, number<inner>{})),
@@ -469,13 +801,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA, bool InElements = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsRunsDescriptor()
     {
-        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t row_bytes        = GetLdsRowBytes<Problem>();
-        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t rows             = warps * atom * repeats;
+        constexpr LdsOperand op     = GetLdsOperand<Problem, IsA>();
+        constexpr index_t row_bytes = GetLdsRowBytes<Problem>();
+        constexpr index_t warps     = GetWarps<Problem, IsA>();
+        constexpr index_t atom      = GetAtom<Problem, IsA>();
+        constexpr index_t repeats   = GetRepeats<Problem, IsA>();
+        constexpr index_t rows      = warps * atom * repeats;
         // A component's rows split into (outer, inner) runs: iterate-mode blocks, padded blocks
         // of whole rows, or one run (rows padded within, or unpadded).
         constexpr bool iterate         = op.iterate_rows > 0;
@@ -522,7 +853,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr index_t GetFragmentHalves()
     {
-        return IsA ? GetSpec<Problem>().atom_m() / 16 : 1;
+        return IsA ? GetAtomM<Problem>() / 16 : 1;
     }
 
     /// One wave's read of an A or B fragment of one K step, in words: lane l reads row l % 16 of
@@ -555,34 +886,30 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowOffset(index_t t)
     {
-        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        const index_t wave                 = t / (repeats * atom);
-        const index_t r                    = t / atom % repeats;
-        const index_t l                    = t % atom;
-        const index_t row                  = wave * atom * repeats + l * repeats + r;
-        return (mx_tdm_scheduled_row_offset<index_t>(op, GetLdsRowBytes<Problem>(), row) -
-                op.base) /
-               4;
+        constexpr LdsOperand op   = GetLdsOperand<Problem, IsA>();
+        constexpr index_t atom    = GetAtom<Problem, IsA>();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
+        const index_t wave        = t / (repeats * atom);
+        const index_t r           = t / atom % repeats;
+        const index_t l           = t % atom;
+        const index_t row         = wave * atom * repeats + l * repeats + r;
+        return (GetLdsRowByteOffset<index_t>(op, GetLdsRowBytes<Problem>(), row) - op.base) / 4;
     }
 
     /// Whether a fragment read can take its repeat and half offsets as constants: for every
     /// lane's first row, moving by a repeat r and a half h adds the offset of (r, h) from row 0.
-    /// Also spot-checks MakeLdsBlockDescriptor against mx_tdm_scheduled_row_offset (a full check is
+    /// Also spot-checks MakeLdsBlockDescriptor against GetLdsRowByteOffset (a full check is
     /// past the constexpr step limit).
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr bool IsLdsReadLinear()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
-        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t halves       = GetFragmentHalves<Problem, IsA>();
-        constexpr index_t rows         = warps * repeats * atom;
-        constexpr auto desc            = MakeLdsBlockDescriptor<Problem, IsA>();
-        const auto offset              = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
+        constexpr index_t warps   = GetWarps<Problem, IsA>();
+        constexpr index_t atom    = GetAtom<Problem, IsA>();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
+        constexpr index_t halves  = GetFragmentHalves<Problem, IsA>();
+        constexpr index_t rows    = warps * repeats * atom;
+        constexpr auto desc       = MakeLdsBlockDescriptor<Problem, IsA>();
+        const auto offset         = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
         for(const index_t t : {index_t{1}, atom - 1, atom, rows / 2 + 1, rows - 1})
             if(desc.calculate_offset(make_multi_index(t, 0)) != offset(t))
                 return false;
@@ -608,15 +935,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleTdmBlockDescriptor()
     {
-        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, true>();
-        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t comps            = warps * atom * repeats / op.rows;
-        constexpr index_t steps            = GetKSteps<Problem>();
-        constexpr index_t run              = steps * op.rows;
-        constexpr index_t block            = op.pad_bytes > 0 ? op.block_bytes / 4 : run;
+        constexpr LdsOperand op   = GetLdsOperand<Problem, IsA, true>();
+        constexpr index_t warps   = GetWarps<Problem, IsA>();
+        constexpr index_t atom    = GetAtom<Problem, IsA>();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
+        constexpr index_t comps   = warps * atom * repeats / op.rows;
+        constexpr index_t steps   = GetKSteps<Problem>();
+        constexpr index_t run     = steps * op.rows;
+        constexpr index_t block   = op.pad_bytes > 0 ? op.block_bytes / 4 : run;
         static_assert(
             warps * atom * repeats % op.rows == 0 && run % block == 0 && op.stride % 4 == 0 &&
                 (op.block_bytes + op.pad_bytes) % 4 == 0,
@@ -653,11 +979,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleDescriptor()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
-        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t steps        = GetKSteps<Problem>();
+        constexpr index_t warps   = GetWarps<Problem, IsA>();
+        constexpr index_t atom    = GetAtom<Problem, IsA>();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
+        constexpr index_t steps   = GetKSteps<Problem>();
         return transform_tensor_descriptor(
             MakeLdsScaleTdmBlockDescriptor<Problem, IsA>(),
             make_tuple(
@@ -672,7 +997,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr index_t GetScaleLanes()
     {
-        return IsA && GetSpec<Problem>().atom_m() == 32 ? 32 : 16;
+        return IsA && GetAtomM<Problem>() == 32 ? 32 : 16;
     }
 
     /// One wave's read of A's or B's scales of one K step: lane l reads its row's words of all
@@ -680,8 +1005,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleReadDistribution()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
-        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
         if constexpr(GetScaleLanes<Problem, IsA>() == 32)
             return make_static_tile_distribution(
                 tile_distribution_encoding<sequence<>,
@@ -701,20 +1025,19 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     /// Whether a scale read can take its K step as a constant word offset and its repeats as
-    /// consecutive words, checked against mx_tdm_scheduled_scale_offset. Also spot-checks
+    /// consecutive words, checked against GetLdsScaleByteOffset. Also spot-checks
     /// MakeLdsScaleDescriptor.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr bool IsLdsScaleReadLinear()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
-        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
-        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
-        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
-        constexpr index_t steps        = GetKSteps<Problem>();
-        constexpr auto desc            = MakeLdsScaleDescriptor<Problem, IsA>();
-        const auto offset              = [](index_t step, index_t row) {
-            constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, true>();
-            return (mx_tdm_scheduled_scale_offset<index_t>(op, step, row) - op.base) / 4;
+        constexpr index_t warps   = GetWarps<Problem, IsA>();
+        constexpr index_t atom    = GetAtom<Problem, IsA>();
+        constexpr index_t repeats = GetRepeats<Problem, IsA>();
+        constexpr index_t steps   = GetKSteps<Problem>();
+        constexpr auto desc       = MakeLdsScaleDescriptor<Problem, IsA>();
+        const auto offset         = [](index_t step, index_t row) {
+            constexpr LdsOperand op = GetLdsOperand<Problem, IsA, true>();
+            return (GetLdsScaleByteOffset<index_t>(op, step, row) - op.base) / 4;
         };
         const index_t step_words = offset(1, 0);
         for(const index_t t : {index_t{1}, atom - 1, atom, warps * atom - 1})
@@ -733,20 +1056,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 
     /// The cluster workgroups that share this one's A (kM: same M tile) or B (kN: same N tile)
     /// and so receive its TDM loads; 0 without a cluster. As the default TDM policy's, but grid
-    /// x walks N tiles and y M tiles, and the cluster shape is the tuning's.
+    /// x walks N tiles and y M tiles.
     template <MultiCastDirection Direction, typename Problem>
     CK_TILE_DEVICE static uint16_t GetTDMWorkgroupMask(dim3 block_id_in_cluster)
     {
         static_assert(Direction != MultiCastDirection::kMN,
                       "comp_tdm_scheduled multicasts A along M and B along N");
+        using Shape   = typename Problem::BlockGemmShape;
         uint32_t mask = 0;
-        if constexpr(!HasCluster())
+        if constexpr(!HasCluster<Problem>())
             ignore = block_id_in_cluster;
         else if constexpr(Direction == MultiCastDirection::kM)
-            mask = cluster_mask_same_y(Tuning::kClusterDimX, block_id_in_cluster.y);
+            mask = cluster_mask_same_y(Shape::kclusterN, block_id_in_cluster.y);
         else
-            mask = cluster_mask_same_x(
-                Tuning::kClusterDimX, Tuning::kClusterDimY, block_id_in_cluster.x);
+            mask = cluster_mask_same_x(Shape::kclusterN, Shape::kclusterM, block_id_in_cluster.x);
         // A cluster has at most 16 workgroups; without this the 16-bit mask costs an s_and.
         __builtin_assume(mask <= 0xFFFFu);
         return static_cast<uint16_t>(mask);
@@ -759,16 +1082,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeCBlockTileDistribution()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t warp_m   = GetWarps<Problem, true>();
+        constexpr index_t warp_n   = GetWarps<Problem, false>();
+        constexpr index_t atom_m   = GetAtomM<Problem>();
+        constexpr index_t atom_n   = GetAtomN<Problem>();
+        constexpr index_t repeat_m = GetWaveRepeatM<Problem>();
+        constexpr index_t repeat_n = GetWaveRepeatN<Problem>();
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<s.warp_m, s.atom_m() / 16, 2, 8, s.wave_repeat_m()>,
-                      sequence<s.warp_n, s.atom_n(), s.wave_repeat_n()>>,
-                tuple<sequence<1, 2>, sequence<1, 2>>,
-                tuple<sequence<0, 0>, sequence<2, 1>>,
-                sequence<1, 2, 1, 1>,
-                sequence<4, 2, 1, 3>>{});
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warp_m, atom_m / 16, 2, 8, repeat_m>,
+                                             sequence<warp_n, atom_n, repeat_n>>,
+                                       tuple<sequence<1, 2>, sequence<1, 2>>,
+                                       tuple<sequence<0, 0>, sequence<2, 1>>,
+                                       sequence<1, 2, 1, 1>,
+                                       sequence<4, 2, 1, 3>>{});
     }
 
     /// The C block tile's elements with the N repeat innermost: (rm, slot / 8, slot % 8, rn), so
@@ -776,16 +1103,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeCStoreTileDistribution()
     {
-        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t warp_m   = GetWarps<Problem, true>();
+        constexpr index_t warp_n   = GetWarps<Problem, false>();
+        constexpr index_t atom_m   = GetAtomM<Problem>();
+        constexpr index_t atom_n   = GetAtomN<Problem>();
+        constexpr index_t repeat_m = GetWaveRepeatM<Problem>();
+        constexpr index_t repeat_n = GetWaveRepeatN<Problem>();
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<s.warp_m, s.atom_m() / 16, 2, 8, s.wave_repeat_m()>,
-                      sequence<s.warp_n, s.atom_n(), s.wave_repeat_n()>>,
-                tuple<sequence<1, 2>, sequence<1, 2>>,
-                tuple<sequence<0, 0>, sequence<2, 1>>,
-                sequence<1, 1, 1, 2>,
-                sequence<4, 1, 3, 2>>{});
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warp_m, atom_m / 16, 2, 8, repeat_m>,
+                                             sequence<warp_n, atom_n, repeat_n>>,
+                                       tuple<sequence<1, 2>, sequence<1, 2>>,
+                                       tuple<sequence<0, 0>, sequence<2, 1>>,
+                                       sequence<1, 1, 1, 2>,
+                                       sequence<4, 1, 3, 2>>{});
     }
 
     /// The block GEMM: a wave's LDS fragment reads and WMMAs on this policy's LDS layout.
@@ -796,39 +1127,525 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                                                      MxGemmPipelineAgBgCrCompTDMScheduledPolicy>{};
     }
 
-    /// The cluster the kernel must be launched with: (x, y, z) = (N tiles, M tiles, 1).
+    /// Whether the kernel is launched with a cluster: (x, y, z) = (kclusterN, kclusterM, 1).
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool HasCluster()
     {
-        return !(Tuning::kClusterDimX == 1 && Tuning::kClusterDimY == 1);
+        using Shape = typename Problem::BlockGemmShape;
+        return !(Shape::kclusterN == 1 && Shape::kclusterM == 1);
+    }
+
+    /**
+     * @brief The part of rocKE's kernel name after the tile: the cluster, then every value that is
+     *        not its default (out dtype, wave group, pf, cs, then the lp0 / hplrnone / hblate /
+     *        lsi0 / mma16 flags), each with a leading "_".
+     *
+     * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
+     *                          already carries in its tile and type fields.
+     */
+    template <typename Problem>
+    CK_TILE_HOST static std::string GetTuningName(bool with_shape_parts = false)
+    {
+        using Shape          = typename Problem::BlockGemmShape;
+        using ODataType      = typename Problem::ODataType;
+        constexpr index_t wm = GetWarps<Problem, true>();
+        constexpr index_t wn = GetWarps<Problem, false>();
+        std::string name =
+            "_c" + std::to_string(Shape::kclusterN) + "x" + std::to_string(Shape::kclusterM);
+        if(with_shape_parts && !std::is_same_v<ODataType, fp8_t>)
+            name += std::is_same_v<ODataType, half_t>   ? "_fp16"
+                    : std::is_same_v<ODataType, bf16_t> ? "_bf16"
+                                                        : "_unknown";
+        if(with_shape_parts && !(wm == 2 && wn == 2))
+            name += "_wg" + std::to_string(wm) + "x" + std::to_string(wn);
+        if(kGl2PrefetchDistance != 4)
+            name += "_pf" + std::to_string(kGl2PrefetchDistance);
+        if(kClusterSignalWmmas >= 0)
+            name += "_cs" + std::to_string(kClusterSignalWmmas);
+        if(kLocalPrefetch == 0)
+            name += "_lp0";
+        if(kHalfPlr == MxTdmScheduledHalfPlr::None)
+            name += "_hplrnone";
+        if(GetHalfBLate<Problem>())
+            name += "_hblate";
+        if(!kLdsSegmentInterleave)
+            name += "_lsi0";
+        if(with_shape_parts && !IsMma32<Problem>())
+            name += "_mma16";
+        return name;
+    }
+
+    private:
+    // The LDS layout (rocKE _lds_placement): TensileLite's padding and segment interleave. The
+    // block GEMM reads rows and scales through the offset helpers until it moves to the V1 block
+    // GEMM.
+    template <typename, typename>
+    friend struct BlockGemmMxAsmemBsmemCRegTDMScheduled;
+
+    static constexpr index_t kDataPadBytes    = 16;
+    static constexpr index_t kBankCycleBytes  = 256;
+    static constexpr index_t kMxsBlockBytes   = 256;
+    static constexpr index_t kMxsPadBytes     = 16;
+    static constexpr index_t kRegionAlignBits = 2048;
+    static constexpr index_t kSegmentBytes    = 1 << 16;
+    static constexpr index_t kTdmPadPeriodMax = 1024;
+    static constexpr index_t kTdmPadMaxBytes  = 128 * 4;
+    static constexpr index_t kLdsPadStepBytes = 8;
+
+    CK_TILE_HOST_DEVICE static constexpr bool is_pow2(long_index_t v)
+    {
+        return v > 0 && (v & (v - 1)) == 0;
+    }
+    CK_TILE_HOST_DEVICE static constexpr long_index_t round_up(long_index_t v, long_index_t m)
+    {
+        return (v + m - 1) / m * m;
+    }
+    CK_TILE_HOST_DEVICE static constexpr long_index_t ceil_div(long_index_t v, long_index_t d)
+    {
+        return (v + d - 1) / d;
+    }
+    /// The smallest power of two at least v (1 for v <= 1).
+    CK_TILE_HOST_DEVICE static constexpr long_index_t pow2_ceil(long_index_t v)
+    {
+        long_index_t p = 1;
+        while(p < v)
+            p <<= 1;
+        return p;
+    }
+    CK_TILE_HOST_DEVICE static constexpr index_t min_i(index_t a, index_t b)
+    {
+        return a < b ? a : b;
+    }
+    CK_TILE_HOST_DEVICE static constexpr index_t max_i(index_t a, index_t b)
+    {
+        return a > b ? a : b;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr bool IsValidTileMN(index_t t)
+    {
+        return t == 16 || t == 32 || t == 64 || t == 128 || t == 256;
+    }
+
+    /// LDS reads of one K step: scales, then one per K chunk of each A row and B fragment.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsReads()
+    {
+        const index_t rm = GetWaveRepeatM<Problem>();
+        const index_t rn = GetWaveRepeatN<Problem>();
+        return max_i(1, rm / 4) + max_i(1, rn / 4) +
+               GetChunksPerLane<Problem>() * (GetAtomM<Problem>() / 16 * rm + rn);
+    }
+    /// LDS reads of half of one K step's B fragments.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBHalfReads()
+    {
+        return GetChunksPerLane<Problem>() * (GetWaveRepeatN<Problem>() / 2);
+    }
+    /// LDS reads of one K step's scales and A rows.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetHeadReads()
+    {
+        return GetLdsReads<Problem>() - 2 * GetBHalfReads<Problem>();
+    }
+
+    /// pad_bytes of LDS padding after every block_bytes written (TensileLite LdsPad and
+    /// LdsBlockSizePerPad, in bytes).
+    struct LdsPad
+    {
+        index_t pad_bytes   = 0;
+        index_t block_bytes = 0;
+
+        CK_TILE_HOST_DEVICE constexpr bool on() const { return pad_bytes > 0; }
+    };
+
+    /// One operand's place in an LDS buffer (see GetLdsOperand).
+    struct LdsOperand
+    {
+        index_t rows           = 0;
+        index_t base           = 0;
+        index_t stride         = 0;
+        index_t pad_bytes      = 0;
+        index_t block_bytes    = 0;
+        index_t iterate_rows   = 0;
+        index_t iterate_stride = 0;
+    };
+
+    /// The two LDS buffers. Buffer 1 starts buffer_stride after buffer 0; buffer_bytes is where
+    /// buffer 0's last region ends. reason is not Ok when segment interleave does not apply.
+    struct LdsLayout
+    {
+        MxTdmScheduledReason reason = MxTdmScheduledReason::Ok;
+        index_t row_bytes           = 0;
+        index_t k_steps             = 0;
+        LdsOperand a{};
+        LdsOperand b{};
+        LdsOperand a_scale{};
+        LdsOperand b_scale{};
+        index_t buffer_bytes  = 0;
+        index_t buffer_stride = 0;
+        index_t lds_bytes     = 0;
+    };
+
+    /// calcLdsBlockSizePerPad for an UnrollMajorLDS operand: the K row, rounded to a bank cycle,
+    /// times VectorWidth once that is longer.
+    CK_TILE_HOST_DEVICE static constexpr index_t TensileDataBlock(index_t k_bytes,
+                                                                  index_t vector_width)
+    {
+        index_t block = static_cast<index_t>(round_up(k_bytes, kBankCycleBytes));
+        if(k_bytes * vector_width > kBankCycleBytes)
+            block = static_cast<index_t>(round_up(k_bytes * vector_width, kBankCycleBytes));
+        return block;
+    }
+
+    /// get_mxs_mt_config(MatrixInstK=128, MXBlock=32, VectorWidth).
+    CK_TILE_HOST_DEVICE static constexpr LdsPad TensileScalePad(index_t vector_width)
+    {
+        const index_t per_block = (kAtomK / 32) * vector_width;
+        if(vector_width < 4 || per_block % 16 || (per_block / 16) & 1)
+            return {};
+        return {kMxsPadBytes, kMxsBlockBytes};
+    }
+
+    struct DerivedPads
+    {
+        LdsPad a{};
+        LdsPad b{};
+        LdsPad a_scale{};
+        LdsPad b_scale{};
+    };
+
+    /// TensileLite's padding with its A/B relabeled to rocKE B/A and VectorWidth taken as the
+    /// operand's wave repeat.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr DerivedPads GetDerivedLdsPads()
+    {
+        const index_t k_bytes = Problem::BlockGemmShape::kK / GetKPerByte<Problem>();
+        const index_t rm      = GetWaveRepeatM<Problem>();
+        const index_t rn      = GetWaveRepeatN<Problem>();
+        return {{kDataPadBytes, TensileDataBlock(k_bytes, rm)},
+                {kDataPadBytes, TensileDataBlock(k_bytes, rn)},
+                TensileScalePad(rm),
+                TensileScalePad(rn)};
+    }
+
+    struct DataComponent
+    {
+        index_t bytes          = 0;
+        index_t iterate_rows   = 0;
+        index_t iterate_stride = 0;
+    };
+
+    CK_TILE_HOST_DEVICE static constexpr DataComponent
+    GetDataComponent(index_t rows, index_t row_bytes, LdsPad pad)
+    {
+        if(pad.on() && pad.block_bytes > kTdmPadPeriodMax)
+        {
+            const index_t iterate_rows = pad.block_bytes / row_bytes;
+            const index_t stride       = pad.block_bytes + pad.pad_bytes;
+            return {
+                static_cast<index_t>(ceil_div(rows, iterate_rows)) * stride, iterate_rows, stride};
+        }
+        index_t size = rows * row_bytes;
+        if(pad.on())
+            size += size / pad.block_bytes * pad.pad_bytes;
+        return {size, 0, 0};
+    }
+
+    /// calcLdsNumBytesAB for an operand's scales, padded as one tensor.
+    CK_TILE_HOST_DEVICE static constexpr index_t
+    GetScaleRegionBytes(index_t rows, index_t steps, LdsPad pad)
+    {
+        const index_t size = 2 * rows * steps * 4;
+        return pad.on() ? size / pad.block_bytes * (pad.block_bytes + pad.pad_bytes) : size;
+    }
+
+    /// Bases and component strides of A and B and where the scales start. An aligned layout
+    /// reaches span (scales included), past the baseline span.
+    struct Placement
+    {
+        MxTdmScheduledReason reason = MxTdmScheduledReason::Ok;
+        index_t a_base              = 0;
+        index_t a_stride            = 0;
+        index_t b_base              = 0;
+        index_t b_stride            = 0;
+        index_t scale_base          = 0;
+        bool aligned                = false;
+        index_t span                = 0;
+    };
+
+    /// first at 0 with component stride `stride`, the other after first's component 0 with
+    /// `second_stride`.
+    CK_TILE_HOST_DEVICE static constexpr Placement Place(bool first_is_b,
+                                                         index_t comp_first,
+                                                         index_t stride,
+                                                         index_t second_stride,
+                                                         index_t scale_base,
+                                                         bool aligned = false,
+                                                         index_t span = 0)
+    {
+        Placement p{};
+        if(first_is_b)
+        {
+            p.b_base   = 0;
+            p.b_stride = stride;
+            p.a_base   = comp_first;
+            p.a_stride = second_stride;
+        }
+        else
+        {
+            p.a_base   = 0;
+            p.a_stride = stride;
+            p.b_base   = comp_first;
+            p.b_stride = second_stride;
+        }
+        p.scale_base = scale_base;
+        p.aligned    = aligned;
+        p.span       = span;
+        return p;
+    }
+
+    /// TensileLite's segment_interleave.evaluate with LDSSegmentInterleave 1, VectorWidth equal to
+    /// the wave repeat and no TDMSplit; `scales` is the aligned size of both scale regions.
+    ///
+    /// 2x2: A's components go to different segments, as tight [B0][A0][B1][A1], or
+    /// segment-aligned when B0 A0 fit one segment. With the 32x16 atom an A read would cross a
+    /// component, so A stays whole: [B0][A0 A1][B1], aligned when that fits one segment. 4x1 and
+    /// 1x4: only the operand spanning four waves splits, around the other one.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr Placement GetInterleavePlacement(
+        index_t comp_a, index_t comp_b, index_t data_a, index_t data_b, index_t scales)
+    {
+        constexpr index_t seg    = kSegmentBytes;
+        constexpr index_t tile_m = Problem::BlockGemmShape::kM;
+        constexpr index_t tile_n = Problem::BlockGemmShape::kN;
+        const index_t warp_m     = GetWarps<Problem, true>();
+        const index_t warp_n     = GetWarps<Problem, false>();
+        const index_t lanes      = min_i(GetAtomM<Problem>(), GetAtomN<Problem>());
+        const auto coarse        = [&](bool is_b) {
+            const index_t tile   = is_b ? tile_n : tile_m;
+            const index_t waves  = is_b ? warp_n : warp_m;
+            const index_t repeat = is_b ? GetWaveRepeatN<Problem>() : GetWaveRepeatM<Problem>();
+            return lanes * repeat >= tile / waves;
+        };
+        Placement fail{};
+        if(warp_m == 1 || warp_n == 1)
+        {
+            const bool active_b      = warp_n > 1;
+            const index_t comp_act   = active_b ? comp_b : comp_a;
+            const index_t comp_share = active_b ? comp_a : comp_b;
+            const index_t data_act   = active_b ? data_b : data_a;
+            if(!coarse(active_b))
+            {
+                fail.reason = MxTdmScheduledReason::LsiRepeat;
+                return fail;
+            }
+            if(active_b && data_b <= seg && comp_b >= seg)
+            {
+                fail.reason = MxTdmScheduledReason::LsiBaselineSplit;
+                return fail;
+            }
+            const index_t stride = comp_act + 2 * comp_share;
+            if(stride / seg > (data_act - 1) / seg)
+                return Place(active_b, comp_act, stride, comp_share, stride + comp_act);
+            const index_t pre  = static_cast<index_t>(round_up(stride, seg));
+            const index_t span = pre + comp_act;
+            return Place(active_b, comp_act, pre, comp_share, span, true, span + scales);
+        }
+        if(!coarse(true))
+        {
+            fail.reason = MxTdmScheduledReason::LsiRepeat;
+            return fail;
+        }
+        const index_t a_cols  = GetAtomM<Problem>() * warp_m * GetWaveRepeatM<Problem>();
+        const bool a_readable = coarse(false) || (a_cols > 0 && (tile_m / 2) % a_cols == 0);
+        if(!a_readable)
+        {
+            const index_t stride = comp_b + 2 * comp_a;
+            if(stride >= seg)
+                return Place(true, comp_b, stride, comp_a, stride + comp_b);
+            const index_t pre  = static_cast<index_t>(round_up(stride, seg));
+            const index_t span = pre + comp_b;
+            return Place(true, comp_b, pre, comp_a, span, true, span + scales);
+        }
+        const index_t pair = comp_a + comp_b;
+        if(pair < seg)
+        {
+            const index_t span = seg + pair;
+            return Place(true, comp_b, seg, seg, span, true, span + scales);
+        }
+        return Place(true, comp_b, pair, pair, 2 * pair);
+    }
+
+    /// The LDS layout of a Problem whose tile, types and wave group are valid. Baseline (segment
+    /// interleave off) is [B0 B1][B scales][A scales][A0 A1]; segment interleave places the
+    /// components so the two LDS read ports read different 64 KiB segments.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr LdsLayout GetLdsLayout()
+    {
+        const DerivedPads pads  = GetDerivedLdsPads<Problem>();
+        const index_t row_bytes = Problem::BlockGemmShape::kK / GetKPerByte<Problem>();
+        const index_t steps     = GetKSteps<Problem>();
+        const index_t a_rows    = Problem::BlockGemmShape::kM / 2;
+        const index_t b_rows    = Problem::BlockGemmShape::kN / 2;
+        const DataComponent a   = GetDataComponent(a_rows, row_bytes, pads.a);
+        const DataComponent b   = GetDataComponent(b_rows, row_bytes, pads.b);
+
+        const auto scale_component = [&](index_t rows, LdsPad pad) {
+            const index_t size = steps * rows * 4;
+            return size + (pad.on() ? size / pad.block_bytes * pad.pad_bytes : 0);
+        };
+
+        const index_t align = kRegionAlignBits / GetElemBits<typename Problem::ADataType>();
+        const index_t b_scale_region =
+            static_cast<index_t>(round_up(GetScaleRegionBytes(b_rows, steps, pads.b_scale), align));
+        const index_t a_scale_region =
+            static_cast<index_t>(round_up(GetScaleRegionBytes(a_rows, steps, pads.a_scale), align));
+        const index_t b_end = static_cast<index_t>(round_up(2 * b.bytes, align));
+        Placement baseline{};
+        baseline.a_base             = b_end + b_scale_region + a_scale_region;
+        baseline.a_stride           = a.bytes;
+        baseline.b_base             = 0;
+        baseline.b_stride           = b.bytes;
+        baseline.scale_base         = b_end;
+        const index_t baseline_span = baseline.a_base + 2 * a.bytes;
+        const index_t natural_stride =
+            baseline.a_base + static_cast<index_t>(round_up(2 * a.bytes, align));
+
+        LdsLayout out{};
+        Placement placement = baseline;
+        if(kLdsSegmentInterleave)
+        {
+            placement = GetInterleavePlacement<Problem>(a.bytes,
+                                                        b.bytes,
+                                                        a_rows * row_bytes,
+                                                        b_rows * row_bytes,
+                                                        b_scale_region + a_scale_region);
+            if(placement.reason != MxTdmScheduledReason::Ok)
+            {
+                out.reason = placement.reason;
+                return out;
+            }
+        }
+        index_t buffer_stride = 0;
+        index_t lds_bytes     = 0;
+        if(placement.aligned)
+        {
+            buffer_stride = static_cast<index_t>(
+                pow2_ceil(natural_stride > placement.span ? natural_stride : placement.span));
+            if(2ll * buffer_stride > kLdsCapacityBytes)
+            {
+                out.reason = MxTdmScheduledReason::LsiCapacity;
+                return out;
+            }
+            lds_bytes = max_i(buffer_stride + baseline_span, buffer_stride + placement.span);
+        }
+        else
+        {
+            buffer_stride = natural_stride;
+            if(natural_stride + pow2_ceil(natural_stride) <= kLdsCapacityBytes)
+                buffer_stride = static_cast<index_t>(pow2_ceil(natural_stride));
+            lds_bytes = buffer_stride + baseline_span;
+        }
+        const index_t b_scale_base = placement.scale_base;
+        const index_t a_scale_base = b_scale_base + b_scale_region;
+        const index_t a_scale_comp = scale_component(a_rows, pads.a_scale);
+        const index_t b_scale_comp = scale_component(b_rows, pads.b_scale);
+
+        out.row_bytes = row_bytes;
+        out.k_steps   = steps;
+        out.a         = {a_rows,
+                         placement.a_base,
+                         placement.a_stride,
+                         pads.a.pad_bytes,
+                         pads.a.block_bytes,
+                         a.iterate_rows,
+                         a.iterate_stride};
+        out.b         = {b_rows,
+                         placement.b_base,
+                         placement.b_stride,
+                         pads.b.pad_bytes,
+                         pads.b.block_bytes,
+                         b.iterate_rows,
+                         b.iterate_stride};
+        out.a_scale   = {a_rows,
+                         a_scale_base,
+                         a_scale_comp,
+                         pads.a_scale.pad_bytes,
+                         pads.a_scale.block_bytes,
+                         0,
+                         0};
+        out.b_scale   = {b_rows,
+                         b_scale_base,
+                         b_scale_comp,
+                         pads.b_scale.pad_bytes,
+                         pads.b_scale.block_bytes,
+                         0,
+                         0};
+        out.buffer_bytes =
+            max_i(max_i(placement.a_base + placement.a_stride + a.bytes,
+                        placement.b_base + placement.b_stride + b.bytes),
+                  max_i(a_scale_base + 2 * a_scale_comp, b_scale_base + 2 * b_scale_comp));
+        out.buffer_stride = buffer_stride;
+        out.lds_bytes     = lds_bytes;
+        return out;
+    }
+
+    /// LDS byte offset, in one buffer, of row `row` (0..tile rows) of a data operand.
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr T
+    GetLdsRowByteOffset(const LdsOperand& op, index_t row_bytes, T row)
+    {
+        const T component = row / op.rows;
+        const T local     = row % op.rows;
+        T linear          = 0;
+        if(op.iterate_rows)
+        {
+            linear =
+                local / op.iterate_rows * op.iterate_stride + local % op.iterate_rows * row_bytes;
+        }
+        else
+        {
+            linear = local * row_bytes;
+            if(op.pad_bytes > 0)
+                linear += linear / op.block_bytes * op.pad_bytes;
+        }
+        return op.base + component * op.stride + linear;
+    }
+
+    /// LDS byte offset of the four E8M0 scales of row `row` at K step `step`.
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr T
+    GetLdsScaleByteOffset(const LdsOperand& op, T step, T row)
+    {
+        T linear = step * (op.rows * 4) + row % op.rows * 4;
+        if(op.pad_bytes > 0)
+            linear += linear / op.block_bytes * op.pad_bytes;
+        return op.base + row / op.rows * op.stride + linear;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr MxTdmScheduledReason
+    GetPadReason(LdsPad pad, index_t row_bytes, index_t rows, index_t chunk)
+    {
+        if(pad.pad_bytes < 0 || pad.block_bytes < 0)
+            return MxTdmScheduledReason::LdsPad;
+        if(!pad.on())
+            return MxTdmScheduledReason::Ok;
+        if(pad.pad_bytes % kLdsPadStepBytes || pad.pad_bytes > kTdmPadMaxBytes)
+            return MxTdmScheduledReason::LdsPad;
+        const index_t block = pad.block_bytes;
+        if(block <= kTdmPadPeriodMax)
+        {
+            if(block < 8 || !is_pow2(block))
+                return MxTdmScheduledReason::LdsPad;
+        }
+        else if(row_bytes == 0)
+            return MxTdmScheduledReason::LdsPad;
+        else if(block % row_bytes || rows % (block / row_bytes))
+            return MxTdmScheduledReason::LdsPad;
+        if(block % chunk)
+            return MxTdmScheduledReason::LdsPad;
+        return MxTdmScheduledReason::Ok;
     }
 };
-
-/// rocKE's validate() at compile time: nullptr if Problem and Tuning build, else the reason code
-/// (see mx_tdm_scheduled_reason_code). The shape rules are the pipeline's GetUnsupportedReason.
-template <typename Problem, typename Tuning = MxTdmScheduledDefaultTuning>
-CK_TILE_HOST_DEVICE constexpr const char* MxTdmScheduledValidate()
-{
-    constexpr MxTdmScheduledReason r =
-        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>::template GetReason<Problem>();
-    return r == MxTdmScheduledReason::Ok ? nullptr : mx_tdm_scheduled_reason_code(r);
-}
-
-/// The rocKE name suffix of a tuning: the cluster, then its non-default values (see
-/// mx_tdm_scheduled_tuning_name), without the parts a CK kernel name already has.
-template <typename Tuning>
-CK_TILE_HOST std::string MxTdmScheduledTuningName()
-{
-    MxTdmScheduledSpec s{};
-    s.cluster_x              = Tuning::kClusterDimX;
-    s.cluster_y              = Tuning::kClusterDimY;
-    s.cluster_z              = Tuning::kClusterDimZ;
-    s.gl2_distance           = Tuning::kGl2PrefetchDistance;
-    s.signal_wmmas_in        = Tuning::kClusterSignalWmmas;
-    s.local_prefetch         = Tuning::kLocalPrefetch;
-    s.half_plr               = Tuning::kHalfPlr;
-    s.half_b_order           = Tuning::kHalfBOrder;
-    s.lds_segment_interleave = Tuning::kLdsSegmentInterleave;
-    return mx_tdm_scheduled_tuning_name(s, false);
-}
 
 } // namespace ck_tile

@@ -14,6 +14,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,12 +29,10 @@ namespace mx_tdm_scheduled_test {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
-using ck_tile::MxTdmScheduledDtype;
-using ck_tile::MxTdmScheduledOutDtype;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 /// A comp_tdm_scheduled pipeline: A, B and E types, tile, wave group, WMMA atom (32 or 16 rows),
-/// tuning and the shape traits (edge M/N, wide A/B/E, odd tiles, tail steps, store width).
+/// tuning (a Tu) and the shape traits (edge M/N, wide A/B/E, odd tiles, tail steps, store width).
 template <typename A,
           typename B,
           typename O,
@@ -50,11 +49,12 @@ using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         A,
         B,
         O,
-        ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                               ck_tile::sequence<WarpM, WarpN, 1>,
-                               ck_tile::sequence<AtomM, 16, 128>>,
+        ck_tile::ClusterTileGemmShape<typename Tuning::Cluster,
+                                      ck_tile::sequence<TileM, TileN, TileK>,
+                                      ck_tile::sequence<WarpM, WarpN, 1>,
+                                      ck_tile::sequence<AtomM, 16, 128>>,
         Traits>,
-    ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
+    typename Tuning::Policy>;
 
 /// The kernel of a comp_tdm_scheduled pipeline: its N-major partitioner and the direct-store
 /// epilogue.
@@ -99,8 +99,9 @@ template <typename A,
 using TdmKernel =
     TdmKernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
 
-/// rocKE's tuning knobs with its defaults after the cluster: GL2 distance, signal WMMAs (-1 for
-/// the default), local prefetch, half PLR, half-B order, segment interleave.
+/// rocKE's tuning knobs: the cluster (CX N tiles by CY M tiles), then the policy's parameters
+/// with its defaults: GL2 distance, signal WMMAs (-1 for the default), local prefetch, half PLR,
+/// half-B order, segment interleave.
 template <index_t CX,
           index_t CY,
           index_t Gl2                             = 4,
@@ -109,7 +110,12 @@ template <index_t CX,
           ck_tile::MxTdmScheduledHalfPlr Plr      = ck_tile::MxTdmScheduledHalfPlr::B,
           ck_tile::MxTdmScheduledHalfBOrder Order = ck_tile::MxTdmScheduledHalfBOrder::Ahead,
           bool Lsi                                = true>
-using Tu = ck_tile::MxTdmScheduledTuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
+struct Tu
+{
+    using Cluster = ck_tile::sequence<CY, CX, 1>;
+    using Policy =
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
+};
 
 template <bool EdgeM, bool EdgeN, index_t OddTiles, index_t TailSteps, index_t StoreWidth>
 using Shape = ck_tile::
@@ -123,7 +129,7 @@ using Shape = ck_tile::
 /// checked bit for bit at any K, and at any scale shift that keeps the sums finite and normal.
 struct Inputs
 {
-    std::vector<uint8_t> a;       // M rows of row_bytes(a_dtype, K)
+    std::vector<uint8_t> a;       // M rows of row_bytes<A>(K)
     std::vector<uint8_t> b;       // N rows
     std::vector<uint8_t> a_scale; // K-major
     std::vector<uint8_t> b_scale; // K-major
@@ -152,50 +158,52 @@ inline std::vector<long_index_t> sparse_steps(long_index_t K, index_t tile_k, st
     return {chosen.begin(), chosen.end()};
 }
 
-inline uint8_t sparse_code(MxTdmScheduledDtype t, std::mt19937& rng)
+template <typename T>
+uint8_t sparse_code(std::mt19937& rng)
 {
-    if(t == MxTdmScheduledDtype::Fp4)
+    if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
         return static_cast<uint8_t>(rng() % 16);
-    const int bits     = t == MxTdmScheduledDtype::Fp8 ? 3 : 2;
-    const int bias     = t == MxTdmScheduledDtype::Fp8 ? 7 : 15;
+    const int bits     = std::is_same_v<T, ck_tile::fp8_t> ? 3 : 2;
+    const int bias     = std::is_same_v<T, ck_tile::fp8_t> ? 7 : 15;
     const int mantissa = static_cast<int>(rng() % (1u << bits));
     const int exponent = bias - static_cast<int>(rng() % 2); // 2^0 or 2^-1
     const int sign     = static_cast<int>(rng() % 2);
     return static_cast<uint8_t>((sign << 7) | (exponent << bits) | mantissa);
 }
 
-inline Inputs make_inputs(MxTdmScheduledDtype a_dtype,
-                          MxTdmScheduledDtype b_dtype,
-                          index_t M,
-                          index_t N,
-                          long_index_t K,
-                          index_t tile_k,
-                          int scale_shift = kSparseScaleShift,
-                          uint32_t seed   = 0x5BA6)
+/// rocKE's sparse inputs of A and B types A and B (pk_fp4_t, fp8_t or bf8_t).
+template <typename A, typename B>
+Inputs make_inputs(index_t M,
+                   index_t N,
+                   long_index_t K,
+                   index_t tile_k,
+                   int scale_shift = kSparseScaleShift,
+                   uint32_t seed   = 0x5BA6)
 {
     std::mt19937 rng(seed);
     const auto steps = sparse_steps(K, tile_k, rng);
     Inputs in;
-    auto operand = [&](MxTdmScheduledDtype t, index_t rows) {
-        const long_index_t row_bytes = sched::row_bytes(t, K);
+    auto operand = [&](auto type, index_t rows) {
+        using T                      = decltype(type);
+        const long_index_t row_bytes = sched::row_bytes<T>(K);
         std::vector<uint8_t> data(static_cast<std::size_t>(rows) * row_bytes, 0);
         for(index_t r = 0; r < rows; ++r)
             for(long_index_t s : steps)
                 for(long_index_t k = s * 128; k < std::min(K, (s + 1) * 128); ++k)
                 {
-                    const uint8_t code = sparse_code(t, rng);
+                    const uint8_t code = sparse_code<T>(rng);
                     uint8_t* row       = data.data() + r * row_bytes;
-                    if(t == MxTdmScheduledDtype::Fp4)
+                    if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
                         row[k / 2] |= static_cast<uint8_t>(k % 2 ? code << 4 : code);
                     else
                         row[k] = code;
                 }
         return data;
     };
-    in.a                      = operand(a_dtype, M);
-    in.b                      = operand(b_dtype, N);
+    in.a                      = operand(A{}, M);
+    in.b                      = operand(B{}, N);
     const long_index_t groups = (K + 31) / 32;
-    const bool fp4            = a_dtype == MxTdmScheduledDtype::Fp4;
+    const bool fp4            = std::is_same_v<A, ck_tile::pk_fp4_t>;
     auto scales               = [&](index_t rows) {
         std::vector<uint8_t> natural(static_cast<std::size_t>(rows) * groups);
         for(auto& x : natural)
@@ -223,19 +231,13 @@ typename Kernel::KernelArgs kernel_args(const void* a,
         {a}, {a_scale}, {b}, {b_scale}, {}, e, 1, M, N, K, {K}, {K}, {}, N});
 }
 
-/// The compile-time spec of a kernel's pipeline.
+/// The sparse inputs of a kernel's A and B types and K tile.
 template <typename Kernel>
-constexpr ck_tile::MxTdmScheduledSpec spec_of()
+Inputs make_kernel_inputs(index_t M, index_t N, long_index_t K, int scale_shift = kSparseScaleShift)
 {
     using Pipeline = typename Kernel::GemmPipeline;
-    return Pipeline::Policy::template GetSpec<typename Pipeline::Problem>();
-}
-
-/// The output type of a kernel's E.
-template <typename Kernel>
-constexpr MxTdmScheduledOutDtype out_of()
-{
-    return spec_of<Kernel>().out;
+    return make_inputs<typename Pipeline::ADataType, typename Pipeline::BDataType>(
+        M, N, K, Pipeline::kTileK, scale_shift);
 }
 
 /// Launches Kernel: the grid of GridSize, and with a cluster tuning the cluster of ClusterSize.
@@ -270,8 +272,8 @@ float launch(const ck_tile::stream_config& s, const typename Kernel::KernelArgs&
 template <typename Kernel>
 std::vector<uint8_t> run_device(const Inputs& in, index_t M, index_t N, index_t K)
 {
-    const std::size_t e_bytes =
-        static_cast<std::size_t>(M) * N * sched::out_bytes(out_of<Kernel>());
+    const std::size_t e_bytes = static_cast<std::size_t>(M) * N *
+                                sched::out_bytes<typename Kernel::GemmPipeline::ODataType>();
 #ifdef MX_TDM_SCHEDULED_DRY_RUN
     // CPU-only build: check that the instance runs the problem, launch nothing.
     ck_tile::ignore  = e_bytes;
@@ -310,45 +312,44 @@ std::vector<uint8_t> run_device(const Inputs& in, index_t M, index_t N, index_t 
 #endif
 }
 
-inline std::vector<uint8_t> run_reference(MxTdmScheduledDtype a_dtype,
-                                          MxTdmScheduledDtype b_dtype,
-                                          MxTdmScheduledOutDtype out,
-                                          const Inputs& in,
-                                          index_t M,
-                                          index_t N,
-                                          long_index_t K,
-                                          const std::vector<index_t>* rows = nullptr)
+/// E of a kernel's types on `in` from the reference; with `rows` only those rows, compactly.
+template <typename Kernel>
+std::vector<uint8_t> run_reference(const Inputs& in,
+                                   index_t M,
+                                   index_t N,
+                                   long_index_t K,
+                                   const std::vector<index_t>* rows = nullptr)
 {
+    using A = typename Kernel::GemmPipeline::ADataType;
+    using B = typename Kernel::GemmPipeline::BDataType;
+    using O = typename Kernel::GemmPipeline::ODataType;
     std::vector<uint8_t> e((rows ? rows->size() : static_cast<std::size_t>(M)) * N *
-                           sched::out_bytes(out));
-    ck_tile::reference_mx_gemm_tdm_scheduled(a_dtype,
-                                             b_dtype,
-                                             out,
-                                             in.a.data(),
-                                             sched::row_bytes(a_dtype, K),
-                                             in.b.data(),
-                                             sched::row_bytes(b_dtype, K),
-                                             in.a_scale.data(),
-                                             in.b_scale.data(),
-                                             e.data(),
-                                             N,
-                                             M,
-                                             N,
-                                             K,
-                                             0,
-                                             rows ? rows->data() : nullptr,
-                                             rows ? static_cast<index_t>(rows->size()) : 0);
+                           sched::out_bytes<O>());
+    ck_tile::reference_mx_gemm_tdm_scheduled<A, B, O>(in.a.data(),
+                                                      sched::row_bytes<A>(K),
+                                                      in.b.data(),
+                                                      sched::row_bytes<B>(K),
+                                                      in.a_scale.data(),
+                                                      in.b_scale.data(),
+                                                      e.data(),
+                                                      N,
+                                                      M,
+                                                      N,
+                                                      K,
+                                                      0,
+                                                      rows ? rows->data() : nullptr,
+                                                      rows ? static_cast<index_t>(rows->size())
+                                                           : 0);
     return e;
 }
 
 /// The first element whose bits differ, or "" if E matches bit for bit (any FP8 NaN code
 /// matching any other).
-inline std::string first_mismatch(const std::vector<uint8_t>& got,
-                                  const std::vector<uint8_t>& want,
-                                  MxTdmScheduledOutDtype out,
-                                  index_t N)
+template <typename O>
+std::string
+first_mismatch(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want, index_t N)
 {
-    const index_t bytes = sched::out_bytes(out);
+    const index_t bytes = sched::out_bytes<O>();
     // The bits as well as the value: NaNs of different bits all print as nan.
     const auto hex = [&](const std::vector<uint8_t>& d, std::size_t i) {
         uint32_t bits = 0;
@@ -362,10 +363,10 @@ inline std::string first_mismatch(const std::vector<uint8_t>& got,
     const auto fp8_nan = [](uint8_t b) { return (b & 0x7F) == 0x7F; };
     for(std::size_t i = 0; i < got.size() / bytes; ++i)
         if(std::memcmp(got.data() + i * bytes, want.data() + i * bytes, bytes) != 0 &&
-           !(out == MxTdmScheduledOutDtype::Fp8E4M3 && fp8_nan(got[i]) && fp8_nan(want[i])))
+           !(std::is_same_v<O, ck_tile::fp8_t> && fp8_nan(got[i]) && fp8_nan(want[i])))
             return "E(" + std::to_string(i / N) + ", " + std::to_string(i % N) + "): got " +
-                   std::to_string(sched::load_out(out, got.data(), i)) + hex(got, i) + ", want " +
-                   std::to_string(sched::load_out(out, want.data(), i)) + hex(want, i);
+                   std::to_string(sched::load_out<O>(got.data(), i)) + hex(got, i) + ", want " +
+                   std::to_string(sched::load_out<O>(want.data(), i)) + hex(want, i);
     return "";
 }
 
@@ -374,10 +375,9 @@ inline std::string first_mismatch(const std::vector<uint8_t>& got,
 template <typename Kernel>
 void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
 {
-    constexpr auto s = spec_of<Kernel>();
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K) + " scale shift " + std::to_string(scale_shift));
-    const Inputs in = make_inputs(s.a_dtype, s.b_dtype, M, N, K, s.tile_k, scale_shift);
+    const Inputs in = make_kernel_inputs<Kernel>(M, N, K, scale_shift);
     const char* why =
         Kernel::GetUnsupportedReason(kernel_args<Kernel>(in.a.data(),
                                                          in.b.data(),
@@ -390,8 +390,8 @@ void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
     ASSERT_EQ(why, nullptr) << why;
     const auto got = run_device<Kernel>(in, M, N, K);
 #ifndef MX_TDM_SCHEDULED_DRY_RUN
-    const auto want = run_reference(s.a_dtype, s.b_dtype, s.out, in, M, N, K);
-    EXPECT_EQ(first_mismatch(got, want, s.out, N), "");
+    const auto want = run_reference<Kernel>(in, M, N, K);
+    EXPECT_EQ(first_mismatch<typename Kernel::GemmPipeline::ODataType>(got, want, N), "");
 #endif
 }
 

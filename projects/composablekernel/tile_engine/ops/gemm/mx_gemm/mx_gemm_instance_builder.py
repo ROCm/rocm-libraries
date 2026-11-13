@@ -266,18 +266,20 @@ struct SelectedKernel {{
         std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;
     static constexpr bool BPreshuffleLaneInterleavedK = true;
 
-    using Tuning = {mx_tdm_scheduled.cpp_tuning_type(tuning)};
+    using Cluster = {mx_tdm_scheduled.cpp_cluster_sequence(tuning)};
+    using Policy = {mx_tdm_scheduled.cpp_policy_type(tuning)};
     using Traits = {mx_tdm_scheduled.cpp_kernel_traits(spec, tuning)};
     using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         ck_tile::MxGemmTdmScheduledProblem<
             ADataType,
             BDataType,
             CDataType,
-            ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                                   ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
-                                   ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
+            ck_tile::ClusterTileGemmShape<Cluster,
+                                          ck_tile::sequence<TileM, TileN, TileK>,
+                                          ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
+                                          ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
             Traits>,
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
+        Policy>;
     using Kernel = ck_tile::MxGemmKernel<
         ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
         Pipeline,

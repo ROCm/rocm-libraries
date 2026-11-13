@@ -38,10 +38,8 @@ namespace {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
-using ck_tile::MxTdmScheduledDtype;
 using ck_tile::MxTdmScheduledHalfBOrder;
 using ck_tile::MxTdmScheduledHalfPlr;
-using ck_tile::MxTdmScheduledOutDtype;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 template <typename A,
@@ -60,11 +58,12 @@ using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
         A,
         B,
         O,
-        ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
-                               ck_tile::sequence<WarpM, WarpN, 1>,
-                               ck_tile::sequence<AtomM, 16, 128>>,
+        ck_tile::ClusterTileGemmShape<typename Tuning::Cluster,
+                                      ck_tile::sequence<TileM, TileN, TileK>,
+                                      ck_tile::sequence<WarpM, WarpN, 1>,
+                                      ck_tile::sequence<AtomM, 16, 128>>,
         Traits>,
-    ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Tuning>>;
+    typename Tuning::Policy>;
 
 template <typename P, typename Epilogue>
 using KernelOf = ck_tile::
@@ -109,7 +108,12 @@ template <index_t CX,
           MxTdmScheduledHalfPlr Plr      = MxTdmScheduledHalfPlr::B,
           MxTdmScheduledHalfBOrder Order = MxTdmScheduledHalfBOrder::Ahead,
           bool Lsi                       = true>
-using Tu = ck_tile::MxTdmScheduledTuningT<CX, CY, Gl2, Signal, Lp, Plr, Order, Lsi>;
+struct Tu
+{
+    using Cluster = ck_tile::sequence<CY, CX, 1>;
+    using Policy =
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
+};
 
 // Whole tiles, even tile count, no K tail.
 template <index_t StoreWidth>
@@ -176,31 +180,34 @@ uint8_t e2m1_rne(float x)
     return static_cast<uint8_t>((std::signbit(x) ? 8 : 0) | code);
 }
 
-Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, uint32_t seed)
+template <typename A, typename B>
+Host make_inputs(
+    index_t M, index_t N, long_index_t K, index_t tile_k, bool sparse, bool trig, uint32_t seed)
 {
     std::mt19937 rng(seed);
-    const long_index_t K = s.K;
     std::set<long_index_t> steps;
-    const long_index_t n_steps = (K + 127) / 128, per_tile = s.tile_k / 128;
+    const long_index_t n_steps = (K + 127) / 128, per_tile = tile_k / 128;
     const long_index_t last = (n_steps - 1) / per_tile * per_tile;
     for(long_index_t x : {long_index_t{0}, n_steps - 1, per_tile - 1, per_tile, last - 1, last})
         if(x >= 0 && x < n_steps)
             steps.insert(x);
     while(static_cast<long_index_t>(steps.size()) < std::min<long_index_t>(12, n_steps))
         steps.insert(static_cast<long_index_t>(rng() % n_steps));
-    auto code = [&](MxTdmScheduledDtype t) -> uint8_t {
-        if(t == MxTdmScheduledDtype::Fp4)
+    auto code = [&](auto type) -> uint8_t {
+        using T = decltype(type);
+        if(std::is_same_v<T, pk_fp4_t>)
             return static_cast<uint8_t>(rng() % 16);
         if(!sparse)
             return static_cast<uint8_t>(rng() & 0xBF);
-        const int bits = t == MxTdmScheduledDtype::Fp8 ? 3 : 2,
-                  bias = t == MxTdmScheduledDtype::Fp8 ? 7 : 15;
+        const int bits = std::is_same_v<T, fp8_t> ? 3 : 2, bias = std::is_same_v<T, fp8_t> ? 7 : 15;
         return static_cast<uint8_t>(((rng() % 2) << 7) | ((bias - rng() % 2) << bits) |
                                     (rng() % (1u << bits)));
     };
-    auto operand = [&](MxTdmScheduledDtype t, index_t rows, bool use_cos) {
-        const long_index_t rb = sched::row_bytes(t, K);
-        const bool trig_fp4   = trig && !sparse && t == MxTdmScheduledDtype::Fp4;
+    auto operand = [&](auto type, index_t rows, bool use_cos) {
+        using T               = decltype(type);
+        constexpr bool fp4_t  = std::is_same_v<T, pk_fp4_t>;
+        const long_index_t rb = sched::row_bytes<T>(K);
+        const bool trig_fp4   = trig && !sparse && fp4_t;
         std::vector<uint8_t> data(static_cast<std::size_t>(rows) * rb, 0);
         for(index_t r = 0; r < rows; ++r)
         {
@@ -210,8 +217,8 @@ Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, u
                 const uint8_t x =
                     trig_fp4
                             ? e2m1_rne(static_cast<float>(use_cos ? std::cos(index) : std::sin(index)))
-                            : code(t);
-                if(t == MxTdmScheduledDtype::Fp4)
+                            : code(type);
+                if(fp4_t)
                     row[k / 2] |= static_cast<uint8_t>(k % 2 ? x << 4 : x);
                 else
                     row[k] = x;
@@ -227,10 +234,10 @@ Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, u
         return data;
     };
     Host h;
-    h.a                       = operand(s.a_dtype, s.M, false);
-    h.b                       = operand(s.b_dtype, s.N, true);
+    h.a                       = operand(A{}, M, false);
+    h.b                       = operand(B{}, N, true);
     const long_index_t groups = (K + 31) / 32;
-    const bool fp4            = s.a_dtype == MxTdmScheduledDtype::Fp4;
+    const bool fp4            = std::is_same_v<A, pk_fp4_t>;
     auto scales               = [&](index_t rows) {
         std::vector<uint8_t> natural(static_cast<std::size_t>(rows) * groups);
         for(auto& x : natural)
@@ -238,16 +245,18 @@ Host make_inputs(const ck_tile::MxTdmScheduledSpec& s, bool sparse, bool trig, u
                                              : (fp4 ? 122 + rng() % 4 : 123 + rng() % 2));
         return ck_tile::mx_scale_to_kmajor(natural.data(), rows, K, groups);
     };
-    h.as = scales(s.M);
-    h.bs = scales(s.N);
+    h.as = scales(M);
+    h.bs = scales(N);
     return h;
 }
 
 template <typename K>
 int run_kernel(const Options& o)
 {
-    using P      = typename K::GemmPipeline;
-    const auto s = P::Policy::template GetSpec<typename P::Problem>(o.M, o.N, o.K);
+    using P = typename K::GemmPipeline;
+    using A = typename P::ADataType;
+    using B = typename P::BDataType;
+    using O = typename P::ODataType;
     {
         uint8_t dummy = 0;
         const ck_tile::MxGemmHostArgs<> probe{{&dummy},
@@ -278,16 +287,16 @@ int run_kernel(const Options& o)
         return 0;
     Host h;
     if(o.mode == "file")
-        h = Host{read_file(o.load + "/a.bin",
-                           static_cast<std::size_t>(o.M) * sched::row_bytes(s.a_dtype, o.K)),
-                 read_file(o.load + "/b.bin",
-                           static_cast<std::size_t>(o.N) * sched::row_bytes(s.b_dtype, o.K)),
-                 read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
-                 read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K))};
+        h = Host{
+            read_file(o.load + "/a.bin", static_cast<std::size_t>(o.M) * sched::row_bytes<A>(o.K)),
+            read_file(o.load + "/b.bin", static_cast<std::size_t>(o.N) * sched::row_bytes<B>(o.K)),
+            read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
+            read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K))};
     else
-        h = make_inputs(s, o.mode == "verify", o.data == "tensile", o.seed);
+        h = make_inputs<A, B>(
+            o.M, o.N, o.K, P::kTileK, o.mode == "verify", o.data == "tensile", o.seed);
 
-    const std::size_t e_bytes = static_cast<std::size_t>(o.M) * o.N * sched::out_bytes(s.out);
+    const std::size_t e_bytes = static_cast<std::size_t>(o.M) * o.N * sched::out_bytes<O>();
     ck_tile::DeviceMem a(h.a.size()), b(h.b.size()), as(h.as.size()), bs(h.bs.size()), e(e_bytes);
     a.ToDevice(h.a.data());
     b.ToDevice(h.b.data());
@@ -341,7 +350,7 @@ int run_kernel(const Options& o)
     {
         std::set<index_t> pick;
         std::mt19937 rng(0xB10C);
-        for(index_t r = 0; r < std::min(o.M, s.tile_m); ++r)
+        for(index_t r = 0; r < std::min(o.M, P::kTileM); ++r)
         {
             pick.insert(r);
             pick.insert(o.M - 1 - r);
@@ -350,25 +359,22 @@ int run_kernel(const Options& o)
             pick.insert(static_cast<index_t>(rng() % o.M));
         rows.assign(pick.begin(), pick.end());
     }
-    const index_t ob = sched::out_bytes(s.out);
+    const index_t ob = sched::out_bytes<O>();
     std::vector<uint8_t> want(rows.size() * o.N * ob);
-    ck_tile::reference_mx_gemm_tdm_scheduled(s.a_dtype,
-                                             s.b_dtype,
-                                             s.out,
-                                             h.a.data(),
-                                             sched::row_bytes(s.a_dtype, o.K),
-                                             h.b.data(),
-                                             sched::row_bytes(s.b_dtype, o.K),
-                                             h.as.data(),
-                                             h.bs.data(),
-                                             want.data(),
-                                             o.N,
-                                             o.M,
-                                             o.N,
-                                             o.K,
-                                             0,
-                                             rows.data(),
-                                             static_cast<index_t>(rows.size()));
+    ck_tile::reference_mx_gemm_tdm_scheduled<A, B, O>(h.a.data(),
+                                                      sched::row_bytes<A>(o.K),
+                                                      h.b.data(),
+                                                      sched::row_bytes<B>(o.K),
+                                                      h.as.data(),
+                                                      h.bs.data(),
+                                                      want.data(),
+                                                      o.N,
+                                                      o.M,
+                                                      o.N,
+                                                      o.K,
+                                                      0,
+                                                      rows.data(),
+                                                      static_cast<index_t>(rows.size()));
     std::size_t bad = 0;
     for(std::size_t i = 0; i < rows.size(); ++i)
         for(index_t n = 0; n < o.N; ++n)
@@ -378,8 +384,8 @@ int run_kernel(const Options& o)
                 std::printf("E(%d, %d): got %g, want %g\n",
                             rows[i],
                             n,
-                            sched::load_out(s.out, got.data(), g),
-                            sched::load_out(s.out, want.data(), w));
+                            sched::load_out<O>(got.data(), g),
+                            sched::load_out<O>(want.data(), w));
         }
     std::printf("%s: %zu of %zu rows checked, %zu mismatches\n",
                 bad ? "FAIL" : "PASS",
