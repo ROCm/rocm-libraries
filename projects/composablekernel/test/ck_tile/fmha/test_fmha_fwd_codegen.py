@@ -2300,10 +2300,11 @@ class TestGfx125V128Codegen(unittest.TestCase):
 class TestGfx125PagedKVTdmSchedGateCodegen(unittest.TestCase):
     """Baseline tripwire for the paged-KV counterpart of qr_tdm_sched.
 
-    fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, a.is_gappy, bn0)
-    (see tdm_sched_gate in fmha_pagedkv_prefill.py) is the only place that
-    enforces page_block_size % kN0 == 0 and declines gappy group mode for the
-    generated qr_pagedkv_tdm_sched dispatch branches. This asserts, by literal substring count only (no
+    fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, a.is_gappy,
+    gappy_variant, bn0) (see tdm_sched_gate in fmha_pagedkv_prefill.py) is the
+    only place that enforces page_block_size % kN0 == 0 and routes gappy group
+    mode to the gappy variant for the generated qr_pagedkv_tdm_sched dispatch
+    branches. This asserts, by literal substring count only (no
     re-derivation of the gating predicate), that every rendered
     QRKSVS_TDM_SCHED branch carries exactly one such gate call -- same style
     as test_cmake_family_esm2_exact_scope above, which tripwires the ESM

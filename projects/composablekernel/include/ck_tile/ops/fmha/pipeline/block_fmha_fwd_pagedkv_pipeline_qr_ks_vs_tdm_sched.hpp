@@ -23,7 +23,12 @@ namespace ck_tile {
 // and V runs one, so the trackers advance independently.
 // Separate template instantiations keep finite virtual-sink normalization out of
 // the generated no-sink kernel's register allocation.
+// SupportsGappy_ selects the variant that accepts any kv_l2p_offset (gappy group mode): its
+// windows use physical rows and it masks the gap. The default variant keeps the windows in
+// logical rows (the kernel folds a kN0-aligned offset into the trackers), so its offset is a
+// compile-time zero here; a runtime offset costs scalar registers this loop cannot spare.
 template <typename Problem_,
+          bool SupportsGappy_     = false,
           typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
 struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
@@ -118,6 +123,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
     using Geometry = typename Policy::Geometry;
     static_assert(Geometry::kM == kM0 && Geometry::kN == kN0 && Geometry::kDv == kN1);
 
+    static constexpr bool kSupportsGappy = SupportsGappy_;
+    static_assert(!(kSupportsGappy && kHasSink),
+                  "the gappy variant does not support a sink prefix; it needs a kN0-aligned "
+                  "kv_l2p_offset there");
     static constexpr const char* name = "qr_pagedkv_tdm_sched";
 
     static constexpr bool kUsesUntransposedVKernelPath = true;
@@ -204,8 +213,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         void* __restrict__ smem_ptrk1,
         void* __restrict__ smem_ptrv0,
         void* __restrict__ smem_ptrv1,
-        float sink_v) const
+        float sink_v,
+        index_t kv_l2p_offset_arg) const
     {
+        const index_t kv_l2p_offset = kSupportsGappy ? kv_l2p_offset_arg : 0;
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
@@ -366,10 +377,20 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         }
 
         // K tile in LDS (sink-aware start)
-        const auto kv_load_start =
-            (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
-        const index_t physical_seqlen_k_start = logical_seqlen_k_start;
-        const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
+        // K/V windows and trackers use PHYSICAL rows (logical + kv_l2p_offset, the page pool's
+        // coordinates), so tiles start at multiples of kN0 there and never straddle a page. The
+        // first window tile starts at the kN0-aligned row at or below physical_seqlen_k_start;
+        // its leading columns are gap rows and are masked. The mask takes logical columns.
+        const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
+        const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
+        const index_t window_seqlen_k_start =
+            kSupportsGappy ? physical_seqlen_k_start - physical_seqlen_k_start % kN0
+                           : physical_seqlen_k_start; // the mask's start is kN0 aligned
+        // The sink prefix starts at logical row 0; only the default variant has one, so the
+        // offset is zero there.
+        const index_t kv_load_start = sink_seq_end == 0 ? window_seqlen_k_start : kv_l2p_offset;
+        // Window move from the end of the sink prefix to the first window tile.
+        const index_t sink_to_window_step = window_seqlen_k_start - (kv_load_start + sink_seq_end);
 
         // Bias tile window (prefill path)
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
@@ -428,15 +449,14 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
-        // Paging is folded into the base pointer; the window origin stays
-        // global so masking and tail predication keep working unchanged.
+        // Paging is folded into the base pointer; the window origin stays a
+        // physical row of the whole sequence, not a page-local one.
         const auto sync_page_ptr = [](auto& dram_window, const auto& tracker) {
             dram_window.set_bottom_tensor_view_data_ptr(tracker.base_ptr());
         };
 
         const index_t num_total_loop =
-            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
-            num_sink_loop;
+            integer_divide_ceil(physical_seqlen_k_end - window_seqlen_k_start, kN0) + num_sink_loop;
 
         constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
         bool even_buffer                 = true;
@@ -514,8 +534,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         {
             if(num_sink_loop == 1 && num_total_loop > 1)
             {
-                move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                k_page_tracker.seek(physical_seqlen_k_start);
+                move_tile_window(k_dram_window, {sink_to_window_step, 0});
+                k_page_tracker.seek(window_seqlen_k_start);
             }
         }
         sync_page_ptr(k_dram_window, k_page_tracker);
@@ -666,9 +686,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 {
                     if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                     {
-                        move_tile_window(v_dram_window,
-                                         {physical_seqlen_k_start - sink_seq_end, 0});
-                        v_page_tracker.seek(physical_seqlen_k_start);
+                        move_tile_window(v_dram_window, {sink_to_window_step, 0});
+                        v_page_tracker.seek(window_seqlen_k_start);
                     }
                 }
                 sync_page_ptr(v_dram_window, v_page_tracker);
@@ -755,7 +774,7 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                             return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
                         else
                             return make_tuple(
-                                kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+                                kN0 * (i_total_loops - num_sink_loop) + window_seqlen_k_start, 0);
                     }();
                     constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
                     sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
@@ -766,7 +785,7 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                             const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
                             constexpr auto i_j_idx = make_tuple(idx0, idx1);
                             s_acc(i_j_idx) *= scale_s;
-                            position_encoding.update(s_acc(i_j_idx), row, col);
+                            position_encoding.update(s_acc(i_j_idx), row, col - kv_l2p_offset);
                         });
                     });
                 }
@@ -787,31 +806,39 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                         return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
                     else
                         return make_tuple(
-                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+                            kN0 * (i_total_loops - num_sink_loop) + window_seqlen_k_start, 0);
                 }();
+                // Logical column of the tile's first key: the bounds and the mask below all
+                // take logical columns.
+                const index_t k_col0 = k_origin.at(I0) - kv_l2p_offset;
+                // Gap rows before the first key appear only in the first window tile of a gappy
+                // batch whose offset is not kN0 aligned (sink tiles, which also lie before
+                // logical_seqlen_k_start, exist only in the default variant).
+                const bool need_gap_check = kSupportsGappy && k_col0 < logical_seqlen_k_start;
                 if constexpr(kUseCountdownLoop)
                 {
                     bool need_split_check = false;
                     if constexpr(kHasUnevenSplits)
                     {
-                        const bool needs_tail_predicate =
-                            k_origin.at(I0) + kN0 > physical_seqlen_k_end;
+                        const bool needs_tail_predicate = k_col0 + kN0 > logical_seqlen_k_end;
                         need_split_check = remaining_loops == 1 && needs_tail_predicate;
                     }
                     bool need_mask_check = false;
                     if constexpr(kPadSeqLenK)
                     {
-                        need_mask_check = mask.IsEdgeTile(
-                            q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                        need_mask_check =
+                            mask.IsEdgeTile(q_origin.at(I0), k_col0, number<kM0>{}, number<kN0>{});
                     }
 
-                    if(__builtin_expect(need_split_check || need_mask_check, false))
+                    if(__builtin_expect(need_split_check || need_mask_check || need_gap_check,
+                                        false))
                     {
                         set_tile_if(
                             s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                                 const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                return (need_split_check && physical_seqlen_k_end <= col) ||
+                                const auto col = k_col0 + tile_idx.at(I1);
+                                return (need_split_check && logical_seqlen_k_end <= col) ||
+                                       (need_gap_check && col < logical_seqlen_k_start) ||
                                        (need_mask_check && mask.IsOutOfBound(row, col));
                             });
                     }
@@ -820,30 +847,32 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 {
                     if constexpr(kHasUnevenSplits)
                     {
-                        const bool needs_tail_predicate =
-                            k_origin.at(I0) + kN0 > physical_seqlen_k_end;
-                        const bool is_last_loop = kUseCountdownLoop
-                                                      ? remaining_loops == 1
-                                                      : i_total_loops == (num_total_loop - 1);
+                        const bool needs_tail_predicate = k_col0 + kN0 > logical_seqlen_k_end;
+                        const bool is_last_loop         = kUseCountdownLoop
+                                                              ? remaining_loops == 1
+                                                              : i_total_loops == (num_total_loop - 1);
                         if(is_last_loop && needs_tail_predicate)
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-
-                                    {
-                                        return physical_seqlen_k_end_ <= col;
-                                    }
-                                });
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            return logical_seqlen_k_end <= k_col0 + tile_idx.at(I1);
+                                        });
                         }
+                    }
+
+                    if(need_gap_check)
+                    {
+                        set_tile_if(
+                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                                return k_col0 + tile_idx.at(I1) < logical_seqlen_k_start;
+                            });
                     }
 
                     if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        bool need_perpixel_check = mask.IsEdgeTile(
-                            q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                        bool need_perpixel_check =
+                            mask.IsEdgeTile(q_origin.at(I0), k_col0, number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
                             set_tile_if(
@@ -851,7 +880,7 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                    const auto col = k_col0 + tile_idx.at(I1);
                                     if constexpr(kHasSink)
                                         return mask.IsOutOfSinkBound(row, col);
                                     else if constexpr(Policy::kUseUnsignedCausalMask &&
@@ -871,8 +900,7 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 {
                     if(i_total_loops == num_sink_loop - 1)
                     {
-                        move_tile_window(bias_dram_window,
-                                         {0, physical_seqlen_k_start - sink_seq_end});
+                        move_tile_window(bias_dram_window, {0, sink_to_window_step});
                     }
                 }
 
@@ -936,9 +964,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 {
                     if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
                     {
-                        move_tile_window(k_dram_window,
-                                         {physical_seqlen_k_start - sink_seq_end, 0});
-                        k_page_tracker.seek(physical_seqlen_k_start);
+                        move_tile_window(k_dram_window, {sink_to_window_step, 0});
+                        k_page_tracker.seek(window_seqlen_k_start);
                     }
                 }
                 sync_page_ptr(k_dram_window, k_page_tracker);
@@ -1120,7 +1147,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                                         void* smem_ptrk0,
                                         void* smem_ptrk1,
                                         void* smem_ptrv0,
-                                        void* smem_ptrv1) const
+                                        void* smem_ptrv1,
+                                        index_t kv_l2p_offset = 0) const
     {
         return run(q_dram_block_window_tmp,
                    k_dram_block_window_tmp,
@@ -1136,7 +1164,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                    smem_ptrk1,
                    smem_ptrv0,
                    smem_ptrv1,
-                   sink_v);
+                   sink_v,
+                   kv_l2p_offset);
     }
 };
 

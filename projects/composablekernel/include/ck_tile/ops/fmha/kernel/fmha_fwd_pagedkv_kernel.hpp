@@ -1402,11 +1402,17 @@ struct FmhaFwdPagedKVKernel
                 static_assert(kIsPagedKV,
                               "qr_pagedkv_tdm_sched is only reachable with paged kv kargs");
 
-                // kv_l2p_offset must be a multiple of kN0, or TdmPageTracker::seek()
-                // fires late and tiles straddle two pages silently. The host gate
-                // declines gappy group mode; this traps a direct launch that
-                // bypasses it (assert() is compiled out in Release).
-                if constexpr(kIsGroupMode)
+                // Two ways to apply kv_l2p_offset (gappy group mode; 0 otherwise):
+                // - default variant: the trackers fold it into the base pointer and the
+                //   windows stay in logical rows. A tile must not straddle a page, so the
+                //   offset must be a multiple of kN0;
+                // - gappy variant: the windows use physical rows and the pipeline masks
+                //   the gap, so any offset works.
+                // The host gate sends gappy mode to the gappy variant; this traps a direct
+                // launch of the default one with a misaligned offset (assert() is compiled
+                // out in Release).
+                constexpr bool kPhysicalRows = FmhaPipeline::kSupportsGappy;
+                if constexpr(kIsGroupMode && !kPhysicalRows)
                 {
                     // is_gappy only exists on the group-mode kargs; batch mode
                     // never sets kv_l2p_offset away from 0.
@@ -1423,18 +1429,18 @@ struct FmhaFwdPagedKVKernel
                     }
                 }
 
-                // TdmPageTracker::refresh() folds paging and kv_l2p_offset into the
-                // base pointer, so K/V are plain affine views over LOGICAL global
-                // rows rather than page-bounded navigator windows. Their height
-                // must be seqlen_k: kv_global_len would let the TDM zero clamp
-                // admit kv_l2p_offset extra rows and read real tokens from the
-                // next physical page on the final partial tile. kv_global_len is
-                // valid only as a page count (num_pages_tdm below).
+                // TdmPageTracker::refresh() folds paging into the base pointer, so K/V
+                // are plain affine views over the batch's key rows rather than
+                // page-bounded navigator windows. The view height ends at the last key,
+                // so the TDM zero clamp covers the final partial tile: seqlen_k for
+                // logical rows, kv_l2p_offset + seqlen_k for physical rows. kv_global_len
+                // is also the page count's extent (num_pages_tdm below).
                 const index_t kv_global_len = kv_l2p_offset + kargs.seqlen_k;
+                const index_t kv_view_len   = kPhysicalRows ? kv_global_len : kargs.seqlen_k;
 
                 const auto k_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
                     static_cast<const KDataType*>(nullptr),
-                    make_tuple(kargs.seqlen_k, kargs.hdim_q),
+                    make_tuple(kv_view_len, kargs.hdim_q),
                     make_tuple(kargs.stride_k, 1),
                     number<FmhaPipeline::kAlignmentK>{},
                     number<1>{});
@@ -1448,7 +1454,7 @@ struct FmhaFwdPagedKVKernel
                 // reads the window lengths; do not copy it here.
                 const auto v_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
                     static_cast<const VDataType*>(nullptr),
-                    make_tuple(kargs.seqlen_k, kargs.hdim_v),
+                    make_tuple(kv_view_len, kargs.hdim_v),
                     make_tuple(kargs.stride_v, 1),
                     number<FmhaPipeline::kAlignmentV>{},
                     number<1>{});
@@ -1487,7 +1493,7 @@ struct FmhaFwdPagedKVKernel
                     kargs.stride_k,
                     num_pages_tdm,
                     0,
-                    kv_l2p_offset);
+                    kPhysicalRows ? 0 : kv_l2p_offset);
                 auto v_page_tracker = TdmPageTracker<VDataType, FmhaPipeline::kN0>(
                     reinterpret_cast<const VDataType*>(kargs.v_ptr),
                     kargs.batch_stride_v,
@@ -1497,7 +1503,7 @@ struct FmhaFwdPagedKVKernel
                     kargs.stride_v,
                     num_pages_tdm,
                     0,
-                    kv_l2p_offset);
+                    kPhysicalRows ? 0 : kv_l2p_offset);
 
                 using Policy = typename FmhaPipeline::Policy;
                 static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
@@ -1523,7 +1529,8 @@ struct FmhaFwdPagedKVKernel
                                       smem_ptr + Policy::GetLdsOffsetK0(),
                                       smem_ptr + Policy::GetLdsOffsetK1(),
                                       smem_ptr + Policy::GetLdsOffsetV0(),
-                                      smem_ptr + Policy::GetLdsOffsetV1());
+                                      smem_ptr + Policy::GetLdsOffsetV1(),
+                                      kv_l2p_offset);
             }
             else if constexpr(kDoFp8StaticQuant)
             {

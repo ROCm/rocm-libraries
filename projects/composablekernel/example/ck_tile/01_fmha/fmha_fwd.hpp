@@ -1634,7 +1634,8 @@ template <ck_tile::index_t HDim_,
           bool kPadDv_,
           bool kSkipMinSeqlenQ_ = false,
           bool kHasSink_        = false,
-          int kOccupancy_       = -1>
+          int kOccupancy_       = -1,
+          bool kSupportsGappy_  = false>
 struct fmha_fwd_pagedkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1663,6 +1664,9 @@ struct fmha_fwd_pagedkv_traits_
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
     static constexpr int kOccupancy = kOccupancy_;
+    // The qr_pagedkv_tdm_sched variant for gappy group mode; part of the traits so its
+    // dispatch symbol does not collide with the default variant's.
+    static constexpr bool kSupportsGappy = kSupportsGappy_;
 };
 
 template <typename Traits_, typename Arch = void>
@@ -1816,15 +1820,16 @@ ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
                                               ck_tile::index_t hdim_v);
 
 // qr_tdm_sched folds paging into the base pointer, which is only valid when a
-// kN0 tile never straddles two pages. Gappy group mode also needs every
-// per-batch kv_l2p_offset to be kN0 aligned, which the host cannot see without
-// copying seqstart_k back, so it is declined as a whole. Anything declined
+// kN0 tile never straddles two pages. Gappy group mode runs the gappy variant
+// (gappy_variant), which accepts any kv_l2p_offset but is only generated
+// without a sink; everything else runs the default variant. Anything declined
 // falls back to the generic paged pipeline.
 inline bool fmha_fwd_pagedkv_tdm_sched_applicable(ck_tile::index_t page_block_size,
                                                   bool is_gappy,
+                                                  bool gappy_variant,
                                                   ck_tile::index_t kN0)
 {
-    return 0 < page_block_size && (page_block_size % kN0) == 0 && !is_gappy;
+    return 0 < page_block_size && (page_block_size % kN0) == 0 && is_gappy == gappy_variant;
 }
 
 struct fmha_fwd_pagedkv_traits

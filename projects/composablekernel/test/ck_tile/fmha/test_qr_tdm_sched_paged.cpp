@@ -28,7 +28,8 @@ using TestProblem = ck_tile::test::Model<128, false, false, false, bf16_t, 128, 
 using TestPolicy  = ck_tile::test::Policy<TestProblem>;
 
 using DensePipelineForTest = BlockFmhaPipelineQRKSVSTdmSched<TestProblem, TestPolicy>;
-using PagedPipelineForTest = BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched<TestProblem, TestPolicy>;
+using PagedPipelineForTest =
+    BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched<TestProblem, false, TestPolicy>;
 
 TEST(QrTdmSchedPaged, PipelineNameDiffersFromDense)
 {
@@ -167,6 +168,16 @@ enum class MaskKind
     SlidingWindow
 };
 
+// (window_size_left, window_size_right) for a MaskKind, same convention as LaunchBatch.
+std::pair<ck_tile::index_t, ck_tile::index_t> WindowFor(MaskKind kind, int window)
+{
+    if(kind == MaskKind::Causal)
+        return {-1, 0};
+    if(kind == MaskKind::SlidingWindow)
+        return {window, 0};
+    return {-1, -1};
+}
+
 struct FwdResult
 {
     std::vector<float> out;
@@ -296,9 +307,10 @@ using PagedProblemFor = ck_tile::BlockFmhaPipelineProblem<
 template <bool Group, bool Mask, bool Sink, bool Lse>
 using PagedPolicyFor = ck_tile::test::Policy<PagedProblemFor<Group, Mask, Sink, Lse>>;
 
-template <bool Group, bool Mask, bool Sink, bool Lse>
+template <bool Group, bool Mask, bool Sink, bool Lse, bool Gappy = false>
 using PagedPipelineFor =
     ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched<PagedProblemFor<Group, Mask, Sink, Lse>,
+                                                       Gappy,
                                                        PagedPolicyFor<Group, Mask, Sink, Lse>>;
 
 template <bool Group, bool Mask, bool Sink, bool Lse>
@@ -307,6 +319,11 @@ using DenseKernelFor = ck_tile::FmhaFwdKernel<DensePipelineFor<Group, Mask, Sink
 template <bool Group, bool Mask, bool Sink, bool Lse>
 using PagedKernelFor =
     ck_tile::FmhaFwdPagedKVKernel<PagedPipelineFor<Group, Mask, Sink, Lse>, Epilogue>;
+
+// Gappy group mode runs the variant that accepts any kv_l2p_offset (no sink).
+template <bool Mask>
+using PagedGappyKernelFor =
+    ck_tile::FmhaFwdPagedKVKernel<PagedPipelineFor<true, Mask, false, false, true>, Epilogue>;
 
 template <typename Kernel>
 void LaunchDirect(const typename Kernel::Kargs& kargs,
@@ -601,12 +618,14 @@ FwdResult LaunchBatch(int batch,
 // single head (nhead=1) since the brief's group signatures take no nhead
 // argument; not exercised by any Task 4 test but kept functional for later
 // tasks.
-template <bool IsPaged>
+template <bool IsPaged, bool Mask = false>
 FwdResult LaunchGroup(const std::vector<int>& seqlens_q,
                       const std::vector<int>& seqlens_k,
                       int hdim,
                       int page_block_size,
-                      bool shuffle)
+                      bool shuffle,
+                      MaskKind mask_kind = MaskKind::None,
+                      int window         = 0)
 {
     if(hdim != kHeadDim)
         throw std::invalid_argument("harness only supports hdim=128 (fixed tile geometry)");
@@ -785,13 +804,13 @@ FwdResult LaunchGroup(const std::vector<int>& seqlens_q,
         args.batch_stride_lse  = 0;
         args.batch_stride_o    = 0;
 
-        args.window_size_left  = -1;
-        args.window_size_right = -1;
+        args.window_size_left  = WindowFor(mask_kind, window).first;
+        args.window_size_right = WindowFor(mask_kind, window).second;
         args.sink_size         = 0;
         args.mask_type         = mask_type;
         args.min_seqlen_q      = 0;
 
-        using Kernel        = PagedKernelFor<true, false, false, false>;
+        using Kernel        = PagedKernelFor<true, Mask, false, false>;
         auto [kargs, grids] = fmha_fwd_pagedkv_create_kargs_and_grids<Kernel>(args);
         LaunchDirect<Kernel>(kargs, stream, grids);
     }
@@ -842,12 +861,12 @@ FwdResult LaunchGroup(const std::vector<int>& seqlens_q,
         args.batch_stride_lse = 0;
         args.batch_stride_o   = 0;
 
-        args.window_size_left  = -1;
-        args.window_size_right = -1;
+        args.window_size_left  = WindowFor(mask_kind, window).first;
+        args.window_size_right = WindowFor(mask_kind, window).second;
         args.sink_size         = 0;
         args.mask_type         = mask_type;
 
-        using Kernel        = DenseKernelFor<true, false, false, false>;
+        using Kernel        = DenseKernelFor<true, Mask, false, false>;
         auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<Kernel>(args);
         LaunchDirect<Kernel>(kargs, stream, grids);
     }
@@ -951,12 +970,15 @@ FwdResult run_paged_tdm_sched_group(const std::vector<int>& seqlens_q,
 // the tracker's tile-advance countdown assumes the first token inside a page
 // is tile aligned, same requirement as page_block_size being a TileRows
 // multiple.
+template <bool Mask = false>
 FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
                                           const std::vector<int>& seqlens_k,
                                           const std::vector<int>& l2p_offsets,
                                           int hdim,
                                           int page_block_size,
-                                          bool shuffle)
+                                          bool shuffle,
+                                          MaskKind mask_kind = MaskKind::None,
+                                          int window         = 0)
 {
     if(hdim != kHeadDim)
         throw std::invalid_argument("harness only supports hdim=128 (fixed tile geometry)");
@@ -966,12 +988,11 @@ FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
     const int batch      = static_cast<int>(seqlens_q.size());
     constexpr int nhead  = 1;
     constexpr int hdim_v = kHeadDimV;
-    constexpr int kN0    = 128; // TileRows for the K/V page tracker, this file's fixed geometry
 
     for(int b = 0; b < batch; ++b)
     {
-        if(l2p_offsets[b] < 0 || l2p_offsets[b] % kN0 != 0)
-            throw std::invalid_argument("l2p_offsets[b] must be a non-negative multiple of kN0");
+        if(l2p_offsets[b] < 0)
+            throw std::invalid_argument("l2p_offsets[b] must be non-negative");
     }
 
     std::vector<int> seqstart_q(static_cast<std::size_t>(batch) + 1, 0);
@@ -1035,17 +1056,11 @@ FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
 
     const std::size_t page_elems_k = static_cast<std::size_t>(page_block_size) * kHeadDim;
     const std::size_t page_elems_v = static_cast<std::size_t>(page_block_size) * hdim_v;
-    // Sentinel, not zero: a zero fill cannot distinguish "the TDM descriptor
-    // correctly clamped this row to zero" from "the harness happened to put
-    // zero there". If the K/V view is oversized (reading past seqlen_k in the
-    // logical coordinate space), the masked-out score for that column is still
-    // forced to -inf independent of K content (see set_tile_if in
-    // block_fmha_fwd_pagedkv_pipeline_qr_ks_vs_tdm_sched.hpp), so the softmax
-    // weight P is exactly 0 there regardless of what K held. A finite sentinel
-    // in V would therefore still multiply out to 0 * finite == 0 and the bug
-    // would stay invisible. NaN breaks that: 0 * NaN == NaN in IEEE-754, so an
-    // over-read into one of these rows poisons the whole output row instead of
-    // silently matching. Fill both K and V with it for symmetry.
+    // Rows past the end of a batch's keys hold NaN: they must never be read (the TDM view
+    // ends at l2p_offset + seqlen_k), and 0 * NaN == NaN would expose an over-read even
+    // where the score is masked. Gap rows before l2p_offset hold finite data unrelated to
+    // the keys: the first K/V tile may read them and must mask them out, so finite values
+    // are required (as for the generic qr_pagedkv), and leaking them changes the output.
     const Data sentinel = ck_tile::type_convert<Data>(std::numeric_limits<float>::quiet_NaN());
     std::vector<Data> k_phys(static_cast<std::size_t>(total_pages) * page_elems_k, sentinel);
     std::vector<Data> v_phys(static_cast<std::size_t>(total_pages) * page_elems_v, sentinel);
@@ -1057,6 +1072,11 @@ FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
         // its placement in the (gappy) page pool differs.
         const auto k_local = make_input(1, 1, seqlens_k[b], kHeadDim, b * 3 + 1);
         const auto v_local = make_input(1, 1, seqlens_k[b], hdim_v, b * 3 + 2);
+        const int gap_rows = std::max(l2p_offsets[b], 1);
+        const auto k_gap   = make_input(1, 1, gap_rows, kHeadDim, 1000 + b * 3 + 1);
+        // A large V makes any leaked gap column visible far above the comparison tolerance.
+        const std::vector<Data> v_gap(static_cast<std::size_t>(gap_rows) * hdim_v,
+                                      ck_tile::type_convert<Data>(64.0f));
         for(int lp = 0; lp < pages_per_batch[b]; ++lp)
         {
             const std::int32_t physical =
@@ -1064,15 +1084,18 @@ FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
             for(int row = 0; row < page_block_size; ++row)
             {
                 const int phys_row = lp * page_block_size + row;
-                if(phys_row < l2p_offsets[b] || phys_row >= l2p_offsets[b] + seqlens_k[b])
-                    continue; // gap row (or trailing pad): never read, left as NaN sentinel
-                const int s = phys_row - l2p_offsets[b];
-                std::copy(k_local.begin() + static_cast<std::size_t>(s) * kHeadDim,
-                          k_local.begin() + static_cast<std::size_t>(s + 1) * kHeadDim,
+                if(phys_row >= l2p_offsets[b] + seqlens_k[b])
+                    continue; // trailing pad: must never be read, left as NaN
+                const bool gap    = phys_row < l2p_offsets[b];
+                const int s       = gap ? phys_row : phys_row - l2p_offsets[b];
+                const auto& k_src = gap ? k_gap : k_local;
+                const auto& v_src = gap ? v_gap : v_local;
+                std::copy(k_src.begin() + static_cast<std::size_t>(s) * kHeadDim,
+                          k_src.begin() + static_cast<std::size_t>(s + 1) * kHeadDim,
                           k_phys.begin() + static_cast<std::size_t>(physical) * page_elems_k +
                               static_cast<std::size_t>(row) * kHeadDim);
-                std::copy(v_local.begin() + static_cast<std::size_t>(s) * hdim_v,
-                          v_local.begin() + static_cast<std::size_t>(s + 1) * hdim_v,
+                std::copy(v_src.begin() + static_cast<std::size_t>(s) * hdim_v,
+                          v_src.begin() + static_cast<std::size_t>(s + 1) * hdim_v,
                           v_phys.begin() + static_cast<std::size_t>(physical) * page_elems_v +
                               static_cast<std::size_t>(row) * hdim_v);
             }
@@ -1142,13 +1165,13 @@ FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
     args.batch_stride_lse  = 0;
     args.batch_stride_o    = 0;
 
-    args.window_size_left  = -1;
-    args.window_size_right = -1;
+    args.window_size_left  = WindowFor(mask_kind, window).first;
+    args.window_size_right = WindowFor(mask_kind, window).second;
     args.sink_size         = 0;
     args.mask_type         = mask_type;
     args.min_seqlen_q      = 0;
 
-    using Kernel        = PagedKernelFor<true, false, false, false>;
+    using Kernel        = PagedGappyKernelFor<Mask>;
     auto [kargs, grids] = fmha_fwd_pagedkv_create_kargs_and_grids<Kernel>(args);
     LaunchDirect<Kernel>(kargs, stream, grids);
 
@@ -1424,6 +1447,70 @@ TEST(QrTdmSchedPaged, GroupModeGappyMatchesDenseWithNonzeroL2pOffset)
             ASSERT_EQ(dense.out[i], paged.out[i])
                 << "page_block_size=" << page_block_size << " elem=" << i;
     }
+}
+
+// Gappy offsets are arbitrary in practice (xformers only requires 0 <= start < row length), so
+// the first key of a batch usually sits mid-tile. Covers offsets that are not multiples of
+// kN0 and all mask kinds. With a misaligned offset the KV tiles cover different key ranges
+// than dense, so the softmax accumulation order differs and the outputs match to bf16
+// rounding, not bitwise.
+template <bool Mask>
+void CheckGappyUnaligned(MaskKind mask_kind, int window)
+{
+    // l2p 37: the keys [37, 237) cross a page boundary (page 128) mid-tile.
+    // l2p 129: the first key sits past page 0 (page 128), or crosses 256 (page 256).
+    // l2p 255: one key row in the first page at page 256. 1 and 300: smallest and a
+    // multi-tile offset.
+    const std::vector<int> seqlens_q   = {64, 128, 96, 200, 33, 50};
+    const std::vector<int> seqlens_k   = {200, 384, 150, 700, 130, 90};
+    const std::vector<int> l2p_offsets = {37, 129, 300, 1, 255, 64};
+    constexpr int hdim                 = 128;
+
+    for(int page_block_size : {128, 256})
+    {
+        SCOPED_TRACE(page_block_size);
+        auto dense = LaunchGroup<false, Mask>(
+            seqlens_q, seqlens_k, hdim, page_block_size, false, mask_kind, window);
+        auto paged = run_paged_tdm_sched_group_gappy<Mask>(seqlens_q,
+                                                           seqlens_k,
+                                                           l2p_offsets,
+                                                           hdim,
+                                                           page_block_size,
+                                                           /*shuffle=*/true,
+                                                           mask_kind,
+                                                           window);
+        AssertNotAllZero(dense.out, "dense.out");
+        AssertAllFinite(paged.out, "paged.out");
+        ASSERT_EQ(dense.out.size(), paged.out.size());
+        constexpr float atol = 2e-3f;
+        constexpr float rtol = 1e-2f;
+        float max_abs_diff   = 0.0f;
+        for(size_t i = 0; i < dense.out.size(); ++i)
+        {
+            const float diff = std::abs(dense.out[i] - paged.out[i]);
+            max_abs_diff     = std::max(max_abs_diff, diff);
+            ASSERT_LE(diff, atol + rtol * std::abs(dense.out[i]))
+                << "page_block_size=" << page_block_size << " elem=" << i
+                << " dense=" << dense.out[i] << " paged=" << paged.out[i];
+        }
+        std::cout << "gappy unaligned page_block_size=" << page_block_size
+                  << " max_abs_diff=" << max_abs_diff << std::endl;
+    }
+}
+
+TEST(QrTdmSchedPaged, GroupModeGappyUnalignedL2pOffsetMatchesDense)
+{
+    CheckGappyUnaligned<false>(MaskKind::None, 0);
+}
+
+TEST(QrTdmSchedPaged, GroupModeGappyUnalignedL2pOffsetCausalMatchesDense)
+{
+    CheckGappyUnaligned<true>(MaskKind::Causal, 0);
+}
+
+TEST(QrTdmSchedPaged, GroupModeGappyUnalignedL2pOffsetSlidingWindowMatchesDense)
+{
+    CheckGappyUnaligned<true>(MaskKind::SlidingWindow, 100);
 }
 
 TEST(QrTdmSchedPaged, LseMatchesDenseForIdenticalLogicalContent)
