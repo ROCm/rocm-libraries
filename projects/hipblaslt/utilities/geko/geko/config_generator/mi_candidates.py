@@ -20,6 +20,7 @@ Two sources, both independent of the problem size:
 from __future__ import annotations
 
 import datetime
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,8 @@ from geko.config_generator.constants import (
 )
 
 MI = Tuple[int, int, int, int, int, int, int, int, int]
+
+logger = logging.getLogger("GEKO")
 
 MI_LISTS_DIR = Path(__file__).parent / "mi_lists"
 
@@ -188,3 +191,71 @@ def load_buildable_list(path: Path) -> BuildableList:
         data.get("Architecture"),
         data.get("GemmType"),
     )
+
+
+def get_candidate_mis(
+    arch: str,
+    data_type: str,
+    search_space: Optional[str],
+    override: Optional[Sequence[int]],
+    buildable_mis: bool,
+    subtile_enabled: bool,
+    gemm_config: Any,
+) -> Tuple[List[MI], Optional[BuildableList]]:
+    """MI Designer's candidate MIs, and the buildable-MI list they came from (None when enumerated).
+
+    With ``buildable_mis`` (the BUILDABLE_MIS option) on, outside the subtile search space (the lists do not
+    cover subtile kernels), the candidates are the MIs of the list for this ARCH and GEMM type
+    (``gemm_config``, a GemmConfig) that use an allowed MFMA. Otherwise, or when no list applies (each case
+    is logged), every MI geko's tiling rules allow (enumerate_candidate_mis), buildable or not.
+    """
+    if buildable_mis and not subtile_enabled:
+        listed = _listed_mis(arch, data_type, override, gemm_config)
+        if listed is not None:
+            return listed
+    return enumerate_candidate_mis(arch, data_type, search_space, override), None
+
+
+def _listed_mis(
+    arch: str, data_type: str, override: Optional[Sequence[int]], gemm_config: Any
+) -> Optional[Tuple[List[MI], BuildableList]]:
+    """The listed MIs with an allowed MFMA and their list, or None (reason logged) when no list applies."""
+    gemm_name, gt = gemm_config.name, gemm_config.gemm_type
+    target = library_logic_architecture(arch)
+    path = buildable_list_path(arch, gemm_name)
+    layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
+    generate = (f"python3 scripts/generate_buildable_mis.py --arch {target} "
+                f"--types {gt.data_type}:{gt.dest_data_type}:{gt.compute_data_type} --layouts {layout}")
+    if gemm_name != gt.gemm_name:
+        logger.warning(" No buildable-MI list applies to %s on %s: lists are generated per GEMM type (%s), and this "
+                       "GEMM's name adds more (e.g. an MX format): using every candidate MI.",
+                       gemm_name, arch, gt.gemm_name)
+        return None
+    if not path.exists():
+        logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
+                       "TensileLite cannot build. Generate it (CPU only) with: %s", gemm_name, arch, generate)
+        return None
+    if override is not None and list(override) not in allowable_mfmas(arch, data_type):
+        logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
+                    "using every candidate MI.", override, path.name)
+        return None
+    buildable = load_buildable_list(path)
+    if (buildable.arch, buildable.gemm_name) != (target, gemm_name):
+        logger.warning(" Buildable-MI list %s names Architecture %s and GemmType %s, not %s and %s: using every "
+                       "candidate MI. Regenerate it (CPU only) with: %s",
+                       path, buildable.arch, buildable.gemm_name, target, gemm_name, generate)
+        return None
+    if not buildable.mis:
+        logger.warning(" Buildable-MI list %s lists no MI: using every candidate MI.", path)
+        return None
+    if buildable.generated is None:
+        logger.warning(" Buildable-MI list %s records no generation date (Source line), so it may be stale. "
+                       "Regenerate it (CPU only) with: %s", path, generate)
+    elif abs((utc_today() - buildable.generated).days) > BUILDABLE_LIST_MAX_AGE_DAYS:
+        logger.warning(" Buildable-MI list %s was generated on %s, more than %d days from today: TensileLite or "
+                       "geko may have changed since. Regenerate it (CPU only) with: %s",
+                       path, buildable.generated, BUILDABLE_LIST_MAX_AGE_DAYS, generate)
+    allowable = allowable_mfmas(arch, data_type, override)
+    mis = [mi for mi in buildable.mis if list(mi[:4]) in allowable]
+    logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
+    return mis, buildable

@@ -21,18 +21,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from geko.config_generator.constants import *
-from geko.config_generator.constants import library_logic_architecture
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension
-from geko.config_generator.mi_candidates import (
-    BUILDABLE_LIST_MAX_AGE_DAYS,
-    allowable_mfmas,
-    buildable_list_path,
-    enumerate_candidate_mis,
-    load_buildable_list,
-    smallest_mfma_dims,
-    utc_today,
-)
-
+from geko.config_generator.mi_candidates import allowable_mfmas, get_candidate_mis, smallest_mfma_dims
 
 
 logger = logging.getLogger("GEKO")
@@ -159,14 +149,10 @@ class MIDesign:
       return MFMAParameters(MT0, MT1, TT0, TT1, WG0, WG1, MI.MIBlockM)
 
   def load_candidate_mfmas(self) -> Tuple[List[MFMA], int, int]:
-      """Candidate MatrixInstructions for the active GEMM type and ARCH.
-
-      With BUILDABLE_MIS: True (off by default) and a buildable-MI list for this GEMM
-      type (see mi_candidates.buildable_list_path), the candidates are the list's MIs:
-      the ones TensileLite code generation can build within the generic (GA)
-      search space's fork-parameter ranges. Subtile kernels (subtile search space,
-      gfx950 MX) are not covered by the lists. Otherwise (the default), every MI
-      geko's tiling rules allow (mi_candidates.enumerate_candidate_mis), buildable or not.
+      """Candidate MatrixInstructions for the active GEMM type and ARCH (mi_candidates.get_candidate_mis): with
+      BUILDABLE_MIS on and a list for this GEMM type, the MIs TensileLite can build within the generic (GA)
+      ranges, else every MI geko's tiling rules allow. Sets ``self._buildable`` to the list in use (its DepthUs
+      restrict the MI groups, _create_mi_groups), or None.
 
       Returns:
           (candidate_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA). The smallest
@@ -174,53 +160,12 @@ class MIDesign:
           a single MFMA override from config).
       """
       arch = self.config["ARCH"]
-      search_space = self.config.get("search_space")
       data_type = self._gt.data_type
       override = self.config.get("MFMA")
-      allowable = allowable_mfmas(arch, data_type, override)
-      smallest_M_in_MFMA, smallest_N_in_MFMA = smallest_mfma_dims(allowable)
-
-      mis = None
-      self._buildable = None  # the buildable-MI list in use: its DepthUs restrict the MI groups (_create_mi_groups)
-      if self.config.get("BUILDABLE_MIS", False) and not self._subtile_enabled:
-          gemm_name = self.config["GemmProblem"].name
-          gt = self.config["GemmProblem"].gemm_type
-          path = buildable_list_path(arch, gemm_name)
-          layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
-          target = library_logic_architecture(arch)
-          generate = (f"python3 scripts/generate_buildable_mis.py --arch {target} "
-                      f"--types {gt.data_type}:{gt.dest_data_type}:{gt.compute_data_type} --layouts {layout}")
-          if gemm_name != gt.gemm_name:
-              logger.warning(" No buildable-MI list applies to %s on %s: lists are generated per GEMM type (%s), "
-                             "and this GEMM's name adds more (e.g. an MX format): using every candidate MI.",
-                             gemm_name, arch, gt.gemm_name)
-          elif not path.exists():
-              logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
-                             "TensileLite cannot build. Generate it (CPU only) with: %s", gemm_name, arch, generate)
-          elif override is not None and list(override) not in allowable_mfmas(arch, data_type):
-              logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
-                          "using every candidate MI.", override, path.name)
-          else:
-              buildable = load_buildable_list(path)
-              if (buildable.arch, buildable.gemm_name) != (target, gemm_name):
-                  logger.warning(" Buildable-MI list %s names Architecture %s and GemmType %s, not %s and %s: using "
-                                 "every candidate MI. Regenerate it (CPU only) with: %s",
-                                 path, buildable.arch, buildable.gemm_name, target, gemm_name, generate)
-              elif not buildable.mis:
-                  logger.warning(" Buildable-MI list %s lists no MI: using every candidate MI.", path)
-              else:
-                  mis = [mi for mi in buildable.mis if list(mi[:4]) in allowable]
-                  self._buildable = buildable
-                  logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
-                  if buildable.generated is None:
-                      logger.warning(" Buildable-MI list %s records no generation date (Source line), so it may be "
-                                     "stale. Regenerate it (CPU only) with: %s", path, generate)
-                  elif abs((utc_today() - buildable.generated).days) > BUILDABLE_LIST_MAX_AGE_DAYS:
-                      logger.warning(" Buildable-MI list %s was generated on %s, more than %d days from today: "
-                                     "TensileLite or geko may have changed since. Regenerate it (CPU only) with: %s",
-                                     path, buildable.generated, BUILDABLE_LIST_MAX_AGE_DAYS, generate)
-      if mis is None:
-          mis = enumerate_candidate_mis(arch, data_type, search_space, override)
+      smallest_M_in_MFMA, smallest_N_in_MFMA = smallest_mfma_dims(allowable_mfmas(arch, data_type, override))
+      mis, self._buildable = get_candidate_mis(
+          arch, data_type, self.config.get("search_space"), override, self.config.get("BUILDABLE_MIS", False),
+          self._subtile_enabled, self.config.get("GemmProblem"))
 
       candidate_mfmas = [MFMA.from_list(mi) for mi in mis]
       logger.info(" Total number of candidate MatrixInstructions: %s", len(candidate_mfmas))
