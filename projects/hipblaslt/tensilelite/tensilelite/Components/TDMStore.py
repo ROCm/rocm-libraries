@@ -48,7 +48,7 @@ from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBr
   VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
-from ..ExecutionPolicy import isPersistent, isStreamK
+from ..ExecutionPolicy import isPersistent
 from .NonTemporal import tdmCacheModifiers
 
 # PackData and TensorDataMover are imported where they are used: they load every component
@@ -78,8 +78,7 @@ def tdmStoreRejectReason(state):
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
   tensor_store_from_lds per wave. That needs fp32 D, fp64 or complex float D from accumulators of their type, int32 or
-  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
-  atomic StreamK, which
+  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel, which
   stores each tile it completes, and no LDS data kept from one persistent tile to the next.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
@@ -108,8 +107,6 @@ def tdmStoreRejectReason(state):
                                     or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
     return "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
            "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
-  if isStreamK(state) and state.get("StreamKAtomic", 0):
-    return "TDMStoreInst does not support atomic StreamK"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
     return "TDMStoreInst requires GlobalSplitU=1 or -1"
   if state["UseSubtileImpl"]:

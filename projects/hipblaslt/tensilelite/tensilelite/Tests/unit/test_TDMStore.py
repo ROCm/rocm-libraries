@@ -56,7 +56,6 @@ def _state(**overrides):
     "ISA": (12, 5, 0),
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
-    "StreamKAtomic": 0,
     "PrefetchAcrossPersistent": 0,
     "ReuseAcrossPersistent": 0,
     "GlobalSplitU": 1,
@@ -99,7 +98,7 @@ def test_accepts_int32_d_from_int32_accumulators():
   assert tdmStoreRejectReason(_state(DestDataType=DataType("i"), ComputeDataType=DataType("i"))) is None
 
 
-def test_accepts_non_atomic_streamk3():
+def test_accepts_streamk3():
   assert tdmStoreRejectReason(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0)) is None
 
 
@@ -150,7 +149,6 @@ def test_disabled_is_not_validated():
 
 _OUTPUT = "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
   "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
-_ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
@@ -165,7 +163,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("d")}, _OUTPUT),
   ({"DestDataType": DataType("c")}, _OUTPUT),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
-  (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
@@ -189,7 +186,7 @@ def test_rejects_unsupported(overrides, reason):
    "PrefetchAcrossPersistent": 1},
 ], ids=["dp", "sk4", "sk5", "sk3_pap", "dp_pap", "dp_rap", "dp_rap_pap"])
 def test_accepts_persistent_policies(overrides):
-  """Every non-atomic persistent policy stores the tiles it completes directly to D: DataParallel, and
+  """Every persistent policy stores the tiles it completes directly to D: DataParallel, and
   StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid,
   also with PrefetchAcrossPersistent and ReuseAcrossPersistent."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
