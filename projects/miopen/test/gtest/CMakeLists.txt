@@ -418,10 +418,10 @@ function(miopen_forwarding_parity_entries MODE TEST_NAME)
   endforeach()
 endfunction()
 
-# Same split as the parity entries, for checks that need no GPU. A GPU runner selects with a tier
-# and an ex_gpu_<arch> label (`-L ^<tier>$ -L ^ex_gpu_<arch>$`), so a tier-only entry never runs
-# there. The bare entry serves the generic filter (`-LE ex_gpu`) and keeps the name other tooling
-# selects by.
+# Same split as the parity entries, for checks that need no GPU. On an architecture that
+# test_categories.yaml declares, the runner selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which a
+# tier-only entry does not match; elsewhere it selects `-LE ex_gpu`, which only the bare entry
+# matches. The bare entry also keeps the name other tooling selects by.
 function(miopen_add_wrapper_check NAME)
   cmake_parse_arguments(CHECK "" "" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION" ${ARGN})
   foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})

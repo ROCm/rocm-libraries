@@ -2026,8 +2026,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--baseline", required=True, help="committed public symbol baseline")
     p.add_argument(
         "--needed-baseline",
-        help="optional committed DT_NEEDED baseline; when given, the full "
-        "runtime dependency list must match it exactly",
+        help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
+        "when given, the full runtime dependency list must match it exactly",
     )
     p.set_defaults(func=cmd_check)
 
@@ -2100,9 +2100,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--needed-baseline",
-        help="optional committed DT_NEEDED baseline; when given, the full "
-        "runtime dependency list must match it exactly. The private-library and "
-        "hipDNN-backend entries are checked either way",
+        help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
+        "when given, the full runtime dependency list must match it exactly. The "
+        "private-library and hipDNN-backend entries are checked either way",
     )
     p.set_defaults(func=cmd_check_wrapper)
 
