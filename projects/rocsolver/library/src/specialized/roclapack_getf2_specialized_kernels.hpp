@@ -58,7 +58,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
     extern __shared__ double lmem[];
     T* common = reinterpret_cast<T*>(lmem);
-    common += ty * std::max(m, DIM);
+    common += ty * std::max(m, I(DIM));
 
     // local variables
     T pivot_value;

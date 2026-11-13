@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,5 +34,9 @@ ROCSOLVER_BEGIN_NAMESPACE
 *************************************************************/
 
 INSTANTIATE_GETF2_SMALL(rocblas_float_complex, rocblas_int, rocblas_int, rocblas_float_complex*);
+
+#ifdef HAVE_ROCBLAS_64
+INSTANTIATE_GETF2_SMALL(rocblas_float_complex, int64_t, int64_t, rocblas_float_complex*);
+#endif
 
 ROCSOLVER_END_NAMESPACE
