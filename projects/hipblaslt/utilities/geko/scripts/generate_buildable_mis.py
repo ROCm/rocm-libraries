@@ -7,7 +7,7 @@
 For each GEMM type (layout x data types), every candidate MatrixInstruction is checked with
 TensileLite code generation (CPU only; no GPU is used) and the ones that build within the generic
 (GA) search space's fork ranges are written to mi_lists/<arch>/<GEMM name>.yaml. MI Designer uses
-the list for every search space except subtile. See geko/config_generator/buildability.py for
+the list for every search space except subtile. See geko/config_generator/buildability/ for
 the search. Rerun whenever TensileLite code generation or geko's fork ranges change.
 
 Usage:

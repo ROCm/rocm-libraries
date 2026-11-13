@@ -154,7 +154,7 @@ BUILDABLE_MIS=1 geko --tune --inline 4096 4096 1 4096 B B S T N --arch gfx950 --
 ```
 
 The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
-(search described in [`buildability.py`](buildability.py)). Code generation and fork ranges change, so
+(search described in [`buildability/`](buildability/__init__.py)). Code generation and fork ranges change, so
 regenerate them regularly and whenever either changes:
 
 ```bash
@@ -213,7 +213,7 @@ flowchart LR
 | [`sizes.py`](sizes.py) | Size list vs grid sources |
 | [`mi_designer.py`](mi_designer.py) | MI / macro-tile exploration for each size |
 | [`mi_candidates.py`](mi_candidates.py) | Candidate MIs: geko's tiling rules, and the buildable-MI lists MI Designer reads |
-| [`buildability.py`](buildability.py) | TensileLite code-generation check behind the buildable-MI lists (used by `scripts/generate_buildable_mis.py`) |
+| [`buildability/`](buildability/__init__.py) | TensileLite code-generation check behind the buildable-MI lists (used by `scripts/generate_buildable_mis.py`) |
 | [`fork_params/`](fork_params/) | Per-`ARCH` (and generic vs heuristic) parameter and post-process implementations |
 | [`fork_param_generator.py`](fork_param_generator.py) | Combines MI design, optimization params, post-processor |
 | [`cluster_sizes.py`](cluster_sizes.py), [`config_merger.py`](config_merger.py) | Clustering and merging fork params under kernel limits |
