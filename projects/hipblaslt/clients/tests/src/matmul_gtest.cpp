@@ -125,18 +125,11 @@ namespace
             arg.a_type = arg.b_type = input_type;
 
             const uint32_t               gemm_count = 1;
-            std::vector<HipDeviceBuffer> no_device, device_aux;
-            if(auxiliary)
-            {
-                device_aux.emplace_back(type, m * n * batches);
-                EXPECT_EQ(synchronize(device_aux[0], result[0]), hipSuccess);
-            }
             std::vector<HipHostBuffer> no_host_gold, no_host;
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
-            check(nullptr,
-                  arg,
+            check(arg,
                   gemm_count,
                   {m},
                   {n},
@@ -148,16 +141,12 @@ namespace
                   {0},
                   gold,
                   auxiliary ? gold : result,
-                  no_device,
                   no_host_gold,
                   no_host,
-                  no_device,
                   auxiliary ? gold : no_host_gold,
                   auxiliary ? result : no_host,
-                  device_aux,
                   no_host_gold,
                   no_host,
-                  no_device,
                   tol,
                   norm_error,
                   atol,
@@ -205,10 +194,8 @@ namespace
             // space explicitly and put mismatched sentinels beyond the logical bias vector.
             const size_t                 capacity = std::max(test.m, test.n);
             std::vector<HipHostBuffer>   gold, result, unused;
-            std::vector<HipDeviceBuffer> device, no_device;
             gold.emplace_back(HIP_R_32F, capacity);
             result.emplace_back(HIP_R_32F, capacity);
-            device.emplace_back(HIP_R_32F, capacity);
             for(size_t i = 0; i < capacity; ++i)
             {
                 gold[0].as<float>()[i]   = 1.0f;
@@ -220,7 +207,6 @@ namespace
                 SCOPED_TRACE(corrupt);
                 // For M < N, the last value is beyond the prefix that an M-value check sees.
                 result[0].as<float>()[test.length - 1] = corrupt ? 2.0f : 1.0f;
-                ASSERT_EQ(synchronize(device[0], result[0]), hipSuccess);
                 std::vector<double> tol{0};
                 double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
                 ::testing::TestPartResultArray failures;
@@ -228,8 +214,7 @@ namespace
                     ::testing::ScopedFakeTestPartResultReporter reporter(
                         ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
                         &failures);
-                    check(nullptr,
-                          arg,
+                    check(arg,
                           1,
                           {test.m},
                           {test.n},
@@ -241,16 +226,12 @@ namespace
                           {test.length},
                           d.gold,
                           d.result,
-                          no_device,
                           unused,
                           unused,
-                          no_device,
                           unused,
                           unused,
-                          no_device,
                           gold,
                           result,
-                          device,
                           tol,
                           norm_error,
                           atol,
