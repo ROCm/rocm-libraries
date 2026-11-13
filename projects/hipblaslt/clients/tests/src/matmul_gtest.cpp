@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -43,6 +44,54 @@
 
 namespace
 {
+
+    TEST(BiasType, smoke_UnsupportedTypeWithoutBias)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.a_type       = HIP_R_8F_E4M3;
+        arg.b_type       = HIP_R_16F;
+        arg.c_type       = HIP_R_8F_E4M3;
+        arg.d_type       = HIP_R_8F_E4M3;
+        arg.compute_type = HIPBLAS_COMPUTE_32F;
+        arg.bias_vector  = false;
+        arg.bias_type    = HIPBLASLT_DATATYPE_INVALID;
+
+        EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E4M3);
+
+        arg.bias_type = HIP_R_8F_E5M2;
+        EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_8F_E5M2);
+    }
+
+    TEST(BiasType, smoke_ValidatesTypeWithBias)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.a_type       = HIP_R_8F_E4M3;
+        arg.b_type       = HIP_R_16F;
+        arg.c_type       = HIP_R_8F_E4M3;
+        arg.d_type       = HIP_R_8F_E4M3;
+        arg.compute_type = HIPBLAS_COMPUTE_32F;
+        arg.bias_vector  = true;
+
+        for(auto bias_type : {HIPBLASLT_DATATYPE_INVALID, HIP_R_8F_E4M3})
+        {
+            SCOPED_TRACE(bias_type);
+            arg.bias_type = bias_type;
+            try
+            {
+                derive_unset_bias_type(arg);
+                FAIL() << "Expected an unsupported bias type to be rejected";
+            }
+            catch(const std::invalid_argument& error)
+            {
+                EXPECT_STREQ(error.what(), "Invalid bias type f8_r");
+            }
+        }
+
+        arg.bias_type = HIP_R_16F;
+        EXPECT_EQ(derive_unset_bias_type(arg), HIP_R_16F);
+    }
 
     void expect_preswizzled_layout_error(const Arguments& arg, const char* expected)
     {
