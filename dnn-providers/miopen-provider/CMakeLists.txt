@@ -229,7 +229,7 @@ add_library(
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
-# Mark MIOpen's public headers as system headers by include name, so the provider's -Werror and
+# Mark every header included as <miopen/...> as a system header, so the provider's -Werror and
 # clang-tidy ignore them (on Windows, miopen.h trips -Wmicrosoft-enum-value). Marking MIOpen's
 # include directories SYSTEM instead would not work: the in-tree target is shared with MIOpen's
 # tests, CK plugins and driver, and SYSTEM would put ROCM_PATH/include ahead of this checkout's
