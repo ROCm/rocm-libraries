@@ -9,8 +9,10 @@
   "metadata": "f9010275-dee5-4388-9343-4e256b3914e5",
   "sort_kernel_catalog": {
     "default": [
-      "7daed91f-2173-4cd6-a3a4-0281e509c8ab",
-      "2254f3e3-981d-4230-8ceb-81b1b9926f30"
+      "7daed91f-2173-4cd6-a3a4-0281e509c8ab"
+    ],
+    "gfx950": [
+      "4c22dff2-4a54-4830-b065-35f92efbd799"
     ]
   },
   "knobs": [
