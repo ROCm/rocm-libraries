@@ -118,11 +118,10 @@ GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     features["conv_stride_w"] =
         static_cast<float>(ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
 
-    // 19–21: dilation_d, dilation_h, dilation_w
-    if(is3d)
-    {
-        features["dilation_d"] = static_cast<float>(problem.GetDilationD());
-    }
+    // 19–21: dilation_d, dilation_h, dilation_w. dilation_d is always 1 in 2D; the gfx1250 2D
+    // candidate-selection models take it as an active input (gfx942/gfx950 keep it constant, so the
+    // extra map entry is unused there), so supply it unconditionally.
+    features["dilation_d"] = static_cast<float>(problem.GetDilationD());
     features["dilation_h"] = static_cast<float>(problem.GetDilationH());
     features["dilation_w"] = static_cast<float>(problem.GetDilationW());
 
