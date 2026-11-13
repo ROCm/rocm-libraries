@@ -442,6 +442,9 @@ namespace hipblaslt_ext::experimental
 
 namespace hipblaslt_jit
 {
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+    std::shared_ptr<const Jit> makeHipKittensJit();
+#endif
 
     namespace
     {
@@ -456,12 +459,21 @@ namespace hipblaslt_jit
             return *backends;
         }
 
-        // The backends a query asks, in order, for the slots still open.
+        // The backends a query asks, in order, for the slots still open: those
+        // added with addHeuristicBackend, then HipKittens when it is built.
         std::vector<std::shared_ptr<const Jit>> processBackends()
         {
-            auto&                       backends = heuristicBackends();
-            std::lock_guard<std::mutex> lock(backends.mutex);
-            return backends.added;
+            std::vector<std::shared_ptr<const Jit>> backends;
+            {
+                auto&                       added = heuristicBackends();
+                std::lock_guard<std::mutex> lock(added.mutex);
+                backends = added.added;
+            }
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+            if(auto hipkittens = makeHipKittensJit())
+                backends.push_back(std::move(hipkittens));
+#endif
+            return backends;
         }
     }
 

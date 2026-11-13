@@ -30,8 +30,8 @@ namespace hipblaslt_ext::experimental::jit
                    Diagnostics&                                      diagnostics);
 
     // Heuristic queries under HIPBLASLT_JIT=1 or 2 ask jit, after the backends
-    // added before it. Nothing in the library adds one; the JIT tests add the
-    // replay backend.
+    // added before it and before HipKittens when it is built. The JIT tests add
+    // the replay backend.
     HIPBLASLT_EXPORT void addHeuristicBackend(std::shared_ptr<const hipblaslt_jit::Jit> jit);
 
     // Build the implemented GEMM request from existing hipBLASLt descriptors.

@@ -194,3 +194,18 @@ foreach(mode IN ITEMS off fallback forced)
     hipblaslt_jit_catch_test(jit-heuristic-${mode} jit-gpu hipblaslt-jit-heuristic-test
         "heuristic ${mode}")
 endforeach()
+
+get_target_property(hipblaslt_definitions hipblaslt COMPILE_DEFINITIONS)
+if(HIPBLASLT_JIT_HIPKITTENS IN_LIST hipblaslt_definitions)
+    add_executable(hipblaslt-jit-hipkittens-test hipkittens_backend_test.cpp)
+    target_include_directories(hipblaslt-jit-hipkittens-test PRIVATE
+        "${hipblaslt_jit_source}"
+        "${hipblaslt_jit_source}/rocblaslt/include"
+        "${hipblaslt_jit_source}/rocblaslt/src/include")
+    target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE
+        roc::hipblaslt roc::tensilelite-host hip::device)
+    # The heuristic case sets HIPBLASLT_JIT, which is read once per process.
+    hipblaslt_jit_catch_test(jit-hipkittens jit-gpu hipblaslt-jit-hipkittens-test "~[heuristic]")
+    hipblaslt_jit_catch_test(jit-hipkittens-heuristic jit-gpu hipblaslt-jit-hipkittens-test
+        "[heuristic]")
+endif()
