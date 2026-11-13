@@ -129,7 +129,9 @@ MultiColored (symmetric) Gauss-Seidel / (S)SOR
 
 The Multi-Colored Symmetric Gauss-Seidel / SSOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the forward and backward substitution is obtained by performing a multi-colored decomposition. Details on the Symmetric Gauss-Seidel / SSOR algorithm can be found in the :cpp:class:`rocalution::SGS` preconditioner.
 
-The Multi-Colored Gauss-Seidel / SOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the forward substitution is obtained by performing a multi-colored decomposition. Details on the Gauss-Seidel / SOR algorithm can be found in the :cpp:class:`rocalution::GS` preconditioner.
+The Multi-Colored Gauss-Seidel / SOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the backward substitution is obtained by performing a multi-colored decomposition, which this preconditioner requires. Details on the Gauss-Seidel / SOR algorithm can be found in the :cpp:class:`rocalution::GS` preconditioner, which applies the forward sweep instead.
+
+The relaxation parameter of both is set with :cpp:func:`rocalution::MultiColoredSGS::SetRelaxation`. Without the multi-colored decomposition (see :cpp:func:`rocalution::MultiColored::SetDecomposition`), the Multi-Colored Symmetric Gauss-Seidel / SSOR preconditioner needs it set before it is built.
 
 .. note::
 
@@ -185,7 +187,7 @@ with :math:`S=ED^{-1}F`, where :math:`D` are the diagonal elements of :math:`K`.
 (Restricted) Additive Schwarz preconditioner
 ============================================
 
-The Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. Those restriction operators produce sub-matrices which overlap. This leads to contributions from two preconditioners on the overlapped area which are scaled by :math:`1/2`.
+The Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. Those restriction operators produce sub-matrices which overlap. Several preconditioners contribute on the overlapped area, so each row is scaled by :math:`1/k`, where :math:`k` is the number of sub-matrices that hold it.
 
 The Restricted Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. The RAS method is a mixture of block Jacobi and the AS scheme. In this case, the sub-matrices contain overlapped areas from other blocks, too.
 
