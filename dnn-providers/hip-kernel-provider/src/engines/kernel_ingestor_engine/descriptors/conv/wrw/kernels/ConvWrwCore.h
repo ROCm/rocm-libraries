@@ -25,6 +25,10 @@
 // The matrix-core step is K1's atom: D[k][c] += A[k][q] B[c][q], A = dy, B = x, the reduction
 // over positions. Both LDS tiles are position-contiguous rows; a channels-last operand is
 // transposed on its way into LDS (KV positions per stored word).
+//
+// Every block-wide barrier here is k1LdsBarrier (ConvIgemmCore.h): the waves of a block exchange
+// data through LDS only, so on gfx12 the barrier fences the local address space alone (no L0
+// invalidate after each barrier); elsewhere it is __syncthreads(), as before.
 #pragma once
 
 #include "ConvIgemmCore.h"
@@ -1369,7 +1373,7 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
         issue(true);
         tiles.template wait<0, 0>();
         tiles.store(a, lds, lds + Tiles::A_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
     }
     const int kb = Atom::template kBase<KPL>(lane);
     int buf = 0;
@@ -1408,7 +1412,7 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
             T* nA = lds + (buf ^ 1) * BUF;
             tiles.store(a, nA, nA + Tiles::A_ELEMS, tid);
         }
-        __syncthreads();
+        k1LdsBarrier();
         buf ^= 1;
     }
     k3StorePartials<T, Atom, FR, S, FK, FC, WTK, WTC>(
@@ -1848,7 +1852,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         issue(true);
         waitLoads();
         store(lds, lds + A_ELEMS);
-        __syncthreads();
+        k1LdsBarrier();
     }
     int kb = 0;
     if constexpr(!FMA)
@@ -1939,7 +1943,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             T* nA = lds + (buf ^ 1) * BUF;
             store(nA, nA + A_ELEMS);
         }
-        __syncthreads();
+        k1LdsBarrier();
         buf ^= 1;
     }
     if constexpr(FMA)
@@ -2337,7 +2341,7 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
         issue(true);
         tiles.template wait<0, 0>();
         tiles.store(a, lds, lds + Tiles::A_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
     }
     const int kb = Atom::template kBase<KPL>(lane);
     int buf = 0;
@@ -2374,7 +2378,7 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
             T* nA = lds + (buf ^ 1) * BUF;
             tiles.store(a, nA, nA + Tiles::A_ELEMS, tid);
         }
-        __syncthreads();
+        k1LdsBarrier();
         buf ^= 1;
     }
 
@@ -2599,7 +2603,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         issue(K3Int<0>{}, true, it >= begin);
         tiles.template wait<0, 0>();
         tiles.template store<0>(a, lds, lds + Tiles::A_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
     }
     const int kb = Atom::template kBase<KPL>(lane);
     constexpr int TRB = Tiles::TR ? 1 : 0;
@@ -2661,7 +2665,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
             T* nA = lds + (J ^ 1) * BUF;
             tiles.template store<0>(a, nA, nA + Tiles::A_ELEMS, tid);
         }
-        __syncthreads();
+        k1LdsBarrier();
         ++it;
     };
     while(it < end)
@@ -3044,12 +3048,12 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
     int mc = m, slot = 0, xb = 0;
     for(int i = tid; i < SLOTS * Tiles::A_ELEMS; i += THREADS)
         ldsA[i] = T(0);
-    __syncthreads();
+    k1LdsBarrier();
     if(begin < end)
     {
         issue(true, it >= begin);
         tiles.store(ldsA, ldsB, tid);
-        __syncthreads();
+        k1LdsBarrier();
     }
     // Ring slots of the rows r = 0 .. R - 1 back (slot of the current row first).
     while(it < end)
@@ -3102,15 +3106,15 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
         }
         // Next step's dy row replaces the oldest slot; a new track first clears the ring.
         const int ns = slot + 1 == SLOTS ? 0 : slot + 1;
-        __syncthreads();
+        k1LdsBarrier();
         if(mc == 0 && it + 1 < end)
         {
             for(int i = tid; i < SLOTS * Tiles::A_ELEMS; i += THREADS)
                 ldsA[i] = T(0);
-            __syncthreads();
+            k1LdsBarrier();
         }
         tiles.store(ldsA + ns * Tiles::A_ELEMS, ldsB + (xb ^ 1) * Tiles::B_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
         (void)trackStart;
         slot = ns;
         xb ^= 1;
@@ -3474,7 +3478,7 @@ __device__ K3_LOOP_INLINE void k3WrwRowsFma(const K3Args& a)
         issue(true);
         k3WaitLoads<0>();
         tiles.store(lds, lds + Tiles::A_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
     }
     int buf = 0;
     for(long long step = begin; step < end; ++step)
@@ -3510,7 +3514,7 @@ __device__ K3_LOOP_INLINE void k3WrwRowsFma(const K3Args& a)
         }
         k3WaitLoads<0>();
         tiles.store(lds + (buf ^ 1) * BUF, lds + (buf ^ 1) * BUF + Tiles::A_ELEMS, tid);
-        __syncthreads();
+        k1LdsBarrier();
         buf ^= 1;
     }
     k3WaitLoads<0>();
@@ -3911,7 +3915,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
             // Wait for this step's slot (NS - 2 newer steps may still load), fix it, publish.
             k3WaitLoads<(NS - 2) * G::LOADS>();
             fixup(sc);
-            __syncthreads();
+            k1LdsBarrier();
             // Issue the step NS - 1 ahead into the slot freed last step.
             constexpr int NEXT = (J + NS - 1) % NS;
             advance();
@@ -4250,7 +4254,7 @@ __device__ inline void k3ReduceRows(const K3ReduceArgs& a)
             sum += __builtin_nontemporal_load(src + sp * a.partialElems);
         tile[cl * taps + tap] = sum;
     }
-    __syncthreads();
+    k1LdsBarrier();
     T* o = static_cast<T*>(a.dw) + gk * a.wk + static_cast<long long>(c0) * taps;
     for(int e = threadIdx.x; e < cn * taps; e += blockDim.x)
     {
@@ -4311,7 +4315,7 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
     }
     if(grp > 0)
         part[grp - 1][lane] = sum;
-    __syncthreads();
+    k1LdsBarrier();
     if(grp != 0 || !live)
         return;
     sum += part[0][lane];
