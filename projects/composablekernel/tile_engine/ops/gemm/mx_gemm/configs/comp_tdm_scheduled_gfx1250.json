@@ -103,12 +103,6 @@
             "values": [
                 4
             ]
-        },
-        "half_b_order": {
-            "values": [
-                "ahead",
-                "late"
-            ]
         }
     },
     "k_block_per_cu": 1

@@ -15,7 +15,6 @@ using ck_tile::bf16_t;
 using ck_tile::bf8_t;
 using ck_tile::fp8_t;
 using ck_tile::half_t;
-using ck_tile::MxTdmScheduledHalfBOrder;
 using ck_tile::MxTdmScheduledHalfPlr;
 using ck_tile::pk_fp4_t;
 
@@ -73,15 +72,10 @@ TEST(MxGemmTdmScheduled, Fp4Clusters)
 TEST(MxGemmTdmScheduled, Fp4ScheduleVariants)
 {
     using S = Shape<false, false, 0, 8>;
-    check<Fp4Big<fp8_t,
-                 Tu<4, 4, 2, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
-                 S>>(1024, 1024, 4096);
+    check<Fp4Big<fp8_t, Tu<4, 4, 2>, S>>(1024, 1024, 4096);
     check<Fp4Big<fp8_t, Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::None>, S>>(1024, 1024, 4096);
     check<Fp4Big<fp8_t, Tu<4, 4, 4, -1, 0, MxTdmScheduledHalfPlr::None>, S>>(1024, 1024, 4096);
-    check<
-        Fp4Big<fp8_t,
-               Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Ahead, false>,
-               S>>(1024, 1024, 4096);
+    check<Fp4Big<fp8_t, Tu<4, 4, 4, -1, 1, MxTdmScheduledHalfPlr::B, false>, S>>(1024, 1024, 4096);
     check<Fp4Big<fp8_t, Tu<4, 4, 0>, S>>(1024, 1024, 4096);
     check<Fp4Big<fp8_t, Tu<4, 4, 8>, S>>(1024, 1024, 4096);
 }
@@ -121,18 +115,17 @@ TEST(MxGemmTdmScheduled, Fp4TilesAndWaveGroups)
                  32,
                  Tu<2, 2>,
                  Shape<false, false, 0, 4>>>(512, 512, 2048);
-    check<
-        Kernel<pk_fp4_t,
-               pk_fp4_t,
-               fp8_t,
-               256,
-               64,
-               512,
-               4,
-               1,
-               32,
-               Tu<1, 1, 4, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late, false>,
-               Shape<false, false, 0, 4>>>(512, 512, 2048);
+    check<Kernel<pk_fp4_t,
+                 pk_fp4_t,
+                 fp8_t,
+                 256,
+                 64,
+                 512,
+                 4,
+                 1,
+                 32,
+                 Tu<1, 1, 4, -1, 1, MxTdmScheduledHalfPlr::B, false>,
+                 Shape<false, false, 0, 4>>>(512, 512, 2048);
     // The 16x16 atom with FP4, and the MAB shape: tile_n 16, one N repeat.
     check<Kernel<pk_fp4_t,
                  pk_fp4_t,
@@ -185,17 +178,6 @@ TEST(MxGemmTdmScheduled, EightBitTypes)
                  2,
                  16,
                  Tu<2, 2, 4, -1, 1, MxTdmScheduledHalfPlr::None>,
-                 S>>(512, 512, 2048);
-    check<Kernel<fp8_t,
-                 fp8_t,
-                 fp8_t,
-                 128,
-                 128,
-                 256,
-                 2,
-                 2,
-                 16,
-                 Tu<2, 2, 4, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
                  S>>(512, 512, 2048);
     check<Kernel<fp8_t,
                  fp8_t,

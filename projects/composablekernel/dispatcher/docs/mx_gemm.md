@@ -114,19 +114,18 @@ product (Tile Engine). Missing keys take rocKE's defaults:
 | `cluster_signal_wmmas` | `null` | WMMAs before the cluster signal; `null` is rocKE's derived value |
 | `local_prefetch` | `1` | LDS-to-register prefetch depth (0 or 1) |
 | `half_plr` | `"b"` | Split the B register prefetch in halves (`"b"`) or not (`"none"`) |
-| `half_b_order` | `"ahead"` | Order of the B halves (`"ahead"` or `"late"`) |
 | `lds_segment_interleave` | `true` | Interleave the LDS segments |
 | `edge` | `true` | Partial M and N tiles (`false` drops the edge code) |
 | `tail_steps` | `0` | K tail in 128-wide steps (`K mod tile_k`) |
 | `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
 | `store_width` | `0` | D store width in elements; `0` is the widest the tile allows |
 
-The first seven are rocKE's knobs; the last four are shape traits fixed at
+The first six are rocKE's knobs; the last four are shape traits fixed at
 compile time (rocKE derives them from its compile-time M, N and K). Every kernel
 runs any K tile count: the pipeline picks the odd or even variant at run time,
 as the other TDM pipelines do. The kernel name adds rocKE's tuning suffix and
 the non-default traits, for example
-`..._256x256x512_2x2x1_32x16x128_c2x2_pf2_hblate_noedge`.
+`..._256x256x512_2x2x1_32x16x128_c2x2_pf2_noedge`.
 
 In the dispatcher, put the keys at the top level of the configuration, or in
 `MxGemmKernelConfig(tuning={...})`:
@@ -134,7 +133,7 @@ In the dispatcher, put the keys at the top level of the configuration, or in
 ```python
 MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_scheduled",
                    tile_m=256, tile_n=256, tile_k=512, warp_tile_m=32,
-                   tuning={"cluster_dim": [2, 2], "half_b_order": "late"})
+                   tuning={"cluster_dim": [2, 2], "gl2_prefetch_distance": 2})
 ```
 
 In a Tile Engine JSON, add a `tuning_config` section; every combination of its
@@ -144,7 +143,7 @@ rules (`mx_gemm/mx_tdm_scheduled.py`):
 ```json
 "tuning_config": {
   "cluster_dim": {"values": [[4, 4], [2, 2]]},
-  "half_b_order": {"values": ["ahead", "late"]}
+  "gl2_prefetch_distance": {"values": [4, 2]}
 }
 ```
 

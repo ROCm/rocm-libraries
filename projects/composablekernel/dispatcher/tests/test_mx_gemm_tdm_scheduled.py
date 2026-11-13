@@ -84,7 +84,6 @@ class TestTuning(unittest.TestCase):
     def test_cpp_spelling(self):
         t = {
             "cluster_dim": [2, 2],
-            "half_b_order": "late",
             "lds_segment_interleave": False,
         }
         spec = sched.spec_from_tile(TILE, t, out_dtype="fp16")
@@ -96,7 +95,7 @@ class TestTuning(unittest.TestCase):
         self.assertEqual(
             sched.cpp_policy_type(t),
             "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, "
-            "ck_tile::MxTdmScheduledHalfPlr::B, ck_tile::MxTdmScheduledHalfBOrder::Late, false>",
+            "ck_tile::MxTdmScheduledHalfPlr::B, false>",
         )
         self.assertEqual(
             sched.cpp_kernel_traits(spec, {"edge": False, "tail_steps": 2}),
@@ -104,7 +103,7 @@ class TestTuning(unittest.TestCase):
         )
         self.assertEqual(
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
-            "_c2x2_hblate_lsi0_noedge_tail2",
+            "_c2x2_lsi0_noedge_tail2",
         )
 
     def test_instance_runs_problem(self):
@@ -301,7 +300,7 @@ class TestTileEngine(unittest.TestCase):
 
     def test_shipped_config(self):
         rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
-        self.assertEqual(len(rows), 20)
+        self.assertEqual(len(rows), 10)
         names = [r[0] for r in rows]
         self.assertEqual(len(set(names)), len(names))
         for name, tile, trait, token, suffix in rows:
@@ -342,7 +341,9 @@ class TestTileEngine(unittest.TestCase):
 
     def test_gen_single(self):
         rows = self._list(_MX / "configs" / "comp_tdm_scheduled_gfx1250.json")
-        name, tile, trait, token, suffix = next(r for r in rows if "hblate" in r[4])
+        name, tile, trait, token, suffix = next(
+            r for r in rows if r[4].startswith("_c2x2")
+        )
         _builder(
             "--working_path",
             str(self.dir),
@@ -369,7 +370,7 @@ class TestTileEngine(unittest.TestCase):
         ).read_text()
         self.assertIn(f'KERNEL_NAME = "{name}"', header)
         self.assertIn("static constexpr bool KMajorScales = true;", header)
-        self.assertIn("ck_tile::MxTdmScheduledHalfBOrder::Late", header)
+        self.assertIn("ck_tile::sequence<2, 2, 1>", header)
         self.assertIn("ck_tile::GemmTile2DNMajorPartitioner", header)
         self.assertIn("Kernel::MakeKernelArgs(args)", header)
         self.assertIn("using CDataType = ck_tile::fp16_t;", header)
@@ -473,11 +474,11 @@ class TestDispatcher(unittest.TestCase):
             tile_k=512,
             warp_tile_m=32,
             warp_tile_n=16,
-            tuning={"cluster_dim": (2, 2), "half_b_order": "late"},
+            tuning={"cluster_dim": (2, 2), "gl2_prefetch_distance": 2},
         ).to_codegen_config()
         self.assertEqual(cfg["epilogue"], "direct")
         self.assertEqual(cfg["cluster_dim"], [2, 2])
-        self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_hblate"))
+        self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_pf2"))
 
 
 class TestRockeConversion(unittest.TestCase):
@@ -489,6 +490,20 @@ class TestRockeConversion(unittest.TestCase):
         self.assertEqual(cfg["edge"], False)
         self.assertNotIn("odd_tiles", cfg)
         self.assertTrue(codegen.kernel_name(cfg).endswith("_32x16x128_c4x4_noedge"))
+
+    def test_half_b_late_rejected(self):
+        name = "mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4"
+        with self.assertRaisesRegex(ValueError, "hblate"):
+            sched.parse_kernel_name(name + "_hblate")
+        spec = sched.parse_kernel_name(name)[1].to_dict()
+        self.assertEqual(
+            sched.MxTdmScheduledSpec.from_dict({**spec, "half_b_order": "ahead"}),
+            sched.MxTdmScheduledSpec.from_dict(spec),
+        )
+        with self.assertRaisesRegex(ValueError, "half_b_order"):
+            sched.MxTdmScheduledSpec.from_dict({**spec, "half_b_order": "late"})
+        with self.assertRaisesRegex(ValueError, "half_b_order"):
+            sched.normalize_tuning({"half_b_order": "late"})
 
     def test_cli(self):
         r = subprocess.run(

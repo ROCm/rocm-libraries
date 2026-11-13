@@ -24,15 +24,6 @@ enum class MxTdmScheduledHalfPlr : int
     None = 1
 };
 
-/// Where the half-B reads of the next K step go (HalfPlr::B only). Ahead: everything but B's second
-/// half before the first wait; three B half-sets live. Late: scales and A after the first wait, B's
-/// halves one half later; two B half-sets live.
-enum class MxTdmScheduledHalfBOrder : int
-{
-    Ahead = 0,
-    Late  = 1
-};
-
 /// Why a Problem and policy do not build, or an M x N x K problem does not run, in the order
 /// rocKE's validate() (instances/gfx1250/mx_gemm.py at commit b32989439dc) checks. Ok when it
 /// builds.
@@ -54,8 +45,6 @@ enum class MxTdmScheduledReason : int
     LocalPrefetch,
     HalfPlr,
     HalfPlrB,
-    HalfBOrder,
-    HalfBLate,
     SignalWmmas,
     Gl2Distance,
     ClusterDim,
@@ -90,8 +79,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmSche
     case MxTdmScheduledReason::LocalPrefetch: return "local_prefetch";
     case MxTdmScheduledReason::HalfPlr: return "half_plr";
     case MxTdmScheduledReason::HalfPlrB: return "half_plr_b";
-    case MxTdmScheduledReason::HalfBOrder: return "half_b_order";
-    case MxTdmScheduledReason::HalfBLate: return "half_b_late";
     case MxTdmScheduledReason::SignalWmmas: return "signal_wmmas";
     case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
@@ -133,8 +120,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
     case MxTdmScheduledReason::HalfPlr: return "half_plr must be 'b' or 'none'";
     case MxTdmScheduledReason::HalfPlrB:
         return "half_plr 'b' needs local_prefetch 1 and an even wave_repeat_n";
-    case MxTdmScheduledReason::HalfBOrder: return "half_b_order must be 'ahead' or 'late'";
-    case MxTdmScheduledReason::HalfBLate: return "half_b_order 'late' needs half_plr 'b'";
     case MxTdmScheduledReason::SignalWmmas:
         return "cluster_signal_wmmas must be in 0..signal_limit";
     case MxTdmScheduledReason::Gl2Distance:
@@ -318,20 +303,18 @@ struct InvalidTuning<MxTdmScheduledReason::Ok>
  * @tparam LdsSegmentInterleave TensileLite's LDSSegmentInterleave 1 (true) or 0 (the baseline
  *                              region order).
  */
-template <index_t Gl2PrefetchDistance         = 4,
-          index_t ClusterSignalWmmas          = -1,
-          index_t LocalPrefetch               = 1,
-          MxTdmScheduledHalfPlr HalfPlr       = MxTdmScheduledHalfPlr::B,
-          MxTdmScheduledHalfBOrder HalfBOrder = MxTdmScheduledHalfBOrder::Ahead,
-          bool LdsSegmentInterleave           = true>
+template <index_t Gl2PrefetchDistance   = 4,
+          index_t ClusterSignalWmmas    = -1,
+          index_t LocalPrefetch         = 1,
+          MxTdmScheduledHalfPlr HalfPlr = MxTdmScheduledHalfPlr::B,
+          bool LdsSegmentInterleave     = true>
 struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 {
-    static constexpr index_t kGl2PrefetchDistance         = Gl2PrefetchDistance;
-    static constexpr index_t kClusterSignalWmmas          = ClusterSignalWmmas;
-    static constexpr index_t kLocalPrefetch               = LocalPrefetch;
-    static constexpr MxTdmScheduledHalfPlr kHalfPlr       = HalfPlr;
-    static constexpr MxTdmScheduledHalfBOrder kHalfBOrder = HalfBOrder;
-    static constexpr bool kLdsSegmentInterleave           = LdsSegmentInterleave;
+    static constexpr index_t kGl2PrefetchDistance   = Gl2PrefetchDistance;
+    static constexpr index_t kClusterSignalWmmas    = ClusterSignalWmmas;
+    static constexpr index_t kLocalPrefetch         = LocalPrefetch;
+    static constexpr MxTdmScheduledHalfPlr kHalfPlr = HalfPlr;
+    static constexpr bool kLdsSegmentInterleave     = LdsSegmentInterleave;
 
     /// K of the scaled WMMA atom, the warp tile's K.
     static constexpr index_t kAtomK = 128;
@@ -478,16 +461,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return kLocalPrefetch == 1;
     }
 
-    /// Whether the B fragments are read in two halves, and whether the second half is read late.
+    /// Whether the B fragments are read in two halves.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool GetHalfB()
     {
         return kLocalPrefetch == 1 && kHalfPlr == MxTdmScheduledHalfPlr::B;
-    }
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool GetHalfBLate()
-    {
-        return GetHalfB<Problem>() && kHalfBOrder == MxTdmScheduledHalfBOrder::Late;
     }
 
     /// The most WMMAs the cluster signal may wait for: a K step's, half of them with half B.
@@ -530,29 +508,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return min_i(GetLdsReads<Problem>(), kDscntMax);
     }
 
-    /// The K loop's s_wait_dscnt count i (0 or 1), clamped to the 6-bit immediate: the reads
-    /// issued after the ones each wait needs.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetDscntWait(index_t i)
-    {
-        index_t wait = 0;
-        if(!kLocalPrefetch)
-            wait = 0;
-        else if(GetHalfBLate<Problem>())
-            wait = i == 0 ? GetBHalfReads<Problem>() : GetHeadReads<Problem>();
-        else
-            wait = i == 0 ? GetLdsReads<Problem>() : 0;
-        return min_i(wait, kDscntMax);
-    }
-
     /// Reads of the other buffer left in flight at the cluster late wait, clamped.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
     {
-        index_t pending = 0;
-        if(kLocalPrefetch)
-            pending = GetHalfBLate<Problem>() ? GetHeadReads<Problem>() : GetLdsReads<Problem>();
-        return min_i(pending, kDscntMax);
+        return kLocalPrefetch ? GetReadsPerStep<Problem>() : 0;
     }
 
     /// The first compile-time rule of rocKE's validate() the Problem and this policy break, or
@@ -598,11 +558,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             return R::HalfPlr;
         if(kHalfPlr == MxTdmScheduledHalfPlr::B && (kLocalPrefetch != 1 || rn % 2))
             return R::HalfPlrB;
-        if(kHalfBOrder != MxTdmScheduledHalfBOrder::Ahead &&
-           kHalfBOrder != MxTdmScheduledHalfBOrder::Late)
-            return R::HalfBOrder;
-        if(kHalfBOrder == MxTdmScheduledHalfBOrder::Late && !GetHalfB<Problem>())
-            return R::HalfBLate;
         if(GetSignalWmmas<Problem>() < 0 || GetSignalWmmas<Problem>() > GetSignalLimit<Problem>())
             return R::SignalWmmas;
         if(kGl2PrefetchDistance != 0 && !(2 <= kGl2PrefetchDistance && kGl2PrefetchDistance <= 8))
@@ -1161,8 +1116,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 
     /**
      * @brief The part of rocKE's kernel name after the tile: the cluster, then every value that is
-     *        not its default (out dtype, wave group, pf, cs, then the lp0 / hplrnone / hblate /
-     *        lsi0 / mma16 flags), each with a leading "_".
+     *        not its default (out dtype, wave group, pf, cs, then the lp0 / hplrnone / lsi0 /
+     *        mma16 flags), each with a leading "_".
      *
      * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
      *                          already carries in its tile and type fields.
@@ -1190,8 +1145,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             name += "_lp0";
         if(kHalfPlr == MxTdmScheduledHalfPlr::None)
             name += "_hplrnone";
-        if(GetHalfBLate<Problem>())
-            name += "_hblate";
         if(!kLdsSegmentInterleave)
             name += "_lsi0";
         if(with_shape_parts && !IsMma32<Problem>())
@@ -1253,18 +1206,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         const index_t rn = GetWaveRepeatN<Problem>();
         return max_i(1, rm / 4) + max_i(1, rn / 4) +
                GetChunksPerLane<Problem>() * (GetAtomM<Problem>() / 16 * rm + rn);
-    }
-    /// LDS reads of half of one K step's B fragments.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetBHalfReads()
-    {
-        return GetChunksPerLane<Problem>() * (GetWaveRepeatN<Problem>() / 2);
-    }
-    /// LDS reads of one K step's scales and A rows.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetHeadReads()
-    {
-        return GetLdsReads<Problem>() - 2 * GetBHalfReads<Problem>();
     }
 
     /// pad_bytes of LDS padding after every block_bytes written (TensileLite LdsPad and

@@ -50,7 +50,6 @@ TUNING_DEFAULTS: Dict[str, object] = {
     "cluster_signal_wmmas": None,
     "local_prefetch": 1,
     "half_plr": "b",
-    "half_b_order": "ahead",
     "lds_segment_interleave": True,
 }
 
@@ -83,8 +82,6 @@ REASONS = (
     "local_prefetch",
     "half_plr",
     "half_plr_b",
-    "half_b_order",
-    "half_b_late",
     "signal_wmmas",
     "gl2_distance",
     "cluster_dim",
@@ -192,6 +189,15 @@ def _place(
     )
 
 
+def _drop_half_b_order(fields: Dict, what: str) -> None:
+    """Removes rocKE's half_b_order: "ahead" is the only order; "late" is not supported."""
+    order = str(fields.pop("half_b_order", "ahead")).lower()
+    if order != "ahead":
+        raise ValueError(
+            f"half_b_order {order!r} in the {what} is not supported (only 'ahead')"
+        )
+
+
 @dataclass(frozen=True)
 class MxTdmScheduledSpec:
     """One comp_tdm_scheduled kernel: problem, tile and tuning, with rocKE's field names and defaults."""
@@ -209,7 +215,6 @@ class MxTdmScheduledSpec:
     cluster_signal_wmmas: Optional[int] = None
     local_prefetch: int = 1
     half_plr: str = "b"
-    half_b_order: str = "ahead"
     lds_segment_interleave: bool = True
     mma: str = "32x16"
     a_dtype: str = "fp4"
@@ -218,6 +223,7 @@ class MxTdmScheduledSpec:
     @classmethod
     def from_dict(cls, d: Dict) -> "MxTdmScheduledSpec":
         fields = dict(d)
+        _drop_half_b_order(fields, "spec")
         for key in ("wave_group", "cluster_dim"):
             if key in fields:
                 fields[key] = tuple(fields[key])
@@ -370,33 +376,8 @@ class MxTdmScheduledSpec:
         )
 
     @property
-    def half_b_late(self) -> bool:
-        return self.half_b and self.half_b_order == "late"
-
-    @property
-    def b_half_reads(self) -> int:
-        return self.chunks_per_lane * (self.wave_repeat_n // 2)
-
-    @property
-    def head_reads(self) -> int:
-        return self.reads_per_step - 2 * self.b_half_reads
-
-    @property
-    def num_dscnt_waits(self) -> int:
-        return 2 if self.half_b_late else 1
-
-    def dscnt_wait(self, i: int) -> int:
-        if not self.local_prefetch:
-            return 0
-        if self.half_b_late:
-            return self.b_half_reads if i == 0 else self.head_reads
-        return self.reads_per_step if i == 0 else 0
-
-    @property
     def late_pending_reads(self) -> int:
-        if not self.local_prefetch:
-            return 0
-        return self.head_reads if self.half_b_late else self.reads_per_step
+        return self.reads_per_step if self.local_prefetch else 0
 
     @property
     def grid(self) -> Tuple[int, int]:
@@ -642,10 +623,6 @@ class MxTdmScheduledSpec:
             return "half_plr"
         if self.half_plr == "b" and (self.local_prefetch != 1 or rn % 2):
             return "half_plr_b"
-        if self.half_b_order not in ("ahead", "late"):
-            return "half_b_order"
-        if self.half_b_order == "late" and not self.half_b:
-            return "half_b_late"
         if self.signal_wmmas < 0 or self.signal_wmmas > self.signal_limit:
             return "signal_wmmas"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:
@@ -703,8 +680,6 @@ class MxTdmScheduledSpec:
             name += "_lp0"
         if self.half_plr == "none":
             name += "_hplrnone"
-        if self.half_b_late:
-            name += "_hblate"
         if not self.lds_segment_interleave:
             name += "_lsi0"
         if with_shape_parts and self.mma == "16x16":
@@ -754,7 +729,6 @@ def parse_kernel_name(name: str) -> Tuple[str, MxTdmScheduledSpec]:
     }
     rest = m["rest"]
     pos = 0
-    hblate = False
     while pos < len(rest):
         f = _FLAG.match(rest, pos)
         if not f:
@@ -773,13 +747,11 @@ def parse_kernel_name(name: str) -> Tuple[str, MxTdmScheduledSpec]:
         elif f["hplrnone"]:
             fields["half_plr"] = "none"
         elif f["hblate"]:
-            hblate = True
+            raise ValueError(f"half-B late (hblate) is not supported: {name!r}")
         elif f["lsi0"]:
             fields["lds_segment_interleave"] = False
         elif f["mma16"]:
             fields["mma"] = "16x16"
-    if hblate:
-        fields["half_b_order"] = "late"
     return m["prefix"], MxTdmScheduledSpec(**fields)
 
 
@@ -801,7 +773,6 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
     if out["cluster_signal_wmmas"] is not None and out["cluster_signal_wmmas"] < 0:
         out["cluster_signal_wmmas"] = None
     out["half_plr"] = str(out["half_plr"]).lower()
-    out["half_b_order"] = str(out["half_b_order"]).lower()
     out["lds_segment_interleave"] = bool(out["lds_segment_interleave"])
     out["edge"] = bool(out["edge"])
     out["wide"] = bool(out["wide"])
@@ -928,7 +899,6 @@ def spec_from_tile(
         cluster_signal_wmmas=t["cluster_signal_wmmas"],
         local_prefetch=t["local_prefetch"],
         half_plr=t["half_plr"],
-        half_b_order=t["half_b_order"],
         lds_segment_interleave=t["lds_segment_interleave"],
         mma=mma,
         a_dtype=a_dtype,
@@ -1023,12 +993,10 @@ def cpp_policy_type(tuning: Optional[Dict]) -> str:
     t = normalize_tuning(tuning)
     signal = -1 if t["cluster_signal_wmmas"] is None else t["cluster_signal_wmmas"]
     plr = "B" if t["half_plr"] == "b" else "None"
-    order = "Late" if t["half_b_order"] == "late" else "Ahead"
     lsi = "true" if t["lds_segment_interleave"] else "false"
     return (
         f"ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<{t['gl2_prefetch_distance']}, "
-        f"{signal}, {t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, "
-        f"ck_tile::MxTdmScheduledHalfBOrder::{order}, {lsi}>"
+        f"{signal}, {t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, {lsi}>"
     )
 
 

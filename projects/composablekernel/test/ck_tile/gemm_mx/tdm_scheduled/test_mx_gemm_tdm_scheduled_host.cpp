@@ -20,7 +20,6 @@ using ck_tile::index_t;
 using ck_tile::MxTdmScheduledReason;
 
 using H = ck_tile::MxTdmScheduledHalfPlr;
-using O = ck_tile::MxTdmScheduledHalfBOrder;
 
 template <typename P, typename Policy>
 using PipelineOf = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<P, Policy>;
@@ -78,8 +77,7 @@ TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
     using ck_tile::fp8_t;
     using ck_tile::pk_fp4_t;
     using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
-    using MabTu =
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None, O::Ahead, false>;
+    using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None, false>;
     using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, -1, 1, H::None>;
     {
         SCOPED_TRACE("maf fp4");
@@ -173,20 +171,14 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     static_assert(Default::GetReason<MafProblem>() == MxTdmScheduledReason::Ok);
     static_assert(Default::Validate<MafProblem>() == nullptr);
     // 3 scale reads and 2 chunks of 4 x 2 A rows and 8 B fragments.
-    static_assert(Default::GetDscntWait<MafProblem>(0) == 35);
+    static_assert(Default::GetReadsPerStep<MafProblem>() == 35);
     static_assert(Default::GetSignalWmmas<MafProblem>() == 6);
     EXPECT_EQ((PipelineOf<MafProblem, Default>::GetRockeName(4096, 4096, 65536, "mxfp4_gemm")),
               "mxfp4_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4");
     EXPECT_EQ(Default::GetTuningName<MafProblem>(), "_c4x4");
 
-    using Late = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<
-        2,
-        -1,
-        1,
-        ck_tile::MxTdmScheduledHalfPlr::B,
-        ck_tile::MxTdmScheduledHalfBOrder::Late>;
-    static_assert(Late::GetHalfBLate<MafProblem>());
-    EXPECT_EQ(Late::GetTuningName<MafProblem>(), "_c4x4_pf2_hblate");
+    using Pf2 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2>;
+    EXPECT_EQ(Pf2::GetTuningName<MafProblem>(), "_c4x4_pf2");
 
     using Mab = ck_tile::
         MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, -1, 0, ck_tile::MxTdmScheduledHalfPlr::None>;

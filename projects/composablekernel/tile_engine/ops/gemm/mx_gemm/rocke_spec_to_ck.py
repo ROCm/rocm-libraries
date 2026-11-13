@@ -3,7 +3,7 @@
 
 """rocKE mx_gemm kernels as CK comp_tdm_scheduled configs, and back.
 
-A rocKE kernel (its name, e.g. ``mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4_hblate``,
+A rocKE kernel (its name, e.g. ``mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4_pf2``,
 or its spec dict) becomes a tile_engine config (one instance: a single value per tile, trait
 and tuning key) or a dispatcher config (unified_mx_gemm_codegen.py). With the problem's M, N
 and K the instance gets the shape traits that problem needs exactly (no edge code when M and N

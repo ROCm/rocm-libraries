@@ -171,7 +171,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kKPerByte         = Policy::template GetKPerByte<Problem>();
     static constexpr bool kLocalPrefetch       = Policy::template GetLocalPrefetch<Problem>();
     static constexpr bool kHalfB               = Policy::template GetHalfB<Problem>();
-    static constexpr bool kHalfBLate           = Policy::template GetHalfBLate<Problem>();
     static constexpr index_t kHalf             = kRn / 2;
     static constexpr bool kHasCluster          = Policy::template HasCluster<Problem>();
     static constexpr index_t kClusterX         = BlockGemmShape::kclusterN;
@@ -182,8 +181,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kReadsPerStep     = Policy::template GetReadsPerStep<Problem>();
     static constexpr index_t kLdsRowBytes      = Policy::template GetLdsRowBytes<Problem>();
     static constexpr index_t kLdsBufferStride  = Policy::template GetLdsBufferStride<Problem>();
-    static constexpr index_t kWait0            = Policy::template GetDscntWait<Problem>(0);
-    static constexpr index_t kWait1            = Policy::template GetDscntWait<Problem>(1);
     static constexpr index_t kLatePending      = Policy::template GetLatePendingReads<Problem>();
     /// The sched_fence mask of the pipeline's fences: LDS reads and WMMAs stay put, ALU work may
     /// cross.
@@ -826,7 +823,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 arrive();
         }
 
-        /// local_prefetch 1, half-B ahead: all reads of K step s + 1 before the first wait but
+        /// local_prefetch 1, half-B: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void k_tile_half_b(AccTile& acc,
@@ -867,43 +864,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 s_wait_dscnt_pinned<kReadsPerStep>();
                 gemm<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
                     acc, cur, cur_b, [&] { arrive(); });
-            });
-        }
-
-        /// local_prefetch 1, half-B late: wait, scales and A, half 0's WMMAs; wait, B half 0,
-        /// half 1's WMMAs; B half 1.
-        template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void k_tile_half_b_late(AccTile& acc,
-                                               ATile& a_tile,
-                                               BTile& b_tile,
-                                               index_t k0,
-                                               index_t parity,
-                                               index_t buffer,
-                                               index_t next_buffer) const
-        {
-            static_for<0, Steps, 1>{}([&](auto s) {
-                constexpr index_t step     = decltype(s)::value;
-                constexpr bool last        = step + 1 == Steps;
-                const ATile cur            = a_tile;
-                const BTile cur_b          = b_tile;
-                const index_t src_buf      = last ? next_buffer : buffer;
-                constexpr index_t src_step = last ? 0 : step + 1;
-                constexpr bool signal      = kHasCluster && step + 2 == Steps;
-                s_wait_dscnt_pinned<kWait0>();
-                if constexpr(last)
-                    publish_next_tile<StaticParity>(k0);
-                a_tile = block_gemm.LocalPrefetchA(src_buf, src_step);
-                gemm<true, 0, kHalf>(acc, cur, cur_b);
-                if constexpr(last)
-                {
-                    arrive_before_fill<Steps>();
-                    fill_stage(k0, parity);
-                }
-                s_wait_dscnt_pinned<kWait1>();
-                block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, src_buf, src_step);
-                gemm<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
-                    acc, cur, cur_b, [&] { arrive(); });
-                block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, src_buf, src_step);
             });
         }
 
@@ -979,9 +939,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 wait_next_tile();
                 k_tile_direct<Steps, StaticParity>(acc, k0, parity, buffer);
             }
-            else if constexpr(kHalfBLate)
-                k_tile_half_b_late<Steps, StaticParity>(
-                    acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
             else if constexpr(kHalfB)
                 k_tile_half_b<Steps, StaticParity>(
                     acc, a_tile, b_tile, k0, parity, buffer, next_buffer);

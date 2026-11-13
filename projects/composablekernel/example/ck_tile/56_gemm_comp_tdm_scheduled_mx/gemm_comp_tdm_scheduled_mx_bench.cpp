@@ -38,7 +38,6 @@ namespace {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
-using ck_tile::MxTdmScheduledHalfBOrder;
 using ck_tile::MxTdmScheduledHalfPlr;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
@@ -102,17 +101,15 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
 
 template <index_t CX,
           index_t CY,
-          index_t Gl2                    = 4,
-          index_t Signal                 = -1,
-          index_t Lp                     = 1,
-          MxTdmScheduledHalfPlr Plr      = MxTdmScheduledHalfPlr::B,
-          MxTdmScheduledHalfBOrder Order = MxTdmScheduledHalfBOrder::Ahead,
-          bool Lsi                       = true>
+          index_t Gl2               = 4,
+          index_t Signal            = -1,
+          index_t Lp                = 1,
+          MxTdmScheduledHalfPlr Plr = MxTdmScheduledHalfPlr::B,
+          bool Lsi                  = true>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy =
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
+    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Lsi>;
 };
 
 // Whole M and N tiles, no K tail.
@@ -446,20 +443,6 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            32,
                            Tu<4, 4>,
                            Whole<8>>>}},
-            {"maf_hblate",
-             {"maf, GL2 distance 2, half-B late",
-              run<Pipeline<
-                  pk_fp4_t,
-                  pk_fp4_t,
-                  fp8_t,
-                  256,
-                  256,
-                  512,
-                  2,
-                  2,
-                  32,
-                  Tu<4, 4, 2, -1, 1, MxTdmScheduledHalfPlr::B, MxTdmScheduledHalfBOrder::Late>,
-                  Whole<8>>>}},
             {"maf_c2x2",
              {"maf on a 2x2 cluster",
               run<Pipeline<pk_fp4_t,

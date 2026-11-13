@@ -101,20 +101,18 @@ using TdmKernel =
 
 /// rocKE's tuning knobs: the cluster (CX N tiles by CY M tiles), then the policy's parameters
 /// with its defaults: GL2 distance, signal WMMAs (-1 for the default), local prefetch, half PLR,
-/// half-B order, segment interleave.
+/// segment interleave.
 template <index_t CX,
           index_t CY,
-          index_t Gl2                             = 4,
-          index_t Signal                          = -1,
-          index_t Lp                              = 1,
-          ck_tile::MxTdmScheduledHalfPlr Plr      = ck_tile::MxTdmScheduledHalfPlr::B,
-          ck_tile::MxTdmScheduledHalfBOrder Order = ck_tile::MxTdmScheduledHalfBOrder::Ahead,
-          bool Lsi                                = true>
+          index_t Gl2                        = 4,
+          index_t Signal                     = -1,
+          index_t Lp                         = 1,
+          ck_tile::MxTdmScheduledHalfPlr Plr = ck_tile::MxTdmScheduledHalfPlr::B,
+          bool Lsi                           = true>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy =
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Order, Lsi>;
+    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Signal, Lp, Plr, Lsi>;
 };
 
 template <bool EdgeM, bool EdgeN, index_t TailSteps, index_t StoreWidth>
