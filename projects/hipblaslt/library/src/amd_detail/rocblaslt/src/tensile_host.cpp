@@ -8061,9 +8061,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const&  prob,
     // A heuristic query never reaches the tuner; see rocblaslt::OnlineTuner. Nor
     // does a call under a settled key, which replay could not serve.
     auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
-    const bool onlineTuning = lookup == SolutionLookup::PerDispatch && tuningKey
-                              && tuner.enabled() && onlineTunable(prob)
-                              && !tuner.settled(*tuningKey);
+    const bool onlineTuning = lookup == SolutionLookup::PerDispatch && tuningKey && tuner.enabled()
+                              && onlineTunable(prob) && !tuner.settled(*tuningKey);
 
     const OnlineLookup  onlineLookup{&prob, tuningKey};
     const OnlineLookup* online = onlineTuning ? &onlineLookup : nullptr;
