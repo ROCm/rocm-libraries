@@ -16,7 +16,6 @@ Numeric correctness is NOT covered here; that is the on-GPU comparison against
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,7 +34,10 @@ from kernels.mla.mla_prefill_gfx942 import (
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-from ._compiler_test_utils import require_tools_or_skip
+from ._compiler_test_utils import (
+    require_tools_or_skip,
+    skip_where_compiler_refuses_option,
+)
 
 
 def _spec(**kw) -> MlaPrefillSpec:
@@ -434,40 +436,27 @@ class _OccupancyGuard:
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.helpers.compile import compile_kernel
+            from rocke.runtime.comgr import loaded_compiler_info
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
-        # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
-        # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
-        # the whole process instead of raising. That happens when an earlier
-        # test in the session already loaded the system comgr ahead of torch's.
-        try:
-            from rocke.runtime.comgr import _require_compiler_info
-
-            llvm_major = int(_require_compiler_info().llvm_version[0])
-        except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
-            require_tools_or_skip(f"comgr unavailable: {exc}")
-        if llvm_major < 21:
-            raise unittest.SkipTest(
-                f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
-                "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
-            )
-
+        # Probe before compiling: compile_kernel reports a missing COMGR as a
+        # ComgrError, the same type as a real compile failure.
+        compiler = loaded_compiler_info()
+        if compiler is None or compiler.llvm_version is None:
+            found = "none loaded" if compiler is None else compiler.describe()
+            require_tools_or_skip(f"no queryable comgr ({found})")
         cls.spec = cls.make_spec()
         try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(cls.spec, arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
+            # The forward kernel needs -amdgpu-mfma-vgpr-form; skip where the
+            # loaded compiler refuses it (see rocke.runtime.compiler_options).
+            with skip_where_compiler_refuses_option():
+                art = compile_kernel(
+                    build_mla_prefill_fwd(cls.spec, arch="gfx942"),
+                    arch="gfx942",
+                    capture_ir_text=False,
+                )
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
-        except RuntimeError as exc:
-            # A forced ROCKE_LLVM_FLAVOR that the loaded comgr cannot take is an
-            # environment mismatch, not a kernel defect. Any other compile
-            # failure is real.
-            if "vintage mismatch" not in str(exc):
-                raise
-            raise unittest.SkipTest(f"comgr cannot take this IR flavor: {exc}")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))

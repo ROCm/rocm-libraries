@@ -660,10 +660,12 @@ This code creates the check target. From the YAML, it also creates one CTest
 suite for each tier. Each suite runs
 `hipdnn_integration_tests --test-article <plugin> --test-engine <ENGINE> --test-config <toml> --gtest_filter=<tier patterns>`.
 Every lane names `--test-engine`, so every lane enforces support claims. The
-function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `ENVIRONMENT`,
+function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `EXTRA_ARGS`, `ENVIRONMENT`,
 `ENVIRONMENT_MODIFICATION`, `FIXTURES_REQUIRED`, `INSTALL_TEST_FILE` and
 `INSTALL_ENVIRONMENT`. `GTEST_FILTER` applies to the check target and to a lane
-without a tier YAML. It does not apply to the tier suites. If you omit
+without a tier YAML. It does not apply to the tier suites. `EXTRA_ARGS` passes
+further arguments, such as `--graph-capture`, to the check target, the CTest
+test and every tier suite, in the build tree and the install tree. If you omit
 `TEST_CATEGORIES_YAML`, the lane is one CTest test with no tier labels. If the
 package is not available, the lane is skipped at configure time.
 
@@ -681,6 +683,27 @@ hand-written companion census suite (`Test<Engine>CatalogTiles` or
 entry in `dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`, `<stem>` as
 `_hkp_companion_suites` there pairs it with the suite. `ASM_SDPA_ENGINE`
 and the FlyDSL SDPA engines still call the function directly.
+
+### Add a graph-capture lane
+
+An engine that reports `SUPPORTS_GRAPH_CAPTURE` also needs a graph-capture
+lane: a second lane pinned to the same engine, with `EXTRA_ARGS --graph-capture`
+and a tier YAML that names a few quick bundle suites the engine serves. Its
+`standard`, `comprehensive` and `full` tiers run the same short list, and it has
+no `quick` or `ffm-quick` tier. Without the lane, nothing in CI
+captures the engine's `execute()`, so a change that makes it unsafe to capture
+fails no test.
+
+- In hip-kernel-provider, call `_hkp_add_graph_capture_lane()` in
+  `src/CMakeLists.txt` next to the engine's own lane, with the same engine,
+  TOML and install routing. For an `HKP_PINNED_ATTENTION_ENGINES` engine, add
+  its local name to `_graph_capture_attention_engines` instead. Every FlyDSL
+  engine already has one. The suites are
+  `GRAPH_CAPTURE_test_categories_integration.yaml`. If the engine serves none
+  of them, add a suite it serves to that file and to
+  `HKP_GRAPH_CAPTURE_GTEST_FILTER`.
+- In hipblaslt-provider, the lane is next to the engine's own lane in
+  `CMakeLists.txt`, and its suites are `test_categories_graph_capture.yaml`.
 
 ## C++ tests: the CMake rule
 

@@ -309,7 +309,7 @@ int rocke_i_buffer_access_bytes(
             err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
         return 0;
     }
-    /* Python _SCALE_ENCODING_SCALARS: whole bytes, but no value form in the IR
+    /* Python core.storage.SCALE_ENCODINGS: whole bytes, but no value form in the IR
      * (no LLVM or HIP type in either engine). */
     if(strcmp(elem->name, "e8m0") == 0 || strcmp(elem->name, "e5m3") == 0)
     {

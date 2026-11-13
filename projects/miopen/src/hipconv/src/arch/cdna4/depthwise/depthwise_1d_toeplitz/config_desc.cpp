@@ -20,6 +20,7 @@ hipconv::KVDescriptor config_fields(const Config& cfg)
     d.int_field("lds_buffers", cfg.lds_buffers, /*default=*/3);
     d.int_field("n_fold", cfg.n_fold, /*default=*/8);
     d.int_field("elem_bytes", cfg.elem_bytes, /*default=*/2);
+    d.int_field("kd", cfg.kd, /*default=*/1);
     return d;
 }
 

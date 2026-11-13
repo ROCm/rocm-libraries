@@ -222,15 +222,27 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
-| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`, or the simulated trap: see below); HIP `__builtin_trap()` |
 | `tile.gpu_check_failed` | (emitted by `gpu_checked_value`) | store 1 to `@rocke_gpu_check_failed_<kernel>`, then `ret void`; HIP `__hip_atomic_store` + `return;`. The launch completes, `rocke.runtime` raises `GpuCheckFailed`, and every output of the launch is undefined |
 
-`trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
-its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host
-sees depends on the platform:
+`trap()` ends the wave at a trap instruction. Which instruction depends on the processor the code
+object is compiled for. The docs state it here only; the docstrings and comments point here.
+
+| Compiled for | The AMDGPU backend emits |
+|---|---|
+| gfx1100, gfx1101, gfx1102, gfx1103, gfx11-generic | its simulated trap: `s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop |
+| any other processor, gfx1150-gfx1154 included | `s_trap 2` |
+
+A target whose compiler does not accept its name is compiled for the generic target its catalog row
+points at (`compiler_target_for_llvm_major`), and gets that target's trap: gfx1154, compiled as
+gfx11-generic by compilers before LLVM 24, gets the simulated trap. `tests/core/test_trap.py` holds
+the same table as its expectation and checks it on every catalogued gfx11 target.
+
+What the host sees when a trap is taken depends on the platform:
 
 - Linux (ROCr): the queue reports an error and the runtime aborts the process.
-- Windows: the HIP runtime never turns the trap into an error; the launch never returns.
+- Windows: on gfx110X GPUs the HIP runtime has been seen not to turn the trap into an error; the
+  launch never returned.
 - Under a debugger: the wave stops at the trap.
 
 None of these lets the process carry on, so a trap is a last resort: put it under an `scf_if` on a

@@ -23,7 +23,7 @@ import pytest
 from ._compiler_test_utils import require_tools_or_skip
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
-# (``platform/CMakeLists.txt`` installs it); a source checkout reads the provider's.
+# (the rocKE umbrella CMake project installs it); a source checkout reads the provider's.
 _PACKS_DIRS = (
     Path(__file__).resolve().parent / "hkp_packs",
     Path(__file__).resolve().parents[3]
@@ -56,9 +56,10 @@ def _packs_dir(config) -> Path:
 def test_installed_pack_headers_imply_require_flag(request):
     """An installed tree that carries the header copy must run with
     ``--rocke-require-hkp-pack-headers``: without it, a later broken copy would skip
-    these cases instead of failing. ``platform/tests/test_engine_linkage.py`` checks
-    the CMake wiring both ways, but no CI lane runs that file; this is the in-lane
-    half. A source checkout has no copy, so it skips."""
+    these cases instead of failing.
+    ``platform/tests/tools/test_sdpa_asset_cmake_contract.py`` checks the CMake
+    wiring both ways; this is the in-lane half. A source checkout has no copy, so
+    it skips."""
     if not _INSTALLED_PACKS_DIR.is_dir():
         pytest.skip("not an installed tree: no hkp_packs/ header copy")
     assert request.config.getoption(

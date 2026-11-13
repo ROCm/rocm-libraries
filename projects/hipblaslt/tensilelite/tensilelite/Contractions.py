@@ -517,6 +517,21 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertStrideDEqual": "StrideDEqual",
 }
 
+# Integer ids of the MXScaleFormat values, as the C++ ProblemType and the
+# MXScaleFormatEquals predicate read them. Append only.
+MX_SCALE_FORMAT_IDS = {
+    "NoSwizzle": 0,
+    "HostPreSwizzle": 1,
+    "InMemorySwizzle": 2,
+    "HostPreSwizzle128x4": 3,
+}
+
+def mxScaleFormatId(state):
+    return MX_SCALE_FORMAT_IDS.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+# Serialized names of the C++ ScalarValue enum, keyed by AssertAlphaValue values.
+ASSERT_ALPHA_VALUE_NAMES = {1: "1"}
+
 def extractDimPredicate(cls, value, predicateName):
     """
     Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
@@ -572,6 +587,12 @@ class ProblemPredicate(Properties.Predicate):
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
+        if key == "AssertAlphaValue":
+            if value not in ASSERT_ALPHA_VALUE_NAMES:
+                raise RuntimeError(
+                    "AssertAlphaValue must be one of {}, got {!r}".format(
+                        sorted(ASSERT_ALPHA_VALUE_NAMES), value))
+            return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -678,6 +699,33 @@ class ProblemPredicate(Properties.Predicate):
         if 'BufferStore' in state and state['BufferStore'] == True:
             rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
 
+        # PrefetchGL2SAddr keeps each lane's prefetch offset in 32 bits. The cluster
+        # prefetches all ClusterDim tiles it consumes, so the free extent is
+        # MacroTile * ClusterDim. See Components/GL2Prefetch.py for the footprint.
+        if state.get('PrefetchGL2', 0) > 0 and state.get('PrefetchGL2SAddr', False):
+            pt = state['ProblemType']
+            clusterDim = state.get('ClusterDim', [1, 1])
+            metadataIdx = 1 if pt.get('Sparse', 0) == 2 else 0
+            metadata = bool(state.get('enableTDMMetadata', False))
+            rv += [cls('GL2PrefetchSAddrOffsetLimitCheck', value={
+                'TLUA': bool(pt['TLUA']),
+                'TLUB': bool(pt['TLUB']),
+                'DepthUA': state.get('_DepthUA', state['DepthU']),
+                'DepthUB': state.get('_DepthUB', state['DepthU']),
+                'ClusterMT0': state['MacroTile0'] * clusterDim[0],
+                'ClusterMT1': state['MacroTile1'] * clusterDim[1],
+                'DepthU': state['DepthU'],
+                'MatrixInstK': state.get('MatrixInstK', 0),
+                'MXBlockA': pt.get('MXBlockA', 0) or 0,
+                'MXBlockB': pt.get('MXBlockB', 0) or 0,
+                'MXBlockFreeA': max(1, pt.get('MXBlockFreeA', 1) or 1),
+                'MXBlockFreeB': max(1, pt.get('MXBlockFreeB', 1) or 1),
+                'Metadata': metadata,
+                'TLUMetadata': bool(pt.get('TLUMetadata', False)) if metadata else False,
+                'DepthUMetadata': state.get('_DepthUMetadata', state['DepthU']) if metadata else 0,
+                'ClusterMTMetadata': state['MacroTileMetadata'] * clusterDim[metadataIdx] if metadata else 0,
+            })]
+
         if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
             value = MIN_K_FOR_GSU
             rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
@@ -690,6 +738,11 @@ class ProblemPredicate(Properties.Predicate):
 
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
+
+        # The host scale modes do not tell NoSwizzle, HostPreSwizzle and InMemorySwizzle
+        # apart, so the predicate matches those loosely and only pins the later formats.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
@@ -1062,9 +1115,8 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
+        rv.problemType.mxScaleFormat = mxScaleFormatId(d)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

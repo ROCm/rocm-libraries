@@ -32,7 +32,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
-from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
+from .ir import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
                         SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
@@ -41,7 +41,7 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
                         ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel, TemporalHint, NonVolatile
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
-from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
+from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
   BufferStoreB8, BufferStoreD16HIB16, CommonInstruction, DSBPermuteB32, DSLoadB128, \
@@ -75,7 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
-  mxLraFreeShift
+  mxLraFreeShift, mxSegmentSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
@@ -98,7 +98,7 @@ from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
-from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
+from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -113,7 +113,7 @@ from .SolutionStructs.Naming import getKernelFileBase
 from .Toolchain.Component import Assembler
 
 import rocisa.instruction as _rocisaInstr
-from rocisa.instruction import ReadWriteInstruction as _RWInstruction, \
+from .ir import ReadWriteInstruction as _RWInstruction, \
   SBarrierSignalIsFirst as _SBarrierSignalIsFirst, TensorLoadToLds as _TensorLoadToLds, \
   VCmpInstruction as _VCmpInstruction, VCmpXInstruction as _VCmpXInstruction
 
@@ -1407,14 +1407,19 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
     if kernel["PrefetchGL2"]:
-      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpgo))
-      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpgo))
+      numGL2IncSgpr = GL2PrefetchLoad.numIncSgpr(kernel)
+      gl2Tensors = ["A", "B"]
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
+        gl2Tensors.append("MXSA")
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
+        gl2Tensors.append("MXSB")
       if kernel["enableTDMMetadata"]:
-        module.add(self.defineSgpr("GL2PrefetchIncMetadata", self.states.rpgo))
+        gl2Tensors.append("Metadata")
+      for tc in gl2Tensors:
+        module.add(self.defineSgpr(f"GL2PrefetchInc{tc}", numGL2IncSgpr, numGL2IncSgpr))
+      if GL2PrefetchLoad.useSAddr(kernel):
+        for tc in gl2Tensors:
+          module.add(self.defineSgpr(f"GL2PrefetchBase{tc}", 2, 2))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -1625,23 +1630,24 @@ class KernelWriterAssembly(KernelWriter):
     """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
     if not kernel["PrefetchGL2"]:
       return
+    numAddrVgpr = GL2PrefetchLoad.numAddrVgpr(kernel)
     for label, tP, stateObj in [("A", tPA, self.states.a),
                                 ("B", tPB, self.states.b)]:
       for i in range(tP["gl2nl"]):
         module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}",
-            stateObj.startVgprGL2PrefetchAddr + i * self.states.rpga))
+            stateObj.startVgprGL2PrefetchAddr + i * numAddrVgpr))
     for mxKey, tP, label, stateObj in [("MXBlockA", tPA, "MXSA", self.states.mxsa),
                                        ("MXBlockB", tPB, "MXSB", self.states.mxsb)]:
       if kernel["ProblemType"][mxKey]:
         mx = tP["MX"]
         for i in range(mx["gl2nl"]):
           module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}",
-              stateObj.startVgprGL2PrefetchAddr + i * self.states.rpga))
+              stateObj.startVgprGL2PrefetchAddr + i * numAddrVgpr))
     if kernel["enableTDMMetadata"]:
       tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
       for i in range(tPM["gl2nl"]):
         module.add(RegSet("v", f"vgprGL2PrefetchAddrMetadata_{i}",
-            self.states.m.startVgprGL2PrefetchAddr + i * self.states.rpga))
+            self.states.m.startVgprGL2PrefetchAddr + i * numAddrVgpr))
 
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
@@ -1685,9 +1691,15 @@ class KernelWriterAssembly(KernelWriter):
           # grown allocation.
           if kernel["ReuseAcrossPersistent"]:
             numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+          # MXScaleVgprInterleave: the blocks and pieces sit in the region shared with MXSB, so the
+          # default per-buffer sets below are skipped (the BASE symbol and the packs stay).
+          numBiData = 0 if self.states.mxsInterleave else numBiFactor
+          if self.states.mxsInterleave:
+            for name, off in self.mxsInterleaveSets("A"):
+              moduleVgprMacroValuMXSA.add(RegSet("v", name, "vgprValuMXSA_X0_I0_BASE", off))
           if self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
                 ri += self.states.mxsa.numVgprValuPerBlock
@@ -1703,7 +1715,7 @@ class KernelWriterAssembly(KernelWriter):
                     ri += ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthMXSA"]
           else:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
                 ri += self.states.mxsa.numVgprValuPerBlock
@@ -1725,9 +1737,15 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
+          # MXScaleVgprInterleave: the blocks and pieces sit in the region shared with MXSA, so the
+          # default per-buffer sets below are skipped (the BASE symbol and the packs stay).
+          numBiData = 0 if self.states.mxsInterleave else numBiFactor
+          if self.states.mxsInterleave:
+            for name, off in self.mxsInterleaveSets("B"):
+              moduleVgprMacroValuMXSB.add(RegSet("v", name, "vgprValuMXSB_X0_I0_BASE", off))
           if self.states.lrvwTileMXSB > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
                 ri += self.states.mxsb.numVgprValuPerBlock
@@ -1743,7 +1761,7 @@ class KernelWriterAssembly(KernelWriter):
                     ri += ceil(kernel["VectorWidthMXSB"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthMXSB"]
           else:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
+            for bi in range(0,numBiData): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
                 ri += self.states.mxsb.numVgprValuPerBlock
@@ -9755,6 +9773,241 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  # Accumulator M-order shuffle for enableLDSTr with VectorWidth > 1
+  ##############################################################################
+  def storeShuffleForLDSTrVW(self, kernel):
+    """Re-order the accumulators' M direction from the local read's layout to the store's.
+
+    ds_read_tr hands lane L the tile row (m_base + L): a transpose group reads
+    NUM_CONT_READ_ELEMENTS *contiguous* rows and every lane in the group shares one
+    m_base, so the lane->row stride is locked at 1 and the A local read is always laid
+    out VW=1 in the tile direction (see mTileOffset in Components/LocalRead.py).
+
+    The store disagrees. It takes vectorWidth0 = VectorWidthA
+    (Components/NotLocalFullTileElements.py) and coord0 = VectorWidthA * (wave_id0 + tid0),
+    grouping VW consecutive wave tiles into one wide store, which needs each lane to own
+    VW *consecutive* M rows.
+
+    This bridges the two, once, in the epilogue. With MI = MatrixInstM, l = L % MI,
+    T = MIWaveTile[0] wave tiles and VW = VectorWidthA (T % VW == 0):
+
+        after MFMA   read tile t, lane l  ->  M row MI*t + l
+        after this   store tile t', lane l ->  M row MI*VW*(t'//VW) + VW*l + (t'%VW)
+
+    Both index the same MI*T rows, so per group of VW tiles this is exactly a
+    VW x MI transpose spread over (VW registers) x (MI lanes). Groups are independent:
+    group g covers M rows [MI*VW*g, MI*VW*(g+1)), which is exactly read tiles
+    VW*g .. VW*g+VW-1.
+
+    For destination slot s in a group, the source lane and source register are
+
+        lane = ((L << log2VW) & (MI-1)) | s          -- one address, reused for all VW sources
+        reg  = (L % MI) >> (log2MI - log2VW)         -- bits [log2MI-1 : log2MI-log2VW] of L
+
+    The register select depends on the *destination* lane, so it has to happen after the
+    gather: VW ds_bpermute then a log2VW-deep cndmask tree. Cost per group of VW tiles is
+    VW*VW ds_bpermute + VW*(VW-1) cndmask, i.e. quadratic in VW -- 96 ops at VW=2,
+    448 at VW=4, 1920 at VW=8 for MIWaveTile[1]=2. Worth checking against the stores it
+    saves before enabling the wider settings.
+
+    Requires MatrixInstBM == 1 and WavefrontSize 32; enforced in SolutionStructs/Solution.py.
+    MIWaveGroup[0] > 1 IS supported: strideWave (Components/LraTileAssignment.py) keeps the
+    real VectorWidth, so each wave owns exactly the VW*MatrixInstM rows the store assigns it
+    and the transpose never has to cross a wave boundary.
+
+    Triggered by, in yaml terms:
+        LDSTrInst: True            -> enableLDSTrA
+        LDSTrStoreShuffle: 1 | 2        -> 0 clamps VectorWidthA to 1, nothing left to bridge
+        VectorWidthA: 2 | 4 | 8    -> the shuffle is a no-op at 1
+        SourceSwap: 1              -> implied by Sparse: 2
+        StoreRemapVectorWidth: 0   -> storeRemap is the alternative bridge, not a companion
+    plus WavefrontSize 32, MatrixInstBM 1, LocalSplitU 1, and MIWaveTile[0] % VectorWidthA == 0.
+    Each of these is rejected with a specific reason in SolutionStructs/Solution.py, so a yaml
+    that asks for the shuffle and does not get it reports why. LDSTrStoreShuffle is the
+    exception: 0 clamps VectorWidthA silently, because that is what enableLDSTrA did before
+    this feature existed.
+
+    The walk is numNTiles*numGroups*accPerTile mutually independent passes. LDSTrStoreShuffle
+    also picks how they are scheduled against each other: 1 drains LDS between every pass, 2
+    issues the next pass's gather first and waits on a staggered dscnt so the LDS latency hides
+    behind the previous pass's cndmask tree. Both emit the same instruction multiset; which one
+    is faster depends on the configuration, so it is a tuning knob rather than a derived value.
+    """
+    module = Module("storeShuffleForLDSTrVW")
+    VW = kernel["VectorWidthA"]
+    # storeRemap is the other way of bridging the two M orders: it stages the accumulators
+    # through LDS and reads them back in store order, which subsumes this shuffle. Running
+    # both would apply the permutation twice. Unreachable today -- Solution.py rejects
+    # VectorWidth > 1 together with StoreRemap -- so this is a guard, not a live path.
+    if not (kernel.get("enableLDSTrA", False) and VW > 1) or kernel["StoreRemapVectorWidth"] > 0:
+      return module
+
+    miM     = kernel["MatrixInstM"]
+    log2VW  = log2(VW)
+    log2MI  = log2(miM)
+    # accumulator vgprs per (M tile, N tile) pair; mfma emits them as [nTile][mTile][acc].
+    accPerTile = miM * kernel["MatrixInstN"] // kernel["WavefrontSize"]
+    numMTiles  = kernel["MIWaveTile"][0]
+    numNTiles  = kernel["MIWaveTile"][1] * kernel["MatrixInstBN"]
+    numGroups  = numMTiles // VW
+
+    module.addComment1("LDSTr VW=%u: transpose accumulator M order for the wide store " \
+                       "(%u x %u per group)" % (VW, VW, miM))
+
+    vAddr = self.vgprPool.checkOut(1, "accShuffleAddr")
+    vTmp  = self.vgprPool.checkOut(1, "accShuffleTmp")
+
+    # addr = 4 * ( MI*(L//MI) + ((L << log2VW) & (MI-1)) ); slot s adds 4*s as an immediate.
+    # The MI*(L//MI) term keeps every gather inside the lane's own N group.
+    module.add(VLShiftRightB32(dst=vgpr(vAddr), shiftHex=hex(log2MI), src=vgpr("Serial"), \
+        comment="accShuffle: N group = Serial // MI_M(%u)" % miM))
+    module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=hex(log2MI + 2), src=vgpr(vAddr), \
+        comment="accShuffle: N group base byte addr"))
+    module.add(VLShiftLeftB32(dst=vgpr(vTmp), shiftHex=hex(log2VW), src=vgpr("Serial"), \
+        comment="accShuffle: Serial * VW(%u)" % VW))
+    module.add(VAndB32(dst=vgpr(vTmp), src0=hex(miM - 1), src1=vgpr(vTmp), \
+        comment="accShuffle: wrap into the MI_M(%u) lane group" % miM))
+    module.add(VLShiftLeftB32(dst=vgpr(vTmp), shiftHex=hex(2), src=vgpr(vTmp), \
+        comment="accShuffle: scale source lane to a byte addr"))
+    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vTmp), src1=vgpr(vAddr), \
+        comment="accShuffle: gather addr for slot 0"))
+
+    laneCnt = self.states.laneSGPRCount
+    with self.allocTmpSgpr(laneCnt * log2VW, tag="accShuffleMask") as maskSgpr:
+      # Bit b of the source-register index is bit (log2MI - log2VW + b) of Serial.
+      # Mask is set when that bit is ZERO, i.e. when the lower element of the pair wins.
+      for b in range(log2VW):
+        bit = 1 << (log2MI - log2VW + b)
+        module.add(VAndB32(dst=vgpr(vTmp), src0=hex(bit), src1=vgpr("Serial"), \
+            comment="accShuffle: source-register index bit %u" % b))
+        module.add(VCmpEQU32(dst=sgpr(maskSgpr.idx + laneCnt * b, laneCnt), src0=vgpr(vTmp), src1=hex(0), \
+            comment="accShuffle: bit %u clear -> take the lower source register" % b))
+
+      # Every destination tile of a group reads *all* VW source tiles of that group, so no
+      # accumulator may be overwritten until the whole group is resolved. Results are parked
+      # in `res` and committed once per group. Slots are batched inside the group so several
+      # LDS round trips are in flight per s_waitcnt.
+      #
+      # The batch size is the only real knob here, and it was measured on gfx1250 rather than
+      # guessed. slotBatch == 1 is clearly bad -- at VW=4 it costs 14% (LDSTrStoreShuffle=1) to 28%
+      # (LDSTrStoreShuffle=2) against slotBatch 3, and at VW=8 the same ordering holds. Above that
+      # the curve flattens: 4 vs 8 at VW=8 measured -0.2% and -2.9%, both inside the run-to-run
+      # noise of this benchmark (~10%), so there is nothing to gain from a larger batch.
+      #
+      # TMP_BUDGET is therefore the smallest value that keeps every supported VW off the
+      # slotBatch==1 floor: VW=4 reaches 4 at 20, VW=8 reaches 2 at 24.
+      TMP_BUDGET = 24
+      # The >= 2 floor is separate from the budget on purpose. A pure budget has to grow like
+      # 3*VW to keep slotBatch >= 2, so one constant cannot serve every VW -- raising it enough
+      # for VW=16 (48) would push VW=8 to 5, paying registers for a batch size already measured
+      # to be worthless. The explicit floor scales to new VW values for free.
+      pipelined = kernel.get("LDSTrStoreShuffle", 0) > 1
+      buffers   = 2 if pipelined else 1
+      want      = min(VW, max(2, (TMP_BUDGET - VW) // VW))
+      # Clamp to what the pool already has free. checkOut() past that grows the pool, which
+      # raises the kernel's high-water mark -- and this runs in endSummation, before
+      # globalWriteElements sizes its store batch, so a higher mark here can cost occupancy for
+      # the rest of the epilogue. res is VW, each in-flight slot is `buffers * VW`.
+      #
+      # This caps the batch; it does not promise the pool never grows. slotBatch 1 still needs
+      # VW*(1 + buffers) registers and the shuffle is not optional -- without it VectorWidthA>1
+      # reads the wrong M rows -- so if the pool is tighter than that, growing is the only
+      # correct outcome. In practice there is no contest: the main loop's temporaries are all
+      # dead by endSummation, leaving ~474 free on a 1020-vgpr MT128x256x256 kernel.
+      free      = self.vgprPool.available()
+      fits      = (free - VW) // (buffers * VW) if free > VW else 0
+      slotBatch = max(1, min(want, fits))
+      res  = [self.vgprPool.checkOut(1, "accShuffleRes%u"%t)  for t in range(VW)]
+      gat  = [self.vgprPool.checkOut(1, "accShuffleGat%u"%t)  for t in range(VW * slotBatch)]
+      # LDSTrStoreShuffle=2 needs a second gather buffer so pass p+1's ds_bpermute can be in flight
+      # while pass p's cndmask tree still reads pass p's results.
+      gatB = [self.vgprPool.checkOut(1, "accShuffleGatB%u"%t) for t in range(VW * slotBatch)] \
+             if pipelined else []
+
+      def accIdx(n, mTile, i):
+        return n * numMTiles * accPerTile + mTile * accPerTile + i
+
+      # One pass = one chunk of slots of one (n, g, i). Passes are emitted back to back and are
+      # mutually independent: distinct (n, g, i) touch disjoint accumulators, and the chunks of
+      # one (n, g, i) only share read-only source registers.
+      passes = []
+      for n in range(numNTiles):
+        for g in range(numGroups):
+          for i in range(accPerTile):
+            for chunk in range(0, VW, slotBatch):
+              passes.append((n, g, i, list(range(chunk, min(chunk + slotBatch, VW)))))
+
+      def issueGather(buf, p):
+        n, g, i, slots = p
+        srcRegs = [accIdx(n, VW * g + j, i) for j in range(VW)]
+        for b, s in enumerate(slots):
+          for j in range(VW):
+            module.add(DSBPermuteB32(dst=vgpr(buf[VW*b + j]), src0=vgpr(vAddr), \
+                src1=vgpr("ValuC+%u"%srcRegs[j]), ds=DSModifiers(offset=4 * s), \
+                comment="accShuffle: grp%u slot%u <- read tile %u (acc %u)" \
+                        % (g, s, VW*g+j, srcRegs[j])))
+
+      def consume(buf, p):
+        n, g, i, slots = p
+        for b, s in enumerate(slots):
+          # cndmask tree: fold the VW candidates down by the source-register index.
+          width = VW
+          for lvl in range(log2VW):
+            mask = sgpr(maskSgpr.idx + laneCnt * lvl, laneCnt)
+            for k in range(width // 2):
+              lo, hi = buf[VW*b + 2*k], buf[VW*b + 2*k + 1]
+              last = (width // 2 == 1)
+              dstV = vgpr(res[s]) if last else vgpr(buf[VW*b + k])
+              module.add(VCndMaskB32(dst=dstV, src0=vgpr(hi), src1=vgpr(lo), src2=mask, \
+                  comment="accShuffle: select by source-register bit %u%s" \
+                          % (lvl, " -> slot %u" % s if last else "")))
+            width //= 2
+        # Commit once the group's last slot chunk is resolved -- `res` holds all VW slots by then.
+        if slots[-1] == VW - 1:
+          for s in range(VW):
+            dst = accIdx(n, VW * g + s, i)
+            module.add(VMovB32(dst=vgpr("ValuC+%u"%dst), src=vgpr(res[s]), \
+                comment="accShuffle: acc %u -> M row MI*VW*%u + VW*l + %u" % (dst, g, s)))
+
+      if not pipelined:
+        for p in passes:
+          issueGather(gat, p)
+          module.add(SWaitCnt(dscnt=0, comment="accShuffle: wait for ds_bpermute"))
+          consume(gat, p)
+      else:
+        # Issue-ahead. Pass p+1's ds_bpermute go out before pass p is consumed and the wait
+        # leaves exactly pass p+1's gathers outstanding, so pass p+1's LDS latency hides behind
+        # pass p's cndmask tree (and, on the last chunk of a group, behind the VW commits too).
+        #
+        # WAR: the commits write ValuC while ds_bpermute that source ValuC are outstanding.
+        # s_wait_dscnt does NOT cover this -- it gates the DS *result*, not the operand read.
+        # The source read is gated by s_wait_alu depctr_vm_vsrc, which the rocisa hazard pass
+        # inserts, and it is what makes this safe: as emitted here a commit is only reachable
+        # after its own group's gathers are consumed, but the scheduler does hoist commits
+        # above the next pass's gather issue, so the emission order alone is not the argument.
+        # Checked on the generated gfx1250 asm by replaying the DS queue against both
+        # s_wait_dscnt and depctr_vm_vsrc: no ValuC commit lands with an in-flight bpermute
+        # still holding that register unread. Re-check if the hazard pass changes.
+        bufs = [gat, gatB]
+        issueGather(bufs[0], passes[0])
+        for idx, p in enumerate(passes):
+          if idx + 1 < len(passes):
+            nxt = passes[idx + 1]
+            issueGather(bufs[(idx + 1) % 2], nxt)
+            waitN = VW * len(nxt[3])
+            module.add(SWaitCnt(dscnt=waitN, \
+                comment="accShuffle: wait pass %u (leave %u ds outstanding)" % (idx, waitN)))
+          else:
+            module.add(SWaitCnt(dscnt=0, comment="accShuffle: wait final pass"))
+          consume(bufs[idx % 2], p)
+
+      for t in gat + gatB + res:
+        self.vgprPool.checkIn(t)
+
+    self.vgprPool.checkIn(vTmp)
+    self.vgprPool.checkIn(vAddr)
+    return module
+  ##############################################################################
   # End Summation
   ##############################################################################
   def _bRotateUnswapAcc(self, kernel):
@@ -9815,6 +10068,11 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.add(vbegin, vsize, "free vgpr of biasSumUnroll")
       module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
                         (vbegin, vbegin+vsize))
+
+    # Bridge the LDSTr local read's VW=1 M order to the store's VW-interleaved M order.
+    # Must run before any consumer of ValuC -- ShiftVectorComponents, computeStoreVgprs and
+    # the global write all follow this call -- and while the sgpr pool is still intact.
+    module.add(self.storeShuffleForLDSTrVW(kernel))
 
     keptSgprs = []
     # FP32 to FP8 SR without v_prng_b32 needs RNDSeed sgpr preserved
@@ -15208,6 +15466,8 @@ class KernelWriterAssembly(KernelWriter):
               inc = scaleRows * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
               comment = " (bpeDS)"
               inc *= matrixInstK
+              if mxSegmentSplit(kernel, tc):
+                inc //= 2
             else:
               inc = mxUnit * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
               comment = " (mxUnit*bpeDS)"
@@ -15277,6 +15537,8 @@ class KernelWriterAssembly(KernelWriter):
                 swizzled=isMxSwizzled,
                 unrollMajor=kernel["UnrollMajorLDS%s" % tP["tensorChar"]],
                 ldsPad=LdsPad)
+            if mxSegmentSplit(kernel, tc):
+              offsetInc //= 2
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
@@ -18785,7 +19047,13 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         # SRVW epilogue can also exceed simm16, so use longBranch like MBSK.
-        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1 or kernel["StoreRemapVectorWidth"]):
+        # The store shuffle grows the epilogue the same way: at MT256x256 the
+        # VectorWidthA=2 kernel overflows simm16 where VectorWidthA=1 does not. The narrow
+        # VectorWidthA is the worst case -- StoreVectorWidth follows it, so the store side
+        # costs more instructions than the shuffle itself saves. Condition mirrors the
+        # shuffle's own trigger (storeShuffleForLDSTrVW).
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1 or kernel["StoreRemapVectorWidth"] \
+            or (kernel["SourceSwap"] and kernel.get("enableLDSTrA", False) and kernel["VectorWidthA"] > 1)):
           module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
@@ -23390,6 +23658,8 @@ class KernelWriterAssembly(KernelWriter):
     _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
     if _segWaveJump:
         dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+    if mxSegmentSplit(kernel, tc):
+        dataBytes = kernel["LDSSegInterleaveOffsets"]["mxsaStrideBytes"]
     # The interleaved layout has NumWaves // 2 components, so a tensor moved in more
     # pieces packs consecutive pieces into each component.
     piecesPerComp = numComp // (kernel["NumWaves"] // 2) if _segFootprint else 1
@@ -23404,7 +23674,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddU32(sgpr(offsetIdx), sgpr(offsetIdx), sgpr(tmpIdx), "woffset += pieceOffset"))
     # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
     # exactly, so the component jump must NOT be re-padded (tile-internal pad is set below).
-    if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint:
+    if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint and not mxSegmentSplit(kernel, tc):
       if ldsBlockSizePerPad & (ldsBlockSizePerPad - 1) == 0:
         mod.add(SLShiftRightB32(sgpr(tmpIdx), int(log2(ldsBlockSizePerPad)), sgpr(offsetIdx), \
               f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
@@ -23560,7 +23830,7 @@ class KernelWriterAssembly(KernelWriter):
         dim1 = sizeRefName(3)
         with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgpr2") as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
-          if numMxKGroups < numComp:
+          if numMxKGroups < numComp or mxSegmentSplit(kernel, tc):
             tileM = mxTdmTileM(mt, mxTile)
             if tileM >= numComp:
               # M/N-splitting: offset within same k_group along tile dimension
@@ -23641,14 +23911,14 @@ class KernelWriterAssembly(KernelWriter):
       sizeShifter = 1 if dtype.isFloat4() else 0
       numMxKGroups = sizeTile0 // mxUnit
       mxTile = mxFreeTile(kernel, tc)
-      kSplit = numMxKGroups >= numComp
+      kSplit = numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc)
       tile0 = mxTdmTile0(sizeTile1, mxUnit, mxTile, numComp, kSplit)
       if kSplit:
         # K-splitting: enough k_groups to divide among wave components
         mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // numComp // dim1Divisor, self))
       else:
-        # M/N-splitting: not enough k_groups, split tile dimension instead
+        # M/N-splitting: split the tile dimension and retain all K-groups.
         mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       if mxTile > 1:
@@ -25014,7 +25284,7 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplitting = numMxKGroups >= numComp if isMXS else False
+    mxKSplitting = (numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc)) if isMXS else False
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
@@ -25094,7 +25364,7 @@ class KernelWriterAssembly(KernelWriter):
             subM = tcM[3]
             mxUnitM: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subM}"]
             mxDUM = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subM}"]
-            mxKSplittingM = (mxDUM // mxUnitM) >= numCompM
+            mxKSplittingM = (mxDUM // mxUnitM) >= numCompM and not mxSegmentSplit(kernel, tcM)
           else:
             mxKSplittingM = False
           if not unrolledMajorM or mxKSplittingM:
@@ -25132,7 +25402,7 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingA = numMxKGroups >= numCompA if isMXSA else False
+    mxKSplittingA = (numMxKGroups >= numCompA and not mxSegmentSplit(kernel, tcA)) if isMXSA else False
     if isMXSB:
         subTc = tcB[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
@@ -25178,6 +25448,23 @@ class KernelWriterAssembly(KernelWriter):
     comp = GL2PrefetchLoad.find(self)
     for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
       comp.init(self, kernel, tp)
+
+  def allocGL2PrefetchAddrVgprs(self, kernel, tPA, tPB, vgprIdx: int) -> int:
+    """Place the GL2PrefetchAddr vgprs of every prefetched tensor from vgprIdx; returns the next free index."""
+    numAddrVgpr = GL2PrefetchLoad.numAddrVgpr(kernel)
+    if numAddrVgpr == 2:
+      vgprIdx = int((vgprIdx + 1) / 2) * 2
+    tpList = [(self.states.a, tPA), (self.states.b, tPB)]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tpList.append((self.states.mxsa, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      tpList.append((self.states.mxsb, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      tpList.append((self.states.m, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for stateObj, tP in tpList:
+      stateObj.startVgprGL2PrefetchAddr = vgprIdx
+      vgprIdx += tP["gl2nl"] * numAddrVgpr
+    return vgprIdx
   
   def gl2PrefetchTpList(self, kernel, tPA, tPB):
     """The tensors the GL2 prefetch warms L2 for.
@@ -25221,6 +25508,13 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.issueLoad(self, kernel, tp))
     return mod
   
+  def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Clear Increment")
+    comp = GL2PrefetchLoad.find(self)
+    for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
+      mod.add(comp.clearIncrement(self, kernel, tp))
+    return mod
+
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")

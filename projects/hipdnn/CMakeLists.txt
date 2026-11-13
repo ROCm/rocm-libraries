@@ -266,6 +266,7 @@ include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
 include(cmake/ResourceCompiler.cmake)
+include(cmake/LongPathManifest.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -473,3 +474,4 @@ endif()
 if(NOT HIPDNN_SKIP_TESTS)
     install_hipdnn_ctest_files()
 endif()
+hipdnn_apply_long_path_manifest()

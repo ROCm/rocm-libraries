@@ -51,6 +51,11 @@ Beta remains host-resident. The device value is read during execution,
 so the allocation must remain valid until the operation completes.
 Algorithm selection requires a kernel with device scalar alpha support.
 
+These kernels reserve bit 11 of ``internalArg0`` for the runtime alpha selector,
+so their maximum GSU (``GemmTuning::setSplitK``) value is 2047. This limit also
+applies when the same kernel executes with host or vector alpha. Other kernels
+retain their existing GSU limits.
+
 .. code-block:: c++
 
     inputs.setScaleAlphaScalar(deviceAlpha);  // One FP32 element in device memory.
