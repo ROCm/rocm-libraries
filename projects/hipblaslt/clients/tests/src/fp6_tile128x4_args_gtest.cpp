@@ -4,13 +4,16 @@
 // Argument validation of HIPBLASLT_ORDER_COL256_R128_EXT and
 // HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT through the C, ext and grouped ext
 // APIs. Nothing is launched: an invalid combination is refused before solution
-// selection, and a valid one is accepted whether or not a kernel exists.
+// selection on every architecture, and a valid one is accepted whether or not a kernel
+// exists. The C heuristic searches for a valid one, so those cases run on gfx950 only.
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
 #include <ostream>
+#include <string>
 #include <vector>
 
 namespace
@@ -124,9 +127,14 @@ namespace
 
         void SetUp() override
         {
-            int count = 0;
-            if(hipGetDeviceCount(&count) != hipSuccess || count == 0)
+            int             count = 0;
+            hipDeviceProp_t props{};
+            if(hipGetDeviceCount(&count) != hipSuccess || count == 0
+               || hipGetDeviceProperties(&props, 0) != hipSuccess)
                 GTEST_SKIP() << "No GPU available";
+            if(GetParam().valid && std::string(props.gcnArchName).rfind("gfx950", 0) != 0)
+                GTEST_SKIP() << "A valid problem reaches solution selection, which these "
+                                "tests cover on gfx950 only";
             ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
         }
