@@ -1005,7 +1005,7 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
 
 | Class | Rule | bf16 atol / rtol | fp16 atol / rtol | Evidence (pilot, bf16 / fp16) |
 |---|---|---|---|---|
-| F32 | fp32 IO | 1e-5 / 1e-5 (harness default) | — | uncalibrated; guard holds on S01, L32 |
+| F32 | fp32 IO | 1e-5 / 1e-5 (harness default) | — | guard holds on S01, L32; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference |
 | K1 | Skv (or every live seq_len_kv) ≤ 2 | 3e-4 / 1.6e-2 | 3e-4 / 4e-3 | bf16 bit-exact at Skv 1; fp16 is DEF-03 |
 | U | logit spread λ ≥ 2 | 2.5e-2 / 1.6e-2 | 3e-3 / 4e-3 | n = 5 / 4 |
 | S | Sq ≤ 17 | 3e-4 / 1.6e-2 | 2e-4 / 4e-3 | n = 12 / 8; margin 3.3 / 5.4 |

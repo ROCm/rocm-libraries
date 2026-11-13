@@ -357,7 +357,7 @@ inline std::vector<std::string> enrolledKnobs(const std::string& slot)
 {
     if(slot == "prep")
     {
-        return {"padded", "hints"};
+        return {"head_dim", "padded", "hints", "floor"};
     }
     if(slot == "dkdv")
     {

@@ -24,8 +24,11 @@ alone:
 object's main kernel, ``rmir_scan`` (``clean``: the fresh build's own R-MIR scan) and, for a row whose pin object the content never
 holds (a combined object, ``sdpa_bwd_pins.holds_no_shipped_object``), its ``function_sha256``. The tool adds the rows to the arch's
 installed pins (the reference CSV is the base), then writes the table block, the reference CSV and the arch's rows of
-``sdpa_bwd_pin_functions.csv`` together, so the three agree. It refuses a hash that is already a pin, a row that is not ``clean``, a
-missing or superfluous function digest and a catalogue in which a floor twin would be dropped; the rows already installed are written back as
+``sdpa_bwd_pin_functions.csv`` together, so the three agree. It refuses a hash that is already a pin, a row that is not ``clean`` and a
+missing or superfluous function digest. A tree-built row may supersede an installed floor twin: same arch, kernel, object sha256 and Spec
+apart from ``floor``, with a served range (``served_dims``) that strictly contains the installed row's. The superseded installed rows are
+dropped (their pin-function rows with them) and printed as the S1 path prints its dropped twins. Any other drop (a twin with an equal or
+wider range than the tree row, a tree row that would be dropped) is refused; the rows already installed are otherwise written back as
 they were.
 
 The nondeterministic list (``tests/data/sdpa_bwd_nondeterministic.csv``) is not installed: the
@@ -216,6 +219,15 @@ def prune_floor_twins(
     return kept, sorted(dropped, key=lambda d: d[0]["hash"])
 
 
+def print_dropped(dropped: list[tuple[dict, dict]]) -> None:
+    """Print the dropped floor twins, each with the row that serves its range."""
+    print(
+        f"{len(dropped)} floor twins dropped (hash -> the row that serves its range):"
+    )
+    for row, keeper in dropped:
+        print(f"  {row['hash']} -> {keeper['hash']}  {row['spec']}")
+
+
 def table_row(spec: Spec, columns: tuple[str, ...]) -> str:
     """The table row of @p spec: its columns in order, the unset spellings where the policy decides.
 
@@ -295,11 +307,7 @@ def install(
         f"{len(pins)} {arch} rows from the S1 catalogue: "
         + ", ".join(f"{k} {v}" for k, v in counts.items())
     )
-    print(
-        f"{len(dropped)} floor twins dropped (hash -> the row that serves its range):"
-    )
-    for row, keeper in dropped:
-        print(f"  {row['hash']} -> {keeper['hash']}  {row['spec']}")
+    print_dropped(dropped)
     return len(pins)
 
 
@@ -345,17 +353,27 @@ def install_tree_pins(
     instances: Path = FLYDSL / "generators" / "_instances.py",
     data_dir: Path = FLYDSL / "tests" / "data",
 ) -> int:
-    """Add the pins of @p tree_pins to the installed gfx950 pins and rewrite the table block, the reference CSV and the pin functions; the rows added."""
+    """Add the pins of @p tree_pins to the installed gfx950 pins, dropping the installed floor twins they supersede, and rewrite the table block, the reference CSV and the pin functions; the rows added."""
     out = ARCH_OUTPUTS[GFX950]
     with (data_dir / out.reference_csv).open(newline="", encoding="utf-8") as fh:
         installed = {row["hash"]: row for row in csv.DictReader(fh)}
     _, rows = read_tree_pins(tree_pins, installed)
     pins = {**installed, **{row["hash"]: row for row in rows}}
-    kept, dropped = prune_floor_twins(pins)
-    if dropped:
-        raise SystemExit(
-            f"{len(dropped)} floor twins would be dropped: {[r['hash'] for r, _ in dropped][:6]}"
+    pins, dropped = prune_floor_twins(pins)
+    added = {row["hash"] for row in rows}
+    for row, keeper in dropped:
+        row_range, keeper_range = (
+            served_dims(Spec.parse(r["spec"])) for r in (row, keeper)
         )
+        if (
+            row["hash"] in added
+            or keeper["hash"] not in added
+            or keeper_range == row_range
+        ):
+            raise SystemExit(
+                f"{row['hash']}: a tree-built pin only supersedes an installed floor twin whose served range "
+                f"is strictly narrower than its own; {keeper['hash']} serves {keeper_range}, it serves {row_range}"
+            )
     begin, end = markers(GFX950)
     text = instances.read_text(encoding="utf-8")
     head, found, rest = text.partition(begin)
@@ -371,6 +389,8 @@ def install_tree_pins(
     functions = pins_data.read_pin_functions(
         data_dir / pins_data.PIN_FUNCTIONS_CSV.name
     )
+    for row, _ in dropped:
+        functions.pop(row["hash"], None)
     for row in rows:
         if row["function_sha256"]:
             functions[row["hash"]] = {
@@ -382,6 +402,7 @@ def install_tree_pins(
         sorted(functions.values(), key=lambda r: r["spec"]),
     )
     print(f"{len(rows)} tree-built {GFX950} pins added; {len(pins)} pins installed")
+    print_dropped(dropped)
     return len(rows)
 
 

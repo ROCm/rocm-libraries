@@ -127,9 +127,9 @@ def test_a_slotted_engine_exposes_exactly_each_slots_tuning_fields(
         slot["name"]: slot["knobs"]
         for slot in json.loads(ued_path.read_text(encoding="utf-8"))["slots"]
     }
-    # head_dim is an alternative of dkdv and dq (their tiles overlap); prep has no tile knob.
+    # head_dim is an alternative of every slot (their tiles overlap).
     assert knobs == {
-        "prep": ["block_m"],
+        "prep": ["head_dim", "block_m"],
         "dkdv": ["head_dim", "block_m", "waves_per_eu"],
         "dq": ["head_dim", "block_m", "role_order"],
     }

@@ -2821,8 +2821,8 @@ SDPA_BWD_TABLES = {
         ("bf16", 32, "plain", "bk", 0, 1, "tail", 0, 1, 1),
         ("bf16", 512, "plain", "bk", 0, 0, "tail", 0, 1, -1),
         ("bf16", 512, "plain", "bk", 0, 0, "tail", 0, 1, 1),
-        ("bf16", 512, "plain", "bk", 0, 1, "tail", 0, 1, -1),
-        ("bf16", 512, "plain", "bk", 0, 1, "tail", 0, 1, 1),
+        ("bf16", 512, "plain", "bk", 0, 1, "g1", 0, 1, -1),
+        ("bf16", 512, "plain", "bk", 0, 1, "g1", 0, 1, 1),
         ("bf16", 64, "plain", "bk", 0, 0, "tail", 0, 1, -1),
         ("bf16", 64, "plain", "bk", 0, 0, "tail", 0, 1, 1),
         ("bf16", 64, "plain", "bk", 0, 1, "tail", 0, 1, -1),
@@ -2855,8 +2855,8 @@ SDPA_BWD_TABLES = {
         ("f16", 32, "plain", "bk", 0, 1, "tail", 0, 1, 1),
         ("f16", 512, "plain", "bk", 0, 0, "tail", 0, 1, -1),
         ("f16", 512, "plain", "bk", 0, 0, "tail", 0, 1, 1),
-        ("f16", 512, "plain", "bk", 0, 1, "tail", 0, 1, -1),
-        ("f16", 512, "plain", "bk", 0, 1, "tail", 0, 1, 1),
+        ("f16", 512, "plain", "bk", 0, 1, "g1", 0, 1, -1),
+        ("f16", 512, "plain", "bk", 0, 1, "g1", 0, 1, 1),
         ("f16", 64, "plain", "bk", 0, 0, "tail", 0, 1, -1),
         ("f16", 64, "plain", "bk", 0, 0, "tail", 0, 1, 1),
         ("f16", 64, "plain", "bk", 0, 1, "tail", 0, 1, -1),
@@ -6045,8 +6045,8 @@ def _sdpa_bwd_gfx11_instances(kind: str) -> list[Instance]:
 
     The KMD of an op is one for every arch, so a row carries the fields of the gfx950 row, with ``-1`` (``"auto"``) where
     the field has no gfx11 meaning, and the build fills the schedule and geometry fields the knob record resolves
-    (``_sdpa_bwd_rdna_build.geometry_of``). A prep row's ``floor`` is the rung below its tile as a number (``padded`` and ``hints`` are
-    prep's only knobs, so a ``g1`` floor would make every rung from the graph's head dim up an indistinguishable row). A bias dQ
+    (``_sdpa_bwd_rdna_build.geometry_of``). A prep row's ``floor`` is the rung below its tile as a number (a ``g1`` floor would serve every rung from the graph's head dim
+    up, not only the rung of its own). A bias dQ
     row stores dB (``store_db`` 1) unless its Spec says ``store_db=0``, reads the bias directly (``bias_stage`` ``"none"``: the
     bias is never staged) and names the standalone reduce kernel its companion object holds.
 

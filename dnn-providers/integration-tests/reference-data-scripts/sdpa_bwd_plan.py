@@ -1020,7 +1020,7 @@ CLASSES = OrderedDict([
            "unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain")),
     ("K1", ("tolk1", {"bf16": (0.0003, 0.016), "fp16": (0.0003, 0.004)},
             "Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows")),
-    ("F32", ("tolf32", {"fp32": (1e-5, 1e-5)}, "fp32 IO (uncalibrated)")),
+    ("F32", ("tolf32", {"fp32": (1e-5, 1e-5)}, "fp32 IO; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference")),
 ])
 # fmt: on
 ASSIGNMENT_ORDER = ("F32", "K1", "U", "S", "P", "DL", "D")

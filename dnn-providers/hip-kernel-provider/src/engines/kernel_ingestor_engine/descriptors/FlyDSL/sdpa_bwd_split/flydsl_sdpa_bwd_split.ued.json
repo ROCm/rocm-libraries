@@ -15,8 +15,10 @@
       "name": "prep",
       "metadata": "8ce86793-4738-5da1-a889-79c7848adad2",
       "knobs": [
+        "head_dim",
         "padded",
-        "hints"
+        "hints",
+        "floor"
       ]
     },
     {

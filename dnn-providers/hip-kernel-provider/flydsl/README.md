@@ -205,8 +205,8 @@ these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
-**SDPA backward** (**gfx950**: split and merged, 2,686 objects; **gfx11-generic**: split
-only, 504 objects): two engines over one graph
+**SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx11-generic**: split
+only, 509 object files): two engines over one graph
 matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
 computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable (no plan
 saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is

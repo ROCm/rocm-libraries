@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
@@ -674,6 +675,41 @@ TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesAHeadSizeNoMergedObjectCovers)
     EXPECT_TRUE(graphMatch(atDim(24, 24)).has_value());
 }
 
+TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesF16AtHeadSize160WhereNoF16ObjectExists)
+{
+    // The merged table ships tile-160 objects for bf16 only. The repro graph is
+    // b4, hq = hkv = 6, sq 1023, skv 1024, d160, non-causal.
+    Shape shape;
+    shape.batch = 4;
+    shape.heads = 6;
+    shape.kvHeads = 6;
+    shape.seqQ = 1023;
+    shape.seqKv = 1024;
+    shape.headDimQk = 160;
+    shape.headDimV = 160;
+    ASSERT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(specOf(shape))));
+
+    {
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        EXPECT_FALSE(graphMatch(specOf(shape, DataType::HALF)).has_value());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "declined the graph [head_size]"));
+    }
+    {
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        EXPECT_TRUE(graphMatch(specOf(shape, DataType::BFLOAT16)).has_value());
+        EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "declined the graph"));
+    }
+    // The other f16 tiles around it keep serving.
+    shape.headDimQk = 128;
+    shape.headDimV = 128;
+    EXPECT_TRUE(graphMatch(specOf(shape, DataType::HALF)).has_value());
+    shape.headDimQk = 192;
+    shape.headDimV = 192;
+    EXPECT_TRUE(graphMatch(specOf(shape, DataType::HALF)).has_value());
+}
+
 TEST(TestFlydslSdpaBwdMergedGraph, EN2ServesPaddedVarlenTheMatcherAccepts)
 {
     const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
@@ -800,7 +836,7 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesAPaddedObjectAtOrBelowItsTile)
     EXPECT_TRUE(servesDims(32, 32));
     EXPECT_TRUE(servesDims(32, 16));
     EXPECT_TRUE(servesDims(8, 8));
-    for(const int64_t headDim : {64, 96, 128, 160, 192})
+    for(const int64_t headDim : {64, 96, 128, 192})
     {
         // The padded tile-32 object serves no head dim above its tile.
         EXPECT_FALSE(servesDims(headDim, headDim)) << "D " << headDim;
@@ -821,7 +857,8 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesTheSmallestTilePaddedBelowIt)
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesNoHeadDimTheCatalogDoesNotCover)
 {
     const auto rows = catalog();
-    for(const int64_t headDim : {24, 32, 64, 96, 128, 160, 192, 224, 256})
+    // The f16 table has no tile-160 object, so the graph match declines f16 at D = 160.
+    for(const int64_t headDim : {24, 32, 64, 96, 128, 192, 224, 256})
     {
         Shape shape;
         shape.headDimQk = headDim;

@@ -983,11 +983,45 @@ TEST(TestFlydslSdpaBwdSplitKernel, TheTailFloorOfTheLargestTileFollowsTheDtypesL
         result.dtype = dtype;
         return result;
     };
-    // 16-bit: the rung below 512 is 384, so 300 rides the t384 row. fp32 has no 384: 300 rides
-    // the padded t512 object.
+    // 16-bit: the rung below 512 is 384, so a tail-floor t512 row serves 385..512 and 300 rides the
+    // g1 t512 row (floor 0). fp32 has no 384 rung: its tail-floor t512 row serves 257..512, so 300
+    // rides it.
     EXPECT_FALSE(serves(Slot::DKDV, spec(DataType::HALF), sixteen));
     EXPECT_TRUE(serves(Slot::DKDV, spec(DataType::FLOAT), single));
     EXPECT_FALSE(serves(Slot::DKDV, spec(DataType::FLOAT), sixteen));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ThePrepG1RowOfTheLargestTileServesWhatItsTailFloorLeaves)
+{
+    for(const auto& dtypePair :
+        {std::pair{DataType::HALF, "f16"}, std::pair{DataType::BFLOAT16, "bf16"}})
+    {
+        const DataType dtype = dtypePair.first;
+        const std::string name = dtypePair.second;
+        SCOPED_TRACE(name);
+        RowSpec g1 = plainRow(512);
+        g1.dtype = name;
+        g1.padded = 1;
+        g1.floorValue = "g1";
+        RowSpec tail = g1;
+        tail.floorValue = "tail";
+        RowSpec smaller = plainRow(224);
+        smaller.dtype = name;
+        smaller.padded = 1;
+        const auto graph = [&](int64_t headDimV) {
+            auto result = withHeadDims(baseSpec(), headDimV, headDimV);
+            result.dtype = dtype;
+            return result;
+        };
+        // 16-bit: a tail-floor t512 row serves 385..512, so 300 rides only the g1 row.
+        EXPECT_TRUE(serves(Slot::PREP, graph(300), g1));
+        EXPECT_FALSE(serves(Slot::PREP, graph(300), tail));
+        EXPECT_FALSE(serves(Slot::PREP, graph(300), smaller));
+        // 200 is served by both its own tile and the g1 row; the catalog ranks the tile first.
+        EXPECT_TRUE(serves(Slot::PREP, graph(200), smaller));
+        EXPECT_TRUE(serves(Slot::PREP, graph(200), g1));
+        EXPECT_FALSE(serves(Slot::PREP, graph(200), tail));
+    }
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ClassFollowsTheGraphForTheClassedSlots)

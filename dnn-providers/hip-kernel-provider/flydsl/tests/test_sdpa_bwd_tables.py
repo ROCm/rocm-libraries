@@ -629,3 +629,104 @@ def test_the_tables_tool_refuses_a_tree_built_pin_that_is_already_a_pin(
     )
     with pytest.raises(SystemExit, match="already a pin"):
         tool.install_tree_pins(pins, instances, data)
+
+
+_TAIL_TWIN = "prep,bf16,256,plain,bk,0,1,tail,0,1"
+
+
+def _installed_sha256(data: Path, key: str) -> str:
+    with (data / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
+        (row,) = (r for r in csv.DictReader(fh) if r["spec"] == key)
+    return row["sha256"]
+
+
+def _hashes(data: Path) -> set[str]:
+    with (data / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
+        return {r["hash"] for r in csv.DictReader(fh)}
+
+
+def test_a_tree_built_pin_supersedes_the_installed_floor_twin_it_strictly_contains(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A g1 row whose object is its tail twin's replaces the twin in every output and the drop is printed."""
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    twin = Spec.parse(_TAIL_TWIN)
+    spec = Spec.parse(_TAIL_TWIN.replace("tail", "g1"))
+    before = _hashes(data)
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(
+        pins,
+        [
+            _tree_pin_row(
+                spec, sha256=_installed_sha256(data, twin.key()), function_sha256=""
+            )
+        ],
+    )
+    assert tool.install_tree_pins(pins, instances, data) == 1
+
+    installed = _hashes(data)
+    assert installed == (before - {twin.hash()}) | {spec.hash()}
+    assert f"  {twin.hash()} -> {spec.hash()}  {twin.key()}" in capsys.readouterr().out
+    assert twin.hash() not in (data / "sdpa_bwd_pin_functions.csv").read_text(
+        encoding="utf-8"
+    )
+    begin, end = tool.markers("gfx950")
+    text = instances.read_text(encoding="utf-8")
+    block = text[text.index(begin) : text.index(end) + len(end)]
+    with (data / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
+        assert block == tool.render_tables(
+            "gfx950", {r["hash"]: r for r in csv.DictReader(fh)}
+        )
+    assert '("bf16", 256, "plain", "bk", 0, 1, "g1", 0, 1, -1),' in block
+    assert '("bf16", 256, "plain", "bk", 0, 1, "tail", 0, 1, -1),' not in block
+
+
+@pytest.mark.parametrize(
+    "twin_key",
+    [
+        # equal range: an exact row serves its tile whatever its floor
+        "prep,bf16,256,plain,bk,0,0,tail,0,1",
+        # the installed twin (225-256) is wider than the tree row (241-256)
+        _TAIL_TWIN,
+    ],
+)
+def test_the_tables_tool_refuses_a_tree_built_pin_that_does_not_strictly_widen_its_twin(
+    tmp_path: Path, twin_key: str
+) -> None:
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    narrower = twin_key.replace(
+        "tail", "g1" if twin_key.endswith(",0,0,tail,0,1") else "240"
+    )
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(
+        pins,
+        [
+            _tree_pin_row(
+                Spec.parse(narrower),
+                sha256=_installed_sha256(data, twin_key),
+                function_sha256="",
+            )
+        ],
+    )
+    before = instances.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="strictly narrower"):
+        tool.install_tree_pins(pins, instances, data)
+    assert instances.read_text(encoding="utf-8") == before
+
+
+def test_a_tree_built_pin_with_another_object_supersedes_nothing(
+    tmp_path: Path,
+) -> None:
+    """Only a floor twin (the same object) is dropped; a row that merely shares the Spec apart from its floor stays."""
+    tool = _tables_tool()
+    instances, data = _copy_tool_inputs(tmp_path)
+    twin = Spec.parse(_TAIL_TWIN)
+    spec = Spec.parse(_TAIL_TWIN.replace("tail", "g1"))
+    before = _hashes(data)
+    pins = tmp_path / "tree-pins.csv"
+    _write_tree_pins(pins, [_tree_pin_row(spec, function_sha256="")])
+    assert tool.install_tree_pins(pins, instances, data) == 1
+    assert _hashes(data) == before | {spec.hash()}
+    assert twin.hash() in _hashes(data)
