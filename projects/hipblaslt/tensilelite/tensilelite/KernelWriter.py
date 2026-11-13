@@ -56,6 +56,7 @@ from .Components.PersistentLoop import PersistentKernelState
 from .Components.StreamK import StreamKKernelState
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
+from .Components import ScalarLoadB
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide, dcpLateFillIncrements
@@ -252,6 +253,10 @@ class StateValues:
   scheduleIterAlg: int                   = 0
   ## ShadowInit
   doShadowInit: int                      = 0
+  scalarLoadBIter: int                   = 0 # ScalarLoadB: summation iteration of the MACs being emitted
+  startVgprScalarLoadBPrefetch: int      = -1
+  vmemLoadsAfterGlobalRead: int          = 0 # vector loads issued after the reads a local write waits for
+  sgprAliases: dict                      = field(default_factory=dict) # SGPR name -> [(alias, offset)]
   ## Loop
   actualSummationLoops: int              = 0
   otherSummationLoops: int               = 0
@@ -3583,6 +3588,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             tPA = None
           if kernel["DirectToVgprB"]:
             tPB = None
+        if kernel.get("ScalarLoadB"):
+          module.add(ScalarLoadB.init(self, kernel, tensorParametersB))
         # Decoupled PGR advances both tensors; legality comes from late fill placement.
         module.add(self.globalReadIncrementAB(kernel, tPA, tPB, self.states.unrollIdx, pfi))
         # swap Tensor memToken
@@ -3913,6 +3920,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
+    self.states.vmemLoadsAfterGlobalRead = 0  # no reads here: local-write waits drain everything
     lastuIdx = False
     pflr     = self.states.numItersPLR
     localWriteEndIter = kernel["LoopIters"] - self.states.numItersPLR - 1
@@ -4447,6 +4455,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             postShiftK.add(item)
         macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll, postShiftK = postShiftK))
       else:
+        if kernel.get("ScalarLoadB"):
+          # the last block has no successor to fetch B for
+          macIterCode.add(ScalarLoadB.iterLoads(self, kernel, u, lastBlock=NLLlast))
+          waitLWCode.add(ScalarLoadB.iterWait(self, kernel, u))
+          self.states.scalarLoadBIter = u
         macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
@@ -4632,6 +4645,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self._syncThreads(kernel, "wait for tensor load to finish, PGR->LW needs sync"))
 
     module.addComment1("Begin Each Unroll: Check VGPR.checkin for INT8 LW")
+    if kernel.get("ScalarLoadB") and not ScalarLoadB.prefetchAfterGlobalRead(kernel):
+      module.add(ScalarLoadB.prefetch(self, kernel))
 
     # swap the order of global read (B->A)
     # - swapAB (grBA=True)
@@ -4724,6 +4739,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.codes.globalReadIncrements = self.globalReadIncrementAB(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, 0)
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
+
+    self.states.vmemLoadsAfterGlobalRead = 0
+    if kernel.get("ScalarLoadB") and ScalarLoadB.prefetchAfterGlobalRead(kernel):
+      globalReadIncACode.add(ScalarLoadB.prefetch(self, kernel), 0)
+      self.states.vmemLoadsAfterGlobalRead += 1
 
     self.codes.gl2PrefetchIncrement = Module()
     self.codes.gl2Prefetch = Module()
@@ -5346,6 +5366,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         else:
           macIterCode.add(mfmaIter)
       else:
+        if kernel.get("ScalarLoadB"):
+          macIterCode.add(ScalarLoadB.iterLoads(self, kernel, u, lastBlock=False))
+          waitLWCode.add(ScalarLoadB.iterWait(self, kernel, u))
+          self.states.scalarLoadBIter = u
         macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
@@ -8101,6 +8125,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
        kernel["UseSubtileImpl"] or \
+       kernel.get("ScalarLoadB") or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
     
@@ -8142,7 +8167,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # doShadowInit performs initialization in the 'shadow' of the global mem prefetch
     # TODO re-enable..
-    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"]:
+    # ScalarLoadB: the store SRDs would stay live across the loop, where the SGPRs hold B.
+    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"] and not kernel.get("ScalarLoadB"):
       if kernel["PrefetchGlobalRead"]:
         if self.states.actualSummationLoops == 1:
           self.states.doShadowInit = 2 # 2 is both store setup and initC
@@ -9007,6 +9033,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       else: # mac instruction
         valuBlocksA = (1 + kernel["PrefetchLocalRead"]) * kernel["InnerUnroll"]
         valuBlocksB = (1 + kernel["PrefetchLocalRead"]) * kernel["InnerUnroll"]
+        if kernel.get("ScalarLoadB"):
+          valuBlocksB = 0 # B lives in SGPRs
 
         if kernel["UseDotInstruction"]:
           # dot2: at least read NumDotElements elements
@@ -9181,6 +9209,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["DirectToVgprB"]:
         self.states.b.numVgprG2L *= 2
         self.states.b.numVgprG2LAllocated *= 2
+      if kernel.get("ScalarLoadB"):
+        self.states.b.numVgprG2L = 0
+        self.states.b.numVgprG2LAllocated = 0
+        self.states.b.numVgprG2LTailloopAllocated = 0
         bpeB = tensorParametersB["bpe"]
         bpeGRB = tensorParametersB["bpeGR"]
         if kernel["ConvertAfterDS"] and bpeB > bpeGRB:
@@ -9399,6 +9431,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["DirectToVgprA"] or kernel["DirectToLdsA"]:
         self.states.a.numVgprLocalWriteAddr = 0
       if kernel["DirectToVgprB"] or kernel["DirectToLdsB"]:
+        self.states.b.numVgprLocalWriteAddr = 0
+      if kernel.get("ScalarLoadB"):
+        # B is never in LDS
+        self.states.b.numVgprLocalReadAddr = 0
         self.states.b.numVgprLocalWriteAddr = 0
 
       if kernel["ProblemType"]["MXBlockA"] and (kernel["DirectToVgprMXSA"] or kernel["DirectToLdsMXSA"]):
@@ -9751,7 +9787,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.startVgprGlobalReadOffsetA = vgprIdx
         vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.a.numVgprGlobalReadOffsets
         self.startVgprGlobalReadOffsetB = vgprIdx
-        vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.b.numVgprGlobalReadOffsets
+        if not kernel.get("ScalarLoadB"):
+          vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.b.numVgprGlobalReadOffsets
         if kernel["ProblemType"]["MXBlockA"]:
           self.startVgprGlobalReadOffsetMXSA = vgprIdx
           vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.mxsa.numVgprGlobalReadOffsets
@@ -9869,7 +9906,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
       if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
         sameBank = (self.states.c.startVgprValu % 4) == (vgprIdx % 4)
-        if self.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
+        if kernel.get("ScalarLoadB"):
+          # A MAC reads only C and A from VGPRs. With A two banks from C, the two halves of a
+          # dual FMAC (C+i, A+i and C+i+1, A+i+1) read four different banks.
+          vgprIdx += (2 - (vgprIdx - self.states.c.startVgprValu)) % 4
+        elif self.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
           # gfx11 WMMA reads A/B/C in lockstep; A sharing C's bank costs +2 cyc.
           if sameBank:
             vgprIdx += 2
@@ -10339,6 +10380,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
   
+      if kernel.get("ScalarLoadB"):
+        if kernel.get("ScalarLoadBPrefetch"):
+          self.states.startVgprScalarLoadBPrefetch = vgprIdx  # 64-bit address, discarded result
+          vgprIdx += 3
+
       if kernel["PrefetchGL2"]:
         vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 

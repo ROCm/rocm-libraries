@@ -908,6 +908,17 @@ validParameters = { # we need to make sure this matches develop
     # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
     # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
     "UseDualFMAC": [False, True],
+    # ScalarLoadB: feed the B operand of f32 source/MAC kernels from SGPRs instead of LDS/VGPRs.
+    # Each wave loads its (wave-uniform) B elements with s_load into a ring of SGPRs that holds
+    # ScalarLoadB summation iterations, and the MACs take B as a scalar operand, so B needs no
+    # LDS, no VGPRs and no VGPR read port. 0 disables. Requirements are checked in
+    # SolutionStructs.Solution (full tiles, no tail loop, no GSU/StaggerU, SubGroup0 a multiple
+    # of the wavefront size so that the tile-1 index is constant within a wave).
+    "ScalarLoadB": [0, 2, 4, 8, 16],
+    # ScalarLoadBPrefetch: with ScalarLoadB, issue one vector load per unrolled iteration that
+    # touches the B data this many unrolled iterations ahead, so the scalar loads hit the cache.
+    # Its result is discarded. 0 disables.
+    "ScalarLoadBPrefetch": [0, 1, 2, 3, 4],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #

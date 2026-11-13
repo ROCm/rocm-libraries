@@ -42,8 +42,9 @@ class NotLocalFullTileElementsVALU(NotLocalFullTileElements):
         while vectorwidth > 0:
             elements_temp = []
             # Full tile loop:
-            for tt1 in range(0, kernel["ThreadTile1"]//kernel["VectorWidthA"]):
-                for vc1 in range(0, kernel["VectorWidthA"]):
+            # tile 1 is laid out with VectorWidthB (it differs from VectorWidthA only with ScalarLoadB)
+            for tt1 in range(0, kernel["ThreadTile1"]//kernel["VectorWidthB"]):
+                for vc1 in range(0, kernel["VectorWidthB"]):
                     for tt0 in range(0, kernel["ThreadTile0"]//kernel["VectorWidthA"]):
                         for vc0 in range(0, kernel["VectorWidthA"], vectorwidth): # note step by fullVw
                             element = (tt1, tt0, vc1, vc0)

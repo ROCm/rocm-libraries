@@ -574,7 +574,7 @@ class StoreState:
                     alignment = self.cfg.numVgprPerValuC * self.cfg.gwvw
                     sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
                 else:
-                    sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]
+                    sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthB"]*kernel["ThreadTile0"]
             self.elementSumIdx.append(sumIdx) # sumIdx is an element idx, need to div/2 for half
 
         for elementIdx in range(0, len(batchElements)):
@@ -882,7 +882,7 @@ class StoreState:
                     #exit(1)
                     sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
                 else:
-                    sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]
+                    sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthB"]*kernel["ThreadTile0"]
             self.elementSumIdx.append(sumIdx) # sumIdx is an element idx, need to div/2 for half
 
         for elementIdx in range(0, len(batchElements)):
