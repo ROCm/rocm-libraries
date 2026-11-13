@@ -61,10 +61,6 @@ namespace TensileLite
                                                      size_t                    device) const;
             ClientProblemFactory const& sliceFactory(size_t device) const;
 
-            // --split-dim N: every device writes its slice of one shared D. The element offset of
-            // device `device`'s slice in the full D of `full` (0 for --split-dim M).
-            bool   splitsN() const;
-            size_t sliceOffsetInD(ContractionProblem const* full, size_t device) const;
 
             size_t workspaceSize() const
             {

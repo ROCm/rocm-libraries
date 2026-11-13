@@ -170,9 +170,9 @@ namespace TensileLite
             }
 
             // Slice factory of --split-devices N. --split-dim M: M becomes this device's share
-            // (A split, B replicated). --split-dim N: N becomes its share (B split, A replicated,
-            // D keeps the full strides because every device writes into one shared output).
-            // The first N-1 devices take size/N; the last takes the remainder.
+            // (A split, B replicated). --split-dim N: N becomes its share (B split, A replicated).
+            // Each device keeps its own output slice; the first N-1 devices take size/N, the last
+            // takes the remainder.
             if(m_sliceCount > 1)
             {
                 m_splitN   = args["split-dim"].as<std::string>() == "N";
@@ -388,22 +388,6 @@ namespace TensileLite
             throw std::runtime_error("[ClientProblemFactory] problem is not from this factory");
         }
 
-        bool ClientProblemFactory::splitsN() const
-        {
-            return !m_slices.empty() && m_slices[0]->m_splitN;
-        }
-
-        size_t ClientProblemFactory::sliceOffsetInD(ContractionProblem const* full,
-                                                    size_t                    device) const
-        {
-            auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(full);
-            if(!splitsN() || gemm == nullptr)
-                return 0;
-            auto const& free  = m_slices[0]->m_splitFree;
-            size_t      share = gemm->d().sizes().at(free.d) / m_slices.size();
-            return device * share * gemm->d().strides().at(free.d);
-        }
-
         ClientProblemFactory const& ClientProblemFactory::sliceFactory(size_t device) const
         {
             return m_slices.empty() ? *this : *m_slices.at(device);
@@ -546,29 +530,14 @@ namespace TensileLite
                                             changed = true;
                                         }
                                     };
+                                    // The split operand (A for M, B for N), C and D shrink with the
+                                    // slice; the other operand is replicated whole.
                                     if(!m_splitN)
-                                    {
                                         retighten(ContractionProblemGemm::TENSOR::A, m_splitFree.i, aS);
-                                        retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
-                                        retighten(ContractionProblemGemm::TENSOR::D, m_splitFree.d, dS);
-                                    }
                                     else
-                                    {
                                         retighten(ContractionProblemGemm::TENSOR::B, m_splitFree.i, bS);
-                                        retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
-                                        // D is one shared tensor: its slice keeps the full strides.
-                                        if(dS.empty())
-                                        {
-                                            dS      = fullStrides(ContractionProblemGemm::TENSOR::D,
-                                                             m_splitFree.d);
-                                            changed = true;
-                                        }
-                                        if(m_cEqualsD)
-                                        {
-                                            cS      = dS;
-                                            changed = true;
-                                        }
-                                    }
+                                    retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
+                                    retighten(ContractionProblemGemm::TENSOR::D, m_splitFree.d, dS);
                                     if(changed)
                                         rv.push_back(make(aS, bS, cS, dS));
                                     else
