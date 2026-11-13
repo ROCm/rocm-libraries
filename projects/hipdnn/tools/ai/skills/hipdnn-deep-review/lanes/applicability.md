@@ -33,6 +33,13 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
 6. Decline tests: one per property value with boundary rows (below, at, above the limit), each a legal graph, failing when the
    guard is removed. Offer the guard removal to `VER` as the mutation.
 7. State, for every claimed hazard, the smallest legal graph mutation the engine accepts.
+8. When support depends on a contract the tree cannot show (prebuilt code objects, vendored or
+   artifact-only kernels, a library's internals), the missing positive gate is the hazard. A
+   reachable value or feature combination (GQA ratio, mask mode, dtype pair, alignment) that the
+   implementation path does not visibly handle is an applicability finding, not a `CORR` handoff.
+   Tier it by its worst plausible outcome, mark the kernel side `[INFERENCE]` in **Proof**, and put
+   the device check that would settle it under **Approval requests**. Never lower the tier because
+   the kernel cannot be read.
 
 ## Hazard classes
 
