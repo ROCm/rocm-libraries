@@ -458,23 +458,13 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
     return config.IsValid(problem);
 }
 
-size_t
-ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
-{
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
-    if(!loader.IsLoaded())
-        return 0;
-
-    auto data_type = problem.GetInDataType();
-    bool use_tf32  = (data_type == miopenFloat) && problem.UseTF32();
-    return loader.GetWorkspaceSize(CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
-}
-
 size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
                                                            const ProblemDescription& problem) const
 {
-    auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
-    return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    // Only backward weights uses a CK split-K workspace, so a backward-data solution needs the
+    // layout transform buffers alone (as GetSolution() sizes it); asking CK for its maximum
+    // would enumerate every instance for a value GetWorkspaceSizeLayoutTransformConv() ignores.
+    return GetWorkspaceSizeLayoutTransformConv(problem);
 }
 
 PerformanceConfigHipImplicitGemmGroupBwdXdlops

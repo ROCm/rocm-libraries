@@ -34,6 +34,7 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/default_config_cache.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
@@ -383,13 +384,25 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     }
 #endif
 
-    // Fallback to default initialization
-    InitValidKernels(problem);
-    if(!valid_kernels.empty())
+    // Fallback to default initialization, computed once per process (DefaultConfigCache).
+    const bool ranked_defaults = !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS);
+    const auto chosen          = DefaultConfigCache::Get().GetOrCompute(
+        DefaultConfigKey(
+            ConvHipImplicitGemmGroupWrwXdlops{}.SolverDbId(), ctx, problem, ranked_defaults),
+        [&]() -> std::optional<CachedDefaultConfig> {
+            InitValidKernels(problem);
+            if(valid_kernels.empty())
+                return std::nullopt;
+            if(ranked_defaults)
+                DefaultKernelFromList(ctx);
+            state.SetResult(index, split_k, k2DWrwSolverConfig.uses_split_k);
+            return CachedDefaultConfig{kernel_id, use_tf32};
+        });
+    if(chosen)
     {
-        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList(ctx);
-        state.SetResult(index, split_k, k2DWrwSolverConfig.uses_split_k);
+        kernel_id = chosen->kernel_id;
+        use_tf32  = chosen->use_tf32;
+        split_k   = 1;
     }
 
     // Invariant: split_k must always be 1 in deterministic mode
