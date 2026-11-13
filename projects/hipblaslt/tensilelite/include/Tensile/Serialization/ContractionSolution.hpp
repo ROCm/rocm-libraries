@@ -222,6 +222,7 @@ namespace TensileLite
                 iot::mapOptional(io, "temporalHintA", s.temporalHintA);
                 iot::mapOptional(io, "temporalHintB", s.temporalHintB);
                 iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
+                iot::mapOptional(io, "adaptiveGemm", s.adaptiveGemm);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
@@ -249,6 +250,12 @@ namespace TensileLite
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "BufferLoad", s.BufferLoad);
                 iot::mapOptional(io, "BufferStore", s.BufferStore);
+                iot::mapOptional(io, "temporalHintD", s.temporalHintD);
+                iot::mapOptional(io, "PrefetchLocalRead", s.PrefetchLocalRead);
+                iot::mapOptional(io, "HalfPLR", s.HalfPLR);
+                iot::mapOptional(io, "PrefetchGL2", s.PrefetchGL2);
+                iot::mapOptional(io, "TDMInst", s.TDMInst);
+                iot::mapOptional(io, "Multicast", s.Multicast);
             }
 
             const static bool flow = false;
