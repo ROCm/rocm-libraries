@@ -289,18 +289,6 @@ inline constexpr const char* kSkipList[] = {
     "Misc_Statistical/NormalizeTest.Correctness/HOST_F16toF16_2D_axis3_cms3_*",
     "Misc_Statistical/NormalizeTest.Correctness/HOST_F32toF32_3D_axis7_*",
     "Misc_Statistical/NormalizeTest.Correctness/HOST_F32toF32_4D_axis15_*",
-    "Voxel_Arithmetic/AddScalarTest.Correctness/HIP_F32toF32_*_FullRoi_LTFRBB_*_add40",
-    "Voxel_Arithmetic/AddScalarTest.Correctness/HIP_F32toF32_*_PartialRoi_LTFRBB_2x3x10x19_add40",
-    "Voxel_Arithmetic/FusedMultiplyAddScalarTest.Correctness/"
-    "HIP_F32toF32_*_FullRoi_LTFRBB_*_mul80_add5",
-    "Voxel_Arithmetic/FusedMultiplyAddScalarTest.Correctness/"
-    "HIP_F32toF32_*_PartialRoi_LTFRBB_2x3x10x19_mul80_add5",
-    "Voxel_Arithmetic/MultiplyScalarTest.Correctness/HIP_F32toF32_*_FullRoi_LTFRBB_*_mul80",
-    "Voxel_Arithmetic/MultiplyScalarTest.Correctness/"
-    "HIP_F32toF32_*_PartialRoi_LTFRBB_2x3x10x19_mul80",
-    "Voxel_Arithmetic/SubtractScalarTest.Correctness/HIP_F32toF32_*_FullRoi_LTFRBB_*_sub40",
-    "Voxel_Arithmetic/SubtractScalarTest.Correctness/"
-    "HIP_F32toF32_*_PartialRoi_LTFRBB_2x3x10x19_sub40",
     "Voxel_Effects/GaussianNoiseVoxelNegativeTest.Negative/*_F32toF32_NCDHW1_FullRoi_XYZWHD_*",
     "Voxel_Effects/GaussianNoiseVoxelTest.Correctness/HIP_*_FullRoi_LTFRBB_*",
     "Voxel_Effects/GaussianNoiseVoxelTest.Correctness/HIP_*_PartialRoi_LTFRBB_2x3x10x19",

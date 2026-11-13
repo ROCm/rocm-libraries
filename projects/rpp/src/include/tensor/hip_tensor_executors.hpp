@@ -40,14 +40,14 @@ SOFTWARE.
 RppStatus hip_exec_add_scalar_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
                                      Rpp32f* dstPtr, RpptGenericDescPtr dstGenericDescPtr,
                                      RpptROI3DPtr roiGenericPtrSrc, Rpp32f* addTensor,
-                                     rpp::Handle& handle);
+                                     RpptRoi3DType roiType, rpp::Handle& handle);
 
 // -------------------- fused_multiply_add_scalar --------------------
 
 RppStatus hip_exec_fused_multiply_add_scalar_tensor(
     Rpp32f* srcPtr, RpptGenericDescPtr srcGenericDescPtr, Rpp32f* dstPtr,
     RpptGenericDescPtr dstGenericDescPtr, RpptROI3DPtr roiGenericPtrSrc, Rpp32f* mulTensor,
-    Rpp32f* addTensor, rpp::Handle& handle);
+    Rpp32f* addTensor, RpptRoi3DType roiType, rpp::Handle& handle);
 
 // -------------------- log_generic --------------------
 
@@ -74,14 +74,14 @@ RppStatus hip_exec_magnitude_tensor(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDescP
 RppStatus hip_exec_multiply_scalar_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
                                           Rpp32f* dstPtr, RpptGenericDescPtr dstGenericDescPtr,
                                           RpptROI3DPtr roiGenericPtrSrc, Rpp32f* mulTensor,
-                                          rpp::Handle& handle);
+                                          RpptRoi3DType roiType, rpp::Handle& handle);
 
 // -------------------- subtract_scalar --------------------
 
 RppStatus hip_exec_subtract_scalar_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
                                           Rpp32f* dstPtr, RpptGenericDescPtr dstGenericDescPtr,
                                           RpptROI3DPtr roiGenericPtrSrc, Rpp32f* subtractTensor,
-                                          rpp::Handle& handle);
+                                          RpptRoi3DType roiType, rpp::Handle& handle);
 
 // -------------------- tensor_arithmetic_operations --------------------
 
