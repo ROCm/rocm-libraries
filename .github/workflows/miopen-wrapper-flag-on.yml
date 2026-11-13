@@ -133,3 +133,14 @@ jobs:
             printf '%s\n' "$listing"
             exit 1
           }
+
+      # Same check as the component CI, on the full flag-on build tree.
+      - name: Wrapper checks are registered for every architecture with an enabled suite
+        run: |
+          labels=$(python3 projects/miopen/test/gtest/forwarding_parity_gpu_labels.py \
+            shared/ctest/parse_test_categories.py \
+            projects/miopen/test/gtest/test_categories.yaml)
+          python3 projects/miopen/test/gtest/check_wrapper_registration.py \
+            --labels "$labels" \
+            --ctest-dir build \
+            --packaged build/test/gtest/install_CTestTestfile.cmake

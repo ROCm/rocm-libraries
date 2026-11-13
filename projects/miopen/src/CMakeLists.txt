@@ -962,10 +962,17 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # MIOPEN_BUILDING_PRIVATE, so the MIOpen source tree stays untouched. The
     # option is restricted to CXX and the path is quoted, so neither a checkout
     # path containing a space nor the generated .S sources added under
-    # MIOPEN_INCBIN can be handed a C++ header.
+    # MIOPEN_INCBIN can be handed a C++ header. clang-cl takes /FI and ignores
+    # -include with only a warning, which would leave the _impl names unrenamed.
     target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(_miopen_force_include "/FI")
+    else()
+        set(_miopen_force_include "-include")
+    endif()
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:${_miopen_force_include} \"${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h\">")
+    unset(_miopen_force_include)
 
     # Public wrapper library. src/private/wrapper_passthrough.cpp (generated from
     # <miopen/miopen.h> by script/generate_wrapper_sources.py) and

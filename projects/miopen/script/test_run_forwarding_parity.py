@@ -24,6 +24,8 @@ that builds MIOpen.
     python3 -m unittest test_run_forwarding_parity
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -33,6 +35,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import run_forwarding_parity
 
 HARNESS = Path(__file__).resolve().parent / "run_forwarding_parity.py"
 
@@ -42,6 +47,7 @@ mode = os.environ.get("MIOPEN_HIPDNN_FORWARDING")
 pathlib.Path(__file__).with_name("env_%s.json" % mode).write_text(json.dumps({{
     "MIOPEN_HIPDNN_FORWARDING": mode,
     "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH"),
+    "PATH": os.environ.get("PATH"),
     "MIOPEN_USER_DB_PATH": os.environ.get("MIOPEN_USER_DB_PATH"),
     "MIOPEN_CUSTOM_CACHE_DIR": os.environ.get("MIOPEN_CUSTOM_CACHE_DIR"),
 }}))
@@ -90,8 +96,10 @@ sys.exit(1)
 
 
 # Checked before anything here touches os.geteuid(), which off POSIX would fail at
-# import rather than skip.
-@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+# import rather than skip. The stand-in test binaries are scripts started through
+# their shebang line, which Windows cannot do; test_miopen_wrapper_libs covers the
+# Windows library layout.
+@unittest.skipUnless(os.name == "posix", "the stand-in binaries need a shebang")
 class ParityRunnerTest(unittest.TestCase):
     def setUp(self):
         """A stand-in install tree: the libraries the harness resolves, plus its helpers."""
@@ -242,6 +250,18 @@ class ParityRunnerTest(unittest.TestCase):
             argv[argv.index("--newer-than") + 1], str(self.tree / "fake_gtest.py")
         )
 
+    def test_a_missing_test_binary_fails_before_any_replay(self):
+        """Windows starts "miopen_gtest" when only miopen_gtest.exe exists, so the
+        replays would pass and the comparison, needing the exact file, would fail
+        only once both had run."""
+        result = self.run_harness(self.tree, gtest="no_such_gtest")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            f"FAIL: test binary {self.tree / 'no_such_gtest'} does not exist",
+            result.stdout,
+        )
+        self.assertFalse((self.tree / "env_disabled.json").exists())
+
     def test_a_replay_that_exits_non_zero_fails(self):
         result = self.run_harness(self.tree, gtest="fails.py")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -354,6 +374,63 @@ class ParityRunnerTest(unittest.TestCase):
         self.assertIn(
             str(self.tree / "lib" / "libMIOpen_private.so.1.0"), result.stdout
         )
+
+
+# Drives the Windows layout in-process by naming the platform, so it is covered on Linux.
+# The stand-in binary is a shebang script, hence the same skip as above.
+@unittest.skipUnless(os.name == "posix", "the stand-in binaries need a shebang")
+class WindowsLayoutTest(unittest.TestCase):
+    def setUp(self):
+        """A stand-in Windows install: DLLs and the scripts' folder both under bin/."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.tree = Path(holder.name)
+
+        self.bin = self.tree / "bin"
+        self.scripts = self.bin / "miopen_wrapper_tests"
+        self.scripts.mkdir(parents=True)
+        (self.bin / "MIOpen.dll").touch()
+        (self.bin / "MIOpen_private.dll").touch()
+        for name, body in (
+            ("miopen_gtest.exe", FAKE_GTEST),
+            ("fake_compare.py", RECORDS_ARGV),
+        ):
+            path = self.bin / name
+            path.write_text(body)
+            path.chmod(0o755)
+
+    def run_main(self, *extra):
+        argv = [
+            "--gtest",
+            str(self.bin / "miopen_gtest.exe"),
+            "--filter",
+            "*",
+            "--compare",
+            str(self.bin / "fake_compare.py"),
+            "--output-dir",
+            str(self.tree / "reports"),
+            *extra,
+        ]
+        output = io.StringIO()
+        with mock.patch.object(
+            run_forwarding_parity, "SCRIPT_DIR", self.scripts
+        ), contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = run_forwarding_parity.main(argv, windows=True)
+        return code, output.getvalue()
+
+    def test_the_dlls_are_found_beside_the_programs_and_put_on_path(self):
+        code, output = self.run_main()
+        self.assertEqual(code, 0, output)
+        self.assertIn(str(self.bin / "MIOpen.dll"), output)
+        self.assertIn(str(self.bin / "MIOpen_private.dll"), output)
+        for mode in ("disabled", "enabled"):
+            recorded = json.loads((self.bin / f"env_{mode}.json").read_text())
+            first, *rest = recorded["PATH"].split(os.pathsep)
+            self.assertEqual(Path(first), self.bin)
+            self.assertEqual(os.pathsep.join(rest), os.environ["PATH"])
+            self.assertEqual(
+                recorded["LD_LIBRARY_PATH"], os.environ.get("LD_LIBRARY_PATH")
+            )
 
 
 if __name__ == "__main__":
