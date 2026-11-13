@@ -246,6 +246,29 @@ miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
     return InferV1(handle, d, with_estimates, with_estimates);
 }
 
+// The inverse variance entry takes no epsilon. It reads the second estimate as
+// an inverse variance.
+miopenStatus_t InferInvVariance(miopen::Handle& handle, InferData& d, bool with_estimates)
+{
+    return miopenBatchNormalizationForwardInferenceInvVariance(
+        &handle,
+        d.bn_mode,
+        &d.alpha,
+        &d.beta,
+        &d.input.desc,
+        d.in_dev.get(),
+        &d.output.desc,
+        d.out_dev.get(),
+        &d.scale.desc,
+        &d.shift.desc,
+        &d.estMean.desc,
+        &d.estVariance.desc,
+        d.scale_dev.get(),
+        d.shift_dev.get(),
+        with_estimates ? d.estMean_dev.get() : nullptr,
+        with_estimates ? d.estVariance_dev.get() : nullptr);
+}
+
 miopenStatus_t
 InferActivation(miopen::Handle& handle, InferData& d, miopenActivationDescriptor_t activ)
 {
@@ -1228,6 +1251,19 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
     }
 }
 
+// The inverse variance entry has no epsilon, so the training it runs uses the
+// default one, 1e-5, and the reference does too.
+TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, InvVarianceRunsTrainingAtDefaultEpsilon)
+{
+    auto&& handle = get_handle();
+    InferData d;
+    SetUpInfer(d);
+    d.epsilon         = 1e-5;
+    const auto result = hs::CaptureCall([&] { return InferInvVariance(handle, d, false); });
+    if(ExpectServed("infer_inv_variance_no_estimates", result))
+        CheckInferWithoutEstimates(handle, d);
+}
+
 // The provider recomputes the stats itself only for plain backward at an epsilon
 // of 1e-5. For any other epsilon, and for backward with an activation, whose
 // graph needs the saved stats, the shim runs training first to compute them into
@@ -1688,12 +1724,21 @@ void ExpectTrainingPolicyGap(miopen::Handle& handle, const std::string& prefix, 
 // The provider sets only None or Search on its handle, so it cannot run the
 // policies that also write or clean the perf db. The shim declines them for
 // training and backward, and for inference without the estimated stats, which
-// runs training; DbUpdate stands for all three.
-TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
+// runs training. Each of the three policies gets its own cases.
+TEST(GPU_HipdnnShimBNGaps_FP32, WriteOrCleanPoliciesAreDeclined)
 {
     auto&& handle = get_handle();
-    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
-    ExpectTrainingPolicyGap(handle, "tuning_policy_dbupdate", "tuning policy");
+
+    for(const auto& [tuning_policy, prefix] :
+        {std::pair<miopenTuningPolicy_t, std::string>{miopenTuningPolicyDbUpdate,
+                                                      "tuning_policy_dbupdate"},
+         {miopenTuningPolicySearchDbUpdate, "tuning_policy_searchdbupdate"},
+         {miopenTuningPolicyDbClean, "tuning_policy_dbclean"}})
+    {
+        SCOPED_TRACE(prefix);
+        const ScopedHandleTuningPolicy policy(handle, tuning_policy);
+        ExpectTrainingPolicyGap(handle, prefix, "tuning policy");
+    }
 }
 
 // MIOpen lets a Search handle win over MIOPEN_FIND_ENFORCE, but the provider sets
