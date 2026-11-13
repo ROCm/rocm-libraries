@@ -287,6 +287,10 @@ namespace TensileLite
         size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
+        // Whether the checked-in rocRoller kernels (RocRollerCaptures predicate) may be
+        // selected. A hipBLASLt build with rocRoller serves those problems through
+        // rocRoller itself, so only builds without it set this.
+        bool rocRollerCaptures = false;
         // Lazily computed by isStandardCU(); -1: unset, 0:false, 1:true.
         // Readers may observe this while it is published, so the store is atomic.
         // AMDGPU is copied as a cache key. std::atomic is not copyable, so a copy
@@ -445,7 +449,8 @@ namespace TensileLite
 
         bool operator==(AMDGPU const& rhs) const
         {
-            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount && _pciChipId == rhs._pciChipId;
+            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount
+                   && _pciChipId == rhs._pciChipId && rocRollerCaptures == rhs.rocRollerCaptures;
         }
 
     private:
