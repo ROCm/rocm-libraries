@@ -2384,14 +2384,18 @@ TEST_F(TestSdpaFwdUnservedAttributes, UnmutatedGraphIsApplicable)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestSdpaFwdUnservedAttributes, SeedAndOffsetAtZeroDropoutAreApplicable)
+class TestSdpaFwdInertAttributes : public TestSdpaFwdUnservedAttributes
+{
+};
+
+TEST_P(TestSdpaFwdInertAttributes, IsApplicable)
 {
     SKIP_IF_NO_DEVICES();
     if(!servedArch())
     {
         GTEST_SKIP();
     }
-    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), seedAndOffsetAtZeroDropoutCase());
+    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -2414,7 +2418,14 @@ TEST_P(TestSdpaFwdUnservedAttributes, IsNotApplicable)
 
 INSTANTIATE_TEST_SUITE_P(Attributes,
                          TestSdpaFwdUnservedAttributes,
-                         ::testing::ValuesIn(commonUnservedFwdAttributeCases()),
+                         ::testing::ValuesIn(asmUnservedFwdAttributeCases()),
+                         [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
+                             return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Attributes,
+                         TestSdpaFwdInertAttributes,
+                         ::testing::ValuesIn(asmInertFwdAttributeCases()),
                          [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
                              return info.param.name;
                          });

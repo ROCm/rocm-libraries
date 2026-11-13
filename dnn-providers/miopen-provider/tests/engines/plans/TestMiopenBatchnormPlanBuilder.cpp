@@ -2465,18 +2465,16 @@ flatbuffers::FlatBufferBuilder createSingleNodeGraph(BnSingleNodeMode mode)
 flatbuffers::FlatBufferBuilder createSingleNodeGraphWithVirtualTensor(BnSingleNodeMode mode,
                                                                       int64_t virtualUid)
 {
-    auto original = createSingleNodeGraph(mode);
-    auto graphT = std::unique_ptr<fb::GraphT>(fb::GetGraph(original.GetBufferPointer())->UnPack());
-    for(auto& tensor : graphT->tensors)
-    {
-        if(tensor->uid == virtualUid)
-        {
-            tensor->virtual_ = true;
-        }
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(fb::CreateGraph(builder, graphT.get()));
-    return builder;
+    return hipdnn_test_sdk::utilities::mutateGraph(createSingleNodeGraph(mode),
+                                                   [virtualUid](fb::GraphT& graph) {
+                                                       for(auto& tensor : graph.tensors)
+                                                       {
+                                                           if(tensor->uid == virtualUid)
+                                                           {
+                                                               tensor->virtual_ = true;
+                                                           }
+                                                       }
+                                                   });
 }
 
 // Every tensor role the single-node plan reads or writes. Uids follow the test-sdk graph helpers.

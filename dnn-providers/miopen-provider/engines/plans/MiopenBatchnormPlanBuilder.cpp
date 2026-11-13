@@ -378,14 +378,14 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 }
 
 void checkSingleNodeTensorsNonVirtual(
-    const std::vector<std::optional<int64_t>>& tensorUids,
+    const std::vector<int64_t>& tensorUids,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    for(const auto& uid : tensorUids)
+    for(const auto uid : tensorUids)
     {
-        if(uid.has_value() && miopen_utils::findTensorAttributes(tensorMap, *uid).virtual_())
+        if(miopen_utils::findTensorAttributes(tensorMap, uid).virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -462,8 +462,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                     return false;
                 }
 
-                if(attr->mean_tensor_uid().has_value()
-                   != attr->inv_variance_tensor_uid().has_value())
+                if(!hasPairedSavedStatistics(*attr))
                 {
                     HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder requires saved mean and "
                                            "inv_variance to be provided together");
@@ -480,12 +479,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             {
                 const auto& attr = *node.attributes_as_BatchnormAttributes();
                 checkBatchnormFwdTrainingTensorConfigSupported(attr, opGraph.getTensorMap());
-                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
-                                                  attr.y_tensor_uid(),
-                                                  attr.scale_tensor_uid(),
-                                                  attr.bias_tensor_uid(),
-                                                  attr.mean_tensor_uid(),
-                                                  attr.inv_variance_tensor_uid()},
+                checkSingleNodeTensorsNonVirtual(batchnormTensorGroups(attr).all(),
                                                  opGraph.getTensorMap());
             }
             break;
@@ -493,12 +487,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             {
                 const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
                 checkBatchnormInferenceTensorConfigSupported(attr, opGraph.getTensorMap());
-                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
-                                                  attr.y_tensor_uid(),
-                                                  attr.scale_tensor_uid(),
-                                                  attr.bias_tensor_uid(),
-                                                  attr.mean_tensor_uid(),
-                                                  attr.inv_variance_tensor_uid()},
+                checkSingleNodeTensorsNonVirtual(batchnormTensorGroups(attr).all(),
                                                  opGraph.getTensorMap());
             }
             break;
@@ -508,12 +497,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                 const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
                 checkBatchnormInferenceVarianceExtTensorConfigSupported(attr,
                                                                         opGraph.getTensorMap());
-                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
-                                                  attr.y_tensor_uid(),
-                                                  attr.scale_tensor_uid(),
-                                                  attr.bias_tensor_uid(),
-                                                  attr.mean_tensor_uid(),
-                                                  attr.variance_tensor_uid()},
+                checkSingleNodeTensorsNonVirtual(batchnormTensorGroups(attr).all(),
                                                  opGraph.getTensorMap());
             }
             break;
@@ -521,14 +505,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             {
                 const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
                 checkBatchnormBackwardTensorConfigSupported(attr, opGraph.getTensorMap());
-                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
-                                                  attr.dy_tensor_uid(),
-                                                  attr.dx_tensor_uid(),
-                                                  attr.scale_tensor_uid(),
-                                                  attr.dscale_tensor_uid(),
-                                                  attr.dbias_tensor_uid(),
-                                                  attr.mean_tensor_uid(),
-                                                  attr.inv_variance_tensor_uid()},
+                checkSingleNodeTensorsNonVirtual(batchnormTensorGroups(attr).all(),
                                                  opGraph.getTensorMap());
             }
             break;

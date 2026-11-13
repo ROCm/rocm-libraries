@@ -447,41 +447,6 @@ void checkSavedStatsPair(const BatchnormAttrs& bnAttr)
             "not at all.");
     }
 }
-
-// A one-node training graph reads and writes every buffer operand, so none may be virtual.
-void checkOperandsNotVirtual(
-    const BatchnormAttrs& bnAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    std::vector<int64_t> uids = {bnAttr.x_tensor_uid(),
-                                 bnAttr.y_tensor_uid(),
-                                 bnAttr.scale_tensor_uid(),
-                                 bnAttr.bias_tensor_uid()};
-    for(const auto& optionalUid : {bnAttr.mean_tensor_uid(),
-                                   bnAttr.inv_variance_tensor_uid(),
-                                   bnAttr.prev_running_mean_tensor_uid(),
-                                   bnAttr.prev_running_variance_tensor_uid(),
-                                   bnAttr.next_running_mean_tensor_uid(),
-                                   bnAttr.next_running_variance_tensor_uid()})
-    {
-        if(optionalUid.has_value())
-        {
-            uids.push_back(optionalUid.value());
-        }
-    }
-
-    for(const auto uid : uids)
-    {
-        if(core::utils::findTensorAttributes(tensorMap, uid).virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm forward training tensors must be non-virtual for a one-node graph.");
-        }
-    }
-}
 } // namespace
 
 void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
@@ -496,7 +461,6 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
 
     checkRunningStatsComplete(bnAttr);
     checkSavedStatsPair(bnAttr);
-    checkOperandsNotVirtual(bnAttr, _tensorMap);
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     const std::vector<int64_t> affineTensorIds

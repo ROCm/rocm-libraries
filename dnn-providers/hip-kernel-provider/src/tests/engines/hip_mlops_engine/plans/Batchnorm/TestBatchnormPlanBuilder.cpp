@@ -910,30 +910,26 @@ flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(Gra
         /*overrideShapeEnabled=*/false,
         /*runtimeEpsilon=*/false,
         /*withRunningStatsAndMomentum=*/true);
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    return hipdnn_test_sdk::utilities::mutateGraph(base, [&mutate](GraphT& graph) {
+        // The factory emits prev stats and momentum only; add the next stats outputs so
+        // the baseline carries a complete running-statistics set.
+        for(const auto [uid, name] : {std::pair<int64_t, const char*>{NEXT_MEAN_UID, "next_mean"},
+                                      {NEXT_VARIANCE_UID, "next_variance"}})
+        {
+            auto tensor = std::make_unique<TensorAttributesT>(tensorByUid(graph, PREV_MEAN_UID));
+            tensor->uid = uid;
+            tensor->name = name;
+            graph.tensors.push_back(std::move(tensor));
+        }
+        auto& attrs = batchnormAttrs(graph);
+        attrs.next_running_mean_tensor_uid = NEXT_MEAN_UID;
+        attrs.next_running_variance_tensor_uid = NEXT_VARIANCE_UID;
 
-    // The factory emits prev stats and momentum only; add the next stats outputs so
-    // the baseline carries a complete running-statistics set.
-    for(const auto [uid, name] : {std::pair<int64_t, const char*>{NEXT_MEAN_UID, "next_mean"},
-                                  {NEXT_VARIANCE_UID, "next_variance"}})
-    {
-        auto tensor = std::make_unique<TensorAttributesT>(tensorByUid(*graph, PREV_MEAN_UID));
-        tensor->uid = uid;
-        tensor->name = name;
-        graph->tensors.push_back(std::move(tensor));
-    }
-    auto& attrs = batchnormAttrs(*graph);
-    attrs.next_running_mean_tensor_uid = NEXT_MEAN_UID;
-    attrs.next_running_variance_tensor_uid = NEXT_VARIANCE_UID;
-
-    if(mutate)
-    {
-        mutate(*graph);
-    }
-
-    flatbuffers::FlatBufferBuilder out;
-    out.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(out, graph.get()));
-    return out;
+        if(mutate)
+        {
+            mutate(graph);
+        }
+    });
 }
 
 std::vector<TrainingGraphMutation> trainingGraphMutations()
@@ -1146,17 +1142,16 @@ TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
 TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
 {
     auto base = GetParam().makeGraph();
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
-    const int64_t uid = GetParam().operandUid(*graph);
-    for(auto& tensor : graph->tensors)
-    {
-        if(tensor->uid == uid)
+    auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
+        const int64_t uid = GetParam().operandUid(graph);
+        for(auto& tensor : graph.tensors)
         {
-            tensor->virtual_ = true;
+            if(tensor->uid == uid)
+            {
+                tensor->virtual_ = true;
+            }
         }
-    }
-    flatbuffers::FlatBufferBuilder mutated;
-    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
+    });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
         mutated.GetBufferPointer(), mutated.GetSize());
 

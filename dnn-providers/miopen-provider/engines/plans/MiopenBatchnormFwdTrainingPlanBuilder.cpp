@@ -106,7 +106,7 @@ void checkTrainingStatisticsComplete(
             "variance and momentum together");
     }
 
-    if(bnAttr.mean_tensor_uid().has_value() != bnAttr.inv_variance_tensor_uid().has_value())
+    if(!hasPairedSavedStatistics(bnAttr))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

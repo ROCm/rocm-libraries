@@ -934,12 +934,10 @@ flatbuffers::FlatBufferBuilder
     mutatedFusedTrainingGraph(const std::function<void(BatchnormAttributesT&)>& mutate)
 {
     auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
-    mutate(*graph->nodes.at(0)->attributes.AsBatchnormAttributes());
-
-    flatbuffers::FlatBufferBuilder out;
-    out.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(out, graph.get()));
-    return out;
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        base, [&mutate](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            mutate(*graph.nodes.at(0)->attributes.AsBatchnormAttributes());
+        });
 }
 
 std::vector<FusedStatsMutation> fusedStatsMutations()

@@ -129,11 +129,7 @@ std::ostream& operator<<(std::ostream& os, const ResampleFwdMutation& value)
 flatbuffers::FlatBufferBuilder mutatedResampleFwdGraph(const std::function<void(GraphT&)>& mutate)
 {
     auto base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
-    mutate(*graph);
-    flatbuffers::FlatBufferBuilder out;
-    out.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(out, graph.get()));
-    return out;
+    return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
 }
 
 void setVirtual(GraphT& graph, int64_t uid)

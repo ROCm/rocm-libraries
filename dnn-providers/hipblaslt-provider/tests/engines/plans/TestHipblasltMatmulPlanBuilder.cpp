@@ -36,17 +36,15 @@ using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 flatbuffers::FlatBufferBuilder frontendVirtualLayout(const flatbuffers::FlatBufferBuilder& source,
                                                      const std::set<std::string>& flipped = {})
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
-    const size_t nodeCount = graph->nodes.size();
-    for(auto& tensor : graph->tensors)
-    {
-        const bool intermediate = (tensor->name == "C_matmul" && nodeCount > 1)
-                                  || (tensor->name == "C_bias" && nodeCount > 2);
-        tensor->virtual_ = intermediate != (flipped.count(tensor->name) != 0);
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
-    return builder;
+    return hipdnn_test_sdk::utilities::mutateGraph(source, [&flipped](auto& graph) {
+        const size_t nodeCount = graph.nodes.size();
+        for(auto& tensor : graph.tensors)
+        {
+            const bool intermediate = (tensor->name == "C_matmul" && nodeCount > 1)
+                                      || (tensor->name == "C_bias" && nodeCount > 2);
+            tensor->virtual_ = intermediate != (flipped.count(tensor->name) != 0);
+        }
+    });
 }
 
 // Re-serializes the graph with the named tensor's strides replaced.
@@ -54,27 +52,43 @@ flatbuffers::FlatBufferBuilder withTensorStrides(const flatbuffers::FlatBufferBu
                                                  const std::string& tensorName,
                                                  const std::vector<int64_t>& strides)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
-    {
-        if(tensor->name == tensorName)
+    return hipdnn_test_sdk::utilities::mutateGraph(source, [&](auto& graph) {
+        for(auto& tensor : graph.tensors)
         {
-            tensor->strides = strides;
+            if(tensor->name == tensorName)
+            {
+                tensor->strides = strides;
+            }
         }
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
-    return builder;
+    });
+}
+
+// Bias node whose operands are in_0 = bias, in_1 = matmul output when `biasFirst` is set.
+flatbuffers::FlatBufferBuilder
+    createMatmulBiasGraph(bool doBias, PointwiseMode activMode, bool biasFirst = false)
+{
+    return createValidMatmulBiasActivGraph({4, 8},
+                                           {8, 1},
+                                           {8, 5},
+                                           {5, 1},
+                                           {4, 5},
+                                           {5, 1},
+                                           doBias,
+                                           activMode,
+                                           std::nullopt,
+                                           std::nullopt,
+                                           std::nullopt,
+                                           hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                           std::nullopt,
+                                           biasFirst);
 }
 
 flatbuffers::FlatBufferBuilder createFusedGraph(bool doBias,
                                                 PointwiseMode activMode,
-                                                const std::set<std::string>& flipped = {})
+                                                const std::set<std::string>& flipped = {},
+                                                bool biasFirst = false)
 {
-    return frontendVirtualLayout(
-        createValidMatmulBiasActivGraph(
-            {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, doBias, activMode),
-        flipped);
+    return frontendVirtualLayout(createMatmulBiasGraph(doBias, activMode, biasFirst), flipped);
 }
 
 // Re-serializes the graph with the named tensor's data type replaced.
@@ -83,17 +97,15 @@ flatbuffers::FlatBufferBuilder
                        const std::string& tensorName,
                        hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
-    {
-        if(tensor->name == tensorName)
+    return hipdnn_test_sdk::utilities::mutateGraph(source, [&](auto& graph) {
+        for(auto& tensor : graph.tensors)
         {
-            tensor->data_type = type;
+            if(tensor->name == tensorName)
+            {
+                tensor->data_type = type;
+            }
         }
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
-    return builder;
+    });
 }
 
 } // namespace
@@ -194,6 +206,32 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontend
     }
 }
 
+// The bias is whichever bias-node operand is not the matmul output, in either position.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesVirtualBiasInFirstOperand)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {"bias"}, true);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Matmul: bias input tensor must be non-virtual"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontendLayoutBiasFirst)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {}, true);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    (void)_planBuilder.isApplicable(_handle, graph);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "tensor must be"))
+        << recorder.getRecordedLogsAsString();
+}
+
 // The bias of a [4, 5] output has dims [1, 5]; hipBLASLt reads it as a packed
 // vector of 5 elements. Strides of size-1 dims do not affect the layout.
 struct BiasStridesCase
@@ -212,19 +250,21 @@ TEST_P(TestHipblasltMatmulPlanBuilderBiasStridesCases, IsApplicableDeclinesNonPa
 {
     for(const auto activMode : {PointwiseMode::UNSET, PointwiseMode::RELU_FWD})
     {
-        const auto recorder
-            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-        auto builder = withTensorStrides(
-            createValidMatmulBiasActivGraph(
-                {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, true, activMode),
-            "bias",
-            GetParam().strides);
-        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        for(const bool biasFirst : {false, true})
+        {
+            const auto recorder
+                = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+            auto builder = withTensorStrides(
+                createMatmulBiasGraph(true, activMode, biasFirst), "bias", GetParam().strides);
+            GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
-        (void)_planBuilder.isApplicable(_handle, graph);
-        EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Matmul: bias strides must be packed"),
-                  !GetParam().packed)
-            << recorder.getRecordedLogsAsString();
+            (void)_planBuilder.isApplicable(_handle, graph);
+            EXPECT_EQ(
+                recorder.hasLogContaining(HIPDNN_SEV_INFO, "Matmul: bias strides must be packed"),
+                !GetParam().packed)
+                << "biasFirst=" << biasFirst << "\n"
+                << recorder.getRecordedLogsAsString();
+        }
     }
 }
 
@@ -253,31 +293,21 @@ class TestHipblasltMatmulPlanBuilderBiasTypeCases
 
 TEST_P(TestHipblasltMatmulPlanBuilderBiasTypeCases, IsApplicableDeclinesUnservedBiasType)
 {
-    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    const auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorDataType(
-        createValidMatmulBiasActivGraph({4, 8},
-                                        {8, 1},
-                                        {8, 5},
-                                        {5, 1},
-                                        {4, 5},
-                                        {5, 1},
-                                        true,
-                                        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET,
-                                        std::nullopt,
-                                        std::nullopt,
-                                        std::nullopt,
-                                        DataType::FLOAT),
-        "bias",
-        GetParam().type);
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    for(const bool biasFirst : {false, true})
+    {
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        auto builder = withTensorDataType(
+            createMatmulBiasGraph(true, PointwiseMode::UNSET, biasFirst), "bias", GetParam().type);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
-    (void)_planBuilder.isApplicable(_handle, graph);
-    EXPECT_EQ(
-        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Bias node input and output data types must be"),
-        !GetParam().served)
-        << recorder.getRecordedLogsAsString();
+        (void)_planBuilder.isApplicable(_handle, graph);
+        EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                            "Bias node input and output data types must be"),
+                  !GetParam().served)
+            << "biasFirst=" << biasFirst << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(

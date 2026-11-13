@@ -752,17 +752,16 @@ TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesNonDens
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto& param = GetParam();
 
-    auto source = createValidMxMatmulGraph();
-    auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
-    for(auto& tensor : graphT->tensors)
-    {
-        if(tensor->name == param.tensorName)
-        {
-            tensor->strides = param.strides;
-        }
-    }
-    flatbuffers::FlatBufferBuilder fb;
-    fb.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(fb, graphT.get()));
+    auto fb
+        = hipdnn_test_sdk::utilities::mutateGraph(createValidMxMatmulGraph(), [&](auto& graphT) {
+              for(auto& tensor : graphT.tensors)
+              {
+                  if(tensor->name == param.tensorName)
+                  {
+                      tensor->strides = param.strides;
+                  }
+              }
+          });
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
 
     (void)_builder.isApplicable(_handle, graph);

@@ -173,17 +173,15 @@ std::ostream& operator<<(std::ostream& os, const ResampleBwdMutation& value)
 flatbuffers::FlatBufferBuilder mutatedResampleBwdGraph(int64_t virtualUid)
 {
     auto base = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    auto graph = UnPackGraph(base.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
-    {
-        if(tensor->uid == virtualUid)
+    return hipdnn_test_sdk::utilities::mutateGraph(base, [virtualUid](GraphT& graph) {
+        for(auto& tensor : graph.tensors)
         {
-            tensor->virtual_ = true;
+            if(tensor->uid == virtualUid)
+            {
+                tensor->virtual_ = true;
+            }
         }
-    }
-    flatbuffers::FlatBufferBuilder out;
-    out.Finish(CreateGraph(out, graph.get()));
-    return out;
+    });
 }
 } // namespace
 

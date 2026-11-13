@@ -6,6 +6,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 
 #include <functional>
@@ -35,15 +36,13 @@ inline flatbuffers::FlatBufferBuilder
     applyUnservedAttribute(flatbuffers::FlatBufferBuilder&& base,
                            const SdpaFwdUnservedAttributeCase& attributeCase)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
-    attributeCase.mutate(hipdnn_test_sdk::utilities::sdpa::detail::getSdpaAttributes(*graph),
-                         *graph);
-    return hipdnn_test_sdk::utilities::sdpa::detail::repack(*graph);
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        base, [&attributeCase](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            attributeCase.mutate(hipdnn_test_sdk::utilities::sdpa::detail::getSdpaAttributes(graph),
+                                 graph);
+        });
 }
 
-// Attributes both forward engines decline: dropout mask, scale and rng_dump operands, block
-// mask, max and sum_exp outputs, and paged-KV length. The frontend and the cuDNN-compatibility
-// layer leave each at its default (tensor absent, max_seq_len_kv unset).
 // seed and offset feed dropout only, so with dropout_probability 0 they are inert and both
 // forward engines accept them.
 inline SdpaFwdUnservedAttributeCase seedAndOffsetAtZeroDropoutCase()
@@ -59,6 +58,9 @@ inline SdpaFwdUnservedAttributeCase seedAndOffsetAtZeroDropoutCase()
             }};
 }
 
+// Attributes both forward engines decline: dropout mask, scale and rng_dump operands, block
+// mask, max and sum_exp outputs, and paged-KV length. The frontend and the cuDNN-compatibility
+// layer leave each at its default (tensor absent, max_seq_len_kv unset).
 inline std::vector<SdpaFwdUnservedAttributeCase> commonUnservedFwdAttributeCases()
 {
     using hipdnn_flatbuffers_sdk::data_objects::GraphT;
@@ -88,6 +90,55 @@ inline std::vector<SdpaFwdUnservedAttributeCase> commonUnservedFwdAttributeCases
                  a.sum_exp_tensor_uid = appendIndexTensor(g, "sum_exp");
              }},
             {"MaxSeqLenKv", [](SdpaAttributesT& a, GraphT&) { a.max_seq_len_kv = 256; }}};
+}
+
+// Attributes the ASM forward builder declines on top of the common set: dropout at a non-zero
+// probability, page tables, and a stats tensor without generate_stats.
+inline std::vector<SdpaFwdUnservedAttributeCase> asmUnservedFwdAttributeCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
+    using hipdnn_test_sdk::utilities::sdpa::detail::appendIndexTensor;
+
+    auto cases = commonUnservedFwdAttributeCases();
+    cases.push_back({"DropoutProbabilityWithSeedAndOffset", [](SdpaAttributesT& a, GraphT& g) {
+                         a.dropout_probability = 0.1f;
+                         a.seed_tensor_uid = appendIndexTensor(g, "seed");
+                         a.offset_tensor_uid = appendIndexTensor(g, "offset");
+                     }});
+    cases.push_back({"PageTableK", [](SdpaAttributesT& a, GraphT& g) {
+                         a.page_table_k_tensor_uid = appendIndexTensor(g, "page_table_k");
+                     }});
+    cases.push_back({"PageTableV", [](SdpaAttributesT& a, GraphT& g) {
+                         a.page_table_v_tensor_uid = appendIndexTensor(g, "page_table_v");
+                     }});
+    cases.push_back({"StatsTensorWithGenerateStatsUnset", [](SdpaAttributesT& a, GraphT& g) {
+                         a.generate_stats.reset();
+                         a.stats_tensor_uid = appendIndexTensor(g, "stats");
+                     }});
+    cases.push_back({"StatsTensorWithGenerateStatsFalse", [](SdpaAttributesT& a, GraphT& g) {
+                         a.generate_stats = false;
+                         a.stats_tensor_uid = appendIndexTensor(g, "stats");
+                     }});
+    return cases;
+}
+
+// Inert attributes the ASM forward builder accepts: the implementation hint selects between
+// frontend lowerings and does not change what the kernels compute.
+inline std::vector<SdpaFwdUnservedAttributeCase> asmInertFwdAttributeCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT;
+
+    return {seedAndOffsetAtZeroDropoutCase(),
+            {"ImplementationComposite",
+             [](SdpaAttributesT& a, GraphT&) {
+                 a.implementation = AttentionImplementation::COMPOSITE;
+             }},
+            {"ImplementationUnified", [](SdpaAttributesT& a, GraphT&) {
+                 a.implementation = AttentionImplementation::UNIFIED;
+             }}};
 }
 
 } // namespace asm_sdpa_engine

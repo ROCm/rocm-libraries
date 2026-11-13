@@ -197,6 +197,27 @@ void checkOneNodeOperandsNotVirtual(
     std::vector<int64_t> uids;
     switch(node.attributes_type())
     {
+    case NodeAttributes::BatchnormAttributes:
+    {
+        const auto& attr = *node.attributes_as_BatchnormAttributes();
+        uids = {attr.x_tensor_uid(),
+                attr.y_tensor_uid(),
+                attr.scale_tensor_uid(),
+                attr.bias_tensor_uid()};
+        for(const auto& optionalUid : {attr.mean_tensor_uid(),
+                                       attr.inv_variance_tensor_uid(),
+                                       attr.prev_running_mean_tensor_uid(),
+                                       attr.prev_running_variance_tensor_uid(),
+                                       attr.next_running_mean_tensor_uid(),
+                                       attr.next_running_variance_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                uids.push_back(optionalUid.value());
+            }
+        }
+        break;
+    }
     case NodeAttributes::BatchnormInferenceAttributes:
     {
         const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();

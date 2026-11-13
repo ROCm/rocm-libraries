@@ -383,6 +383,9 @@ static bool
                                "page_table_v tensor not supported");
     // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
     HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
+    // The plan writes a stats tensor only when generate_stats asks for one.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.stats_tensor_uid().has_value() && !hasStatsOutput(attrs),
+                               "stats_tensor_uid is set but generate_stats is not");
 
     return true;
 }

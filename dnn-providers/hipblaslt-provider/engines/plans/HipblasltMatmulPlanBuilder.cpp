@@ -24,6 +24,14 @@ bool isBias(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& att
     return attr.operation() == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD;
 }
 
+// The bias is the operand of the bias node that is not the matmul output.
+int64_t biasOperandUid(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& biasAttr,
+                       int64_t matmulOutputUid)
+{
+    return biasAttr.in_0_tensor_uid() == matmulOutputUid ? biasAttr.in_1_tensor_uid().value()
+                                                         : biasAttr.in_0_tensor_uid();
+}
+
 bool isSupportedActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attr)
 {
     using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
@@ -212,10 +220,7 @@ void checkNodeAttrsTensors(
                 "Activation node input must be the bias node output tensor");
         }
 
-        // The bias is the operand that is not the matmul output.
-        const auto biasUid = biasAttr->in_0_tensor_uid() == matmulAttr.c_tensor_uid()
-                                 ? biasAttr->in_1_tensor_uid().value()
-                                 : biasAttr->in_0_tensor_uid();
+        const auto biasUid = biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid());
         const auto tBias = hipblaslt_utils::findTensorAttributes(tensorMap, biasUid);
         const auto biasInType = tBias.dataType();
         const auto& biasOutType
@@ -328,9 +333,7 @@ void checkVirtualTensors(
 
     if(biasAttr != nullptr)
     {
-        const auto biasUid = biasAttr->in_0_tensor_uid() == matmulAttr.c_tensor_uid()
-                                 ? biasAttr->in_1_tensor_uid().value()
-                                 : biasAttr->in_0_tensor_uid();
+        const auto biasUid = biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid());
         requireNonVirtual(biasUid, "bias input");
         requireVirtual(matmulAttr.c_tensor_uid(), "matmul output");
         if(activAttr != nullptr)

@@ -74,6 +74,16 @@ const TensorAttributesT& findTensor(const GraphT& graph, const std::string& name
 
 } // namespace
 
+TEST(TestFlatbufferGraphMutators, MutateGraphAppliesTheMutationAndLeavesTheSourceUntouched)
+{
+    const auto source = pack(makeMixedTensorGraph());
+
+    const auto mutated = mutateGraph(source, [](GraphT& graph) { graph.name = "mutated"; });
+
+    EXPECT_EQ(UnPackGraph(mutated.GetBufferPointer())->name, "mutated");
+    EXPECT_NE(UnPackGraph(source.GetBufferPointer())->name, "mutated");
+}
+
 TEST(TestFlatbufferGraphMutators, RaggedTensorMarksFirstNonVirtualTensor)
 {
     auto mixed = makeMixedTensorGraph();
