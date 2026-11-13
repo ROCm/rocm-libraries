@@ -7729,6 +7729,123 @@ class TestSpaceM0WritesFromLdsLoads:
         assert gaps[1] == ["drain", "m0 a", self.NOP, "L a"]
 
 
+class TestSpaceMainLoopM0Writes:
+    """Main-loop m0 writes take the slot that keeps their MFMA gap fullest
+    within budget, else the emptiest, moving SRD steps and base swaps."""
+
+    NOP = TestSpaceM0WritesFromLdsLoads.NOP
+    SGPRS = {"SrdA": 40, "LocalWriteBaseAddrA": 48, "SwapA": 49}
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @classmethod
+    def _run(cls, *gaps, outside=6):
+        """One-body loop with outside instructions around its back edge."""
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceMainLoopM0Writes)
+        body = TestKeepValuBehindLeader._body(*gaps)
+        spaceMainLoopM0Writes([body], [outside], cls.SGPRS)
+        return TestHalfDisjointCell._gaps(body)[1]
+
+    @staticmethod
+    def _reads(tag, count):
+        read = TestKeepValuBehindLeader._read
+        return [read(7, f"{tag}{i}") for i in range(count)]
+
+    def test_m0_climbs_mfmas_across_a_wait_and_barrier(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(
+            self._reads("R", 1), self._reads("F", 5),
+            [SWaitCnt(dscnt=0, comment="drain"), SBarrier(comment="barrier"),
+             *self._reads("G", 3)],
+            TestSpaceM0WritesFromLdsLoads._pair("a"))
+        assert gaps[:4] == [["R0", "m0 a"], ["F0", "F1", "F2", "F3", "F4"],
+                            ["drain", "barrier", "G0", "G1", "G2"], ["L a"]]
+
+    def test_m0_stays_with_a_nop_below_full_gaps(self):
+        gaps = self._run(self._reads("F", 5), self._reads("G", 5),
+                         TestSpaceM0WritesFromLdsLoads._pair("a"))
+        assert gaps[2] == ["m0 a", self.NOP, "L a"]
+
+    @pytest.mark.parametrize("above, hoisted", [(5, True), (6, True), (7, False)])
+    def test_crowded_m0_takes_the_emptier_of_stay_and_hoist(self, above, hoisted):
+        gaps = self._run(self._reads("F", above),
+                         TestSpaceM0WritesFromLdsLoads._pair("a") + self._reads("R", 4),
+                         outside=8)
+        if hoisted:
+            assert gaps[:2] == [[f"F{i}" for i in range(above)] + ["m0 a"],
+                                ["L a", "R0", "R1", "R2", "R3"]]
+        else:
+            assert gaps[1] == ["m0 a", self.NOP, "L a", "R0", "R1", "R2", "R3"]
+
+    @pytest.mark.parametrize("above, hoisted", [(4, True), (5, False)])
+    def test_tie_goes_toward_the_load(self, above, hoisted):
+        gaps = self._run(self._reads("F", above),
+                         self._reads("R", 4) + TestSpaceM0WritesFromLdsLoads._pair("a"))
+        if hoisted:
+            assert gaps[1] == ["R0", "R1", "R2", "R3", "L a"]
+        else:
+            assert gaps[1] == ["R0", "R1", "R2", "m0 a", "R3", "L a"]
+
+    def test_m0_crosses_a_carry_pair_but_never_lands_inside_it(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(
+            [salu._add("add")],
+            [salu._carry(), *self._reads("R", 3), *TestSpaceM0WritesFromLdsLoads._pair("a")],
+            outside=8)
+        assert gaps[:2] == [["m0 a", "add"], ["carry", "R0", "R1", "R2", "L a"]]
+
+    def test_carry_pair_splits_across_an_mfma(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(self._reads("R", 1),
+                         self._reads("F", 4) + [salu._add("add"), salu._carry()],
+                         outside=3)
+        assert gaps[:2] == [["R0", "add"], ["F0", "F1", "F2", "F3", "carry"]]
+
+    def test_blocking_swap_moves_up_to_free_its_m0(self):
+        swap = TestSpaceM0WritesFromLdsLoads._swap()
+        gaps = self._run(
+            self._reads("R", 1),
+            self._reads("F", 3) + [swap, *TestSpaceM0WritesFromLdsLoads._pair("a")])
+        assert gaps[:2] == [["R0", "swap", "m0 a"], ["F0", "F1", "F2", "L a"]]
+
+    def test_loads_reads_and_waits_never_move(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        crowded = [SWaitCnt(dscnt=0, comment="drain"), SBarrier(comment="barrier"),
+                   *self._reads("R", 2), TestKeepValuBehindLeader._request(lds=False)[1],
+                   *self._reads("S", 2)]
+        gaps = self._run([], crowded, [], outside=0)
+        assert gaps[:3] == [[], ["drain", "barrier", "R0", "R1", "L", "S0", "S1"], []]
+
+    def test_swap_stays_unless_moving_it_relieves_a_gap(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SMovB32
+        swap = TestSpaceM0WritesFromLdsLoads._swap()
+        m0, load = TestSpaceM0WritesFromLdsLoads._pair("a")
+        base = SMovB32(dst=sgpr("LocalWriteBaseAddrA"), src=sgpr("SwapA"), comment="set")
+        gaps = self._run([base], self._reads("F", 5), [swap, m0, load], outside=0)
+        assert gaps[:3] == [["set"], ["F0", "F1", "F2", "F3", "F4"],
+                            ["swap", "m0 a", self.NOP, "L a"]]
+
+    def test_two_body_loop_counts_the_back_edge_junction(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceMainLoopM0Writes)
+        bodies = [TestKeepValuBehindLeader._body(
+            self._reads(f"R{b}", 1), TestSpaceM0WritesFromLdsLoads._pair(f"a{b}"))
+            for b in range(2)]
+        spaceMainLoopM0Writes(bodies, [0, 5], self.SGPRS)
+        first, second = (TestHalfDisjointCell._gaps(body) for body in bodies)
+        assert first == ([], [["R00", "m0 a0"], ["L a0"], []])
+        assert second == (["m0 a1"], [["R10"], ["L a1"], []])
+
+
 class TestReadInOpeningBarrierGap:
     """The first barrier's gap takes the body's next ds_read when it can."""
 

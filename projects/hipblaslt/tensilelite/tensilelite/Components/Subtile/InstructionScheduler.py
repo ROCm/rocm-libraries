@@ -9,8 +9,9 @@ with pluggable scheduling rules.
 
 import copy
 import math
+from collections import Counter
 from typing import List, Tuple, Optional
-from rocisa.code import Module, TextBlock
+from rocisa.code import Label, Module, TextBlock
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, LocalWriteInstruction, GlobalReadInstruction, GlobalWriteInstruction, \
     CommonInstruction, SMemLoadInstruction, SNop, VXorB32
@@ -3115,6 +3116,379 @@ def spaceM0WritesFromLdsLoads(module):
         at = next(i for i, item in enumerate(items) if item is load)
         container.setItems(items[:at] + [SNop(
             waitState=0, comment="m0 write -> direct-to-LDS load")] + items[at:])
+
+
+_M0_GAP_BUDGET = 5
+_M0_RELIEF_ROUNDS = 400
+_SRD_STEP_OPS = ("SAddU32", "SAddCU32", "SSubU32", "SSubBU32")
+
+
+class _M0Op:
+    """A main-loop instruction as spaceMainLoopM0Writes sees it."""
+    __slots__ = ("inst", "reads", "writes", "fence", "sccR", "sccW", "mfma",
+                 "m0w", "lds", "movable", "counted")
+
+
+def _m0Keys(span, sgprIndex):
+    """Register keys of a span, SGPR names resolved through sgprIndex."""
+    kind, start, count = span
+    if kind == "m":
+        return {("m", 0)}
+    if isinstance(start, str):
+        name, _, lane = start.partition("+")
+        base = sgprIndex.get(name) if kind == "s" else None
+        if not isinstance(base, int):
+            return {(kind, name)}
+        start = base + int(lane or 0)
+    return {(kind, start + k) for k in range(count)}
+
+
+def _m0Op(inst, sgprIndex):
+    op = _M0Op()
+    op.inst = inst
+    op.mfma = _isMfma(inst)
+    op.m0w = _isM0Update(inst)
+    op.lds = _isDirectToLdsLoad(inst)
+    op.counted = not isinstance(inst, Label)
+    name = type(inst).__name__
+    quiet = _isWaitCnt(inst) or _isBarrier(inst) or name.startswith("SNop")
+    op.fence = not (op.mfma or quiet) and (
+        isinstance(inst, TextBlock) or _isOrderFence(inst)
+        or not (_isDsRead(inst) or _isBufferLoad(inst) or _operandsVisible(inst)))
+    op.reads, op.writes = set(), set()
+    if _isDsRead(inst) or _isBufferLoad(inst):
+        params = list(inst.getParams())
+        spans = [("dst", _registerSpan(params[0]))] if params else []
+        spans += [("src", _registerSpan(p)) for p in params[1:]]
+        if op.lds:
+            spans.append(("src", ("m", 0, 1)))
+    elif op.mfma or quiet or op.fence:
+        spans = []
+    else:
+        spans = _instructionRegisterSpans(inst)
+    for role, span in spans:
+        if span is not None:
+            (op.writes if role == "dst" else op.reads).update(_m0Keys(span, sgprIndex))
+    op.sccR = _readsScc(inst) or name.startswith("SCMov")
+    op.sccW = _writesScc(inst) and not name.startswith(("SCSelect", "SCMov"))
+    op.movable = ((name == "SXorB32"
+                   and _scalarDestName(inst).startswith("LocalWriteBaseAddr"))
+                  or (name in _SRD_STEP_OPS and _scalarDestName(inst).startswith("Srd")))
+    return op
+
+
+def _m0Conflict(a, b) -> bool:
+    return (a.fence or b.fence or bool(a.writes & b.reads)
+            or bool(a.reads & b.writes) or bool(a.writes & b.writes))
+
+
+def _m0GapOf(ops):
+    """Gap of each instruction (MFMAs ahead of it), None for an MFMA."""
+    out, gap = [], 0
+    for op in ops:
+        out.append(None if op.mfma else gap)
+        gap += op.mfma
+    return out
+
+
+def _m0SccMap(ops):
+    out, last = {}, None
+    for op in ops:
+        if op.sccR:
+            out[id(op)] = last
+        if op.sccW:
+            last = id(op)
+    return out
+
+
+def _m0PairsSpaced(ops, pairs) -> bool:
+    at = {id(op): i for i, op in enumerate(ops)}
+    return all(at[id(w)] + 1 < at[id(l)] for w, l in pairs)
+
+
+def _m0Move(ops, i, p, baseScc, pairs):
+    """ops with ops[i] moved to before ops[p], or None when that is illegal."""
+    op = ops[i]
+    lo, hi = (p, i) if p < i else (i + 1, p)
+    if any(_m0Conflict(op, other) for other in ops[lo:hi]):
+        return None
+    moved = ops[:i] + ops[i + 1:]
+    moved.insert(p if p < i else p - 1, op)
+    if (op.sccR or op.sccW) and _m0SccMap(moved) != baseScc:
+        return None
+    return moved if _m0PairsSpaced(moved, pairs) else None
+
+
+class _M0LoopGaps:
+    """Gap populations of a main loop: its bodies in loop order and the
+    instruction count between each body and the next, around the back edge.
+
+    A gap is what lies between two MFMAs; the tail of one body, the code
+    after it and the head of the next form one junction gap. Population
+    counts every instruction but MFMAs, comments and labels, waits,
+    barriers and s_nop included.
+    """
+
+    def __init__(self, bodies, outside):
+        self.bodies, self.outside = bodies, outside
+        self.refresh()
+
+    def refresh(self):
+        self.mfmas = [sum(op.mfma for op in ops) for ops in self.bodies]
+        self.pops = []
+        for ops in self.bodies:
+            pop = Counter()
+            for op, gap in zip(ops, _m0GapOf(ops)):
+                if gap is not None and op.counted:
+                    pop[gap] += 1
+            self.pops.append(pop)
+
+    def junction(self, body):
+        after = (body + 1) % len(self.bodies)
+        return (self.pops[body][self.mfmas[body]] + self.outside[body]
+                + self.pops[after][0])
+
+    def pop(self, body, gap):
+        if 1 <= gap < self.mfmas[body]:
+            return self.pops[body][gap]
+        return self.junction(body if gap else body - 1)
+
+    def gaps(self):
+        """((body, gap) spans, population) of every gap, inner gaps first."""
+        out = [([(r, g)], self.pops[r][g]) for r in range(len(self.bodies))
+               for g in range(1, self.mfmas[r])]
+        n = len(self.bodies)
+        out += [([(r, self.mfmas[r]), ((r + 1) % n, 0)], self.junction(r))
+                for r in range(n)]
+        return out
+
+    def objective(self):
+        pops = [p for _s, p in self.gaps()]
+        return (sum(p > _M0_GAP_BUDGET for p in pops),
+                sum(max(0, p - _M0_GAP_BUDGET) for p in pops))
+
+    def snapshot(self):
+        return [list(ops) for ops in self.bodies]
+
+    def restore(self, saved):
+        self.bodies[:] = [list(ops) for ops in saved]
+        self.refresh()
+
+
+def _m0Slots(ops, wi):
+    """{gap: slot} the m0 write at wi may move to, the index of the
+    instruction that stops it (-1 at the body start), and its own gap.
+
+    A slot p puts the write ahead of ops[p]; each gap keeps its legal slot
+    nearest the load, and p == wi is staying. An SCC-writing m0 write never
+    sits where the next SCC user reads SCC.
+    """
+    writer = ops[wi]
+    gapOf = _m0GapOf(ops)
+    readerNext, state = [False] * (len(ops) + 1), False
+    for i in range(len(ops) - 1, -1, -1):
+        if ops[i] is not writer and (ops[i].sccR or ops[i].sccW):
+            state = ops[i].sccR
+        readerNext[i] = state
+    mfmasAhead = [0]
+    for op in ops:
+        mfmasAhead.append(mfmasAhead[-1] + op.mfma)
+    slots, stop, own = {}, -1, gapOf[wi]
+    for p in range(wi, -1, -1):
+        if p < wi and _m0Conflict(writer, ops[p]):
+            stop = p
+            break
+        if writer.sccW and readerNext[p]:
+            continue
+        gap = mfmasAhead[p]
+        if gap == own and p == wi:
+            slots.setdefault("stay", p)
+        elif gap not in slots:
+            slots[gap] = p
+    stay = slots.pop("stay", None)
+    if own not in slots and stay is not None:
+        slots[own] = stay
+    return slots, stop, own
+
+
+def _m0Rank(population, nop, gap):
+    """Any gap within budget is as good as another; then no s_nop, then
+    the emptier gap, then the gap nearer the load."""
+    return (max(population, _M0_GAP_BUDGET), nop, population, -gap)
+
+
+def _chooseM0Slot(state, r, wi):
+    """(rank, gap, slot or None for stay + s_nop) for the m0 write at wi,
+    and the index of the instruction that stops it."""
+    ops = state.bodies[r]
+    slots, stop, own = _m0Slots(ops, wi)
+    choices = []
+    for gap, p in slots.items():
+        if gap == own:
+            room = p < wi
+            population = state.pop(r, gap) + (not room)
+            choices.append((_m0Rank(population, not room, gap), gap, p if room else None))
+        else:
+            choices.append((_m0Rank(state.pop(r, gap) + 1, False, gap), gap, p))
+    if own not in slots:
+        choices.append((_m0Rank(state.pop(r, own) + 1, True, own), own, None))
+    return min(choices, key=lambda c: c[0]), stop
+
+
+def _placeM0Write(state, r, wi, slot):
+    ops = state.bodies[r]
+    if slot is None:
+        nop = _M0Op()
+        nop.inst = SNop(waitState=0, comment="m0 write -> direct-to-LDS load")
+        nop.reads, nop.writes = set(), set()
+        nop.fence = nop.sccR = nop.sccW = nop.mfma = nop.m0w = nop.lds = nop.movable = False
+        nop.counted = True
+        ops.insert(wi + 1, nop)
+    elif slot != wi:
+        ops.insert(slot, ops.pop(wi))
+    state.refresh()
+
+
+def _opIndex(ops, op):
+    return next(i for i, x in enumerate(ops) if x is op)
+
+
+def _placeM0WriteFreeingSwap(state, r, writer, baseScc, placed):
+    """Place the m0 write; when a base swap stops it, also try that swap
+    at the lowest legal slot of each gap above, and keep the one that
+    lowers the loop's gap objective most."""
+    ops = state.bodies[r]
+    wi = _opIndex(ops, writer)
+    (_rank, _gap, slot), stop = _chooseM0Slot(state, r, wi)
+    swap = ops[stop] if stop >= 0 else None
+    if swap is None or not (swap.movable and type(swap.inst).__name__ == "SXorB32"):
+        _placeM0Write(state, r, wi, slot)
+        return
+    saved = state.snapshot()
+    _placeM0Write(state, r, wi, slot)
+    plain = state.objective()
+    best = None
+    state.restore(saved)
+    mfmaAt = [i for i, op in enumerate(state.bodies[r]) if op.mfma]
+    for gap in range(_m0GapOf(state.bodies[r])[stop] - 1, -1, -1):
+        start = mfmaAt[gap - 1] + 1 if gap >= 1 else 0
+        for q in range(mfmaAt[gap], start - 1, -1):
+            moved = _m0Move(state.bodies[r], stop, q, baseScc, placed)
+            if moved is None:
+                continue
+            state.bodies[r] = moved
+            state.refresh()
+            at = _opIndex(moved, writer)
+            (_rank, _gap, freed), _stop = _chooseM0Slot(state, r, at)
+            _placeM0Write(state, r, at, freed)
+            objective = state.objective()
+            if objective < plain and (best is None or objective < best[0]):
+                best = (objective, state.snapshot())
+            state.restore(saved)
+            break
+    if best is not None:
+        state.restore(best[1])
+    else:
+        _placeM0Write(state, r, _opIndex(state.bodies[r], writer), slot)
+
+
+def _relieveM0Gaps(state, baseSccs, pairs):
+    """Move one base swap, SRD step or m0 write out of a gap over budget
+    at a time, while the loop's gap objective strictly drops."""
+    for _round in range(_M0_RELIEF_ROUNDS):
+        objective = state.objective()
+        crowded = sorted(((spans, p) for spans, p in state.gaps()
+                          if p > _M0_GAP_BUDGET), key=lambda c: -c[1])
+        if not any(_relieveOne(state, baseSccs, pairs, spans, p, objective)
+                   for spans, p in crowded):
+            return
+
+
+def _relieveOne(state, baseSccs, pairs, spans, population, objective) -> bool:
+    for r, g in spans:
+        ops = state.bodies[r]
+        gapOf = _m0GapOf(ops)
+        mfmaAt = [i for i, op in enumerate(ops) if op.mfma]
+        for i, op in enumerate(ops):
+            if gapOf[i] != g or not (op.movable or op.m0w):
+                continue
+            dests = sorted((state.pop(r, d), abs(d - g), d)
+                           for d in range(state.mfmas[r] + 1) if d != g)
+            for destPop, _dist, d in dests:
+                if destPop + 1 >= population:
+                    break
+                start = mfmaAt[d - 1] + 1 if d >= 1 else 0
+                end = mfmaAt[d] if d < len(mfmaAt) else len(ops)
+                for q in (range(end, start - 1, -1) if d < g else range(start, end + 1)):
+                    if q in (i, i + 1):
+                        continue
+                    moved = _m0Move(ops, i, q, baseSccs[r], pairs[r])
+                    if moved is None:
+                        continue
+                    state.bodies[r] = moved
+                    state.refresh()
+                    if state.objective() < objective:
+                        return True
+                    state.bodies[r] = ops
+                    state.refresh()
+    return False
+
+
+def _reorderBody(module, order):
+    """Make the body's instructions issue in order. Comments stay in place;
+    an instruction not yet in the body is inserted."""
+    leaves = _bodyLeaves(module)
+    for k, inst in enumerate(order):
+        code = [i for i, (_c, x) in enumerate(leaves) if not _isComment(x)]
+        if k < len(code) and leaves[code[k]][1] is inst:
+            continue
+        at = next((i for i in code if leaves[i][1] is inst), None)
+        if at is not None:
+            leaves[at][0].removeItem(inst)
+        container, anchor = leaves[code[k - 1]] if k else leaves[code[0]]
+        items = list(container.items())
+        slot = next(i for i, item in enumerate(items) if item is anchor) + (1 if k else 0)
+        container.setItems(items[:slot] + [inst] + items[slot:])
+        leaves = _bodyLeaves(module)
+
+
+def spaceMainLoopM0Writes(bodies, outside, sgprIndex=None):
+    """Give every m0 write of a main loop a wait state before its
+    direct-to-LDS load, keeping its MFMA gaps within budget.
+
+    bodies are the loop's copies in order; outside[r] counts the
+    instructions between body r and the next, around the back edge.
+    Each m0 write right ahead of its load, in program order, takes the
+    slot whose gap (_M0LoopGaps) stays within _M0_GAP_BUDGET, else the
+    emptiest (_m0Rank): any slot between the instruction it depends on
+    (_m0Conflict) and its load, across waits, barriers and any number of
+    MFMAs, but never between an SCC producer and its reader. Staying
+    costs an s_nop 0. A base swap that stops a write may move up first
+    when that lowers the gap objective (_placeM0WriteFreeingSwap). Once
+    every write is placed, base swaps, SRD steps and m0 writes leave
+    crowded gaps one at a time while the objective drops
+    (_relieveM0Gaps). Every move keeps each register and m0 read, each
+    SCC reader's producer, and the spacing of placed writes. Loads,
+    reads, waits, barriers, VALU and MFMAs never move, so no wait count
+    changes. A body without MFMAs is left as it is.
+    """
+    sgprIndex = sgprIndex or {}
+    ops = [[_m0Op(inst, sgprIndex) for _c, inst in _bodyLeaves(body)
+            if not _isComment(inst)] for body in bodies]
+    if not ops or not all(any(op.mfma for op in body) for body in ops):
+        return
+    state = _M0LoopGaps(ops, list(outside))
+    baseSccs = [_m0SccMap(body) for body in ops]
+    pairs = [[(body[i], body[i + 1]) for i in range(len(body) - 1)
+              if body[i].m0w and body[i + 1].lds] for body in ops]
+    for r in range(len(bodies)):
+        placed = []
+        for writer, load in pairs[r]:
+            _placeM0WriteFreeingSwap(state, r, writer, baseSccs[r], placed)
+            placed.append((writer, load))
+    _relieveM0Gaps(state, baseSccs, pairs)
+    for body, order in zip(bodies, state.bodies):
+        _reorderBody(body, [op.inst for op in order])
 
 
 def _saluFirstRank(inst):
