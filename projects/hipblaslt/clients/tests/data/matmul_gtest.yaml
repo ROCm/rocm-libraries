@@ -3152,7 +3152,7 @@ Tests:
 # 2.2e12 multiply-adds, and each test peaks at about 12 GiB of host memory.
 # integer_exact bounds every partial sum of D by K * 64, below 2^24 at both K, so every
 # fp32 sum is exact in any order and unit_check compares all of D exactly.
-# RowUniformityMXFp6_smoke runs every kernel at the quick tier.
+# RowUniformityMXFp6_smoke runs every kernel at the quick tier, and checks sampled D exactly.
 - name: matmul_mx_fp6_tile128x4
   category: pre_checkin
   function:

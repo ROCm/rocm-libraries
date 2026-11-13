@@ -1197,6 +1197,22 @@ namespace
     {
     };
 
+    // Round to nearest even of x, exact in double and in the normal bf16 range.
+    uint16_t bf16BitsRne(double x)
+    {
+        if(x == 0)
+            return std::signbit(x) ? 0x8000 : 0;
+        int          exp     = 0;
+        const double scaled  = std::frexp(std::abs(x), &exp) * 256;
+        double       rounded = std::floor(scaled);
+        if(scaled - rounded > 0.5 || (scaled - rounded == 0.5 && std::fmod(rounded, 2) != 0))
+            rounded += 1;
+        const float value = static_cast<float>(std::copysign(std::ldexp(rounded, exp - 8), x));
+        uint32_t    bits  = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return static_cast<uint16_t>(bits >> 16);
+    }
+
     // The gfx950 MXFP6 custom kernels on the 128x4 scale layout, with A, and B when
     // tiledB is set, in the COL256_R128 data layout, declare uniformSummationOrder. They
     // need beta == 0, which the C heuristic never assumes, so the case goes through the
@@ -1206,8 +1222,11 @@ namespace
     // scales are read from where the host layouts put them. Blocks 0 and K / 64 carry
     // large products that cancel; what they absorb of the small ones while pending
     // depends on the summation order, by more than D's bf16 precision.
-    // The matmul_mx_fp6_tile128x4* entries of matmul_gtest.yaml check all of D exactly.
-    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsRowUniform)
+    // A second run on the same data lowers those two blocks' scales into the small
+    // range. Every partial sum is then exact in fp32 in any order, so sampled D must
+    // equal the exact dot product rounded to bf16. The matmul_mx_fp6_tile128x4* entries
+    // of matmul_gtest.yaml check all of D exactly, in the pre_checkin and nightly tiers.
+    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
     {
         const MXFp6Case&  c       = GetParam();
         const bool        e3m2    = c.type == HIP_R_6F_E3M2;
@@ -1253,6 +1272,8 @@ namespace
         // B is packed, and tiled one 256-row block at a time when tiledB is set, which is
         // contiguous in the tiled layout; only the columns read below keep their values.
         constexpr int64_t    kProbeCols   = 64;
+        const int64_t        sampleRows[] = {0, 1, 15, 16, 255, 256, 2047, m - 1};
+        const int64_t        sampleCols[] = {0, 1, 63, 64, 255, 256, 2049, n - 1};
         const size_t         rowBytes     = k * 6 / 8;
         const size_t         blockBytes   = mx_tile128x4::kTileRows * rowBytes;
         std::vector<uint8_t> codes(k);
@@ -1271,7 +1292,9 @@ namespace
             for(int64_t kb = 0; kb < kBlocks; ++kb)
                 bScale[col * kBlocks + kb] = static_cast<uint8_t>(
                     kb == large0 || kb == large1 ? one + 10 : smallScaleOf(rng));
-            if(col < kProbeCols)
+            if(col < kProbeCols
+               || std::find(std::begin(sampleCols), std::end(sampleCols), col)
+                      != std::end(sampleCols))
                 bValue[col] = colValues;
 
             const int64_t blockRow = col % mx_tile128x4::kTileRows;
@@ -1350,8 +1373,44 @@ namespace
 
         const std::vector<uint8_t> shuffledA = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
         const std::vector<uint8_t> shuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+
+        // The exact run: the large blocks at the small range's top scale, so every block
+        // product is a multiple of 2^-6 of magnitude at most 512.
+        for(int64_t row = 0; row < m; ++row)
+            for(const int64_t kb : {large0, large1})
+                scalesA[row * kBlocks + kb] -= 10;
+        for(int64_t col = 0; col < n; ++col)
+            for(const int64_t kb : {large0, large1})
+                bScale[col * kBlocks + kb] -= 10;
+        aScale[large0] = aScale[large1] = one;
+        const std::vector<uint8_t> exactShuffledA
+            = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> exactShuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
         scalesA.clear();
         scalesA.shrink_to_fit();
+
+        // Exact D of each sampled column in units of 2^-6; every row of A has the same
+        // values. Sum |product| < 2^24 bounds every fp32 partial sum below 2^18, so the
+        // device result in any summation order is the exact sum.
+        std::map<int64_t, int64_t> exactSum;
+        for(const int64_t col : sampleCols)
+        {
+            int64_t sum    = 0;
+            int64_t absSum = 0;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                int64_t dot = 0;
+                for(int64_t idx = kb * 32; idx < kb * 32 + 32; ++idx)
+                    dot += aValue[idx] * bValue[col][idx];
+                const int shift = aScale[kb] + bScale[col * kBlocks + kb] - 2 * one + 6;
+                ASSERT_TRUE(shift >= 0 && shift <= 6) << "block " << kb << " shift " << shift;
+                sum += dot * (int64_t(1) << shift);
+                absSum += std::abs(dot) * (int64_t(1) << shift);
+            }
+            ASSERT_LT(absSum, int64_t(1) << 24)
+                << "Column " << col << " can round in fp32, so the exact check does not hold";
+            exactSum[col] = sum;
+        }
 
         void* dA         = nullptr;
         void* dB         = nullptr;
@@ -1392,6 +1451,7 @@ namespace
         }
 
         std::vector<uint16_t> hostD(static_cast<size_t>(m * n));
+        std::vector<uint16_t> exactD(static_cast<size_t>(m * n));
         {
             const float alpha = 1.0f;
             const float beta  = 0.0f;
@@ -1472,6 +1532,24 @@ namespace
             EXPECT_TRUE(isExpectedPick(pick)) << "The default pick is " << pick << ", not a "
                                               << c.gfx950Pick << "*" << kTag << "* kernel";
             EXPECT_TRUE(ran || !isExpectedPick(pick)) << pick << " was picked but could not be run";
+            const bool ranExact
+                = ran
+                  && hipMemcpy(dScaleA,
+                               exactShuffledA.data(),
+                               exactShuffledA.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && hipMemcpy(dScaleB,
+                               exactShuffledB.data(),
+                               exactShuffledB.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                  && hipStreamSynchronize(stream) == hipSuccess
+                  && hipMemcpy(
+                         exactD.data(), dD, exactD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                         == hipSuccess;
+            EXPECT_TRUE(ranExact || !ran) << pick << " could not be run with the exact scales";
         }
         static_cast<void>(hipStreamDestroy(stream));
         hipblasLtDestroy(handle);
@@ -1498,6 +1576,22 @@ namespace
         EXPECT_NE(std::count(hostD.begin(), hostD.begin() + m * n, hostD[0]),
                   static_cast<std::ptrdiff_t>(m * n))
             << "D is constant, so the fill did not reach the output";
+
+        int mismatches = 0;
+        for(const int64_t col : sampleCols)
+        {
+            const uint16_t expected
+                = bf16BitsRne(std::ldexp(static_cast<double>(exactSum[col]), -6));
+            for(const int64_t row : sampleRows)
+            {
+                const uint16_t actual = exactD[col * m + row];
+                if(actual != expected && ++mismatches <= 8)
+                    ADD_FAILURE() << "Exact run: D(" << row << ", " << col << ") = 0x" << std::hex
+                                  << actual << ", exact sum rounded to bf16 = 0x" << expected
+                                  << std::dec;
+            }
+        }
+        EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
     }
 
     // Every kernel in the quick tier, so every pull request on a registered chip runs
