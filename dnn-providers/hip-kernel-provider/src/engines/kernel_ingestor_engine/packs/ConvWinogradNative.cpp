@@ -489,7 +489,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         const bool registerVariant = config.variant == Variant::WREG
                                      || config.variant == Variant::SREG
                                      || config.variant == Variant::COOP;
-        if((config.variant != Variant::WREG && config.bins != 0)
+        // bins: the register WMMA's bins per wave, or 16 for the cooperative 16-bin layout.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        if((config.variant != Variant::WREG && !coop16 && config.bins != 0)
+           || (config.variant != Variant::FUSED && !coop16 && config.variant != Variant::WRW
+               && (config.tm != 0 || config.tn != 0))
            || (!registerVariant && config.variant != Variant::WRW && config.f16Math)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
                && config.pf != 0))
@@ -598,6 +602,23 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // bk = 16 x mt x waves / 4 with mt 1, 2 or 4, and the double-buffered transformed
             // input (bt KiB) within 64 KiB of LDS. Accumulator tiles per bin (mt x bt / 16): at
             // most 4 on RDNA (8 registers each), 16 on CDNA (4 each; mt and nt cap it).
+            if(coop16)
+            {
+                // 16-bin layout (RDNA, F(2,3)): a wave owns all 16 bins of 16 x tm out channels
+                // by 16 x tn tiles (accumulators 128 x tm x tn registers: tm = tn = 1); kw K
+                // waves by tw tile waves.
+                const int kw = config.bk / 16;
+                const int tw = config.bt / 16;
+                if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
+                   || (config.arch != "gfx11" && config.arch != "gfx12") || config.tm != 1
+                   || config.tn != 1 || config.bk % 16 != 0 || (kw != 2 && kw != 4 && kw != 8)
+                   || config.bt % 16 != 0 || (tw != 1 && tw != 2) || config.waves != kw * tw
+                   || config.pf != 0)
+                {
+                    return std::nullopt;
+                }
+                break;
+            }
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
             // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(2,3), or
@@ -1469,11 +1490,19 @@ public:
         options.add("CONV_WINO_TG", std::to_string(std::max(1, config.bt / 16)));
         options.add("CONV_WINO_BINS", std::to_string(config.bins));
         options.add("CONV_WINO_F16MATH", std::string(config.f16Math ? "1" : "0"));
-        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups.
-        const int coopKw = std::max(1, config.waves / 4);
+        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups; the
+        // 16-bin layout (bins 16): K waves, 16 x tm channels by 16 x tn tiles, tile waves.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        const int coopMt = coop16 ? std::max(1, config.tm) : 0;
+        const int coopNt = coop16 ? std::max(1, config.tn) : 0;
+        const int coopKw
+            = coop16 ? std::max(1, config.bk / (16 * coopMt)) : std::max(1, config.waves / 4);
         options.add("CONV_WINO_KW", std::to_string(coopKw));
-        options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
-        options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_MT",
+                    std::to_string(coop16 ? coopMt : std::max(1, config.bk / (16 * coopKw))));
+        options.add("CONV_WINO_NT", std::to_string(coop16 ? coopNt : std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_TW",
+                    std::to_string(coop16 ? std::max(1, config.bt / (16 * coopNt)) : 0));
         options.add("CONV_WINO_PF", std::to_string(config.pf));
         // Fused VALU: pf 1 prefetches two chunks ahead (depth 2).
         options.add("CONV_WINO_PFD", std::to_string(config.pf + 1));

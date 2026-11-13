@@ -581,6 +581,19 @@ ConfigFields coop(const std::string& arch, int64_t f16math)
     return f;
 }
 
+/// Cooperative 16-bin layout (RDNA): 4 K waves of 16 out channels by 16 tiles each, one tile wave.
+ConfigFields coop16(const std::string& arch)
+{
+    ConfigFields f = coop(arch, 1);
+    f.bk = 64;
+    f.bt = 16;
+    f.waves = 4;
+    f.tm = 1;
+    f.tn = 1;
+    f.bins = 16;
+    return f;
+}
+
 /// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
 ConfigFields sreg(int64_t f16math)
 {
@@ -825,6 +838,67 @@ TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixtee
     f32Bf16.m = 3;
     EXPECT_TRUE(admits(f32Bf16, "gfx1201", strideTwo(), "BFLOAT16"));
     EXPECT_FALSE(admits(f32Bf16, "gfx1100", strideTwo(), "BFLOAT16"));
+}
+
+TEST(TestConvWinogradKernelMatch, CooperativeSixteenBinLayoutOnRdnaForStrideOne)
+{
+    EXPECT_TRUE(admits(coop16("gfx12"), "gfx1201", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop16("gfx11"), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop16("gfx11"), "gfx1201", baseShape(), "HALF"));
+    // F(2,3) only: no stride 2.
+    EXPECT_FALSE(admits(coop16("gfx12"), "gfx1201", strideTwo(), "HALF"));
+    // Two tile waves (32 tiles), and 8 K waves (128 out channels).
+    auto twoTileWaves = coop16("gfx12");
+    twoTileWaves.bt = 32;
+    twoTileWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(twoTileWaves, "HALF")).has_value());
+    auto eightKWaves = coop16("gfx12");
+    eightKWaves.bk = 128;
+    eightKWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(eightKWaves, "HALF")).has_value());
+    // Every field the layout reads is gated: one decline each.
+    struct Case
+    {
+        const char* name;
+        std::function<void(ConfigFields&)> edit;
+    };
+    const std::vector<Case> cases{
+        {"Cdna", [](ConfigFields& f) { f.arch = "gfx9"; }},
+        {"FThreeTwo", [](ConfigFields& f) { f.m = 3; }},
+        {"Nhwc", [](ConfigFields& f) { f.layout = "NHWC"; }},
+        {"Bins8", [](ConfigFields& f) { f.bins = 8; }},
+        {"TwoKTiles", [](ConfigFields& f) { f.tm = 2; }},
+        {"TwoTileGroups", [](ConfigFields& f) { f.tn = 2; }},
+        {"KBlock48",
+         [](ConfigFields& f) {
+             f.bk = 48;
+             f.waves = 3;
+         }},
+        {"KBlock16",
+         [](ConfigFields& f) {
+             f.bk = 16;
+             f.waves = 1;
+         }},
+        {"TileBlock64",
+         [](ConfigFields& f) {
+             f.bt = 64;
+             f.waves = 16;
+         }},
+        {"WavesNotKwTimesTw", [](ConfigFields& f) { f.waves = 8; }},
+        {"Prefetch", [](ConfigFields& f) { f.pf = 1; }},
+        {"Llc", [](ConfigFields& f) { f.llc = 1; }},
+    };
+    for(const auto& [name, edit] : cases)
+    {
+        SCOPED_TRACE(name);
+        auto f = coop16("gfx12");
+        edit(f);
+        EXPECT_FALSE(conv_winograd::configOf(kernelOf(f, "HALF")).has_value());
+    }
+    // The transform-row layout reads no micro-tile fields.
+    auto rowLayout = coop("gfx12", 1);
+    rowLayout.tm = 1;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(rowLayout, "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
