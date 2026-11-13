@@ -32,13 +32,8 @@
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE ForwardIterator
 lower_bound(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value);
@@ -145,23 +140,20 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
   StrictWeakOrdering comp);
 
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
   const LessThanComparable& value);
 
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> equal_range(
   thrust::execution_policy<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
   const LessThanComparable& value,
   StrictWeakOrdering comp);
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/binary_search.inl>

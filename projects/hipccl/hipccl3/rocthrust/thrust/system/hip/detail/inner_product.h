@@ -44,6 +44,8 @@
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/zip_function.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+
 // rocPRIM includes
 #  include <rocprim/rocprim.hpp>
 

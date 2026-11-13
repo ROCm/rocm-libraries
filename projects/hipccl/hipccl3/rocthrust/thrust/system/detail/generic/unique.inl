@@ -30,21 +30,17 @@
 #include <thrust/detail/internal_functional.h>
 #include <thrust/detail/range/head_flags.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/distance.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/unique.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 
-THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
-{
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
 
+THRUST_NAMESPACE_BEGIN
+namespace system::detail::generic
+{
 template <typename DerivedPolicy, typename ForwardIterator>
 THRUST_HOST_DEVICE ForwardIterator
 unique(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last)
@@ -112,8 +108,5 @@ unique_count(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator firs
   using value_type = thrust::detail::it_value_t<ForwardIterator>;
   return thrust::unique_count(exec, first, last, _THRUST_STD::equal_to<value_type>());
 } // end unique_copy()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

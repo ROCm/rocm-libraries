@@ -20,6 +20,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/tabulate.h>
 #include <thrust/transform_scan.h>
 
 #include "test_param_fixtures.hpp"
@@ -463,4 +464,130 @@ TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
     thrust::device, vec.cbegin(), vec.cend(), vec.begin(), _THRUST_STD::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{0, 5, 5, 5, 8, 8, 8, 8, 8, 8}), vec);
+}
+
+// User-defined Int type with poison default constructor
+struct TransformInt
+{
+  int value;
+
+  THRUST_HOST_DEVICE TransformInt()
+      : value(999)
+  {}
+  THRUST_HOST_DEVICE TransformInt(int v)
+      : value(v)
+  {}
+
+  THRUST_HOST_DEVICE friend TransformInt operator+(TransformInt a, TransformInt b)
+  {
+    return TransformInt(a.value + b.value);
+  }
+  THRUST_HOST_DEVICE friend TransformInt operator*(TransformInt a, TransformInt b)
+  {
+    return TransformInt(a.value * b.value);
+  }
+  THRUST_HOST_DEVICE friend bool operator==(TransformInt a, TransformInt b)
+  {
+    return a.value == b.value;
+  }
+  friend std::ostream& operator<<(std::ostream& os, TransformInt i)
+  {
+    return os << i.value;
+  }
+};
+
+// Test edge cases for parallel transform_scan with non-additive operations
+TEST(TransformScanTests, TestTransformScanEdgeCases)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using thrust::placeholders::_1;
+
+  // Large array, transform_inclusive_scan, multiplies, and init
+  {
+    const int n = 10000;
+    thrust::device_vector<int> d_input(n);
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 5) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::transform_inclusive_scan(
+      d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<int>(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::transform_inclusive_scan(
+      h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<int>(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ(d_output, h_output);
+  }
+
+  // transform_exclusive_scan with multiplies on large array
+  {
+    const int n = 10000;
+    thrust::device_vector<int> d_input(n);
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 3) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::transform_exclusive_scan(
+      d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<int>(), 5, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::transform_exclusive_scan(
+      h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<int>(), 5, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ(d_output, h_output);
+  }
+
+  // User-defined type with poison default constructor
+  {
+    thrust::device_vector<TransformInt> vec(5, TransformInt{1});
+    thrust::transform_exclusive_scan(
+      vec.begin(),
+      vec.end(),
+      vec.begin(),
+      _THRUST_STD::identity{},
+      TransformInt{100},
+      _THRUST_STD::plus<TransformInt>());
+    ASSERT_EQ(vec,
+              (thrust::device_vector<TransformInt>{
+                TransformInt{100}, TransformInt{101}, TransformInt{102}, TransformInt{103}, TransformInt{104}}));
+  }
+
+  // In-place transform_exclusive_scan with multiplies
+  {
+    thrust::device_vector<int> vec = {2, 3, 4, 5};
+    auto r                         = thrust::transform_exclusive_scan(
+      vec.begin(), vec.end(), vec.begin(), _THRUST_STD::negate<int>(), 10, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((vec.end() == r), true);
+    ASSERT_EQ(vec, (thrust::device_vector<int>{10, -20, 60, -240}));
+  }
+
+  // Boundary case at OMP parallel_scan_threshold (1024 elements)
+  {
+    const int n = 1024;
+    thrust::device_vector<int> d_input(n);
+    thrust::tabulate(d_input.begin(), d_input.end(), _1 + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::transform_inclusive_scan(
+      d_input.begin(), d_input.end(), d_output.begin(), thrust::square<int>(), 1, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::transform_inclusive_scan(
+      h_input.begin(), h_input.end(), h_output.begin(), thrust::square<int>(), 1, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ(d_output, h_output);
+  }
+
+  // Very small array (2 elements)
+  {
+    thrust::device_vector<int> d_input = {3, 7};
+    thrust::device_vector<int> d_output(2);
+    auto r = thrust::transform_inclusive_scan(
+      d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<int>(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+    ASSERT_EQ(d_output, (thrust::device_vector<int>{-6, 42}));
+  }
 }

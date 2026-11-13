@@ -30,7 +30,10 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _THRUST_STD_INCLUDE(__iterator/next.h)
+#include _THRUST_STD_INCLUDE(__iterator/prev.h)
 
 THRUST_NAMESPACE_BEGIN
 

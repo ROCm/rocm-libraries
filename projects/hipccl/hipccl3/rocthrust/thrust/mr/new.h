@@ -36,7 +36,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /** \addtogroup memory_resources Memory Resources
  *  \ingroup memory_management
  *  \{
@@ -98,6 +97,5 @@ class new_delete_resource final : public new_delete_resource_base
 
 /*! \} // memory_resources
  */
-
 } // namespace mr
 THRUST_NAMESPACE_END

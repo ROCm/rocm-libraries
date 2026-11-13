@@ -22,9 +22,9 @@
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/dialect.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/execution_space.h>
 #  include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
-#  include <thrust/detail/memory_wrapper.h>
 
 #  include <iterator>
+#  include <memory>
 #  include <type_traits>
 #  include <utility>
 #endif

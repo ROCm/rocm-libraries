@@ -37,28 +37,19 @@
 #endif // no system header
 #include <thrust/system/cuda/config.h>
 
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_scan.cuh>
-#include <cub/block/block_store.cuh>
-#include <cub/util_temporary_storage.cuh>
-
-#include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/system/cuda/detail/core/load_iterator.h>
-#include <thrust/system/cuda/detail/core/make_load_iterator.h>
 #include <thrust/system/cuda/detail/util.h>
-#include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include <cuda/std/type_traits>
+#include <cuda/std/__type_traits/conditional.h>
+#include <cuda/std/__type_traits/integral_constant.h>
+#include <cuda/std/__type_traits/type_identity.h>
+#include <cuda/std/__type_traits/void_t.h>
+#include <cuda/std/cstdint>
 
 #include <nv/target>
 
 THRUST_NAMESPACE_BEGIN
 
-namespace cuda_cub
-{
-namespace core
-{
-namespace detail
+namespace cuda_cub::core::detail
 {
 /// Typelist - a container of types
 template <typename...>
@@ -71,19 +62,13 @@ struct typelist;
 
 struct sm52
 {
-  enum
-  {
-    ver      = 520,
-    warpSize = 32
-  };
+  static constexpr int ver      = 520;
+  static constexpr int warpSize = 32;
 };
 struct sm60
 {
-  enum
-  {
-    ver      = 600,
-    warpSize = 32
-  };
+  static constexpr int ver      = 600;
+  static constexpr int warpSize = 32;
 };
 
 // list of sm, checked from left to right order
@@ -229,10 +214,7 @@ struct has_enough_shmem_impl<V, A, S, typelist<Head, Tail...>>
 template <bool V, class A, size_t S>
 struct has_enough_shmem_impl<V, A, S, typelist<>>
 {
-  enum
-  {
-    value = V
-  };
+  static constexpr bool value = V;
   using type = ::cuda::std::conditional_t<value, ::cuda::std::true_type, ::cuda::std::false_type>;
 };
 
@@ -398,15 +380,6 @@ struct get_arch<Plan<Arch>>
   using type = Arch;
 };
 
-// BlockLoad
-// -----------
-// a helper metaprogram that returns type of a block loader
-template <class PtxPlan, class It, class T = thrust::detail::it_value_t<It>>
-struct BlockLoad
-{
-  using type = cub::BlockLoad<T, PtxPlan::BLOCK_THREADS, PtxPlan::ITEMS_PER_THREAD, PtxPlan::LOAD_ALGORITHM, 1, 1>;
-};
-
 // cuda_optional
 // --------------
 // used for function that return cudaError_t along with the result
@@ -519,10 +492,7 @@ struct uninitialized
 {
   using DeviceWord = typename cub::UnitWord<T>::DeviceWord;
 
-  enum
-  {
-    WORDS = sizeof(T) / sizeof(DeviceWord)
-  };
+  static constexpr int WORDS = sizeof(T) / sizeof(DeviceWord);
 
   DeviceWord storage[WORDS];
 
@@ -540,12 +510,12 @@ struct uninitialized
 // uninitialized_array
 // --------------
 // allocates uninitialized data on stack
-template <class T, size_t N>
+template <class T, size_t N, size_t Alignment = alignof(T)>
 struct uninitialized_array
 {
   using value_type = T;
   static constexpr ::cuda::std::integral_constant<size_t, N> size{};
-  alignas(T) char data_[N * sizeof(T)];
+  alignas(Alignment) char data_[N * sizeof(T)];
 
   _CCCL_HOST_DEVICE T* data()
   {
@@ -600,12 +570,9 @@ template <int ALLOCATIONS>
 THRUST_RUNTIME_FUNCTION cudaError_t alias_storage(
   void* storage_ptr, size_t& storage_size, void* (&allocations)[ALLOCATIONS], size_t (&allocation_sizes)[ALLOCATIONS])
 {
-  return cub::detail::AliasTemporaries(storage_ptr, storage_size, allocations, allocation_sizes);
+  return cub::detail::alias_temporaries(storage_ptr, storage_size, allocations, allocation_sizes);
 }
 #endif // !_CCCL_COMPILER(NVRTC)
-
-} // namespace detail
-} // namespace core
-} // namespace cuda_cub
+} // namespace cuda_cub::core::detail
 
 THRUST_NAMESPACE_END

@@ -32,13 +32,8 @@
 #include <thrust/transform.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename DerivedPolicy, typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator gather(
   thrust::execution_policy<DerivedPolicy>& exec,
@@ -95,8 +90,5 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
     _THRUST_STD::identity{},
     pred);
 } // end gather_if()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

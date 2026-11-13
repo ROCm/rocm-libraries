@@ -34,7 +34,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename RandomAccessIterator,
           typename BinaryPredicate = _THRUST_STD::equal_to<detail::it_value_t<RandomAccessIterator>>,
           typename ValueType       = bool,
@@ -126,6 +125,5 @@ make_tail_flags(RandomAccessIterator first, RandomAccessIterator last)
 {
   return tail_flags<RandomAccessIterator>(first, last);
 }
-
 } // namespace detail
 THRUST_NAMESPACE_END

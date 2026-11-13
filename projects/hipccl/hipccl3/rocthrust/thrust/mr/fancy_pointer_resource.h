@@ -32,7 +32,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /*! A \p memory_resource derived class that wraps a pointer type.
  *
  * Wrapping the pointer type allows this class to use either the global (static) memory
@@ -88,6 +87,5 @@ public:
 private:
   Upstream* m_upstream;
 };
-
 } // namespace mr
 THRUST_NAMESPACE_END

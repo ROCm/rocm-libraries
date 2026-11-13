@@ -50,10 +50,8 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 template <typename T>
 struct is_operator_plus_function_object_impl;
-
 } // namespace detail
 
 /*! \endcond
@@ -91,7 +89,6 @@ constexpr bool is_operator_plus_function_object_v = is_operator_plus_function_ob
 
 namespace detail
 {
-
 template <typename T>
 struct is_operator_plus_function_object_impl : false_type
 {};
@@ -103,7 +100,6 @@ template <typename T>
 struct is_operator_plus_function_object_impl<std::plus<T>> : true_type
 {};
 #endif
-
 } // namespace detail
 
 /*! \endcond
