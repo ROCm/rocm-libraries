@@ -1145,7 +1145,8 @@ Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_AS_SAB_SAV_shortname1_gfx942:
 .long 0x7E98ACF9, 0x00040644
 .long 0x7E1814F9, 0x0006144C
 .long 0x7E1C14F9, 0x0006144D
-.long 0xBF8CC17F
+// s_waitcnt lgkmcnt(0): no LDS write follows the v[28:31] read, which is used below.
+.long 0xBF8CC07F
 .long 0xD3CD8000, 0x04021118
 .long 0x7E98ACF9, 0x00050645
 .long 0x7E1814F9, 0x0006154C
@@ -1305,7 +1306,8 @@ Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_AS_SAB_SAV_shortname1_gfx942:
 .long 0x7E98ACF9, 0x00040630
 .long 0x7E1814F9, 0x0006144C
 .long 0x7E1C14F9, 0x0006144D
-.long 0xBF8CC17F
+// s_waitcnt lgkmcnt(0): no LDS write follows the v[28:31] read, which is used below.
+.long 0xBF8CC07F
 .long 0xD3CD8000, 0x04021118
 .long 0x7E98ACF9, 0x00050631
 .long 0x7E1814F9, 0x0006154C
