@@ -8,6 +8,7 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
@@ -19,8 +20,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <array>
 #include <cctype>
+#include <ostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hip_flash2_engine
@@ -590,6 +594,114 @@ INSTANTIATE_TEST_SUITE_P(Attributes,
                          [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
                              return info.param.name;
                          });
+
+// -- isApplicable: buffer roles must not be virtual -----------------------------
+
+namespace
+{
+enum class BufferRole
+{
+    Q,
+    K,
+    V,
+    O
+};
+
+std::ostream& operator<<(std::ostream& os, BufferRole role)
+{
+    constexpr std::array<const char*, 4> NAMES{"Q", "K", "V", "O"};
+    return os << NAMES.at(static_cast<size_t>(role));
+}
+
+// Q, K, V and O are read or written through device pointers, so none may be virtual.
+flatbuffers::FlatBufferBuilder createFp16GraphWithVirtual(BufferRole role)
+{
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto base = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    const auto& attrs = hipdnn_test_sdk::utilities::sdpa::detail::getSdpaAttributes(*graph);
+    const std::array<int64_t, 4> uids{
+        attrs.q_tensor_uid, attrs.k_tensor_uid, attrs.v_tensor_uid, attrs.o_tensor_uid};
+    const int64_t target = uids.at(static_cast<size_t>(role));
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == target)
+        {
+            tensor->virtual_ = true;
+        }
+    }
+    return hipdnn_test_sdk::utilities::sdpa::detail::repack(*graph);
+}
+} // namespace
+
+class TestHipFlash2FwdVirtualRole : public ::testing::TestWithParam<BufferRole>
+{
+protected:
+    Handle _handle;
+    HipFlash2FwdPlanBuilder _builder;
+
+    bool servedArch()
+    {
+        return hip_kernel_provider_common::getDeviceString(_handle.getStream()) == "gfx942";
+    }
+};
+
+TEST_F(TestHipFlash2FwdVirtualRole, NonVirtualGraphIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_P(TestHipFlash2FwdVirtualRole, VirtualTensorIsNotApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    auto builder = createFp16GraphWithVirtual(GetParam());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Roles,
+    TestHipFlash2FwdVirtualRole,
+    ::testing::Values(BufferRole::Q, BufferRole::K, BufferRole::V, BufferRole::O),
+    [](const ::testing::TestParamInfo<BufferRole>& info) {
+        return std::string(1, std::string_view("QKVO").at(static_cast<size_t>(info.param)));
+    });
 
 } // namespace
 } // namespace hip_flash2_engine

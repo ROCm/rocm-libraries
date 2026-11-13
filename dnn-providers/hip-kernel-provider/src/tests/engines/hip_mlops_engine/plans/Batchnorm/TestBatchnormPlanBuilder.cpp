@@ -17,6 +17,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -1006,6 +1007,135 @@ INSTANTIATE_TEST_SUITE_P(Mutations,
                          TestBatchnormTrainingGraphDecline,
                          ::testing::ValuesIn(trainingGraphMutations()),
                          [](const ::testing::TestParamInfo<TrainingGraphMutation>& info) {
+                             return info.param.name;
+                         });
+
+// ============================================================================
+// One-node inference and backward graphs: every operand is a device buffer
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+struct OneNodeVirtualOperandCase
+{
+    std::string name;
+    std::function<flatbuffers::FlatBufferBuilder()> makeGraph;
+    std::function<int64_t(GraphT&)> operandUid;
+};
+
+std::ostream& operator<<(std::ostream& os, const OneNodeVirtualOperandCase& value)
+{
+    return os << value.name;
+}
+
+std::vector<OneNodeVirtualOperandCase> oneNodeVirtualOperandCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributesT;
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesT;
+    using hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExtT;
+
+    std::vector<OneNodeVirtualOperandCase> cases;
+
+    const auto addInference
+        = [&](const std::string& role, int64_t BatchnormInferenceAttributesT::*field) {
+              cases.push_back(
+                  {"Inference" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(); },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormInferenceAttributes()->*field;
+                   }});
+          };
+    addInference("X", &BatchnormInferenceAttributesT::x_tensor_uid);
+    addInference("Mean", &BatchnormInferenceAttributesT::mean_tensor_uid);
+    addInference("InvVariance", &BatchnormInferenceAttributesT::inv_variance_tensor_uid);
+    addInference("Scale", &BatchnormInferenceAttributesT::scale_tensor_uid);
+    addInference("Bias", &BatchnormInferenceAttributesT::bias_tensor_uid);
+    addInference("Y", &BatchnormInferenceAttributesT::y_tensor_uid);
+
+    const auto addVarianceExt
+        = [&](const std::string& role, int64_t BatchnormInferenceAttributesVarianceExtT::*field) {
+              cases.push_back(
+                  {"InferenceWithVariance" + role,
+                   [] {
+                       return hipdnn_test_sdk::utilities::
+                           createValidBatchnormWithVarianceInferenceGraph();
+                   },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormInferenceAttributesVarianceExt()
+                                  ->*field;
+                   }});
+          };
+    addVarianceExt("X", &BatchnormInferenceAttributesVarianceExtT::x_tensor_uid);
+    addVarianceExt("Mean", &BatchnormInferenceAttributesVarianceExtT::mean_tensor_uid);
+    addVarianceExt("Variance", &BatchnormInferenceAttributesVarianceExtT::variance_tensor_uid);
+    addVarianceExt("Scale", &BatchnormInferenceAttributesVarianceExtT::scale_tensor_uid);
+    addVarianceExt("Bias", &BatchnormInferenceAttributesVarianceExtT::bias_tensor_uid);
+    addVarianceExt("Y", &BatchnormInferenceAttributesVarianceExtT::y_tensor_uid);
+
+    const auto addBackward
+        = [&](const std::string& role, int64_t BatchnormBackwardAttributesT::*field) {
+              cases.push_back(
+                  {"Backward" + role,
+                   [] { return hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(); },
+                   [field](GraphT& g) {
+                       return g.nodes.at(0)->attributes.AsBatchnormBackwardAttributes()->*field;
+                   }});
+          };
+    addBackward("Dy", &BatchnormBackwardAttributesT::dy_tensor_uid);
+    addBackward("X", &BatchnormBackwardAttributesT::x_tensor_uid);
+    addBackward("Scale", &BatchnormBackwardAttributesT::scale_tensor_uid);
+    addBackward("Dx", &BatchnormBackwardAttributesT::dx_tensor_uid);
+    addBackward("Dscale", &BatchnormBackwardAttributesT::dscale_tensor_uid);
+    addBackward("Dbias", &BatchnormBackwardAttributesT::dbias_tensor_uid);
+    return cases;
+}
+} // namespace
+
+class TestBatchnormOneNodeVirtualOperand
+    : public ::testing::TestWithParam<OneNodeVirtualOperandCase>
+{
+protected:
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormPlanBuilder _batchnormBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
+    Handle _dummyHandle;
+};
+
+TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
+{
+    auto builder = GetParam().makeGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
+{
+    auto base = GetParam().makeGraph();
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    const int64_t uid = GetParam().operandUid(*graph);
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            tensor->virtual_ = true;
+        }
+    }
+    flatbuffers::FlatBufferBuilder mutated;
+    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        mutated.GetBufferPointer(), mutated.GetSize());
+
+    EXPECT_FALSE(_batchnormBuilder.isApplicable(_dummyHandle, wrapper));
+}
+
+INSTANTIATE_TEST_SUITE_P(Operands,
+                         TestBatchnormOneNodeVirtualOperand,
+                         ::testing::ValuesIn(oneNodeVirtualOperandCases()),
+                         [](const ::testing::TestParamInfo<OneNodeVirtualOperandCase>& info) {
                              return info.param.name;
                          });
 

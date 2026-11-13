@@ -107,6 +107,12 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
     auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
 
+    // Every buffer is read or written through a device pointer; a virtual tensor has none.
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->virtual_(), "Q tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->virtual_(), "K tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->virtual_(), "V tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->virtual_(), "O tensor must not be virtual");
+
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->size() != 4, "Q must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
