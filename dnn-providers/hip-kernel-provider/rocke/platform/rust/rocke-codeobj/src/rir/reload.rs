@@ -125,10 +125,11 @@ impl Spills {
     fn slot(&self, inst: &MInst) -> Option<(Slot, bool)> {
         let scratch = |o: &Opnd| Slot::Scratch(inst.imm, inst.imm + 4 * o.dwords() as i64);
         match inst.op {
-            Opc::ScratchLoadB32 | Opc::ScratchLoadB64 | Opc::ScratchLoadB96 | Opc::ScratchLoadB128 => {
+            // An access that names an SGPR base (a slot past 4 KiB) stays where the `s_mov` before it put it.
+            Opc::ScratchLoadB32 | Opc::ScratchLoadB64 | Opc::ScratchLoadB96 | Opc::ScratchLoadB128 if inst.uses.is_empty() => {
                 Some((scratch(&inst.defs[0]), true))
             }
-            Opc::ScratchStoreB32 | Opc::ScratchStoreB64 | Opc::ScratchStoreB96 | Opc::ScratchStoreB128 => {
+            Opc::ScratchStoreB32 | Opc::ScratchStoreB64 | Opc::ScratchStoreB96 | Opc::ScratchStoreB128 if inst.uses.len() == 1 => {
                 Some((scratch(&inst.uses[0]), false))
             }
             Opc::DsLoadB32 | Opc::DsStoreB32
@@ -549,7 +550,7 @@ mod tests {
         for (seed, nv, ns, lds_slots) in [(1, 60, 30, 0), (2, 80, 40, 8), (3, 120, 12, 64), (4, 40, 70, 4), (5, 90, 20, 16)] {
             let f = random_kernel(seed, nv, ns);
             let want = effects(&f, 3);
-            let cfg = regalloc::SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
+            let cfg = regalloc::SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0, ..Default::default() };
             let mut spilled = f.clone();
             let a = regalloc::allocate_spilling(&mut spilled, regalloc::Limits { vgprs: 24, sgprs: 20 }, cfg).expect("allocates");
             for waves in [1, 8] {

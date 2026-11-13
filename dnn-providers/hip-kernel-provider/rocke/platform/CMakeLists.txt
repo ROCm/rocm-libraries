@@ -674,7 +674,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
-        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_unified_2d_direct.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -884,6 +885,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
+        "tests/library/tests/test_kda_chunkwise_direct_deterministic.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
         "tests/library/tests/test_mla_prefill_gfx942_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_numeric.py"

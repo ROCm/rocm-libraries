@@ -26,8 +26,11 @@ use crate::rir::unroll::Auto;
 use crate::rir::CompileStats;
 
 /// The automatic unrolling of gfx950: `Auto::DEFAULT`, with empty register
-/// pins not counted as waits on a carried value.
-pub const AUTO: Auto = Auto { pins_wait: false, ..Auto::DEFAULT };
+/// pins not counted as waits on a carried value, and loops of up to 64 trips
+/// (2048 ops of copies) in a kernel without MFMAs: the split-KV attention
+/// reduce kernel sums 64 partial results per lane, which COMGR issues as 64
+/// loads at once and a rolled loop issues one trip at a time.
+pub const AUTO: Auto = Auto { pins_wait: false, scalar: Some((64, 2048)), ..Auto::DEFAULT };
 
 /// The automatic unrolling a gfx950 compile tries.
 pub fn auto() -> Auto {
@@ -57,10 +60,21 @@ pub fn keeps(unrolled: &MFunc, u: &CompileStats, rolled: &MFunc, r: &CompileStat
     !crate::rir::debug_flag("nounrollcost") && cost(unrolled, u.waves) * 5 <= cost(rolled, r.waves) * 4
 }
 
+/// Whether a gfx950 compile (`f`, statistics `s`) unrolled a loop, issues no MFMA and runs fewer waves than the
+/// target allows.
+pub fn lost_waves_without_mfma(f: &MFunc, s: &CompileStats, target: crate::target::Target) -> bool {
+    target == crate::target::Target::Gfx950 && s.unrolled > 0 && s.waves < target.info().max_waves && !has_mfma(f)
+}
+
+/// Whether `f` issues an MFMA.
+pub(crate) fn has_mfma(f: &MFunc) -> bool {
+    f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op))
+}
+
 /// Slots per wave of `f` (allocated) at `waves` waves per SIMD: each block's
 /// cost model cycles there, weighted by the block's runs (`runs`).
 pub fn cost(f: &MFunc, waves: u32) -> u64 {
-    let mfma = f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op));
+    let mfma = has_mfma(f);
     let mut one = MFunc { target: f.target, ..MFunc::default() };
     runs(f)
         .into_iter()
@@ -210,5 +224,44 @@ mod tests {
             }
         }
         assert_eq!(crate::rir::unroll::unroll_loops_with(&mut kernel, &mut lds, Some(AUTO)).expect("walks"), 0);
+    }
+
+    /// The split-KV attention reduce kernel (seg64, d128): two 64-trip loops over the same LDS table, each trip a
+    /// global load and an FMA, no MFMA.
+    const SPLITKV_REDUCE: &str = include_str!("testdata/splitkv_reduce_seg64.ir");
+
+    #[test]
+    fn the_split_kv_reduce_unrolls_and_keeps_all_its_waves() {
+        let compiled = crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let s = &compiled.stats;
+        assert_eq!(s.unrolled, 2, "both 64-trip loops unroll");
+        // Merged LDS loads (the second loop reads the first's table) would hold 64 values across the unrolled loads: more
+        // VGPRs and a lost wave; without merging, all loads are in flight at once.
+        assert_eq!(s.waves, Target::Gfx950.info().max_waves, "{s:?}");
+        assert!(s.vgprs <= 40 && s.spill.scratch_dwords == 0, "{s:?}");
+    }
+
+    #[test]
+    fn lever_widewin_keeps_more_split_kv_reduce_loads_in_flight_at_the_same_waves() {
+        let plain = crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let wide = crate::rir::with_levers(&["widewin"], || crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(wide.stats.waves, plain.stats.waves);
+        assert!(wide.stats.vgprs > plain.stats.vgprs && wide.stats.vgprs <= 64 && wide.stats.spill.scratch_dwords == 0, "{:?} {:?}", plain.stats, wide.stats);
+    }
+
+    #[test]
+    fn only_unrolled_gfx950_code_without_mfmas_that_runs_fewer_waves_is_retried() {
+        let func = |op: Opc| MFunc {
+            blocks: vec![MBlock { insts: vec![MInst::new(op, [s(4)], [s(4), Opnd::Imm(1)])], loop_depth: 0 }],
+            target: Target::Gfx950,
+            ..MFunc::default()
+        };
+        let stats = |waves, unrolled| CompileStats { waves, unrolled, ..CompileStats::default() };
+        let (plain, mfma) = (func(Opc::SAddI32), func(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VMfma16x16x32F16)));
+        assert!(lost_waves_without_mfma(&plain, &stats(7, 1), Target::Gfx950));
+        assert!(!lost_waves_without_mfma(&plain, &stats(8, 1), Target::Gfx950), "all waves");
+        assert!(!lost_waves_without_mfma(&plain, &stats(7, 0), Target::Gfx950), "nothing unrolled");
+        assert!(!lost_waves_without_mfma(&mfma, &stats(7, 1), Target::Gfx950), "an MFMA kernel");
+        assert!(!lost_waves_without_mfma(&plain, &stats(7, 1), Target::Gfx1151), "gfx1151");
     }
 }

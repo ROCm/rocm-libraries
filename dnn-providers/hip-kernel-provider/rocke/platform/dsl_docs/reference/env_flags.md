@@ -25,17 +25,30 @@ For setup and the most common flags in context, see
 
 ## Direct code-object compiler
 
-Read by the direct compiler's library in the process that compiles. They are
-diagnostic controls, not a tuning interface; see
+The rollout, lever and debug variables below are read in the process that
+compiles. The debug controls are diagnostic, not a tuning interface; see
 [`../runtime/direct_compiler.md`](../runtime/direct_compiler.md#debug-controls)
 for the switches.
 
+The rollout variables matter only when the direct backend is selected
+(`ROCKE_CODEOBJ_BACKEND=direct`, the `code_object_backend` argument, or a
+kernel's request); see
+[Rollout controls](../runtime/direct_compiler.md#rollout-controls).
+
 | Variable | Values (default) | Purpose |
 |---|---|---|
+| `ROCKE_DIRECT_STRICT` | `1` \| `0` (`0`) | A direct failure raises instead of falling back to COMGR. For validation runs. A kernel kept off direct by the allow or deny list still compiles with COMGR. |
+| `ROCKE_DIRECT_FALLBACK` | `unsupported` \| `all` (`unsupported`) | Which direct failures fall back to COMGR: only `DirectUnsupported`, or every `CodeObjectError` (an unreadable op, no register allocation, a missing library). |
+| `ROCKE_DIRECT_DENY` | comma-separated `fnmatch` patterns on the kernel name (unset) | Matching kernels compile with COMGR without trying direct. Wins over `ROCKE_DIRECT_ALLOW`. |
+| `ROCKE_DIRECT_ALLOW` | comma-separated `fnmatch` patterns on the kernel name (unset) | When set, only matching kernels try direct; the rest compile with COMGR. |
+| `ROCKE_DIRECT_LOG` | `1` \| `0` (`0`) | One stderr line per compiled kernel: the compiler that built it and the fallback reason. Counts are in `rocke.runtime.code_object.backend_usage()`. |
+| `ROCKE_DIRECT_LEVERS` | lever names, comma- or `+`-separated (unset) | Turns on code-generation choices that are off by default (the list is in [Levers](../runtime/direct_compiler.md#levers)). `compile_kernel` adds the backend defaults and the kernel's own levers for its compile. |
+| `ROCKE_DIRECT_DEFAULT_LEVERS` | lever names (`acqfence,bufoffany,fmax3`) | Replaces the levers the direct backend turns on for every kernel (`""`: none); a kernel's own levers still apply. |
 | `ROCKE_DIRECT_DEBUG` | switch names, comma-separated (unset) | Turns compiler stages off, or on, to bisect a miscompile or a regression. Code objects compiled with a switch set are not qualified. |
 | `ROCKE_DIRECT_THREADS` | integer (the machine's parallelism, at most 4) | Threads one compile may use when a large kernel spills. The output does not change. |
 | `ROCKE_DIRECT_PARSE_THREADS` | integer (by input size) | Threads that parse one input. By default, 1 below 256 KiB of text, then one per 128 KiB, at most 4 and the machine's parallelism; in a session, 1 below 128 KiB, then one per 64 KiB, at most 3 and the session's threads. The output does not change. |
 | `ROCKE_DIRECT_SCAN` | `scalar` \| `avx2` (the best level the CPU has) | A lower SIMD level for the parser's byte scanner. The output does not change. |
+| `ROCKE_DIRECT_TRACE_FILE` | path (unset) | With the `tracepressure` debug switch: also writes the function with its pressure per instruction to this file. |
 
 ## GEMM dispatch
 

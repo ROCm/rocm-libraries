@@ -17,6 +17,8 @@
 //!   `memref.global_atomic_add` of a `vec<f16x2>` at an f16 element index:
 //!   `global_atomic_pk_add_f16`, the returning form (GLC) only when the old
 //!   value is used, as `llvm.amdgcn.global.atomic.fadd.v2f16` lowers.
+//! * `memref.global_atomic_add_pk_bf16 (ptr<bf16>, index, vec<bf16x2>)` is the
+//!   same with `global_atomic_pk_add_bf16` (opcode 0x52, gfx950 only).
 //! * `tile.buffer_store_vN_f32` stores its dwords as the f16 and bf16 forms
 //!   do (`raw.ptr.buffer.store` of the dwords), on either target.
 
@@ -26,6 +28,11 @@ use crate::rir::mir::Opc;
 /// The packed f16 atomic add: the plain and the returning form.
 pub fn pk_add_f16() -> (Opc, Opc) {
     (Opc::Gfx9(Gfx9Op::GAtomicPkAddF16), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn))
+}
+
+/// The packed bf16 atomic add: the plain and the returning form.
+pub fn pk_add_bf16() -> (Opc, Opc) {
+    (Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16), Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn))
 }
 
 #[cfg(test)]
@@ -94,23 +101,34 @@ mod tests {
 
     #[test]
     fn the_packed_f16_atomic_returns_only_when_its_old_value_is_used() {
-        let params = "    %W : ptr<f16,global>\n    %O : ptr<f16,global>\n";
-        let add = "    %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    %i : i32 = arith.mul ( %tid, %c2 )\n    \
-                   %v : vec<f16x2> = memref.global_load_vN ( %O, %i ) { align = i:4, elem_type = s:\"f16\", vec = i:2 }\n    \
-                   %old : vec<f16x2> = memref.global_atomic_add_pk_f16 ( %W, %i, %v ) { elem_type = s:\"f16\", ordering = s:\"monotonic\", vec = i:2 }\n";
-        let kept = format!(
-            "{add}    memref.global_store_vN ( %O, %i, %old ) {{ align = i:4, elem_type = s:\"f16\", vec = i:2 }}\n"
+        packed_atomic("f16", "global_atomic_pk_add_f16", 0x4e);
+    }
+
+    #[test]
+    fn the_packed_bf16_atomic_returns_only_when_its_old_value_is_used() {
+        packed_atomic("bf16", "global_atomic_pk_add_bf16", 0x52);
+    }
+
+    fn packed_atomic(elem: &str, mnemonic: &str, opcode: u32) {
+        let params = format!("    %W : ptr<{elem},global>\n    %O : ptr<{elem},global>\n");
+        let add = format!(
+            "    %c2 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:2 }}\n    %i : i32 = arith.mul ( %tid, %c2 )\n    \
+             %v : vec<{elem}x2> = memref.global_load_vN ( %O, %i ) {{ align = i:4, elem_type = s:\"{elem}\", vec = i:2 }}\n    \
+             %old : vec<{elem}x2> = memref.global_atomic_add_pk_{elem} ( %W, %i, %v ) {{ elem_type = s:\"{elem}\", ordering = s:\"monotonic\", vec = i:2 }}\n"
         );
-        for (body, glc) in [(add.to_string(), false), (kept, true)] {
-            let listing = rir::compile_any_target(&kernel("", params, &body), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
-            let line = listing.lines().find(|l| l.trim_start().starts_with("global_atomic_pk_add_f16")).unwrap_or_else(|| panic!("{listing}"));
+        let kept = format!(
+            "{add}    memref.global_store_vN ( %O, %i, %old ) {{ align = i:4, elem_type = s:\"{elem}\", vec = i:2 }}\n"
+        );
+        for (body, glc) in [(add.clone(), false), (kept, true)] {
+            let listing = rir::compile_any_target(&kernel("", &params, &body), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+            let line = listing.lines().find(|l| l.trim_start().starts_with(mnemonic)).unwrap_or_else(|| panic!("{listing}"));
             let words: Vec<u32> = line.rsplit(": ").next().unwrap().split_whitespace().map(|w| u32::from_str_radix(w, 16).unwrap()).collect();
-            // GLOBAL (segment 2) op 0x4e (dd388000 007f0308: global_atomic_pk_add_f16 v[8:9], v3, off); sc0 returns.
-            assert_eq!((words[0] >> 26, words[0] >> 14 & 3, words[0] >> 18 & 0x7f), (0x37, 2, 0x4e), "{line}");
+            // GLOBAL (segment 2) op 0x4e / 0x52 (dd388000 007f0308: global_atomic_pk_add_f16 v[8:9], v3, off); sc0 returns.
+            assert_eq!((words[0] >> 26, words[0] >> 14 & 3, words[0] >> 18 & 0x7f), (0x37, 2, opcode), "{line}");
             assert_eq!(words[0] >> 16 & 1 == 1, glc, "{line}");
         }
-        let e = rir::compile_any_target(&kernel("", params, add), Target::Gfx1151).err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(e.contains("F16"), "{e}");
+        let e = rir::compile_any_target(&kernel("", &params, &add), Target::Gfx1151).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.to_uppercase().contains(&elem.to_uppercase()), "{e}");
     }
 
     #[test]

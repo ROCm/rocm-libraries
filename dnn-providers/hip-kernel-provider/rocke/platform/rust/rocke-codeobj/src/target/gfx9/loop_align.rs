@@ -6,8 +6,9 @@
 //! words fill the block before it (executed once on the way in, never by the loop). The last pass before encoding:
 //! hazards already counted, and an `s_nop` adds wait states only.
 //!
-//! Branches (`s_cbranch_*` / `s_branch`) keep a 16-bit word offset; a target past it is refused by the encoder
-//! (`asm::branch_delta`, "branch out of range") rather than relaxed: the GEMM loops here are below 2,000 instructions.
+//! Branches (`s_cbranch_*` / `s_branch`) keep a 16-bit word offset; a target past it is relaxed by the encoder
+//! (`asm::assemble_relaxed`), after this pass: the GEMM loops here are below 2,000 instructions, so the alignment
+//! padding is not recomputed for the few kernels with a loop body past 128 KiB.
 
 use crate::error::CompileError;
 use crate::rir::mir::*;

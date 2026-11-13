@@ -694,6 +694,81 @@ fn pressure_of(f: &MFunc, live: &Live) -> Pressure {
     Pressure { vgprs: most(Class::V), sgprs: most(Class::S) }
 }
 
+/// Developer trace (`ROCKE_DIRECT_DEBUG=tracepressure`): per block of `f`
+/// (in the order it stands) the VGPR dwords live after each instruction, and
+/// at the busiest point the live registers by size and defining opcode.
+pub fn trace_pressure(f: &MFunc, label: &str) {
+    let Ok(live) = analyze(f) else { return };
+    let prof = profile(f, &live, Class::V);
+    let mut peak = (0u32, 0usize);
+    for (i, &p) in prof.iter().enumerate() {
+        if p > peak.0 {
+            peak = (p, i);
+        }
+    }
+    let slot = peak.1;
+    let inst_of = |s: usize| s / 2;
+    eprintln!("trace[{label}]: peak {} vgpr dwords at slot {slot} (inst {})", peak.0, inst_of(slot));
+    // Instruction index to (block, position).
+    let mut def_op: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    for blk in &f.blocks {
+        for inst in &blk.insts {
+            for d in &inst.defs {
+                if let Opnd::R(v) = d {
+                    def_op.entry(v.reg).or_insert_with(|| format!("{:?}", inst.op));
+                }
+            }
+        }
+    }
+    let mut by_kind: std::collections::BTreeMap<String, (u32, u32)> = std::collections::BTreeMap::new();
+    for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
+        let mut n = 0;
+        for u in live.base[v]..live.base[v + 1] {
+            if live.segs(u).iter().any(|&(s, e)| (s as usize) <= slot && slot <= e as usize) {
+                n += 1;
+            }
+        }
+        if n > 0 {
+            let key = def_op.get(&(v as u32)).cloned().unwrap_or_else(|| "-".into());
+            let e = by_kind.entry(key).or_default();
+            e.0 += n;
+            e.1 += 1;
+        }
+    }
+    for (k, (dw, regs)) in &by_kind {
+        eprintln!("trace[{label}]:   {k}: {dw} dwords in {regs} registers");
+    }
+    // Pressure curve of the block holding the peak, every 16th instruction.
+    let first = &live.first;
+    let blk = (0..first.len() - 1).find(|&b| (first[b] as usize) <= inst_of(slot) && inst_of(slot) < first[b + 1] as usize).unwrap_or(0);
+    eprintln!("trace[{label}]: peak block {blk} insts {}..{}", first[blk], first[blk + 1]);
+    if let Some(path) = std::env::var_os("ROCKE_DIRECT_TRACE_FILE") {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let fmt = |o: &Opnd| match o {
+            Opnd::R(v) => format!("v{}.{}.{}", v.reg, v.off, v.n),
+            Opnd::P(p, n) => format!("p{}", phys_name(*p, *n)),
+            Opnd::Imm(x) => format!("#{x}"),
+        };
+        let mut i = 0usize;
+        for (b, blk) in f.blocks.iter().enumerate() {
+            let _ = writeln!(out, "block {b}");
+            for inst in &blk.insts {
+                let d: Vec<String> = inst.defs.iter().map(fmt).collect();
+                let u: Vec<String> = inst.uses.iter().map(fmt).collect();
+                let _ = writeln!(out, "{i}\t{}\t{:?}\t{} <- {}\timm={}", prof[2 * i], inst.op, d.join(","), u.join(","), inst.imm);
+                i += 1;
+            }
+        }
+        let _ = std::fs::write(path, out);
+    }
+    let mut line = String::new();
+    for i in (first[blk] as usize..first[blk + 1] as usize).step_by(16) {
+        line.push_str(&format!("{} ", prof[2 * i]));
+    }
+    eprintln!("trace[{label}]: curve {line}");
+}
+
 /// The most VGPR and SGPR dwords live at one point of `f`: every assignment
 /// uses at least that many registers. Counts the live units slot by slot,
 /// as `profile` does over `analyze`'s segments, without building them.
@@ -992,6 +1067,47 @@ pub(super) struct Groups {
     pub(super) gfixed: Vec<Option<u16>>,
 }
 
+/// What `valcoal` needs to know about a copy `d = s` of one dword: the unit defined once each, by instructions of
+/// one block, `s` before the copy, with `d` not live past the block: `s` is not defined again while `d` is live.
+struct SameValue {
+    /// Per unit: how many instructions define it, and the linear index of the last.
+    defs: Vec<(u32, u32)>,
+}
+
+impl SameValue {
+    fn new(f: &MFunc, live: &Live) -> SameValue {
+        let mut defs = vec![(0u32, 0u32); live.base[f.vregs.len()]];
+        let mut at = 0u32;
+        for block in &f.blocks {
+            for inst in &block.insts {
+                for d in inst.defs.iter().filter_map(Opnd::vref) {
+                    for u in live.base[d.reg as usize] + d.off as usize..live.base[d.reg as usize] + (d.off + d.n) as usize {
+                        defs[u] = (defs[u].0 + 1, at);
+                    }
+                }
+                at += 1;
+            }
+        }
+        SameValue { defs }
+    }
+
+    fn holds(&self, f: &MFunc, live: &Live, (b, k): (usize, usize), d: VRef, s: VRef, shared: &[bool]) -> bool {
+        let (ud, us) = (live.base[d.reg as usize] + d.off as usize, live.base[s.reg as usize] + s.off as usize);
+        if shared[ud] || shared[us] || f.vregs[d.reg as usize].class != Class::V || f.vregs[d.reg as usize].fixed.is_some() || f.vregs[s.reg as usize].fixed.is_some() {
+            return false;
+        }
+        let (start, end) = (live.first[b], live.first[b + 1]);
+        let copy = start + k as u32;
+        let single = |u: usize, at: u32| self.defs[u].0 == 1 && self.defs[u].1 == at;
+        // `s` is defined once, earlier in this block; `d` only by this copy.
+        if !single(ud, copy) || self.defs[us].0 != 1 || !(start..copy).contains(&self.defs[us].1) {
+            return false;
+        }
+        // `d` lives inside the block, after the copy: it is not live out of it.
+        live.segs(ud).iter().all(|&(a, e)| a >= 2 * copy && e + 1 < 2 * end)
+    }
+}
+
 /// Merges copy-related groups whose units are never live at once, hottest
 /// copies first; a merged group's units get the union of the segments.
 pub(super) fn coalesce(f: &MFunc, live: &mut Live) -> Groups {
@@ -1017,6 +1133,9 @@ pub(super) fn coalesce(f: &MFunc, live: &mut Live) -> Groups {
     let base = live.base.clone();
     let group_unit = |v: u32, k: u32| base[v as usize] + k as usize;
     let mut both: Vec<Seg> = Vec::new();
+    // Lever `valcoal`: a copy of a value that is still live may share its source's register, as both hold one value.
+    let same_value = if super::lever("valcoal") { Some(SameValue::new(f, live)) } else { None };
+    let mut shared = vec![false; live.base[nv]];
     for &(_, b, k) in &copies {
         let inst = &f.blocks[b].insts[k];
         let (Opnd::R(d), Opnd::R(s)) = (inst.defs[0], inst.uses[0]) else {
@@ -1057,6 +1176,19 @@ pub(super) fn coalesce(f: &MFunc, live: &mut Live) -> Groups {
             (rs, rd, od - os)
         } else if try_merge(rd, rs, os - od, &g, live) {
             (rd, rs, os - od)
+        } else if same_value.as_ref().is_some_and(|sv| {
+            d.n == 1 && g.gsize[rs as usize] == 1 && g.parent[rs as usize] == (rs, 0) && sv.holds(f, live, (b, k), d, s, &shared)
+        }) {
+            // The one dword of `rs` goes into `rd` at the destination's place; segments overlap by design.
+            let delta = od - os;
+            let (sx, sy) = (g.gsize[rs as usize] as i32, g.gsize[rd as usize] as i32);
+            let ok = delta >= 0 && delta + sx <= sy && g.gfixed[rs as usize].is_none() && delta % g.galign[rs as usize] as i32 == 0;
+            if !ok || g.gfixed[rd as usize].is_some_and(|p| (p as i32 + delta) % g.galign[rs as usize] as i32 != 0) {
+                continue;
+            }
+            shared[group_unit(rs, 0)] = true;
+            shared[group_unit(rd, delta as u32)] = true;
+            (rs, rd, delta)
         } else {
             continue;
         };
@@ -1172,7 +1304,7 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
             Ok((phys, used, tight)) if used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs => {
                 rewrite(f, &phys);
                 let spill = spiller.finish(f)?;
-                return Ok(Allocation { num_sgprs: used.sgprs, num_vgprs: used.vgprs, pressure, spill, tight });
+                return Ok(Allocation { num_sgprs: used.sgprs.max(spill.sgprs_needed), num_vgprs: used.vgprs, pressure, spill, tight });
             }
             Ok((_, used, _)) => {
                 if used.sgprs > hard.sgprs {
@@ -1686,6 +1818,60 @@ mod tests {
         let p = pressure(&f).expect("analyzes");
         let a = allocate(&mut f).expect("fits");
         assert_eq!(a.num_vgprs, p.vgprs);
+    }
+
+    /// `x = v_exp(a); y = v_exp(b); t = (x, y) by copies; use t; use x, y again` in one block.
+    fn exp_pair(use_again: bool) -> MFunc {
+        let r = |reg: u32, off: u8, n: u8| Opnd::R(VRef { reg, off, n });
+        let mut f = MFunc::default();
+        for size in [1, 1, 1, 1, 2] {
+            f.vregs.push(VRegInfo { class: Class::V, size, align: if size > 1 { 2 } else { 1 }, fixed: None });
+        }
+        let mut insts = vec![
+            MInst::new(Opc::VMovB32, [r(0, 0, 1)], [Opnd::Imm(1)]),
+            MInst::new(Opc::VAddNcU32, [r(1, 0, 1)], [Opnd::Imm(1), r(0, 0, 1)]),
+            MInst::new(Opc::VAddNcU32, [r(2, 0, 1)], [Opnd::Imm(2), r(0, 0, 1)]),
+            MInst::new(Opc::Copy, [r(4, 0, 1)], [r(1, 0, 1)]),
+            MInst::new(Opc::Copy, [r(4, 1, 1)], [r(2, 0, 1)]),
+            MInst::new(Opc::GStoreB32, [], [r(4, 0, 1), r(4, 1, 1)]),
+        ];
+        if use_again {
+            insts.push(MInst::new(Opc::GStoreB32, [], [r(1, 0, 1), r(2, 0, 1)]));
+        }
+        f.blocks.push(MBlock { insts, loop_depth: 0 });
+        f
+    }
+
+    fn copies_left(f: &MFunc) -> usize {
+        let mut g = f.clone();
+        let alloc = allocate(&mut g).expect("fits");
+        let _ = alloc;
+        g.blocks[0].insts.iter().filter(|i| i.op == Opc::Copy && i.defs[0] != i.uses[0]).count()
+    }
+
+    #[test]
+    fn valcoal_puts_a_value_that_stays_live_in_its_copys_tuple() {
+        // Without the lever the values and the tuple are live at once: two copies stay. With it, one register each.
+        let f = exp_pair(true);
+        let (plain, lever) = (copies_left(&f), crate::rir::with_levers(&["valcoal"], || copies_left(&f)));
+        assert_eq!(lever, 0, "valcoal leaves a copy");
+        assert!(plain > 0, "the copies were free without the lever");
+        // The values stay what they were: the register of the tuple halves holds them all the way.
+        let mut g = f.clone();
+        crate::rir::with_levers(&["valcoal"], || allocate(&mut g)).expect("fits");
+        let regs: Vec<Opnd> = g.blocks[0].insts.last().expect("store").uses.iter().copied().collect();
+        let tuple: Vec<Opnd> = g.blocks[0].insts[g.blocks[0].insts.len() - 2].uses.iter().copied().collect();
+        assert_eq!(regs, tuple, "the later read sees the tuple's registers");
+    }
+
+    #[test]
+    fn valcoal_leaves_a_redefined_source_alone() {
+        // The source is written again while the copy lives: two values, so two registers.
+        let r = |reg: u32, off: u8, n: u8| Opnd::R(VRef { reg, off, n });
+        let mut f = exp_pair(false);
+        f.blocks[0].insts.insert(5, MInst::new(Opc::VAddNcU32, [r(1, 0, 1)], [Opnd::Imm(7), r(0, 0, 1)]));
+        f.blocks[0].insts.push(MInst::new(Opc::GStoreB32, [], [r(1, 0, 1), r(4, 0, 1)]));
+        assert_eq!(copies_left(&f), crate::rir::with_levers(&["valcoal"], || copies_left(&f)));
     }
 
     #[test]

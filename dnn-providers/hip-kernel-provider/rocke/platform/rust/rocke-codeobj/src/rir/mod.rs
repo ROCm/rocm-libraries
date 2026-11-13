@@ -20,6 +20,7 @@ mod loadorder;
 pub mod lds_swizzle;
 pub mod mir;
 mod mma_order;
+mod pressure_trace;
 pub mod opt;
 pub mod parse;
 mod parse_par;
@@ -27,9 +28,12 @@ pub mod peephole;
 pub mod post;
 pub mod print;
 pub mod reassoc;
+mod ring_form;
 pub mod regalloc;
 mod reload;
+pub(crate) mod remat;
 pub mod unroll;
+pub mod voff_split;
 mod scan;
 mod scan_line;
 pub mod session;
@@ -139,6 +143,8 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   SGPR's VGPR copy) as loop blocks do (`target::gfx9::legalize`).
 /// - `bufoffany`: a buffer access's constant voffset part (0..4095) goes
 ///   to the offset field even when the rest's sign is unknown (`rir::opt`).
+/// - `fmax3`: a `v_max_f32` (`v_min_f32`) whose operand is the only use of an earlier one in its block becomes one
+///   `v_max3_f32` (`v_min3_f32`), as LLVM combines `fmaxnum` chains (`target::gfx9::minmax3`).
 /// - `dsrebase`, `scalesep`, `loadorder`, `bitop3`, `selxor`, `subadd`: see
 ///   their passes (`rir::isel`, `target::gfx9::mfma`, `rir::post`,
 ///   `target::gfx9::bitop3`, `rir::opt`).
@@ -150,6 +156,20 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   the instructions its address waits on, as soon as they are ready, ahead
 ///   of instructions that could start sooner (`rir::post`): the loads keep
 ///   the most in flight.
+/// - `cmpreassoc`: both sides of an i32 compare in a loop become (leaf sum) + constant before LICM, so a row of
+///   compares against distinct constants (a causal mask) shares one base per iteration (`rir::reassoc`).
+/// - `packtuple`: two f32 VALU instructions (`packfar`'s too) whose results are the two halves of one tuple pack
+///   into one `v_pk_*` that writes the tuple (a `vec<f32x2>` operation; `target::gfx9::pack`).
+/// - `rematv`: spilling also recomputes at their uses single-definition VGPR values computed from VGPRs defined once
+///   outside every loop (a row of address offsets), when at least three share a source (`rir::spill`).
+/// - `valcoal`: allocation also coalesces a copy of a dword defined once earlier in its block into the register of
+///   its source while the source is still live, when the copy's dword is defined only there and dies in the block
+///   (one tuple of two exps for a packed add: no `v_mov`; `rir::regalloc::coalesce`).
+/// - `widewin`: a gfx950 kernel without MFMAs also tries scheduling windows of 128, 256 and 512 places, widest first, and
+///   takes the widest whose schedule keeps the occupancy of load sinking alone: more loads in flight per wave (the
+///   split-KV attention reduce kernels, whose launches are too small for other waves to hide the loads' latency).
+/// - `smemsink`: the scalar compare-and-select pairs that read a scalar load's result move below the loads that follow
+///   (`target::gfx9::smem_sink`): a block table's entries are then loaded together, not one memory round trip apart.
 /// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
 ///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
@@ -182,13 +202,13 @@ pub(crate) fn kernel_lever(name: &str) -> bool {
 /// Drivers reject any other name ([`unknown_levers`]): an unknown name would
 /// otherwise be ignored silently and build the lever-off code.
 pub const LEVERS: &[&str] = &[
-    "acqfence", "addrfold", "bitop3", "bufoffany", "devfn", "dmafree", "dmamanual", "dmamanualring",
+    "acqfence", "addrfold", "bitop3", "bufoffany", "cmpreassoc", "devfn", "dmafree", "dmamanual", "dmamanualring",
     "dmamanualringw", "dppcombine", "dppcombinef", "dppcombinei", "dppmirror", "ds128", "dsb96",
-    "dsfold", "dshoist", "dsrebase", "fmac", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
+    "dsfold", "dshoist", "dsrebase", "fmac", "fmax3", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
-    "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
-    "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
-    "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "wpecap", "xorcmp",
+    "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar", "packtuple",
+    "rematv", "scalesep", "selxor", "sgb", "smemfree", "smemsink", "soffshare", "soffsharek", "sreassoc", "storewait",
+    "subadd", "u16zext", "valcoal", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "widewin", "wpecap", "xorcmp",
 ];
 
 /// The names of lever list `text` (`,` / `+` separated; `-name` turns a
@@ -584,10 +604,33 @@ fn schedule_and_allocate(
     let waves = |vgprs: u32| t.occupancy(vgprs, lds_size, wg);
     let hw = regalloc::Limits::for_func(func);
     let base_pressure = known.pressure();
+    if debug_flag("trace") {
+        eprintln!("trace: entry sunk v{} s{} hw v{}", base_pressure.vgprs, base_pressure.sgprs, hw.vgprs);
+        pressure_trace::trace_peak(sunk, "sunk");
+        for w in [64, 32, 16] {
+            let (orders, p) = known.schedule(w);
+            eprintln!("trace: entry window {w} v{} s{}", p.vgprs, p.sgprs);
+            pressure_trace::trace_peak(&post::reordered(sunk, &orders), &format!("w{w}"));
+        }
+    }
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
+    if debug_flag("tracepressure") {
+        eprintln!("pressure: sunk {} vgpr {} sgpr; hw {} vgpr; target waves {}", base_pressure.vgprs, base_pressure.sgprs, hw.vgprs, target);
+        regalloc::trace_pressure(sunk, "sunk");
+        for w in [64usize, 32, 16] {
+            let (_, p) = known.schedule(w);
+            eprintln!("pressure: window {w}: {} vgpr {} sgpr", p.vgprs, p.sgprs);
+        }
+    }
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
-    let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
+    let windows: &[usize] = if debug_flag("nosched") {
+        &[]
+    } else if func.target == Target::Gfx950 && kernel_lever("widewin") && !crate::target::gfx9::unrolled::has_mfma(func) {
+        &[512, 256, 128, 64, 32, 16]
+    } else {
+        &[64, 32, 16]
+    };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
     // Each window's schedule and pressure; `None` until a later step needs
     // them if the window could not be tried (`schedule_capped`).
@@ -721,8 +764,18 @@ fn schedule_and_allocate(
     }
     let scheduled = scheduled.into_iter().map(|(window, schedule)| {
         let (orders, p) = schedule.unwrap_or_else(|| known.schedule(window));
-        (window, post::reordered(sunk, &orders), p)
+        let g = post::reordered(sunk, &orders);
+        if debug_flag("trace") {
+            eprintln!("trace: window {window} pressure v{} s{}", p.vgprs, p.sgprs);
+            pressure_trace::trace_peak(&g, &format!("w{window}"));
+        }
+        (window, g, p)
     });
+    if debug_flag("trace") {
+        pressure_trace::trace_peak(sunk, "sunk");
+        pressure_trace::trace_peak(&program, "program");
+        eprintln!("trace: sunk v{} s{} program v{} s{} hw v{}", base_pressure.vgprs, base_pressure.sgprs, program_pressure.vgprs, program_pressure.sgprs, hw.vgprs);
+    }
     let candidates: Candidates = scheduled.chain([(0, sunk.clone(), base_pressure), (1, program, program_pressure)]).collect();
     let error = CompileError::new(
         "ROCKE_DIRECT_REGISTERS",
@@ -756,6 +809,9 @@ fn spill_best(
     let agprs = candidates[0].1.agpr_limit != Some(0);
     for (window, f, _) in candidates.iter().filter(|_| agprs) {
         if let Some((g, a)) = crate::target::gfx9::agpr::allocate_banked(f, hw).filter(|(_, a)| a.unified_vgprs() <= room) {
+            if debug_flag("showwindow") {
+                eprintln!("rocke: banked AGPR allocation, scheduling window {} ({} unified VGPRs)", window, a.unified_vgprs());
+            }
             *func = g;
             return Ok((a, *window));
         }
@@ -787,11 +843,12 @@ fn spill_best(
             Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg).min(agpr_cap()),
             Target::Gfx1151 => 0,
         },
+        scratch_sgpr: None,
     };
     // gfx950: also the accumulator webs in AGPRs beside the spilled values; the cheapest wins (`gfx9::agpr_spill`).
     let spilled = crate::target::gfx9::agpr_spill::banked_spill(&f, cfg, room, |g, cfg| regalloc::allocate_spilling_on(g, hw, cfg, threads));
     banked.extend(spilled.into_iter().map(|(g, b)| (window, g, b)));
-    let a = regalloc::allocate_spilling_on(&mut f, hw, cfg, threads)?;
+    let a = spill_with_wide_agprs(&mut f, hw, cfg, (agprs, room), (lds_size, wg), threads)?;
     if let Some((w, g, b)) = crate::target::gfx9::agpr_spill::cheapest(banked, (&f, &a), lds_size, wg) {
         *func = g;
         return Ok((b, w));
@@ -804,6 +861,52 @@ fn spill_best(
     }
     *func = f;
     Ok((a, window))
+}
+
+/// `allocate_spilling_on` with `cfg`. When that overflows the scratch offset
+/// range, the function is spilled again (gfx950):
+/// 1. with every AGPR that `room` unified registers leave beside the VGPRs
+///    (and the LDS slots the lower occupancy frees), taking the waves those
+///    cost, as LLVM does for a kernel whose state needs the whole register
+///    file (`(agprs, room)`: AGPRs enabled, the unified registers a workgroup
+///    may use);
+/// 2. with an SGPR below the last pair as the base of the scratch accesses past 4 KiB.
+fn spill_with_wide_agprs(
+    f: &mut mir::MFunc,
+    hw: regalloc::Limits,
+    cfg: regalloc::SpillConfig,
+    (agprs, room): (bool, u32),
+    (lds_size, wg): (u32, u32),
+    threads: usize,
+) -> Result<regalloc::Allocation, CompileError> {
+    if f.target != Target::Gfx950 || debug_flag("nowideagpr") {
+        return regalloc::allocate_spilling_on(f, hw, cfg, threads);
+    }
+    let backup = f.clone();
+    let first = regalloc::allocate_spilling_on(f, hw, cfg, threads);
+    if !first.as_ref().err().is_some_and(is_scratch_overflow) {
+        return first;
+    }
+    let t = f.target.info();
+    let wide = if agprs { room.saturating_sub(hw.vgprs.next_multiple_of(4)).min(256).min(agpr_cap()) } else { 0 };
+    let mut cfg = cfg;
+    if wide > cfg.agpr_slots {
+        let unified = hw.vgprs.next_multiple_of(4) + wide;
+        cfg = regalloc::SpillConfig { agpr_slots: wide, lds_slots: cfg.lds_slots.max(t.lds_spill_slots(lds_size, wg, unified)), ..cfg };
+        *f = backup.clone();
+        match regalloc::allocate_spilling_on(f, hw, cfg, threads) {
+            Err(e) if is_scratch_overflow(&e) => {}
+            r => return r,
+        }
+    }
+    // The two SGPRs above it stay free for a relaxed branch (`assemble_relaxed`).
+    let base = hw.sgprs - 3;
+    *f = backup;
+    regalloc::allocate_spilling_on(f, regalloc::Limits { sgprs: base, ..hw }, regalloc::SpillConfig { scratch_sgpr: Some(base as u16), ..cfg }, threads)
+}
+
+fn is_scratch_overflow(e: &CompileError) -> bool {
+    e.kind == "ROCKE_DIRECT_REGISTERS" && e.message.contains("scratch offset range")
 }
 
 /// Threads one compile may run at once: `ROCKE_DIRECT_THREADS` if set, else
@@ -945,6 +1048,12 @@ fn schedule_and_widen(
     post::sink_load_uses(&mut sunk, 32);
     let known = Schedules::new(&sunk)?;
     let chosen = schedule_and_allocate(func, &sunk, &known, lds_size, wg, spill, threads)?;
+    if debug_flag("trace") {
+        eprintln!("trace: chose window {} v{} spill {:?}", chosen.1, chosen.0.num_vgprs, chosen.0.spill.scratch_dwords);
+    }
+    if debug_flag("showwindow") {
+        eprintln!("rocke: scheduling window {} ({} VGPRs, {} spilled dwords)", chosen.1, chosen.0.num_vgprs, chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords);
+    }
     if spill || chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords > 0 {
         return Ok(chosen);
     }
@@ -1200,6 +1309,67 @@ pub(crate) fn compile_parsed_by_on(
     threads: usize,
     target: Target,
 ) -> Result<CompiledKernel, CompileError> {
+    // gfx950: a kernel that spills, or runs fewer waves than it could, is compiled again with its
+    // loop-invariant addresses and masks computed where they are used (`remat`), and keeps that
+    // compile when it spills less or, spilling no more, runs more waves. The first compile notes whether
+    // the pass finds anything (`remat::hook`); when it finds nothing there is no second compile.
+    let retry = target == Target::Gfx950 && !debug_flag("noremat") && !remat::enabled() && !remat::off();
+    if retry {
+        remat::reset();
+    }
+    let first = compile_unrolling(text, parse, threads, target);
+    if !retry {
+        return first;
+    }
+    let hardware = target.info().max_vgprs;
+    if first.as_ref().is_ok_and(|u| !remat::could_gain(u.stats.vgprs, u.stats.waves, hardware, spilled(&u.stats) > 0)) {
+        return first;
+    }
+    remat::reset();
+    let second = remat::with(true, || compile_unrolling(text, parse, threads, target));
+    if debug_flag("tracepressure") {
+        eprintln!(
+            "remat retry: {} recomputations; first {:?}, second {:?}",
+            remat::changed(),
+            first.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats))),
+            second.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats)))
+        );
+    }
+    if remat::changed() == 0 {
+        return first;
+    }
+    match (first, second) {
+        (Ok(a), Ok(b)) => Ok(if debug_flag("rematforce") || keeps_remat(&b, &a) { b } else { a }),
+        (Err(_), Ok(b)) => Ok(b),
+        (first, _) => first,
+    }
+}
+
+/// Whether the compile with loop-invariant values recomputed (`recomputed`) is kept over `plain`: it spills less,
+/// or spills no more and runs more waves for at most 3% more instructions, or both are alike and it issues at
+/// least 3% fewer (the dead address chains and AGPR moves it saves). Instructions are counted with each block
+/// weighted by 8 to the power of its loop depth. More waves bought with many more instructions did not pay
+/// (a second level of `rir::remat` was tried and dropped for that reason).
+fn keeps_remat(recomputed: &CompiledKernel, plain: &CompiledKernel) -> bool {
+    let (r, p) = (&recomputed.stats, &plain.stats);
+    let weighted = |k: &CompiledKernel| k.func.blocks.iter().map(|b| b.insts.len() as u64 * 8u64.pow(b.loop_depth.min(4))).sum::<u64>();
+    let (wr, wp) = (weighted(recomputed), weighted(plain));
+    if spilled(r) != spilled(p) {
+        return spilled(r) < spilled(p);
+    }
+    if r.waves != p.waves {
+        return r.waves > p.waves && wr * 100 <= wp * 103;
+    }
+    wr * 100 <= wp * 97
+}
+
+/// `compile_parsed_by_on` before its retry with `remat`.
+fn compile_unrolling(
+    text: &str,
+    parse: &dyn Fn(&str) -> Result<ast::Kernel, CompileError>,
+    threads: usize,
+    target: Target,
+) -> Result<CompiledKernel, CompileError> {
     if debug_flag("nounroll") {
         return compile_retrying(text, parse, None, &mut 0, threads, target);
     }
@@ -1274,6 +1444,15 @@ fn compile_retrying(
                     compile_with(text, false, true, parse, auto, unrolled, threads, target, None)
                 }
                 result => result,
+            }
+        }
+        // gfx950, a kernel without MFMAs that unrolled a loop and lost waves for it: merged LDS loads (copies of
+        // one loop reading what another reads) live across all the unrolled loads and keep them from being in
+        // flight together; the compile without merging keeps the waves.
+        Ok(first) if crate::target::gfx9::unrolled::lost_waves_without_mfma(&first.func, &first.stats, target) => {
+            match compile_with(text, false, false, parse, auto, unrolled, threads, target, None) {
+                Ok(other) if other.stats.waves > first.stats.waves && spilled(&other.stats) <= spilled(&first.stats) => Ok(other),
+                _ => Ok(first),
             }
         }
         Ok(packed) if packed.tight => match compile_with(text, false, false, parse, auto, unrolled, threads, target, None) {
@@ -1361,6 +1540,9 @@ impl Resume {
         } else {
             spill_best(&mut s.sel.func, candidates, lds_size, wg, threads)?
         };
+        if debug_flag("showwindow") {
+            eprintln!("rocke: spilling compile, scheduling window {} ({} VGPRs, {} spilled dwords)", window, alloc.num_vgprs, alloc.spill.lds_dwords + alloc.spill.scratch_dwords);
+        }
         complete(s, alloc, window, unrolled)
     }
 }
@@ -1395,6 +1577,7 @@ fn compile_with(
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
+        crate::target::gfx9::trunc_mix::mark(&mut kernel);
     }
     validate::kernel(&kernel)?;
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
@@ -1447,6 +1630,7 @@ fn compile_with(
         laps.lap("prepare");
         crate::target::gfx9::legalize::run(&mut sel.func);
         crate::target::gfx9::lits::share(&mut sel.func);
+        remat::hook(&mut sel.func, |vgprs| target.info().occupancy(vgprs.max(1), sel.lds_size, kernel.max_workgroup_size));
     } else {
         peephole::optimize(&mut sel.func);
         uniform_masks::reuse_masks(&mut sel.func);
@@ -1568,16 +1752,25 @@ fn complete(
             pairs
         }
     };
+    let mut alloc = alloc;
+    // gfx950: a branch past the 16-bit word offset jumps through the first SGPR pair no instruction uses.
+    let spare = alloc.num_sgprs.next_multiple_of(2) as u16;
+    let (body, relaxed) = match target {
+        Target::Gfx1151 => (asm::assemble(&sel.func)?, false),
+        Target::Gfx950 => crate::target::gfx9::asm::assemble_relaxed(&sel.func, Some(spare))?,
+    };
+    if relaxed {
+        alloc.num_sgprs = spare as u32 + 2;
+    }
     let code = match target {
-        Target::Gfx1151 => asm::assemble(&sel.func)?,
         // Kernarg preload: the 256-byte entry that loads the preloaded
         // arguments for firmware that does not preload (which skips it).
         Target::Gfx950 if sel.preload > 0 => {
             let mut code = crate::target::gfx9::preload_entry(sel.preload)?;
-            code.extend(crate::target::gfx9::asm::assemble(&sel.func)?);
+            code.extend(body);
             code
         }
-        Target::Gfx950 => crate::target::gfx9::asm::assemble(&sel.func)?,
+        _ => body,
     };
     laps.lap("encode");
 

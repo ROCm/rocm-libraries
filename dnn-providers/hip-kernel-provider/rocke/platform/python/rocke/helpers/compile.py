@@ -95,11 +95,13 @@ from ..core.lower_llvm import (
 )
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.code_object import (
+    CodeObjectError,
     DirectUnsupported,
     _require_compiler_info,
     build_direct_rocke_ir_hsaco,
     build_hsaco_from_llvm_ir,
     build_hsaco_from_llvm_modules,
+    record_backend_use,
     resolve_code_object_backend,
 )
 
@@ -123,6 +125,8 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # - ``DIRECT_LEVERS_ATTR``: a kernel's own direct-compiler levers (a list or a
 #   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), joined to the
 #   environment's for its compile only; not IR (stripped before serialization).
+#   The gfx950 attention builders set it (the dense kernels ``cmpreassoc,rematv,valcoal,packtuple``,
+#   the unified 2D kernel ``dmafree,smemsink``, the split-KV reduce kernel ``widewin``).
 # - ``DIRECT_SCOPES_ATTR`` + the op attribute ``SCOPE_OP_ATTR``: per-op lever
 #   scopes by name (``"<scope>:<lever>+<lever>;..."`` on the kernel, the scope
 #   name on its ops; ``qwen38_mono.persist.knobs.RustScope``). The direct
@@ -131,13 +135,16 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # - ``DIRECT_DEFAULT_LEVERS``: levers the direct backend turns on for every
 #   kernel (D0.6; rust-track INTEGRATION.md 5 items 1-2): ``acqfence`` (an
 #   acquire-only fence lowers as LLVM's: wait + ``buffer_inv``, no L2
-#   write-back) and ``bufoffany`` (LLVM's buffer offset split).
-#   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none, the plain
-#   direct object).
+#   write-back), ``bufoffany`` (LLVM's buffer offset split) and ``fmax3``
+#   (a ``v_max_f32`` / ``v_min_f32`` chain becomes ``v_max3_f32`` /
+#   ``v_min3_f32``, as LLVM combines ``fmaxnum`` chains: the attention softmax
+#   row maxima).
+#   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none; a kernel's
+#   own levers still apply).
 DIRECT_LEVERS_ATTR = "direct_levers"
 DIRECT_SCOPES_ATTR = "direct_scopes"
 SCOPE_OP_ATTR = "rocke.scope"
-DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany")
+DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
 _DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
 
 
@@ -145,7 +152,9 @@ def request_code_object_backend(kernel: KernelDef, backend: str) -> KernelDef:
     """Mark ``kernel`` to compile with ``backend`` (``"comgr"`` | ``"direct"``)
     when ``compile_kernel`` is not told otherwise; returns ``kernel``."""
     if backend not in ("comgr", "direct"):
-        raise ValueError(f"code-object backend must be 'comgr' or 'direct', not {backend!r}")
+        raise ValueError(
+            f"code-object backend must be 'comgr' or 'direct', not {backend!r}"
+        )
     setattr(kernel, _CODE_OBJECT_BACKEND_REQUEST, backend)
     return kernel
 
@@ -239,36 +248,79 @@ def compile_kernel(
     ``DIRECT_LEVERS_ATTR`` for its levers and scopes); when it refuses the
     kernel (``DirectUnsupported``), COMGR compiles it and
     ``artifact.direct_fallback`` holds the refusal (``ROCKE_DIRECT_STRICT=1``
-    raises instead). The COMGR path is the same code with or without this.
+    raises instead). ``ROCKE_DIRECT_FALLBACK=all`` also falls back on any other
+    direct compile error (an unreadable op, an allocation that does not fit, a
+    missing library); ``ROCKE_DIRECT_ALLOW`` / ``ROCKE_DIRECT_DENY`` (comma
+    separated ``fnmatch`` patterns on the kernel name) send kernels that are
+    not allowed, or are denied, to COMGR without trying direct. The COMGR path
+    is the same code with or without this. Every compile is counted
+    (``rocke.runtime.code_object.backend_usage()``) and, with
+    ``ROCKE_DIRECT_LOG=1``, logged to stderr.
     """
+    artifact = _compile_kernel(
+        kernel,
+        arch=arch,
+        isa=isa,
+        capture_ir_text=capture_ir_text,
+        optimize_ir=optimize_ir,
+        backend=backend,
+        code_object_backend=code_object_backend,
+        spec=spec,
+    )
+    record_backend_use(
+        kernel.name, artifact.code_object_backend, artifact.direct_fallback
+    )
+    return artifact
+
+
+def _compile_kernel(
+    kernel: KernelDef,
+    *,
+    arch: Optional[str],
+    isa: str,
+    capture_ir_text: bool,
+    optimize_ir: bool,
+    backend: Optional[str],
+    code_object_backend: str | None,
+    spec: Optional[object],
+) -> KernelArtifact:
+    """:func:`compile_kernel` without the usage record (a fallback recurses here)."""
     _lower_arch, isa = _resolve_compile_target(arch, isa)
-    selected_code_object_backend = _selected_code_object_backend(code_object_backend, kernel)
+    selected_code_object_backend = _selected_code_object_backend(
+        code_object_backend, kernel
+    )
     if selected_code_object_backend == "direct":
-        try:
-            return _compile_kernel_direct(
-                kernel,
-                isa=isa,
-                capture_ir_text=capture_ir_text,
-                optimize_ir=optimize_ir,
-            )
-        except DirectUnsupported as refused:
-            # ``ROCKE_DIRECT_STRICT=1`` (validation runs): a refusal is an error, not a COMGR fallback.
-            if os.environ.get("ROCKE_DIRECT_STRICT", "0") == "1":
-                raise
-            # The passes ran on `kernel` before the direct compiler refused it.
-            artifact = compile_kernel(
-                kernel,
-                arch=arch,
-                isa=isa,
-                capture_ir_text=capture_ir_text,
-                optimize_ir=False,
-                backend=backend,
-                code_object_backend="comgr",
-                spec=spec,
-            )
-            artifact.pass_stats = getattr(refused, "pass_stats", artifact.pass_stats)
-            artifact.direct_fallback = str(refused)
-            return artifact
+        reason = _direct_list_exclusion(kernel.name)
+        pass_stats = None
+        if reason is None:
+            try:
+                return _compile_kernel_direct(
+                    kernel,
+                    isa=isa,
+                    capture_ir_text=capture_ir_text,
+                    optimize_ir=optimize_ir,
+                )
+            except CodeObjectError as refused:
+                if not _direct_falls_back(refused):
+                    record_backend_use(kernel.name, "refused", str(refused))
+                    raise
+                reason = str(refused)
+                # The passes ran on `kernel` before the direct compiler refused it.
+                pass_stats = getattr(refused, "pass_stats", None)
+        artifact = _compile_kernel(
+            kernel,
+            arch=arch,
+            isa=isa,
+            capture_ir_text=capture_ir_text,
+            optimize_ir=False,
+            backend=backend,
+            code_object_backend="comgr",
+            spec=spec,
+        )
+        if pass_stats is not None:
+            artifact.pass_stats = pass_stats
+        artifact.direct_fallback = reason
+        return artifact
     llvm_flavor = _code_object_llvm_flavor(selected_code_object_backend)
 
     timings: Dict[str, float] = {}
@@ -317,7 +369,41 @@ def compile_kernel(
     )
 
 
-def _selected_code_object_backend(code_object_backend: Optional[str], kernel: KernelDef) -> str:
+def _direct_falls_back(error: CodeObjectError) -> bool:
+    """Whether COMGR compiles a kernel the direct compiler failed on: never
+    under ``ROCKE_DIRECT_STRICT=1``; a refusal (:class:`DirectUnsupported`)
+    otherwise; any other direct error only with ``ROCKE_DIRECT_FALLBACK=all``."""
+    if os.environ.get("ROCKE_DIRECT_STRICT", "0") == "1":
+        return False
+    mode = os.environ.get("ROCKE_DIRECT_FALLBACK", "unsupported")
+    if mode not in ("unsupported", "all"):
+        raise ValueError(
+            f"ROCKE_DIRECT_FALLBACK={mode!r}, expected 'unsupported' or 'all'"
+        )
+    return isinstance(error, DirectUnsupported) or mode == "all"
+
+
+def _direct_list_exclusion(kernel_name: str) -> Optional[str]:
+    """Why ``ROCKE_DIRECT_DENY`` / ``ROCKE_DIRECT_ALLOW`` (comma separated
+    ``fnmatch`` patterns on the kernel name) keep ``kernel_name`` off the direct
+    compiler, or ``None``. Deny wins; an allow list admits only its matches."""
+    from fnmatch import fnmatchcase
+
+    def patterns(name: str) -> List[str]:
+        return _lever_names(os.environ.get(name))
+
+    for pattern in patterns("ROCKE_DIRECT_DENY"):
+        if fnmatchcase(kernel_name, pattern):
+            return f"denied by ROCKE_DIRECT_DENY={pattern}"
+    allow = patterns("ROCKE_DIRECT_ALLOW")
+    if allow and not any(fnmatchcase(kernel_name, p) for p in allow):
+        return "not in ROCKE_DIRECT_ALLOW"
+    return None
+
+
+def _selected_code_object_backend(
+    code_object_backend: Optional[str], kernel: KernelDef
+) -> str:
     """``code_object_backend``, else the kernel's mark, else the environment
     (``ROCKE_CODEOBJ_BACKEND``), else ``"comgr"``; validated."""
     if code_object_backend is None:
@@ -388,10 +474,16 @@ def direct_source(kernel: KernelDef) -> KernelDef:
         return Region(label=region.label, ops=ops)
 
     body = region_of(kernel.body)
-    attrs = {k: v for k, v in kernel.attrs.items() if k not in (DIRECT_SCOPES_ATTR, DIRECT_LEVERS_ATTR)}
+    attrs = {
+        k: v
+        for k, v in kernel.attrs.items()
+        if k not in (DIRECT_SCOPES_ATTR, DIRECT_LEVERS_ATTR)
+    }
     if body is kernel.body and len(attrs) == len(kernel.attrs):
         return kernel
-    return dataclasses.replace(kernel, body=body, attrs=attrs, params=list(kernel.params))
+    return dataclasses.replace(
+        kernel, body=body, attrs=attrs, params=list(kernel.params)
+    )
 
 
 def _compile_kernel_direct(
@@ -414,7 +506,9 @@ def _compile_kernel_direct(
     # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
     # join the environment's for this compile; named op scopes become ``dlevers``
     # before the lifting (a lifted asm statement keeps its scope).
-    levers = direct_default_levers() + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR))
+    levers = direct_default_levers() + _lever_names(
+        kernel.attrs.get(DIRECT_LEVERS_ATTR)
+    )
     source = direct_source(kernel)
     # Inline-asm idioms the direct compiler lowers as IR ops, on a copy
     # (`kernel` itself keeps its asm for a COMGR fallback).
@@ -427,8 +521,10 @@ def _compile_kernel_direct(
         merged = _lever_names(saved)
         os.environ["ROCKE_DIRECT_LEVERS"] = ",".join(dict.fromkeys(merged + levers))
     try:
-        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(serialized, isa=isa)
-    except DirectUnsupported as refused:
+        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(
+            serialized, isa=isa
+        )
+    except CodeObjectError as refused:
         refused.pass_stats = pass_stats
         raise
     finally:
@@ -526,7 +622,9 @@ class ModuleArtifact:
     """Output from :func:`compile_module`: one code object, several kernels.
 
     ``ir_texts`` and ``llvm_texts`` follow ``module.kernels`` order. ``isa``
-    is the COMGR ISA name, as in :class:`KernelArtifact`.
+    is the COMGR ISA name, as in :class:`KernelArtifact`. COMGR always builds
+    ``hsaco``; ``direct_fallback`` holds why when the direct backend was asked
+    for explicitly.
     """
 
     module: KernelModule
@@ -536,6 +634,7 @@ class ModuleArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: Tuple[PassStats, ...] = ()
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    direct_fallback: str = ""
 
     @property
     def kernel_name(self) -> str:
@@ -578,11 +677,24 @@ def compile_module(
     a linked module compiles in this process, which that kernel must not.
     Target resolution and per-kernel lowering can also raise ``ValueError``,
     as in :func:`compile_kernel`, before any link.
+
+    The direct compiler writes one kernel per code object, so a module always
+    compiles with COMGR: ``ROCKE_CODEOBJ_BACKEND=direct`` does not apply to it
+    (and ``ROCKE_DIRECT_STRICT`` does not make it an error). Asking for
+    ``code_object_backend="direct"`` explicitly is a refusal, handled as
+    :func:`compile_kernel` handles one: ``DirectUnsupported`` under
+    ``ROCKE_DIRECT_STRICT=1``, else COMGR with the reason in
+    ``ModuleArtifact.direct_fallback``.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
-    selected_code_object_backend = resolve_code_object_backend(code_object_backend)
-    llvm_flavor = _code_object_llvm_flavor(selected_code_object_backend)
     kernels = module.kernels
+    fallback = ""
+    if resolve_code_object_backend(code_object_backend or "comgr") == "direct":
+        fallback = f"direct compiles one kernel per code object; {module.primary.name} is a module of {len(kernels)}"
+        if not _direct_falls_back(DirectUnsupported(fallback)):
+            record_backend_use(module.primary.name, "refused", fallback)
+            raise DirectUnsupported(fallback)
+    llvm_flavor = _code_object_llvm_flavor("comgr")
 
     fresh = [k.name for k in kernels if k.attrs.get(COMGR_FRESH_PROCESS_ATTR)]
     if fresh:
@@ -622,7 +734,7 @@ def compile_module(
         llvm_texts,
         isa=isa,
         options=options[0],
-        backend=selected_code_object_backend,
+        backend="comgr",
     )
     t3 = time.perf_counter()
 
@@ -639,6 +751,7 @@ def compile_module(
     timings["codeobj_executable"] = timings["comgr_executable"]
     timings["total"] = (t3 - t0) * 1000.0
 
+    record_backend_use(module.primary.name, "comgr", fallback)
     return ModuleArtifact(
         module=module,
         ir_texts=ir_texts,
@@ -647,6 +760,7 @@ def compile_module(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        direct_fallback=fallback,
     )
 
 
@@ -701,7 +815,10 @@ def lower_kernel_for_code_object(
     ``compile_kernel(kernel, arch=arch)`` would.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
-    selected_code_object_backend = resolve_code_object_backend(code_object_backend)
+    # LLVM text is for COMGR: ROCKE_CODEOBJ_BACKEND=direct does not apply here.
+    selected_code_object_backend = resolve_code_object_backend(
+        code_object_backend or "comgr"
+    )
     llvm_text = _lower_llvm_via_backend(
         kernel,
         arch=lower_arch,

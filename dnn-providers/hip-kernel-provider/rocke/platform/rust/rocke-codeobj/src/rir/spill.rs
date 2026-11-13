@@ -32,6 +32,19 @@ use crate::error::CompileError;
 /// Marks a placeholder spill access (and the LDS address computation).
 const M_SPILL: u32 = 1 << 31;
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: place every spill with `share_slots`.
+    static FORCE_SHARE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn force_share() -> bool {
+    #[cfg(test)]
+    return FORCE_SHARE.with(|c| c.get());
+    #[cfg(not(test))]
+    false
+}
+
 /// Where spill slots may go.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SpillConfig {
@@ -44,6 +57,10 @@ pub struct SpillConfig {
     /// AGPR slots that leave the occupancy unchanged (gfx950,
     /// `target::gfx9::spill`); spilled webs take them before LDS slots.
     pub agpr_slots: u32,
+    /// An SGPR (past the allocation) that scratch accesses beyond the 4 KiB
+    /// of an instruction's offset use as their base (gfx950): `s_mov_b32`
+    /// before the access, then `saddr` of the instruction.
+    pub scratch_sgpr: Option<u16>,
 }
 
 /// What spilling did.
@@ -64,6 +81,8 @@ pub struct SpillStats {
     pub stores: u32,
     /// VGPR dwords kept in AGPRs a0 onward (gfx950).
     pub agpr_dwords: u32,
+    /// SGPRs the allocation plus the scratch base register need (0: none beyond the allocation).
+    pub sgprs_needed: u32,
 }
 
 /// A spilled VGPR web: its first dword slot, size, and weighted accesses.
@@ -282,8 +301,11 @@ fn spilled(o: &Opnd, slot_of: &[Option<u32>]) -> Option<(VRef, u32)> {
 /// Whether `inst` computes its one result purely from constants and, for
 /// a VGPR, single-definition SGPRs, so it can be repeated where those are
 /// live. Scalar candidates are moves of constants only: anything else might
-/// clobber SCC where the copy lands.
-fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> bool {
+/// clobber SCC where the copy lands. With `vsources` (gfx950), a VGPR result
+/// may also read single-definition VGPRs, and VGPRs that are never written
+/// (the thread id): what keeps one live across a loop is then the source
+/// that the loop reads anyway, not each address computed from it.
+pub(super) fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32], vsources: bool) -> bool {
     if inst.mods != 0 || inst.defs.len() != 1 {
         return false;
     }
@@ -292,11 +314,12 @@ fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> boo
     }
     let pure = match inst.op {
         Opc::Copy | Opc::VMovB32 => true,
-        op => matches!(op.fmt(), Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3) && op.flags() == F_USE_EXEC,
+        op => matches!(op.fmt(), Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b) && op.flags() == F_USE_EXEC,
     };
     pure && inst.uses.iter().all(|o| match o {
         Opnd::Imm(_) => true,
-        Opnd::R(s) => vregs[s.reg as usize].class == Class::S && defs[s.reg as usize] == 1,
+        Opnd::R(s) if vregs[s.reg as usize].class == Class::S => defs[s.reg as usize] == 1,
+        Opnd::R(s) => vsources && (defs[s.reg as usize] == 1 || defs[s.reg as usize] == 0 && vregs[s.reg as usize].fixed.is_some()),
         Opnd::P(..) => false,
     })
 }
@@ -658,6 +681,7 @@ impl Spiller {
         target: u32,
     ) -> Vec<Choice> {
         let nv = f.vregs.len();
+        let vsrc = super::kernel_lever("rematv");
         let groups = regalloc::coalesce(f, live);
         let mut parent = groups.parent.clone();
         let root: Vec<(u32, u8)> = (0..nv as u32).map(|v| regalloc::find(&mut parent, v)).collect();
@@ -712,6 +736,9 @@ impl Spiller {
         // (coverage, register, recomputed, freed); a candidate whose
         // recomputation reads registers is settled once their use positions
         // are known.
+        // The spiller recomputes VGPR-sourced values on gfx950 by default (`noremat` turns that off); lever `rematv` asks for it elsewhere
+        // and adds the rules for sources that outlive their live range (`vsrc` below).
+        let vsources = vsrc || (f.target == crate::target::Target::Gfx950 && !super::debug_flag("noremat"));
         let mut cands: Vec<(u64, u32, bool, u32)> = Vec::new();
         let mut sourced: Vec<usize> = Vec::new();
         for r in 0..nv as u32 {
@@ -739,7 +766,7 @@ impl Spiller {
             let pure = members[r as usize] == 1
                 && size == 1
                 && defs[r as usize] == 1
-                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs));
+                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs, vsources));
             let reads = pure && def_inst[r as usize].is_some_and(|(b, k)| f.blocks[b as usize].insts[k as usize].uses.iter().any(|o| matches!(o, Opnd::R(_))));
             if reads {
                 sourced.push(cands.len());
@@ -753,13 +780,52 @@ impl Spiller {
                 wanted[cands[c].1 as usize] = true;
             }
             let uses_at = UsePositions::new(f, nv, &wanted);
+            // A VGPR source defined once outside every loop keeps its value to every use; recomputing at the uses
+            // then only lengthens its range, which pays when several recomputed values share it (`vsrc`).
+            let extendable = |s: &VRef| {
+                vsrc && f.vregs[s.reg as usize].class == Class::V
+                    && def_inst[s.reg as usize].is_some_and(|(b, _)| f.blocks[b as usize].loop_depth == 0)
+            };
+            let mut shared: std::collections::HashMap<u32, u32> = Default::default();
+            for &c in &sourced {
+                let (b, k) = def_inst[cands[c].1 as usize].expect("defined once");
+                for o in f.blocks[b as usize].insts[k as usize].uses.iter() {
+                    if let Opnd::R(s) = o {
+                        if extendable(s) {
+                            *shared.entry(s.reg).or_default() += 1;
+                        }
+                    }
+                }
+            }
             for &c in &sourced {
                 let r = cands[c].1;
                 let (b, k) = def_inst[r as usize].expect("defined once");
                 cands[c].2 = f.blocks[b as usize].insts[k as usize].uses.iter().all(|o| match o {
-                    Opnd::R(s) => uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)),
+                    Opnd::R(s) => {
+                        uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)) || (extendable(s) && shared.get(&s.reg).is_some_and(|&n| n >= 3))
+                    }
                     _ => true,
                 });
+            }
+        }
+        // A value that is the source of another recomputed value is not itself recomputed (the clones would read a
+        // register with no definition left).
+        if vsrc {
+            let mut is_src = vec![false; nv];
+            for &c in &sourced {
+                if cands[c].2 {
+                    let (b, k) = def_inst[cands[c].1 as usize].expect("defined once");
+                    for o in f.blocks[b as usize].insts[k as usize].uses.iter() {
+                        if let Opnd::R(s) = o {
+                            is_src[s.reg as usize] = true;
+                        }
+                    }
+                }
+            }
+            for c in cands.iter_mut() {
+                if c.2 && is_src[c.1 as usize] {
+                    c.2 = false;
+                }
             }
         }
         // A recomputation is one instruction per use; a spill access is
@@ -776,19 +842,50 @@ impl Spiller {
         cands.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut covered = 0u32;
         let mut out = Vec::new();
+        // A recomputation reads its sources where it lands, so none of them may itself be recomputed
+        // (no longer live there): a register read by a chosen recomputation stays, and a chosen
+        // recomputation reads none of the others chosen.
+        let mut recomputed = std::collections::HashSet::new();
+        let mut read_by_remat = std::collections::HashSet::new();
+        let mut stored = std::collections::HashSet::new();
+        let sources_of = |r: u32| -> Vec<u32> {
+            let (b, k) = def_inst[r as usize].expect("defined once");
+            f.blocks[b as usize].insts[k as usize].uses.iter().filter_map(|o| o.vref().map(|v| v.reg)).collect()
+        };
         for (_, r, remat, freed) in cands {
             if covered >= need {
                 break;
             }
+            if remat && sources_of(r).iter().any(|s| recomputed.contains(s) || stored.contains(s)) {
+                continue;
+            }
+            if read_by_remat.contains(&r) {
+                continue;
+            }
             covered += freed;
             if remat {
+                recomputed.insert(r);
+                read_by_remat.extend(sources_of(r));
                 let (b, k) = def_inst[r as usize].expect("defined once");
                 out.push(Choice::Remat(r, (b as usize, k as usize)));
             } else {
                 let list: Vec<(u32, u8)> =
                     (0..nv as u32).filter(|&v| root[v as usize].0 == r).map(|v| (v, root[v as usize].1)).collect();
+                stored.extend(list.iter().map(|&(v, _)| v));
                 out.push(Choice::Spill(list, groups.gsize[r as usize], cost[r as usize]));
             }
+        }
+        if vsrc {
+            // A recomputation that reads a register this round spills would read it with no reload: leave it live.
+            let spilled: std::collections::HashSet<u32> = out
+                .iter()
+                .filter_map(|c| if let Choice::Spill(list, ..) = c { Some(list.iter().map(|&(v, _)| v)) } else { None })
+                .flatten()
+                .collect();
+            out.retain(|c| match c {
+                Choice::Remat(_, (b, k)) => !f.blocks[*b].insts[*k].uses.iter().any(|o| o.vref().is_some_and(|s| spilled.contains(&s.reg))),
+                _ => true,
+            });
         }
         out
     }
@@ -802,6 +899,12 @@ impl Spiller {
         let mut remat_of: Vec<u32> = vec![NO_REMAT; nv];
         let mut remat: Vec<MInst> = Vec::new();
         for c in chosen {
+            if super::debug_flag("tracepressure") {
+                match c {
+                    Choice::Spill(list, size, heat) => eprintln!("spill: web of {size} dwords ({} registers, first v{}), weighted accesses {heat}", list.len(), list[0].0),
+                    Choice::Remat(v, at) => eprintln!("spill: recompute v{v} (defined at block {} inst {})", at.0, at.1),
+                }
+            }
             match c {
                 Choice::Spill(list, size, heat) => {
                     let slot = if class == Class::S {
@@ -1014,6 +1117,105 @@ impl Spiller {
         }
     }
 
+    /// The live range of each web's slots, in instruction positions of `f` (placeholder accesses only): from the
+    /// first access to the last. A web whose accesses all sit in one block that starts with a store is
+    /// iteration-local, so its range is exact even in a loop block; any other web may be live across a back edge,
+    /// and its range grows to the blocks of the loops it touches.
+    fn web_ranges(&self, f: &MFunc) -> Vec<(u32, u32)> {
+        let mut web_of = vec![u32::MAX; self.next_slot as usize];
+        for (w, web) in self.webs.iter().enumerate() {
+            for k in 0..web.size {
+                web_of[(web.slot + k) as usize] = w as u32;
+            }
+        }
+        let mut start = Vec::with_capacity(f.blocks.len() + 1);
+        let mut pos = 0u32;
+        for block in &f.blocks {
+            start.push(pos);
+            pos += block.insts.len() as u32;
+        }
+        start.push(pos);
+        // Per web: (first position, last position, first block, last block, a block other than the first, first access is a store).
+        let mut acc: Vec<Option<(u32, u32, usize, usize, bool, bool)>> = vec![None; self.webs.len()];
+        for (b, block) in f.blocks.iter().enumerate() {
+            for (i, inst) in block.insts.iter().enumerate() {
+                if inst.mods & M_SPILL == 0 || inst.op == Opc::VLshlrevB32 {
+                    continue;
+                }
+                let w = web_of[inst.imm as usize] as usize;
+                let at = start[b] + i as u32;
+                let store = inst.defs.is_empty();
+                acc[w] = Some(match acc[w] {
+                    None => (at, at, b, b, false, store),
+                    Some((lo, _, fb, _, multi, fs)) => (lo, at, fb, b, multi || b != fb, fs),
+                });
+            }
+        }
+        let depth = |b: usize| f.blocks[b].loop_depth;
+        acc.into_iter()
+            .map(|a| match a {
+                None => (0, 0),
+                Some((lo, hi, _, _, false, true)) => (lo, hi),
+                Some((_, _, fb, lb, _, _)) => {
+                    let (mut a, mut b) = (fb, lb);
+                    while depth(a) > 0 && a > 0 && depth(a - 1) > 0 {
+                        a -= 1;
+                    }
+                    while depth(b) > 0 && b + 1 < f.blocks.len() && depth(b + 1) > 0 {
+                        b += 1;
+                    }
+                    (start[a], start[b + 1])
+                }
+            })
+            .collect()
+    }
+
+    /// `finish`'s placement with webs whose live ranges are disjoint sharing slots: AGPR slots, then LDS slots,
+    /// then scratch, each web at the lowest slot where its range overlaps no other web's. Returns (placement,
+    /// AGPR slot of each dword slot, AGPR slots used, LDS slots used, scratch dwords used).
+    #[allow(clippy::type_complexity)]
+    fn share_slots(&self, f: &MFunc, order: &[usize]) -> (Vec<(bool, u32)>, Vec<Option<u32>>, u32, u32, u32) {
+        let ranges = self.web_ranges(f);
+        // A tier: the live ranges already placed at each of its slots.
+        let fit = |tier: &mut Vec<Vec<(u32, u32)>>, cap: u32, size: u32, (lo, hi): (u32, u32)| -> Option<u32> {
+            let free = |s: &Vec<(u32, u32)>| s.iter().all(|&(a, b)| hi < a || b < lo);
+            let mut at = 0u32;
+            while at + size <= cap {
+                match (0..size).find(|&k| tier.get((at + k) as usize).is_some_and(|s| !free(s))) {
+                    None => {
+                        if tier.len() < (at + size) as usize {
+                            tier.resize((at + size) as usize, Vec::new());
+                        }
+                        for k in 0..size {
+                            tier[(at + k) as usize].push((lo, hi));
+                        }
+                        return Some(at);
+                    }
+                    Some(k) => at += k + 1,
+                }
+            }
+            None
+        };
+        let lds_cap = if self.addr.is_some() { self.cfg.lds_slots } else { 0 };
+        let (mut agpr_t, mut lds_t, mut scratch_t) = (Vec::new(), Vec::new(), Vec::new());
+        let mut place: Vec<(bool, u32)> = vec![(false, 0); self.next_slot as usize];
+        let mut in_agpr: Vec<Option<u32>> = vec![None; self.next_slot as usize];
+        for &w in order {
+            let web = &self.webs[w];
+            let r = ranges[w];
+            if let Some(at) = fit(&mut agpr_t, self.cfg.agpr_slots, web.size, r) {
+                (0..web.size).for_each(|k| in_agpr[(web.slot + k) as usize] = Some(at + k));
+            } else if let Some(at) = fit(&mut lds_t, lds_cap, web.size, r) {
+                (0..web.size).for_each(|k| place[(web.slot + k) as usize] = (true, at + k));
+            } else {
+                // Past the offset range the caller refuses it.
+                let at = fit(&mut scratch_t, u32::MAX / 2, web.size, r).expect("scratch is unbounded");
+                (0..web.size).for_each(|k| place[(web.slot + k) as usize] = (false, at + k));
+            }
+        }
+        (place, in_agpr, agpr_t.len() as u32, lds_t.len() as u32, scratch_t.len() as u32)
+    }
+
     /// Finishes the allocated function: VGPR placeholders become LDS or
     /// scratch accesses (the most accessed webs take the LDS slots), and
     /// lane writes drop the liveness-only source.
@@ -1045,16 +1247,26 @@ impl Spiller {
                 scratch += web.size;
             }
         }
-        if scratch * 4 > 4096 {
+        if scratch * 4 > 4096 || force_share() {
+            // One slot per web does not fit the scratch offset range: webs whose slots are never live at once
+            // share one (hottest webs still take AGPR, then LDS, slots first).
+            let shared = self.share_slots(f, &order);
+            (place, in_agpr, agprs, lds, scratch) = shared;
+        }
+        let far = scratch * 4 > 4096;
+        if far && self.cfg.scratch_sgpr.is_none() {
             return Err(CompileError::new(
                 "ROCKE_DIRECT_REGISTERS",
                 format!("out of VGPRs: {scratch} spilled dwords exceed the 4 KiB scratch offset range"),
             ));
         }
         let stride = 4 * self.cfg.wg_size;
+        let base_sgpr = self.cfg.scratch_sgpr.filter(|_| far);
         for block in f.blocks.iter_mut() {
             let old = std::mem::take(&mut block.insts);
             let mut out = Vec::with_capacity(old.len() + 8);
+            // The value of the base SGPR at this point of the block, if known.
+            let mut base_now: Option<i64> = None;
             for mut inst in old {
                 if inst.op == Opc::VWritelaneB32 && inst.uses.len() == 3 {
                     inst.uses = Uses::from(&inst.uses[..2]);
@@ -1095,12 +1307,25 @@ impl Spiller {
                         });
                     }
                 } else {
-                    let offset = 4 * at as i64;
-                    out.push(if load {
-                        MInst::new(inst.op, [data], []).with_imm(offset)
-                    } else {
-                        MInst::new(inst.op, [], [data]).with_imm(offset)
-                    });
+                    let mut offset = 4 * at as i64;
+                    let mut saddr = None;
+                    if let Some(sgpr) = base_sgpr.filter(|_| offset + 4 * n as i64 > 4096) {
+                        // The instruction's offset is 13 bits signed: the base is the 4 KiB multiple below.
+                        let base = offset & !4095;
+                        if base_now != Some(base) {
+                            out.push(MInst::new(Opc::SMovB32, [Opnd::P(Phys::S(sgpr), 1)], [Opnd::Imm(base as u32)]));
+                            base_now = Some(base);
+                        }
+                        offset -= base;
+                        saddr = Some(Opnd::P(Phys::S(sgpr), 1));
+                    }
+                    out.push(match (load, saddr) {
+                        (true, None) => MInst::new(inst.op, [data], []),
+                        (true, Some(a)) => MInst::new(inst.op, [data], [a]),
+                        (false, None) => MInst::new(inst.op, [], [data]),
+                        (false, Some(a)) => MInst::new(inst.op, [], [data, a]),
+                    }
+                    .with_imm(offset));
                 }
             }
             block.insts = out;
@@ -1108,6 +1333,7 @@ impl Spiller {
         self.stats.lds_dwords = lds;
         self.stats.scratch_dwords = scratch;
         self.stats.agpr_dwords = agprs;
+        self.stats.sgprs_needed = base_sgpr.map_or(0, |s| s as u32 + 1);
         self.stats.lds_bytes = lds * stride;
         self.stats.scratch_bytes = scratch * 4;
         Ok(self.stats)
@@ -1154,6 +1380,8 @@ pub(super) mod tests {
         regs.insert(Key::V(0), 12345);
         let (mut lds, mut scratch) = (HashMap::new(), HashMap::new());
         let mut lanes: HashMap<(Key, u32), u64> = HashMap::new();
+        // The immediates `s_mov_b32` put in SGPRs: the bases of scratch accesses past 4 KiB.
+        let mut bases: HashMap<u16, i64> = HashMap::new();
         let mut out = Vec::new();
         let name = |op: Opc| op.name().bytes().fold(5u64, |h, b| mix(h, b as u64));
         let read = |regs: &HashMap<Key, u64>, o: &Opnd| -> Vec<u64> {
@@ -1178,6 +1406,9 @@ pub(super) mod tests {
                             }
                         }
                         Opc::Copy | Opc::VMovB32 | Opc::SMovB32 => {
+                            if let (Opc::SMovB32, Opnd::P(Phys::S(r), _), Opnd::Imm(x)) = (inst.op, inst.defs[0], inst.uses[0]) {
+                                bases.insert(r, x as i64);
+                            }
                             for (k, v) in defs.iter().zip(read(&regs, &inst.uses[0])) {
                                 regs.insert(*k, v);
                             }
@@ -1189,13 +1420,21 @@ pub(super) mod tests {
                             regs.insert(defs[0], *lds.get(&inst.imm).unwrap_or(&0xbad));
                         }
                         op if op.name().starts_with("scratch_store") => {
+                            let base = inst.uses.get(1).map_or(0, |o| match o {
+                                Opnd::P(Phys::S(r), _) => bases[r],
+                                other => panic!("a scratch base {other:?}"),
+                            });
                             for (k, v) in read(&regs, &inst.uses[0]).into_iter().enumerate() {
-                                scratch.insert(inst.imm + 4 * k as i64, v);
+                                scratch.insert(base + inst.imm + 4 * k as i64, v);
                             }
                         }
                         op if op.name().starts_with("scratch_load") => {
+                            let base = inst.uses.first().map_or(0, |o| match o {
+                                Opnd::P(Phys::S(r), _) => bases[r],
+                                other => panic!("a scratch base {other:?}"),
+                            });
                             for (k, d) in defs.iter().enumerate() {
-                                regs.insert(*d, *scratch.get(&(inst.imm + 4 * k as i64)).unwrap_or(&0xbad));
+                                regs.insert(*d, *scratch.get(&(base + inst.imm + 4 * k as i64)).unwrap_or(&0xbad));
                             }
                         }
                         Opc::VWritelaneB32 => {
@@ -1330,7 +1569,7 @@ pub(super) mod tests {
             let want = effects(&f, 3);
             let mut g = f.clone();
             let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0, ..Default::default() };
             let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
             assert!(a.num_vgprs <= 24 && a.num_sgprs <= 20, "{a:?}");
             assert!(a.spill.lds_dwords + a.spill.scratch_dwords + a.spill.remat + a.spill.sgpr_dwords > 0);
@@ -1349,6 +1588,54 @@ pub(super) mod tests {
         assert!(total.remat > 0 && total.lds_dwords > 0 && total.scratch_dwords > 0 && total.sgpr_dwords > 0, "{total:?}");
     }
 
+    /// Webs whose slots are never live at once share them, and the code still computes the same values.
+    #[test]
+    fn shared_slots_compute_the_same_values() {
+        let (mut plain, mut shared) = (0, 0);
+        for (seed, nv, ns, lds_slots) in [(1, 60, 30, 0), (2, 80, 40, 8), (3, 120, 12, 64), (4, 40, 70, 4), (5, 90, 20, 0)] {
+            let f = random_kernel(seed, nv, ns);
+            let want = effects(&f, 3);
+            let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0, ..Default::default() };
+            let mut base = f.clone();
+            let a = regalloc::allocate_spilling(&mut base, limits, cfg).expect("allocates");
+            FORCE_SHARE.with(|c| c.set(true));
+            let mut g = f.clone();
+            let b = regalloc::allocate_spilling(&mut g, limits, cfg);
+            FORCE_SHARE.with(|c| c.set(false));
+            let b = b.expect("allocates");
+            assert!(b.spill.lds_dwords <= lds_slots, "{b:?}");
+            assert!(b.spill.scratch_dwords + b.spill.lds_dwords <= a.spill.scratch_dwords + a.spill.lds_dwords + 4, "{a:?} {b:?}");
+            assert_eq!(effects(&g, 3), want, "seed {seed}: {b:?}");
+            assert!(g.blocks.iter().flat_map(|b| &b.insts).all(|i| i.mods & M_SPILL == 0));
+            plain += a.spill.scratch_dwords + a.spill.lds_dwords;
+            shared += b.spill.scratch_dwords + b.spill.lds_dwords;
+        }
+        assert!(shared <= plain, "sharing needs more slots: {shared} vs {plain}");
+    }
+
+    /// More than 4 KiB of scratch (gfx950): refused without a base SGPR; with one, the slots past 4 KiB are
+    /// reached through it and every value survives.
+    #[test]
+    fn scratch_past_4_kib_is_addressed_from_an_sgpr() {
+        let f = random_kernel(7, 2600, 12);
+        let want = effects(&f, 3);
+        let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
+        let mut g = f.clone();
+        let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 0, agpr_slots: 0, scratch_sgpr: None };
+        let e = regalloc::allocate_spilling(&mut g, limits, cfg).expect_err("passes 4 KiB");
+        assert!(e.message.contains("scratch offset range"), "{e}");
+        let mut g = f.clone();
+        let cfg = SpillConfig { scratch_sgpr: Some(20), ..cfg };
+        let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
+        assert!(a.spill.scratch_dwords > 1024 && a.num_sgprs == 21, "{a:?}");
+        assert_eq!(effects(&g, 3), want, "{a:?}");
+        let moves = g.blocks.iter().flat_map(|b| &b.insts).filter(|i| i.op == Opc::SMovB32 && i.defs[0] == Opnd::P(Phys::S(20), 1)).count();
+        assert!(moves > 0);
+        super::super::post::expand_pseudos(&mut g).expect("expands");
+        super::super::asm::assemble(&g).expect("encodes");
+    }
+
     /// gfx950: the hottest webs take AGPR slots before LDS and scratch, and
     /// the moves keep every value.
     #[test]
@@ -1360,7 +1647,7 @@ pub(super) mod tests {
             for agpr_slots in [8, 200] {
                 let mut g = f.clone();
                 let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-                let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 4, agpr_slots };
+                let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 4, agpr_slots, ..Default::default() };
                 let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
                 assert!(a.spill.agpr_dwords > 0 && a.spill.agpr_dwords <= agpr_slots, "{a:?}");
                 if agpr_slots == 200 {

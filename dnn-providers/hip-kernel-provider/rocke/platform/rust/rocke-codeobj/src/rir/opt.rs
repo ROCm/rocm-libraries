@@ -1798,6 +1798,7 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::IglpOpt
                 | OpKind::DppXor
                 | OpKind::QuadPerm
+                | OpKind::DppRowMirror
                 | OpKind::MovDpp8
                 | OpKind::BufferLoadScalar
                 | OpKind::BufferStoreScalar
@@ -3359,9 +3360,11 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     sweep(kernel, &mut ws)?;
     compact(kernel, &mut ws, lds);
     // rustgemm lever `sreassoc`: LDS DMA soffsets as (leaves) + constant, before LICM / CSE share the leaves.
-    if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") {
+    if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") || super::kernel_lever("cmpreassoc") || super::scoped_anywhere(kernel, "cmpreassoc") {
         super::reassoc::run(kernel);
     }
+    // gfx950: LDS DMA lane offsets as (shared sum) + (a scalar per load), before LICM / CSE share the sum.
+    super::voff_split::run(kernel);
     // rustgemm lever `m0share`: an LDS DMA next to one at a constant LDS distance reads its M0 value.
     if super::kernel_lever("m0share") || super::scoped_anywhere(kernel, "m0share") {
         super::reassoc::share_m0(kernel, lds);

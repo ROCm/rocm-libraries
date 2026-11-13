@@ -354,7 +354,8 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         OpKind::IntToPtr => Rule::Inputs(&op.operands),
         // An SGPR pin keeps a uniform value uniform (validation refuses it on a divergent one).
         OpKind::InlineAsmIdentity if op.asm_pin() == Some('s') => Rule::Inputs(&op.operands),
-        OpKind::Not | OpKind::GlobalPtrToI64 => Rule::Inputs(&op.operands),
+        // A conversion of a uniform value (computed on the VALU, read back into an SGPR).
+        OpKind::Not | OpKind::GlobalPtrToI64 | OpKind::SitofpF32 => Rule::Inputs(&op.operands),
         OpKind::VecBitcast => Rule::Inputs(op.operands.get(..1).unwrap_or(&[])),
         OpKind::Add
         | OpKind::Sub

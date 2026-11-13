@@ -14,6 +14,24 @@ compile, or a kernel using an operation it does not lower for the target
 (``ROCKE_DIRECT_UNSUPPORTED``), raises :class:`DirectUnsupported`, on which
 ``rocke.helpers.compile_kernel`` compiles the kernel with COMGR instead. The
 gfx1151 WMMA GEMM proof slice uses the same library through its own entry.
+
+Entry-point contract under ``ROCKE_CODEOBJ_BACKEND=direct``:
+
+- ``compile_kernel`` compiles rocKE IR with the direct compiler; a refusal
+  falls back to COMGR unless ``ROCKE_DIRECT_STRICT=1``.
+- The LLVM-IR entries (:func:`build_hsaco_from_llvm_ir`,
+  :func:`build_hsaco_from_llvm_modules`, ``lower_kernel_for_code_object`` and
+  the LLVM lowerers' flavor detection) take LLVM text, which the direct
+  compiler has no use for: they always use COMGR. The environment never
+  redirects them; asking one for ``backend="direct"`` explicitly is an error.
+- ``compile_module`` builds a module of several kernels, which the direct
+  compiler (one kernel per code object) cannot, so it always uses COMGR. The
+  environment never redirects it; an explicit
+  ``code_object_backend="direct"`` is a refusal: it compiles with COMGR and
+  records the reason in ``ModuleArtifact.direct_fallback``, and under
+  ``ROCKE_DIRECT_STRICT=1`` raises :class:`DirectUnsupported`.
+- Which compiler built each kernel is observable: :func:`backend_usage` and
+  ``ROCKE_DIRECT_LOG=1`` (see :func:`record_backend_use`).
 """
 
 from __future__ import annotations
@@ -23,6 +41,8 @@ import ctypes.util
 import functools
 import os
 import re
+import sys
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -38,9 +58,12 @@ __all__ = [
     "build_direct_rocke_ir_hsaco",
     "build_hsaco_from_llvm_ir",
     "build_hsaco_from_llvm_modules",
+    "backend_usage",
     "compiler_identity",
     "direct_supported_targets",
     "loaded_compiler_info",
+    "record_backend_use",
+    "reset_backend_usage",
     "resolve_code_object_backend",
     "supported_isas",
 ]
@@ -523,12 +546,19 @@ def _require_compiler_info(
     return _comgr_compiler_info()
 
 
-def _reject_direct_for_llvm(backend: str | None) -> None:
-    if resolve_code_object_backend(backend) == "direct":
+def _llvm_entry_backend(backend: str | None) -> str:
+    """The backend of an LLVM-IR entry: COMGR, whatever the environment says
+    (the direct compiler reads rocKE IR, not LLVM). Only an explicit
+    ``backend="direct"`` is an error."""
+    if backend is None:
+        return "comgr"
+    selected = resolve_code_object_backend(backend)
+    if selected == "direct":
         raise CodeObjectError(
             "the direct code-object backend compiles rocKE IR, not LLVM IR; "
             "use compile_kernel or build_direct_rocke_ir_hsaco"
         )
+    return selected
 
 
 def compiler_identity(backend: str | None = None) -> str:
@@ -548,6 +578,67 @@ def supported_isas(backend: str | None = None) -> list[str]:
     return comgr_supported_isas()
 
 
+_LOG_ENV = "ROCKE_DIRECT_LOG"
+_usage_lock = threading.Lock()
+_usage = {"direct": 0, "comgr": 0, "fallback": 0, "refused": 0}
+_fallback_reasons: dict[str, int] = {}
+
+
+def _reason_key(reason: str) -> str:
+    """One short line of a fallback reason, for grouping and logging."""
+    reason = reason.rpartition("rejected the kernel: ")[2]
+    return " ".join(reason.split())[:160]
+
+
+def record_backend_use(
+    kernel_name: str, backend: str, fallback_reason: str = ""
+) -> None:
+    """Count one compiled kernel and, with ``ROCKE_DIRECT_LOG=1``, log it.
+
+    ``backend`` is the compiler that built the kernel (``"direct"`` or
+    ``"comgr"``), or ``"refused"`` when the direct compiler failed and nothing
+    fell back (``ROCKE_DIRECT_STRICT=1`` or a non-refusal error).
+    ``fallback_reason`` is why a ``comgr`` build is not the compiler asked for,
+    or the error of a ``refused`` one. ``compile_kernel`` and ``compile_module``
+    call this once per compile.
+    """
+    key = _reason_key(fallback_reason)
+    with _usage_lock:
+        _usage[backend] += 1
+        if backend == "comgr" and key:
+            _usage["fallback"] += 1
+        if key:
+            _fallback_reasons[key] = _fallback_reasons.get(key, 0) + 1
+    if os.environ.get(_LOG_ENV, "0") == "1":
+        print(
+            f"rocke-direct: kernel={kernel_name} backend={backend} "
+            f"fallback={key or '-'}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def backend_usage() -> dict[str, object]:
+    """Process-wide compile counts, to monitor a direct rollout.
+
+    ``direct`` / ``comgr``: kernels each compiler built. ``fallback``: the
+    ``comgr`` builds that were direct requests the direct compiler refused (or
+    that an allow/deny list sent to COMGR). ``refused``: direct requests that
+    raised. ``fallback_reasons``: reason -> count over both. The snapshot is a
+    copy; :func:`reset_backend_usage` clears the counters.
+    """
+    with _usage_lock:
+        return {**_usage, "fallback_reasons": dict(_fallback_reasons)}
+
+
+def reset_backend_usage() -> None:
+    """Zero the :func:`backend_usage` counters."""
+    with _usage_lock:
+        for name in _usage:
+            _usage[name] = 0
+        _fallback_reasons.clear()
+
+
 def _timings(timings) -> CodeObjectTimings:
     return CodeObjectTimings(
         bc=timings.bc,
@@ -565,8 +656,9 @@ def build_hsaco_from_llvm_ir(
     fresh_process: bool = False,
     backend: str | None = None,
 ) -> tuple[bytes, CodeObjectTimings]:
-    """Compile one textual LLVM module through the selected backend."""
-    _reject_direct_for_llvm(backend)
+    """Compile one textual LLVM module with COMGR (the only compiler of LLVM
+    IR; ``ROCKE_CODEOBJ_BACKEND`` does not apply, ``backend="direct"`` raises)."""
+    _llvm_entry_backend(backend)
     from .comgr import build_hsaco_from_llvm_ir as comgr_build
 
     hsaco, timings = comgr_build(
@@ -585,14 +677,15 @@ def build_hsaco_from_llvm_modules(
     options: list[str] | None = None,
     backend: str | None = None,
 ) -> tuple[bytes, CodeObjectTimings]:
-    """Compile and bitcode-link two or more LLVM modules into one HSACO."""
+    """Compile and bitcode-link two or more LLVM modules into one HSACO with
+    COMGR (see :func:`build_hsaco_from_llvm_ir`)."""
     ir_texts = tuple(ir_texts)
     if len(ir_texts) < 2:
         raise ValueError(
             "build_hsaco_from_llvm_modules links two or more modules; use "
             "build_hsaco_from_llvm_ir for one"
         )
-    _reject_direct_for_llvm(backend)
+    _llvm_entry_backend(backend)
     from .comgr import build_hsaco_from_llvm_modules as comgr_build
 
     hsaco, timings = comgr_build(ir_texts, isa=isa, options=list(options or ["-O3"]))

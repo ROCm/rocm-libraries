@@ -40,7 +40,9 @@ pub mod lds_tr;
 pub mod licm_const;
 pub mod lits;
 pub mod loop_align;
+pub mod low_i64;
 pub mod m0_order;
+pub mod m0_uniform_add;
 pub mod mask_splat;
 pub mod masks;
 pub mod legalize;
@@ -54,6 +56,7 @@ pub mod minmax;
 pub mod minmax3;
 pub mod model;
 pub mod pack;
+pub mod pack_coalesce;
 pub mod peep;
 pub mod q38;
 pub mod relief;
@@ -62,8 +65,11 @@ pub mod rules;
 pub mod sched;
 pub mod sched_groups;
 pub mod select;
+pub mod smem_sink;
 pub mod spill;
 pub mod trade;
+pub mod trunc_mix;
+pub mod unpack;
 pub mod unrolled;
 pub mod vectorize;
 pub mod waitcnt;
@@ -97,10 +103,11 @@ pub fn prepare(f: &mut MFunc) {
     if f.lever_anywhere("minmax") {
         minmax::run(f);
     }
-    if f.lever_anywhere("minmax3") {
+    if f.lever_anywhere("minmax3") || f.lever_anywhere("fmax3") {
         minmax3::run(f);
     }
     zero_acc::run(f);
+    m0_uniform_add::run(f);
     m0_hoist::run(f);
     rules::peephole(f);
     select::run(f);
@@ -115,7 +122,11 @@ pub fn prepare(f: &mut MFunc) {
     if !crate::rir::debug_flag("nopack") {
         pack::run(f);
     }
+    pack_coalesce::run(f);
     masks::reuse(f);
+    if f.lever_anywhere("smemsink") {
+        smem_sink::run(f);
+    }
     // rust-compiler-v2 lever `sgb`: `tile.sched_group_barrier` pipelines order the blocks that have them.
     if f.lever_anywhere("sgb") {
         sched_groups::run(f);
@@ -126,7 +137,8 @@ pub fn prepare(f: &mut MFunc) {
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
 /// MFMAs read the zeros moved into their C as the constant
 /// (`zero_acc::after_allocation`; copied from zeros of an earlier block,
-/// `zero_wide`), the 64-bit shift fix, `s_waitcnt`, the peepholes the
+/// `zero_wide`), the packed f32 instructions an MFMA reads right after become
+/// scalar ones (`unpack`), the 64-bit shift fix, `s_waitcnt`, the peepholes the
 /// kernel asks for (`peep`, `m0_cse`), its early M0 writes (`m0_early`, `m0_fill`),
 /// then the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or
 /// VGPR release message, so none of the gfx11 passes that place them run.
@@ -141,6 +153,7 @@ pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'sta
     drop_holds(func);
     zero_acc::after_allocation(func);
     zero_wide::after_allocation(func);
+    unpack::run(func);
     hazards::fix_shift64(func, num_vgprs)?;
     if func.lever_anywhere("fmac") {
         func.fill_scopes();
@@ -409,6 +422,34 @@ mod tests {
         assert!(wave32.contains("s_and_saveexec_b32") && !wave32.contains("s_and_saveexec_b64"));
     }
 
+    /// `many_live` with the values loaded four at a time (`count` / 4 vector loads): the spills are of the
+    /// vectors' dwords and the loads' address SGPRs stay few.
+    fn many_live_vec(count: usize) -> String {
+        let mut t = String::from(
+            "ckdsl.ir v1\nkernel @spills {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<f32,global>\n    \
+             %Y : ptr<f32,global>\n  }\n  region @entry {\n    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    \
+             %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    %t4 : i32 = arith.mul ( %tid, %c4 )\n",
+        );
+        for i in 0..count / 4 {
+            t += &format!("    %c{i} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n", 256 * i);
+            t += &format!("    %p{i} : i32 = arith.add ( %t4, %c{i} )\n");
+            t += &format!("    %g{i} : vec<f32x4> = memref.global_load_vN ( %X, %p{i} ) {{ align = i:16, elem_type = s:\"f32\", vec = i:4 }}\n");
+            for k in 0..4 {
+                t += &format!("    %v{} : f32 = vector.extract ( %g{i} ) {{ index = i:{k} }}\n", 4 * i + k);
+            }
+        }
+        let (mut fwd, mut rev) = ("%v0".to_string(), format!("%v{}", count - 1));
+        for i in 1..count {
+            t += &format!("    %f{i} : f32 = arith.fadd ( {fwd}, %v{i} )\n");
+            t += &format!("    %r{i} : f32 = arith.fadd ( {rev}, %v{} )\n", count - 1 - i);
+            (fwd, rev) = (format!("%f{i}"), format!("%r{i}"));
+        }
+        t + &format!(
+            "    %y : f32 = arith.fmul ( {fwd}, {rev} )\n    \
+             memref.global_store_typed ( %Y, %tid, %y ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
     /// `count` loaded values summed forward and in reverse, and the sums
     /// multiplied: whatever the order, every value is live at once.
     fn many_live(count: usize) -> String {
@@ -557,6 +598,45 @@ mod tests {
             let s = &small.stats.spill;
             assert!(s.agpr_dwords <= cap, "cap {cap}: {s:?}");
             assert!(small.hsaco != free.hsaco);
+        }
+    }
+
+    /// A spill past the 4 KiB scratch offset range retries with every AGPR (the waves go: one workgroup
+    /// fills a CU's registers), and then with scratch addressed from an SGPR.
+    #[test]
+    fn spills_past_the_scratch_offset_range_use_every_agpr_then_an_sgpr_base() {
+        use crate::rir;
+        use crate::target::Target;
+        let compile = |n: usize| rir::compile_any_target_limited(&many_live_vec(n), Target::Gfx950, 64).unwrap_or_else(|e| panic!("{n}: {e}"));
+        // Values past the 64 VGPRs: 1248 of them pass 1024 dwords of scratch, which the 256 AGPRs bring back under it.
+        let s = compile(1248).stats.spill;
+        assert!(s.agpr_dwords > 200 && s.scratch_dwords > 0 && s.scratch_dwords <= 1024, "{s:?}");
+        // 2000 values need more than every AGPR and 4 KiB hold: the slots past 4 KiB sit behind an `s_mov_b32`.
+        let big = compile(2000);
+        let s = &big.stats.spill;
+        assert!(s.agpr_dwords > 200 && s.scratch_dwords > 1024, "{s:?}");
+        assert!(big.stats.sgprs >= 100, "{}", big.stats.sgprs);
+        assert!(big.listing().lines().any(|l| l.contains("scratch_load_dword") && l.contains("s99")), "no access through the base SGPR");
+        // A function that fits the AGPRs that cost no waves and 4 KiB is as before: no base SGPR, the waves it kept.
+        let small = compile(300);
+        assert!(small.stats.spill.agpr_dwords <= 32 && !small.listing().contains("s99"), "{:?}", small.stats.spill);
+    }
+
+    /// `mfma_vgpr_form` (rocKE's `-amdgpu-mfma-vgpr-form` request) is accepted and changes nothing: the
+    /// accumulators are in VGPRs unless the allocator banks them, and `agpr_alloc` limits that as before.
+    #[test]
+    fn mfma_vgpr_form_is_accepted_and_changes_nothing() {
+        use crate::rir;
+        use crate::target::Target;
+        let with = |attrs: &str, text: String| text.replacen("attrs { ", &format!("attrs {{ {attrs}, "), 1);
+        for (extra, vgprs) in [("", 64), ("agpr_alloc = l:[ i:0, i:0 ]", 64), ("agpr_alloc = l:[ i:32, i:32 ]", 64), ("", 256)] {
+            let plain = |text: String| if extra.is_empty() { text } else { with(extra, text) };
+            let compile = |text: String| rir::compile_any_target_limited(&text, Target::Gfx950, vgprs).unwrap_or_else(|e| panic!("{extra}: {e}"));
+            let (want, got) = (compile(plain(accumulators(6))), compile(with("mfma_vgpr_form = b:true", plain(accumulators(6)))));
+            assert!(got.hsaco == want.hsaco, "{extra} @ {vgprs}");
+            if extra.contains("i:0, i:0") {
+                assert!(!got.listing().contains("accvgpr"));
+            }
         }
     }
 

@@ -6,7 +6,9 @@ from [`rust/rocke-codeobj`](../../rust/rocke-codeobj/). No LLVM component takes
 part in a compile: no COMGR, Clang, LLD, assembler, subprocess, code-object
 cache or precompiled image. The crate depends only on the Rust standard
 library. COMGR stays the default code-object compiler, and it is the reference
-the direct compiler is tested against.
+the direct compiler is tested against. Which entry points use the direct
+compiler, and how to turn it on for a subset and monitor it, are under
+[Using it](#using-it).
 
 This page describes what the compiler does, how to call it, what it refuses,
 and how to debug and change it. It records no measurements: measured
@@ -73,11 +75,56 @@ artifact.direct_fallback      # why the direct compiler refused, after a fallbac
 - When the direct compiler raises `DirectUnsupported` (a target it does not
   compile for, or an op it does not lower for the target), `compile_kernel`
   builds the kernel with COMGR instead and records the reason in
-  `direct_fallback`. Every other rejection raises `CodeObjectError`: nothing
-  else falls back.
-- One kernel per code object. `compile_module` (several kernels in one code
-  object) and the LLVM-IR entry points (`build_hsaco_from_llvm_ir`,
-  `build_hsaco_from_llvm_modules`) are COMGR-only and refuse `direct`.
+  `direct_fallback`. Every other rejection raises `CodeObjectError`, unless
+  `ROCKE_DIRECT_FALLBACK=all` (see [Rollout controls](#rollout-controls)).
+  `ROCKE_DIRECT_STRICT=1` turns every fallback into an error.
+- One kernel per code object.
+
+### Entry points under `ROCKE_CODEOBJ_BACKEND=direct`
+
+The direct compiler reads rocKE IR, so an entry point that takes LLVM IR has
+nothing to give it. The environment setting never redirects those entries and
+never makes them fail:
+
+| Entry point | Compiler under `ROCKE_CODEOBJ_BACKEND=direct` |
+|---|---|
+| `compile_kernel` | direct; COMGR after a refusal, unless `ROCKE_DIRECT_STRICT=1`. |
+| `compile_module` (several kernels, one code object) | COMGR always: the direct compiler writes one kernel per code object. `ROCKE_DIRECT_STRICT` does not apply. An explicit `code_object_backend="direct"` is a refusal: `DirectUnsupported` under strict, else COMGR with the reason in `ModuleArtifact.direct_fallback`. |
+| `build_hsaco_from_llvm_ir`, `build_hsaco_from_llvm_modules`, `lower_kernel_for_code_object`, and the examples and drivers built on them (`ck_tile_parity`, the lowering registry, `compile_fn`) | COMGR always. An explicit `backend="direct"` raises `CodeObjectError`. |
+| LLVM flavor detection (`_detect_llvm_flavor`) | Asks COMGR. |
+
+Which compiler built what is observable. `rocke.runtime.code_object.backend_usage()`
+returns process-wide counts (`direct`, `comgr`, `fallback` for the COMGR builds
+that were direct requests, `refused` for direct requests that raised, and
+`fallback_reasons`, reason to count); `reset_backend_usage()` zeroes them.
+`ROCKE_DIRECT_LOG=1` also writes one line per compiled kernel to stderr:
+
+```text
+rocke-direct: kernel=<name> backend=<direct|comgr|refused> fallback=<reason or ->
+```
+
+`compile_kernel` and `compile_module` record every compile; a direct compile of
+a kernel built through another entry (`build_direct_rocke_ir_hsaco`) is not
+counted.
+
+### Rollout controls
+
+COMGR stays the default. These variables only matter when the direct backend is
+selected (`ROCKE_CODEOBJ_BACKEND=direct`, the argument, or a kernel's request).
+They are the knobs for turning direct on for a subset and watching it.
+
+| Variable | Values (default) | Effect |
+|---|---|---|
+| `ROCKE_DIRECT_STRICT` | `1` \| `0` (`0`) | A direct failure raises instead of falling back. For validation runs. |
+| `ROCKE_DIRECT_FALLBACK` | `unsupported` \| `all` (`unsupported`) | Which direct failures fall back to COMGR: only `DirectUnsupported`, or every `CodeObjectError` (an unreadable op, no register allocation, a missing library). |
+| `ROCKE_DIRECT_DENY` | comma-separated `fnmatch` patterns on the kernel name (unset) | Matching kernels go to COMGR without trying direct. Wins over the allow list. |
+| `ROCKE_DIRECT_ALLOW` | the same (unset) | When set, only matching kernels try direct. |
+| `ROCKE_DIRECT_LOG` | `1` \| `0` (`0`) | One stderr line per compiled kernel. |
+
+A kernel the lists keep off direct is a configured choice, not a refusal: it
+compiles with COMGR even under `ROCKE_DIRECT_STRICT=1`, and counts as a
+`fallback` with the reason `denied by ROCKE_DIRECT_DENY=<pattern>` or `not in
+ROCKE_DIRECT_ALLOW`.
 
 ### `rocke.runtime`
 
@@ -198,20 +245,20 @@ Paths are under [`rust/rocke-codeobj/src`](../../rust/rocke-codeobj/src/).
 
 | Stage | What it does | Code |
 |---|---|---|
-| Parse | Reads the text into the compiler's IR. Large inputs are cut into chunks parsed on several threads, a SIMD byte scanner (AVX-512 or AVX2 when the CPU has them) finds the line structure, and repeated constants are shared. A session parses a streamed input while it is being written. On gfx950, constants used before their definition move ahead of their uses, a vector select by a splatted mask becomes a scalar select, and nontemporal accesses get the `nt` bit. | `rir/parse.rs`, `rir/parse_par.rs`, `rir/scan.rs`, `rir/hashcons.rs`, `rir/stream.rs`, `target/gfx9/early_constants.rs`, `target/gfx9/mask_splat.rs`, `target/gfx9/cpol.rs` |
+| Parse | Reads the text into the compiler's IR. Large inputs are cut into chunks parsed on several threads, a SIMD byte scanner (AVX-512 or AVX2 when the CPU has them) finds the line structure, and repeated constants are shared. A session parses a streamed input while it is being written. On gfx950, a constant used before its definition, or after the region that defines it (a loop body, say) has closed, moves to the start of the kernel body, a vector select by a splatted mask becomes a scalar select, and nontemporal accesses get the `nt` bit. | `rir/parse.rs`, `rir/parse_par.rs`, `rir/scan.rs`, `rir/hashcons.rs`, `rir/stream.rs`, `target/gfx9/early_constants.rs`, `target/gfx9/mask_splat.rs`, `target/gfx9/cpol.rs` |
 | Validate | Checks every op's operands, results, types and attributes, and the limits: region nesting, vector width, LDS per workgroup, workgroup size, uniformity. | `rir/validate.rs` |
 | LDS layout | Places the kernel's LDS allocations; allocations whose lifetimes do not overlap share space. | `rir/analysis.rs` |
 | Optimize | Simplification and constant folding, common-subexpression elimination (repeated LDS loads included), loop-invariant code motion, known-bits facts (a bounds test with the same answer in every workgroup, for example), unrolling the loops the IR marks `unroll = true`, and the `noalias` and `readonly` facts of kernel arguments. | `rir/opt.rs`, `rir/unroll.rs`, `rir/alias.rs` |
-| Automatic unrolling | Unrolls small loops with a constant trip count that the IR leaves rolled, under a size bound. gfx950 also unrolls a loop whose only wait on a carried value is an empty register pin (`tile.inline_asm` without a template). | `rir/unroll.rs`, `target/gfx9/unrolled.rs` |
+| Automatic unrolling | Unrolls small loops with a constant trip count that the IR leaves rolled, under a size bound. gfx950 also unrolls a loop whose only wait on a carried value is an empty register pin (`tile.inline_asm` without a template), and, in a kernel without `tile.mma`, loops of up to 64 trips and 2048 ops of copies (the split-KV attention reduce kernels sum 64 partial results per lane: every copy's load is then in flight at once). The constant of each unrolled copy's global address moves into the access's offset field, a multiple of 4096 bytes of it staying in the scalar base, so copies within one window share one 64-bit scalar address. | `rir/unroll.rs`, `target/gfx9/unrolled.rs` |
 | Target IR passes | gfx950: adjacent `if` blocks of one condition fuse and their stores widen, and a repeated load takes the first load's result: within one straight-line run, and for memory of a `noalias readonly` argument also past barriers and from an enclosing region. gfx1151: long FMA accumulator chains issue round-robin. | `target/gfx9/widen.rs`, `target/gfx9/ro_loads.rs`, `rir/fma_chains.rs` |
 | LDS swizzle | Remaps LDS addresses to avoid bank conflicts; wave32 only. | `rir/lds_swizzle.rs` |
 | Uniformity | Classifies every value as wave-uniform (SGPRs) or per lane (VGPRs). | `rir/analysis.rs` |
 | Instruction selection | Maps ops to machine instructions. On gfx950 it adds MFMA selection, LDS DMA with its M0 writes, the transposing LDS reads, the fp8 and bf8 conversions, uniform-address atomics issued once per wave, the cross-lane ops and the cache-policy bits. On gfx1151, a 64-bit division takes a 32-bit path when both operands fit. | `rir/isel.rs`, `target/gfx9/isel_hooks.rs`, `target/gfx9/mfma.rs`, `target/gfx9/lds_dma.rs`, `target/gfx9/lds_tr.rs`, `target/gfx9/fp8.rs`, `target/gfx9/atomics.rs`, `target/gfx9/lanes.rs`, `rir/div_bypass.rs` |
-| Machine-code rewrites | Dead copies, the proven peephole rules (on gfx950, the rule families confirmed there) and VALU fusion. gfx1151: a row's guard is evaluated once per loop block. gfx950: an MFMA that starts from zero reads C as the constant 0, an LDS DMA address is read into an SGPR once, gfx950's own instructions (packed f32, `v_lshl_add_u64`), and gfx9's operand rules, with literals and VGPR copies of SGPRs reused in loops; in kernels without MFMAs, a uniform compare repeated in a loop block reuses the first evaluation's lane mask. | `rir/post.rs`, `rir/peephole.rs`, `rir/uniform_masks.rs`, `target/gfx9/zero_acc.rs`, `target/gfx9/m0_hoist.rs`, `target/gfx9/rules.rs`, `target/gfx9/select.rs`, `target/gfx9/wide_add.rs`, `target/gfx9/pack.rs`, `target/gfx9/masks.rs`, `target/gfx9/legalize.rs` |
-| Scheduling and allocation | Schedules each candidate window, allocates it, and takes the widest window that keeps the occupancy of load sinking alone. A wider window still is tried when a cost model predicts a faster schedule at the same occupancy or one wave less. The `noalias` facts relax memory order only when the relaxed schedule wins after allocation. When program order does not fit the registers, each WMMA moves up to its operands. gfx1151: an f16 conversion that several FMAs read folds into each of them when that costs no spills or waves. gfx950: MFMA accumulators move to AGPRs when no schedule fits the VGPRs; before spilling, a candidate schedule that fits with its accumulators in AGPRs (moved inside their loops where needed) joins the cost race; a kernel whose LDS or workgroup size already sets its occupancy also tries wider windows with its accumulators in AGPRs; a wider schedule at one wave fewer with AGPR accumulators is kept when the cost model prefers it; in a kernel without MFMAs whose schedule leaves most of its latency exposed, wider windows are weighed with the SGPRs they need past the hardware in VGPR lanes at the same occupancy, also when the kernel spills anyway; a window that fails is retried with its SGPR results sunk toward their readers; every kernel's registers leave room for one workgroup on a CU; the allocator keeps a load's destination and the registers its memory clause reads apart where a register below the most placed so far is free, so that the clause needs no break; and `agpr_alloc = [0, 0]` turns AGPRs off. | `rir/mod.rs`, `rir/regalloc.rs`, `rir/mma_order.rs`, `rir/fma_mix.rs`, `target/gfx9/sched.rs`, `target/gfx9/agpr.rs`, `target/gfx9/agpr_spill.rs`, `target/gfx9/bank_wide.rs`, `target/gfx9/trade.rs`, `target/gfx9/latency.rs`, `target/gfx9/relief.rs`, `target/gfx9/clauses.rs` |
-| Spilling | When nothing fits: VGPRs go to free AGPRs (gfx950), then to LDS slots that cost no occupancy, then to scratch; SGPRs go to VGPR lanes. On gfx950 the accumulators can also take the top of the AGPRs with the spill slots under them, and the cost model picks between that and the plain spill. Reloads move up their block, never across a write of EXEC. | `rir/spill.rs`, `rir/reload.rs`, `target/gfx9/spill.rs`, `target/gfx9/agpr_spill.rs` |
-| After allocation | Pseudo expansion and `s_waitcnt`. gfx1151: VOPD dual issue, the WMMA hazards, clauses, `s_delay_alu`, the VGPR release and FMAC shrinking. gfx950: a wide MFMA whose C is copied from registers that hold zero on every path into its block reads C as the constant 0, the 64-bit shift fix, and the wait states its hazard rules need as `s_nop`s, counted over every path into a block. | `rir/post.rs`, `rir/vopd.rs`, `target/gfx9/zero_wide.rs`, `target/gfx9/waitcnt.rs`, `target/gfx9/hazards.rs` |
-| Encoding | Encodes each instruction from the generated tables. The encoder refuses operands the hardware does not read, such as an inline constant as a lane mask. | `rir/asm.rs`, `rir/isa.rs`, `target/gfx9/asm.rs` |
+| Machine-code rewrites | Dead copies, the proven peephole rules (on gfx950, the rule families confirmed there) and VALU fusion. gfx1151: a row's guard is evaluated once per loop block. gfx950: an MFMA that starts from zero reads C as the constant 0, an LDS DMA address is read into an SGPR once (the first lane of `base + uniform` is the first lane of `base` plus the uniform, so each load keeps one `s_add_i32` into M0), a tuple built from values that are also used alone takes them as its halves (the packed row sums), i64 address arithmetic that only an LDS pointer's low dword reaches is computed in 32 bits, the lane offsets of a loop's buffer DMA loads become one shared sum plus one scalar per load, gfx950's own instructions (packed f32, `v_lshl_add_u64`), and gfx9's operand rules, with literals and VGPR copies of SGPRs reused in loops; in kernels without MFMAs, a uniform compare repeated in a loop block reuses the first evaluation's lane mask; with lever `smemsink`, the scalar compare-and-select pairs that read a scalar load's result move below the loads that follow (a block table's entries load together). | `rir/post.rs`, `rir/peephole.rs`, `rir/uniform_masks.rs`, `target/gfx9/zero_acc.rs`, `target/gfx9/m0_hoist.rs`, `target/gfx9/rules.rs`, `target/gfx9/select.rs`, `target/gfx9/wide_add.rs`, `target/gfx9/pack.rs`, `target/gfx9/masks.rs`, `target/gfx9/smem_sink.rs`, `target/gfx9/m0_uniform_add.rs`, `target/gfx9/pack_coalesce.rs`, `target/gfx9/low_i64.rs`, `rir/voff_split.rs`, `target/gfx9/legalize.rs` |
+| Scheduling and allocation | Schedules each candidate window, allocates it, and takes the widest window that keeps the occupancy of load sinking alone (lever `widewin` adds windows of 128 to 512 places for a gfx950 kernel without MFMAs). A wider window still is tried when a cost model predicts a faster schedule at the same occupancy or one wave less. The `noalias` facts relax memory order only when the relaxed schedule wins after allocation. When program order does not fit the registers, each WMMA moves up to its operands. gfx1151: an f16 conversion that several FMAs read folds into each of them when that costs no spills or waves. gfx950: MFMA accumulators move to AGPRs when no schedule fits the VGPRs; before spilling, a candidate schedule that fits with its accumulators in AGPRs (moved inside their loops where needed) joins the cost race; a kernel whose LDS or workgroup size already sets its occupancy also tries wider windows with its accumulators in AGPRs; a wider schedule at one wave fewer with AGPR accumulators is kept when the cost model prefers it; in a kernel without MFMAs whose schedule leaves most of its latency exposed, wider windows are weighed with the SGPRs they need past the hardware in VGPR lanes at the same occupancy, also when the kernel spills anyway; a window that fails is retried with its SGPR results sunk toward their readers; every kernel's registers leave room for one workgroup on a CU; the allocator keeps a load's destination and the registers its memory clause reads apart where a register below the most placed so far is free, so that the clause needs no break; and `agpr_alloc = [0, 0]` turns AGPRs off. | `rir/mod.rs`, `rir/regalloc.rs`, `rir/mma_order.rs`, `rir/fma_mix.rs`, `target/gfx9/sched.rs`, `target/gfx9/agpr.rs`, `target/gfx9/agpr_spill.rs`, `target/gfx9/bank_wide.rs`, `target/gfx9/trade.rs`, `target/gfx9/latency.rs`, `target/gfx9/relief.rs`, `target/gfx9/clauses.rs` |
+| Spilling | When nothing fits: VGPRs go to free AGPRs (gfx950), then to LDS slots that cost no occupancy, then to scratch; SGPRs go to VGPR lanes. On gfx950 the accumulators can also take the top of the AGPRs with the spill slots under them, and the cost model picks between that and the plain spill. Reloads move up their block, never across a write of EXEC. When one slot per spilled value would pass the 4 KiB scratch offset range, values that are never spilled at the same time share a slot. If the slots still pass it (gfx950), the function is spilled again with every AGPR the registers of one workgroup leave (as LLVM does for a kernel whose state needs the whole register file, at the waves that costs), and then with scratch accesses past 4 KiB addressed from an SGPR set before them (`saddr`), the two SGPRs above it kept for a relaxed branch. | `rir/spill.rs`, `rir/reload.rs`, `target/gfx9/spill.rs`, `target/gfx9/agpr_spill.rs` |
+| After allocation | Pseudo expansion and `s_waitcnt`. gfx1151: VOPD dual issue, the WMMA hazards, clauses, `s_delay_alu`, the VGPR release and FMAC shrinking. gfx950: a wide MFMA whose C is copied from registers that hold zero on every path into its block reads C as the constant 0, the 64-bit shift fix, and the wait states its hazard rules need as `s_nop`s, counted over every path into a block. Before those, a packed f32 VALU instruction (`v_pk_mul_f32`, `v_pk_add_f32`, `v_pk_fma_f32`) that an MFMA of its block reads, as the scaled accumulators of a kernel that keeps its MFMA state in VGPRs are, becomes its two scalar instructions: the packed form gave stale or torn MFMA inputs, differently on every launch. | `rir/post.rs`, `rir/vopd.rs`, `target/gfx9/zero_wide.rs`, `target/gfx9/unpack.rs`, `target/gfx9/waitcnt.rs`, `target/gfx9/hazards.rs` |
+| Encoding | Encodes each instruction from the generated tables. The encoder refuses operands the hardware does not read, such as an inline constant as a lane mask. On gfx950 a branch past the 16-bit word offset (a loop body over about 128 KiB) becomes `s_getpc_b64` / `s_add_u32` / `s_addc_u32` / `s_setpc_b64` through the first SGPR pair the kernel does not use, with the opposite branch over it when conditional; the jump clobbers SCC. | `rir/asm.rs`, `rir/isa.rs`, `target/gfx9/asm.rs` |
 | Code object | Writes the ELF: the kernel descriptor (with the AGPR offset on gfx950), the MessagePack metadata note the HIP runtime reads, symbols, hash tables and headers. | `hsaco_writer.rs`, `elf.rs` |
 
 The instruction descriptions are `rust/rocke-codeobj/isa/gfx11.isa` (with
@@ -238,6 +285,32 @@ fixed rules:
   WMMA moved up to its operands. It spills only when that does not fit either.
 - A result that fits only by packing register tuples first is compared with a
   compile without that packing, and the one with more occupancy is kept.
+- On gfx950, a kernel without MFMAs that unrolled a loop and runs fewer waves
+  than the hardware allows is compiled again without merging repeated LDS
+  loads (the unrolled copies of two loops reading one table share their loads,
+  which then stay live across all of them), and the compile with more waves is
+  kept if it spills no more.
+
+- On gfx950, a kernel that spills, or that runs fewer waves than the hardware
+  allows, is compiled again with its loop-invariant addresses and masks
+  recomputed where a deeper loop uses them (`rir/remat.rs`). Front ends compute
+  every per-lane offset a loop needs once in front of it (`tid * 272 + 544`,
+  one column index per MFMA tile), which holds a register each for the whole
+  loop: 74 of the 309 dwords live at the peak of the 256x128 attention tile.
+  A one-dword VGPR value that one VALU instruction makes from constants,
+  scalars and VGPRs defined once is made again in front of each use in a deeper
+  loop, when the VGPRs it reads are live there anyway and its other uses come
+  before the loop's first one (a 64-bit sum made for its low half alone, the
+  LDS-DMA address of every row of a tile, counts: its dead carry chain is
+  dropped first). The retried compile is kept if it spills less or, spilling no
+  more, runs more waves for at most 3% more instructions or, with both alike,
+  issues at least 3% fewer (blocks weighted by 8 to the power of their loop
+  depth). The first compile notes how many VGPRs of pressure the pass would
+  save, and the retry runs only when that could cross a waves threshold of the
+  first compile's register count (with 16 registers of slack: scheduling and
+  fragmentation add to what is counted), or when the first compile spilled or
+  sits within 8 registers of the hardware limit. The spiller does the same for
+  what it must spill, now also from such VGPRs.
 
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
@@ -261,7 +334,18 @@ on the same inputs in these ways:
 - **Rounding.** Each rounding the IR states is kept. LLVM may fuse operations
   the IR keeps separate: for example, the last FMA of a chain and the f16
   conversion of its result become one `v_fma_mixlo_f16`, with one rounding
-  instead of two. Such outputs can differ by 1 ULP.
+  instead of two. Such outputs can differ by 1 ULP (about 1 element in 10^5 of
+  an fp16 depthwise convolution). On gfx950 the compiler makes the same fusion
+  where LLVM does, so those outputs agree bit for bit
+  (`target/gfx9/trunc_mix.rs`): a scalar f16 conversion of an f32 `arith.fma`
+  or `arith.fmul` that only buffer stores read, or that is the only such
+  conversion of its region and only plain stores read. LLVM leaves two or more
+  of the latter to its SLP vectorizer (a `<2 x float>` multiply and
+  `v_cvt_pk_f16_f32`, which round twice, as does the direct compiler's packed
+  form), and a conversion of a loop's carried value is not a product at all
+  (the direct compiler's own unrolling does not change that: the conversions are
+  marked on the IR as parsed). A product that other instructions read is
+  computed again inside the `v_fma_mixlo_f16`, as LLVM does.
 - **NaN and signed zero.** Float `max` and `min` quiet a signaling NaN first,
   as LLVM's `maxnum` semantics require, and no rewrite assumes that there are no
   NaNs or no signed zeros. COMGR's code can skip the quieting, or fold a pattern
@@ -273,19 +357,48 @@ on the same inputs in these ways:
 ## Limits
 
 - Only gfx1151 and gfx950.
-- `tile.inline_asm`: only the empty `"=v,0"` barrier, and on gfx950 an LDS read
+- `tile.inline_asm`: only the empty `"=v,0"` barrier and `"=s,0"` pin (of a
+  dword or, uniform, a 64-bit pointer), and on gfx950 an LDS read
   (`ds_read_b32`, `ds_read_b64` or `ds_read_b128` with constraints `=v,v`),
-  which one rocKE GEMM emits. Any other template is
+  which one rocKE GEMM emits, and the general templates of `rir/isel_asm.rs`.
+  Those take the clobbers `memory`, `scc`, `vcc` and `m0`; the DMA ring's
+  `s_mov_b32 m0, $1` / `global_load_lds_dword[x4] $0, $2` (a VGPR offset and an
+  SGPR pair) is an LDS DMA whose completion only the kernel's own `s_waitcnt`s
+  order. A `v_mfma_*` template written with AGPR operands (`=a` outputs, pinned
+  `{a[x:y]}`) is emitted in VGPR form; a raw `aN` register name in a template is
+  refused. Any other template or clobber (`v_mov_b32_sdwa`, for one) is
   `ROCKE_DIRECT_UNSUPPORTED`.
+- `cf.return` under control flow whose lanes differ (an `scf.if` with a per-lane
+  condition, or an `scf.for` with per-lane bounds) takes only the lanes that
+  reach it out of EXEC for the rest of the kernel, through a lane mask the
+  kernel keeps: each EXEC restore at the end of such a region leaves those lanes
+  out, and the wave ends once none is left, after the outermost such region.
+  Barriers that the remaining lanes reach are then taken by fewer lanes, as in
+  LLVM's lowering of the same IR. A `cf.return` where every lane returns ends
+  the wave at once. The uniformity analysis calls an `arith.sitofp_f32` of a
+  uniform value uniform, as LLVM's does, so the `floor(log2(n))` loop bounds
+  of the unified-attention sequence lookup stay scalar, and the returns they
+  guard are the plain kind.
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
-- `agpr_alloc`: only `[0, 0]`.
+- `tile.writelane` takes a constant lane only (a dynamic lane is refused);
+  `tile.global_load_atomic` and `tile.global_store_atomic` are lowered for
+  monotonic ordering only (acquire and seq_cst are refused);
+  `tile.dpp_xor` on gfx950 needs a mask with a register-only DPP encoding (1, 2,
+  3, 7, 8 or 15), as the LLVM lowering does, and `tile.dpp_row_mirror` takes the
+  controls `0x140` and `0x141`.
+- A spill that passes the 4 KiB scratch offset range is not an error on gfx950:
+  see Spilling above. Elsewhere it is `ROCKE_DIRECT_REGISTERS`.
+- i16 is the 16-bit view of an f16 or bf16 scalar. Of the i16 vectors, 1-lane
+  `vector.and`, splat and bitcast are lowered; extracts and inserts need lever
+  `i16vec`, and global accesses of i16 vectors are refused.
+- `agpr_alloc`: `[0, 0]` (no AGPRs) and `[lo, hi]` with `hi` up to 256 (at most `hi`). The kernel attribute `mfma_vgpr_form` (rocKE's `-amdgpu-mfma-vgpr-form`) is accepted and changes nothing: accumulators stay in VGPRs and move to AGPRs only as above.
 - An op name the parser does not know is `ROCKE_DIRECT_PARSE`, so
   `compile_kernel` raises instead of falling back. A new IR op needs at least
   its name and `OpKind` in `rir/ast.rs`, and a `ROCKE_DIRECT_UNSUPPORTED`
   refusal in instruction selection until it is lowered.
-- No branch relaxation: a branch past the instruction's offset range fails with
-  `ROCKE_DIRECT_ENCODE`.
+- Branch relaxation is gfx950 only: on gfx1151 a branch past the instruction's
+  offset range fails with `ROCKE_DIRECT_ENCODE`.
 - The LDS swizzle runs on wave32 only; its bank model is gfx1151's.
 - One kernel per code object.
 - No debug information: no DWARF and no line tables. `ROCKE_DEBUG_LOC` adds
@@ -296,6 +409,19 @@ on the same inputs in these ways:
 - Malformed or extreme input is rejected, but not always with a diagnostic that
   names the cause: `scf.if` regions nested deeply enough that their saved EXEC
   masks use up the SGPRs, for example, end in `ROCKE_DIRECT_REGISTERS`.
+
+## Levers
+
+`ROCKE_DIRECT_LEVERS` (comma-separated) turns on code-generation choices that are off by default; the complete list is `rir::LEVERS` in
+[`rust/rocke-codeobj/src/rir/mod.rs`](../../rust/rocke-codeobj/src/rir/mod.rs), and the Python backend's default set is
+`DIRECT_DEFAULT_LEVERS` in `rocke/helpers/compile.py`. Levers for gfx950 attention loops (the dense attention builders request these four through the kernel attribute `direct_levers`):
+
+| Lever | Effect | Code |
+|---|---|---|
+| `cmpreassoc` | Both sides of an i32 compare in a loop become (leaf sum) + constant before loop-invariant code motion, so a row of compares against distinct constants (a causal mask's column index per accumulator element) shares one base per trip instead of hoisting a register per constant. | `rir/reassoc.rs` |
+| `rematv` | Spilling also recomputes at their uses single-definition VGPR values computed from VGPRs defined once outside every loop (at least three sharing a source) instead of storing them. | `rir/spill.rs` |
+| `valcoal` | Allocation coalesces a copy of a dword defined once earlier in its block into its source's register while the source is still live (both hold one value), when the copy dies in the block. | `rir/regalloc.rs` |
+| `packtuple` | Two adjacent f32 VALU instructions whose results are the two halves of one tuple pack into one `v_pk_*` that writes the tuple. | `target/gfx9/pack.rs` |
 
 ## Debug controls
 
@@ -320,6 +446,10 @@ Switches for both targets:
 | `nolicm` | No loop-invariant code motion. |
 | `noalias` | Ignores the `noalias` facts: every pair of global accesses stays in order. |
 | `nounroll` | No automatic unrolling. Loops the IR marks `unroll = true` still unroll. |
+| `rematforce` | gfx950: keeps the remat retry whenever it compiles. |
+| `noremat` | gfx950: no retry with loop-invariant addresses recomputed in loops, and the spiller recomputes values only from constants and scalars. |
+| `tracepressure` | Prints the pressure of load sinking alone and of each window to stderr, the registers live at the busiest point by defining opcode (`ROCKE_DIRECT_TRACE_FILE=path` also writes the function with its pressure per instruction), and what the remat retry did. |
+| `noglobalfold` | Leaves the constants of unrolled copies in their global addresses (no offset folding). |
 | `noldsreuse` | Every LDS allocation gets its own space. |
 | `nohashcons` | Parses repeated constants as written. |
 | `nopeephole`, `nopeephole_<family>` | Skips the proven peephole rules, or one family of them. |
@@ -330,6 +460,7 @@ Switches for both targets:
 | `nocoalesce` | No copy coalescing in the register allocator. |
 | `nohoist` | Leaves spill reloads right before their uses. |
 | `verifyspill` | Checks every spill round against a full recomputation. Slow. |
+| `showwindow` | Prints the scheduling window each compile chose, and the VGPRs and spilled dwords of the result, to stderr. |
 | `burs` | Plans 32-bit integer address arithmetic with the prototype tree-pattern selector (`rir/burs.rs`). Off by default. |
 
 gfx1151 only:
@@ -357,14 +488,22 @@ gfx950 only:
 | `noselect9` | Skips gfx950's own instruction rewrites (`target/gfx9/select.rs`). |
 | `nowideadd` | Keeps the carry adds of a 64-bit address plus a zero-extended VGPR. |
 | `nopack` | No packed f32. |
+| `nounpack` | Keeps a packed f32 instruction that an MFMA of its block reads packed (`target/gfx9/unpack.rs`). |
+| `nomixtrunc` | Rounds an f32 product or FMA to f16 in two steps (`v_fma_f32`, `v_cvt_f16_f32`) where LLVM fuses them into one `v_fma_mixlo_f16`. |
+| `nopackco` | Keeps the copies that build a tuple from values also used alone. |
+| `norfladd` | Reads an LDS DMA address's first lane after the uniform addend is added, per load. |
+| `novoffsplit` | Keeps each buffer DMA load's lane offset as the IR writes it (a multiply per load). |
 | `noliteralreuse` | Moves a literal into a register at each use. |
 | `nocopyreuse` | Copies an SGPR into a VGPR at each use that needs one. |
 | `noclauses` | Allocates registers without keeping loads apart from their memory clauses. |
+| `trace` | Prints, to stderr, the VGPR pressure of each scheduling candidate, where it peaks and what is live there, and the window taken. |
 | `norelief` | Never retries a window with its SGPR results sunk. |
 | `notight` | Takes load sinking alone, or program order, before a window that fits only by packing tuples first. |
 | `nobankspill` | Spills without putting the accumulators in AGPRs first, and tries no schedule that fits with them there. |
 | `nobankfits` | Before spilling, tries no candidate schedule that fits with the accumulators in AGPRs; the accumulators beside spill slots stay. |
 | `nobankwide` | Tries no wider window with the accumulators in AGPRs. |
+| `nowideagpr` | A spill past the 4 KiB scratch offset range is an error: no retry with every AGPR, nor with scratch addressed from an SGPR. |
+| `nosmemsink` | Leaves the compare-and-select pairs that read a scalar load's result where selection put them (lever `smemsink`). |
 | `nomasks64` | Evaluates a uniform compare at each lane-mask reader. |
 | `nolatency` | Weighs no wider window with SGPRs in VGPR lanes for a latency-bound kernel without MFMAs. |
 | `nounrollcost` | Unrolls automatically and keeps unrolled code by the shared rules only. |

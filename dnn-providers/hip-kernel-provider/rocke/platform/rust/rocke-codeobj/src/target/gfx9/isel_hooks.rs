@@ -273,6 +273,30 @@ mod tests {
     }
 
     #[test]
+    fn gfx950_dpp_xor_refuses_masks_without_a_register_encoding() {
+        let text = |mask: u32| {
+            kernel(
+                64,
+                &format!(
+                    "    %x : i32 = tile.dpp_xor ( %tid ) {{ xor_mask = i:{mask} }}\n    \
+                     memref.global_store_typed ( %Y, %tid, %x ) {{ align = i:4, elem_type = s:\"i32\" }}\n"
+                ),
+            )
+        };
+        for mask in 1..16 {
+            let gfx950 = select(&text(mask), Target::Gfx950).map(|_| ());
+            if [1, 2, 3, 7, 8, 15].contains(&mask) {
+                assert!(gfx950.is_ok(), "mask {mask}");
+            } else {
+                let e = gfx950.err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(e.contains("no register-only DPP encoding") && e.contains("xor_mask"), "mask {mask}: {e}");
+            }
+            // row_xmask takes every mask on gfx11
+            assert!(select(&text(mask), Target::Gfx1151).is_ok(), "gfx1151 mask {mask}");
+        }
+    }
+
+    #[test]
     fn gfx950_loads_both_halves_whole() {
         // Two f16 loads into the halves of one register: gfx1151 loads them
         // straight into the halves (d16), gfx950 loads each whole and packs.

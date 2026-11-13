@@ -604,8 +604,8 @@ inst   VMfmaScale32x32x64F8f6f4 v_mfma_scale_f32_32x32x64_f8f6f4 VOP3P 0x2e opc=
 # M0 is implicit, so the rows are fences: no instruction is scheduled across one (it reads M0 and writes LDS).
 inst   BufLoadLdsB32     buffer_load_dword         MUBUF   0x14   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
 inst   BufLoadLdsB128    buffer_load_dwordx4       MUBUF   0x17   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
-inst   GLoadLdsB32       global_load_lds_dword     GLOBAL  0x2a   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
-inst   GLoadLdsB128      global_load_lds_dwordx4   GLOBAL  0x7d   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+inst   GLoadLdsB32       global_load_lds_dword     GLOBAL  0x2a   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol m=saddr imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
+inst   GLoadLdsB128      global_load_lds_dwordx4   GLOBAL  0x7d   opc=gfx9 flags=VMEM_LOAD|LDS|FENCE u=vaddr:v2 imm=off12cpol m=saddr imp=use:exec,use:m0 unit=VMEM lat=vmem_load form=lds haz=h12
 # Transposing LDS reads: 64 bits per lane, gathered across the lanes of a group in 16-bit (b16) or 8-bit (b8)
 # elements, so a lane's result depends on the other lanes' addresses.
 inst   DsReadB64TrB16    ds_read_b64_tr_b16        DS      0xe3   opc=gfx9 flags=LDS d=vdst:v2 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
@@ -623,7 +623,9 @@ inst   VCvtPkFp8F32      v_cvt_pk_fp8_f32          VOP3    0x2a2  opc=gfx9 flags
 inst   VCvtPkBf8F32      v_cvt_pk_bf8_f32          VOP3    0x2a3  opc=gfx9 flags=VALU|TIED d=vdst:v1 u=src0:vs1,src1:vs1,old:v1 m=opsel_dst imp=use:exec unit=VALU lat=valu
 # The packed f16 atomic add (llvm.amdgcn.global.atomic.fadd.v2f16): each half of the dword adds its f16.
 inst   GAtomicPkAddF16   global_atomic_pk_add_f16  GLOBAL  0x4e   opc=gfx9 flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicPkAddBf16   global_atomic_pk_add_bf16  GLOBAL  0x52   opc=gfx9 flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
 inst   GAtomicPkAddF16Rtn global_atomic_pk_add_f16 GLOBAL  0x4e   opc=gfx9 flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
+inst   GAtomicPkAddBf16Rtn global_atomic_pk_add_bf16 GLOBAL  0x52   opc=gfx9 flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
 # The Qwen3.8 monokernel device ops (rocKE IR `tile.s_getreg`, `tile.s_sleep`, `tile.memrealtime`,
 # `tile.global_atomic_add_scoped` of an i64, `arith.cvt_scalef32_pk_bf16_fp4`; rir/isel.rs). The scaled
 # convert's byte select is op_sel[1:0] (source 0 high-half bits OPSEL_SRC0 and OPSEL_SRC1).

@@ -368,7 +368,8 @@ _LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
 
 
 def _detect_llvm_flavor() -> str:
-    """Choose an explicit flavor or query the selected code-object compiler.
+    """Choose an explicit flavor or query COMGR, the compiler of LLVM IR (also
+    under ``ROCKE_CODEOBJ_BACKEND=direct``, which reads rocKE IR instead).
 
     Loading and querying are owned by runtime.code_object. ROCm package
     versions and unrelated compiler executables on PATH are not evidence about
@@ -390,12 +391,7 @@ def _detect_llvm_flavor() -> str:
         return env
     from ..runtime.code_object import _require_compiler_info
 
-    info = _require_compiler_info()
-    if info.llvm_version is None:
-        raise ValueError(
-            f"the {info.backend!r} code-object backend consumes rocKE IR, not "
-            "LLVM IR; no LLVM flavor applies"
-        )
+    info = _require_compiler_info("comgr")
     return _flavor_for_llvm(info.llvm_version[0])
 
 
@@ -3901,7 +3897,9 @@ class _Lowerer:
             raise NotImplementedError(f"math.{name} currently supports f32")
         self._need(f"{name}.f32")
         args = ", ".join(f"float {self._operand(v)}" for v in op.operands)
-        self._current().emit(f"  {op.result.name} = call float @llvm.{name}.f32({args})")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.{name}.f32({args})"
+        )
 
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands
@@ -5922,6 +5920,7 @@ class _Lowerer:
             f"@llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32 {self._operand(src)}, "
             f"float {self._operand(scale)}, i32 {int(op.attrs['byte'])})"
         )
+
     def _op_tile_perm_b32(self, op: Op) -> None:
         """``v_perm_b32`` — in-lane byte select across two VGPRs (pure VALU)."""
         src0, src1, sel = op.operands
@@ -6886,7 +6885,9 @@ class _Lowerer:
 
     def _op_tile_s_getreg(self, op: Op) -> None:
         """``tile.s_getreg``: ``device_ops.xcc_id`` / ``hw_id``'s asm."""
-        self._device_asm(op, f"s_getreg_b32 $0, hwreg(HW_REG_{op.attrs['hwreg']})", "=s")
+        self._device_asm(
+            op, f"s_getreg_b32 $0, hwreg(HW_REG_{op.attrs['hwreg']})", "=s"
+        )
 
     def _op_tile_s_sleep(self, op: Op) -> None:
         """``tile.s_sleep``: ``device_ops.s_sleep``'s asm."""
@@ -6907,7 +6908,9 @@ class _Lowerer:
         bits = ["sc1"] if op.attrs["scope"] == "system" else []
         if not op.attrs["returns"]:
             cp = (" " + " ".join(bits)) if bits else ""
-            self._device_asm(op, f"global_atomic_add{x2} $0, $1, $2{cp}", "v,v,s,~{memory}")
+            self._device_asm(
+                op, f"global_atomic_add{x2} $0, $1, $2{cp}", "v,v,s,~{memory}"
+            )
             return
         cp = " " + " ".join(["sc0", *bits])
         self._device_asm(

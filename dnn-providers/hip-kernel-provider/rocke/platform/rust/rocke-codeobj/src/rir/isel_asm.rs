@@ -19,10 +19,16 @@
 //! operand values moved into that file; a digit ties an input to that output
 //! (copied in first); `~{memory}` fences the block for the scheduler. Early
 //! clobbers need nothing: the instructions' own reads and writes give the
-//! allocator the live ranges. Anything else in a template is refused.
+//! allocator the live ranges. `a` constraints (AGPR operands, also pinned ones)
+//! are VGPRs, and a
+//! `v_mfma_*` instruction takes its operands in VGPR form. Anything else in a
+//! template is refused.
 
 use super::*;
 use crate::target::gfx9::gen_isa as t;
+
+/// The KiB of LDS (past any allocation: gfx950 has 160 KiB) that the DMA loads of a template are tagged with.
+const UNTRACKED_DMA_KIB: u32 = 254;
 
 /// One constraint of the string, outputs first.
 #[derive(Clone, Copy, Debug)]
@@ -45,6 +51,16 @@ fn fixed_vgprs(text: &str) -> Option<(u16, u8)> {
     Some((inner.parse().ok()?, 1))
 }
 
+/// `{a[x:y]}` or `{aN}`.
+fn fixed_agprs(text: &str) -> bool {
+    let Some(inner) = text.strip_prefix("{a").and_then(|t| t.strip_suffix('}')) else { return false };
+    match inner.strip_prefix('[').and_then(|r| r.strip_suffix(']')).map(|r| r.split_once(':')) {
+        Some(Some((a, b))) => matches!((a.parse::<u16>(), b.parse::<u16>()), (Ok(a), Ok(b)) if a <= b && b < 256),
+        Some(None) => false,
+        None => inner.parse::<u16>().is_ok_and(|n| n < 256),
+    }
+}
+
 fn parse_constraints(text: &str) -> Result<(Vec<Constraint>, Vec<String>), CompileError> {
     let (mut out, mut clobbers) = (Vec::new(), Vec::new());
     for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
@@ -53,6 +69,11 @@ fn parse_constraints(text: &str) -> Result<(Vec<Constraint>, Vec<String>), Compi
         } else if let Some(rest) = part.strip_prefix('=') {
             match rest.trim_start_matches('&') {
                 c @ ("v" | "s") => out.push(Constraint::Out(c.chars().next().unwrap())),
+                // An AGPR output (rocKE's AGPR-form MFMA templates): the VGPR form of the instruction.
+                "a" => out.push(Constraint::Out('v')),
+                // An output pinned to AGPRs `{a[x:y]}` / `{aN}`: where the AGPRs go is the allocator's choice
+                // here, and the template names the operand as `$N` (a raw `aN` in it is refused).
+                a if fixed_agprs(a) => out.push(Constraint::Out('v')),
                 other => match fixed_vgprs(other) {
                     Some((first, n)) => out.push(Constraint::OutFixed(first, n)),
                     None => return Err(unsupported(format!("inline asm output constraint {other:?}"))),
@@ -176,7 +197,7 @@ impl Isel<'_> {
     pub(super) fn inline_asm(&mut self, op: &Op) -> Result<(), CompileError> {
         let template = op.str_attr("template").unwrap_or("").to_string();
         let (constraints, clobbers) = parse_constraints(op.str_attr("constraints").unwrap_or(""))?;
-        if let Some(c) = clobbers.iter().find(|c| !matches!(c.as_str(), "memory" | "scc" | "vcc")) {
+        if let Some(c) = clobbers.iter().find(|c| !matches!(c.as_str(), "memory" | "scc" | "vcc" | "m0")) {
             return Err(unsupported(format!("inline asm clobber {c:?}")));
         }
         let fence = clobbers.iter().any(|c| c == "memory");
@@ -348,6 +369,7 @@ impl Isel<'_> {
             match text {
                 "exec" => return Ok(s.exec()),
                 "vcc" => return Ok(s.vcc()),
+                "m0" => return Ok(Opnd::P(Phys::M0, 1)),
                 _ => {}
             }
             // A raw VGPR name: only inside a fixed output (`{v[a:b]}`), as that output's dwords.
@@ -412,6 +434,17 @@ impl Isel<'_> {
                 return Ok(None);
             }
             _ => {}
+        }
+        // A matrix instruction (`v_mfma_*` dst, a, b, c): in VGPR form, as `mfma_vgpr_form` asks for; the
+        // `a` constraints of its template are VGPRs here.
+        if mnemonic.starts_with("v_mfma_") {
+            let opc = t::ALL.iter().copied().find(|&o| matches!(o, Opc::Gfx9(_)) && t::mnemonic(o) == Some(mnemonic) && crate::target::gfx9::agpr::is_mfma(o));
+            let (Some(opc), [d, a, b, c], []) = (opc, operands, mods) else {
+                return Err(unsupported(format!("inline asm {mnemonic} with {} operands and {} modifiers", operands.len(), mods.len())));
+            };
+            let (d, a, b, c) = (opnd(self, d)?, opnd(self, a)?, opnd(self, b)?, opnd(self, c)?);
+            self.emit(MInst::new(opc, [d], [a, b, c]));
+            return Ok(None);
         }
         if mnemonic == "s_dcache_inv" {
             self.emit(MInst::new(Opc::Gfx9(t::Gfx9Op::SDcacheInv), [], []));
@@ -495,6 +528,26 @@ impl Isel<'_> {
                 None => MInst::new(opc, [], uses).with_mods(m),
             };
             self.emit(inst.with_imm(offset));
+            return Ok(None);
+        }
+        // `global_load_lds_dword[x4] voffset, saddr`: an LDS DMA through M0 (the template's own `s_mov_b32 m0`),
+        // kept out of the compiler's LDS-wait tracking as LLVM does for an opaque block: the kernel's explicit
+        // `s_waitcnt`s order it, so its tag is a KiB range no allocation uses.
+        if let Some(width) = mnemonic.strip_prefix("global_load_lds_dword") {
+            let opc = match width {
+                "" => Opc::Gfx9(t::Gfx9Op::GLoadLdsB32),
+                "x4" => Opc::Gfx9(t::Gfx9Op::GLoadLdsB128),
+                _ => return Err(unsupported(format!("inline asm {mnemonic}"))),
+            };
+            let [voffset, saddr] = operands else {
+                return Err(unsupported(format!("inline asm {mnemonic} with {} operands", operands.len())));
+            };
+            if !mods.is_empty() {
+                return Err(unsupported(format!("inline asm {mnemonic} modifiers {mods:?}")));
+            }
+            let (voffset, saddr) = (opnd(self, voffset)?, opnd(self, saddr)?);
+            let tag = crate::target::gfx9::lds_dma::tag(UNTRACKED_DMA_KIB * 1024, 1024);
+            self.emit(MInst::new(opc, [], [voffset, saddr]).with_mods(M_SADDR).with_mem(tag));
             return Ok(None);
         }
         if let Some(width) = mnemonic.strip_prefix("global_load_dword").or_else(|| mnemonic.strip_prefix("global_store_dword")) {
@@ -586,5 +639,66 @@ mod tests {
         assert_eq!(opcode_of("v_cmp_lt_u32_e64", 3).map(|o| matches!(o, Opc::VCmp(_))), Some(true));
         assert_eq!(opcode_of("s_addc_u32", 3), Some(Opc::SAddcU32));
         assert_eq!(opcode_of("v_readfirstlane_b32", 2), Some(Opc::VReadfirstlaneB32));
+        // AGPR constraints, free and pinned, are VGPR outputs; a malformed pin is refused.
+        for text in ["=a,0,v,v", "={a[120:123]},v,v", "={a124},v", "=&a,v"] {
+            assert!(matches!(parse_constraints(text).unwrap().0[0], Constraint::Out('v')), "{text}");
+        }
+        for text in ["={a[3:1]}", "={a[0:300]}", "={a[1]}", "={q[0:3]}"] {
+            assert!(parse_constraints(text).is_err(), "{text}");
+        }
+    }
+
+    /// The AGPR-form MFMA templates of the attention backward (`=a` outputs, tied accumulators, or pinned
+    /// `{a[x:y]}` with a zero accumulator) compile in VGPR form: the MFMA names VGPRs, no AGPR is used.
+    #[test]
+    fn mfma_templates_with_agpr_constraints_compile_in_vgpr_form() {
+        let kernel = |constraints: &str, template: &str, operands: &str| {
+            format!(
+                "ckdsl.ir v1\nkernel @asm_mfma {{\n  attrs {{ max_workgroup_size = i:64, mfma_vgpr_form = b:true }}\n  params {{\n    %X : ptr<f16,global>\n    %Y : ptr<f32,global>\n  }}\n  \
+                 region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+                 %i : i32 = arith.mul ( %tid, %c4 )\n    \
+                 %a : vec<f16x4> = memref.global_load_vN ( %X, %i ) {{ align = i:8, elem_type = s:\"f16\", vec = i:4 }}\n    \
+                 %b : vec<f16x4> = memref.global_load_vN ( %X, %i ) {{ align = i:8, elem_type = s:\"f16\", vec = i:4 }}\n    \
+                 %z : vec<f32x4> = arith.constant_vec (  ) {{ elem = s:\"f32\", fill = f:0.0, vec = i:4 }}\n    \
+                 %acc : vec<f32x4> = tile.inline_asm ( {operands} ) {{ constraints = s:\"{constraints}\", convergent = b:true, sideeffect = b:true, template = s:\"{template}\" }}\n    \
+                 %e : f32 = vector.extract ( %acc ) {{ index = i:1 }}\n    \
+                 memref.global_store_typed ( %Y, %tid, %e ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+            )
+        };
+        for text in [
+            kernel("=a,0,v,v", "s_nop 1\\n\\tv_mfma_f32_16x16x16_f16 $0, $2, $3, $1\\n\\ts_nop 15", "%z, %a, %b"),
+            kernel("={a[120:123]},v,v", "s_nop 1\\n\\tv_mfma_f32_16x16x16_f16 $0, $1, $2, 0\\n\\ts_nop 15", "%a, %b"),
+        ] {
+            let listing = crate::rir::compile_any_target(&text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}")).listing();
+            assert_eq!(listing.matches("v_mfma_f32_16x16x16_f16").count(), 1, "{listing}");
+            assert!(!listing.contains("accvgpr") && !listing.contains(" a["), "{listing}");
+        }
+        // A raw AGPR name in the template is not mapped: refused, so COMGR compiles it.
+        let raw = kernel("=a,v,v", "v_mfma_f32_16x16x16_f16 $0, $1, $2, a[0:3]", "%a, %b");
+        assert!(crate::rir::compile_any_target(&raw, crate::target::Target::Gfx950).is_err());
+    }
+
+    /// rocKE's DMA-ring asm (`_attention_bwd_ring._ASM_X4`): M0 from an SGPR, a wait state, `global_load_lds_dwordx4`
+    /// through a 32-bit VGPR offset and an SGPR pair. It compiles on gfx950 to the instructions llvm-mc encodes.
+    #[test]
+    fn the_dma_ring_asm_is_an_lds_dma_through_m0() {
+        let text = "ckdsl.ir v1\nkernel @ring {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<bf16,global>\n    %Y : ptr<i32,global>\n  }\n  region @entry {\n    \
+                    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+                    %voff : i32 = arith.shl ( %tid, %c4 )\n    %lds : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:40960 }\n    \
+                    tile.inline_asm ( %voff, %lds, %X ) { constraints = s:\"v,s,s,~{m0},~{memory}\", sideeffect = b:true, template = s:\"s_mov_b32 m0, $1\\n\\ts_nop 0\\n\\tglobal_load_lds_dwordx4 $0, $2\" }\n    \
+                    tile.inline_asm ( %voff, %lds, %X ) { constraints = s:\"v,s,s,~{m0},~{memory}\", sideeffect = b:true, template = s:\"s_mov_b32 m0, $1\\n\\ts_nop 0\\n\\tglobal_load_lds_dword $0, $2\" }\n    \
+                    memref.global_store_typed ( %Y, %tid, %tid ) { align = i:4, elem_type = s:\"i32\" }\n    cf.return (  )\n  }\n}\n";
+        let listing = crate::rir::compile_any_target(text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+        let at = |name: &str| listing.lines().position(|l| l.trim_start().starts_with(name)).unwrap_or_else(|| panic!("{name}:\n{listing}"));
+        let lines: Vec<&str> = listing.lines().collect();
+        for (mnemonic, opcode) in [("global_load_lds_dwordx4", 0x7d), ("global_load_lds_dword ", 0x2a)] {
+            let i = at(mnemonic);
+            let words: Vec<u32> = lines[i].rsplit(": ").next().unwrap().split_whitespace().map(|w| u32::from_str_radix(w, 16).unwrap()).collect();
+            // GLOBAL (segment 2), the saddr form: no `off` in the saddr field.
+            assert_eq!((words[0] >> 26, words[0] >> 14 & 3, words[0] >> 18 & 0x7f), (0x37, 2, opcode), "{}", lines[i]);
+            assert_ne!(words[1] >> 16 & 0x7f, 0x7f, "saddr is a register pair: {}", lines[i]);
+            // M0 is written before it, with a wait state between (the template's own).
+            assert!(lines[..i].iter().rev().take(4).any(|l| l.contains("s_mov_b32 m0")), "{listing}");
+        }
     }
 }

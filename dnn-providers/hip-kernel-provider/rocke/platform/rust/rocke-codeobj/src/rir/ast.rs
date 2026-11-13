@@ -377,6 +377,9 @@ pub enum OpKind {
     LdsAtomicAdd,
     DppXor,
     QuadPerm,
+    /// `tile.dpp_row_mirror (data: i32) {ctrl}`: DPP `row_mirror` (0x140) or
+    /// `row_half_mirror` (0x141), a register-only in-row lane mirror.
+    DppRowMirror,
     MovDpp8,
     // internal forms produced by the optimizer (never parsed)
     KernArg,
@@ -432,6 +435,8 @@ pub enum OpKind {
     Permlane32Swap,
     /// `tile.readlane (v: i32|f32, lane: i32)`: lane `lane`'s `v`, uniform.
     ReadLane,
+    /// `tile.writelane (value, lane, passthrough)`: `passthrough` with `lane` replaced by the uniform `value`.
+    WriteLane,
     /// `arith.cvt_fp8_to_f32 (fp8e4m3) -> f32` and its bf8e5m2 twin (gfx950).
     CvtFp8ToF32,
     CvtBf8ToF32,
@@ -447,6 +452,14 @@ pub enum OpKind {
     CvtPkBf8F32,
     /// `vector.and (a, b: vec<i32xN>)`: element-wise and.
     VecAnd,
+    /// `vector.lshr (a, b: vec<i32xN>)`: element-wise logical shift right of `a` by `b`.
+    VecLshr,
+    /// `tile.global_load_atomic (ptr, index) {ordering, scope}`: a monotonic atomic load of the
+    /// i32 or i64 at `ptr[index]`; `tile.global_store_atomic (ptr, index, value)` its store.
+    GlobalLoadAtomic,
+    GlobalStoreAtomic,
+    /// `tile.byte_perm (a, b) {sel}`: `v_perm_b32`, the bytes of `{a, b}` that `sel` names.
+    BytePerm,
     /// `tile.s_wait_asynccnt {n}`: gfx1250's wait on its asynchronous LDS
     /// copies; a target without that counter has none to wait for.
     WaitAsyncCnt,
@@ -636,6 +649,7 @@ impl OpKind {
             "tile.lds_atomic_add" => OpKind::LdsAtomicAdd,
             "tile.dpp_xor" => OpKind::DppXor,
             "tile.quad_perm" => OpKind::QuadPerm,
+            "tile.dpp_row_mirror" => OpKind::DppRowMirror,
             "tile.mov_dpp8" => OpKind::MovDpp8,
             "arith.trunc_f32_to_bf16" => OpKind::TruncF32ToBf16,
             "tile.buffer_load_bf16" => OpKind::BufferLoadScalar,
@@ -681,6 +695,8 @@ impl OpKind {
             "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
             // `(ptr<f16>, index, vec<f16x2>)`: an atomic add of both halves at an f16 element index.
             "memref.global_atomic_add_pk_f16" => OpKind::GlobalAtomicAdd,
+            // `(ptr<bf16>, index, vec<bf16x2>)`: the same with `global_atomic_pk_add_bf16`.
+            "memref.global_atomic_add_pk_bf16" => OpKind::GlobalAtomicAdd,
             "memref.fence" => OpKind::Fence,
             "tile.sync_lds_only" => OpKind::SyncLdsOnly,
             "tile.smem_addr_of" => OpKind::SmemAddrOf,
@@ -692,6 +708,7 @@ impl OpKind {
             "tile.ds_read_tr_b8" => OpKind::DsReadTr8,
             "tile.permlane32_swap" => OpKind::Permlane32Swap,
             "tile.readlane" => OpKind::ReadLane,
+            "tile.writelane" => OpKind::WriteLane,
             "arith.cvt_fp8_to_f32" => OpKind::CvtFp8ToF32,
             "arith.cvt_bf8_to_f32" => OpKind::CvtBf8ToF32,
             "arith.cvt_pk_f32_fp8x4" => OpKind::CvtPkF32Fp8,
@@ -701,6 +718,10 @@ impl OpKind {
             "arith.cvt_pk_fp8_f32x4" => OpKind::CvtPkFp8F32,
             "arith.cvt_pk_bf8_f32x4" => OpKind::CvtPkBf8F32,
             "vector.and" => OpKind::VecAnd,
+            "vector.lshr" => OpKind::VecLshr,
+            "tile.byte_perm" => OpKind::BytePerm,
+            "tile.global_load_atomic" => OpKind::GlobalLoadAtomic,
+            "tile.global_store_atomic" => OpKind::GlobalStoreAtomic,
             "tile.s_wait_asynccnt" => OpKind::WaitAsyncCnt,
             "memref.global_flag_wait_eq" => OpKind::FlagWaitEq,
             "memref.global_flag_store" => OpKind::FlagStore,
@@ -779,6 +800,7 @@ impl OpKind {
                 | OpKind::LAtomicAdd
                 | OpKind::DppXor
                 | OpKind::QuadPerm
+                | OpKind::DppRowMirror
                 | OpKind::MovDpp8
                 | OpKind::BufferLoadScalar
                 | OpKind::BufferStoreScalar
@@ -802,6 +824,9 @@ impl OpKind {
                 | OpKind::LdsReadTr
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
+                | OpKind::WriteLane
+                | OpKind::GlobalLoadAtomic
+                | OpKind::GlobalStoreAtomic
                 | OpKind::WaitAsyncCnt
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
@@ -844,6 +869,7 @@ impl OpKind {
                     | OpKind::SmemLoadV4
                     | OpKind::DppXor
                     | OpKind::QuadPerm
+                    | OpKind::DppRowMirror
                     | OpKind::MovDpp8
                     | OpKind::BufferLoadScalar
                     | OpKind::Permlanex16
@@ -858,6 +884,7 @@ impl OpKind {
                     | OpKind::LdsReadTr
                     | OpKind::Permlane32Swap
                     | OpKind::ReadLane
+                    | OpKind::WriteLane
                     | OpKind::BufferLoadCp
                     | OpKind::Permlane16Swap
                     | OpKind::DppOp
@@ -887,6 +914,7 @@ impl OpKind {
                 | OpKind::TaggedPoll
                 | OpKind::AtomicAddScoped
                 | OpKind::GlobalStoreCp
+                | OpKind::GlobalStoreAtomic
                 // Orders memory like a write: nothing is reused across it.
                 | OpKind::CompilerFence
         )

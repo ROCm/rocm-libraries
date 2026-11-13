@@ -579,6 +579,13 @@ _CODEGEN_KNOB_DEFAULTS = MappingProxyType(
 AttentionDenseSpec = Gfx950AttentionDenseSpec
 
 
+# Direct code-object compiler levers of the dense kernels (``rocke.helpers.compile.DIRECT_LEVERS_ATTR``;
+# not IR, the LLVM lowering ignores them): ``cmpreassoc`` (a causal mask's per-element constants stay
+# immediates of one base), ``rematv`` (spilling recomputes hoisted address offsets), ``valcoal`` /
+# ``packtuple`` (the row-sum tuples take no copies and pack into ``v_pk_add_f32``). ``packfar`` (pairing
+# far-apart f32 ops) is not here: it did not pay.
+_DIRECT_LEVERS = "cmpreassoc,rematv,valcoal,packtuple"
+
 #: gfx950 LDS per workgroup (``ArchTarget("gfx950").lds_capacity_bytes``).
 GFX950_LDS_CAPACITY_BYTES = 163840
 
@@ -840,6 +847,7 @@ def build_attention_dense(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
+    b.kernel.attrs["direct_levers"] = _DIRECT_LEVERS
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -1797,6 +1805,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
     b.kernel.attrs["waves_per_eu"] = int(spec.waves_per_eu)
+    b.kernel.attrs["direct_levers"] = _DIRECT_LEVERS
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16

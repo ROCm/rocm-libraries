@@ -144,6 +144,10 @@ struct Isel<'a> {
     vals: Vec<Option<Val>>,
     lds: &'a FxHashMap<ValueId, u32>,
     depth: u32,
+    /// The lanes that executed a `cf.return` under divergent control flow (`return_op`), when the kernel has one:
+    /// EXEC restores leave them out, and the number of divergent `scf.if` / `scf.for` regions being selected.
+    dead: Option<VRef>,
+    divergent_depth: u32,
     single_wave: bool,
     /// The facts of the target selected for: wave size, lane-mask width.
     t: &'static TargetInfo,
@@ -175,6 +179,9 @@ struct Isel<'a> {
     vote_sel: FxHashMap<ValueId, (ValueId, bool, bool)>,
     /// f16 `vector.trunc_f32_to` results of f32 vector products, and the factors.
     trunc_mul: FxHashMap<ValueId, (ValueId, ValueId)>,
+    /// gfx950: scalar f16 conversions marked by `gfx9::trunc_mix` of an f32 `arith.fmul` or `arith.fma` result ->
+    /// its factors and addend (`None`: the product alone); each is one `v_fma_mixlo_f16`.
+    scalar_mix: FxHashMap<ValueId, (ValueId, ValueId, Option<ValueId>)>,
     /// `alias::value_tags`, by which VMEM instructions get `MInst::mem`;
     /// empty (every access `alias::ANY`) with `ROCKE_DIRECT_DEBUG=noalias`.
     mem_tags: Vec<u16>,
@@ -605,6 +612,11 @@ impl<'a> Isel<'a> {
             Val::T(t) if t.n == 2 => Ok((r(sub(t, 0, 1)), r(sub(t, 1, 1)))),
             other => Err(unsupported(format!("value {} ({other:?}) is not 64-bit", self.k.name_of(v)))),
         }
+    }
+
+    /// The low dword of a 64-bit value.
+    fn lo_dword(&mut self, v: ValueId) -> Result<Opnd, CompileError> {
+        Ok(self.d(v)?.0)
     }
 
     fn tuple(&mut self, v: ValueId) -> Result<VRef, CompileError> {
@@ -1102,8 +1114,12 @@ impl<'a> Isel<'a> {
         // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
         // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
         // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
+        // A 1-lane i16 vector that is only bitcast, splat or ANDed (the keyless-row mask of a 16-bit O store) is that
+        // 16-bit view too, whatever the lever.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
-        let i16_ok = matches!(op.kind, Extract | Insert) && super::lever("i16vec");
+        let one_lane = |v: &ValueId| !i16_vec(v) || matches!(self.k.ty(*v), Type::Vec(_, 1));
+        let i16_ok = (matches!(op.kind, Extract | Insert) && super::lever("i16vec"))
+            || (matches!(op.kind, Bitcast | VecSplat | VecAnd) && op.results.iter().chain(&op.operands).all(one_lane));
         if op.kind != VecBitcast && !i16_ok && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
             return Err(unsupported(format!("{:?} of i16 vectors", op.kind)));
         }
@@ -1273,6 +1289,7 @@ impl<'a> Isel<'a> {
                 self.valu(Opc::VCvtF32F16, [r(dst)], [src], if hi { M_OPSEL_SRC0 } else { 0 });
                 self.set(res.unwrap(), Val::W(r(dst)));
             }
+            CastF32To | TruncF32ToF16 if self.scalar_mix.contains_key(&res.unwrap()) => self.scalar_trunc_mix(op)?,
             CastF32To => {
                 if op.str_attr("target") != Some("f16") {
                     return Err(unsupported("cast_f32_to only supports f16"));
@@ -1640,6 +1657,14 @@ impl<'a> Isel<'a> {
                 self.set(op.results[1], Val::W(r(y)));
             }
             ReadLane => self.readlane(op)?,
+            WriteLane => self.writelane(op)?,
+            BytePerm => {
+                let (a, b) = (self.w(op.operands[0])?, self.w(op.operands[1])?);
+                let sel = Opnd::Imm(op.int_attr("sel").unwrap_or(0) as u32);
+                let out = self.v3(Opc::VPermB32, a, b, sel, 0);
+                self.set(op.results[0], Val::W(out));
+            }
+            GlobalLoadAtomic | GlobalStoreAtomic if self.t.target == Target::Gfx950 => self.global_atomic(op)?,
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 use crate::target::gfx9::fp8::{self, Cvt};
                 if self.t.target == Target::Gfx1151 {
@@ -1869,7 +1894,16 @@ impl<'a> Isel<'a> {
             // rustgemm: the AGPR pin is an identity here (the allocator picks the file).
             InlineAsmIdentity if op.asm_pin() == Some('a') => self.agpr_pin(op)?,
             InlineAsmIdentity if op.asm_pin() == Some('s') => {
-                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged.
+                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged; a pointer in an SGPR pair.
+                if let Type::Ptr(_) = self.k.ty(op.operands[0]) {
+                    let (lo, hi) = self.d(op.operands[0])?;
+                    if self.is_v(lo) || self.is_v(hi) {
+                        return Err(unsupported("an \"=s,0\" pin of a pointer in VGPRs"));
+                    }
+                    let (lo, hi) = (self.to_s(lo), self.to_s(hi));
+                    self.set(res.unwrap(), Val::D(lo, hi));
+                    return Ok(());
+                }
                 let x = self.w(op.operands[0])?;
                 if self.is_v(x) {
                     return Err(unsupported("an \"=s,0\" pin of a value in VGPRs"));
@@ -1945,9 +1979,19 @@ impl<'a> Isel<'a> {
             // It only orders instructions, so emitting nothing is correct.
             IglpOpt => {}
             LAtomicAdd => self.lds_atomic_add(op)?,
-            DppXor | QuadPerm | MovDpp8 => {
+            DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
+                        // As `rocke.core.ir.dpp_xor_ctrl`: a mask outside the register-only set is the kernel's error.
+                        Some(mask @ 1..=15) if self.t.target == Target::Gfx950 && !matches!(mask, 1 | 2 | 3 | 7 | 8 | 15) => {
+                            return Err(CompileError::new(
+                                "ROCKE_DIRECT_INVALID",
+                                format!(
+                                    "tile.dpp_xor: xor_mask {mask} has no register-only DPP encoding on gfx950 (no row_xmask); \
+                                     masks 1, 2, 3, 7, 8 and 15 do. Use warp_shuffle_xor (ds_swizzle) for this mask"
+                                ),
+                            ));
+                        }
                         Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
                             isel_hooks::XorShuffle::QuadPerm(ctrl) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl, true)),
                             isel_hooks::XorShuffle::Swizzle(offset) => (Opc::DsSwizzleB32, offset),
@@ -1958,6 +2002,10 @@ impl<'a> Isel<'a> {
                     QuadPerm => match op.int_attr("ctrl") {
                         Some(ctrl @ 0..=255) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
                         _ => return Err(unsupported("tile.quad_perm ctrl outside 0..255")),
+                    },
+                    DppRowMirror => match op.int_attr("ctrl") {
+                        Some(ctrl @ 0x140..=0x141) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
+                        _ => return Err(unsupported("tile.dpp_row_mirror ctrl is not 0x140 or 0x141")),
                     },
                     _ => match op.int_attr("sel") {
                         Some(sel) => {
@@ -1987,7 +2035,9 @@ impl<'a> Isel<'a> {
                 let x = self.w(op.operands[0])?;
                 let dst = self.vgpr(1);
                 self.valu(opc, [r(dst)], [x], 0);
-                self.set(res.unwrap(), Val::W(r(dst)));
+                // A uniform conversion's result is an SGPR (`analysis::classify`).
+                let out = if op.kind == SitofpF32 && self.uni(res.unwrap()) { self.to_s(r(dst)) } else { r(dst) };
+                self.set(res.unwrap(), Val::W(out));
             }
             Tanh => return Err(unsupported("math.tanh survived the optimizer")),
             Fdot2 => self.fdot2_op(op)?,
@@ -1996,7 +2046,7 @@ impl<'a> Isel<'a> {
                 let (lo, hi) = self.d(op.operands[0])?;
                 self.set(res.unwrap(), Val::D(lo, hi));
             }
-            VecAdd | VecSub | VecMul | VecFma | VecAnd => self.vec_arith(op)?,
+            VecAdd | VecSub | VecMul | VecFma | VecAnd | VecLshr => self.vec_arith(op)?,
             VecSplat => self.splat_op(op)?,
             VecBitcast => {
                 let t = self.same_class_tuple(op.operands[0])?;
@@ -2086,7 +2136,7 @@ impl<'a> Isel<'a> {
             For => self.for_op(op)?,
             If | IfElse => self.if_op(op)?,
             Yield => {}
-            Return => self.emit(MInst::new(Opc::SEndpgm, [], [])),
+            Return => self.return_op(),
             other => return Err(unsupported(format!("op {other:?} has no direct lowering"))),
         }
         Ok(())
@@ -2816,8 +2866,12 @@ impl<'a> Isel<'a> {
             OpKind::VecSub | OpKind::Fsub => OpKind::Fsub,
             OpKind::VecMul | OpKind::Fmul => OpKind::Fmul,
             OpKind::VecAnd => OpKind::And,
+            OpKind::VecLshr => OpKind::Lshr,
             _ => OpKind::Fma,
         };
+        if kind == OpKind::And && elem == Scalar::I16 {
+            return self.and_i16x1(op);
+        }
         let mut srcs = Vec::with_capacity(3);
         for &o in &op.operands {
             srcs.push(match self.splats.get(&o) {
@@ -2847,6 +2901,12 @@ impl<'a> Isel<'a> {
             let d = [r(sub(dst, i, 1))];
             if let Some(opc) = opc {
                 self.valu(opc, d, &x[..], 0);
+                continue;
+            }
+            // `v_lshrrev_b32` shifts its src1 (a VGPR) by its src0.
+            if kind == OpKind::Lshr {
+                let value = if self.is_v(x[0]) { x[0] } else { self.to_v(x[0]) };
+                self.valu(Opc::VLshrrevB32, d, [x[1], value], 0);
                 continue;
             }
             // VOP2 wants the VGPR in src1.
@@ -2879,6 +2939,23 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
+    /// `vector.and` of two 1-lane i16 vectors (the keyless-row mask of a 16-bit
+    /// O store): the AND of the zero-extended halves, whose high half is zero.
+    fn and_i16x1(&mut self, op: &Op) -> Result<(), CompileError> {
+        let uni = self.uni(op.results[0]);
+        let mut x = [Opnd::Imm(0); 2];
+        for (x, &o) in x.iter_mut().zip(&op.operands) {
+            let (h, hi) = self.half(o)?;
+            *x = self.widen16(h, hi, false, uni);
+        }
+        let out = match x {
+            [Opnd::Imm(a), Opnd::Imm(b)] => Opnd::Imm(a & b),
+            _ => self.int_bin(OpKind::And, x[0], x[1], !self.is_v(x[0]) && !self.is_v(x[1]), false)?,
+        };
+        self.set(op.results[0], Val::H(out, false));
+        Ok(())
+    }
+
     /// `vector.splat`: the scalar copied into every element.
     fn splat_op(&mut self, op: &Op) -> Result<(), CompileError> {
         let v = op.results[0];
@@ -2886,6 +2963,10 @@ impl<'a> Isel<'a> {
             return Err(unsupported("vector.splat to a scalar"));
         };
         match elem.bytes() {
+            2 if elem == Scalar::I16 && n == 1 => {
+                let (o, hi) = self.half(op.operands[0])?;
+                self.set(v, Val::H(o, hi));
+            }
             4 => {
                 let o = self.w(op.operands[0])?;
                 let dst = self.vgpr(n as u8);
@@ -3087,6 +3168,38 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
+    /// A scalar f16 conversion of an f32 product or FMA (`find_scalar_trunc_mix`): one `v_fma_mixlo_f16` of the
+    /// factors and the addend (-0.0 for a product, so that a negative zero product stays one), which rounds the
+    /// exact result to f16 once, as LLVM selects `fptrunc (fma a, b, c)` and `fptrunc (fmul a, b)`.
+    fn scalar_trunc_mix(&mut self, op: &Op) -> Result<(), CompileError> {
+        let v = op.results[0];
+        let (a, b, c) = self.scalar_mix[&v];
+        let mut mods = 0;
+        let mut src = |this: &mut Self, i: u32, x: ValueId| -> Result<Opnd, CompileError> {
+            // An `arith.fneg` read by FMAs only is never emitted: its operand comes with a negation modifier.
+            let o = match this.fneg_fma.get(&x) {
+                Some(&y) => {
+                    mods |= M_NEG0 << i;
+                    this.w(y)?
+                }
+                None => this.w(x)?,
+            };
+            Ok(this.vop3p_opnd(o))
+        };
+        let (a, b) = (src(self, 0, a)?, src(self, 1, b)?);
+        let c = match c {
+            Some(c) => src(self, 2, c)?,
+            None => {
+                mods |= M_NEG2;
+                Opnd::Imm(0)
+            }
+        };
+        let dst = self.vgpr(1);
+        self.valu(Opc::VFmaMixloF16, [r(dst)], [a, b, c], mods);
+        self.set(v, Val::H(r(dst), false));
+        Ok(())
+    }
+
     /// `tile.wave_any(p)` / `tile.wave_all(p)`: whether some / every lane of
     /// the wave has `p != 0`; all of them must be active for `wave_all`, as
     /// in the LLVM lowering (ballot == full wave mask).
@@ -3158,6 +3271,9 @@ impl<'a> Isel<'a> {
             Scalar::F32 => (Opc::GAtomicAddF32, Opc::GAtomicAddF32Rtn),
             Scalar::F16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::F16, 2) => {
                 crate::target::gfx9::conv_ops::pk_add_f16()
+            }
+            Scalar::BF16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::BF16, 2) => {
+                crate::target::gfx9::conv_ops::pk_add_bf16()
             }
             other => return Err(unsupported(format!("memref.global_atomic_add of {other:?}"))),
         };
@@ -3676,6 +3792,13 @@ impl<'a> Isel<'a> {
                 let out = self.m_bin(opc, a, b);
                 self.set(v, Val::M(out));
             }
+            // Only the low dword is read (`low_i64`): a 32-bit op, the high dword 0 which no use reads.
+            Type::Scalar(Scalar::I64) if self.lds_dma.low_int.contains(&v) => {
+                let a = self.lo_dword(op.operands[0])?;
+                let b = self.lo_dword(op.operands[1])?;
+                let lo = self.int_bin(op.kind, a, b, uniform, false)?;
+                self.set(v, Val::D(lo, Opnd::Imm(0)));
+            }
             Type::Scalar(Scalar::I64) => {
                 let a = self.d(op.operands[0])?;
                 let out = match op.kind {
@@ -4171,21 +4294,26 @@ impl<'a> Isel<'a> {
     /// The address of the i32 `flags[index]` as global access operands:
     /// the index sign-extended and scaled, as the reference's GEP takes it.
     fn flag_addr(&mut self, flags: ValueId, index: ValueId) -> Result<(Uses, u32), CompileError> {
+        self.element_addr(flags, index, 2)
+    }
+
+    /// The address of element `index` of `ptr`, elements of `1 << shift` bytes.
+    fn element_addr(&mut self, flags: ValueId, index: ValueId, shift: u32) -> Result<(Uses, u32), CompileError> {
         let base = self.d(flags)?;
         let i = self.w(index)?;
         let uniform = self.uni(flags) && self.uni(index);
         let off = match i {
             Opnd::Imm(c) => {
-                let bytes = c as i32 as i64 * 4;
+                let bytes = (c as i32 as i64) << shift;
                 (Opnd::Imm(bytes as u32), Opnd::Imm((bytes >> 32) as u32))
             }
             _ if uniform => {
                 let s = self.to_s(i);
-                (self.s_bin(Opc::SLshlB32, s, Opnd::Imm(2)), self.s_bin(Opc::SAshrI32, s, Opnd::Imm(30)))
+                (self.s_bin(Opc::SLshlB32, s, Opnd::Imm(shift)), self.s_bin(Opc::SAshrI32, s, Opnd::Imm(32 - shift)))
             }
             _ => {
                 let v = self.to_v(i);
-                (self.v_bin(Opc::VLshlrevB32, Opnd::Imm(2), v), self.v_bin(Opc::VAshrrevI32, Opnd::Imm(30), v))
+                (self.v_bin(Opc::VLshlrevB32, Opnd::Imm(shift), v), self.v_bin(Opc::VAshrrevI32, Opnd::Imm(32 - shift), v))
             }
         };
         let (lo, hi) = self.add64(base, off, uniform, false);
@@ -4331,6 +4459,44 @@ impl<'a> Isel<'a> {
             self.emit(MInst::new(plain, [], [voff, r(base), data]).with_mods(mods));
         }
         self.emit(MInst::new(Opc::SchedBarrier, [], []));
+        Ok(())
+    }
+
+    /// `tile.global_load_atomic` / `tile.global_store_atomic` on gfx950: monotonic only, as the memory
+    /// model of gfx950 spells them, a plain access with the scope's cache bits (agent: sc1, system:
+    /// sc0 and sc1, workgroup: none). The ordered forms need fences and cache invalidates: refused.
+    fn global_atomic(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::cpol::M_SC1;
+        let store = op.kind == OpKind::GlobalStoreAtomic;
+        let name = if store { "tile.global_store_atomic" } else { "tile.global_load_atomic" };
+        if op.str_attr("ordering") != Some("monotonic") {
+            return Err(unsupported(format!("{name} with ordering {:?}", op.str_attr("ordering"))));
+        }
+        let mods = match op.str_attr("scope") {
+            Some("agent") => M_SC1,
+            Some("system") => M_GLC | M_SC1,
+            Some("workgroup") => 0,
+            other => return Err(unsupported(format!("{name} at scope {other:?}"))),
+        };
+        let data_ty = self.k.ty(if store { op.operands[2] } else { op.results[0] }).clone();
+        let wide = data_ty == Type::Scalar(Scalar::I64);
+        let (mut uses, saddr) = self.element_addr(op.operands[0], op.operands[1], if wide { 3 } else { 2 })?;
+        if store {
+            if wide {
+                let (lo, hi) = self.d(op.operands[2])?;
+                let pair = self.pair_v(lo, hi);
+                uses.push(r(pair));
+            } else {
+                let value = self.w(op.operands[2])?;
+                uses.push(self.to_v(value));
+            }
+            self.emit(MInst::new(if wide { Opc::GStoreB64 } else { Opc::GStoreB32 }, [], uses).with_mods(mods | saddr));
+            return Ok(());
+        }
+        let dst = self.vgpr(if wide { 2 } else { 1 });
+        self.emit(MInst::new(if wide { Opc::GLoadB64 } else { Opc::GLoadB32 }, [r(dst)], uses).with_mods(mods | saddr));
+        let val = if wide { Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))) } else { Val::W(r(dst)) };
+        self.set(op.results[0], val);
         Ok(())
     }
 
@@ -5051,6 +5217,30 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
+    /// `tile.writelane (value, lane, passthrough)`: a copy of `passthrough` that
+    /// `v_writelane_b32` then updates in place. Its source 0 is an SGPR or an
+    /// inline constant and its lane a constant (one SGPR at most).
+    fn writelane(&mut self, op: &Op) -> Result<(), CompileError> {
+        let Opnd::Imm(lane) = self.w(op.operands[1])? else {
+            return Err(unsupported("tile.writelane with a lane that is not a constant"));
+        };
+        let value = match self.w(op.operands[0])? {
+            Opnd::Imm(k) if (-16..=64).contains(&(k as i32)) => Opnd::Imm(k),
+            o if self.is_v(o) => self.to_s(o),
+            o => {
+                let s = self.sreg(1);
+                self.copy(s, o);
+                r(s)
+            }
+        };
+        let old = self.w(op.operands[2])?;
+        let dst = self.vgpr(1);
+        self.copy(dst, old);
+        self.emit(MInst::new(Opc::VWritelaneB32, [r(dst)], [value, Opnd::Imm(lane & 63), r(dst)]));
+        self.set(op.results[0], Val::W(r(dst)));
+        Ok(())
+    }
+
     /// A transposing read of 64 bits at `smem`'s `addr + offset` (gfx950).
     fn lds_read_tr(&mut self, op: &Op) -> Result<(), CompileError> {
         let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
@@ -5364,6 +5554,7 @@ impl<'a> Isel<'a> {
         let saved = self.mreg();
         self.emit(MInst::new(self.lm(Opc::SMovB32), [r(saved)], [self.exec()]));
         self.depth += 1;
+        self.divergent_depth += 1;
         let head = self.new_block();
         let running = self.mreg();
         self.valu(Opc::VCmp(0x41), [r(running)], [r(iv), ub], 0);
@@ -5413,6 +5604,8 @@ impl<'a> Isel<'a> {
         let exit = self.new_block();
         self.f.blocks[leave.0].insts[leave.1].imm = exit as i64;
         self.emit(MInst::new(self.lm(Opc::SMovB32), [self.exec()], [r(saved)]));
+        self.divergent_depth -= 1;
+        self.rejoin();
         for (i, &res) in op.results.iter().enumerate() {
             let view = match self.k.ty(res).clone() {
                 Type::Scalar(Scalar::I64 | Scalar::F64) | Type::Ptr(_) => Val::D(r(sub(carried[i], 0, 1)), r(sub(carried[i], 1, 1))),
@@ -5455,11 +5648,13 @@ impl<'a> Isel<'a> {
         self.emit(MInst::new(Opc::SCbranchExecz, [], []));
         let first = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
         self.new_block();
+        self.divergent_depth += 1;
         self.region(&op.regions[0])?;
         if has_else {
             let else_block = self.new_block();
             self.f.blocks[first.0].insts[first.1].imm = else_block as i64;
             self.salu(self.lm(Opc::SAndNot1B32), [exec], [r(saved), mask]);
+            self.drop_dead_lanes();
             self.emit(MInst::new(Opc::SCbranchExecz, [], []));
             let second = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
             self.new_block();
@@ -5472,7 +5667,48 @@ impl<'a> Isel<'a> {
             self.f.blocks[first.0].insts[first.1].imm = end as i64;
             self.salu(self.lm(Opc::SOrB32), [exec], [exec, r(saved)]);
         }
+        self.divergent_depth -= 1;
+        self.rejoin();
         Ok(())
+    }
+
+    /// `cf.return`. Where every lane that gets here returns (not under a divergent `scf.if` or `scf.for`), the
+    /// wave ends. Otherwise the lanes arriving here are added to `dead` and leave EXEC (the region's EXEC
+    /// restores, `drop_dead_lanes`, keep them out); the wave ends once none is left, at the end of the
+    /// outermost divergent region (`rejoin`).
+    fn return_op(&mut self) {
+        match self.dead {
+            Some(dead) if self.divergent_depth > 0 => {
+                let exec = self.exec();
+                self.salu(self.lm(Opc::SOrB32), [r(dead)], [r(dead), exec]);
+                self.emit(MInst::new(self.lm(Opc::SMovB32), [exec], [Opnd::Imm(0)]));
+            }
+            _ => self.emit(MInst::new(Opc::SEndpgm, [], [])),
+        }
+    }
+
+    /// EXEC without the lanes that returned, after a restore of it.
+    fn drop_dead_lanes(&mut self) {
+        if let Some(dead) = self.dead {
+            let exec = self.exec();
+            self.salu(self.lm(Opc::SAndNot1B32), [exec], [exec, r(dead)]);
+        }
+    }
+
+    /// After a divergent region: EXEC is restored without the lanes that returned, and a wave with none left ends.
+    fn rejoin(&mut self) {
+        if self.dead.is_none() {
+            return;
+        }
+        self.drop_dead_lanes();
+        if self.divergent_depth == 0 {
+            self.emit(MInst::new(Opc::SCbranchExecnz, [], []));
+            let skip = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
+            self.new_block();
+            self.emit(MInst::new(Opc::SEndpgm, [], []));
+            let after = self.new_block();
+            self.f.blocks[skip.0].insts[skip.1].imm = after as i64;
+        }
     }
 }
 
@@ -5524,12 +5760,34 @@ fn inverse_scmp(op: Opc) -> Option<Opc> {
     })
 }
 
+/// Whether a `cf.return` of `kernel` is under an `scf.if` whose condition or an `scf.for` whose bounds differ
+/// between lanes: only some of the lanes that reach it return.
+fn returns_under_divergence(kernel: &Kernel, uniform: &[bool]) -> bool {
+    let uni = |v: &ValueId| uniform.get(v.0 as usize) == Some(&true);
+    let mut stack = vec![(&kernel.body, false)];
+    while let Some((region, divergent)) = stack.pop() {
+        for op in &region.ops {
+            let inner = divergent
+                || match op.kind {
+                    OpKind::If | OpKind::IfElse => !op.operands.first().is_some_and(uni),
+                    OpKind::For => !op.operands.get(..3).is_some_and(|b| b.iter().all(uni)),
+                    _ => false,
+                };
+            if op.kind == OpKind::Return && divergent {
+                return true;
+            }
+            stack.extend(op.regions.iter().map(|r| (r, inner)));
+        }
+    }
+    false
+}
+
 /// An op in `region` that is wrong under a partial EXEC mask: a WMMA writes
-/// every lane whatever EXEC holds, and a barrier or an early return would
-/// leave the lanes that stopped (and other waves) behind.
+/// every lane whatever EXEC holds, and a barrier would leave the lanes that
+/// stopped (and other waves) behind.
 fn unsafe_under_partial_exec(region: &Region) -> Option<OpKind> {
     region.ops.iter().find_map(|op| match op.kind {
-        OpKind::Mma | OpKind::Sync | OpKind::BarrierBare | OpKind::SyncLdsOnly | OpKind::Return => Some(op.kind),
+        OpKind::Mma | OpKind::Sync | OpKind::BarrierBare | OpKind::SyncLdsOnly => Some(op.kind),
         _ => op.regions.iter().find_map(unsafe_under_partial_exec),
     })
 }
@@ -6088,6 +6346,35 @@ fn find_f16_packs(cx: &ChainCx, region: &Region, packs: &mut FxHashMap<ValueId, 
     }
 }
 
+/// The scalar f16 conversions `gfx9::trunc_mix` marked whose f32 is still an `arith.fmul` or `arith.fma` after
+/// optimization: one `v_fma_mixlo_f16` rounds the exact result once, as LLVM selects them. The product or FMA is
+/// skipped when the conversion is its only reader.
+fn find_scalar_trunc_mix(
+    cx: &ChainCx,
+    region: &Region,
+    found: &mut FxHashMap<ValueId, (ValueId, ValueId, Option<ValueId>)>,
+    skip: &mut FxHashSet<ValueId>,
+) {
+    let f32_scalar = Type::Scalar(Scalar::F32);
+    for op in &region.ops {
+        for inner in &op.regions {
+            find_scalar_trunc_mix(cx, inner, found, skip);
+        }
+        if op.attr(crate::target::gfx9::trunc_mix::MARK).is_none() || skip.contains(&op.results[0]) {
+            continue;
+        }
+        let x = op.operands[0];
+        let Some(d) = cx.defs.get(&x).filter(|d| matches!(d.kind, OpKind::Fmul | OpKind::Fma)) else { continue };
+        if *cx.k.ty(x) != f32_scalar || d.operands.iter().any(|&o| *cx.k.ty(o) != f32_scalar) {
+            continue;
+        }
+        found.insert(op.results[0], (d.operands[0], d.operands[1], (d.kind == OpKind::Fma).then(|| d.operands[2])));
+        if cx.uses[x.0 as usize] == 1 {
+            skip.insert(x);
+        }
+    }
+}
+
 /// f16 `vector.trunc_f32_to` of a single-use product of even-length f32
 /// vectors: the product folds into the conversion (`trunc_mix`).
 fn find_trunc_products(cx: &ChainCx, region: &Region, found: &mut FxHashMap<ValueId, (ValueId, ValueId)>, skip: &mut FxHashSet<ValueId>) {
@@ -6306,6 +6593,10 @@ pub fn select_for(
     find_vote_selects(&cx, &kernel.body, &mut vote_sel, &mut chains.skip);
     let mut trunc_mul = FxHashMap::default();
     find_trunc_products(&cx, &kernel.body, &mut trunc_mul, &mut chains.skip);
+    let mut scalar_mix = FxHashMap::default();
+    if target == Target::Gfx950 {
+        find_scalar_trunc_mix(&cx, &kernel.body, &mut scalar_mix, &mut chains.skip);
+    }
     let (mut negs, mut fma_uses) = (FxHashMap::default(), FxHashMap::default());
     find_fneg_fma(kernel, &kernel.body, &mut negs, &mut fma_uses);
     let fneg_fma = negs.into_iter().filter(|(v, _)| fma_uses.get(v) == Some(&uses[v.0 as usize])).collect();
@@ -6322,6 +6613,8 @@ pub fn select_for(
         vals: vec![None; kernel.values.len()],
         lds,
         depth: 0,
+        dead: None,
+        divergent_depth: 0,
         single_wave: kernel.max_workgroup_size <= target.info().wave,
         t: target.info(),
         kernarg_ptr: VRef { reg: 0, off: 0, n: 2 },
@@ -6341,6 +6634,7 @@ pub fn select_for(
         packs,
         vote_sel,
         trunc_mul,
+        scalar_mix,
         mem_tags: if super::debug_flag("noalias") { Vec::new() } else { super::alias::value_tags(kernel) },
         lds_dma: match target {
             Target::Gfx950 => crate::target::gfx9::lds_dma::Facts::of(kernel),
@@ -6394,6 +6688,11 @@ pub fn select_for(
     let tid = isel.vgpr(1);
     isel.copy(tid, r(tid_fixed));
     isel.tid = tid;
+    if returns_under_divergence(kernel, &isel.uniform) {
+        let dead = isel.mreg();
+        isel.emit(MInst::new(isel.lm(Opc::SMovB32), [r(dead)], [Opnd::Imm(0)]));
+        isel.dead = Some(dead);
+    }
     isel.region(&kernel.body)?;
     let last = isel.f.blocks.last().and_then(|b| b.insts.last()).map(|i| i.op);
     if last != Some(Opc::SEndpgm) {
@@ -7258,7 +7557,7 @@ mod convmem_tests {
         let body = r#"    %p : i32 = tile.pin_sgpr ( %n )
     %q : i32 = tile.pin_sgpr ( %tid )
     %s : i32 = arith.add ( %p, %q )
-    %f : f32 = arith.sitofp_f32 ( %s )
+    %f : f32 = arith.bitcast ( %s ) { target = s:"f32" }
     memref.global_store_typed ( %Y, %tid, %f ) { align = i:4, elem_type = s:"f32" }
 "#;
         assert_eq!(count(&insts(&kernel(params, body)), Opc::VReadfirstlaneB32), 1);
@@ -7305,22 +7604,50 @@ mod convmem_tests {
         text.replacen(from, to, 1)
     }
 
+    /// An `"=s,0"` pin of a pointer (the split-dQ kernels' slab pointers) keeps the pair in SGPRs and emits nothing.
+    #[test]
+    fn an_sgpr_pin_of_a_pointer_is_an_identity() {
+        let params = "    %X : ptr<i32,global>\n    %Y : ptr<i32,global>\n";
+        let body = r#"    %p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        let plain = body.replace("%p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:\"=s,0\", convergent = b:false, sideeffect = b:false, template = s:\"\" }\n", "").replace("( %p,", "( %X,");
+        let pinned = insts(&kernel(params, body));
+        let direct = insts(&kernel(params, &plain));
+        // The pin adds no instruction, and the load's base pair is in SGPRs.
+        assert_eq!(pinned.len(), direct.len());
+        let load = pinned.iter().find(|i| i.op == Opc::GLoadB32).expect("a global load");
+        assert!(load.mods & M_SADDR != 0, "{load:?}");
+        // A pointer that lives in VGPRs (an address made from a lane value) is refused.
+        let lane = r#"    %w : i64 = arith.zext ( %tid )
+    %q : ptr<i32,global> = tile.global_ptr_add ( %X, %w )
+    %p : ptr<i32,global> = tile.inline_asm ( %q ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        assert!(compiled(&kernel(params, lane)).is_err());
+    }
+
     #[test]
     fn dpp_moves_carry_their_control_words() {
         let params = "    %X : ptr<i32,global>\n    %Y : ptr<i32,global>\n";
         let body = r#"    %x : i32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:"i32" }
     %a : i32 = tile.dpp_xor ( %x ) { xor_mask = i:1 }
     %b : i32 = tile.quad_perm ( %a ) { ctrl = i:177 }
-    %c : i32 = tile.mov_dpp8 ( %b ) { sel = i:14570689 }
+    %m : i32 = tile.dpp_row_mirror ( %b ) { ctrl = i:320 }
+    %h : i32 = tile.dpp_row_mirror ( %m ) { ctrl = i:321 }
+    %c : i32 = tile.mov_dpp8 ( %h ) { sel = i:14570689 }
     memref.global_store_typed ( %Y, %tid, %c ) { align = i:4, elem_type = s:"i32" }
 "#;
         let text = kernel(params, body);
         let insts = insts(&text);
         let dpp: Vec<i64> = all(&insts, Opc::VMovB32Dpp).iter().map(|i| i.imm).collect();
-        assert_eq!(dpp, [dpp16_ctrl(0x161, true) as i64, dpp16_ctrl(177, true) as i64]);
+        assert_eq!(dpp, [0x161, 177, 0x140, 0x141].map(|c| dpp16_ctrl(c, true) as i64));
         assert_eq!(all(&insts, Opc::VMovB32Dpp8)[0].imm, 0xde_54c1);
         assert!(compiled(&text_with(&text, "xor_mask = i:1", "xor_mask = i:16")).is_err());
         assert!(compiled(&text_with(&text, "ctrl = i:177", "ctrl = i:256")).is_err());
+        assert!(compiled(&text_with(&text, "ctrl = i:320", "ctrl = i:322")).is_err());
     }
 
     /// Encodings checked against `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.
@@ -7476,10 +7803,11 @@ mod convmem_tests {
         assert!(err.message.contains("Sync"), "{}", err.message);
         // The same body under a uniform bound is fine.
         compiled(&loop_kernel("%c0", "%c1", "%z", &sync)).unwrap_or_else(|e| panic!("{e}"));
-        // An early return in a per-lane loop would end lanes that already left it.
+        // An early return in a per-lane loop takes the lanes still in it out of EXEC for good (not the wave: the
+        // lanes that already left it go on).
         let ret = "        cf.return (  )\n".to_string() + ACCUMULATE;
-        let err = compiled(&loop_kernel("%c0", "%n", "%z", &ret)).err().expect("refused");
-        assert_eq!(err.kind, "ROCKE_DIRECT_UNSUPPORTED", "{}", err.message);
+        let insts = self::insts(&loop_kernel("%c0", "%n", "%z", &ret));
+        assert_eq!(count(&insts, Opc::SCbranchExecnz), 1);
     }
 
     /// Operand and result types, attributes and ranges the LLVM lowering
@@ -7880,5 +8208,166 @@ mod dword_quad_tests {
         let (off, on) = (listing(""), listing(", u16_zext = b:true"));
         assert!(off.contains("ds_read_u16") && and16(&off), "{off}");
         assert!(on.contains("ds_read_u16") && !and16(&on), "{on}");
+    }
+
+    /// A one-wave kernel storing 1.0 at `tid` after `body` (selected for both targets).
+    fn returning(body: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @early {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %Y : ptr<f32,global>\n    %n : i32\n    %ub : i32\n  }}\n  \
+             region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    %bid : i32 = gpu.block_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+             %one : f32 = arith.constant (  ) {{ ity = s:\"f32\", value = f:1.0 }}\n{body}    \
+             memref.global_store_typed ( %Y, %tid, %one ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn listings(text: &str) -> Vec<String> {
+        [Target::Gfx1151, Target::Gfx950]
+            .into_iter()
+            .map(|t| super::super::compile_any_target(text, t).unwrap_or_else(|e| panic!("{t:?}: {e}\n{text}")).listing())
+            .collect()
+    }
+
+    fn count(listing: &str, mnemonic: &str) -> usize {
+        listing.lines().filter(|l| l.trim_start().starts_with(mnemonic)).count()
+    }
+
+    const EARLY_IF: &str = "    %c : i1 = arith.cmp ( {cond}, %n ) { pred = s:\"ge\" }\n    scf.if ( %c )\n      region @then {\n        cf.return (  )\n      }\n";
+
+    /// A return under a divergent `scf.if` takes the lanes it covers out of EXEC for the rest of the kernel and
+    /// ends the wave when none is left; a return under a uniform one still just ends the wave.
+    #[test]
+    fn a_divergent_early_return_masks_the_lanes() {
+        for l in listings(&returning(&EARLY_IF.replace("{cond}", "%tid"))) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_endpgm")), (1, 2), "{l}");
+            assert!(count(&l, "s_and_not1") + count(&l, "s_andn2") >= 1, "{l}");
+        }
+        for l in listings(&returning(&EARLY_IF.replace("{cond}", "%bid"))) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_endpgm")), (0, 2), "{l}");
+            assert_eq!(count(&l, "s_and_not1") + count(&l, "s_andn2"), 0, "{l}");
+        }
+    }
+
+    /// The wave ends only where no lane is waiting to rejoin: once, after the outermost divergent region, however
+    /// the returns nest in `scf.if` regions (either arm) and loops with per-lane bounds.
+    #[test]
+    fn divergent_returns_in_nested_regions_end_the_wave_once() {
+        let nested_if = format!(
+            "    %a : i1 = arith.cmp ( %tid, %ub ) {{ pred = s:\"lt\" }}\n    scf.if ( %a )\n      region @then {{\n{}      }}\n",
+            EARLY_IF.replace("{cond}", "%tid")
+        );
+        let else_arm = "    %a : i1 = arith.cmp ( %tid, %n ) { pred = s:\"lt\" }\n    scf.if_else ( %a )\n      region @then {\n        %x : i32 = arith.add ( %tid, %c1 )\n      }\n      region @else {\n        cf.return (  )\n      }\n";
+        let in_loop = "    scf.for ( %c0, %tid, %c1 ) { iv = s:\"%i\", iv_type = s:\"i32\" }\n      region @body {\n        %q : i1 = arith.cmp ( %i, %n ) { pred = s:\"ge\" }\n        scf.if ( %q )\n          region @then {\n            cf.return (  )\n          }\n        scf.yield (  )\n      }\n";
+        for body in [nested_if.as_str(), else_arm, in_loop] {
+            for l in listings(&returning(body)) {
+                assert_eq!(count(&l, "s_cbranch_execnz"), 1, "{body}\n{l}");
+                assert!(count(&l, "s_and_not1") + count(&l, "s_andn2") >= 1, "{body}\n{l}");
+            }
+        }
+    }
+
+    /// `arith.sitofp_f32` of a uniform value is uniform (read back into an SGPR), so what is computed from it
+    /// (here a loop bound and a return condition: the `floor(log2(n))` idiom) stays scalar.
+    #[test]
+    fn uniform_int_to_float_conversion_is_uniform() {
+        let body = "    %f : f32 = arith.sitofp_f32 ( %n )\n    %b : i32 = arith.bitcast ( %f ) { target = s:\"i32\" }\n    \
+                    %e : i32 = arith.lshr ( %b, %c1 )\n    %c : i1 = arith.cmp ( %e, %ub ) { pred = s:\"ge\" }\n    scf.if ( %c )\n      region @then {\n        cf.return (  )\n      }\n";
+        for l in listings(&returning(body)) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_and_not1") + count(&l, "s_andn2"), count(&l, "s_endpgm")), (0, 0, 2), "{l}");
+            assert!(count(&l, "v_readfirstlane") >= 1, "{l}");
+        }
+    }
+}
+
+/// f16 conversions of f32 products and FMAs that `gfx9::trunc_mix` marks round once (`v_fma_mixlo_f16`), as LLVM
+/// selects them: an f32 FMA followed by `v_cvt_f16_f32` rounds twice, which differs by one f16 ulp on about 1
+/// element in 10^5.
+#[cfg(test)]
+mod f16_single_rounding_tests {
+    use super::{Opc, Opnd, M_NEG2};
+    use crate::target::Target;
+
+    /// A kernel storing the f16 conversion of the f32 `%m` (computed from three f32 loads `%a`, `%b`, `%c`) with
+    /// a plain store; `extra` is more IR after it.
+    fn kernel(m: &str, convert: &str, extra: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @round {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %X : ptr<f32,global>\n    \
+             %Y : ptr<f16,global>\n    %Z : ptr<f32,global>\n  }}\n  region @entry {{\n    \
+             %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c64 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:64 }}\n    \
+             %c128 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:128 }}\n    \
+             %t1 : i32 = arith.add ( %tid, %c64 )\n    %t2 : i32 = arith.add ( %tid, %c128 )\n    \
+             %a : f32 = memref.global_load_typed ( %X, %tid ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             %b : f32 = memref.global_load_typed ( %X, %t1 ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             %c : f32 = memref.global_load_typed ( %X, %t2 ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+             {m}\n    {convert}\n    \
+             memref.global_store_typed ( %Y, %tid, %h ) {{ align = i:2, elem_type = s:\"f16\" }}\n    {extra}\n    \
+             cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn listing(text: &str, target: Target) -> String {
+        crate::rir::compile_any_target(text, target).unwrap_or_else(|e| panic!("{e}")).listing()
+    }
+
+    fn count(listing: &str, mnemonic: &str) -> usize {
+        listing.lines().filter(|l| l.trim_start().starts_with(mnemonic)).count()
+    }
+
+    const TRUNC: &str = "%h : f16 = arith.trunc_f32_to_f16 ( %m )";
+    const CAST: &str = "%h : f16 = arith.cast_f32_to ( %m ) { target = s:\"f16\" }";
+    const FMA: &str = "%m : f32 = arith.fma ( %a, %b, %c )";
+    const FMUL: &str = "%m : f32 = arith.fmul ( %a, %b )";
+
+    #[test]
+    fn an_fma_converted_to_f16_is_one_mixlo() {
+        for convert in [TRUNC, CAST] {
+            let l = listing(&kernel(FMA, convert, ""), Target::Gfx950);
+            assert_eq!(count(&l, "v_fma_mixlo_f16"), 1, "{convert}\n{l}");
+            assert_eq!((count(&l, "v_fma_f32"), count(&l, "v_cvt_f16_f32")), (0, 0), "{convert}\n{l}");
+        }
+    }
+
+    #[test]
+    fn a_product_converted_to_f16_is_one_mixlo_with_a_negative_zero_addend() {
+        for convert in [TRUNC, CAST] {
+            let text = kernel(FMUL, convert, "");
+            let l = listing(&text, Target::Gfx950);
+            assert_eq!(count(&l, "v_fma_mixlo_f16"), 1, "{convert}\n{l}");
+            assert_eq!((count(&l, "v_mul_f32"), count(&l, "v_cvt_f16_f32")), (0, 0), "{convert}\n{l}");
+            // the addend is -0.0 (0 with its negation modifier), so a negative zero product stays negative
+            let c = crate::rir::compile_for(&text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+            let mix = c.func.blocks.iter().flat_map(|b| &b.insts).find(|i| i.op == Opc::VFmaMixloF16).expect("a mixlo");
+            assert_eq!((mix.uses[2], mix.mods & M_NEG2), (Opnd::Imm(0), M_NEG2), "{l}");
+        }
+    }
+
+    #[test]
+    fn a_product_read_elsewhere_is_computed_again_inside_the_mixlo() {
+        // LLVM does the same: the f32 product stays for its other reader, the f16 is rounded from the exact one.
+        let extra = "memref.global_store_typed ( %Z, %tid, %m ) { align = i:4, elem_type = s:\"f32\" }";
+        let l = listing(&kernel(FMUL, TRUNC, extra), Target::Gfx950);
+        assert_eq!((count(&l, "v_mul_f32"), count(&l, "v_fma_mixlo_f16"), count(&l, "v_cvt_f16_f32")), (1, 1, 0), "{l}");
+    }
+
+    #[test]
+    fn two_stored_conversions_are_left_to_the_slp_vectorizer_model() {
+        // LLVM vectorizes two stored products (a multiply and `v_cvt_pk_f16_f32`): no mixlo, as before.
+        let extra = "%m2 : f32 = arith.fmul ( %b, %c )\n    %h2 : f16 = arith.trunc_f32_to_f16 ( %m2 )\n    \
+                     memref.global_store_typed ( %Y, %t1, %h2 ) { align = i:2, elem_type = s:\"f16\" }";
+        let l = listing(&kernel(FMUL, TRUNC, extra), Target::Gfx950);
+        assert_eq!(count(&l, "v_fma_mixlo_f16"), 0, "{l}");
+    }
+
+    #[test]
+    fn other_f32_values_still_convert_with_cvt() {
+        let l = listing(&kernel("%m : f32 = arith.fadd ( %a, %b )", TRUNC, ""), Target::Gfx950);
+        assert_eq!((count(&l, "v_add_f32"), count(&l, "v_cvt_f16_f32"), count(&l, "v_fma_mixlo_f16")), (1, 1, 0), "{l}");
+    }
+
+    #[test]
+    fn gfx1151_keeps_the_conversion() {
+        let l = listing(&kernel(FMA, TRUNC, ""), Target::Gfx1151);
+        assert_eq!(count(&l, "v_fma_mixlo_f16"), 0, "{l}");
     }
 }

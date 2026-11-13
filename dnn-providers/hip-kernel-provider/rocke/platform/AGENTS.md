@@ -481,6 +481,9 @@ dual-engine vs Python-only split.
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CODEOBJ_BACKEND` | `comgr` (default) \| `direct`; selects the code-object compiler independently of the lowering engine. `direct` compiles serialized rocKE IR for gfx1151 and gfx950 with no LLVM, and `compile_kernel` falls back to COMGR for a kernel it refuses as unsupported; see `dsl_docs/runtime/direct_compiler.md` |
 | `ROCKE_CODEOBJ_DIRECT_LIB` | explicit path of the direct compiler's Rust library (`rocke_codeobj_ffi`); unset searches the platform library path |
+| `ROCKE_DIRECT_STRICT` / `ROCKE_DIRECT_FALLBACK` | with `ROCKE_CODEOBJ_BACKEND=direct`: `ROCKE_DIRECT_STRICT=1` raises instead of falling back to COMGR; `ROCKE_DIRECT_FALLBACK=all` also falls back on non-refusal direct errors (default `unsupported`). LLVM-IR entries (`build_hsaco_from_llvm_ir`, `compile_module`, ...) always use COMGR |
+| `ROCKE_DIRECT_ALLOW` / `ROCKE_DIRECT_DENY` | comma-separated `fnmatch` patterns on kernel names: only matching kernels try direct / matching kernels never do |
+| `ROCKE_DIRECT_LOG` | `1` = one stderr line per compiled kernel (kernel, backend, fallback reason); counts in `rocke.runtime.code_object.backend_usage()` |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (AUTO queries the loaded COMGR compiler: LLVM <=20, 21/22, >=23; unavailable evidence raises; explicit flavors support offline emission) |

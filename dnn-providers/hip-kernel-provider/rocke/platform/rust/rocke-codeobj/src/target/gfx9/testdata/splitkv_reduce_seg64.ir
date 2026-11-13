@@ -1,0 +1,173 @@
+ckdsl.ir v1
+kernel @rocke_uattn_reduce_tiled_d128_seg64_bf16 {
+  attrs { max_workgroup_size = i:64 }
+  params {
+    %output_ptr : ptr<bf16,global> { align = i:16, noalias = b:true, writeonly = b:true }
+    %segm_output_ptr : ptr<f32,global> { align = i:16, readonly = b:true }
+    %segm_max_ptr : ptr<f32,global> { align = i:4, readonly = b:true }
+    %segm_expsum_ptr : ptr<f32,global> { align = i:4, readonly = b:true }
+    %seq_lens_ptr : ptr<i32,global> { align = i:4, readonly = b:true }
+    %num_query_heads : i32
+  }
+  region @entry {
+    %bid1 : i32 = gpu.block_id (  ) { axis = s:"x" }
+    %bid2 : i32 = gpu.block_id (  ) { axis = s:"y" }
+    %tid3 : i32 = gpu.thread_id (  ) { axis = s:"x" }
+    %c4 : f32 = arith.constant (  ) { ity = s:"f32", value = f:-inf }
+    %c5 : f32 = arith.constant (  ) { ity = s:"f32", value = f:0.0 }
+    %c6 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %mul7 : i32 = arith.mul ( %num_query_heads, %c6 )
+    %c8 : i32 = arith.constant (  ) { ity = s:"i32", value = i:8192 }
+    %mul9 : i32 = arith.mul ( %num_query_heads, %c8 )
+    %c10 : i32 = arith.constant (  ) { ity = s:"i32", value = i:128 }
+    %mul11 : i32 = arith.mul ( %num_query_heads, %c10 )
+    %c12 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %mul13 : i32 = arith.mul ( %bid1, %mul7 )
+    %c14 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %mul15 : i32 = arith.mul ( %bid2, %c14 )
+    %add16 : i32 = arith.add ( %mul13, %mul15 )
+    %add17 : i32 = arith.add ( %add16, %c12 )
+    %seg_factor18 : smem<f32, [64]> = tile.smem_alloc (  )
+    %c19 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %add20 : i32 = arith.add ( %c19, %tid3 )
+    %add21 : i32 = arith.add ( %add17, %add20 )
+    %gl22 : f32 = memref.global_load_typed ( %segm_max_ptr, %add21 ) { align = i:4, elem_type = s:"f32" }
+    %gl23 : f32 = memref.global_load_typed ( %segm_expsum_ptr, %add21 ) { align = i:4, elem_type = s:"f32" }
+    %fcmp24 : i1 = arith.fcmp ( %gl23, %c5 ) { pred = s:"ogt" }
+    %sel25 : f32 = arith.select ( %fcmp24, %gl22, %c4 )
+    %fmax26 : f32 = arith.fmax ( %c4, %sel25 )
+    %bc27 : i32 = arith.bitcast ( %fmax26 ) { target = s:"i32" }
+    %sw28 : i32 = tile.ds_swizzle_xor ( %bc27 ) { xor_mask = i:1 }
+    %bc29 : f32 = arith.bitcast ( %sw28 ) { target = s:"f32" }
+    %fmax30 : f32 = arith.fmax ( %fmax26, %bc29 )
+    %bc31 : i32 = arith.bitcast ( %fmax30 ) { target = s:"i32" }
+    %sw32 : i32 = tile.ds_swizzle_xor ( %bc31 ) { xor_mask = i:2 }
+    %bc33 : f32 = arith.bitcast ( %sw32 ) { target = s:"f32" }
+    %fmax34 : f32 = arith.fmax ( %fmax30, %bc33 )
+    %bc35 : i32 = arith.bitcast ( %fmax34 ) { target = s:"i32" }
+    %sw36 : i32 = tile.ds_swizzle_xor ( %bc35 ) { xor_mask = i:4 }
+    %bc37 : f32 = arith.bitcast ( %sw36 ) { target = s:"f32" }
+    %fmax38 : f32 = arith.fmax ( %fmax34, %bc37 )
+    %bc39 : i32 = arith.bitcast ( %fmax38 ) { target = s:"i32" }
+    %sw40 : i32 = tile.ds_swizzle_xor ( %bc39 ) { xor_mask = i:8 }
+    %bc41 : f32 = arith.bitcast ( %sw40 ) { target = s:"f32" }
+    %fmax42 : f32 = arith.fmax ( %fmax38, %bc41 )
+    %bc43 : i32 = arith.bitcast ( %fmax42 ) { target = s:"i32" }
+    %sw44 : i32 = tile.ds_swizzle_xor ( %bc43 ) { xor_mask = i:16 }
+    %bc45 : f32 = arith.bitcast ( %sw44 ) { target = s:"f32" }
+    %fmax46 : f32 = arith.fmax ( %fmax42, %bc45 )
+    %lane47 : i32 = tile.lane_id (  )
+    %c48 : i32 = arith.constant (  ) { ity = s:"i32", value = i:32 }
+    %lxor49 : i32 = arith.xor ( %lane47, %c48 )
+    %c50 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+    %laddr51 : i32 = arith.shl ( %lxor49, %c50 )
+    %bc52 : i32 = arith.bitcast ( %fmax46 ) { target = s:"i32" }
+    %bp53 : i32 = tile.ds_bpermute ( %laddr51, %bc52 )
+    %bc54 : f32 = arith.bitcast ( %bp53 ) { target = s:"f32" }
+    %fmax55 : f32 = arith.fmax ( %fmax46, %bc54 )
+    %fcmp56 : i1 = arith.fcmp ( %sel25, %c4 ) { pred = s:"ogt" }
+    %fsub57 : f32 = arith.fsub ( %sel25, %fmax55 )
+    %exp2f58 : f32 = math.exp2_fast ( %fsub57 )
+    %sel59 : f32 = arith.select ( %fcmp56, %exp2f58, %c5 )
+    %fmul60 : f32 = arith.fmul ( %gl23, %sel59 )
+    %fadd61 : f32 = arith.fadd ( %c5, %fmul60 )
+    tile.smem_store_vN_f32 ( %seg_factor18, %add20, %sel59 ) { elem_type = s:"f32", rank = i:1, vec = i:1 }
+    %bc62 : i32 = arith.bitcast ( %fadd61 ) { target = s:"i32" }
+    %sw63 : i32 = tile.ds_swizzle_xor ( %bc62 ) { xor_mask = i:1 }
+    %bc64 : f32 = arith.bitcast ( %sw63 ) { target = s:"f32" }
+    %fadd65 : f32 = arith.fadd ( %fadd61, %bc64 )
+    %bc66 : i32 = arith.bitcast ( %fadd65 ) { target = s:"i32" }
+    %sw67 : i32 = tile.ds_swizzle_xor ( %bc66 ) { xor_mask = i:2 }
+    %bc68 : f32 = arith.bitcast ( %sw67 ) { target = s:"f32" }
+    %fadd69 : f32 = arith.fadd ( %fadd65, %bc68 )
+    %bc70 : i32 = arith.bitcast ( %fadd69 ) { target = s:"i32" }
+    %sw71 : i32 = tile.ds_swizzle_xor ( %bc70 ) { xor_mask = i:4 }
+    %bc72 : f32 = arith.bitcast ( %sw71 ) { target = s:"f32" }
+    %fadd73 : f32 = arith.fadd ( %fadd69, %bc72 )
+    %bc74 : i32 = arith.bitcast ( %fadd73 ) { target = s:"i32" }
+    %sw75 : i32 = tile.ds_swizzle_xor ( %bc74 ) { xor_mask = i:8 }
+    %bc76 : f32 = arith.bitcast ( %sw75 ) { target = s:"f32" }
+    %fadd77 : f32 = arith.fadd ( %fadd73, %bc76 )
+    %bc78 : i32 = arith.bitcast ( %fadd77 ) { target = s:"i32" }
+    %sw79 : i32 = tile.ds_swizzle_xor ( %bc78 ) { xor_mask = i:16 }
+    %bc80 : f32 = arith.bitcast ( %sw79 ) { target = s:"f32" }
+    %fadd81 : f32 = arith.fadd ( %fadd77, %bc80 )
+    %lane82 : i32 = tile.lane_id (  )
+    %c83 : i32 = arith.constant (  ) { ity = s:"i32", value = i:32 }
+    %lxor84 : i32 = arith.xor ( %lane82, %c83 )
+    %c85 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+    %laddr86 : i32 = arith.shl ( %lxor84, %c85 )
+    %bc87 : i32 = arith.bitcast ( %fadd81 ) { target = s:"i32" }
+    %bp88 : i32 = tile.ds_bpermute ( %laddr86, %bc87 )
+    %bc89 : f32 = arith.bitcast ( %bp88 ) { target = s:"f32" }
+    %fadd90 : f32 = arith.fadd ( %fadd81, %bc89 )
+    %fcmp91 : i1 = arith.fcmp ( %fadd90, %c5 ) { pred = s:"oeq" }
+    %rcp92 : f32 = math.rcp ( %fadd90 )
+    %sel93 : f32 = arith.select ( %fcmp91, %c5, %rcp92 )
+    tile.sync (  )
+    %c94 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c95 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %mul96 : i32 = arith.mul ( %c94, %c95 )
+    %add97 : i32 = arith.add ( %mul96, %tid3 )
+    %c98 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c99 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %c100 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %for101 : f32 = scf.for ( %c98, %c99, %c100, %c5 ) { elide_trailing_barrier = b:true, iter_args = l:[ { name = s:"%ac0", type = s:"f32" } ], iv = s:"%s_acc0", iv_type = s:"i32", num_iter_args = i:1, unroll = b:false }
+      region @body {
+        %av1f32102 : vec<f32x1> = tile.smem_load_vN_f32 ( %seg_factor18, %s_acc0 ) { elem_type = s:"f32", rank = i:1, vec = i:1 }
+        %e103 : f32 = vector.extract ( %av1f32102 ) { index = i:0 }
+        %mul104 : i32 = arith.mul ( %bid1, %mul9 )
+        %c105 : i32 = arith.constant (  ) { ity = s:"i32", value = i:8192 }
+        %mul106 : i32 = arith.mul ( %bid2, %c105 )
+        %add107 : i32 = arith.add ( %mul104, %mul106 )
+        %c108 : i32 = arith.constant (  ) { ity = s:"i32", value = i:128 }
+        %mul109 : i32 = arith.mul ( %s_acc0, %c108 )
+        %add110 : i32 = arith.add ( %add107, %mul109 )
+        %add111 : i32 = arith.add ( %add110, %add97 )
+        %gl112 : f32 = memref.global_load_typed ( %segm_output_ptr, %add111 ) { align = i:4, elem_type = s:"f32" }
+        %fmul113 : f32 = arith.fmul ( %gl112, %e103 )
+        %fadd114 : f32 = arith.fadd ( %ac0, %fmul113 )
+        scf.yield ( %fadd114 ) { num = i:1 }
+      }
+    %fmul115 : f32 = arith.fmul ( %for101, %sel93 )
+    %cast116 : bf16 = arith.cast_f32_to ( %fmul115 ) { target = s:"bf16" }
+    %mul117 : i32 = arith.mul ( %bid1, %mul11 )
+    %c118 : i32 = arith.constant (  ) { ity = s:"i32", value = i:128 }
+    %mul119 : i32 = arith.mul ( %bid2, %c118 )
+    %add120 : i32 = arith.add ( %mul117, %mul119 )
+    %add121 : i32 = arith.add ( %add120, %add97 )
+    memref.global_store_typed ( %output_ptr, %add121, %cast116 ) { align = i:2, elem_type = s:"bf16" }
+    %c122 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %c123 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %mul124 : i32 = arith.mul ( %c122, %c123 )
+    %add125 : i32 = arith.add ( %mul124, %tid3 )
+    %c126 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c127 : i32 = arith.constant (  ) { ity = s:"i32", value = i:64 }
+    %c128 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %for129 : f32 = scf.for ( %c126, %c127, %c128, %c5 ) { elide_trailing_barrier = b:true, iter_args = l:[ { name = s:"%ac1", type = s:"f32" } ], iv = s:"%s_acc1", iv_type = s:"i32", num_iter_args = i:1, unroll = b:false }
+      region @body {
+        %av1f32130 : vec<f32x1> = tile.smem_load_vN_f32 ( %seg_factor18, %s_acc1 ) { elem_type = s:"f32", rank = i:1, vec = i:1 }
+        %e131 : f32 = vector.extract ( %av1f32130 ) { index = i:0 }
+        %mul132 : i32 = arith.mul ( %bid1, %mul9 )
+        %c133 : i32 = arith.constant (  ) { ity = s:"i32", value = i:8192 }
+        %mul134 : i32 = arith.mul ( %bid2, %c133 )
+        %add135 : i32 = arith.add ( %mul132, %mul134 )
+        %c136 : i32 = arith.constant (  ) { ity = s:"i32", value = i:128 }
+        %mul137 : i32 = arith.mul ( %s_acc1, %c136 )
+        %add138 : i32 = arith.add ( %add135, %mul137 )
+        %add139 : i32 = arith.add ( %add138, %add125 )
+        %gl140 : f32 = memref.global_load_typed ( %segm_output_ptr, %add139 ) { align = i:4, elem_type = s:"f32" }
+        %fmul141 : f32 = arith.fmul ( %gl140, %e131 )
+        %fadd142 : f32 = arith.fadd ( %ac1, %fmul141 )
+        scf.yield ( %fadd142 ) { num = i:1 }
+      }
+    %fmul143 : f32 = arith.fmul ( %for129, %sel93 )
+    %cast144 : bf16 = arith.cast_f32_to ( %fmul143 ) { target = s:"bf16" }
+    %mul145 : i32 = arith.mul ( %bid1, %mul11 )
+    %c146 : i32 = arith.constant (  ) { ity = s:"i32", value = i:128 }
+    %mul147 : i32 = arith.mul ( %bid2, %c146 )
+    %add148 : i32 = arith.add ( %mul145, %mul147 )
+    %add149 : i32 = arith.add ( %add148, %add125 )
+    memref.global_store_typed ( %output_ptr, %add149, %cast144 ) { align = i:2, elem_type = s:"bf16" }
+  }
+}

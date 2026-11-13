@@ -978,8 +978,9 @@ mod tests {
                 .map(|x| x.split_whitespace().nth(2).unwrap_or("").trim_end_matches(',').to_string())
                 .collect()
         };
-        let plain = order(&listing(&text));
-        let lev = order(&rir::with_levers(&["loadorder"], || listing(&text)));
+        // Without the remat retry, whose outcome depends on the occupancy the order leaves.
+        let plain = order(&rir::remat::without(|| listing(&text)));
+        let lev = order(&rir::remat::without(|| rir::with_levers(&["loadorder"], || listing(&text))));
         scopes_match_kernel_levers(&text, &["loadorder"]);
         assert_eq!(plain.len(), 30, "{plain:?}");
         assert_eq!(lev, plain, "loadorder reordered the guarded loads");
@@ -1504,6 +1505,26 @@ mod tests {
         assert!(refused.contains("i16 vectors"), "{refused}");
         let lev = rir::with_levers(&["i16vec"], || listing(&text));
         assert!(has(&lev, "ds_read_u16"), "{lev}");
+    }
+
+    #[test]
+    fn one_lane_i16_vectors_are_bitcast_splat_and_anded() {
+        // zero_keyless_row of a 16-bit O store: bf16 value masked by a trunc'd i32 select, no lever
+        let body = concat!(
+            "    %f : f32 = arith.bitcast ( %tid )\n",
+            "    %h : bf16 = arith.cast_f32_to ( %f ) { target = s:\"bf16\" }\n",
+            "    %p : vec<bf16x1> = vector.pack ( %h ) { elem = s:\"bf16\", vec = i:1 }\n",
+            "    %t : i16 = arith.trunc ( %tid )\n",
+            "    %b : vec<i16x1> = arith.bitcast ( %p ) { target = s:\"vec<i16x1>\" }\n",
+            "    %s : vec<i16x1> = vector.splat ( %t ) { vec = i:1 }\n",
+            "    %a : vec<i16x1> = vector.and ( %b, %s )\n",
+            "    %e : vec<bf16x1> = arith.bitcast ( %a ) { target = s:\"vec<bf16x1>\" }\n",
+            "    memref.global_store_vN ( %O, %tid, %e ) { align = i:2, elem_type = s:\"bf16\", vec = i:1 }\n",
+            "    %r : i32 = arith.add ( %tid, %c0 )\n",
+        );
+        let text = kernel("    %O : ptr<bf16,global>\n", body);
+        let l = listing(&text);
+        assert!(has(&l, "v_and_b32") && has(&l, "global_store_short"), "{l}");
     }
 
     #[test]
