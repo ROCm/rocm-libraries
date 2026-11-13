@@ -186,6 +186,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     // Lean TDM issue: see Policy::UseLeanTdmIssue.
     static constexpr bool kLeanIssue = Policy::template UseLeanTdmIssue<Problem>();
 
+    // Guarded row max: see Policy::UseGuardedRowMax.
+    static constexpr bool kGuardedRowMax = Policy::template UseGuardedRowMax<Problem>();
+
     // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
     // are issued right after it, and the Q and K/V load latencies overlap instead of adding up.
     // Without it Q is staged in K0 and must be read out before K0 is loaded. Whole-tile pages
@@ -657,6 +660,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         auto k_su0_tile = load_tile(initial_k_lds_su_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
+
+        // Guarded row max: the weight sums of the tile, for the guard after PV, and whether a row
+        // of the wave has no finite base yet (the tile then reduces the row max).
+        [[maybe_unused]] array<float, 2> guarded_tile_sums{0.0f, 0.0f};
+        [[maybe_unused]] bool row_base_pending = true;
 
         auto mainloop = [&](KDataType* __restrict__ k_lds_write_ptr,
                             KDataType* __restrict__ k_lds_read_ptr,
@@ -1132,38 +1140,69 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                     static_assert(kNWarp == 1);
                     static_assert(std::is_same_v<SaccDataType, float> &&
                                   std::is_same_v<SMPLComputeDataType, float>);
-                    float delta_m0;
-                    float delta_m1;
-                    Schedule::template RunSplitSoftmax<Mode>(
-                        [&]() {
-                            Policy::template RunSplitSoftmaxPart01<Problem>(
-                                s_new, m, kScoresInLog2Domain ? 1.0f : scale_s, delta_m0, delta_m1);
-                        },
-                        [&]() { s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>(); },
-                        [&](auto ordinal) {
-                            const float scale_m0 = Mode::kEarlyOutputRescale
-                                                       ? SplitSoftmax::Exp2(delta_m0)
-                                                       : pv_output_scale_m0;
-                            const float scale_m1 = Mode::kEarlyOutputRescale
-                                                       ? SplitSoftmax::Exp2(delta_m1)
-                                                       : pv_output_scale_m1;
-                            Policy::template RescaleOutputFragment<decltype(ordinal)::value>(
-                                o_acc, scale_m0, scale_m1);
-                        },
-                        [&](auto) {
-                            if constexpr(Policy::kReadsV0InSoftmax)
-                                Policy::template LoadV0InSoftmax<Problem>(
-                                    v_tile, v_lds_read_window, bases);
-                            Policy::template RunSplitSoftmaxPart2AndGetScale<Problem>(
-                                s_new,
-                                m,
-                                l,
-                                kScoresInLog2Domain ? 1.0f : scale_s,
-                                delta_m0,
-                                delta_m1,
-                                pv_output_scale_m0,
-                                pv_output_scale_m1);
-                        });
+                    if constexpr(kGuardedRowMax)
+                    {
+                        const float log2e_scale = kScoresInLog2Domain ? 1.0f : scale_s;
+                        const bool reduce_max   = row_base_pending;
+                        Schedule::template RunSplitSoftmax<Mode>(
+                            [&]() {
+                                if(reduce_max)
+                                    Policy::template RunGuardedRowMaxPart01<Problem>(
+                                        s_new, m, l, o_acc, log2e_scale);
+                            },
+                            [&]() {
+                                s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>();
+                            },
+                            [&](auto) {},
+                            [&](auto) {
+                                if constexpr(Policy::kReadsV0InSoftmax)
+                                    Policy::template LoadV0InSoftmax<Problem>(
+                                        v_tile, v_lds_read_window, bases);
+                                guarded_tile_sums = Policy::template RunGuardedRowMaxPart2<Problem>(
+                                    s_new, m, l, log2e_scale);
+                            });
+                    }
+                    else
+                    {
+                        float delta_m0;
+                        float delta_m1;
+                        Schedule::template RunSplitSoftmax<Mode>(
+                            [&]() {
+                                Policy::template RunSplitSoftmaxPart01<Problem>(
+                                    s_new,
+                                    m,
+                                    kScoresInLog2Domain ? 1.0f : scale_s,
+                                    delta_m0,
+                                    delta_m1);
+                            },
+                            [&]() {
+                                s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>();
+                            },
+                            [&](auto ordinal) {
+                                const float scale_m0 = Mode::kEarlyOutputRescale
+                                                           ? SplitSoftmax::Exp2(delta_m0)
+                                                           : pv_output_scale_m0;
+                                const float scale_m1 = Mode::kEarlyOutputRescale
+                                                           ? SplitSoftmax::Exp2(delta_m1)
+                                                           : pv_output_scale_m1;
+                                Policy::template RescaleOutputFragment<decltype(ordinal)::value>(
+                                    o_acc, scale_m0, scale_m1);
+                            },
+                            [&](auto) {
+                                if constexpr(Policy::kReadsV0InSoftmax)
+                                    Policy::template LoadV0InSoftmax<Problem>(
+                                        v_tile, v_lds_read_window, bases);
+                                Policy::template RunSplitSoftmaxPart2AndGetScale<Problem>(
+                                    s_new,
+                                    m,
+                                    l,
+                                    kScoresInLog2Domain ? 1.0f : scale_s,
+                                    delta_m0,
+                                    delta_m1,
+                                    pv_output_scale_m0,
+                                    pv_output_scale_m1);
+                            });
+                    }
                     return MakePForGemm1<decltype(gemm_1)>(s_new);
                 }();
                 return p_tile;
@@ -1235,6 +1274,14 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                                                     run_pv,
                                                     advance_iteration);
             Schedule::Run(tile_ops);
+            if constexpr(kGuardedRowMax)
+                row_base_pending = Policy::template RunGuardedRowMaxGuard<Problem>(
+                    m,
+                    l,
+                    o_acc,
+                    guarded_tile_sums,
+                    kScoresInLog2Domain ? 1.0f : scale_s,
+                    row_base_pending);
         }; // mainloop
 
         const index_t num_pipeline_loop = num_total_loop;

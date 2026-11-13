@@ -180,6 +180,140 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
         });
     }
 
+    // Guarded row max (FA4-style) for the BF16 D128 tiles with prepared tile bases and no logits
+    // soft cap. The row max is reduced only while a row of the wave has no finite base: on the
+    // first tile, and on the tiles after one in which a row had no visible key (a sliding window's
+    // left edge). Later tiles weight their scores against the stored base, so they reduce no row
+    // max and rescale no output. After PV, a row whose weight sum of the tile exceeds 2^8 is
+    // rebased by that sum, which bounds every weight of the row in the tile (weights are not
+    // negative): output, row sum and base. The guard runs after the P conversion, so P must keep
+    // the FP32 exponent range (BF16, not FP16); a weight past ~2^110 above the base in one tile (a
+    // score jump of ~76 natural-log units) still overflows the weights or the output. The other
+    // tiles keep the per-tile row max: in the vectorized layout their inline-asm operands (the WMMA
+    // operand guard's kept operands, the page-id queue's loads) fill the low 256 VGPRs, and the
+    // guarded max spills 16-32 VGPRs there (PV stage 0's V where the QK tail stage reads it, the
+    // page-id queue's operands with a soft cap).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseGuardedRowMax()
+    {
+        return Base::kEarlyOutputRescale &&
+               std::is_same_v<remove_cvref_t<typename Problem::PDataType>, bf16_t> &&
+               detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry> &&
+               !Problem::kHasLogitsSoftCap;
+    }
+
+    static constexpr float kGuardedRowSumBound = 256.0f;
+
+    // Guarded row max, max path: the row max (Part01), then the output and the row sums rescaled
+    // by the change of the max.
+    template <typename Problem, typename ScoreTensor, typename RowTensor, typename Fragments>
+    CK_TILE_DEVICE static void RunGuardedRowMaxPart01(ScoreTensor& score,
+                                                      RowTensor& row_max,
+                                                      RowTensor& row_sum,
+                                                      Fragments& output,
+                                                      float log2e_scale)
+    {
+        float delta_m0;
+        float delta_m1;
+        Base::template RunSplitSoftmaxPart01<Problem>(
+            score, row_max, log2e_scale, delta_m0, delta_m1);
+        const float scale_m0 = Base::ScoreSoftmax::Exp2(delta_m0);
+        const float scale_m1 = Base::ScoreSoftmax::Exp2(delta_m1);
+        static_for<0, Base::OutputFragments::kNumFragments, 1>{}([&](auto ordinal) {
+            Base::template RescaleOutputFragment<decltype(ordinal)::value>(
+                output, scale_m0, scale_m1);
+        });
+        auto& sums = row_sum.get_thread_buffer();
+        sums[number<0>{}] *= scale_m0;
+        if constexpr(Base::ScoreMapping::kNumMIter == 2)
+            sums[number<1>{}] *= scale_m1;
+    }
+
+    // Guarded row max, weights: exp2 of the scores against the stored base (0 for a row without a
+    // finite base, whose weights are 0); the tile's row sums are added to the row sums and returned
+    // for the guard. The sums are merged across the lane pair every tile: the permlane is
+    // convergent, so the pre-ISel IR sinking cannot move the sums, nor the weights they read, out
+    // of the softmax to their first use after PV (128 FP32 weights live across PV take the D128
+    // M128 tiles past 512 VGPRs).
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static array<float, 2> RunGuardedRowMaxPart2(ScoreTensor& score,
+                                                                const RowTensor& row_max,
+                                                                RowTensor& row_sum,
+                                                                float log2e_scale)
+    {
+        using Softmax      = typename Base::ScoreSoftmax;
+        const auto base_of = [](float value) {
+            return value <= -numeric<float>::infinity() ? 0.0f : value;
+        };
+        const auto& maxes = row_max.get_thread_buffer();
+        auto& sums        = row_sum.get_thread_buffer();
+        array<float, 2> tile_sums{0.0f, 0.0f};
+        const float base_m0 = base_of(maxes[number<0>{}]);
+        tile_sums(0)        = Softmax::MergeRowSum(
+            Softmax::template RunPart2LocalSum<0>(score, base_m0, log2e_scale),
+            Softmax::template RunPart2LocalSum<1>(score, base_m0, log2e_scale));
+        sums[number<0>{}] += tile_sums[0];
+        if constexpr(Base::ScoreMapping::kNumMIter == 2)
+        {
+            const float base_m1 = base_of(maxes[number<1>{}]);
+            tile_sums(1)        = Softmax::MergeRowSum(
+                Softmax::template RunPart2LocalSum<2>(score, base_m1, log2e_scale),
+                Softmax::template RunPart2LocalSum<3>(score, base_m1, log2e_scale));
+            sums[number<1>{}] += tile_sums[1];
+        }
+        return tile_sums;
+    }
+
+    // Guarded row max, after PV: rebases the rows whose weight sum of the tile exceeds the bound.
+    // Returns whether a row of the wave still has no finite base, so the next tile reduces the row
+    // max (once every row has one, it keeps it).
+    template <typename Problem, typename RowTensor, typename Fragments>
+    CK_TILE_DEVICE static bool RunGuardedRowMaxGuard(RowTensor& row_max,
+                                                     RowTensor& row_sum,
+                                                     Fragments& output,
+                                                     const array<float, 2>& tile_sums,
+                                                     float log2e_scale,
+                                                     bool base_pending)
+    {
+        auto& maxes = row_max.get_thread_buffer();
+        auto& sums  = row_sum.get_thread_buffer();
+        const bool unsafe =
+            !(tile_sums[0] <= kGuardedRowSumBound) || !(tile_sums[1] <= kGuardedRowSumBound);
+        if(__builtin_amdgcn_ballot_w32(unsafe) != 0)
+        {
+            const auto base_of = [](float value) {
+                return value <= -numeric<float>::infinity() ? 0.0f : value;
+            };
+            const float bound_m0 = tile_sums[0];
+            const float bound_m1 = tile_sums[1];
+            const bool rebase_m0 = !(bound_m0 <= kGuardedRowSumBound);
+            const bool rebase_m1 = !(bound_m1 <= kGuardedRowSumBound);
+            const float scale_m0 = rebase_m0 ? 1.0f / bound_m0 : 1.0f;
+            const float scale_m1 = rebase_m1 ? 1.0f / bound_m1 : 1.0f;
+            static_for<0, Base::OutputFragments::kNumFragments, 1>{}([&](auto ordinal) {
+                Base::template RescaleOutputFragment<decltype(ordinal)::value>(
+                    output, scale_m0, scale_m1);
+            });
+            sums[number<0>{}] *= scale_m0;
+            if(rebase_m0)
+                maxes[number<0>{}] =
+                    base_of(maxes[number<0>{}]) + __builtin_amdgcn_logf(bound_m0) / log2e_scale;
+            if constexpr(Base::ScoreMapping::kNumMIter == 2)
+            {
+                sums[number<1>{}] *= scale_m1;
+                if(rebase_m1)
+                    maxes[number<1>{}] =
+                        base_of(maxes[number<1>{}]) + __builtin_amdgcn_logf(bound_m1) / log2e_scale;
+            }
+        }
+        if(!base_pending)
+            return false;
+        bool no_base = maxes[number<0>{}] <= -numeric<float>::infinity();
+        if constexpr(Base::ScoreMapping::kNumMIter == 2)
+            no_base = no_base || maxes[number<1>{}] <= -numeric<float>::infinity();
+        return __builtin_amdgcn_ballot_w32(no_base) != 0;
+    }
+
     // QK stage with the tile's bases: the earlier stages read the next K tile from qk_stage0; with
     // UsePreparedTileBases the tail stage reads V from qk_v0.
     template <index_t Stage,
