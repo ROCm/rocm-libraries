@@ -825,12 +825,16 @@ def buildable_depthus(
 ) -> List[int]:
     """Every DepthU of the space at which ``mi`` builds, for an MI whose ``witness`` setting built.
 
-    Searches from the witness's DepthU upward, then downward, stopping in each direction at the first
-    DepthU where classify finds no kernel. That assumes an MI's buildable DepthUs are contiguous, which
-    held for all 900 gfx950 MIs checked at every DepthU (300 each of BBS NN, F8BS NT, SSS NN): a larger
-    DepthU stages more of A and B in LDS and registers. Each stop is a full search that fails, which
-    roughly doubles a list's generation time. On gfx950, 0 of 481 sampled stops built under a much
-    deeper search (3,000 attempts each).
+    Upward from the witness's DepthU, the search stops at the first DepthU where classify finds no kernel:
+    a larger DepthU stages more of A and B in LDS and registers, so resource use only grows. That held for
+    all 900 gfx950 MIs checked at every DepthU (300 each of BBS NN, F8BS NT, SSS NN), and 0 of 481 sampled
+    upward stops built under a much deeper search (3,000 attempts each). Each stop is a full search that
+    fails, which roughly doubles a list's generation time.
+
+    Every DepthU below the witness is searched: there, validity rules decide as much as resources, and they
+    need not be monotonic in DepthU. The witness is usually at or near the smallest legal DepthU (the
+    presets and factorial start there), and a DepthU below MFMA K x local split U has no legal MI entry, so
+    classify rejects it without code generation.
     """
     dus = searched_depthu(search.space)
     w = witness.get("DepthU")
@@ -842,11 +846,8 @@ def buildable_depthus(
         if not classify(checker, search.pinned(d), mi).buildable:
             break
         found.append(d)
-    for d in reversed(dus[:i]):
-        if not classify(checker, search.pinned(d), mi).buildable:
-            break
-        found.insert(0, d)
-    return found
+    below = [d for d in dus[:i] if classify(checker, search.pinned(d), mi).buildable]
+    return below + found
 
 
 # ---------------------------------------------------------------------------- driver
