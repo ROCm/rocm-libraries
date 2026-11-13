@@ -40,7 +40,7 @@ struct ResampleFwdConfig
     std::vector<int64_t> yDims;
     std::vector<int64_t> yStrides;
 
-    // Set when the node has generate_index. MIOpen writes the indices, packed in NC(D)HW order,
+    // Set when the node has an index tensor. MIOpen writes the indices, packed in NC(D)HW order,
     // to the front of its workspace; the plan copies them into this tensor.
     std::optional<int64_t> indexUid;
     miopenIndexType_t indexType{miopenIndexUint8};

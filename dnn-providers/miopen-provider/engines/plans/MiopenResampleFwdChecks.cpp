@@ -304,10 +304,12 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
         }
     }
 
-    // MIOpen's max pooling can only select a padded position when no input in the window is above
-    // the lowest finite value of the type (all -inf, NaN or lowest), and its average pooling counts
-    // padded positions as zero. Any other padding_mode, PADDING_NOT_SET included, only agrees with
-    // that when there are no padded positions.
+    // MIOpen's max pooling never selects a padded position over an in-bounds one, which matches
+    // NEG_INF_PAD, and its average pooling counts padded positions as zero, which matches
+    // ZERO_PAD. Any other padding_mode, PADDING_NOT_SET included, only agrees with that when there
+    // are no padded positions. (A max pooling window with no finite in-bounds input differs from
+    // hipDNN's references whatever the padding: MIOpen writes the type's lowest finite value and
+    // index 0. That depends on the data, so no graph check can decline it.)
     const auto implicitPaddingMode = isMaxPool ? PaddingMode::NEG_INF_PAD : PaddingMode::ZERO_PAD;
     const bool hasPadding
         = std::any_of(config.padding.begin(), config.padding.end(), [](int p) { return p > 0; });

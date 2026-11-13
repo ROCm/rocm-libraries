@@ -45,8 +45,9 @@ MiopenPoolingDescriptor::MiopenPoolingDescriptor(miopenPoolingMode_t mode,
                                                              stride.data()));
 
         // Setting the N-d descriptor resets the index type and the workspace index mode, so both
-        // must be applied afterwards. MIOpen defaults to mask mode (an offset inside the window),
-        // which its N-d max pooling solver rejects when indices are saved.
+        // must be applied afterwards. Image mode records a flattened spatial offset into the
+        // unpadded input, hipDNN's index convention. MIOpen's default for two spatial dimensions
+        // is mask mode, an offset inside the window.
         THROW_ON_MIOPEN_FAILURE(miopenSetPoolingIndexType(_descriptor, indexType));
         THROW_ON_MIOPEN_FAILURE(
             miopenSetPoolingWorkSpaceIndexMode(_descriptor, miopenPoolingWorkspaceIndexImage));
