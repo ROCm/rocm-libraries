@@ -958,17 +958,17 @@ std::vector<ConvCase> splitCases()
     padded.filter = {3, 3};
     padded.prePadding = padded.postPadding = {1, 1};
     cases.push_back({"Padded3x3NhwcWrw", padded, ConvDirection::BACKWARD_WEIGHTS});
-    // One output pixel over 16384 terms: forward and backward data into a 16-bit output run as
+    // One output pixel over 65536 terms: forward and backward data into a 16-bit output run as
     // fp32 partials summed once (narrow partials, which this suite forces).
     ConvGemmShape pointLong;
     pointLong.n = 1;
     pointLong.c = pointLong.k = 16;
-    pointLong.input = pointLong.filter = {32, 32};
+    pointLong.input = pointLong.filter = {64, 64};
     cases.push_back({"PointOutputLongFwd", pointLong, ConvDirection::FORWARD});
     ConvGemmShape pixelLong;
     pixelLong.n = 1;
     pixelLong.c = 1;
-    pixelLong.k = 16384;
+    pixelLong.k = 65536;
     pixelLong.input = {1, 1};
     cases.push_back({"OnePixelManyChannelsBwd", pixelLong, ConvDirection::BACKWARD_DATA});
     return cases;
