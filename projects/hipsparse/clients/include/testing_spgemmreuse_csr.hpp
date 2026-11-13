@@ -26,6 +26,7 @@
 #define TESTING_SPGEMMREUSE_CSR_HPP
 
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -62,9 +63,8 @@ void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
 
     hipsparseLocalHandle_t handle;
 
-    std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
-    hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;
-    auto                           dcsr_row_ptr_A_managed
+    hipsparseLocalSpGEMMDescr descr;
+    auto dcsr_row_ptr_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto dcsr_col_ind_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -222,8 +222,7 @@ void testing_spgemmreuse_csr(Arguments argus)
     // hipSPARSE handles
     hipsparseLocalHandle_t handle(argus);
 
-    std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
-    hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;
+    hipsparseLocalSpGEMMDescr descr;
 
     // Host structures
     std::vector<I> hcsr_row_ptr_A;

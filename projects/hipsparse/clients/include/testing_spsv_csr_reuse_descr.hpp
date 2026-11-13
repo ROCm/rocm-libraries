@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_local_spmat.hpp"
@@ -126,8 +127,7 @@ static void call_spsv(hipsparseHandle_t&     handle,
     hipsparseLocalDnVec y1(m, dy_1, typeT);
     hipsparseLocalDnVec y2(m, dy_2, typeT);
 
-    hipsparseSpSVDescr_t descr;
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
+    hipsparseLocalSpSVDescr descr;
 
     // Query SpSV buffer
     size_t bufferSize;
@@ -180,8 +180,6 @@ static void call_spsv(hipsparseHandle_t&     handle,
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data(), -1.0, atol);
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data(), -1.0, atol);
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -241,15 +239,12 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
 
                 for(hipsparseSpSVAlg_t alg : algs)
                 {
-                    hipsparseSpSVDescr_t descr;
-                    CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
+                    hipsparseLocalSpSVDescr descr;
 
                     size_t bufferSize;
                     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
                         handle, op, &alpha, matA, x, y, typeT, alg, descr, &bufferSize));
                     buffer_size_max = std::max(buffer_size_max, bufferSize);
-
-                    CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
                 }
             }
         }
@@ -285,8 +280,7 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         hipsparseLocalDnVec x(m, dx, typeT);
                         hipsparseLocalDnVec y(m, dy, typeT);
 
-                        hipsparseSpSVDescr_t descr;
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
+                        hipsparseLocalSpSVDescr descr;
 
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_analysis(
                             handle, op, &alpha, matA, x, y, typeT, alg, descr, buffer));
@@ -325,8 +319,6 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                                             -1.0,
                                             spsv_reuse_descr_atol<T>());
                         }
-
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
                     }
                 }
             }
