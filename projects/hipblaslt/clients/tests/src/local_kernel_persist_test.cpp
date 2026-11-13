@@ -1423,6 +1423,103 @@ TEST(LocalKernelPersist, DISABLED_RefreshDuringMappingWorker)
     EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
+// A mapping whose read back fails, or reads a journal that replaced the one
+// it was saved in, is published as it is, over a later mapping this process
+// had already applied. The next Refresh puts the journal's last mapping back.
+TEST(LocalKernelPersist, DISABLED_FailedReadBackWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    const auto kernels = twoUsableKernels(handle, p, candidates);
+    ASSERT_EQ(kernels.size(), 2u) << "no two kernels in this build's library serve the problem";
+    const auto kernelOf = mappingNames(handle, library, kernels);
+    ASSERT_EQ(kernelOf.size(), 2u);
+    std::string second;
+    for(auto const& [name, kernel] : kernelOf)
+        if(kernel == kernels[1])
+            second = name;
+    const std::string secondMapping
+        = journalRecord("E " + second + " " + std::to_string(M) + " " + std::to_string(N) + " 1 "
+                        + std::to_string(K));
+    auto lastKernel = [&] {
+        auto found = kernelOf.find(lastMapping(library));
+        return found == kernelOf.end() ? -1 : found->second;
+    };
+
+    // Maps the first kernel; `meanwhile` runs once it is saved and before it
+    // is read back.
+    auto mapFirstWhile = [&](auto const& meanwhile) {
+        hipblasStatus_t mapped = HIPBLAS_STATUS_NOT_INITIALIZED;
+        std::thread     mapping(
+            [&] { mapped = hipblasLtLocalKernelSetExactMatch(handle, kernels[0], M, N, 1, K); });
+        for(int i = 0; i < 6000 && lastKernel() != kernels[0]; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        EXPECT_EQ(lastKernel(), kernels[0]) << "the first mapping was saved";
+        meanwhile();
+        mapping.join();
+        EXPECT_EQ(mapped, HIPBLAS_STATUS_SUCCESS);
+    };
+    size_t added = 0;
+
+    // Another process maps the shape to the second kernel and a Refresh
+    // applies both mappings; then the read back cannot lock the journal.
+    int held = -1;
+    mapFirstWhile([&] {
+        std::ofstream(journalPath(library).string(), std::ios::app) << secondMapping << '\n';
+        EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(topIndex(handle, p), kernels[1]);
+        held = ::open(journalPath(library).c_str(), O_RDONLY | O_CLOEXEC);
+        EXPECT_EQ(::flock(held, LOCK_EX), 0);
+    });
+    EXPECT_EQ(topIndex(handle, p), kernels[0]) << "published without its read back";
+    ::close(held);
+    ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(lastKernel(), kernels[1]);
+    EXPECT_EQ(topIndex(handle, p), kernels[1]) << "the next Refresh read the mapping again";
+
+    // The journal is replaced by one that maps the shape to the second kernel.
+    mapFirstWhile([&] {
+        const auto  lines   = journalLines(library);
+        std::string version = lines[0];
+        version.back()      = version.back() == '0' ? '1' : '0';
+        std::string payload;
+        for(auto const& line : lines)
+            if(line.rfind("R " + second.substr(0, second.rfind(' ')) + " ", 0) == 0)
+                payload = line;
+        ASSERT_FALSE(payload.empty());
+        const fs::path journal = journalPath(library);
+        const fs::path next    = journal.string() + ".next";
+        std::ofstream(next.string(), std::ios::binary) << version << '\n'
+                                                       << payload << '\n'
+                                                       << secondMapping << '\n';
+        ASSERT_EQ(::chmod(next.c_str(), 0644), 0);
+        fs::rename(next, journal);
+    });
+    EXPECT_EQ(topIndex(handle, p), kernels[0]) << "published after reading the new journal";
+    ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(lastKernel(), kernels[1]);
+    EXPECT_EQ(topIndex(handle, p), kernels[1]) << "the next Refresh read the new journal again";
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, FailedReadBackIsRepairedByRefresh)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_FailedReadBackWorker",
+                        {libraryEnv(tmp.path / "lib"),
+                         env("HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS", "500")}),
+              0);
+}
+
 TEST(LocalKernelPersist, RefreshDuringMappingKeepsJournalOrder)
 {
     TempDir tmp;

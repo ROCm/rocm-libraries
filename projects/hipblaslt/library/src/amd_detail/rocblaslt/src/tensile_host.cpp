@@ -8639,7 +8639,8 @@ namespace
         // quietly until it changes.
         std::map<Key, std::string> rejected;
         // Where to read a scope's journal again from, because a payload
-        // skipped there has been registered since.
+        // skipped there has been registered since, or a mapping saved there
+        // was published without being read back.
         std::map<std::string, uint64_t> rewind;
         // Replays of one scope run one at a time, and take `mutex` only to
         // look up and to publish.
@@ -9020,7 +9021,8 @@ namespace
         for(auto const& [offset, skipped] : waiting)
             if(store.objectState(skipped.record) != skipped.state)
                 cursor.offset = std::min(cursor.offset, offset);
-        const uint64_t readFrom = cursor.offset;
+        const uint64_t    readFrom = cursor.offset;
+        const std::string readIn   = cursor.journal;
 
         std::vector<uks::JournalEntry> entries;
         if(!store.read(scope, &cursor, &entries, error))
@@ -9151,9 +9153,12 @@ namespace
             localLibrary.setExactMatches(mappings, TensileLite::LocalDeviceClass::of(gpu)));
 
         // A rewind asked for while the journal was read, from an earlier
-        // record, is for the next replay.
+        // record, or from one this read did not reach, is for the next replay.
+        // One into a journal that was replaced is spent: the one that
+        // replaced it was read from the start.
         if(auto from = registry.rewind.find(scope);
-           from != registry.rewind.end() && from->second >= readFrom)
+           from != registry.rewind.end() && from->second >= readFrom
+           && (from->second < cursor.offset || cursor.journal != readIn))
             registry.rewind.erase(from);
         registry.journals[scope] = cursor;
         if(read)
@@ -9515,7 +9520,25 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
 
     // The mapping is saved by now, so a read back that fails, throws, or reads
     // a journal that replaced the one it was saved in is reported, or not, and
-    // the mapping published as it is.
+    // the mapping published as it is. Another replay may already have applied
+    // a later mapping at this key and read past it, so the next replay reads
+    // again from this record, or from the start of a journal that replaced
+    // it, and leaves the journal's last mapping on top again. Publishing and
+    // asking for that together keeps a replay that ends meanwhile from taking
+    // the request before the publish.
+    auto publishAndRewind = [&] {
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
+            return rocblaslt_status_invalid_value;
+        auto const     known = registry.journals.find(scope);
+        const uint64_t offset
+            = known != registry.journals.end() && known->second.journal == saved.journal
+                  ? saved.offset
+                  : 0;
+        auto& from = registry.rewind.try_emplace(scope, offset).first->second;
+        from       = std::min(from, offset);
+        return rocblaslt_status_success;
+    };
     size_t      added = 0;
     std::string read;
     try
@@ -9533,7 +9556,7 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
         std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << e.what()
                   << std::endl;
     }
-    return publish();
+    return publishAndRewind();
 }
 
 rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t* registered)
