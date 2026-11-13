@@ -1391,6 +1391,15 @@ GFX950_ATTENTION_TILED_2D = [
         "use_register_pv": True,
         "tile_size": 32,
     },
+]
+
+# idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+GFX950_ATTENTION_TILED_2D += [
+    {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
+]
+
+# idx75 onward: additive bias.
+GFX950_ATTENTION_TILED_2D += [
     {
         "head_size": 128,
         "block_size": 16,
@@ -1575,10 +1584,6 @@ GFX950_ATTENTION_TILED_2D = [
         "tile_size": 32,
         "emit_lse": True,
     },
-]
-# idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
-GFX950_ATTENTION_TILED_2D += [
-    {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
 ]
 
 GFX942_ATTENTION_TILED_3D = [
