@@ -424,20 +424,33 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         const auto& node = opGraph.getNode(0);
 
-        // Only batchnorm training (BatchnormAttributes) has running statistics
+        // Only batchnorm training (BatchnormAttributes) has running and saved statistics.
+        // This builder serves neither: running statistics belong to the training builder,
+        // and the plan writes saved mean / inv_variance only as a pair.
         if(node.attributes_type()
            == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes)
         {
             const auto* attr = node.attributes_as_BatchnormAttributes();
-            if(attr != nullptr && attr->prev_running_mean_tensor_uid().has_value()
-               && attr->prev_running_variance_tensor_uid().has_value()
-               && attr->momentum_tensor_uid().has_value()
-               && attr->next_running_mean_tensor_uid().has_value()
-               && attr->next_running_variance_tensor_uid().has_value())
+            if(attr != nullptr)
             {
-                HIPDNN_PLUGIN_LOG_INFO(
-                    "Batchnorm plan builder does not support running statistics");
-                return false;
+                if(attr->prev_running_mean_tensor_uid().has_value()
+                   || attr->prev_running_variance_tensor_uid().has_value()
+                   || attr->momentum_tensor_uid().has_value()
+                   || attr->next_running_mean_tensor_uid().has_value()
+                   || attr->next_running_variance_tensor_uid().has_value())
+                {
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "Batchnorm plan builder does not support running statistics");
+                    return false;
+                }
+
+                if(attr->mean_tensor_uid().has_value()
+                   != attr->inv_variance_tensor_uid().has_value())
+                {
+                    HIPDNN_PLUGIN_LOG_INFO("Batchnorm plan builder requires saved mean and "
+                                           "inv_variance to be provided together");
+                    return false;
+                }
             }
         }
 

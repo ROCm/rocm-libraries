@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
+#include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include "mocks/MockHipdnnMiopenContext.hpp"
@@ -2255,3 +2256,210 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanFor3dNclFusedThreeNodeGr
     EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
+
+namespace
+{
+
+namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+// Running-statistics roles of a batchnorm training node, one bit each.
+constexpr unsigned PREV_MEAN = 1U << 0;
+constexpr unsigned PREV_VAR = 1U << 1;
+constexpr unsigned MOMENTUM = 1U << 2;
+constexpr unsigned NEXT_MEAN = 1U << 3;
+constexpr unsigned NEXT_VAR = 1U << 4;
+constexpr unsigned ALL_RUNNING_STATS = PREV_MEAN | PREV_VAR | MOMENTUM | NEXT_MEAN | NEXT_VAR;
+
+// Single-node batchnorm training graph whose running-statistics roles and saved
+// mean / inv_variance outputs are selected independently.
+flatbuffers::FlatBufferBuilder createBatchnormTrainingGraphWithStats(unsigned runningStatsMask,
+                                                                     bool saveMean,
+                                                                     bool saveInvVariance)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors;
+
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> strides = {588, 196, 14, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
+    const std::vector<int64_t> scalarDims = {1};
+
+    const auto addTensor = [&](int64_t uid,
+                               const char* name,
+                               const std::vector<int64_t>& tensorStrides,
+                               const std::vector<int64_t>& tensorDims) {
+        tensors.push_back(fb::CreateTensorAttributesDirect(
+            builder, uid, name, fb::DataType::FLOAT, &tensorStrides, &tensorDims));
+    };
+    const auto addScalar = [&](int64_t uid, const char* name, float value) {
+        const fb::Float32Value scalar(value);
+        tensors.push_back(fb::CreateTensorAttributesDirect(builder,
+                                                           uid,
+                                                           name,
+                                                           fb::DataType::FLOAT,
+                                                           &scalarDims,
+                                                           &scalarDims,
+                                                           false,
+                                                           fb::TensorValue::Float32Value,
+                                                           builder.CreateStruct(scalar).Union()));
+    };
+    const auto optionalUid = [](bool present, int64_t uid) {
+        return present ? flatbuffers::Optional<int64_t>(uid) : flatbuffers::nullopt;
+    };
+
+    addTensor(1, "x", strides, dims);
+    addTensor(2, "y", strides, dims);
+    addTensor(3, "scale", derivedStrides, derivedDims);
+    addTensor(4, "bias", derivedStrides, derivedDims);
+    addScalar(5, "epsilon", 1e-5f);
+
+    if(saveMean)
+    {
+        addTensor(6, "mean", derivedStrides, derivedDims);
+    }
+    if(saveInvVariance)
+    {
+        addTensor(7, "inv_variance", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & PREV_MEAN) != 0U)
+    {
+        addTensor(8, "prev_running_mean", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & PREV_VAR) != 0U)
+    {
+        addTensor(9, "prev_running_variance", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & MOMENTUM) != 0U)
+    {
+        addScalar(10, "momentum", 0.1f);
+    }
+    if((runningStatsMask & NEXT_MEAN) != 0U)
+    {
+        addTensor(11, "next_running_mean", derivedStrides, derivedDims);
+    }
+    if((runningStatsMask & NEXT_VAR) != 0U)
+    {
+        addTensor(12, "next_running_variance", derivedStrides, derivedDims);
+    }
+
+    const auto attributes
+        = fb::CreateBatchnormAttributes(builder,
+                                        1,
+                                        3,
+                                        4,
+                                        5,
+                                        0,
+                                        optionalUid((runningStatsMask & PREV_MEAN) != 0U, 8),
+                                        optionalUid((runningStatsMask & PREV_VAR) != 0U, 9),
+                                        optionalUid((runningStatsMask & MOMENTUM) != 0U, 10),
+                                        2,
+                                        optionalUid(saveMean, 6),
+                                        optionalUid(saveInvVariance, 7),
+                                        optionalUid((runningStatsMask & NEXT_MEAN) != 0U, 11),
+                                        optionalUid((runningStatsMask & NEXT_VAR) != 0U, 12));
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    nodes.push_back(fb::CreateNodeDirect(builder,
+                                         "batchnorm_training",
+                                         fb::DataType::FLOAT,
+                                         fb::NodeAttributes::BatchnormAttributes,
+                                         attributes.Union()));
+
+    builder.Finish(fb::CreateGraphDirect(builder,
+                                         "test",
+                                         fb::DataType::FLOAT,
+                                         fb::DataType::HALF,
+                                         fb::DataType::BFLOAT16,
+                                         &tensors,
+                                         &nodes));
+    return builder;
+}
+
+struct BnTrainingStatsParam
+{
+    unsigned runningStatsMask;
+    bool saveMean;
+    bool saveInvVariance;
+};
+
+std::string bnTrainingStatsParamName(const ::testing::TestParamInfo<BnTrainingStatsParam>& info)
+{
+    const auto& p = info.param;
+    const auto role = [&](unsigned bit, const char* name) {
+        return std::string((p.runningStatsMask & bit) != 0U ? "_" : "_No") + name;
+    };
+    return role(PREV_MEAN, "PrevMean") + role(PREV_VAR, "PrevVar") + role(MOMENTUM, "Momentum")
+           + role(NEXT_MEAN, "NextMean") + role(NEXT_VAR, "NextVar")
+           + (p.saveMean ? "_SaveMean" : "_NoSaveMean")
+           + (p.saveInvVariance ? "_SaveInvVar" : "_NoSaveInvVar");
+}
+
+std::vector<BnTrainingStatsParam> allBnTrainingStatsParams()
+{
+    std::vector<BnTrainingStatsParam> params;
+    for(unsigned mask = 0; mask <= ALL_RUNNING_STATS; ++mask)
+    {
+        for(const bool saveMean : {false, true})
+        {
+            for(const bool saveInvVariance : {false, true})
+            {
+                params.push_back({mask, saveMean, saveInvVariance});
+            }
+        }
+    }
+    return params;
+}
+
+} // namespace
+
+// The single-node training plan only honours a complete running-statistics set or
+// none, and saved mean / inv_variance only as a pair; anything else is dropped
+// silently at execute time, so the builder must decline it.
+class TestMiopenBatchnormPlanBuilderTrainingStats
+    : public ::testing::TestWithParam<BnTrainingStatsParam>
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
+};
+
+TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsThePlanHonours)
+{
+    const auto& p = GetParam();
+    auto builder
+        = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const bool planHonoursStats = p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance;
+
+    EXPECT_EQ(MiopenBatchnormPlanBuilder{}.isApplicable(*_dummyHandle, graph), planHonoursStats);
+}
+
+// The training builder serves the complete running-statistics set, but, like the plan
+// it builds, only a complete one.
+TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
+       TrainingBuilderServesOnlyCompleteOrNoRunningStats)
+{
+    const auto& p = GetParam();
+    auto builder
+        = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const bool planHonoursStats
+        = (p.runningStatsMask == 0U || p.runningStatsMask == ALL_RUNNING_STATS)
+          && p.saveMean == p.saveInvVariance;
+
+    EXPECT_EQ(MiopenBatchnormFwdTrainingPlanBuilder{}.isApplicable(*_dummyHandle, graph),
+              planHonoursStats);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllRunningStatsAndSavedStatsSubsets,
+                         TestMiopenBatchnormPlanBuilderTrainingStats,
+                         ::testing::ValuesIn(allBnTrainingStatsParams()),
+                         bnTrainingStatsParamName);
