@@ -58,7 +58,7 @@ RppStatus water_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* 
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+        compute_local_ltrb_from_xywh_host(&roi, &roiLTRB);
 
         Rpp8u *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -335,7 +335,7 @@ RppStatus water_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp3
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+        compute_local_ltrb_from_xywh_host(&roi, &roiLTRB);
 
         Rpp32f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -612,7 +612,7 @@ RppStatus water_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp1
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+        compute_local_ltrb_from_xywh_host(&roi, &roiLTRB);
 
         Rpp16f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -768,7 +768,7 @@ RppStatus water_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* 
         RpptROI roi, roiLTRB;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+        compute_local_ltrb_from_xywh_host(&roi, &roiLTRB);
 
         Rpp8s *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
