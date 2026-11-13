@@ -13,6 +13,7 @@ enum class MXScaleLayout
 };
 
 #include "hipblaslt_scaling_format.hpp"
+#include <cstdint>
 #include <string_view>
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
@@ -24,6 +25,23 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
                                      std::string_view       archName);
 
+// integer_exact MX elements are integers of magnitude at most kIntegerExactMXMaxElement, and their
+// E8M0 scales at most kIntegerExactMXMaxScale, so each product of a dequantized A and B element is
+// an integer of magnitude at most kIntegerExactMXMaxProduct. K of them bound every partial sum of
+// D, in any summation order. fp32 holds every integer below 2^24 exactly, so the device and the
+// host reference agree exactly while K * kIntegerExactMXMaxProduct < 2^24, that is K < 262144.
+constexpr int     kIntegerExactMXMaxElement = 2;
+constexpr int     kIntegerExactMXMaxScale   = 4;
+constexpr int64_t kIntegerExactMXMaxProduct = int64_t(kIntegerExactMXMaxElement)
+                                              * kIntegerExactMXMaxScale * kIntegerExactMXMaxElement
+                                              * kIntegerExactMXMaxScale;
+constexpr int64_t kIntegerExactMXExactLimit = int64_t(1) << 24;
+
+constexpr int64_t integerExactMXSumBound(int64_t K)
+{
+    return K * kIntegerExactMXMaxProduct;
+}
+
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include <hip/hip_bfloat16.h>
@@ -34,7 +52,7 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 
 #include <vector>
 
-// integer_exact supports fp8 data. With swizzled scales it currently requires K along
+// integer_exact supports fp8 and fp6 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,

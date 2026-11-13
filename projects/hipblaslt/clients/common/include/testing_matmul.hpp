@@ -1111,6 +1111,12 @@ inline int64_t bias_vector_length(hipblaslt_bias_source source, int64_t m, int64
     return source == hipblaslt_bias_source::b ? n : m;
 }
 
+// The MX element types integer_exact data supports (makeIntegerExactMX in mxDataGen.cpp).
+inline bool integer_exact_mx_element_type(hipDataType t)
+{
+    return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2 || t == HIP_R_6F_E2M3 || t == HIP_R_6F_E3M2;
+}
+
 // Returns why fast_check cannot verify this configuration, or an empty string when it can.
 inline std::string fast_check_unsupported_reason(const Arguments&     arg,
                                                  hipblasLtBatchMode_t batchMode,
@@ -1901,6 +1907,32 @@ void testing_matmul(const Arguments& arg)
               && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
               && arg.scaleA == hipblaslt_scaling_format::none
               && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+        // MX integer_exact data is exact against the fp32 host reference only while
+        // integerExactMXSumBound(K) * |alpha| stays below 2^24 (see mxDataGen.hpp).
+        if(host_reference && (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB)))
+        {
+            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < gemm_count; i++)
+            {
+                const double bound = double(integerExactMXSumBound(arg.K[i]))
+                                     * std::max(1.0, std::fabs(double(arg.alpha)));
+                if(bound >= double(kIntegerExactMXExactLimit))
+                {
+                    std::string why = "integer_exact MX data with K=" + std::to_string(arg.K[i])
+                                      + " bounds |alpha * D| by " + std::to_string(bound)
+                                      + ", which is not below 2^24, so the exact host check "
+                                        "does not hold";
+#ifdef GOOGLE_TEST
+                    FAIL() << why;
+#else
+                    hipblaslt_cerr << why << std::endl;
+                    return;
+#endif
+                }
+            }
+        }
+#endif
         if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
@@ -3427,15 +3459,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiA)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3538,15 +3572,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiB)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
