@@ -2378,7 +2378,8 @@ namespace TensileLite
                                           initModeToMXMethod(dataInitMode),
                                           -1.0f,
                                           1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                                          initModeToMXMethod(scaleInitMode),
+                                          /*returnReference=*/false);
                           // Collapse the free dimension before restriding: restride
                           // fixes K-block padding, which is the orthogonal axis.
                           if(mxBlockFree > 1)
@@ -2696,7 +2697,8 @@ namespace TensileLite
                                 initModeToMXMethod(m_vdata[dataTensorEnum].init),
                                 -1.0f,
                                 1.0f,
-                                initModeToMXMethod(m_vdata[scaleTensorEnum].init));
+                                initModeToMXMethod(m_vdata[scaleTensorEnum].init),
+                                /*returnReference=*/false);
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
