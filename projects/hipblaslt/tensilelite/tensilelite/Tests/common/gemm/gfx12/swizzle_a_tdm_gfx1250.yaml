@@ -411,3 +411,70 @@ BenchmarkProblems:
           - Exact:
               sizes: [200, 100, 2, 200]
               stridesA: [1, 200, 45000]
+  -
+    - # ProblemType, TN, F8 swizzle-A, multi-wave, VectorWidthA = 2 and 4 (the swizzled read re-decomposes
+      # the VW-strided M into (mO, mI); same path as swizzle-B VWB>1). Includes a tail-K size.
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 2,  2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [2, 4]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 128, 1, 512]
+          - Exact: [200, 100, 1, 400]
+        - ActivationArgs:
+          - [Enum: none]

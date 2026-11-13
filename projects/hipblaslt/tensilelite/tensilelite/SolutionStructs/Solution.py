@@ -5469,7 +5469,7 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["SwizzleTensorA"]:
         # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if state["VectorWidthA"] != 1:
+          if state["VectorWidthA"] != 1 and not swizzleAIsTDM:
             reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
             return
           # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts the
