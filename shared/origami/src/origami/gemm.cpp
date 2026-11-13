@@ -908,6 +908,32 @@ double compute_cvt_overhead_x1(const problem_t& problem,
   return overhead;
 }
 
+// W4A16 on gfx1151: int4 A (the weights) dequantized to a bf16/fp16 MI type inside the
+// kernel, the case w4a16_defaults_t was calibrated for.
+static bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
+  return hardware.arch == hardware_t::architecture_t::gfx1151 && problem.a_dtype == data_type_t::Int4
+         && (problem.mi_dtype == data_type_t::BFloat16 || problem.mi_dtype == data_type_t::Half);
+}
+
+// W4A16 dequantize cost per MT_MxMT_NxMT_K iteration, in the same serial-MI cycle
+// units as compute_mt_compute_latency. Every workgroup expands its MT_M x MT_K int4 A
+// tile into the MI type between the global read and the LDS write, with VALU
+// instructions that issue on the SIMDs that run the MIs (RDNA has no separate matrix
+// pipe), so the cost adds to the MI time rather than hiding under it. Relative to the
+// MI time it is 4 * I / MT_N, I being VALU instructions per dequantized element: the A
+// tile is expanded once per output tile, so a wider N tile spreads it over more MI
+// work. 0 for every other problem.
+static double compute_w4a16_dequant_latency(const problem_t& problem,
+                                            const hardware_t& hardware,
+                                            const config_t& config) {
+  if (!is_w4a16(problem, hardware)) return 0.0;
+  const double per_elem = problem.mi_dtype == data_type_t::BFloat16
+      ? w4a16_defaults_t::BF16_DEQUANT_VALU_PER_ELEM
+      : w4a16_defaults_t::F16_DEQUANT_VALU_PER_ELEM;
+  constexpr double lanes = 32.0;  // wave32: one VALU instruction covers 32 elements
+  return static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k) * per_elem / lanes;
+}
+
 // Compute cvt overhead in tf32 emulation
 double compute_cvt_overhead(const problem_t& problem,
                             const hardware_t& hardware,
@@ -1927,6 +1953,7 @@ double compute_tile_latency(const problem_t& problem,
 
   // Per-K-iter cycle costs (simple MFMA-only compute model; bytes/BW memory).
   double L_compute = static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
+  L_compute += compute_w4a16_dequant_latency(problem, hardware, config);
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
   // LDS read time that narrow M/N-contiguous reads (VectorWidth * bpe below a
@@ -1947,15 +1974,18 @@ double compute_tile_latency(const problem_t& problem,
   // register-starved kernels are still penalised.
   // ---------------------------------------------------------------------------
   const double wgs_per_cu = static_cast<double>(compute_resident_wgs(config, context));
-  const double wg_score =
-      std::clamp(wgs_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
-  constexpr double PER_WAVE_MIN_SCORE = 1.0 / 1.5;
-  const double per_wave_score         = std::max(wg_score, PER_WAVE_MIN_SCORE);
-
   const auto& tp            = tparams(config);
   const dim3_t& waves       = context.wave_group;
   const double simds_per_cu = static_cast<double>(hardware.simds_per_cu());
   const double waves_per_wg = static_cast<double>(waves.m * waves.n * waves.k);
+  // W4A16 counts co-residency in waves instead: its one-WG/CU kernels are the
+  // 16-wave tiles.
+  const double wg_score = is_w4a16(problem, hardware)
+      ? std::clamp(wgs_per_cu * waves_per_wg / w4a16_defaults_t::TARGET_WAVES_PER_CU, 0.0, 1.0)
+      : std::clamp(wgs_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
+  constexpr double PER_WAVE_MIN_SCORE = 1.0 / 1.5;
+  const double per_wave_score         = std::max(wg_score, PER_WAVE_MIN_SCORE);
+
   const double simds_busy = std::min(simds_per_cu, waves_per_wg * wgs_per_cu);
 
   L_compute = L_compute / per_wave_score * (simds_per_cu / simds_busy);
@@ -2088,8 +2118,11 @@ double compute_tile_latency(const problem_t& problem,
   // more reads in flight and overlaps most of this, so expose only a fraction.
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
+  const double loop_overhead_per_iter = is_w4a16(problem, hardware)
+      ? w4a16_defaults_t::K_ITER_LOOP_OVERHEAD
+      : heuristic_defaults_t::K_ITER_LOOP_OVERHEAD;
   const double L_loop_overhead =
-      heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
+      loop_overhead_per_iter * static_cast<double>(k_iters) * pgr_loop_overlap;
 
   // With one LDS buffer the next iteration's tile can only be written once every wave has read
   // the current one, so the writes fit only between the MFMAs of the last K-step.  When writing
@@ -2441,7 +2474,35 @@ double compute_total_latency(const problem_t& problem,
   // 3) Latency for all scheduling rounds.  num_timesteps = WG waves passing
   // through the CUs.  Occupancy hides stalls inside a tile but doesn't cut the
   // round count, so it belongs in the per-tile model, not as a divisor here.
-  double total_latency             = L_timestep * context.num_timesteps;
+  double timesteps = static_cast<double>(context.num_timesteps);
+  // A W4A16 Stream-K grid of at most one workgroup per CU that shares more tiles
+  // than workgroups runs tiles / workgroups tiles per workgroup (its partial tiles
+  // are charged below), not whole waves: below a few tiles per CU, where data
+  // parallel pays a partly idle last wave, counting it as whole waves made Origami
+  // pick the data-parallel kernel, measured up to 2x slower on gfx1151.
+  const size_t usable_cus = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  if (is_w4a16(problem, hardware) && config.stream_k > 0 && context.num_wgs < context.num_output_tiles
+      && context.num_wgs <= usable_cus
+      && static_cast<double>(context.num_output_tiles)
+             < w4a16_defaults_t::SK_SHARED_MAX_TILES_PER_CU * static_cast<double>(usable_cus))
+    timesteps = static_cast<double>(context.num_output_tiles) / static_cast<double>(context.num_wgs);
+  double total_latency             = L_timestep * timesteps;
+
+  // W4A16 Stream-K partial tiles: the workgroup that finishes a tile waits for and reads
+  // the MT_M x MT_N f32 partial of every other workgroup that worked on it, on the
+  // critical path. A tile split over s workgroups has s - 1 partials; a grid that shares
+  // tiles unevenly has one. Without it, splitting a few large tiles' K over every CU
+  // looked as fast as splitting many small ones, and was measured up to 2.3x slower.
+  if (is_w4a16(problem, hardware) && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
+    const double tiles     = static_cast<double>(context.num_output_tiles);
+    const double wgs       = static_cast<double>(context.num_wgs);
+    const double partials  = wgs > tiles ? std::ceil(wgs / tiles) - 1.0
+                                         : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
+    const double tile_bytes = static_cast<double>(config.mt.m * config.mt.n) * 4.0;
+    const double bw         = std::max(hardware.mem2_perf_ratio
+        * compute_mem_bw_from_occupancy(hardware, std::min(context.num_wgs, usable_cus)), 1e-12);
+    total_latency += partials * w4a16_defaults_t::SK_PARTIAL_TILE_COST * 2.0 * tile_bytes / bw;
+  }
 
   //  4) Kernel launch overhead
   total_latency += heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;

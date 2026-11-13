@@ -7727,6 +7727,14 @@ namespace TensileLite
                         // the DataParallel launch itself has no reduction strategy.
                         .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
                                                   ? origami::reduction_t::tree : reductionStrat,
+                        // The kernel's wave layout, as the Prediction library passes it:
+                        // the W4A16 grid rules count a workgroup's waves.
+                        .backend = origami::tensile_params_t{
+                            .local_split_u = self.sizeMapping.LocalSplitU,
+                            .wavefront_size = self.sizeMapping.WavefrontSize,
+                            .wave_group_m  = self.sizeMapping.waveGroup[0],
+                            .wave_group_n  = self.sizeMapping.waveGroup[1],
+                        },
                     };
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);

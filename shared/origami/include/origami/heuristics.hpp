@@ -83,6 +83,60 @@ struct heuristic_defaults_t {
   static constexpr size_t SUBMI_GEMV_K_MIN             = 256;
   static constexpr double EPILOGUE_OCC_SATURATION      = 2.0;
   static constexpr double SCALAR_STORE_EXPOSED_PENALTY = 4.0;
+
+};
+
+/**
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type): latency-model constants
+ *        and Stream-K launch-grid thresholds.
+ *
+ * Calibrated for gfx1151 (Strix Halo), and only applied there: fit with the W4A16
+ * kernel sets of its Origami logic, on hipBLASLt GPU kernel times (every kernel timed
+ * in its own process, rows padded to an odd multiple of 128 B; the score is the
+ * measured speed of Origami's pick). Other architectures are not affected until they
+ * are tuned.
+ */
+struct w4a16_defaults_t {
+  // --- Latency model ---
+  // Dequantize VALU per element, including its dependency stalls: bf16 rounds f32
+  // products, fp16 uses packed halves.
+  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 8.0;
+  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 4.0;
+  static constexpr double K_ITER_LOOP_OVERHEAD       = 500.0;
+  // Co-residency counted in waves: one 16-wave workgroup keeps a CU as busy as
+  // several small ones.
+  static constexpr double TARGET_WAVES_PER_CU = 4.0;
+  // Stream-K workgroups sharing tiles below this many tiles per CU are charged their
+  // share of tiles, not waves (above it data parallel's last wave is a small part of
+  // the work).
+  static constexpr double SK_SHARED_MAX_TILES_PER_CU = 6.0;
+  // Cost of a Stream-K partial tile on the critical path, in units of writing and
+  // reading its f32 values at the workgroups' memory bandwidth.
+  static constexpr double SK_PARTIAL_TILE_COST = 256.0;
+
+  // --- Stream-K launch grid (grid_k_split_aware_gfx1151_w4a16, rules 1-6) ---
+  // Waves per workgroup when the config does not say.
+  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;
+  // Workgroups with this many waves fill a CU.
+  static constexpr int FULL_CU_WAVES = 16;
+  // Rule 1: the t range where 16-wave workgroups split K instead of running DP.
+  static constexpr double FULL_CU_SPLIT_MIN_TILES_PER_CU = 0.5;
+  static constexpr double FULL_CU_SPLIT_MAX_TILES_PER_CU = 0.75;
+  // Rule 2: short K, in K iterations (the second when t > 0.5).
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 16;
+  // Rule 6: share the tiles below this t. Above it, DP for short K.
+  static constexpr size_t GRID_SHARED_MAX_TILES_PER_CU = 5;
+  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS    = 8;
+  // Rule 4: largest ceil(t) / t that still runs DP, by waves per workgroup.
+  static constexpr double DP_MAX_WAVE_ROUNDING_16_WAVES = 1.5;
+  static constexpr double DP_MAX_WAVE_ROUNDING_8_WAVES  = 1.06;
+  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES  = 1.15;
+  // Rule 4: a single row of token tiles is shared, not DP, up to this t.
+  static constexpr double TOKEN_ROW_SHARED_MAX_TILES_PER_CU = 5.0;
+  // Rule 5: token tiles (MT_N at most this) and their workgroups per CU.
+  static constexpr size_t TOKEN_TILE_MAX_N      = 48;
+  static constexpr size_t TOKEN_TILE_WGS_PER_CU = 2;
 };
 
 /**
