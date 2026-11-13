@@ -108,10 +108,15 @@ namespace
         return upload(narrow);
     }
 
+    // A NaN in both FP16 and BF16, which no call in these tests computes.
+    constexpr uint16_t kUnwritten = 0x7FFF;
+
     // One grouped matrix: per-group shape and ld, packed into one buffer.
     struct GroupedMatrix
     {
         std::vector<int64_t> rows, cols, ld;
+        // Columns allocated per group; cols may shrink after init.
+        std::vector<int64_t> allocCols;
         std::vector<size_t> offset;
         std::vector<uint16_t> hostData;
         // Device copy of hostData, with the same layout. This is what hipBLASLt reads and writes.
@@ -127,8 +132,9 @@ namespace
                   hipDataType                 type,
                   std::mt19937&               rng)
         {
-            rows = r;
-            cols = c;
+            rows      = r;
+            cols      = c;
+            allocCols = c;
             ld.resize(r.size());
             offset.resize(r.size());
             size_t total = 0;
@@ -154,21 +160,29 @@ namespace
             return toFloat(type, hostData[offset[g] + size_t(j * ld[g] + i)]);
         }
 
-        // Rows r[g] to ld[g] - 1 of the first c[g] columns of every group, which no call
-        // writes, still hold hostData in out (a device copy of the matrix).
-        void expectPaddingUntouched(const std::vector<uint16_t>& out,
-                                    const std::vector<int64_t>&  r,
-                                    const std::vector<int64_t>&  c) const
+        // Fills the device copy with kUnwritten, so a launch's output holds only what that
+        // launch wrote, not what an earlier one did.
+        void resetToUnwritten()
+        {
+            EXPECT_EQ(hipMemsetD16(deviceData, kUnwritten, hostData.size()), hipSuccess);
+        }
+
+        // Every element of out (a device copy of the matrix) outside the first r[g] rows of
+        // the first c[g] columns of each group, ld padding and earlier, larger shapes
+        // included, still holds kUnwritten.
+        void expectWrittenOnlyInside(const std::vector<uint16_t>& out,
+                                     const std::vector<int64_t>&  r,
+                                     const std::vector<int64_t>&  c) const
         {
             int written = 0;
             for(size_t g = 0; g < r.size(); g++)
-                for(int64_t j = 0; j < c[g]; j++)
-                    for(int64_t i = r[g]; i < ld[g]; i++)
+                for(int64_t j = 0; j < allocCols[g]; j++)
+                    for(int64_t i = 0; i < ld[g]; i++)
                     {
                         size_t e = offset[g] + size_t(j * ld[g] + i);
-                        if(out[e] != hostData[e] && written++ < 5)
-                            ADD_FAILURE() << "group " << g << ": padding (" << i << "," << j
-                                          << ") was written";
+                        if((i >= r[g] || j >= c[g]) && out[e] != kUnwritten && written++ < 5)
+                            ADD_FAILURE() << "group " << g << ": (" << i << "," << j
+                                          << ") outside the output was written";
                     }
             EXPECT_EQ(written, 0);
         }
@@ -665,6 +679,7 @@ namespace
 
             ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
             auto matmulAndCheck = [&]() {
+                D.resetToUnwritten();
                 ASSERT_EQ(hipblasLtMatmul(handle,
                                           desc,
                                           alphaArg,
@@ -715,7 +730,7 @@ namespace
                         }
                     EXPECT_EQ(mismatches, 0);
                 }
-                D.expectPaddingUntouched(out, capM, capN);
+                D.expectWrittenOnlyInside(out, m, n);
             };
             matmulAndCheck();
 
@@ -892,6 +907,7 @@ namespace
                 EXPECT_EQ(launch(), HIPBLAS_STATUS_INVALID_VALUE);
                 return;
             }
+            D.resetToUnwritten();
             ASSERT_EQ(launch(), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -921,7 +937,7 @@ namespace
                     }
                 EXPECT_EQ(mismatches, 0);
             }
-            D.expectPaddingUntouched(out, m, n);
+            D.expectWrittenOnlyInside(out, m, n);
         }
     };
 
