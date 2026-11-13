@@ -477,6 +477,7 @@ if(ROCKE_INSTALL_TESTS)
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
+    # the LDS profile parity test (reads cpp/analysis/lds/profiles.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
     # and the arch-domain artifact unit tests. The latter remain
     # source-only units, while the full regeneration sweep is installed below as
@@ -504,6 +505,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_arch_table_engine_parity.py" EXCLUDE
+              PATTERN "test_lds_profile_engine_parity.py" EXCLUDE
               PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
               PATTERN "test_check_mma_catalog.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)

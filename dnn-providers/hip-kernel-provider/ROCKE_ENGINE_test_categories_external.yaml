@@ -117,6 +117,7 @@ test_categories:
       # installed test artifact does not carry (see
       # rocke/platform/tests/cmake/CoreTests.cmake).
       - "rocke_arch_table_engine_parity"
+      - "rocke_lds_profile_engine_parity"
       - "rocke_gemm_spec_dict_binding_parity"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
@@ -209,6 +210,7 @@ test_categories:
       # installed test artifact does not carry (see
       # rocke/platform/tests/cmake/CoreTests.cmake).
       - "rocke_arch_table_engine_parity"
+      - "rocke_lds_profile_engine_parity"
       - "rocke_gemm_spec_dict_binding_parity"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
