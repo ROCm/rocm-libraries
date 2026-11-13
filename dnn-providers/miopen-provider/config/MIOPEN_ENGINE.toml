@@ -57,11 +57,81 @@ rtol = 0.3
 # atol to 5e-5 (rtol unchanged at the 1e-5 default) for the 3D fp32 forward
 # cases only; 5e-5 clears the floor while staying ~50x below the worst-case
 # bound (~2.5e-3).
-# 3D fp32 conv forward override for the bundle cases
+# 3D fp32 conv forward override for the bundle cases. Case ids come from
+# reference-data-scripts/generate_conv_fwd_bundles.py:
+# <items>_3d_i<spatial>_n<N>c<C>k<K>_f<filter>_fp32_<layout>.
 [[tolerance_overrides]]
-filters = ["*_ConvolutionFwd_Default.*fp32_ncdhw*", "*_ConvolutionFwd_Default.*fp32_ndhwc*"]
+filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*", "*_ConvolutionFwdPointwise_*.*_3d_*_fp32_*"]
 atol = 5e-5
 rtol = 1e-5
+
+# Conv forward fp32 numerical floor, calibrated on gfx942 from the conv-fwd test plan
+# run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
+# different orders, so the absolute error of a long fp32 reduction grows with the
+# accumulation length A = C/G x filter volume. Observed worst absolute error:
+#   A <= 1,152 (L, M, H shapes)        5.2e-5
+#   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
+#   A >= 65,536 (S19, L19, X4)         8.2e-3
+# Each class takes about 2x its observed maximum. Later entries win.
+# The R shapes and the S24-S62 / L24-L62 shapes are placed in a class by their
+# accumulation length; all of them pass in that class on gfx942 and gfx90a. S shapes
+# with A above 400 join the first class: S31 (768) and S59 (480; one element of
+# 12,672 off by 2.5e-5 on gfx90a at the default atol 1e-5).
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-4
+
+# X4 fp16 (2D, C 2048, 3x3: accumulation length 18,432). MIOpen's fp16 output varies
+# from run to run at this length, by up to 0.17 against the GPU reference (one element
+# of 12,544 above the default 0.1 in some runs). Interim class until the dynamic fp16
+# tolerance replaces the fixed one (ALMIOPEN-3187).
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd*.x4_*_fp16_*"]
+atol = 0.2
+rtol = 0.1
 
 # MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
 # magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
@@ -80,3 +150,57 @@ rtol = 0.01
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
+
+# conv-fwd test plan (docs/test-plans/convolution-fwd.md): graphs that the MIOpen plugin
+# accepts but then fails or computes wrongly. They are probes (a typed rejection or a
+# correct accept is the pass criterion), so each is quarantined here until its defect is
+# fixed. Each entry names the MIOpen ticket and the provider ticket (epic ALMIOPEN-3008).
+# The cause is the plugin's applicability check, which does not depend on the
+# architecture (the same classes fail on gfx942, gfx90a and Windows gfx110X), so the
+# entries apply to every arch. Temporary: remove the entry when either ticket lands (the
+# provider fix makes the plugin decline the graph; the MIOpen fix makes it correct); the
+# cases then run and report unclaimed_support.
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant4.*"]
+reason  = "conv -> add(residual) -> relu is accepted as a bias fusion and fp32 output is wrong (up to 56% of elements); tracked in ALMIOPEN-3009 (MIOpen) and ALMIOPEN-3014 (provider)"
+
+[[test_skips]]
+filters = ["*_ConvolutionFwd_Default.*_f20_*"]
+reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w); tracked in ALMIOPEN-3010 (MIOpen) and ALMIOPEN-3015 (provider)"
+
+[[test_skips]]
+filters = ["*_ConvolutionFwd_Default.*_f15_*"]
+reason  = "conv with mixed x, w and y layouts is accepted; MIOpen output disagrees with the GPU and CPU references for the cases that execute; tracked in ALMIOPEN-3012 (MIOpen) and ALMIOPEN-3017 (provider)"
+
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25type_*"]
+reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4); tracked in ALMIOPEN-3011 (MIOpen) and ALMIOPEN-3016 (provider)"
+
+[[test_skips]]
+filters = [
+    "*_ConvolutionFwdPointwise_Variant2.*_f25full_*",
+    "*_ConvolutionFwdPointwise_Variant2.*_f25scalar_*",
+]
+reason  = "conv -> bias -> relu with a full-size or scalar bias tensor is accepted and the bias is read as per-channel, so the output is wrong (22-41% of elements); tracked in ALMIOPEN-3009 (MIOpen) and ALMIOPEN-3014 (provider)"
+
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25first_*"]
+reason  = "conv -> bias -> relu with the bias as the add's first operand: MIOpen executes it, but neither the GPU nor the CPU reference implements that operand order with a half bias node, so the case is unverifiable; reference gap tracked in ALMIOPEN-3227"
+
+[[test_skips]]
+filters = [
+    "*_ConvolutionFwd_Default.s13a_f16chan_2d_i16x16_n2c16k16g16_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s13a_f16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s13b_f16plane_1d_i16_n2c16k32g16_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.s13b_f16chan_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s14_f16plane_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s20_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s7_f16fast_2d_i16x16_n2c16k32g2_f3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s7_f16plane_1d_i16_n2c16k32g2_f3_bf16_cf",
+    "*_ConvolutionFwd_Default.s8_f16chan_2d_i16x16_n2c32k64g4_f3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s8_f16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
+    "*_ConvolutionFwd_Default.s9_f16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
+]
+reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted; MIOpen output disagrees with the GPU and CPU references for these cases (grouped, depthwise and 3D shapes); tracked in ALMIOPEN-3013 (MIOpen) and ALMIOPEN-3018 (provider)"
