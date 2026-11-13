@@ -3,15 +3,17 @@
 
 """The fused chunkwise KDA kernel built by the direct compiler is deterministic.
 
-The kernel keeps its state accumulators in VGPRs and scales them each chunk with
-``v_pk_mul_f32``.  Built by the direct compiler without a wait state between
-the last packed multiply and the MFMA after it, some accumulator lanes came out
-different on every launch (about 1 element in 10^4 of the state, one bf16 ulp
-of the output), which the bitwise tests of ``test_kda_chunkwise_gfx950_numeric``
-caught only as a failure to match COMGR's code.  This test runs the kernel
-under ``ROCKE_CODEOBJ_BACKEND=direct`` (strict: a refusal fails) and compares
-launches with each other, for both input-staging variants.  It needs a gfx950
-GPU and the direct compiler's library.
+The kernel keeps its state accumulators in VGPRs and scales them each chunk;
+the direct compiler's ``pack`` made those multiplies ``v_pk_mul_f32``, and the
+MFMA that read them next got stale or torn lanes (about 1 element in 10^4 of the
+state, one bf16 ulp of the output, different on every launch), which the
+bitwise tests of ``test_kda_chunkwise_gfx950_numeric`` caught only as a failure
+to match COMGR's code.  It is not a wait-state rule: no count of wait states
+between the packed write and the MFMA is safe.  ``target/gfx9/unpack.rs`` turns
+a packed f32 instruction that an MFMA of its block reads into its two scalar
+ones.  This test runs the kernel under ``ROCKE_CODEOBJ_BACKEND=direct`` (strict:
+a refusal fails) and compares launches with each other, for both input-staging
+variants.  It needs a gfx950 GPU and the direct compiler's library.
 """
 
 from __future__ import annotations
