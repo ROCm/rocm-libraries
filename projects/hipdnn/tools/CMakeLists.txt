@@ -12,6 +12,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # training tooling.
     add_subdirectory(bench)
 
+    # Cross-engine heuristic evaluation (selection latency and regret against autotune). It
+    # reuses hipdnn_bench_lib, so it follows bench.
+    add_subdirectory(xengine_eval)
+
     # Both evaluate UHD descriptor expressions through plugin_sdk's heuristics/uhd/, which
     # exists only with the kernel ingestor.
     add_subdirectory(corpus_gen)

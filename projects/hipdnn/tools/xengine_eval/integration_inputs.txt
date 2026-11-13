@@ -1,0 +1,11 @@
+# Branches merged, in this order, into users/jascampb/uhd-xengine-eval-integration by
+# rebuild_integration.sh. One remote branch name per line; '#' starts a comment.
+# Order matters: the first branch that changes a file wins nothing by itself, but recorded
+# conflict resolutions (git rerere) are keyed on the conflict as this order produces it.
+users/jascampb/adjust-default-heuristics-policy
+users/jascampb/uhd-initial-provider-integration
+users/jascampb/mlops-l1
+users/jascampb/flydsl-sdpa-bwd-uhd
+users/jascampb/flydsl-aotriton-parity-uhd
+users/jascampb/hipdnn-conv-engines-snapshot-uhd
+users/jascampb/uhd-xengine-eval-harness
