@@ -50,7 +50,7 @@ endif()
 
 set( HIPFFT_BUILD_SCOPE ON )
 
-project( hipfft LANGUAGES CXX C )
+project( hipfft LANGUAGES CXX )
 
 # Build options
 option( BUILD_SHARED_LIBS "Build ${PROJECT_NAME} as a shared library" ON )

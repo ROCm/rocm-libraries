@@ -328,7 +328,6 @@ endforeach()
 # Only build it when linked hipfft is new enough to guarantee this contract.
 set( HIPFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION "1.0.28" )
 set( HIPFFT_LINKED_VERSION "" )
-set( HIPFFT_ENABLE_C_API_COMPILE_TEST OFF )
 if( DEFINED hipfft_VERSION AND NOT "${hipfft_VERSION}" STREQUAL "" )
   set( HIPFFT_LINKED_VERSION "${hipfft_VERSION}" )
 elseif( DEFINED hipfft_VERSION_MAJOR
@@ -339,6 +338,7 @@ endif()
 
 if( NOT "${HIPFFT_LINKED_VERSION}" STREQUAL ""
     AND NOT HIPFFT_LINKED_VERSION VERSION_LESS HIPFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
+  enable_language( C )
   foreach( c_src hipfft hipfftXt hipfftMp hiplibxt )
     add_executable( ${c_src}_c ${c_src}_c.c )
     # Use BEFORE so that the repository's public header takes priority over
