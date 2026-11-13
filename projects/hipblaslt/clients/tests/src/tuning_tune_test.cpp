@@ -3307,6 +3307,31 @@ namespace
         EXPECT_EQ(counters().hits, 1u) << "cache mode did not replay the online row";
     }
 
+    // The startup line names the settings online explores with.
+    TEST_F(TuningOnline_pre_checkin, TheStartupLineShowsTheOnlineSettings)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        enterOnline(m_path);
+
+        std::string out;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(problem.dispatch(nullptr));
+            out = capture.str();
+        }
+
+        const std::string line = "tuning-cache: mode=online path=" + m_path;
+        const std::string settings = " K=" + std::to_string(kOnlineTopK)
+                                     + " R=" + std::to_string(kOnlineRepeats) + " cold=0";
+        const size_t at = out.find(line);
+        ASSERT_NE(at, std::string::npos) << out;
+        EXPECT_NE(out.substr(at, out.find('\n', at) - at).find(settings), std::string::npos) << out;
+    }
+
     // A shape the file already serves, here from a tune row, is replayed and not
     // explored.
     TEST_F(TuningOnline_pre_checkin, AnExistingRowIsReplayedNotExplored)

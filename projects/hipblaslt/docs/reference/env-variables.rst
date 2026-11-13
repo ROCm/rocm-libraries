@@ -105,6 +105,11 @@ in what it leaves out, such as beta, run default selection while the first of th
 replay its row afterwards. A shape the cache file already serves is replayed, not explored. Exploring
 calls share a process-wide lock.
 
+Each key spends ``HIPBLASLT_TUNING_COLD_ITERS`` untimed calls, then ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+times ``HIPBLASLT_TUNING_HOT_ITERS`` timed calls exploring, which may run slower candidates, and holds
+memory proportional to the timed calls until it is done; values set for ``tune`` apply to ``online``
+too. The startup notice shows the values ``online`` uses as ``K``, ``R`` and ``cold``.
+
 While a key is explored, which takes about ``HIPBLASLT_TUNING_MAX_CANDIDATES`` times
 ``HIPBLASLT_TUNING_HOT_ITERS`` calls, consecutive calls of a problem run different kernels, so their
 outputs can differ bitwise. Those calls are also slower: they run lower-ranked candidates, which can

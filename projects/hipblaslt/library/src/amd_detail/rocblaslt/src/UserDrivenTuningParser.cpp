@@ -26,6 +26,7 @@
  * ************************************************************************ */
 
 #include "UserDrivenTuningParser.hpp"
+#include "OnlineTuner.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "utility.hpp"
 
@@ -305,6 +306,13 @@ namespace TensileLite
         msg << "mode=" << tuningModeName(tuning.mode()) << " path=" << tuning.cachePath()
             << " load=" << statusName
             << " loaded=" << TuningCounters::instance().entriesLoaded.load();
+
+        // The settings online explores with, as the tuner applies them.
+        if(tuning.mode() == TuningMode::Online)
+        {
+            const auto& tuner = rocblaslt::OnlineTuner::getInstance();
+            msg << " K=" << tuner.topK() << " R=" << tuner.repeats() << " cold=" << tuner.coldCalls();
+        }
 
         if(status == TuningLoadStatus::NoPath)
             msg << "; set HIPBLASLT_TUNING_CACHE_PATH or tuning does nothing";
