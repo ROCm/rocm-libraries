@@ -34,7 +34,7 @@ public:
 
     /// A context that reads through to @p shared for every name it does not bind itself
     /// (VariableContext's base). @p shared is never modified and may serve many contexts.
-    explicit FeatureExtractionContext(std::shared_ptr<const FeatureExtractionContext> shared)
+    explicit FeatureExtractionContext(const std::shared_ptr<const FeatureExtractionContext>& shared)
         : _ctx(shared == nullptr ? nullptr
                                  : std::shared_ptr<const VariableContext>(shared, &shared->_ctx))
     {

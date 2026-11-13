@@ -39,9 +39,10 @@ namespace hipdnn_plugin_sdk::uhd
 
 /// @brief Ensemble of small MLPs estimating one engine's metric (UHD adapter `mlp_data`).
 ///
-/// An L1 (`predict_engine`) scorer: one network ensemble per engine and architecture, scoring
-/// a graph's feature row to the log of a ranking metric in a few microseconds, where a
-/// tree_data model of similar accuracy walks hundreds of trees. The artifact (`mlp_model.fbs`,
+/// One network ensemble per engine and architecture, scoring a feature row to the log of a
+/// ranking metric in a few microseconds: an engine estimate (`predict_engine`) scores the
+/// graph's row, a catalog ranker (`sort_kernel_catalog`) each candidate's; a tree_data model
+/// walks hundreds of trees for the same row. The artifact (`mlp_model.fbs`,
 /// identifier `HMLP`) names that metric; the UHD declares the same `score.metric` with
 /// `transform: log`, and the loader refuses a mismatch.
 ///
@@ -317,7 +318,7 @@ inline std::string
     const auto width = static_cast<size_t>(model.num_features());
     adapter._numFeatures = width;
 
-    if(model.metric() == nullptr || model.metric()->size() == 0)
+    if(model.metric() == nullptr || model.metric()->empty())
     {
         return "the model names no metric";
     }
@@ -385,7 +386,7 @@ inline std::string
     }
 
     const auto* networks = model.networks();
-    if(networks == nullptr || networks->size() == 0 || networks->size() > MAX_MEMBERS)
+    if(networks == nullptr || networks->empty() || networks->size() > MAX_MEMBERS)
     {
         return "networks must hold between 1 and " + std::to_string(MAX_MEMBERS) + " networks";
     }
@@ -397,7 +398,7 @@ inline std::string
         const auto* network = networks->Get(m);
         const std::string name = "network " + std::to_string(m);
         const auto* layers = network == nullptr ? nullptr : network->layers();
-        if(layers == nullptr || layers->size() == 0 || layers->size() > MAX_LAYERS)
+        if(layers == nullptr || layers->empty() || layers->size() > MAX_LAYERS)
         {
             return name + " must hold between 1 and " + std::to_string(MAX_LAYERS) + " layers";
         }
@@ -621,9 +622,10 @@ inline double MlpDataAdapter::scoreRow(const double* row, size_t width) const
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    alignas(32) float input[MAX_WIDTH];
-    alignas(32) float ping[MAX_WIDTH];
-    alignas(32) float pong[MAX_WIDTH];
+    // Left uninitialized: every value read is written first.
+    alignas(32) std::array<float, MAX_WIDTH> input;
+    alignas(32) std::array<float, MAX_WIDTH> ping;
+    alignas(32) std::array<float, MAX_WIDTH> pong;
 
     // z = sign(x) * log1p(|x|), a missing value at 0, standardized; then the missing flags.
     size_t n = 0;
@@ -650,14 +652,14 @@ inline double MlpDataAdapter::scoreRow(const double* row, size_t width) const
     size_t layer = 0;
     for(const size_t end : _memberEnd)
     {
-        const float* x = input;
-        float* y = ping;
+        const float* x = input.data();
+        float* y = ping.data();
         for(; layer + 1 < end; ++layer)
         {
             affine(x, _layers[layer], parameters, y);
             silu(y, _layers[layer].outPadded);
             x = y;
-            y = y == ping ? pong : ping;
+            y = y == ping.data() ? pong.data() : ping.data();
         }
         sum += static_cast<double>(dot(x, _layers[layer], parameters));
         ++layer;

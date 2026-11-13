@@ -149,20 +149,38 @@ def _initial_layers(
     return layers
 
 
+def _validation_split(
+    rows: int, seed_rng: np.random.Generator, groups: np.ndarray | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Row indices (validation, train). Without `groups`, a seeded 15% of rows are held out.
+    With them (one id per row), a seeded 15% of the groups are, and every row of a held-out
+    group with them, so no problem's rows straddle the split."""
+    if groups is None:
+        held = min(rows - 1, max(1, round(VALIDATION_FRACTION * rows)))
+        order = seed_rng.permutation(rows)
+        return order[:held], order[held:]
+    ids = np.unique(groups)
+    held = min(len(ids) - 1, max(1, round(VALIDATION_FRACTION * len(ids))))
+    chosen = ids[seed_rng.permutation(len(ids))[:held]]
+    is_valid = np.isin(groups, chosen)
+    return np.flatnonzero(is_valid), np.flatnonzero(~is_valid)
+
+
 def _fit_member(
     inputs: np.ndarray,
     target: np.ndarray,
     hidden: tuple[int, ...],
     epochs: int,
     seed: int,
+    groups: np.ndarray | None = None,
 ) -> tuple[list[Layer], dict]:
     """One network: AdamW on L1 loss with cosine-annealed rate, minibatches, a seeded 15%
-    validation split, early stopping on its L1 and the best weights restored."""
+    validation split (of rows, or of `groups` when given), early stopping on its L1 and the
+    best weights restored."""
     rng = np.random.default_rng(seed)
     rows = len(inputs)
-    held = min(rows - 1, max(1, round(VALIDATION_FRACTION * rows)))
-    order = rng.permutation(rows)
-    valid, train = order[:held], order[held:]
+    valid, train = _validation_split(rows, rng, groups)
+    held = len(valid)
     x_train, y_train = inputs[train], target[train]
     x_valid, y_valid = inputs[valid], target[valid]
 
@@ -254,6 +272,7 @@ def fit_mlp(
     epochs: int = DEFAULT_EPOCHS,
     seed: int = DEFAULT_SEED,
     max_rows: int = 0,
+    groups: np.ndarray | None = None,
 ) -> tuple[MlpEnsemble, dict]:
     """Fit an ensemble of `members` networks to `y_log`, the log of the metric, over the
     feature `matrix` (NaN = missing). Returns it and what the manifest records.
@@ -261,6 +280,10 @@ def fit_mlp(
     Member k is seeded `seed + k` for its initial weights, its validation split and its
     shuffles, so the fit is a function of its arguments. `max_rows` > 0 subsamples a larger
     corpus (seeded, row order kept); 0 uses every row.
+
+    `groups` (one id per row, e.g. the problem a catalog row measures) makes the early-stopping
+    validation split hold out whole groups instead of rows, so no problem's candidates train
+    the network that is validated on a sibling. Omitted, the split is of rows.
     """
     matrix = np.asarray(matrix, dtype=np.float64)
     y_log = np.asarray(y_log, dtype=np.float64)
@@ -281,6 +304,10 @@ def fit_mlp(
         raise ValueError("epochs must be at least 1")
     if max_rows < 0:
         raise ValueError("max_rows must be 0 (every row) or positive")
+    if groups is not None:
+        groups = np.asarray(groups)
+        if groups.shape != (len(matrix),):
+            raise ValueError("groups must hold one id per row")
     if not np.isfinite(y_log).all():
         raise ValueError("the log target must be finite")
     if np.isinf(matrix).any():
@@ -294,6 +321,13 @@ def fit_mlp(
             np.random.default_rng(seed).choice(total_rows, size=max_rows, replace=False)
         )
         matrix, y_log = matrix[keep], y_log[keep]
+        if groups is not None:
+            groups = groups[keep]
+    if groups is not None and len(np.unique(groups)) < 2:
+        raise ValueError(
+            "a grouped validation split needs at least 2 problems: one to train on, "
+            "one to validate"
+        )
     rows = len(matrix)
 
     t = np.where(np.isnan(matrix), 0.0, np.copysign(np.log1p(np.abs(matrix)), matrix))
@@ -326,7 +360,7 @@ def fit_mlp(
     summaries = []
     for member in range(members):
         layers, summary = _fit_member(
-            network_input, standardized, hidden, epochs, seed + member
+            network_input, standardized, hidden, epochs, seed + member, groups
         )
         ensemble.networks.append(layers)
         summaries.append(summary)
@@ -346,6 +380,8 @@ def fit_mlp(
         "epochs": epochs,
         "seed": seed,
         "max_rows": max_rows,
+        "validation_split": "group" if groups is not None else "row",
+        "validation_groups": None if groups is None else int(len(np.unique(groups))),
         "rows": int(rows),
         "rows_available": int(total_rows),
         "input_slots": [int(slot) for slot in inputs],

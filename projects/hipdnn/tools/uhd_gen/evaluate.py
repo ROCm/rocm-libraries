@@ -1806,11 +1806,6 @@ def load_model(
             if descriptor.get("adapter") in ("linear_data", "mlp_data")
             else "tree_data"
         )
-        if body_key == "mlp_data" and not immediate:
-            raise ValueError(
-                "mlp_data estimates one engine's metric and serves only the "
-                f"{ROLE} role"
-            )
         declared = descriptor.get(body_key, {})
         named = None
         if "artifact" in declared:
@@ -1867,7 +1862,11 @@ def load_model(
                 feature_evaluator=feature_evaluator,
                 expected_hash=expected_hash,
                 model_hash=model_hash,
-                metric=l1_metric.name,
+                metric=(
+                    l1_metric.name
+                    if l1_metric
+                    else (descriptor.get("score") or {}).get("metric")
+                ),
                 score_transform=transform,
             )
         elif candidate.suffix in (".lgbm", ".txt"):

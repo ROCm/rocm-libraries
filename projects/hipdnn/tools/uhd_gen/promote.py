@@ -590,11 +590,6 @@ def _verify_artifact(
     declared = descriptor[adapter].get("hash")
     try:
         if adapter == "mlp_data":
-            if role != ROLE:
-                raise ValueError(
-                    f"mlp_data estimates one engine's metric and installs only as {ROLE}, "
-                    f"not {role}"
-                )
             _, artifact_metric = load_mlp_artifact(
                 artifact_path,
                 declared,

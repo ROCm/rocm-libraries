@@ -819,7 +819,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
 | `linear_data` | A per-config linear ranker (RelLin): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
-| `mlp_data` | An ensemble of small MLPs predicting log(metric) for one engine, carried as a FlatBuffer; engine estimates (`predict_engine`) only | Score the graph's row, in the metric's direction | with engine |
+| `mlp_data` | An ensemble of small MLPs predicting log(metric) for one engine, carried as a FlatBuffer | Score each row (the graph's, or each candidate's), in the metric's direction | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
 
@@ -1812,7 +1812,7 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
 | `linear_data` | none | Yes | Per-config linear ranker: one hash lookup and one dot product per candidate; a within-catalog ranker only ([Section 7.5](#75-linear_data)) |
-| `mlp_data` | none | Yes | Per-engine MLP ensemble: a few small matrix products per graph; engine estimates only ([Section 7.6](#76-mlp_data)) |
+| `mlp_data` | none | Yes | Per-engine MLP ensemble: a few small matrix products per row; engine estimates or catalog ranking ([Section 7.6](#76-mlp_data)) |
 | `onnx` | ONNX runtime | Yes, if dep present | Opt-in, dependency-gated |
 | `custom_library` | none on provider | Yes | Engine ships its own `.so`, `dlopen`'d through a tiny C ABI |
 
@@ -1925,7 +1925,7 @@ and always available; `native` proves the seam with a compiled function and need
 heuristics. `onnx` is added when a concrete need appears. `custom_library` is implemented with no trust
 gate; [Open Question 11](#operational) records what the code does. `linear_data` ([Section 7.5](#75-linear_data))
 is a cheaper alternative to `tree_data` for small catalogs, and `mlp_data`
-([Section 7.6](#76-mlp_data)) a cheaper one for engine estimates.
+([Section 7.6](#76-mlp_data)) a cheaper one where a ranking costs one estimate per engine.
 
 ### 7.5 `linear_data`
 
@@ -1965,12 +1965,13 @@ finiteness, unique keys).
 
 The UHD names this adapter as `"adapter": "mlp_data"` and points `mlp_data.artifact` at a FlatBuffer
 (`flatbuffers_sdk/schemas/mlp_model.fbs`, file identifier `HMLP`), with the artifact's `hash` as for
-`tree_data`. It serves engine estimates (`predict_engine`): one model per engine and architecture scores
-the graph's feature row to the **log of a registered ranking metric**. The artifact names that metric,
-and the UHD declares the same one with `transform: "log"` (`score: {metric, calibrated: true,
-transform: "log"}` and the metric's `objective`). The parser refuses an `mlp_data` UHD without
-`score.metric` or with another transform, and the adapter refuses an artifact whose metric is not the
-UHD's.
+`tree_data`. It scores a feature row to the **log of a registered ranking metric**: for an engine
+estimate (`predict_engine`) one model per engine and architecture scores the graph's row, and as a
+catalog ranker (`sort_kernel_catalog`) it scores each candidate's row like an ungrouped `tree_data`
+model. The artifact names that metric, and the UHD declares the same one with `transform: "log"`
+(`score: {metric, transform: "log"}` and the metric's `objective`; `calibrated` follows the role, as
+for any adapter). The parser refuses an `mlp_data` UHD without `score.metric` or with another
+transform, and the adapter refuses an artifact whose metric is not the UHD's.
 
 The model is an ensemble of small fully connected networks over one standardized input:
 
@@ -1986,10 +1987,11 @@ The networks run in float32 with the ensemble mean in double. An estimate costs 
 products: about 2 us for three networks of two 64-wide layers, against 6-15 us for a 500-tree
 `tree_data` model, whose cost rises as more engines' models compete for the CPU cache. One estimate is
 made per applicable engine and graph, so that cost grows with the number of engines.
-Training (`uhd_gen train --role predict_engine --adapter mlp_data`) fits each network on the engine's own
-rows with an L1 loss on the standardized log metric, so engines stay independent. The adapter loads under
-the same checks as `linear_data` (digest, file identifier, FlatBuffers verifier, `features_hash`), then
-the metric and the model's own bounds (slots, layer shapes, widths of at most 512, finiteness).
+Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
+loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be
+`mlp_data` or `tree_data` is the evaluation's to decide. The adapter loads under the checks of
+`linear_data`: digest, file identifier and FlatBuffers verifier, then the model's own bounds (slots,
+layer shapes, widths of at most 512, finiteness), its metric and `features_hash`.
 
 ---
 

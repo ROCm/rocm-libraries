@@ -11,9 +11,9 @@ This tool takes benchmark timing data and produces:
 
 `train --adapter linear_data` produces a RelLin per-configuration linear model and the
 `LinearDataAdapter` artifact instead ([below](#the-linear_data-adapter-rellin)).
-`train --adapter mlp_data --role predict_engine` produces an ensemble of small neural
-networks for an engine's L1 estimate and the `MlpDataAdapter` artifact
-([below](#the-mlp_data-adapter)).
+`train --adapter mlp_data` produces an ensemble of small neural networks, for an engine's
+L1 estimate (`--role predict_engine`) or as a catalog ranker (`--role sort_kernel_catalog`),
+and the `MlpDataAdapter` artifact ([below](#the-mlp_data-adapter)).
 
 Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
 reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
@@ -183,7 +183,7 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
 | `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
 | `--early-exit` | No | `auto` (default), `none`, or `TREES:KEEP[,TREES:KEEP...]`: the catalog-ranking early-exit schedule written into `model.bin` (see [Early exit](#early-exit)) |
-| `--adapter` | No | Model family: `tree_data` (default), `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)) or `mlp_data` (`predict_engine` only, see [The `mlp_data` adapter](#the-mlp_data-adapter)). `generate` takes the same flag |
+| `--adapter` | No | Model family: `tree_data` (default), `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)) or `mlp_data` (either role, a catalog ranker for `sort_kernel_catalog`; refuses `--group-by-feature`; see [The `mlp_data` adapter](#the-mlp_data-adapter)). `generate` takes the same flag |
 | `--key-features` | No | `linear_data`: the features whose values together identify a kernel configuration (default: every `$kernel.*` reference in the signature) |
 | `--family-features` | No | `linear_data`: a coarser key whose family fit scores a configuration never seen in training (default: none) |
 | `--ridge` / `--min-rows` | No | `linear_data`: ridge strength (default `1e-2`) and the row count below which a configuration is shrunk harder (default `10`) |
@@ -271,7 +271,7 @@ It validates everything before writing anything, and refuses rather than half-su
   descriptor's, and its `num_features` equal to the `features_signature` slot count; for
   `linear_data` and `mlp_data`, the same checks on their artifacts (`HLIN` and `HMLP`
   identifiers, their own verifiers and bounds) -- an `mlp_data` artifact must also name the
-  UHD's `score.metric`, and installs only as `predict_engine`; for
+  UHD's `score.metric`, and installs under either role; for
   any other artifact, the declared digest. A `predict_engine` model must not be a grouped
   (two-layer) artifact. A `custom_library` body's `config` must be omitted or empty, as
   the runtime parser requires.
@@ -1244,25 +1244,29 @@ python -m uhd_gen train --adapter linear_data \
 
 ## The `mlp_data` adapter
 
-`python -m uhd_gen train --adapter mlp_data --role predict_engine --metric tflops ...` fits an
-ensemble of small fully connected networks to one engine's L1 estimate (`MlpDataAdapter`,
-`mlp_model.fbs`, identifier `HMLP`). It is the same job a `tree_data` L1 model does, at
-similar accuracy on the corpora it was developed on, for about 2 us per engine at run time
-where a 500-tree model takes 6-15 us, more as engines' models crowd the CPU cache. Pick it
-when the cost of scoring every engine of a graph matters; compare the two with `evaluate` on
-a held-out corpus first, since accuracy is the corpus's to decide. It serves `predict_engine`
-only: there is no catalog contract for it, so `sort_kernel_catalog` and `--group-by-feature`
-are refused.
+`python -m uhd_gen train --adapter mlp_data --metric tflops ...` fits an ensemble of small
+fully connected networks to the log of one metric (`MlpDataAdapter`, `mlp_model.fbs`,
+identifier `HMLP`). It serves both roles. With `--role predict_engine` it is one engine's L1
+estimate: the same job a `tree_data` L1 model does, at similar accuracy on the corpora it was
+developed on, for about 2 us per engine at run time where a 500-tree model takes 6-15 us,
+more as engines' models crowd the CPU cache. Pick it when the cost of scoring every engine
+of a graph matters; compare the two with `evaluate` on a held-out corpus first, since
+accuracy is the corpus's to decide. With `--role sort_kernel_catalog` it is a catalog
+ranker, an ungrouped one like a single-layer `tree_data` model (see the end of this
+section). `--group-by-feature` is refused: there is one ensemble per model and no grouped
+artifact.
 
 What it predicts. The network estimates the **log** of the registered ranking metric
-(`--metric`, default `tflops` as for any L1 model), so the descriptor is the one a `tree_data`
-L1 model has: `objective` the metric's direction, `score: {metric, calibrated: true,
-transform: log}`, and `mlp_data: {artifact, hash}`. The artifact records the metric it
-predicts and the runtime refuses it when the UHD's `score.metric` differs.
+(`--metric`, default `tflops` as for any L1 model; a non-default `--target` needs `--metric`
+too, since the artifact names the metric it predicts), so the descriptor is the one a
+`tree_data` model of that role has: `objective` the metric's direction, `score: {metric,
+calibrated, transform: log}`, and `mlp_data: {artifact, hash}`. The artifact records the
+metric it predicts and the runtime refuses it when the UHD's `score.metric` differs.
 
 How it fits (`mlp.py`, numpy only: no new dependency, deterministic given its seeds).
 
-- Per engine, every row of its L1 corpus (`--mlp-max-rows` subsamples a larger one). The
+- Per engine, every row of its L1 corpus, or every candidate row of a catalog corpus
+  (`--mlp-max-rows` subsamples a larger one). The
   feature matrix is the one `tree_data` fits, after constant columns are dropped.
 - Inputs: `t = sign(x) * log1p(|x|)` with a missing value at 0, standardized by the column's
   mean and spread over the training rows. A column that never varies is not an input; a
@@ -1271,8 +1275,8 @@ How it fits (`mlp.py`, numpy only: no new dependency, deterministic given its se
 - Each network is `input -> 64 -> SiLU -> 64 -> SiLU -> 1` (`--mlp-hidden`), initialised as
   PyTorch's `nn.Linear` is, trained on L1 loss by AdamW (rate `3e-3`, weight decay `1e-4`)
   under cosine annealing over `--mlp-epochs`, in minibatches of 256. A seeded 15% of the rows
-  validate; a member stops after 25 epochs without a better validation loss and keeps its
-  best weights.
+  (of the problems, for a catalog) validate; a member stops after 25 epochs without a better
+  validation loss and keeps its best weights.
 - The score is the mean of `--mlp-members` such networks (member `k` seeded `--mlp-seed + k`
   for its weights, split and shuffles), mapped back by `target_mean + target_scale * mean`.
   `train_manifest.json` records the fit (`mlp_fit`): widths, seeds, rows, epochs run and each
@@ -1290,6 +1294,18 @@ double ensemble mean, as the runtime does; a row with an infinite feature scores
 the runtime declines). `TestMlpDataAdapter` pins the C++ adapter against the writer on a
 shared fixture. An installed `mlp_data` model and a `tree_data` one may replace each other in
 place for the same slot (`promote`, [above](#promote-arguments)).
+
+As a catalog ranker (`--role sort_kernel_catalog`) the model is trained, evaluated and
+installed like an ungrouped `tree_data` model: `evaluate` ranks the held-out problems'
+candidates by its score and reports the regret against the best candidate, and `promote`
+installs it into the role's slot. Nothing prefers it: whether it is the model to ship is what
+that evaluation decides, against a `tree_data` or `linear_data` one trained on the same
+corpus. `sort_kernel_catalog` ranks the candidates of one problem, so its rows come in
+problems; the early-stopping split therefore holds out whole problems (15% of them, seeded),
+keyed by the first `--group-by` column (the `benchmark` column by default) as the
+`tree_data` trainer's `GroupKFold` keys them, so a candidate is never validated against
+siblings it trained next to. A corpus with no problem identity, and an L1 corpus (one row per
+graph), split by row. `mlp_fit.validation_split` records `group` or `row`.
 
 ```bash
 python -m uhd_gen train --adapter mlp_data --role predict_engine --metric time \

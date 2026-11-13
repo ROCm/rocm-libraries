@@ -994,8 +994,8 @@ private:
 /// @brief The process-wide (per plugin library) ProblemFeatureCache.
 inline ProblemFeatureCache& problemFeatureCache()
 {
-    static ProblemFeatureCache cache;
-    return cache;
+    static ProblemFeatureCache s_cache;
+    return s_cache;
 }
 
 /// @brief problemFeatures() through problemFeatureCache(): built once per graph and device,

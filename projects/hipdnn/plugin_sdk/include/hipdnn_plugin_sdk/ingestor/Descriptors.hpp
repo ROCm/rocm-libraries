@@ -238,7 +238,7 @@ enum class UhdAdapter
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
     LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
-    MLP_DATA, ///< Per-engine MLP ensemble estimating log(metric) (L1 only), a data artifact.
+    MLP_DATA, ///< Per-engine MLP ensemble estimating log(metric), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019

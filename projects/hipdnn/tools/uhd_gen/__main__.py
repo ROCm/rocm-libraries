@@ -539,9 +539,12 @@ def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
         "(--group-by or a benchmark column), serves no --metric or --calibrated score and no "
         "predict_engine role, and ignores the tree-only options (--num-boost-round, "
         "--early-stopping, --model-encoding, --leaf-precision, --group-by-feature). "
-        "mlp_data: an ensemble of small neural networks estimating one engine's metric, "
-        "for --role predict_engine only (README, 'The mlp_data adapter'); it ignores the "
-        "tree-only options and takes the --mlp-* ones.",
+        "mlp_data: an ensemble of small neural networks fitted to the log of one metric; "
+        "an estimate of one engine's metric for --role predict_engine, a catalog ranker "
+        "(like an ungrouped tree_data model) for --role sort_kernel_catalog, where "
+        "evaluation decides whether it is picked (README, 'The mlp_data adapter'). It "
+        "refuses --group-by-feature, ignores the other tree-only options and takes the "
+        "--mlp-* ones.",
     )
     parser.add_argument(
         "--mlp-hidden",
@@ -625,11 +628,9 @@ def _resolve_uhd_id(requested: str | None) -> str:
     return canonical
 
 
-def check_adapter_options(args: argparse.Namespace, immediate: bool) -> None:
+def check_adapter_options(args: argparse.Namespace) -> None:
     """Refuse an adapter option that does not apply: `train` and `generate` share this, so
     `generate` refuses before it measures anything."""
-    from .immediate import ROLE
-
     if args.adapter != "mlp_data":
         given = [flag for flag, dest in _MLP_OPTIONS if getattr(args, dest) is not None]
         if given:
@@ -637,11 +638,6 @@ def check_adapter_options(args: argparse.Namespace, immediate: bool) -> None:
                 f"{', '.join(given)} apply only to --adapter mlp_data, not {args.adapter}"
             )
         return
-    if not immediate:
-        raise ValueError(
-            f"mlp_data cannot train {args.role}: it estimates one engine's metric "
-            f"(an engine-level model), so it serves only --role {ROLE}"
-        )
     if args.group_by_feature:
         raise ValueError(
             "--group-by-feature is a tree_data option: an mlp_data model is one "
@@ -657,7 +653,7 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """
     from .immediate import LABEL_STATISTIC
 
-    check_adapter_options(args, immediate)
+    check_adapter_options(args)
     if args.adapter == "linear_data":
         _resolve_linear_score(args, immediate)
         return
@@ -668,6 +664,11 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
             raise ValueError(
                 f"{args.role} requires --metric: engine selection compares its "
                 "score across engines, so it must name a registered metric"
+            )
+        if args.adapter == "mlp_data":
+            raise ValueError(
+                "mlp_data predicts the log of one registered metric, and its artifact "
+                "names it: pass --metric (--target alone names a column, not a metric)"
             )
         if args.calibrated:
             raise ValueError(
@@ -1217,9 +1218,15 @@ def _parse_mlp_hidden(text: str) -> tuple[int, ...]:
     return widths
 
 
-def _fit_mlp(args: argparse.Namespace, df: pd.DataFrame, matrix: np.ndarray):
+def _fit_mlp(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    matrix: np.ndarray,
+    groups: list | None = None,
+):
     """The ensemble fit of mlp_data on log(target). Returns the ensemble and what the
-    manifest records."""
+    manifest records. `groups` are the columns identifying a catalog problem (None for an
+    L1 corpus or one without problem identity)."""
     from .mlp import (
         DEFAULT_EPOCHS,
         DEFAULT_HIDDEN,
@@ -1237,6 +1244,18 @@ def _fit_mlp(args: argparse.Namespace, df: pd.DataFrame, matrix: np.ndarray):
         raise ValueError(
             f"target {args.target!r} must contain finite, strictly positive values"
         )
+    # A catalog's rows are candidates of a problem: hold out whole problems for early
+    # stopping, keyed as the tree trainer's GroupKFold keys them (shape first, so every
+    # device's measurements of one shape fall on one side). Rows without problem identity,
+    # and an L1 corpus (one row per graph), split by row.
+    problems = None
+    if groups:
+        if groups[0] not in df.columns:
+            raise ValueError(
+                f"problem column {groups[0]!r} is not in the corpus, so mlp_data cannot "
+                "hold out whole problems for early stopping"
+            )
+        problems = df.groupby(groups[0]).ngroup().to_numpy()
     ensemble, fit = fit_mlp(
         matrix,
         score_transform.forward(target),
@@ -1249,6 +1268,7 @@ def _fit_mlp(args: argparse.Namespace, df: pd.DataFrame, matrix: np.ndarray):
         epochs=option(args.mlp_epochs, DEFAULT_EPOCHS),
         seed=option(args.mlp_seed, DEFAULT_SEED),
         max_rows=option(args.mlp_max_rows, 0),
+        groups=problems,
     )
     logger.info(
         "Fitted %d network(s) on %d of %d rows; held-out L1 %.4f in log units",
@@ -1387,7 +1407,9 @@ def _run_train(args: argparse.Namespace) -> int:
             model, group_index, group_models = None, -1, []
             early_exit, early_exit_record = [], None
         elif args.adapter == "mlp_data":
-            ensemble, mlp_fit = _fit_mlp(args, df, matrix)
+            ensemble, mlp_fit = _fit_mlp(
+                args, df, matrix, None if immediate else groups
+            )
             model, group_index, group_models = None, -1, []
             early_exit, early_exit_record = [], None
         else:

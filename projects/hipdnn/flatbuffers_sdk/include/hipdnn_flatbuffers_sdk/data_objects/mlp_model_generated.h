@@ -345,9 +345,10 @@ struct MlpModelT : public ::flatbuffers::NativeTable {
 
 /// Ensemble of small fully connected networks (RFC 0019 §7 "mlp_data" adapter).
 ///
-/// An engine estimate (`predict_engine`): the score is the model's prediction of
-/// log(metric value) for the registered ranking metric `metric` names, so the UHD declares
-/// `score: {metric: <metric>, calibrated: true, transform: log}` and that metric's objective.
+/// An engine estimate (`predict_engine`) or a catalog ranker (`sort_kernel_catalog`): the
+/// score is the model's prediction of log(metric value) for the registered ranking metric
+/// `metric` names, so the UHD declares `score: {metric: <metric>, transform: log}` and that
+/// metric's objective.
 ///
 /// Prediction for a feature row x:
 ///     input = [z(inputs[0]), ..., z(inputs[n-1]),

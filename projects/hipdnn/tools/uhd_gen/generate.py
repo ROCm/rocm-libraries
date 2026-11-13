@@ -1961,7 +1961,7 @@ def _check_generate_arguments(
     """Refuse a `generate` request that cannot be honoured, before anything is measured."""
     from .__main__ import check_adapter_options
 
-    check_adapter_options(args, immediate)
+    check_adapter_options(args)
     if not 0 <= args.max_graph_failures < 1:
         raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
     if output.exists():

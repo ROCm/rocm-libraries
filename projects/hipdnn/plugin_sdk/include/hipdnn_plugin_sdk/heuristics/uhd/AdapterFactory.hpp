@@ -63,7 +63,7 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            // The artifact names the metric its log it predicts; it must be the score's.
+            // The artifact names the metric whose log it predicts, which must be the UHD's.
             return MlpDataAdapter::load(
                 cfg.modelArtifactPath, cfg.featuresHash, cfg.scoreMetric, cfg.modelHash);
         }

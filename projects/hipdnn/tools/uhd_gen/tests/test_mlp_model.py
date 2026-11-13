@@ -785,7 +785,6 @@ def test_evaluate_reports_the_mlp_models_predictions(tmp_path, evaluator):
 @pytest.mark.parametrize(
     "extra, message",
     [
-        (["--role", "sort_kernel_catalog"], "serves only --role predict_engine"),
         (["--group-by-feature", "graph.nodes"], "tree_data option"),
         (["--mlp-hidden", "16,x"], "comma-separated integers"),
         (["--mlp-hidden", "16,0"], "widths must be positive"),
@@ -908,24 +907,23 @@ def test_promote_refuses_an_mlp_data_uhd_the_runtime_would_refuse(tmp_path, eval
     manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
     artifact = (output / "model.bin").read_bytes()
 
-    def broken(name, edit, keep_manifest=True):
+    def broken(name, edit):
         directory = tmp_path / name
         directory.mkdir()
         (directory / "heuristic.uhd.json").write_text(
             json.dumps(edit(copy.deepcopy(document))), encoding="utf-8"
         )
         (directory / "model.bin").write_bytes(artifact)
-        if keep_manifest:
-            (directory / "train_manifest.json").write_text(
-                json.dumps(manifest), encoding="utf-8"
-            )
+        (directory / "train_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
         return directory
 
-    def plan(directory, **kwargs):
+    def plan(directory):
         return build_plan(
             directory,
             root,
-            role=kwargs.pop("role", "predict_engine"),
+            role="predict_engine",
             arch="gfx942",
             feature_evaluator=evaluator,
         )
@@ -963,13 +961,6 @@ def test_promote_refuses_an_mlp_data_uhd_the_runtime_would_refuse(tmp_path, eval
 
     with pytest.raises(PromoteError, match="features_hash|num_features"):
         plan(broken("wide", wide))
-
-    # It estimates one engine's metric, so no catalog role takes it.
-    with pytest.raises(PromoteError, match="installs only as predict_engine"):
-        plan(
-            broken("catalog", lambda d: d, keep_manifest=False),
-            role="sort_kernel_catalog",
-        )
 
 
 def _probe_corpus(path, count=40):
@@ -1086,3 +1077,214 @@ def test_a_model_replaces_the_installed_one_of_its_slot_across_adapters(
     )
     if incoming == "mlp_data":
         load_mlp_artifact(artifact, installed[incoming]["hash"], feature_count=2)
+
+
+def _catalog_frame():
+    """The linear_data catalog corpus, its two kernel knobs named as the promote tree's KMD."""
+    from uhd_gen.tests.test_linear_model import _catalog
+
+    return _catalog(problems=30).rename(
+        columns={"kernel.tile": "kernel.block_size", "kernel.stages": "kernel.tile_m"}
+    )
+
+
+def _train_catalog(
+    tmp_path, evaluator, provenance, *extra, frame=None, metric="tflops"
+):
+    corpus = tmp_path / "catalog.csv"
+    (_catalog_frame() if frame is None else frame).to_csv(corpus, index=False)
+    snapshot = tmp_path / "provenance.json"
+    snapshot.write_text(json.dumps(provenance), encoding="utf-8")
+    output = tmp_path / "catalog_model"
+    code = main(
+        [
+            "train",
+            "--role",
+            "sort_kernel_catalog",
+            "--adapter",
+            "mlp_data",
+            "--input",
+            str(corpus),
+            "--provenance",
+            str(snapshot),
+            "--features",
+            "kernel.block_size",
+            "kernel.tile_m",
+            "q.size",
+            "q.size2",
+            *(["--metric", metric] if metric else []),
+            "--group-by",
+            "benchmark",
+            "device",
+            "--feature-evaluator",
+            evaluator,
+            "--output-dir",
+            str(output),
+            "--training-arches",
+            "gfx942",
+            *TRAIN_OPTIONS,
+            *extra,
+        ]
+    )
+    return code, output
+
+
+def _scored_fraction_of_best(frame, scores):
+    """Mean over problems of the picked candidate's TFLOPS over the problem's best."""
+    picked = (
+        frame.assign(score=scores).sort_values("score").groupby("benchmark").tail(1)
+    )
+    best = frame.groupby("benchmark")["tflops"].max()
+    return float((picked.set_index("benchmark")["tflops"] / best).mean())
+
+
+def test_a_catalog_trained_mlp_data_model_ranks_and_is_evaluated_as_a_catalog_ranker(
+    tmp_path, evaluator
+):
+    from uhd_gen.tests.test_promote import _tree
+    from uhd_gen.provenance import snapshot_provenance
+
+    provenance = snapshot_provenance(_tree(tmp_path / "tree"), arch="gfx942")
+    frame = _catalog_frame()
+    code, output = _train_catalog(tmp_path, evaluator, provenance, frame=frame)
+    assert code == 0
+
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["adapter"] == "mlp_data"
+    assert descriptor["objective"] == "max"
+    assert descriptor["score"] == {
+        "metric": "tflops",
+        "calibrated": False,
+        "transform": "log",
+    }
+    artifact = output / "model.bin"
+    _, metric = load_mlp_artifact(
+        artifact,
+        descriptor["mlp_data"]["hash"],
+        feature_count=len(descriptor["features_signature"]),
+    )
+    assert metric == "tflops"
+    manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
+    assert "role" not in manifest and manifest["group_by"] == ["benchmark", "device"]
+    # A problem's candidates validate together, never against their own siblings.
+    fit = manifest["mlp_fit"]
+    assert fit["validation_split"] == "group" and fit["validation_groups"] == 30
+    for member in fit["member_fits"]:
+        assert member["validation_rows"] % 4 == 0
+        assert member["train_rows"] + member["validation_rows"] == 120
+
+    bundle = load_model(output, feature_evaluator=evaluator)
+    assert bundle.role != "predict_engine"
+    assert _scored_fraction_of_best(frame, bundle.scorer(frame)) > 0.9
+
+    report = tmp_path / "report.json"
+    code = main(
+        [
+            "evaluate",
+            "--input",
+            str(tmp_path / "catalog.csv"),
+            "--model-dir",
+            str(output),
+            "--eval-fraction",
+            "1",
+            "--feature-evaluator",
+            evaluator,
+            "--output",
+            str(report),
+        ]
+    )
+    assert code == 0
+    metrics = json.loads(report.read_text(encoding="utf-8"))["metrics"]
+    assert metrics["problems_scored"] == 30
+    assert metrics["top1_regret"]["mean"] < 0.1
+
+
+def test_a_catalog_trained_mlp_data_model_installs_into_the_catalog_slot(
+    tmp_path, evaluator
+):
+    from uhd_gen.promote import _apply, build_plan
+    from uhd_gen.provenance import snapshot_provenance
+    from uhd_gen.tests.test_promote import _read, _tree
+
+    tree = _tree(tmp_path / "tree")
+    frame = _catalog_frame()
+    code, output = _train_catalog(
+        tmp_path, evaluator, snapshot_provenance(tree, arch="gfx942"), frame=frame
+    )
+    assert code == 0
+    plan = build_plan(
+        output,
+        tree,
+        role="sort_kernel_catalog",
+        arch="gfx942",
+        feature_evaluator=evaluator,
+    )
+    _apply(plan)
+    installed = _read(plan.destination_descriptor)
+    assert installed["adapter"] == "mlp_data"
+    assert (
+        installed["id"]
+        in _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"]
+    )
+    # An installed model has no manifest; it scores as it did before it moved.
+    before = load_model(output, feature_evaluator=evaluator).scorer(frame)
+    after = load_model(plan.destination_descriptor.parent, feature_evaluator=evaluator)
+    assert after.role == "sort_kernel_catalog"
+    np.testing.assert_array_equal(after.scorer(frame), before)
+
+
+def test_a_catalog_mlp_data_model_names_a_metric_because_its_artifact_does(
+    tmp_path, evaluator, caplog
+):
+    from uhd_gen.provenance import snapshot_provenance
+    from uhd_gen.tests.test_promote import _tree
+
+    provenance = snapshot_provenance(_tree(tmp_path / "tree"), arch="gfx942")
+    code, output = _train_catalog(
+        tmp_path, evaluator, provenance, "--target", "q.size", metric=None
+    )
+    assert code == 1 and "pass --metric" in caplog.text
+    assert not output.exists()
+
+
+def test_a_grouped_validation_split_never_separates_a_groups_rows():
+    from uhd_gen.mlp import VALIDATION_FRACTION, _validation_split
+
+    groups = np.repeat(np.arange(20), 5)
+    held = {}
+    for seed in range(8):
+        valid, train = _validation_split(
+            len(groups), np.random.default_rng(seed), groups
+        )
+        assert sorted([*valid, *train]) == list(range(len(groups)))
+        assert not set(groups[valid]) & set(groups[train])
+        assert len(set(groups[valid])) == round(VALIDATION_FRACTION * 20) == 3
+        # Every row of a held-out group is held out with it.
+        assert len(valid) == 3 * 5
+        held[seed] = tuple(sorted(set(groups[valid])))
+    assert len(set(held.values())) > 1, "the held-out groups follow the seed"
+    again, _ = _validation_split(len(groups), np.random.default_rng(3), groups)
+    assert tuple(sorted(set(groups[again]))) == held[3]
+
+
+def test_a_grouped_fit_holds_out_groups_and_the_row_fit_is_unchanged():
+    matrix, y = _curve(rows=200)
+    groups = np.repeat(np.arange(40), 5)
+    grouped, fit = fit_mlp(matrix, y, epochs=3, members=2, hidden=(4,), groups=groups)
+    assert (fit["validation_split"], fit["validation_groups"]) == ("group", 40)
+    for member in fit["member_fits"]:
+        assert member["validation_rows"] == 6 * 5 and member["train_rows"] == 34 * 5
+    plain, plain_fit = fit_mlp(matrix, y, epochs=3, members=2, hidden=(4,))
+    assert (plain_fit["validation_split"], plain_fit["validation_groups"]) == (
+        "row",
+        None,
+    )
+    assert plain_fit["member_fits"][0]["validation_rows"] == 30
+    assert not _same_networks(grouped, plain)
+    # A subsample keeps each row's group, and a lone problem has nothing to validate on.
+    _, sampled = fit_mlp(
+        matrix, y, epochs=1, members=1, hidden=(4,), groups=groups, max_rows=100
+    )
+    assert sampled["rows"] == 100
+    with pytest.raises(ValueError, match="at least 2 problems"):
+        fit_mlp(matrix, y, epochs=1, members=1, groups=np.zeros(200, dtype=int))
