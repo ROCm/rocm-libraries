@@ -735,19 +735,29 @@ if(ROCKE_INSTALL_TESTS)
       # per-directory times in CI logs; _ROCKE_PLATFORM_PYTEST_GROUP_<group>
       # lists the directories of rocke_pytest_<group>. rocke_pytest_other runs
       # the rest of tests/: the files at its top level and every directory no
-      # group names, so a new directory runs with no edit here. Together the
-      # entries collect what one entry over tests/ would. To keep a file out of
-      # every part, list(APPEND) it (a path under tests/) to
-      # _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose directories hold
-      # it, or for "other"; APPEND keeps any value given on the configure line,
-      # which tests/test_engine_linkage.py uses. The rocke_pytest_ name prefix
-      # is reserved for these entries; the provider categories tier them by
-      # that prefix.
+      # group names, so a new directory runs with no edit here. Together with
+      # rocke_ctest_shard_pytest below, the entries collect what one entry over
+      # tests/ would. To keep a file out of every part, list(APPEND) it (a path
+      # under tests/) to _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose
+      # directories hold it, or for "other"; APPEND keeps any value given on the
+      # configure line, which tests/test_engine_linkage.py uses. The
+      # rocke_pytest_ name prefix is reserved for these entries; the provider
+      # categories tier them by that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
           runtime portable_ir tools analysis in_tree)
+      # The tests of the rocke.tests.ctest_shard plugin start many child pytest
+      # and CTest runs. They run in rocke_ctest_shard_pytest, which the provider
+      # categories tier as standard, so the quick tier does not run them.
+      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_other test_ctest_shard.py)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
+             "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n")
       set(_rocke_pytest_other_arguments
           "${ROCKE_TEST_CTEST_REL}tests" --ignore "${ROCKE_TEST_CTEST_REL}tests/library")
       foreach(_rocke_pytest_group IN LISTS _ROCKE_PLATFORM_PYTEST_GROUPS)

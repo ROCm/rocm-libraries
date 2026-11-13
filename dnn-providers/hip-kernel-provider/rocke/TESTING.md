@@ -774,6 +774,8 @@ PYTHONPATH=python ROCKE_TEST_SHARD=1/4 \
 ```
 
 Run each shard index of the same total, and compare the split lines.
+The tests of the plugin, `platform/tests/test_ctest_shard.py`, run in their own
+installed entry, `rocke_ctest_shard_pytest`, in the standard tier.
 
 **The `rocke` package must be importable.** Each installed pytest entry,
 except the gates, loads `rocke.tests.ctest_shard` before it collects. If the
@@ -896,6 +898,8 @@ They run the platform pytest suite in parts, each a group of directories under
 `_ROCKE_PLATFORM_PYTEST_GROUPS` in [`platform/CMakeLists.txt`](platform/CMakeLists.txt)
 names the groups. `rocke_pytest_other` runs the rest of `tests/` without
 `tests/library`: the files at its top level and every directory no group names.
+It does not run `tests/test_ctest_shard.py`, which `rocke_ctest_shard_pytest`
+runs in the standard tier.
 To print each part's command and environment:
 
 ```text
