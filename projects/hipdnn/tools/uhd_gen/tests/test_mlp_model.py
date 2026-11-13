@@ -27,7 +27,16 @@ from uhd_gen.artifact import (  # noqa: E402
     verify_mlp_artifact,
 )
 from uhd_gen.evaluate import _mlp_scorer, load_model  # noqa: E402
-from uhd_gen.mlp import PATIENCE, MlpEnsemble, fit_mlp  # noqa: E402
+from uhd_gen.mlp import (  # noqa: E402
+    LEARNING_RATE,
+    PATIENCE,
+    MlpEnsemble,
+    _fit_member,
+    _forward,
+    _initial_layers,
+    _validation_split,
+    fit_mlp,
+)
 from uhd_gen.mlp_to_flatbuffer import build_mlp_model, write_mlp_model  # noqa: E402
 
 NAN = float("nan")
@@ -564,6 +573,85 @@ def test_a_corpus_beyond_max_rows_is_subsampled_with_the_seed():
     assert fit["rows"] == 200
 
 
+def test_a_member_keeps_the_weights_of_its_best_epoch_not_its_last():
+    rng = np.random.default_rng(3)
+    inputs = rng.uniform(0, 10, size=(150, 3)).astype(np.float32)
+    target = rng.normal(size=150).astype(np.float32)
+    layers, fit = _fit_member(inputs, target, (32,), epochs=300, seed=3)
+    # The run went on PATIENCE epochs past its best, so the last weights are not the best.
+    assert fit["epochs_run"] == fit["best_epoch"] + PATIENCE + 1
+    valid, _ = _validation_split(len(inputs), np.random.default_rng(3), None)
+    held_out = float(np.mean(np.abs(_forward(layers, inputs[valid]) - target[valid])))
+    assert held_out == pytest.approx(fit["validation_l1"], rel=1e-5)
+
+
+def test_a_corpus_beyond_max_rows_keeps_a_seeded_sample_in_row_order():
+    matrix, y = _curve(rows=200)
+    seed = 7
+    kept = np.sort(np.random.default_rng(seed).choice(200, size=50, replace=False))
+    options = {"epochs": 2, "members": 1, "hidden": (4,), "seed": seed}
+    sampled, _ = fit_mlp(matrix, y, max_rows=50, **options)
+    reference, _ = fit_mlp(matrix[kept], y[kept], **options)
+    assert _same_networks(sampled, reference)
+    assert sampled.target_mean == pytest.approx(y[kept].mean())
+
+
+def _l1_gradient(layers, inputs, target):
+    """d(mean |network - target|)/d(each parameter) by central differences in float64,
+    ordered weights then biases per layer."""
+    wide = [[p.astype(np.float64) for p in layer] for layer in layers]
+
+    def loss():
+        a = inputs.astype(np.float64)
+        for index, (weights, biases) in enumerate(wide):
+            a = a @ weights.T + biases
+            if index + 1 < len(wide):
+                a = a / (1.0 + np.exp(-a))
+        return float(np.mean(np.abs(a[:, 0] - target)))
+
+    gradient = []
+    for layer in wide:
+        for array in layer:
+            for position in np.ndindex(array.shape):
+                original = array[position]
+                array[position] = original + 1e-6
+                above = loss()
+                array[position] = original - 1e-6
+                below = loss()
+                array[position] = original
+                gradient.append((above - below) / 2e-6)
+    return np.array(gradient)
+
+
+def test_a_first_step_descends_the_l1_loss_through_every_silu_layer():
+    """Adam's first update is a step of `-LEARNING_RATE * sign(gradient)`, so the direction
+    each weight and bias moves is the sign of the backward pass's gradient. One minibatch,
+    one epoch: the update from the known initial weights must descend the true mean absolute
+    error, whose gradient is taken numerically."""
+    rng = np.random.default_rng(11)
+    inputs = rng.normal(size=(40, 3)).astype(np.float32)
+    target = rng.normal(size=40).astype(np.float32)
+    hidden, seed = (4, 3), 5
+
+    split = np.random.default_rng(seed)
+    _, train = _validation_split(len(inputs), split, None)
+    initial = _initial_layers([3, *hidden, 1], split)
+    trained, _ = _fit_member(inputs, target, hidden, epochs=1, seed=seed)
+
+    gradient = _l1_gradient(initial, inputs[train], target[train])
+    moved = np.concatenate(
+        [
+            (after - before).ravel()
+            for (w1, b1), (w0, b0) in zip(trained, initial)
+            for after, before in ((w1, w0), (b1, b0))
+        ]
+    )
+    decisive = np.abs(gradient) > 1e-4
+    assert decisive.sum() > 0.8 * len(gradient)
+    assert np.all(np.sign(moved[decisive]) == -np.sign(gradient[decisive]))
+    assert np.all(np.abs(moved[decisive]) < 2 * LEARNING_RATE)
+
+
 @pytest.mark.parametrize(
     "options, message",
     [
@@ -780,6 +868,35 @@ def test_evaluate_reports_the_mlp_models_predictions(tmp_path, evaluator):
         "prediction_coverage"
     ]
     assert scored["scored_rows"] == scored["rows"] == 60
+
+
+def test_evaluate_refuses_an_artifact_of_another_metric_than_the_descriptor_scores(
+    tmp_path, evaluator
+):
+    code, output = _train(tmp_path, evaluator, "--mlp-epochs", "5", metric="tflops")
+    assert code == 0
+    load_model(output, feature_evaluator=evaluator)
+    path = output / "heuristic.uhd.json"
+    descriptor = json.loads(path.read_text(encoding="utf-8"))
+    descriptor["score"]["metric"] = "time"
+    descriptor["objective"] = "min"
+    path.write_text(json.dumps(descriptor), encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="predicts 'tflops' but the descriptor scores 'time'"
+    ):
+        load_model(output, feature_evaluator=evaluator)
+
+
+def test_the_offline_scorer_refuses_an_artifact_whose_arity_is_not_the_signatures(
+    tmp_path,
+):
+    ensemble = fixture_ensemble()
+    path = tmp_path / "model.bin"
+    write_mlp_model(ensemble, "tflops", FEATURES_HASH, path)
+    features = ["f0", "f1", "f2", "f3"]
+    _mlp_scorer(path, features, signature=list(range(ensemble.num_features)))
+    with pytest.raises(ValueError, match="num_features 4 differs from the 3-slot"):
+        _mlp_scorer(path, features[:3], signature=[0, 1, 2])
 
 
 @pytest.mark.parametrize(

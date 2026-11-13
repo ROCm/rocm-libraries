@@ -159,6 +159,111 @@ std::unique_ptr<MlpDataAdapter> loadTiny(const std::function<void(fb::MlpModelT&
     return MlpDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, TEST_METRIC);
 }
 
+/// A layer of in -> out with weights and biases that differ from one slot to the next, so a kernel
+/// that reads the wrong slot or drops a lane or block changes the score.
+std::unique_ptr<fb::MlpLayerT> patternedLayer(size_t in, size_t out, int salt)
+{
+    auto layer = std::make_unique<fb::MlpLayerT>();
+    layer->inputs = static_cast<int32_t>(in);
+    layer->outputs = static_cast<int32_t>(out);
+    for(size_t o = 0; o < out; ++o)
+    {
+        for(size_t i = 0; i < in; ++i)
+        {
+            const auto level = (static_cast<int>(o) * 7 + static_cast<int>(i) * 3 + salt) % 9;
+            layer->weights.push_back(static_cast<float>(level - 4) / 8.0F);
+        }
+        layer->biases.push_back(static_cast<float>((static_cast<int>(o) * 5 + salt) % 7 - 3)
+                                / 16.0F);
+    }
+    return layer;
+}
+
+/// A model whose member m has the layer widths `shapes[m]`, from the network input to the one
+/// output. Features [0, inputCount) are inputs; the `flags` features after them are missing flags.
+std::vector<uint8_t>
+    patternedModel(size_t inputCount, size_t flags, const std::vector<std::vector<size_t>>& shapes)
+{
+    fb::MlpModelT model;
+    model.num_features = static_cast<int32_t>(inputCount + flags);
+    model.metric = TEST_METRIC;
+    model.features_hash = TEST_HASH;
+    for(size_t k = 0; k < inputCount; ++k)
+    {
+        auto input = std::make_unique<fb::MlpInputT>();
+        input->feature = static_cast<int32_t>(k);
+        input->mean = 0.25 * static_cast<double>(k % 3);
+        input->scale = 1.5;
+        model.inputs.push_back(std::move(input));
+    }
+    for(size_t f = 0; f < flags; ++f)
+    {
+        model.missing_flags.push_back(static_cast<int32_t>(inputCount + f));
+    }
+    for(size_t m = 0; m < shapes.size(); ++m)
+    {
+        auto network = std::make_unique<fb::MlpNetworkT>();
+        for(size_t l = 0; l + 1 < shapes[m].size(); ++l)
+        {
+            network->layers.push_back(
+                patternedLayer(shapes[m][l], shapes[m][l + 1], static_cast<int>(m * 3 + l)));
+        }
+        model.networks.push_back(std::move(network));
+    }
+    model.target_mean = 1.5;
+    model.target_scale = 0.5;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    fbb.Finish(fb::CreateMlpModel(fbb, &model), fb::MlpModelIdentifier());
+    return {fbb.GetBufferPointer(), fbb.GetBufferPointer() + fbb.GetSize()};
+}
+
+/// The score of `row` in double precision, read back out of the artifact's bytes: the adapter's
+/// arithmetic with std::exp for SiLU.
+double referenceScore(const std::vector<uint8_t>& bytes, const std::vector<double>& row)
+{
+    const auto* model = fb::GetMlpModel(bytes.data());
+    std::vector<double> input;
+    for(const auto* in : *model->inputs())
+    {
+        const double x = row[static_cast<size_t>(in->feature())];
+        const double z = std::isnan(x) ? 0.0 : std::copysign(std::log1p(std::fabs(x)), x);
+        input.push_back((z - in->mean()) / in->scale());
+    }
+    for(const int32_t column : *model->missing_flags())
+    {
+        input.push_back(std::isnan(row[static_cast<size_t>(column)]) ? 1.0 : 0.0);
+    }
+
+    double sum = 0.0;
+    for(const auto* network : *model->networks())
+    {
+        auto activations = input;
+        const auto layerCount = network->layers()->size();
+        for(flatbuffers::uoffset_t l = 0; l < layerCount; ++l)
+        {
+            const auto* layer = network->layers()->Get(l);
+            std::vector<double> next;
+            for(size_t o = 0; o < static_cast<size_t>(layer->outputs()); ++o)
+            {
+                auto acc = static_cast<double>(
+                    layer->biases()->Get(static_cast<flatbuffers::uoffset_t>(o)));
+                for(size_t i = 0; i < activations.size(); ++i)
+                {
+                    acc += static_cast<double>(layer->weights()->Get(
+                               static_cast<flatbuffers::uoffset_t>(o * activations.size() + i)))
+                           * activations[i];
+                }
+                next.push_back(l + 1 == layerCount ? acc : acc / (1.0 + std::exp(-acc)));
+            }
+            activations = std::move(next);
+        }
+        sum += activations[0];
+    }
+    return model->target_mean()
+           + model->target_scale() * (sum / static_cast<double>(model->networks()->size()));
+}
+
 TEST(TestMlpDataAdapter, ScoresTheSharedFixtureAsUhdGenDoes)
 {
     const auto bytes = fixtureBytes();
@@ -234,6 +339,34 @@ TEST(TestMlpDataAdapter, HiddenLayersAreFollowedBySilu)
     {
         const double z = std::copysign(std::log1p(std::fabs(x)), x);
         EXPECT_NEAR(adapter->score({x}), z * std::tanh(z / 2.0), TOLERANCE) << "x " << x;
+    }
+}
+
+TEST(TestMlpDataAdapter, LayersWiderThanOneBlockScoreAsAReferenceDoes)
+{
+    // Member 0: 14 -> 40 -> 33 -> 1. Its hidden layers take a second 32-wide block, and its last
+    // layer has 33 inputs, so dot() runs its 8-lane loop and then a tail. Member 1: 14 -> 70 -> 1.
+    // 70 pads to 96, so SiLU takes a second 64-wide chunk and affine() a third block.
+    const auto bytes = patternedModel(12, 2, {{14, 40, 33, 1}, {14, 70, 1}});
+    const auto adapter
+        = MlpDataAdapter::loadFromBuffer(bytes.data(), bytes.size(), TEST_HASH, TEST_METRIC);
+    ASSERT_NE(adapter, nullptr);
+
+    // Negatives, magnitudes over several decades, and missing values (features 12 and 13 have a
+    // flag but no input of their own, so only whether they are missing is read).
+    const std::vector<std::vector<double>> rows = {
+        {1, 20, 300, 4000, 5, 60, 7, 80, 900, 10, 11, 12, 0, 0},
+        {-3, 2, NAN_VALUE, 40, 0.5, -6, 70, 8e3, 9, 1e5, 11, 1, NAN_VALUE, 0},
+        {5, 5, 5, 5, NAN_VALUE, 5, 5, 5, 5, 5, NAN_VALUE, 5, 0, NAN_VALUE},
+        {-1e6, 3e-2, -40, 7, 0, -0.5, 1e3, -9e3, 2, -2, 33, -330, NAN_VALUE, NAN_VALUE},
+    };
+    for(size_t r = 0; r < rows.size(); ++r)
+    {
+        // The members are float32 and SiLU's exp is a polynomial, so the adapter differs from a
+        // double reference by float rounding over sums of ~50 terms (about 1e-5), not by
+        // exactness. A block, lane or chunk handled wrongly is off by about a weight (0.1 or
+        // more), three orders above this bound.
+        EXPECT_NEAR(adapter->score(rows[r]), referenceScore(bytes, rows[r]), 1e-4) << "row " << r;
     }
 }
 
@@ -392,6 +525,54 @@ TEST(TestMlpDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneError
              m.networks[0]->layers[0]->weights = {1.0F, 1.0F};
              m.networks[0]->layers[0]->biases = {0.0F, 0.0F};
          }},
+        {"missing flag outside the features, the layer sized for it",
+         [](fb::MlpModelT& m) {
+             m.missing_flags = {1};
+             m.networks[0]->layers[0]->inputs = 2;
+             m.networks[0]->layers[0]->weights = {2.0F, 3.0F};
+         }},
+        {"a layer one weight short",
+         [](fb::MlpModelT& m) {
+             m.missing_flags = {0};
+             m.networks[0]->layers[0]->inputs = 2;
+             m.networks[0]->layers[0]->weights = {2.0F};
+         }},
+        {"a hidden layer of 513 outputs",
+         [](fb::MlpModelT& m) {
+             m.networks[0]->layers.clear();
+             m.networks[0]->layers.push_back(patternedLayer(1, 513, 0));
+             m.networks[0]->layers.push_back(patternedLayer(513, 1, 1));
+         }},
+        {"513 network inputs",
+         [](fb::MlpModelT& m) {
+             m.num_features = 513;
+             m.inputs.clear();
+             for(int32_t k = 0; k < 513; ++k)
+             {
+                 auto input = std::make_unique<fb::MlpInputT>();
+                 input->feature = k;
+                 input->mean = 0.0;
+                 input->scale = 1.0;
+                 m.inputs.push_back(std::move(input));
+             }
+             m.networks[0]->layers.clear();
+             m.networks[0]->layers.push_back(patternedLayer(513, 1, 0));
+         }},
+        {"9 layers",
+         [](fb::MlpModelT& m) {
+             m.networks[0]->layers.clear();
+             for(int k = 0; k < 9; ++k)
+             {
+                 m.networks[0]->layers.push_back(patternedLayer(1, 1, k));
+             }
+         }},
+        {"65 networks",
+         [](fb::MlpModelT& m) {
+             for(int k = 0; k < 64; ++k)
+             {
+                 m.networks.push_back(std::make_unique<fb::MlpNetworkT>(*m.networks[0]));
+             }
+         }},
         {"too few weights", [](fb::MlpModelT& m) { m.networks[0]->layers[0]->weights.clear(); }},
         {"too many biases",
          [](fb::MlpModelT& m) { m.networks[0]->layers[0]->biases = {0.0F, 0.0F}; }},
@@ -408,6 +589,45 @@ TEST(TestMlpDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneError
         auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         EXPECT_EQ(loadTiny(refusal.edit), nullptr);
+        EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+TEST(TestMlpDataAdapter, AnEmptyNetworkListAndAnEmptyLayerListAreRefusedWithOneError)
+{
+    // The object API writes an empty vector as an absent one; the direct builders write a present,
+    // empty vector, which is what another writer may emit.
+    for(const bool emptyNetworks : {true, false})
+    {
+        SCOPED_TRACE(emptyNetworks ? "empty networks" : "empty layers");
+        flatbuffers::FlatBufferBuilder fbb;
+        const std::vector<flatbuffers::Offset<fb::MlpInput>> inputs
+            = {fb::CreateMlpInput(fbb, 0, 0.0, 1.0)};
+        std::vector<flatbuffers::Offset<fb::MlpNetwork>> networks;
+        if(!emptyNetworks)
+        {
+            const std::vector<flatbuffers::Offset<fb::MlpLayer>> layers;
+            networks.push_back(fb::CreateMlpNetworkDirect(fbb, &layers));
+        }
+        fbb.Finish(fb::CreateMlpModelDirect(
+                       fbb, 1, TEST_METRIC, TEST_HASH, &inputs, nullptr, &networks, 0.0, 1.0),
+                   fb::MlpModelIdentifier());
+
+        const auto* written = fb::GetMlpModel(fbb.GetBufferPointer());
+        ASSERT_NE(written->networks(), nullptr);
+        ASSERT_EQ(written->networks()->empty(), emptyNetworks);
+        if(!emptyNetworks)
+        {
+            ASSERT_NE(written->networks()->Get(0)->layers(), nullptr);
+            ASSERT_TRUE(written->networks()->Get(0)->layers()->empty());
+        }
+
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        EXPECT_EQ(MlpDataAdapter::loadFromBuffer(
+                      fbb.GetBufferPointer(), fbb.GetSize(), TEST_HASH, TEST_METRIC),
+                  nullptr);
         EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
             << recorder.getRecordedLogsAsString();
     }

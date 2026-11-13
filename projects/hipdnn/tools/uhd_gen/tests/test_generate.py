@@ -1200,3 +1200,96 @@ def test_the_bench_sweep_entry_is_read_as_the_bench_writes_it(monkeypatch, tmp_p
     ) == (2.0, 2.75, 2.5, 0.125, 40)
     assert row["is_valid"] is True and row["numerically_valid"] is True
     assert row["validation"] == entry["validation"]
+
+
+def _generate_arguments(*extra):
+    import argparse
+
+    from uhd_gen.generate import add_generate_arguments
+
+    parser = argparse.ArgumentParser()
+    add_generate_arguments(parser)
+    return parser.parse_args(
+        [
+            "--graphs",
+            "g",
+            "--descriptor-tree",
+            "t",
+            "--engine-id",
+            "7",
+            "--output-dir",
+            "o",
+            *extra,
+        ]
+    )
+
+
+def test_generate_hands_train_every_mlp_option_it_was_given_and_only_those():
+    """`generate` trains through `train`, so an option it parsed but did not forward would
+    silently fit the defaults."""
+    from uhd_gen.__main__ import adapter_args
+
+    given = _generate_arguments(
+        "--adapter",
+        "mlp_data",
+        "--mlp-hidden",
+        "16,8",
+        "--mlp-members",
+        "2",
+        "--mlp-epochs",
+        "5",
+        "--mlp-seed",
+        "9",
+        "--mlp-max-rows",
+        "100",
+    )
+    assert adapter_args(given) == [
+        "--adapter",
+        "mlp_data",
+        "--mlp-hidden",
+        "16,8",
+        "--mlp-members",
+        "2",
+        "--mlp-epochs",
+        "5",
+        "--mlp-seed",
+        "9",
+        "--mlp-max-rows",
+        "100",
+    ]
+    assert adapter_args(_generate_arguments("--adapter", "mlp_data")) == [
+        "--adapter",
+        "mlp_data",
+    ]
+    assert adapter_args(_generate_arguments("--mlp-epochs", "5")) == [
+        "--adapter",
+        "tree_data",
+        "--mlp-epochs",
+        "5",
+    ]
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        (["--mlp-epochs", "5"], "--mlp-epochs apply only to --adapter mlp_data"),
+        (
+            ["--adapter", "linear_data", "--mlp-seed", "1", "--mlp-members", "2"],
+            "--mlp-members, --mlp-seed apply only to --adapter mlp_data",
+        ),
+        (
+            ["--adapter", "mlp_data", "--group-by-feature", "kernel.tile"],
+            "tree_data option",
+        ),
+    ],
+)
+def test_generate_refuses_an_adapter_option_that_does_not_apply_before_measuring(
+    extra, message
+):
+    """Checked on the arguments alone: no corpus is read and no GPU is touched."""
+    from uhd_gen.generate import _check_generate_arguments
+
+    with pytest.raises(ValueError, match=message):
+        _check_generate_arguments(
+            _generate_arguments(*extra), False, Path("nonexistent-output"), Path("t")
+        )
