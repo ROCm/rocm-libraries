@@ -94,6 +94,16 @@ def _mi_wave_group(mi: Sequence[int]) -> Tuple[int, int]:
     return miwg0, waves // miwg0
 
 
+def _interleavable(wave_group: Tuple[int, int]) -> bool:
+    """Whether ``LDSSegmentInterleave=1`` supports this MIWaveGroup.
+
+    "LDSSegmentInterleave=1 requested but not applicable: MIWaveGroup
+    unsupported" (segment_interleave.py): only [2,2] and the asymmetric groups,
+    with exactly one dimension equal to 1, can interleave.
+    """
+    return wave_group == (2, 2) or (wave_group[0] == 1) != (wave_group[1] == 1)
+
+
 def _mis(mi_groups: GroupDimension) -> List[Sequence[int]]:
     """The 9-element MatrixInstruction of every group that carries one."""
     out = []
@@ -154,13 +164,9 @@ class _GFX1250GeometryNarrowing:
         restrict("HalfPLR", half_plr_usable, [0])
 
         # Rule C -- "LDSSegmentInterleave=1 requested but not applicable:
-        # MIWaveGroup unsupported" (segment_interleave.py): only [2,2] and the
-        # asymmetric groups, with exactly one dimension equal to 1, can
-        # interleave. Same "any group" policy.
-        def interleavable(wg):
-            return wg == (2, 2) or (wg[0] == 1) != (wg[1] == 1)
-
-        can_interleave = any(interleavable(_mi_wave_group(mi)) for mi in mis)
+        # MIWaveGroup unsupported" (see _interleavable). Same "any group"
+        # policy; _GFX1250SegmentInterleaveLayout narrows it per MI later.
+        can_interleave = any(_interleavable(_mi_wave_group(mi)) for mi in mis)
         restrict("LDSSegmentInterleave", lambda v: v != 1 or can_interleave, [0])
 
         return fork_params, mi_groups
@@ -257,11 +263,104 @@ class _GFX1250TDMFuseOneWave:
         return fork_params, coupled
 
 
+def _can_interleave(entry: Dict[str, ForkParameter]) -> bool:
+    """Whether an MI group entry can build ``LDSSegmentInterleave=1``.
+
+    Needs an interleavable MIWaveGroup (:func:`_interleavable`) and
+    LocalSplitU 1 (``WorkGroup[2]``): segment_interleave.py answers "not
+    applicable: LocalSplitU>1" otherwise. An MI this cannot read counts as
+    interleavable, like Rule C.
+    """
+    wg = getattr(entry.get("WorkGroup"), "values", None)
+    if isinstance(wg, list) and len(wg) == 3 and wg[2] > 1:
+        return False
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    return not mi or len(mi) != 9 or _interleavable(_mi_wave_group(mi))
+
+
+class _GFX1250SegmentInterleaveLayout:
+    """Give ``LDSSegmentInterleave=1`` the paired LDS layout, per MI group.
+
+    TensileLite pairs a tight interleave's ping/pong buffers only when
+    ``paired_buffer_reason`` (segment_interleave.py) finds nothing against it,
+    and ``TDMFuse > 0`` is one of its reasons. Without pairing a non-persistent
+    kernel is rejected ("LDSSegmentInterleave=1 requires paired LDS placement:
+    TDMFuse is not supported") and a persistent one keeps the unpaired
+    interleave. A persistent MX kernel also keeps it unless
+    ``ForceDisableShadowInit`` is set (``persistent_keeps_unpaired``). The
+    shipped gfx1250 kernels, and every ``LDSSegmentInterleave=1`` kernel
+    validated and timed for this profile, use the paired layout: TDMFuse 0
+    and ForceDisableShadowInit True.
+
+    So when the flat parameter offers 1 next to other values, it moves into
+    the MI groups. Every MI gets one entry per other value, with its TDMFuse;
+    an MI that can interleave (:func:`_can_interleave`) also gets an entry
+    with ``LDSSegmentInterleave=1`` and ``TDMFuse=0``. A flat TDMFuse moves
+    into the entries too, one entry per value, so no entry inherits a
+    conflicting flat value and every group value stays a single value, which
+    is how Tensile reads it. TDMFuse=0 makes TemporalHintA/B (0, 1) and
+    (1, 0) build the (0, 0) kernel on the 1 entries (see
+    ``GFX1250GAParams.tdm_fuse``); that costs duplicate draws, not invalid
+    ones.
+
+    For MX problems every entry also carries ``ForceDisableShadowInit=True``,
+    as the shipped gfx1250 perf yamls do. The LDSSegmentInterleave=1
+    entries need it for the paired layout. The other entries need it to
+    build at DepthU 512: some MX kernels with LDSSegmentInterleave 0 and
+    TDMFuse 1 fail in KernelWriter without it, and Tensile's solution check
+    does not catch that. With it, the two
+    LDSSegmentInterleave entries of an MI differ only in the layout and its
+    TDMFuse. ForceDisableShadowInit only turns off an optional
+    initialization done in the shadow of the global-read prefetch
+    (KernelWriter ``doShadowInit``).
+    """
+
+    @mark_post_process
+    def couple_lds_segment_interleave(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("LDSSegmentInterleave")
+        if fp is None or not fp.active or not isinstance(fp.values, list) or 1 not in fp.values:
+            return fork_params, mi_groups
+        others = [v for v in fp.values if v != 1]
+        if not others:
+            return fork_params, mi_groups
+        tdm = fork_params.get("TDMFuse")
+        flat_tdm = tdm if tdm is not None and tdm.active else None
+        mx = bool(getattr(self.config.get("GemmProblem"), "mx", False))
+        base = {}
+        if mx:
+            base["ForceDisableShadowInit"] = self._make_param("ForceDisableShadowInit", [True])
+        paired = {"LDSSegmentInterleave": self._make_param("LDSSegmentInterleave", [1]),
+                  "TDMFuse": self._make_param("TDMFuse", [0])}
+        coupled = []
+        for entry in mi_groups:
+            tdm_values = [None]
+            if flat_tdm is not None and "TDMFuse" not in entry:
+                tdm_values = list(flat_tdm.values)
+            for lsi in others:
+                for tdm_value in tdm_values:
+                    lsi_fp = self._make_param("LDSSegmentInterleave", [lsi])
+                    unpaired = {**entry, **base, "LDSSegmentInterleave": lsi_fp}
+                    if tdm_value is not None:
+                        unpaired["TDMFuse"] = self._make_param("TDMFuse", [tdm_value])
+                    coupled.append(unpaired)
+            if _can_interleave(entry):
+                coupled.append({**entry, **base, **paired})
+        del fork_params["LDSSegmentInterleave"]
+        if flat_tdm is not None:
+            del fork_params["TDMFuse"]
+        return fork_params, coupled
+
+
 def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
     """True when an MI group entry's MatrixInstruction has M == N.
 
     Entries whose MatrixInstruction cannot be read count as square, so the
-    SourceSwap coupling never narrows something it cannot parse.
+    SourceSwap split never acts on something it cannot parse.
     """
     mi = getattr(entry.get("MatrixInstruction"), "values", None)
     if not isinstance(mi, list) or len(mi) < 2:
@@ -269,24 +368,33 @@ def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
     return mi[0] == mi[1]
 
 
-class _GFX1250SourceSwapCoupling:
-    """Pin SourceSwap to False on non-square MI groups (32x16 on gfx1250).
+def _cluster_dim_is_coupled(fork_params: Dict[str, ForkParameter]) -> bool:
+    """True when _GFX1250ClusterDimCoupling will move ClusterDim into the MI groups."""
+    fp = fork_params.get("ClusterDim")
+    return fp is not None and fp.active and len(fp.values) >= 2
+
+
+class _GFX1250SourceSwapSplit:
+    """Split SourceSwap into the MI groups so ClusterDim is ranked per tile.
 
     SourceSwap=True on a non-square MI swaps the effective M and N, so the
     kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2] is
-    512x128 with SourceSwap=False but 256x256 with SourceSwap=True.
-    _GFX1250ClusterDimCoupling ranks ClusterDim shapes on the tile of the
-    MatrixInstruction as written, so SourceSwap=True kernels on these MIs would
-    get shapes ranked for the wrong tile (on 4096x3072 the [4, 4] that 256x256
-    needs is dropped for [2, 8]). Until that coupling ranks each SourceSwap
-    tile, SourceSwap moves into the MI groups: non-square groups keep only
-    False, square groups keep every profile value, one entry per value so each
-    group entry stays single-valued. A profile without SourceSwap=True, or MI
-    groups that are all square, leaves the flat parameter untouched.
+    512x128 with SourceSwap=False but 256x256 with SourceSwap=True, and the
+    best ClusterDim shape differs (on 4096x3072, [2, 8] versus [4, 4]).
+    _GFX1250ClusterDimCoupling ranks an entry on the tile of the entry's own
+    SourceSwap, so every MI group entry is repeated once per SourceSwap value,
+    each copy single-valued, and the flat parameter is dropped. Each
+    (MI, SourceSwap) entry then gets only the shapes of the tile it builds, and
+    the GA draws SourceSwap together with a shape chosen for it.
+
+    The split runs only where it changes the shapes: the profile offers
+    SourceSwap=True, some MI is non-square, and ClusterDim is coupled. With
+    all-square MIs both values build the same tile, and without a ClusterDim
+    axis nothing is ranked, so the flat parameter stays.
     """
 
     @mark_post_process
-    def pin_non_square_source_swap(
+    def split_source_swap(
         self,
         fork_params: Dict[str, ForkParameter],
         mi_groups: GroupDimension,
@@ -295,16 +403,64 @@ class _GFX1250SourceSwapCoupling:
         fp = fork_params.get("SourceSwap")
         if fp is None or not fp.active or not isinstance(fp.values, list) or True not in fp.values:
             return fork_params, mi_groups
-        if all(_mi_is_square(e) for e in mi_groups):
+        if all(_mi_is_square(e) for e in mi_groups) or not _cluster_dim_is_coupled(fork_params):
             return fork_params, mi_groups
-        non_square = [v for v in fp.values if v is False] or [False]
         coupled = []
         for entry in mi_groups:
-            values = list(fp.values) if _mi_is_square(entry) else non_square
-            for v in values:
+            for v in fp.values:
                 coupled.append({**entry, "SourceSwap": self._make_param("SourceSwap", [v])})
         del fork_params["SourceSwap"]
         return fork_params, coupled
+
+
+def _source_swap_values(
+    fork_params: Dict[str, ForkParameter],
+    entry: Dict[str, ForkParameter],
+) -> List[bool]:
+    """The SourceSwap values an MI group entry can be built with.
+
+    A SourceSwap carried by the entry itself wins over the flat parameter. An
+    absent, inactive (commented-out) or empty parameter leaves Tensile's
+    default, False; a scalar value counts as a one-element list.
+    """
+    fp = entry.get("SourceSwap") or fork_params.get("SourceSwap")
+    if fp is None or not fp.active:
+        return [False]
+    values = fp.values if isinstance(fp.values, list) else [fp.values]
+    return [bool(v) for v in values] or [False]
+
+
+def _source_swapped_macro_tile(mi: Sequence[int], macro_tile: Tuple[int, int]) -> Tuple[int, int]:
+    """``(MT0, MT1)`` of the same MI built with ``SourceSwap=True``.
+
+    SourceSwap on a non-square MI swaps the instruction's effective M and N
+    (TensileLite ``effectiveMatrixInstMN``), while MIBlock, MIWaveTile and
+    MIWaveGroup keep their physical values. ``Solution.py`` forms
+    ``MacroTile0 = MIWaveGroup[0] * MatrixInstM * MatrixInstBM * MIWaveTile[0]``
+    (and the N-side analogue) from the effective extents, so MT0 scales by
+    ``N / M`` and MT1 by ``M / N``: ``[32,16,128,1,1,8,4,2,2]`` is 512x128
+    unswapped and 256x256 swapped. A square MI is unchanged.
+    """
+    m, n = mi[0], mi[1]
+    if m == n:
+        return macro_tile
+    mt0, mt1 = macro_tile
+    return mt0 * n // m, mt1 * m // n
+
+
+def _buildable_macro_tiles(
+    fork_params: Dict[str, ForkParameter],
+    entry: Dict[str, ForkParameter],
+) -> List[Tuple[int, int]]:
+    """Every macro tile an MI group entry builds across its SourceSwap values."""
+    mi = entry["MatrixInstruction"].values
+    unswapped = mi_macro_tile(entry)
+    tiles: List[Tuple[int, int]] = []
+    for swap in _source_swap_values(fork_params, entry):
+        tile = _source_swapped_macro_tile(mi, unswapped) if swap else unswapped
+        if tile not in tiles:
+            tiles.append(tile)
+    return tiles
 
 
 class _GFX1250ClusterDimCoupling:
@@ -315,6 +471,16 @@ class _GFX1250ClusterDimCoupling:
     MI with shapes chosen for none of them. Each MI group entry is instead
     repeated once per shape that :func:`select_cluster_dims` keeps for its tile
     grid at this size, and the flat parameter is dropped.
+
+    The macro tile is the one the kernel actually builds. ``SourceSwap=True``
+    on a non-square MI transposes it (see :func:`_source_swapped_macro_tile`),
+    and the best shape of a size differs with it: at 4096x3072,
+    ``[32,16,128,1,1,8,4,2,2]`` prefers ``[2, 8]`` as 512x128 but
+    ``[4, 4]`` as 256x256. An entry that carries its own single SourceSwap
+    (as _GFX1250SourceSwapSplit leaves them) is ranked on its own tile.
+    When SourceSwap is still a flat parameter that can be True, the shapes
+    selected for each buildable tile are merged, so the swapped kernel can
+    still draw its own best shape.
 
     The execution policy stays a separate group, so some pairs remain that
     Tensile rejects: persistent StreamK takes only ``[Cs, 1]`` shapes and
@@ -329,14 +495,17 @@ class _GFX1250ClusterDimCoupling:
         mi_groups,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], list]:
-        fp = fork_params.get("ClusterDim")
-        if fp is None or not fp.active or len(fp.values) < 2:
+        if not _cluster_dim_is_coupled(fork_params):
             return fork_params, mi_groups
+        fp = fork_params["ClusterDim"]
         coupled = []
         for entry in mi_groups:
-            macro_tile = mi_macro_tile(entry)
-            grid = tile_grid(ctx.M, ctx.N, macro_tile)
-            for shape in select_cluster_dims(fp.values, grid, macro_tile):
+            shapes = set()
+            for macro_tile in _buildable_macro_tiles(fork_params, entry):
+                grid = tile_grid(ctx.M, ctx.N, macro_tile)
+                shapes.update(select_cluster_dims(fp.values, grid, macro_tile))
+            # Same order select_cluster_dims returns: by size, then by Cs.
+            for shape in sorted(shapes, key=lambda s: (s[0] * s[1], s[0])):
                 coupled.append({**entry, "ClusterDim": self._make_param("ClusterDim", [list(shape)])})
         del fork_params["ClusterDim"]
         return fork_params, coupled
@@ -349,13 +518,18 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapCoupling
-# runs just before it and _GFX1250TDMFuseOneWave before that, so each per-shape
-# copy inherits its group's SourceSwap and TDMFuse.
+# it runs last, on the final, de-duplicated MI groups. Before it, in run order:
+# _GFX1250TDMFuseOneWave; _GFX1250SegmentInterleaveLayout, which overrides
+# TDMFuse on its LDSSegmentInterleave=1 entries and so must follow it; and
+# _GFX1250SourceSwapSplit, just before the coupling, so every
+# (MI, SourceSwap) entry is ranked on the tile it builds. The two splits are
+# independent of each other. Each per-shape copy inherits its group's
+# SourceSwap, LDSSegmentInterleave and TDMFuse.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
-    _GFX1250SourceSwapCoupling,
+    _GFX1250SourceSwapSplit,
+    _GFX1250SegmentInterleaveLayout,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,

@@ -24,17 +24,33 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 DUCTILE_COST_SCALE = 0.25
 
 
-def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
-    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
+# MI group fields a post-processor expands one MI into several entries over.
+# LDSSegmentInterleave entries also carry their own TDMFuse and, for MX
+# problems, ForceDisableShadowInit (gfx1250 _GFX1250SegmentInterleaveLayout).
+# SourceSwap is deliberately not one of them: _GFX1250SourceSwapSplit gives
+# every MI one entry per SourceSwap value, so keeping it in the key gives each
+# value an equal share, as a flat SourceSwap would, however many ClusterDim
+# shapes each value's tile keeps. Every MI is split alike, so the MIs' relative
+# sampling mass does not change.
+_MI_VARIANT_FIELDS = frozenset(
+    {"ClusterDim", "LDSSegmentInterleave", "TDMFuse", "ForceDisableShadowInit"}
+)
 
-    An MI group entry repeated once per ClusterDim shape would otherwise be
-    drawn as many times more often as it has shapes. Adding ln(n) / scale to
-    each of the n variants divides each variant's probability by n, so the MI
-    as a whole keeps the probability its cost gives it.
+
+def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """Cost offsets that keep each MI's sampling mass independent of its variants.
+
+    An MI group entry repeated once per ClusterDim shape, or per
+    LDSSegmentInterleave value, would otherwise be drawn as many times more
+    often as it has variants. Adding ln(n) / scale to each of the n variants
+    divides each variant's probability by n, so the MI as a whole keeps the
+    probability its cost gives it.
     """
     keys: List[Optional[tuple]] = [
-        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
-        if "ClusterDim" in entry else None
+        tuple(
+            (name, repr(fp.values)) for name, fp in entry.items() if name not in _MI_VARIANT_FIELDS
+        )
+        if "ClusterDim" in entry or "LDSSegmentInterleave" in entry else None
         for entry in mi_groups
     ]
     counts = Counter(key for key in keys if key is not None)

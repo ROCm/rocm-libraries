@@ -565,7 +565,9 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         builds its own kernel.
 
         TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
-        post_processor.py keeps one-wave MIs at TDMFuse=0.
+        post_processor.py keeps one-wave MIs at TDMFuse=0. TDMFuse>0 also rules
+        out the paired LDS layout, so ``_GFX1250SegmentInterleaveLayout`` gives
+        LDSSegmentInterleave=1 entries TDMFuse=0.
         """
         return self._make_param("TDMFuse", [1])
 
@@ -784,11 +786,13 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
-        """Both values; _GFX1250SourceSwapCoupling pins non-square MIs to False.
+        """Both values, for every MI.
 
         SourceSwap=True on a non-square MI (32x16) swaps the effective M and N, so
-        the kernel builds a different macro tile than the ClusterDim coupling ranks
-        shapes for. Square MIs build the same tile either way and keep both values.
+        the kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2]
+        is 512x128 unswapped and 256x256 swapped, the tile of the shipped
+        MXFP4/NVFP4 MAF kernel. _GFX1250SourceSwapSplit gives each MI one group
+        entry per value, so the ClusterDim coupling ranks each on its own tile.
         """
         return self._make_param("SourceSwap", [False, True])
 
@@ -963,11 +967,24 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
-        # MI455X latest reco: pin to 1 (paired with BRotate=1).
-        # ---
-        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
-        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
-        return self._make_param("LDSSegmentInterleave", [0])
+        """[0, 1]; independent of LDSSegmentBRotate, which stays pinned to 0.
+
+        AIHPBLAS-5252 is about LDSSegmentBRotate=1 only, which Tensile rejects
+        on StreamK ("persistent / StreamK not supported"). Its own reproducer
+        built StreamK kernels with LDSSegmentInterleave=1 and
+        LDSSegmentBRotate=0, and #14802 enabled the paired LDS layouts for
+        StreamK / persistent kernels. The shipped gfx1250 MAF perf yamls use
+        LDSSegmentInterleave=1.
+
+        Those kernels use the paired LDS layout (TDMFuse=0,
+        ForceDisableShadowInit=True), which this profile's TDMFuse=1 pin would
+        otherwise rule out, so _GFX1250SegmentInterleaveLayout in
+        post_processor.py gives every 1 entry that layout and leaves MIs whose
+        MIWaveGroup cannot interleave at 0. For MX problems it sets
+        ForceDisableShadowInit=True on the 0 entries as well, without which
+        some MX kernels at DepthU 512 fail in KernelWriter.
+        """
+        return self._make_param("LDSSegmentInterleave", [0, 1])
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
