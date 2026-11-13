@@ -2280,14 +2280,14 @@ Backward rows exist only for gfx950 and gfx11-generic; the forward engines also 
 | Dqk != Dv | yes (DT-5) | yes, up to 256 | only both up to 32 | yes / ? / yes |
 | Head dim not a multiple of 8 (4 for f32) | padded pitch only (DT-8, LY-3) | padded pitch only | padded pitch, up to 32 | yes, at any pitch / no / padded pitch only |
 | GQA, any group size | yes | yes | yes | yes / yes / yes |
-| `Hk != Hv` (no bias, not f32, not ragged) | yes | yes | no | yes / ? / untested |
-| Causal, top-left or bottom-right; window | yes | yes | yes | yes / yes (not `Sq > Skv` with bottom-right or a window and no `padding_mask`) / causal and a top-left window |
+| `Hk != Hv` (no bias, not f32, not ragged) | head dims 64, 128 | head dims 1 to 128 | no | yes / ? / untested |
+| Causal, top-left or bottom-right; window (not a `left_bound` of 0, MW-9; not with bottom-right alignment under `padding_mask`, MW-13) | yes | yes | yes | yes / yes (not `Sq > Skv` with bottom-right or a window and no `padding_mask`) / causal and a top-left window |
 | ALiBi | no (MW-12) | no | no | no / yes / untested |
 | Bias of rank 1 to 4 broadcast over batch or head, with or without dBias (BI-1, BI-3) | yes | yes | yes, staged bias in Q's dtype only; no dBias at bf16 160 or on the padded 32 tile | yes / yes / a full-matrix bias, with and without dBias |
 | Bias broadcast over query rows, without dBias | yes | yes | yes, except one bias object | yes / yes / untested |
 | dBias with a bias broadcast over query rows (BI-4) | no | no | no | ? / ? / untested |
 | f32 bias beside 16-bit Q/K/V (BI-2) | head dims 64, 128 | head dims 1 to 128 | no | yes / ? / untested |
-| 16-bit bias with an unaligned row pitch | 1 to 256 and 385 to 512 | 1 to 256 | no | ? / ? / untested |
+| 16-bit bias with an unaligned row pitch | 1 to 512 | 1 to 256 | no | ? / ? / untested |
 | Bias with a causal or window mask (MW-10) | no | no | no | yes / yes (top-left) / untested |
 | Bias or dBias with `padding_mask`, or a ragged bias or dBias (PV-8, PV-10) | no | no | no | yes (padding) / yes / untested |
 | Dropout, probability in [0, 1) | yes | yes | yes | yes / yes, other random stream / yes |
@@ -2389,7 +2389,7 @@ gfx11-generic, for f16 and bf16, with and without baked dropout.
 | | gfx950 | gfx11-generic |
 |---|---|---|
 | f32 bias and `Hk != Hv` (plain and causal) | head dims 64 and 128 only | head dims 1 to 128 |
-| 16-bit bias, unaligned pitch | exact tiles at 64 and 128, otherwise the padded 256 and 512 tile rows, which do more work than an exact tile: 1 to 256 and 385 to 512; 257 to 384 declines | every row reads the bias directly: 1 to 256 |
+| 16-bit bias, unaligned pitch | exact tiles at 64 and 128, otherwise the padded 256 and 512 tile rows, which do more work than an exact tile: 1 to 512 | every row reads the bias directly: 1 to 256 |
 
 New table rows: gfx950 79 (dQ 16-bit direct 7, dQ f32 bias 16, dK/dV f32 bias 8, dK-only 16, dV-only 16, dQ V-head 16),
 gfx11-generic 72 (the same without the 16-bit direct rows), and one V-head tail-zero object per arch

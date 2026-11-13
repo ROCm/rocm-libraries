@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. It also lists where hipDNN's SDPA engines (seeded dropout) differ from cuDNN, outside the shim. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. It also lists where hipDNN's SDPA engines differ from cuDNN (dropout random stream, SDPA backward gaps and extensions), outside the shim. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -128,7 +128,7 @@ A `dropout_probability` of 0 is the graph without dropout, forward and backward:
 
 The hip-kernel-provider's FlyDSL SDPA backward engines (`hipkernel:flydsl_sdpa_bwd_merged`, `hipkernel:flydsl_sdpa_bwd_split`) are a first version:
 
-- They decline some graphs cuDNN frontend v1.24.0 serves: ALiBi, a bias with a causal or window mask, a bias or dBias with `padding_mask`, an explicit dropout mask, a ragged bias or dBias, and a device-resident attention scale. Another engine may serve them. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- They decline some graphs cuDNN frontend v1.24.0 serves: ALiBi, a bias with a top-left causal or window mask, a window with bottom-right alignment under `padding_mask`, a bias or dBias with `padding_mask`, an explicit dropout mask, a ragged bias or dBias, and a device-resident attention scale. Another engine may serve them. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
 - Their plans cannot be serialized. See [COVERAGE.md 9.3](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#93-known-issues).
 
 ## hipDNN extensions
