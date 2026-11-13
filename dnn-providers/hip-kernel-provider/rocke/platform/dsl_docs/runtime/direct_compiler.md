@@ -353,7 +353,10 @@ on the same inputs in these ways:
   Those take the clobbers `memory`, `scc`, `vcc` and `m0`; the DMA ring's
   `s_mov_b32 m0, $1` / `global_load_lds_dword[x4] $0, $2` (a VGPR offset and an
   SGPR pair) is an LDS DMA whose completion only the kernel's own `s_waitcnt`s
-  order. Any other template or clobber is `ROCKE_DIRECT_UNSUPPORTED`.
+  order. A `v_mfma_*` template written with AGPR operands (`=a` outputs, pinned
+  `{a[x:y]}`) is emitted in VGPR form; a raw `aN` register name in a template is
+  refused. Any other template or clobber (`v_mov_b32_sdwa`, for one) is
+  `ROCKE_DIRECT_UNSUPPORTED`.
 - `cf.return` under control flow whose lanes differ (an `scf.if` with a per-lane
   condition, or an `scf.for` with per-lane bounds) takes only the lanes that
   reach it out of EXEC for the rest of the kernel, through a lane mask the
@@ -367,6 +370,17 @@ on the same inputs in these ways:
   guard are the plain kind.
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
+- `tile.writelane` takes a constant lane only (a dynamic lane is refused);
+  `tile.global_load_atomic` and `tile.global_store_atomic` are lowered for
+  monotonic ordering only (acquire and seq_cst are refused);
+  `tile.dpp_xor` on gfx950 needs a mask with a register-only DPP encoding (1, 2,
+  3, 7, 8 or 15), as the LLVM lowering does, and `tile.dpp_row_mirror` takes the
+  controls `0x140` and `0x141`.
+- A spill that passes the 4 KiB scratch offset range is not an error on gfx950:
+  see Spilling above. Elsewhere it is `ROCKE_DIRECT_REGISTERS`.
+- i16 is the 16-bit view of an f16 or bf16 scalar. Of the i16 vectors, 1-lane
+  `vector.and`, splat and bitcast are lowered; extracts and inserts need lever
+  `i16vec`, and global accesses of i16 vectors are refused.
 - `agpr_alloc`: `[0, 0]` (no AGPRs) and `[lo, hi]` with `hi` up to 256 (at most `hi`). The kernel attribute `mfma_vgpr_form` (rocKE's `-amdgpu-mfma-vgpr-form`) is accepted and changes nothing: accumulators stay in VGPRs and move to AGPRs only as above.
 - An op name the parser does not know is `ROCKE_DIRECT_PARSE`, so
   `compile_kernel` raises instead of falling back. A new IR op needs at least

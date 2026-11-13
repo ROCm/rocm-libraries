@@ -138,7 +138,7 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 #   write-back), ``bufoffany`` (LLVM's buffer offset split) and ``fmax3``
 #   (a ``v_max_f32`` / ``v_min_f32`` chain becomes ``v_max3_f32`` /
 #   ``v_min3_f32``, as LLVM combines ``fmaxnum`` chains: the attention softmax
-#   row maxima; 1.2% faster on dense attention, MI355X).
+#   row maxima).
 #   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none, the plain
 #   direct object).
 DIRECT_LEVERS_ATTR = "direct_levers"
@@ -148,8 +148,7 @@ DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
 # Levers the direct backend adds for attention kernels (names starting ``rocke_attention_dense``) on top of the defaults:
 # ``cmpreassoc`` (a causal mask's per-element constants stay immediates of one base), ``rematv`` (spilling
 # recomputes hoisted address offsets), ``valcoal`` / ``packtuple`` (the row-sum tuples take no copies and pack
-# into ``v_pk_add_f32``). Dense attention b2_s2048 on MI355X, rust / best COMGR geomean over 37 kernels: 1.108 ->
-# 1.034 (the two 256x128 causal d128 kernels 2.1x -> 1.14x). ``packfar`` measured 2% slower and is not here.
+# into ``v_pk_add_f32``). ``packfar`` (pairing far-apart f32 ops) is not here: it did not pay.
 DIRECT_ATTENTION_LEVERS = ("cmpreassoc", "rematv", "valcoal", "packtuple")
 _DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
 

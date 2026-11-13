@@ -1347,9 +1347,8 @@ pub(crate) fn compile_parsed_by_on(
 /// Whether the compile with loop-invariant values recomputed (`recomputed`) is kept over `plain`: it spills less,
 /// or spills no more and runs more waves for at most 3% more instructions, or both are alike and it issues at
 /// least 3% fewer (the dead address chains and AGPR moves it saves). Instructions are counted with each block
-/// weighted by 8 to the power of its loop depth. More waves bought with many more instructions measured slower
-/// (the second level of `rir::remat` that was tried: persist bf16 d64 causal 256x32 at 4 waves and +22%; qbminor d64
-/// causal 128x64 at 3 waves instead of 2 for +6% was 12-13% slower).
+/// weighted by 8 to the power of its loop depth. More waves bought with many more instructions did not pay
+/// (a second level of `rir::remat` was tried and dropped for that reason).
 fn keeps_remat(recomputed: &CompiledKernel, plain: &CompiledKernel) -> bool {
     let (r, p) = (&recomputed.stats, &plain.stats);
     let weighted = |k: &CompiledKernel| k.func.blocks.iter().map(|b| b.insts.len() as u64 * 8u64.pow(b.loop_depth.min(4))).sum::<u64>();
