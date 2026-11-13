@@ -39,7 +39,7 @@
  *        prepare and launch, against hipDNN's CPU reference wgrad accumulated in double.
  *
  * Every config of the catalog shipped for this device's architecture that serves a case runs on
- * it, in fp32, fp16 and bf16: grouped layers of 4 channels a group (odd batch), both layouts,
+ * it, in fp32, fp16 and bf16 (a layout no config ships for on the architecture is skipped): grouped layers of 4 channels a group (odd batch), both layouts,
  * dense layers with ragged rows (widths no multiple of a lane's columns), width stride 2, 1x1
  * (2-D and 1-D), 5x5, true convolution, height stride / dilation / padding, several splits folded in order, and a
  * tensor past 2 GiB of small images (sampled).
@@ -362,9 +362,17 @@ void runCase(ConvShape shape)
     const auto* expected = static_cast<const T*>(reference.rawHostData());
     const auto* bounds = static_cast<const T*>(magnitude.rawHostData());
 
+    const auto kernels = catalog(device.gcnArchName);
+    const std::string layout = shape.channelsLast ? "nhwc" : "nchw";
+    if(std::none_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+           return kernel.getStringMetadata("layout") == layout;
+       }))
+    {
+        GTEST_SKIP() << "no " << layout << " config ships for " << device.gcnArchName;
+    }
     const auto& handler = dispatchHandler(pack());
     int ran = 0;
-    for(const auto& kernel : catalog(device.gcnArchName))
+    for(const auto& kernel : kernels)
     {
         if(!matchesKernel(pack(), fixture.context(), kernel, *bound))
         {

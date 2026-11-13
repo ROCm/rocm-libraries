@@ -66,9 +66,33 @@ TILES = {
     F5: {"pass": [(2, 4, 4, 2), (1, 4, 4, 2), (2, 2, 8, 2)], "ring": [(2, 2, 4, 2)]},
 }
 
-ARCHS = {
-    # Every shipped arch for now; narrowed per group from the sweeps.
-    "all": [],
+# The matrix-core architectures take a small pack: there the matrix-core engines serve most
+# layers, and this engine wins only narrow ones (groups of 4 to 8 channels, few-channel dense
+# and pointwise layers) by 1.1-2.7x, channels-first only (no channels-last config won on any of
+# gfx90a, gfx942, gfx950, gfx1201, gfx1101).
+TILES_MMA = {
+    F3: {
+        "pass": [(4, 4, 8, 4), (1, 4, 8, 2), (1, 4, 4, 2), (1, 4, 2, 2), (1, 8, 4, 2)],
+        "ring": [
+            (4, 4, 2, 2),
+            (2, 4, 2, 2),
+            (2, 4, 4, 2),
+            (2, 4, 8, 2),
+            (4, 2, 4, 4),
+            (4, 2, 4, 2),
+        ],
+    },
+    F3S2: {"pass": [(2, 4, 4, 2), (1, 4, 4, 2)]},
+    F1: {"pass": [(4, 4, 8, 2), (8, 8, 4, 2), (8, 8, 8, 2), (8, 16, 4, 2)]},
+    F5: {"pass": [(2, 4, 4, 2)]},
+}
+RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
+RDNA += ["gfx1200", "gfx1201"]
+# group -> (archs, tiles, layouts)
+PACKS = {
+    # No matrix core for the type (gfx906), or a vector unit fast enough to matter (gfx908).
+    "valu": (["gfx906", "gfx908"], TILES, ("nchw", "nhwc")),
+    "mma": (["gfx90a", "gfx942", "gfx950"] + RDNA, TILES_MMA, ("nchw",)),
 }
 
 kmd, umd, udd, ued = U("kmd"), U("umd"), U("udd"), U("ued")
@@ -116,11 +140,11 @@ write(
 
 DTYPES = (("FLOAT", "f32"), ("HALF", "f16"), ("BFLOAT16", "bf16"))
 total = 0
-for group, archs in ARCHS.items():
+for group, (archs, tiles_of, layouts) in PACKS.items():
     kernels = []
-    for fil, forms in TILES.items():
+    for fil, forms in tiles_of.items():
         fr, fs, sw, dw, pw = fil
-        for layout in ("nchw", "nhwc"):
+        for layout in layouts:
             for form, tiles in forms.items():
                 ring = 1 if form == "ring" else 0
                 if ring and layout != "nchw":
@@ -182,4 +206,5 @@ for group, archs in ARCHS.items():
         },
     )
     total += len(kernels)
+    print(group, len(kernels), "kernel configs")
 print(total, "kernel configs")
