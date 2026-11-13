@@ -43,7 +43,11 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/errors.hpp>
 #include <fdeep/fdeep.hpp>
+#include <nlohmann/json.hpp>
+#include "gtest_common.hpp"
+#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -51,6 +55,8 @@
 #include <vector>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_SYSTEM_DB_PATH)
 
 namespace {
 
@@ -1154,6 +1160,38 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
         oss << "\n  " << f;
     EXPECT_TRUE(failures.empty()) << "frugally-deep failed to load " << failures.size() << " of "
                                   << models.size() << " bundled model(s):" << oss.str();
+}
+
+// A metadata file whose `derived_features` key is present but not an array of strings must fail the
+// load with a named cause (MetadataND::LoadDerivedFeatures throws) rather than silently producing
+// an empty list and a later engineered-width mismatch. Redirects MIOPEN_SYSTEM_DB_PATH to a temp
+// dir holding a copy of a real metadata with that one field corrupted, so every other field still
+// loads and the ctor reaches the derived_features parse. CPU only (file load + parse; no device).
+TEST(CPU_ConvAiMetadataND_NONE, ThrowsOnMalformedDerivedFeatures)
+{
+    namespace fs   = miopen::fs;
+    const auto ref = miopen::GetSystemDbPath() / "gfx942_metadata.tn.model";
+    if(!fs::exists(ref))
+        GTEST_SKIP() << "reference metadata not installed at " << ref;
+
+    nlohmann::json meta;
+    {
+        std::ifstream in(ref.string());
+        in >> meta;
+    }
+    meta["derived_features"] = 42; // present, but not a list of strings
+
+    const auto dir = fs::temp_directory_path() / "miopen_md_malformed_derived_features";
+    fs::create_directories(dir);
+    {
+        std::ofstream out((dir / "gfx942_metadata.tn.model").string());
+        out << meta.dump();
+    }
+
+    ScopedEnvironment<std::string> scoped_db(MIOPEN_SYSTEM_DB_PATH, dir.string());
+    EXPECT_THROW(immed_mode::MetadataND("gfx942", 2), miopen::Exception);
+
+    fs::remove_all(dir);
 }
 
 } // namespace
