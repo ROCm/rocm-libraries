@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 // An algo for a hand-written kernel is refused, through the C and the ext API, when
-// the problem it is launched for fails the kernel's problem predicates. The gfx950
-// skinny TN kernel for n == 1 asserts n == 1; its algo is reused for n == 2.
+// the problem it is launched for fails the kernel's problem predicates or is a
+// pointer-array batch, which hand-written kernels cannot address. The gfx950 skinny TN
+// kernel for n == 1 asserts n == 1; its algo is reused for n == 2 and for a
+// pointer-array batch of the same problem.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -26,6 +28,9 @@ namespace
         void*             a      = nullptr;
         void*             b      = nullptr;
         void*             d      = nullptr;
+        void*             arrayA = nullptr;
+        void*             arrayB = nullptr;
+        void*             arrayD = nullptr;
         const float       alpha  = 1.0f;
         const float       beta   = 0.0f;
         // Room for the n == 2 problem.
@@ -52,7 +57,7 @@ namespace
         {
             if(handle)
                 EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
-            for(void* p : {a, b, d})
+            for(void* p : {a, b, d, arrayA, arrayB, arrayD})
                 if(p)
                     EXPECT_EQ(hipFree(p), hipSuccess);
         }
@@ -65,12 +70,33 @@ namespace
 
         bool dUntouched()
         {
-            std::vector<uint8_t> host(dBytes);
-            EXPECT_EQ(hipMemcpy(host.data(), d, dBytes, hipMemcpyDeviceToHost), hipSuccess);
-            for(uint8_t byte : host)
+            for(uint8_t byte : download(d, dBytes))
                 if(byte != 0x7f)
                     return false;
             return true;
+        }
+
+        std::vector<uint8_t> download(const void* p, size_t bytes)
+        {
+            std::vector<uint8_t> host(bytes);
+            EXPECT_EQ(hipMemcpy(host.data(), p, bytes, hipMemcpyDeviceToHost), hipSuccess);
+            return host;
+        }
+
+        // A one-batch pointer array, as large as the tensor it points to so a kernel
+        // that read it as that tensor would stay inside it.
+        void makePointerArray(void*& array, void* tensor, size_t bytes)
+        {
+            ASSERT_EQ(hipMalloc(&array, bytes), hipSuccess);
+            ASSERT_EQ(hipMemset(array, 0x7f, bytes), hipSuccess);
+            ASSERT_EQ(hipMemcpy(array, &tensor, sizeof(tensor), hipMemcpyHostToDevice), hipSuccess);
+        }
+
+        void makePointerArrays()
+        {
+            makePointerArray(arrayA, a, m * k * sizeof(uint16_t));
+            makePointerArray(arrayB, b, k * 2 * sizeof(uint16_t));
+            makePointerArray(arrayD, d, dBytes);
         }
 
         struct CProblem
@@ -95,6 +121,15 @@ namespace
                 EXPECT_EQ(hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, m, n, m), HIPBLAS_STATUS_SUCCESS);
             }
 
+            void setPointerArray()
+            {
+                const hipblasLtBatchMode_t mode = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+                for(auto* layout : {la, lb, ld})
+                    EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                                  layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode)),
+                              HIPBLAS_STATUS_SUCCESS);
+            }
+
             ~CProblem()
             {
                 for(auto* layout : {la, lb, ld})
@@ -105,8 +140,17 @@ namespace
 
         hipblasStatus_t matmul(const CProblem& p, const hipblasLtMatmulAlgo_t& algo)
         {
+            return matmul(p, algo, a, b, d);
+        }
+
+        hipblasStatus_t matmul(const CProblem&              p,
+                               const hipblasLtMatmulAlgo_t& algo,
+                               const void*                  A,
+                               const void*                  B,
+                               void*                        D)
+        {
             return hipblasLtMatmul(
-                handle, p.desc, &alpha, a, p.la, b, p.lb, &beta, d, p.ld, d, p.ld, &algo, nullptr, 0, nullptr);
+                handle, p.desc, &alpha, A, p.la, B, p.lb, &beta, D, p.ld, D, p.ld, &algo, nullptr, 0, nullptr);
         }
 
         void setExtProblem(hipblaslt_ext::Gemm& gemm, int64_t n)
@@ -176,6 +220,41 @@ namespace
         EXPECT_EQ(gemm.initialize(algo, nullptr), HIPBLAS_STATUS_SUCCESS);
 
         setExtProblem(gemm, 2);
+        EXPECT_EQ(gemm.initialize(algo, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(HandwrittenAlgoReuse_smoke, CApiRefusesAlgoForPointerArrayBatch)
+    {
+        const hipblasLtMatmulAlgo_t algo = skinnyAlgo();
+        if(HasFailure())
+            return;
+        makePointerArrays();
+        if(HasFailure())
+            return;
+
+        CProblem p(1);
+        p.setPointerArray();
+        poisonD();
+        const std::vector<uint8_t> arrayDBefore = download(arrayD, dBytes);
+        EXPECT_EQ(matmul(p, algo, arrayA, arrayB, arrayD), HIPBLAS_STATUS_INVALID_VALUE);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_TRUE(dUntouched()) << "the refused algo launched";
+        EXPECT_EQ(download(arrayD, dBytes), arrayDBefore) << "the refused algo launched";
+    }
+
+    TEST_F(HandwrittenAlgoReuse_smoke, ExtApiRefusesAlgoForPointerArrayBatch)
+    {
+        const hipblasLtMatmulAlgo_t algo = skinnyAlgo();
+        if(HasFailure())
+            return;
+        makePointerArrays();
+        if(HasFailure())
+            return;
+
+        CProblem p(1);
+        p.setPointerArray();
+        hipblaslt_ext::Gemm gemm(
+            handle, p.desc, &alpha, arrayA, p.la, arrayB, p.lb, &beta, arrayD, p.ld, arrayD, p.ld);
         EXPECT_EQ(gemm.initialize(algo, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
     }
 }

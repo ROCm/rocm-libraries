@@ -3739,6 +3739,9 @@ struct TensileDataGroupedGemm
     rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 };
 
+inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm const& problem,
+                                          TensileLite::ContractionSolution const&    solution);
+
 namespace
 {
     void updateTensileData(const RocblasltContractionProblem& prob, TensileDataGemm& data)
@@ -3803,14 +3806,20 @@ namespace
     }
 
     // A hand-written kernel may rely on its problem predicates to stay inside the
-    // tensors (fixed sizes or strides, no bounds checks), so an algo for one is
-    // refused once the problem it runs no longer satisfies them. Generated kernels
-    // and the grouped path keep their existing launch checks.
+    // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
+    // addresses, so an algo for one is refused once the problem it runs no longer
+    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
+    // path keep their existing launch checks.
     rocblaslt_status checkHandwrittenKernelPredicates(
         const char*                                caller,
         const TensileLite::ContractionProblemGemm& problem,
         const TensileLite::ContractionSolution&    solution)
     {
+        if(isCustomKernelForPointerArray(problem, solution))
+        {
+            log_error(caller, "custom kernels do not support batch_mode=POINTER_ARRAY");
+            return rocblaslt_status_invalid_value;
+        }
         if(solution.customKernel.name.empty() || solution.customKernel.generated
            || (*solution.problemPredicate)(problem))
             return rocblaslt_status_success;
