@@ -104,7 +104,8 @@ float fmha_fwd_ck(mha_fwd_args a, const stream_config& s)
 
 # AITER's Python entry points each define their own can_impl_fmha_v3_fwd(), which
 # calls a nested is_fmha_v3_fp8() of the same caller and the module-level extent
-# helper. _fmha_bwd_extent_ge_u32() is defined but not called by either gate.
+# helper, and reads the caller's local swa, computed from a parameter with a
+# default. _fmha_bwd_extent_ge_u32() is defined but not called by either gate.
 MHA_PY = """\
 def _fmha_kv_byte_extent_ge_u32(max_seqlen_k, k, v):
     return max_seqlen_k * k.stride(-3) >= (1 << 32)
@@ -114,7 +115,9 @@ def _fmha_bwd_extent_ge_u32(max_seqlen_k, k):
     return max_seqlen_k * k.stride(-2) >= (1 << 32)
 
 
-def _flash_attn_forward(q, k, v, hdim_q):
+def _flash_attn_forward(q, k, v, hdim_q, window=-1):
+    swa = window > 0
+
     def is_fmha_v3_fp8():
         return q.dtype == "fp8" and hdim_q == 128
 
@@ -122,6 +125,7 @@ def _flash_attn_forward(q, k, v, hdim_q):
         ret = hdim_q == 128
         ret = ret or is_fmha_v3_fp8()
         ret = ret and not _fmha_kv_byte_extent_ge_u32(4096, k, v)
+        ret = ret and not swa
         return ret
 
     if can_impl_fmha_v3_fwd():
@@ -586,15 +590,24 @@ def test_python_gate_change_in_either_copy_is_reported(
             ["_flash_attn_forward", "_flash_attn_varlen_forward"],
         ),
         (("k.stride(-2) >= (1 << 32)", "k.stride(-2) >= (1 << 31)"), []),
+        (("swa = window > 0", "swa = window >= 0"), ["_flash_attn_forward"]),
+        (("hdim_q, window=-1)", "hdim_q, window=0)"), ["_flash_attn_forward"]),
     ],
-    ids=["nested-helper", "module-helper", "uncalled-function"],
+    ids=[
+        "nested-helper",
+        "module-helper",
+        "uncalled-function",
+        "caller-local",
+        "caller-default",
+    ],
 )
 def test_python_gate_reports_a_change_confined_to_a_helper_it_calls(
     sync, env, helper_change, callers
 ):
-    """A gate's verdict depends on the helpers it calls. A change to one is reported
-    under every gate that calls it, apply keeps the host-code commit, and a change
-    to a function no gate calls is not reported."""
+    """A gate's verdict depends on the helpers it calls and the caller's locals and
+    parameters it reads. A change to one is reported under every gate that reads
+    it, apply keeps the host-code commit, and a change to a function no gate calls
+    is not reported."""
     aiter, tree, kernels, cache, report = env
     base = base_upstream(aiter)
     vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
@@ -613,20 +626,64 @@ def test_python_gate_reports_a_change_confined_to_a_helper_it_calls(
     assert pin(kernels)["abi_commit"] == (base if callers else target)
 
 
-def test_host_code_change_names_the_archs_the_plan_leaves_alone(sync, env):
+def test_python_region_resolves_names_as_python_does(sync):
+    """Helpers are followed transitively, an inner definition shadows an outer one
+    of the same name, and a class body is not an enclosing scope."""
+    source = """\
+def helper():
+    return "outer helper"
+
+
+def chained():
+    return "module chained"
+
+
+class Box:
+    def chained(self):
+        return "class chained"
+
+    def caller(self):
+        def helper():
+            return chained()
+
+        def gate():
+            return helper()
+
+        return gate()
+"""
+    region = sync.extract_region(
+        source, sync.Ref("x.py", "pyfunction", "Box.caller.gate", 3, "gate")
+    )
+    assert "def gate():" in region
+    assert "return chained()" in region  # the inner helper, not the module one
+    assert '"outer helper"' not in region
+    assert '"module chained"' in region  # followed through the inner helper
+    assert '"class chained"' not in region
+
+
+@pytest.mark.parametrize(
+    "path, change",
+    [
+        ("csrc/include/mha_fwd.h", (MHA_FWD_H, "p2 _p0;", "p2 _p0;\n    int nsplit;")),
+        ("csrc/cpp_itfs/mha_fwd.cu", (MHA_FWD_CU, "get_grid_dim(", "compute_grid(")),
+    ],
+    ids=["reference-changed", "reference-missing"],
+)
+def test_host_code_change_names_the_archs_the_plan_leaves_alone(
+    sync, env, path, change
+):
     """The engine launches every arch's objects with one copy of the mirrored host
-    code, so a reference change planned for one arch reaches the others."""
+    code, so a reference change planned for one arch reaches the others, unless
+    they already mirror the target."""
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
     aiter.module("gfx950", [ROW_HD128])
     base = aiter.commit("v0.1.1")
     vendor(kernels, "gfx942", [ROW_HD128], roots=("MI300", "MI308"))
     vendor(kernels, "gfx950", [ROW_HD128])
-    aiter.write(
-        "csrc/include/mha_fwd.h",
-        MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
-    )
-    aiter.commit("v0.2.0")
+    text, old, new = change
+    aiter.write(path, text.replace(old, new))
+    target = aiter.commit("v0.2.0")
 
     plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx950")
     shared = of_kind(
@@ -636,14 +693,57 @@ def test_host_code_change_names_the_archs_the_plan_leaves_alone(sync, env):
 
     plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx942,gfx950")
     for key in ("gfx942/fmha_v3_fwd", "gfx950/fmha_v3_fwd"):
-        assert "reference_changed" in kinds(report, key)
         assert "host_code_shared_with_unplanned_archs" not in kinds(report, key)
+
+    # gfx942 already mirrors the target's host code: nothing reaches it.
+    plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx942")
+    apply(sync, env)
+    pins_path = kernels / "aiter_fwd_pins.json"
+    pins = json.loads(pins_path.read_text())
+    pins["modules"][KEY]["abi_commit"] = target
+    pins_path.write_text(json.dumps(pins))
+    plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx950")
+    assert "host_code_shared_with_unplanned_archs" not in kinds(
+        report, "gfx950/fmha_v3_fwd"
+    )
+
+
+def test_new_arch_diffs_the_host_code_the_vendored_archs_share(sync, env, capsys):
+    """An arch added at a newer release has no host-code commit of its own; it takes
+    the one the vendored archs share, and the host code is recorded as ported only
+    once every arch holds objects from the same commit."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    plan(sync, env, "v0.1.0")
+    apply(sync, env)
+    run(sync, env, "mark-ported", "--module", KEY)
+    aiter.module("gfx950", [ROW_HD128])
+    aiter.write(
+        "csrc/include/mha_fwd.h",
+        MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
+    )
+    target = aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", arch="gfx950")
+    new = "gfx950/fmha_v3_fwd"
+    assert "+    int nsplit;" in of_kind(report, "reference_changed", new)[0]["diff"]
+    shared = of_kind(report, "host_code_shared_with_unplanned_archs", new)
+    assert len(shared) == 1 and "gfx942" in shared[0]["detail"]
+    apply(sync, env)
+    capsys.readouterr()
+    assert run(sync, env, "mark-ported", "--module", new) == 2
+    assert "gfx942/fmha_v3_fwd" in capsys.readouterr().err
+
+    plan(sync, env, "v0.2.0", arch="gfx942,gfx950")
+    apply(sync, env)
+    assert run(sync, env, "mark-ported", "--module", new) == 0
+    assert pin(kernels)["abi_commit"] == pin(kernels, new)["abi_commit"] == target
 
 
 def test_renamed_reference_keeps_the_host_code_baseline(sync, env, monkeypatch):
     """A mirrored function renamed upstream is missing under its old name. apply
     must keep the old host-code commit, so that once REFERENCES names the new
-    function the next plan still shows what changed in it."""
+    function the next plan still reports it, with the new body in the diff."""
     aiter, tree, kernels, cache, report = env
     base = base_upstream(aiter)
     vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))

@@ -294,7 +294,10 @@ def test_validate_skill_ignores_claude_fields_outside_frontmatter(
     assert any("allowed-tools" in error for error in errors)
 
 
-@pytest.mark.parametrize("skill", ["hipdnn-deep-review", "hipdnn-ingestor-impact"])
+@pytest.mark.parametrize(
+    "skill",
+    ["hipdnn-deep-review", "hipdnn-ingestor-impact", "hipdnn-aiter-asm-sdpa-fwd-sync"],
+)
 def test_expected_scripts_cover_every_script_of_a_fully_listed_skill(
     validate_mod, skill
 ):

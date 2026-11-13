@@ -7,8 +7,8 @@
 // Commit:  the `abi_commit` of each <arch>/fmha_v3_fwd module in
 //          asm_kernels/aiter_fwd_pins.json (the forward host code the engine mirrors)
 // Sources:
-//   - aiter/csrc/include/mha_fwd.h        (lines 274-358: fmha_fwd_v3_args)
-//   - aiter/csrc/include/aiter_hip_common.h (lines 144-154: p3, p2 padding structs)
+//   - aiter/csrc/include/mha_fwd.h        (struct fmha_fwd_v3_args)
+//   - aiter/csrc/include/aiter_hip_common.h (padding structs p3, p2)
 //
 // Adaptations:
 //   - Replaced AITER padding types p2/p3 with SgprPad2/SgprPad3 (see SgprPadding.hpp)

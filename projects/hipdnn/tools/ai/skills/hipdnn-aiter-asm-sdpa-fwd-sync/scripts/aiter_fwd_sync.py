@@ -92,6 +92,10 @@ BLOCKING_KINDS = frozenset(
     }
 )
 
+# Findings that mean the mirrored host code must change: apply then keeps the
+# module's host-code commit, and plan names the other archs that share that code.
+HOST_CODE_KINDS = frozenset({"reference_changed", "reference_missing"})
+
 
 @dataclass(frozen=True)
 class Ref:
@@ -605,11 +609,64 @@ def _python_def(node: ast.AST, name: str) -> ast.AST | None:
     return None
 
 
+_PY_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _own_nodes(node: ast.AST):
+    """node and the nodes below it in its own scope: the functions, classes and
+    lambdas it defines are yielded, but their bodies are other scopes."""
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (*_PY_DEFS, ast.Lambda)):
+            yield child
+        else:
+            yield from _own_nodes(child)
+
+
+def _parameters(function: ast.AST) -> set[str]:
+    return {a.arg for a in ast.walk(function.args) if isinstance(a, ast.arg)}
+
+
+def _bound_names(statement: ast.AST) -> set[str]:
+    """The names a statement binds in the scope that holds it."""
+    if isinstance(statement, _PY_DEFS):
+        return {statement.name}
+    names: set[str] = set()
+    for node in _own_nodes(statement):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, _PY_DEFS):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update((a.asname or a.name).split(".")[0] for a in node.names)
+    return names
+
+
+def _read_names(node: ast.AST) -> set[str]:
+    return {
+        n.id
+        for n in ast.walk(node)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+    }
+
+
+def _bound_names_in(function: ast.AST) -> set[str]:
+    """The names a function binds in its own body."""
+    names: set[str] = set()
+    for statement in function.body:
+        names |= _bound_names(statement)
+    return names
+
+
 def _python_function(text: str, dotted: str) -> str | None:
     """The source of a Python function by its dotted name, decorators included,
-    followed by the source of every function it calls that the file defines in a
-    scope enclosing it, transitively and in file order. A dispatch gate's verdict
-    depends on the helpers it calls, so a change confined to one must show too."""
+    followed by the code the file defines that its result depends on, in file order:
+    each name it reads from an enclosing scope resolves, as Python resolves it, to
+    the functions and statements that bind the name there, or to a parameter, which
+    brings in that function's signature; the same applies to what they read in turn.
+    A dispatch gate nested in its caller reads the caller's locals (swa, hdim_q) and
+    calls helpers (is_fmha_v3_fp8), so a change confined to one of them shows too.
+    Imported names are not followed."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
@@ -622,40 +679,61 @@ def _python_function(text: str, dotted: str) -> str | None:
         if node is None:
             return None
 
-    # Python resolves a free name in the enclosing functions and then the module;
-    # class bodies are not enclosing scopes.
-    def resolve(name: str, enclosing: list[ast.AST]) -> tuple[ast.AST, list] | None:
-        for depth in range(len(enclosing) - 1, -1, -1):
-            scope = enclosing[depth]
-            if isinstance(scope, ast.ClassDef):
-                continue
-            found = _python_def(scope, name)
-            if isinstance(found, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return found, enclosing[: depth + 1]
-        return None
-
-    included = {id(node): node}
-    pending = [(node, scopes)]
-    while pending:
-        function, enclosing = pending.pop()
-        for call in ast.walk(function):
-            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
-                continue
-            found = resolve(call.func.id, enclosing)
-            if found is not None and id(found[0]) not in included:
-                included[id(found[0])] = found[0]
-                pending.append(found)
-
     lines = text.split("\n")
+    # Each part of the region by its first line: the function, then every binding
+    # statement, helper and enclosing signature it depends on.
+    parts: dict[int, str] = {}
+    seen: set[object] = {id(node)}
 
-    def source(function: ast.AST) -> str:
-        first = min([function.lineno] + [d.lineno for d in function.decorator_list])
-        return "\n".join(lines[first - 1 : function.end_lineno])
+    def add(unit: ast.AST, signature: bool = False) -> int:
+        decorators = getattr(unit, "decorator_list", [])
+        first = min([unit.lineno] + [d.lineno for d in decorators])
+        last = unit.body[0].lineno - 1 if signature else unit.end_lineno
+        parts[first] = "\n".join(lines[first - 1 : last])
+        return first
 
-    helpers = sorted(
-        (f for f in included.values() if f is not node), key=lambda f: f.lineno
-    )
-    return "\n\n".join(source(f) for f in [node, *helpers]) + "\n"
+    start = add(node)
+    # (reader, the scopes enclosing it, the names it binds itself)
+    pending: list[tuple[ast.AST, list[ast.AST], set[str]]] = [
+        (node, scopes, _parameters(node) | _bound_names_in(node))
+    ]
+    while pending:
+        reader, enclosing, own = pending.pop()
+        for name in sorted(_read_names(reader) - own):
+            # Python resolves a free name in the enclosing functions and then the
+            # module; class bodies are not enclosing scopes.
+            for depth in range(len(enclosing) - 1, -1, -1):
+                scope = enclosing[depth]
+                if isinstance(scope, ast.ClassDef):
+                    continue
+                binders = [
+                    s for s in scope.body if s is not reader and name in _bound_names(s)
+                ]
+                is_parameter = isinstance(scope, _PY_FUNCTIONS) and (
+                    name in _parameters(scope)
+                )
+                if not binders and not is_parameter:
+                    continue
+                if is_parameter and ("signature", id(scope)) not in seen:
+                    seen.add(("signature", id(scope)))
+                    add(scope, signature=True)
+                for binder in binders:
+                    if id(binder) in seen or isinstance(
+                        binder, (ast.Import, ast.ImportFrom)
+                    ):
+                        continue
+                    seen.add(id(binder))
+                    add(binder)
+                    inner = enclosing[: depth + 1]
+                    if isinstance(binder, _PY_FUNCTIONS):
+                        own_names = _parameters(binder) | _bound_names_in(binder)
+                        pending.append((binder, inner, own_names))
+                    else:
+                        pending.append((binder, inner, set()))
+                break
+
+    rest = [parts[line] for line in sorted(parts) if line != start]
+    return "\n\n".join([parts[start], *rest]) + "\n"
 
 
 def extract_region(text: str, ref: Ref) -> str | None:
@@ -854,8 +932,14 @@ def plan_module(
         findings.add(
             3,
             "new_module",
-            f"{key} is not vendored yet; read its reference sources in full, since "
-            "there is no baseline to diff them against",
+            (
+                f"{key} is not vendored yet; read its reference sources in full, since "
+                "there is no baseline to diff them against"
+                if abi_baseline is None
+                else f"{key} is not vendored yet; its host code is the engine's one copy, "
+                "so the reference diffs below run from the host-code commit of the archs "
+                "already vendored"
+            ),
         )
     elif local.object_roots() != up.object_roots():
         findings.add(
@@ -1034,8 +1118,9 @@ def plan_module(
         findings.add(
             3,
             "baseline_unknown",
-            "no host-code baseline (no pinned abi_commit and no --baseline): upstream ABI "
-            "and dispatch changes cannot be diffed; review the reference sources by hand",
+            "no host-code baseline (no arch of the module records an abi_commit, and "
+            "no --baseline): upstream ABI and dispatch changes cannot be diffed; "
+            "review the reference sources by hand",
         )
     elif abi_baseline is not None and baseline is not None:
         if abi_baseline["commit"] != baseline["commit"]:
@@ -1161,6 +1246,23 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         elif explicit_baseline and (kernels / arch / module).is_dir():
             baseline_commit[key], baseline_source[key] = explicit_baseline, "--baseline"
             abi_commit[key] = explicit_baseline
+        if key not in abi_commit:
+            # The engine launches every arch of a module with one copy of the host
+            # code, so a module without its own host-code commit takes the one
+            # already vendored archs record; the oldest, if they differ, so that no
+            # change since any of them is missed.
+            shared = {
+                entry["abi_commit"]
+                for other, entry in pins["modules"].items()
+                if split_key(other)[1] == module and entry.get("abi_commit")
+            }
+            if shared:
+                abi_commit[key] = min(
+                    shared,
+                    key=lambda c: int(
+                        run_git(upstream.repo, "log", "-1", "--format=%ct", c)
+                    ),
+                )
     baseline_files: dict[str, dict[str, bytes]] = {}
     for base in sorted(set(baseline_commit.values()) | set(abi_commit.values())):
         baseline_files[base] = upstream.materialize(base, module_dirs, refs)
@@ -1251,10 +1353,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         # struct, packing, grid, dispatch) and launches every arch's objects with
         # it, so porting a reference change re-targets archs this plan leaves
         # alone. Their objects stay built for the host code they are pinned to.
-        if any(
-            f["kind"] in ("reference_changed", "reference_missing")
-            for f in findings.items
-        ):
+        if any(f["kind"] in HOST_CODE_KINDS for f in findings.items):
             unplanned = sorted(
                 arch_dir.parent.name
                 for arch_dir in kernels.glob(f"gfx*/{module}")
@@ -1270,8 +1369,9 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
                     "host_code_shared_with_unplanned_archs",
                     f"{', '.join(unplanned)} also vendor {module}, and the engine "
                     "launches them with the same host code; porting these reference "
-                    "changes changes their launch too: add them to --arch, or do not "
-                    "port the changes",
+                    "changes changes their launch too: add them to --arch so every "
+                    f"arch moves to the new host code together, or leave {key} out "
+                    "of this update",
                 )
         plan["tier"] = findings.tier
         plan["findings"] = findings.items
@@ -1426,12 +1526,10 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
                 directory.rmdir()
         # The host-code commit advances with the objects only when nothing in the
         # mirrored upstream code changed or went missing; otherwise it stays until
-        # mark-ported. A region renamed upstream is missing under its old name, and
-        # keeping the old commit lets the next plan diff it under its new name.
-        abi_changed = any(
-            f["kind"] in ("reference_changed", "reference_missing")
-            for f in plan["findings"]
-        )
+        # mark-ported. A region renamed upstream is missing under its old name;
+        # keeping the old commit keeps the moved code in later reports once
+        # REFERENCES names it, as a whole added function to compare by hand.
+        abi_changed = any(f["kind"] in HOST_CODE_KINDS for f in plan["findings"])
         abi = plan["abi_baseline"]
         entry = {
             "tag": report["tag"],
@@ -1462,19 +1560,42 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
 
 
 def cmd_mark_ported(args: argparse.Namespace, root: Path) -> int:
-    """Record that the engine now mirrors the host code of the pinned commit."""
+    """Record that the engine now mirrors the host code of the pinned commit. The
+    engine launches every arch of a module with one copy of that code, so the record
+    covers every arch that vendors the module, and their objects must all come from
+    the same commit."""
     kernels = root / KERNELS_DIR
     pins = load_pins(kernels)
     for key in args.module:
         entry = pins["modules"].get(key)
         if entry is None:
             raise SyncError(f"{key} is not pinned; run plan and apply first")
-        arch, module = split_key(key)
-        entry["abi_commit"] = entry["commit"]
-        (safe_module_dir(kernels, key) / SOURCE_MD).write_text(
-            render_source_md(arch, module, entry), encoding="utf-8"
+        _, module = split_key(key)
+        sharing = sorted(
+            module_key(arch_dir.parent.name, module)
+            for arch_dir in kernels.glob(f"gfx*/{module}")
         )
-        print(f"{key}: host-code mirror recorded at {entry['commit'][:12]}")
+        unpinned = [k for k in sharing if k not in pins["modules"]]
+        if unpinned:
+            raise SyncError(
+                f"{', '.join(unpinned)} share {key}'s host code but are not pinned; "
+                "run plan and apply for them first"
+            )
+        stale = [k for k in sharing if pins["modules"][k]["commit"] != entry["commit"]]
+        if stale:
+            raise SyncError(
+                f"{', '.join(stale)} share {key}'s host code but hold objects from "
+                f"another commit; update them to {entry['commit'][:12]} (plan --arch "
+                "with every arch, then apply) before marking the host code ported"
+            )
+        for shared_key in sharing:
+            shared = pins["modules"][shared_key]
+            shared["abi_commit"] = shared["commit"]
+            (safe_module_dir(kernels, shared_key) / SOURCE_MD).write_text(
+                render_source_md(split_key(shared_key)[0], module, shared),
+                encoding="utf-8",
+            )
+            print(f"{shared_key}: host-code mirror recorded at {shared['commit'][:12]}")
     write_pins(kernels, pins)
     return 0
 
