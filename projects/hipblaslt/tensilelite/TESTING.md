@@ -557,11 +557,19 @@ since the TheRock pin of 2026-10-02 both gfx942 and gfx950 run it per PR. gfx90a
 only in TheRock's own postsubmit and nightly runs. Measured in `preliminary`, the suite takes about
 an hour on gfx942 and about two on gfx950, and TheRock runs it unsharded.
 
-gfx1250 still gets no `Tests/common` coverage in TheRock. TheRock's own family matrix now names a
+gfx1250 gets no hardware `Tests/common` coverage in TheRock. TheRock's own family matrix now names a
 gfx1250 runner, but the CI configuration overlay this repository uses leaves it empty, and both the
 `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. So its whole Test stage is
 skipped, and the emulation categories (`ffm-quick`, `emu-fast`, `emu-full`) are not selected by any
-TheRock job.
+hardware job.
+
+The advisory [`rocjitsu TensileLite` sidecar](../../../.github/workflows/therock-rocjitsu-tensilelite-linux.yml)
+runs `Tests/common/test_config.py -m gfx1250` on a CPU runner for hipBLASLt changes or the
+`test:hipblaslt` label. It uses up to 16 pytest-xdist workers and a 45-minute per-test timeout,
+matching the FFM lane. It builds rocjitsu from `rocm-systems` develop and records the exact
+revision in its reports. The gfx1250 generator explicitly selects the stinkytofu backend and
+loads its native binding before starting the suite. This sidecar does not gate a merge;
+its uploaded reports provide numerical outcomes and timings for the emulation comparison.
 
 Other Math CI jobs post checks without gating. The one worth knowing is
 `tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
