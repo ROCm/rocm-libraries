@@ -828,12 +828,16 @@ def test_default_grouping_still_needs_agreement_within_each_set():
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_unsuffixed_nontemporal_reaches_every_fused_set(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
-    """NonTemporal=2 sets A and B but not MXSA/MXSB; the data tensor decides, so scope survives."""
-    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, NonTemporal=2)
+    """NonTemporal=2 sets A and B only; a scale rides A or B, so it needs the same scope key."""
+    alone, aloneOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, NonTemporal=2)
+    assert alone.get("Valid") is False
+    assert _IGNORED_RULE in aloneOut and "NonTemporalMXSA=0 emits 2" in aloneOut, aloneOut
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, NonTemporal=2,
+                       NonTemporalMXSA=2, NonTemporalMXSB=2)
     assert sol.get("Valid") is True, out
     state = sol._state
     assert (state["NonTemporalA"], state["NonTemporalB"]) == (2, 2)
-    assert (state["NonTemporalMXSA"], state["NonTemporalMXSB"]) == (0, 0)
+    assert (state["NonTemporalMXSA"], state["NonTemporalMXSB"]) == (2, 2)
     caps = {"HasTHModifier": bool(state["_HasTemporalHint"])}
     assert caps["HasTHModifier"]
     assert _issued(state, "A", caps) == (DEV, NO_TH, NO_NV)
@@ -1299,28 +1303,30 @@ def test_solution_accepts_both_scales_on_two_waves(_gp_gfx1250, gfx1250_iim, ass
     assert TF.tdmStashedMembers(sol._state) == ("MXSB",)
 
 
-def _tdmConfig(fuse, numWaves, mxA, mxB, halfPLR=0):
-    """_oneSidedConfig's problem and fork with any MX state."""
+def _tdmConfig(fuse, numWaves, mxA, mxB, halfPLR=0, hints=()):
+    """_oneSidedConfig's problem and fork with any MX state, plus (key, value) cache-hint keys."""
     config = _oneSidedConfig(fuse, "MXSA", numWaves)
     problemType = config["BenchmarkProblems"][0][0]
     problemType["MXBlockA"], problemType["MXBlockB"] = mxA, mxB
     if halfPLR:
         config["BenchmarkProblems"][0][1]["ForkParameters"].append({"HalfPLR": [halfPLR]})
+    config["BenchmarkProblems"][0][1]["ForkParameters"].extend({key: [value]} for key, value in hints)
     return config
 
 
 @pytest.fixture(scope="module")
 def tdmKernel(gfx1250_iim, tmp_path_factory):
-    """Derive and emit one kernel per (TDMFuse, NumWaves, MXBlockA, MXBlockB), on first use."""
+    """Derive and emit one kernel per (TDMFuse, NumWaves, MXBlockA, MXBlockB, HalfPLR, hint keys),
+    on first use."""
     from config_harness import derive_states, emit_kernels_from_config
 
     root = tmp_path_factory.mktemp("tdm_fuse_cells")
     kernels = {}
 
-    def emit(fuse, numWaves, mxA, mxB, halfPLR=0):
-        cell = (fuse, numWaves, mxA, mxB, halfPLR)
+    def emit(fuse, numWaves, mxA, mxB, halfPLR=0, hints=()):
+        cell = (fuse, numWaves, mxA, mxB, halfPLR, tuple(hints))
         if cell not in kernels:
-            path = root / ("tdmfuse%d_w%d_a%d_b%d_hplr%d.yaml" % cell)
+            path = root / ("tdmfuse%d_w%d_a%d_b%d_hplr%d_%d.yaml" % (cell[:5] + (len(kernels),)))
             path.write_text(yaml.safe_dump(_tdmConfig(*cell)))
             states = derive_states(path, arch="gfx1250", limit_solutions=1)
             assert len(states) == 1, "%s derives no solution" % (cell,)
@@ -1500,6 +1506,35 @@ def test_two_waves_issue_mxsb_through_mxsas_set_after_it(tdmKernel, fuse, owner,
     assert firstOwner < min(switched), "MXSA (the shared set's load) must issue before MXSB's"
     assert not [ops for _, ops in k.instructions
                 if ops and ops[0] == "s[sgprtdmABIncs]" and any("GlobalReadIncsMXSB" in op for op in ops)]
+
+
+# NonTemporal 2, TemporalHint 1 and NonVolatile 1 load as scope:SCOPE_DEV, th:TH_LOAD_NT and nv.
+_STASH_HINTS = {"NonTemporal": 2, "TemporalHint": 1, "NonVolatile": 1}
+_STASH_FIELDS = ("nv", "scope:SCOPE_DEV", "th:TH_LOAD_NT")
+_LOAD_FIELD = re.compile(r"\b(?:th|scope):\w+|\bnv\b")
+
+
+def _loadFields(k, at):
+    """The th/scope/nv fields of the tensor_load_to_lds at instructions[at], sorted."""
+    return tuple(sorted(_LOAD_FIELD.findall(" ".join(k.instructions[at][1]).rpartition("]")[2])))
+
+
+@pytest.mark.parametrize("fuse, owner, other", [(2, "A", "B"), (3, "B", "A")])
+def test_two_waves_mxsb_stash_load_carries_its_sets_hints(tdmKernel, fuse, owner, other):
+    """MXSB's own load through its stash carries the th/scope/nv of the set it rides, as the set's
+    load does (tdmLoadModifiers); its NULL load and the other tensor's load carry none. Without
+    hints no load carries any."""
+    hints = tuple((key + tc, value) for tc in (owner, "MXSA", "MXSB") for key, value in _STASH_HINTS.items())
+    for cell, fields in (((), ()), (hints, _STASH_FIELDS)):
+        k = _AsmKernel(tdmKernel(fuse, 2, 32, 32, hints=cell)[1])
+        nulls = {at for name, at in k.labels.items() if name.startswith("label_TDMStashedMXSBNull")}
+        seen = {}
+        for at, group0, _ in _tdmLoads(k, 0, len(k.instructions)):
+            tc = re.match(r"s\[sgprtdm(\w+?)Group0:", group0).group(1)
+            seen.setdefault(tc + (" NULL" if at in nulls else ""), set()).add(_loadFields(k, at))
+        assert seen == {owner: {fields}, "MXSB": {fields}, "MXSB NULL": {()}, other: {()}}, (cell, seen)
+
+
 @pytest.mark.parametrize("fuse, owner", [(2, "A"), (3, "B")])
 def test_two_waves_advance_mxsas_set_and_mxsbs_stash(tdmKernel, fuse, owner):
     """Each main-loop iteration advances MXSA's global address in the set and MXSB's in its stash."""
@@ -2785,3 +2820,211 @@ def test_one_wave_rejects_rows_one_to_three_with_one_mx_scale(
     assert sol.get("Valid") is False
     assert _ONE_SIDED_MX not in out, out
     assert "TDMFuse=%d needs more than one wave (NumWaves=1)" % fuse in out, out
+
+
+# ---------------------------------------------------------------------------
+# Cache hints that no tensor_load_to_lds carries are rejected
+# ---------------------------------------------------------------------------
+from tensilelite.Components.NonTemporal import tdmCacheModifiers, tdmIgnoredHints
+
+_IGNORED_RULE = "TDM cache hints that no tensor_load_to_lds carries"
+_NT_RULE = "NonTemporal 4-7 set the nt bit (0x4)"
+_AGNTAB_RULE = "AdaptiveGemmNTAB is not implemented where A and B share one tensor_load_to_lds"
+_HINT_KEY_NAMES = ("NonTemporal", "TemporalHint", "NonVolatile")
+
+
+def _hintState(fuse, mx="mx", numWaves=4, **over):
+    mxA, mxB = _MX_STATES[mx]
+    return dict(_kernel(fuse, numWaves), ProblemType={"MXBlockA": mxA, "MXBlockB": mxB}, **over)
+
+
+def _hintTriple(state, tc):
+    """(NonTemporal scope bits, TemporalHint, NonVolatile) of tensor `tc`."""
+    return (state.get("NonTemporal" + tc, 0) & 0x3, state.get("TemporalHint" + tc, 0),
+            state.get("NonVolatile" + tc, 0))
+
+
+def _ownFields(kernel, tc):
+    """What tensor `tc`'s own keys emit on an instruction that carries nothing else."""
+    mods = tdmCacheModifiers(HINT_CAPS, [(kernel.get("NonTemporal" + tc, 0),
+                                          TemporalHint(kernel.get("TemporalHint" + tc, 0)),
+                                          NonVolatile(kernel.get("NonVolatile" + tc, 0)))])
+    return None if mods is None else (mods.scope, mods.th, mods.nv)
+
+
+def _tensorOf(key):
+    return next(key[len(name):] for name in _HINT_KEY_NAMES if key.startswith(name))
+
+
+@pytest.mark.parametrize("fuse, mx, numWaves, subtile, sets", [
+    (0, "mx", 4, False, (("A", "B"), ("MXSA", "MXSB"))),
+    (1, "mx", 4, False, (("A", "MXSA"), ("MXSB", "B"))),
+    (2, "mx", 4, False, (("A", "MXSA", "MXSB"),)),
+    (3, "mx", 4, False, (("B", "MXSA", "MXSB"),)),
+    (0, "mx_a", 4, False, (("A", "B"),)),
+    (1, "mx_a", 4, False, (("A", "MXSA"),)),
+    (0, "no_mx", 2, False, (("A", "B"),)),
+    (1, "no_mx", 4, False, ()),
+    (0, "mx", 1, False, ()),
+    (0, "mx", 4, True, ()),
+])
+def test_hint_sets_are_the_sets_one_instruction_moves(fuse, mx, numWaves, subtile, sets):
+    assert TF.tdmHintSets(_hintState(fuse, mx, numWaves, UseSubtileImpl=subtile)) == sets
+
+
+_HINT_KEYS = ("TemporalHintA", "TemporalHintB", "NonTemporalA", "NonTemporalB", "NonVolatileA",
+              "TemporalHintMXSA", "NonTemporalMXSB", "NonVolatileMXSB")
+_HINT_VALUES = list(itertools.product((0, 1), (0, 1), (0, 1, 3), (0, 2), (0, 1), (0, 5), (0, 3),
+                                      (0, 1)))[::6]
+_HINT_CELLS = list(itertools.product(sorted(TDM_FUSE_GROUPING), sorted(_MX_STATES), (1, 2, 4),
+                                     (False, True)))
+
+
+@pytest.mark.parametrize("fuse, mx, numWaves, subtile", _HINT_CELLS,
+                         ids=["tdmfuse%d-%s-w%d%s" % (f, m, w, "-subtile" if s else "")
+                              for f, m, w, s in _HINT_CELLS])
+def test_ignored_hints_are_exactly_the_hints_the_writer_drops(fuse, mx, numWaves, subtile):
+    """A tensor has an ignored key iff the real tdmLoadModifiers issues it other hints than its own."""
+    for values in _HINT_VALUES:
+        kernel = _hintState(fuse, mx, numWaves, UseSubtileImpl=subtile, **dict(zip(_HINT_KEYS, values)))
+        live = ("A", "B") + TF.tdmLiveScales(kernel)
+        dropped = sorted(tc for tc in live if _issued(kernel, tc) != _ownFields(kernel, tc))
+        ignored = tdmIgnoredHints(kernel, HINT_CAPS)
+        assert sorted({_tensorOf(key) for key, _, _ in ignored}) == dropped, values
+
+
+def test_tdmfuse0_one_sided_data_hints_are_ignored():
+    kernel = dict(_kernel(0), TemporalHintA=1, TemporalHintB=0, NonTemporalA=2, NonTemporalB=0,
+                  NonVolatileA=1, NonVolatileB=1)
+    assert tdmIgnoredHints(kernel, HINT_CAPS) == [("NonTemporalA", 2, 0), ("TemporalHintA", 1, 0)]
+
+
+def test_agreeing_sets_ignore_nothing():
+    agree = dict(_kernel(0), TemporalHintA=1, TemporalHintB=1, NonTemporalA=2, NonTemporalB=2,
+                 NonVolatileA=1, NonVolatileB=1, TemporalHintMXSA=5, TemporalHintMXSB=5)
+    assert tdmIgnoredHints(agree, HINT_CAPS) == []
+
+
+def test_tdmfuse0_scale_set_needs_agreement():
+    clash = dict(_kernel(0), TemporalHintMXSA=5, TemporalHintMXSB=0)
+    assert tdmIgnoredHints(clash, HINT_CAPS) == [("TemporalHintMXSA", 5, 0)]
+
+
+@pytest.mark.parametrize("fuse, owners", [(1, {"MXSA": "A", "MXSB": "B"}),
+                                          (2, {"MXSA": "A", "MXSB": "A"}),
+                                          (3, {"MXSA": "B", "MXSB": "B"})])
+def test_scale_keys_must_match_the_data_tensor_they_ride(fuse, owners):
+    """A scale riding its data tensor's instruction is loaded with that data tensor's hints."""
+    kernel = dict(_kernel(fuse),
+                  NonTemporalA=2, NonTemporalB=3, NonTemporalMXSA=1, NonTemporalMXSB=0,
+                  TemporalHintA=1, TemporalHintB=2, TemporalHintMXSA=3, TemporalHintMXSB=5,
+                  NonVolatileA=1, NonVolatileB=0, NonVolatileMXSA=0, NonVolatileMXSB=1)
+    expected = sorted((name + scale, _hintTriple(kernel, scale)[i], _hintTriple(kernel, owner)[i])
+                      for scale, owner in owners.items() for i, name in enumerate(_HINT_KEY_NAMES)
+                      if _hintTriple(kernel, scale)[i] != _hintTriple(kernel, owner)[i])
+    assert sorted(tdmIgnoredHints(kernel, HINT_CAPS)) == expected
+    following = dict(kernel, **{name + scale: kernel[name + owner] for scale, owner in owners.items()
+                                for name in _HINT_KEY_NAMES})
+    assert tdmIgnoredHints(following, HINT_CAPS) == []
+
+
+@pytest.mark.parametrize("kernel, caps", [
+    (_kernel(0, numWaves=1), HINT_CAPS),
+    (dict(_kernel(0), enableTDMB=False, TDMInst=0x01), HINT_CAPS),
+    (dict(_kernel(0), UseSubtileImpl=True), HINT_CAPS),
+    (_kernel(0), {"HasTHModifier": False}),
+], ids=["one-wave", "tdm-on-a-only", "subtile", "no-th-modifier"])
+def test_nothing_is_ignored_without_a_shared_instruction(kernel, caps):
+    """One wave, TDM on one tensor, the subtile path and an ISA without th: carry every hint."""
+    kernel = dict(kernel, TemporalHintA=1, TemporalHintB=0, TemporalHintMXSA=5, NonVolatileMXSB=1)
+    assert tdmIgnoredHints(kernel, caps) == []
+
+
+def test_solution_rejects_a_one_sided_tdmfuse0_hint(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """TemporalHintA=1/B=0 on a shared {A,B} set would emit what (0, 0) emits, under another name."""
+    oneSided, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, TemporalHintA=1,
+                            TemporalHintB=0)
+    assert oneSided.get("Valid") is False
+    assert _IGNORED_RULE in out and "TemporalHintA=1 emits 0" in out and "TDMFuse=1" in out, out
+    for keys in ({}, {"TemporalHintA": 1, "TemporalHintB": 1}):
+        sol, solOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, **keys)
+        assert sol.get("Valid") is True, solOut
+
+
+def test_solution_takes_one_sided_hints_on_tdmfuse1(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """TDMFuse=1 gives A and B an instruction each; a scale must carry its data tensor's hints."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, TemporalHintA=1,
+                       TemporalHintMXSA=1)
+    assert sol.get("Valid") is True, out
+    bare, bareOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, TemporalHintA=1)
+    assert bare.get("Valid") is False
+    assert _IGNORED_RULE in bareOut and "TemporalHintMXSA=0 emits 1" in bareOut, bareOut
+
+
+def test_solution_rejects_nontemporal_4_to_7_without_the_nt_modifier(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    from tensilelite.Common.Architectures import gfxToIsa
+
+    keepsNT = bool(gfx1250_iim[gfxToIsa("gfx1250")].asmCaps["HasNTModifier"])
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, NonTemporalD=4)
+    assert sol.get("Valid") is keepsNT, out
+    assert (_NT_RULE in out) is not keepsNT, out
+
+
+def test_solution_hints_untouched_on_one_wave(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, TemporalHintA=1, TemporalHintB=0,
+                       **_WAVES[1])
+    assert sol.get("Valid") is True, out
+    assert (sol["TemporalHintA"], sol["TemporalHintB"]) == (1, 0)
+
+
+def test_solution_rejects_adaptive_ntab_on_a_shared_ab_set(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """The NTA/NTB loop bodies set TemporalHint on one tensor, which a shared {A,B} set drops."""
+    shared, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, AdaptiveGemmNTAB=1)
+    assert shared.get("Valid") is False
+    assert _AGNTAB_RULE in out, out
+    _, pairedOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, AdaptiveGemmNTAB=1)
+    assert _AGNTAB_RULE not in pairedOut
+
+
+@pytest.mark.parametrize("fuse, owner", [(2, "A"), (3, "B")])
+def test_stashed_mxsb_load_carries_the_fields_the_check_expects(fuse, owner):
+    """Two waves with both scales stash MXSB, which issues its own load with its set's fields
+    (tdmLoadModifiers): the check passes MXSB's keys that match them and lists the others."""
+    state = _hintState(fuse, numWaves=2, **{key + tc: value for tc in (owner, "MXSA", "MXSB")
+                                            for key, value in _STASH_HINTS.items()})
+    assert TF.tdmStashedMembers(state) == ("MXSB",)
+    assert _issued(state, "MXSB") == _issued(state, owner) == (DEV, TemporalHint.TH_NT, NonVolatile.NV)
+    assert tdmIgnoredHints(state, HINT_CAPS) == []
+    assert tdmIgnoredHints(dict(state, TemporalHintMXSB=0), HINT_CAPS) == [("TemporalHintMXSB", 0, 1)]
+
+
+from tensilelite.Components.NonTemporal import tdmAbsentHints
+
+_ABSENT_RULE = "Cache-hint keys on a tensor this problem does not carry"
+
+
+def test_absent_tensor_hints_are_listed_unless_an_unsuffixed_key_copied_them():
+    """A scale the problem does not carry, and dense-problem metadata, are never loaded."""
+    oneScale = dict(_hintState(0, "mx_a"), NonTemporalMXSB=3, TemporalHintMXSB=2,
+                    NonVolatileMXSB=1, TemporalHintMetadata=1)
+    assert sorted(tdmAbsentHints(oneScale)) == [("NonTemporalMXSB", 3), ("NonVolatileMXSB", 1),
+                                                 ("TemporalHintMXSB", 2), ("TemporalHintMetadata", 1)]
+    copied = dict(_hintState(0, "no_mx"), TemporalHint=1, TemporalHintMXSA=1, TemporalHintMXSB=1,
+                  TemporalHintMetadata=1, NonTemporal=2, NonTemporalMetadata=2)
+    assert tdmAbsentHints(copied) == []
+    assert tdmAbsentHints(dict(copied, NonTemporalMXSA=2)) == [("NonTemporalMXSA", 2)]
+    sparse = dict(_hintState(0, "mx"), TemporalHintMetadata=1)
+    sparse["ProblemType"] = dict(sparse["ProblemType"], Sparse=1)
+    assert tdmAbsentHints(sparse) == []
+
+
+def test_solution_rejects_hints_on_an_absent_scale(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ProblemType=_NO_MX,
+                       NonVolatileMXSA=1)
+    assert sol.get("Valid") is False
+    assert _ABSENT_RULE in out and "NonVolatileMXSA=1" in out, out
+    _, copiedOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ProblemType=_NO_MX,
+                           NonVolatile=1)
+    assert _ABSENT_RULE not in copiedOut, copiedOut

@@ -27,9 +27,12 @@ BenchmarkProblems:
   ########################################
   # gfx1250 TDM loads (tensor_load_to_lds) with NonTemporal scope, TemporalHint
   # and NonVolatile. MIWaveGroup [1, 1] issues one tensor_load_to_lds per tensor,
-  # so per-tensor hints apply. MIWaveGroup [2, 2] is wave-separated: A and B share
-  # one tensor_load_to_lds, which carries a field only when both tensors request
-  # the same value (the per-tensor groups below disagree, the last group agrees).
+  # so per-tensor hints apply. MIWaveGroup [2, 2] is wave-separated: under TDMFuse=0
+  # A and B share one tensor_load_to_lds, which carries a field only when both tensors
+  # request the same value, so the per-tensor groups below (which disagree) are rejected
+  # there and the last group (which agrees) is kept. TDMFuse=1 gives A and B one
+  # tensor_load_to_lds each, so their hints apply again; it needs more than one wave and
+  # is rejected on MIWaveGroup [1, 1].
   ########################################
   -
     - &problem_type_base # ProblemType NN
@@ -57,6 +60,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
+        - TDMFuse: [0, 1]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]

@@ -24061,7 +24061,8 @@ class KernelWriterAssembly(KernelWriter):
     """Issue stashed member tP (tdmStashedMembers) through the set its wave's resident holds.
 
     On tP's waves the member fields of the set's Group1 are rewritten for tP, the load issues
-    with tP's stash as its Group0 and the set's Group1, and the resident's fields come back.
+    with tP's stash as its Group0, the set's Group1 and the set's th/scope/nv (tdmLoadModifiers),
+    and the resident's fields come back.
     Like develop, which advances and toggles Group0 words right after each
     tensor_load_to_lds, the descriptor SGPRs are rewritten straight after the issue. The other
     waves issue a NULL load through the stash, whose enable word is 0 there, so every wave
@@ -24083,7 +24084,7 @@ class KernelWriterAssembly(KernelWriter):
     branch = SCBranchSCC0 if carriedOnScc1 else SCBranchSCC1
     mod.add(branch(nullLabel.getLabelName(), f"waves outside {tc}'s share issue its NULL load"))
     mod.add(self._tdmRewriteScaleFields(kernel, tPres, tP, group1))
-    mod.add(comp.issueLoad(stash, group1, group2, group3))
+    mod.add(comp.issueLoad(stash, group1, group2, group3, tensor=self.tdmLoadModifiers(kernel, tc)))
     mod.add(self._tdmRewriteScaleFields(kernel, tP, tPres, group1))
     mod.add(SBranch(endLabel.getLabelName()))
     mod.add(nullLabel)

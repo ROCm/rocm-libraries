@@ -199,6 +199,18 @@ def tdmHintDeciders(members):
     return data or tuple(range(len(members)))
 
 
+def tdmHintSets(ks):
+    """The live members of each descriptor set whose one tensor_load_to_lds carries several tensors.
+
+    These are the sets tdmLoadModifiers merges: wave-separated TDM off the subtile path, where
+    one instruction moves every live member of a set and its th/scope/nv bits follow
+    tdmHintDeciders. A one-member set and every other load carry their own tensor's hints.
+    """
+    if not tdmWaveSeparated(ks) or ks.get("UseSubtileImpl"):
+        return ()
+    return tuple(group for group in liveGroups(ks) if len(group) > 1)
+
+
 def tdmSetGroup(ks, tc):
     """The full group `tc` rides, or None. Not the live one: see liveGroups."""
     for group in tdmGrouping(ks).groups:
