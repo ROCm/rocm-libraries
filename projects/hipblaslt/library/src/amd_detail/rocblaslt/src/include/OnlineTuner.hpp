@@ -171,6 +171,13 @@ namespace rocblaslt
                             bool                    mayProbe,
                             Record*                 record);
 
+        /**
+         * Whether selection has nothing left to do for key: it resolved with no
+         * winner, or a call has claimed its winner's row, after which replay
+         * serves every call the winner suits.
+         */
+        bool settled(const Key& key);
+
         /** Read back every outstanding measurement the GPU has finished. */
         void harvestPending(const Key& key);
 

@@ -210,6 +210,16 @@ namespace rocblaslt
         return position;
     }
 
+    bool OnlineTuner::settled(const Key& key)
+    {
+        std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+
+        const auto iter = m_problems.find(key);
+        return iter != m_problems.end() && iter->second.m_resolved
+               && (iter->second.m_winner < 0
+                   || iter->second.m_recordClaimed.load(std::memory_order_relaxed));
+    }
+
     void OnlineTuner::harvestPending(const Key& key)
     {
         {

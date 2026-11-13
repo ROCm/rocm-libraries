@@ -231,6 +231,7 @@ namespace
 
         EXPECT_EQ(visit(key, identityOf(key), ranked), 0);
         EXPECT_FALSE(resolved(key));
+        EXPECT_FALSE(tuner().settled(key));
 
         const int calls = exploreToResolution(key, identityOf(key), ranked);
         ASSERT_GT(calls, 0) << "exploration never ended";
@@ -238,6 +239,7 @@ namespace
         EXPECT_LE(calls, kVisitBudget) << "the visit budget did not bound it";
 
         EXPECT_EQ(winnerOf(key), -1);
+        EXPECT_TRUE(tuner().settled(key)) << "a key resolved with no winner is not settled";
         EXPECT_EQ(visit(key, identityOf(key), ranked), -1);
 
         EXPECT_FALSE(tuner().beginMeasurement(key, 21, nullptr, start, stop));
@@ -658,12 +660,14 @@ namespace
         float us     = 0.0f;
         ASSERT_TRUE(resolved(key, &winner, &us)) << "exploration never ended";
         ASSERT_GE(winner, 0) << "nothing was measured";
+        EXPECT_FALSE(tuner().settled(key)) << "a key settled before its row was claimed";
 
         // The row describes the exploration, not the problem that claims it.
         Tuner::Record record;
         EXPECT_EQ(visit(key, other, ranked, &record, /*workspace=*/1u << 20),
                   positionOf(ranked, winner));
         EXPECT_FLOAT_EQ(record.us, us) << "the first call served the winner did not claim the row";
+        EXPECT_TRUE(tuner().settled(key)) << "a key whose row was claimed is not settled";
         EXPECT_TRUE(record.complete) << "every candidate was timed";
         EXPECT_EQ(record.candidates, 3);
         EXPECT_EQ(record.workspaceBytes, 0u) << "the row took the claimer's workspace";

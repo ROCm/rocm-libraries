@@ -8058,10 +8058,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const&  prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
-    // A heuristic query never reaches the tuner; see rocblaslt::OnlineTuner.
+    // A heuristic query never reaches the tuner; see rocblaslt::OnlineTuner. Nor
+    // does a call under a settled key, which replay could not serve.
+    auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
     const bool onlineTuning = lookup == SolutionLookup::PerDispatch && tuningKey
-                              && rocblaslt::OnlineTuner::getInstance().enabled()
-                              && onlineTunable(prob);
+                              && tuner.enabled() && onlineTunable(prob)
+                              && !tuner.settled(*tuningKey);
 
     const OnlineLookup  onlineLookup{&prob, tuningKey};
     const OnlineLookup* online = onlineTuning ? &onlineLookup : nullptr;
