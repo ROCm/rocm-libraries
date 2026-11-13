@@ -774,12 +774,8 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     device_vector<double> d_source(source);
     device_vector<float>  d_target(std::vector<float>(convert_nitems, -1.0f));
 
-    ScopedMaxGridSizeX         clamp(handle, clamped_grid_x);
-    std::ostringstream         log;
-    const rocsparse_layer_mode saved_mode = handle->layer_mode;
-    std::ostream* const        saved_os   = handle->log_debug_os;
-    handle->layer_mode   = rocsparse_layer_mode(saved_mode | rocsparse_layer_mode_log_debug);
-    handle->log_debug_os = &log;
+    ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+    ScopedDebugLog     log(handle);
     testing::internal::CaptureStdout();
     const rocsparse_status status  = rocsparse::convert_array(handle,
                                                              convert_nitems,
@@ -788,12 +784,10 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
                                                              rocsparse_datatype_f64_r,
                                                              d_source.ptr);
     const std::string      printed = testing::internal::GetCapturedStdout();
-    handle->layer_mode             = saved_mode;
-    handle->log_debug_os           = saved_os;
 
     ASSERT_EQ(status, rocsparse_status_success);
     EXPECT_EQ(printed, "");
-    EXPECT_NE(log.str().find(expected.str()), std::string::npos) << log.str();
+    EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
 }
 
 // ===========================================================================
