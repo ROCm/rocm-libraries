@@ -26,7 +26,8 @@ Tests:
           transA: [ N, C ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 
         - name: her2k_tall
           function: her2k
@@ -36,7 +37,8 @@ Tests:
           transA: [ N, C ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 
         - name: her2k_wide
           function: her2k
@@ -46,5 +48,6 @@ Tests:
           transA: [ N, C ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 ...
