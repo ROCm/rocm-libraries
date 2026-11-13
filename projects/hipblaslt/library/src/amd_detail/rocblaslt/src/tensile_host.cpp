@@ -8995,6 +8995,31 @@ int getMXScaleFormatFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmu
     return solution ? solution->problemType.mxScaleFormat : -1;
 }
 
+uint64_t getSolutionUidFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
+{
+    int* solutionIndex = (int*)algo.data;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(*solutionIndex < 0)
+        return 0;
+#endif
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+
+    if(!library)
+        return 0;
+
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
+    if(!solution)
+        return 0;
+    return solution->solutionUid;
+}
+
 /***************************************************************
  * ! \brief  Initialize rocblaslt for the current HIP device, to *
  * avoid costly startup time at the first call on that device. *

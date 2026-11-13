@@ -264,6 +264,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
+| `unit/solution_uid_log_gtest.cpp` | `HostUnitSolutionUidLog` | The base62 SolutionUID text and the solution lines `hipblaslt-bench` prints after a result, with and without a UID |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no

@@ -287,4 +287,7 @@ std::string rocblaslt_get_kernel_name_from_algo(rocblaslt_handle             han
 std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             handle,
                                                   const rocblaslt_matmul_algo& algo);
 
+uint64_t rocblaslt_get_solution_uid_from_algo(rocblaslt_handle             handle,
+                                              const rocblaslt_matmul_algo& algo);
+
 #endif
