@@ -457,6 +457,7 @@
       },
       {
         "cases": [
+          "h41_b1h2k2v2_72x120_d384_fp16_none_told",
           "m18n_b1h8k1v1_64x64_d512_bfp16_tlcausal_bshd_s1_dom0p125to0p125_tolu",
           "m25n_b1h8k1v1_128x128_d512_bfp16_cm_tlw32rinf_bshd_tolu"
         ],
