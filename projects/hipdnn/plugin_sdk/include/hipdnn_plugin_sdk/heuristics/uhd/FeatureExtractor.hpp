@@ -30,10 +30,12 @@ class FeatureExtractionContext
 public:
     using ValueMap = std::unordered_map<std::string, VariableContext::ValueType>;
 
+    /// An empty context with no shared base.
     FeatureExtractionContext() = default;
 
     /// A context that reads through to @p shared for every name it does not bind itself
-    /// (VariableContext's base). @p shared is never modified and may serve many contexts.
+    /// (VariableContext's base). @p shared is never modified and may serve many contexts;
+    /// this context's bind(), unbindSlot() and clear*() calls change only its own names.
     explicit FeatureExtractionContext(const std::shared_ptr<const FeatureExtractionContext>& shared)
         : _ctx(shared == nullptr ? nullptr
                                  : std::shared_ptr<const VariableContext>(shared, &shared->_ctx))
@@ -88,6 +90,7 @@ public:
         });
         return result;
     }
+    /// Removes every own binding and detaches the shared base, leaving an empty context.
     void clear()
     {
         _ctx.clear();

@@ -956,12 +956,14 @@ public:
         return computed;
     }
 
+    /// @returns The number of graphs held, at most CAPACITY.
     size_t size() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         return _entries.size();
     }
 
+    /// Forgets every graph; a context already handed out stays valid for its holders.
     void clear()
     {
         const std::lock_guard<std::mutex> lock(_mutex);

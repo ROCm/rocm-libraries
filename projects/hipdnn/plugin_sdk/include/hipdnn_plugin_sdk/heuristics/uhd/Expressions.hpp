@@ -46,8 +46,12 @@ using CategoricalEncoding = std::map<std::string, std::map<std::string, int32_t>
 ///
 /// A context may read through to a shared, immutable base context: the features every
 /// engine computes alike for one graph, say, bound once and shared by each engine's own
-/// context. A context's own bindings shadow its base's; unbind() and clearNamespace() remove
-/// only its own, so they cannot uncover or remove a base binding.
+/// context. Reads (find(), has(), getData(), forEachBinding()) see the own bindings first,
+/// then the base's, so a context with a base reads exactly as one holding both sets.
+/// Writes reach only the own bindings, never the base: bind() of a base name shadows it,
+/// and unbind() and clearNamespace() remove own bindings only, so a base binding stays
+/// readable (and becomes visible again when an own binding that shadowed it is removed).
+/// bindings() lists own bindings only, and clear() drops the base as well.
 class VariableContext
 {
 public:
@@ -85,14 +89,15 @@ public:
         return &_bindings.insert_or_assign(name, std::move(value)).first->second;
     }
 
-    /// Removes @p name, as given, from this context's own bindings. Invalidates a pointer
-    /// bindSlot returned for it.
+    /// Removes @p name, as given, from this context's own bindings; a base binding of the
+    /// same name is not removed and reads again. Invalidates a pointer bindSlot returned for
+    /// it.
     void unbind(const std::string& name)
     {
         _bindings.erase(name);
     }
 
-    /// Removes every own binding under `ns.`; a base's bindings are untouched.
+    /// Removes every own binding under `ns.`; a base's bindings are untouched and still read.
     void clearNamespace(const std::string& ns)
     {
         const std::string prefix = ns + ".";
@@ -119,15 +124,16 @@ public:
         return find(name) != nullptr;
     }
 
-    /// Removes every binding and the base.
+    /// Removes every own binding and detaches the base, leaving an empty context.
     void clear()
     {
         _bindings.clear();
         _base.reset();
     }
 
-    /// @brief This context's own bindings, keyed without the sigil; the base's are not
-    ///        included (see forEachBinding()).
+    /// @brief This context's own bindings, keyed without the sigil. A base's bindings are not
+    ///        included, so this is not every name that reads as bound: use forEachBinding()
+    ///        for that.
     const std::unordered_map<std::string, ValueType>& bindings() const
     {
         return _bindings;
