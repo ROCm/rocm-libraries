@@ -774,7 +774,9 @@ work count, it falls back to `robustMeanMs`/`min`/uncalibrated with **no** `scor
 — the engine's metric-less default ranker, which is legal (§2.5, §15.1), ranks this
 engine's own catalog just as well, and warns that the score is no longer comparable with
 another engine's; the thorough policy then falls back to the engine's L1 prediction. An
-explicitly requested `--metric tflops` without a work count fails instead.
+explicitly requested `--metric tflops` without a work count fails instead. `mlp_data` has no
+such fallback: a catalog `generate --adapter mlp_data` must pass `--metric`
+([below](#the-mlp_data-adapter)).
 
 `generate` takes the work count from the engine's own published `graph.flops`, which is
 the effective count the runtime computed for the graph it just ran. A corpus that was
@@ -1172,7 +1174,13 @@ measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep wit
 A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
 loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
 `--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
-explicit other target, such as `avgTimeMs`.
+explicit other target, such as `avgTimeMs`. An `mlp_data` model always names the metric it
+predicts, so it can never be a slot ranker (a slot has no time of its own, and a slot ranker
+must be metric-less): `generate --adapter mlp_data --slot` is refused before anything is read,
+and `promote` and the packer refuse such a model bound to a slot. Use `tree_data` or
+`linear_data` for slot rankers. A slotted engine's own L1 estimate is another matter: its
+`predict_engine` model names a metric and records every slot's KMD in `trained_against.kmds`
+(a `1.1` UHD), and it may be `mlp_data`.
 
 **Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
 `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
@@ -1314,6 +1322,25 @@ python -m uhd_gen train --adapter mlp_data --role predict_engine --metric time \
     --mlp-hidden 64,64 --mlp-members 3 --mlp-epochs 300 \
     --output-dir ./uhd_l1
 ```
+
+**`generate --adapter mlp_data`** trains through `train`, so it holds an `mlp_data` run to
+what `train` needs, and refuses a run that cannot meet it before it measures or reads anything:
+
+- *The metric is forwarded.* `--metric` reaches `train` as `--metric`, not only as the label
+  column and direction it implies, so the artifact names it (`generate --dataset <published>
+  --adapter mlp_data --metric time` writes `score.metric: time`). A `tree_data` run still
+  reaches `train` as `--target`/`--objective`: there `--metric time` only picks the label, and
+  a slot ranker has to stay metric-less.
+- *No `--slot`.* A slot ranker must be metric-less (RFC 0021 §7) and an `mlp_data` model always
+  names a metric, so `--slot` with `--adapter mlp_data` is refused.
+- *No `robustMeanMs` fallback.* A catalog run without `--metric` falls back to the metric-less
+  `robustMeanMs` label when the engine publishes no `graph.flops`, which `mlp_data` cannot
+  train; that is only known after the sweep, so a catalog (`sort_kernel_catalog`) run needs
+  `--metric tflops` or `--metric time` up front. An L1 (`predict_engine`) run keeps its default
+  `tflops`.
+
+A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
+UHD); its slot rankers may not.
 
 ## Output
 

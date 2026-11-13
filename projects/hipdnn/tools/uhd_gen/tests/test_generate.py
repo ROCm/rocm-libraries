@@ -3,6 +3,7 @@
 """Tests for uhd_gen generate: corpus collection, labels and model emission."""
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -1293,3 +1294,82 @@ def test_generate_refuses_an_adapter_option_that_does_not_apply_before_measuring
         _check_generate_arguments(
             _generate_arguments(*extra), False, Path("nonexistent-output"), Path("t")
         )
+
+
+def test_generate_trains_the_adapter_it_was_asked_for_on_the_metric_it_was_asked_for(
+    monkeypatch, tmp_path, evaluator
+):
+    """`generate` trains through `train`: an mlp_data run must come out as an mlp_data model
+    that names the requested metric, not a tree_data one."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert (
+        main(
+            [
+                *common,
+                "--adapter",
+                "mlp_data",
+                "--metric",
+                "time",
+                "--mlp-epochs",
+                "5",
+                "--mlp-members",
+                "1",
+            ]
+        )
+        == 0
+    )
+    uhd = json.loads(
+        (output / "model" / "heuristic.uhd.json").read_text(encoding="utf-8")
+    )
+    assert uhd["adapter"] == "mlp_data" and "tree_data" not in uhd
+    assert (uhd["score"]["metric"], uhd["objective"]) == ("time", "min")
+
+
+MLP_REFUSALS = [
+    (
+        ["--dataset", "ds", "--slot", "dkdv"],
+        "a slot has no time of its own.*metric-less.*names the metric.*tree_data or "
+        "linear_data",
+    ),
+    (["--role", "sort_kernel_catalog"], "pass --metric tflops or --metric time"),
+    (
+        ["--role", "sort_kernel_catalog", "--dataset", "ds"],
+        "pass --metric tflops or --metric time",
+    ),
+]
+
+
+@pytest.mark.parametrize(("extra", "message"), MLP_REFUSALS)
+def test_an_mlp_data_run_that_cannot_train_is_refused_before_anything_is_measured(
+    monkeypatch, tmp_path, caplog, extra, message
+):
+    """A slot ranker must be metric-less and an mlp_data model names a metric; a catalog
+    run with no --metric could fall back to the metric-less robustMeanMs label only after the
+    sweep. Both are decided on the arguments, before the bench or a dataset is touched.
+    """
+    main = _cli()
+    touched = []
+    for name in ("_measure", "load_dataset"):
+        monkeypatch.setattr(
+            f"uhd_gen.generate.{name}",
+            lambda *args, name=name, **kwargs: touched.append(name),
+        )
+    arguments = [
+        "generate",
+        "--adapter",
+        "mlp_data",
+        "--descriptor-tree",
+        str(tmp_path / "tree"),
+        "--output-dir",
+        str(tmp_path / "out"),
+        *(["--graphs", str(tmp_path)] if "--dataset" not in extra else []),
+        *extra,
+    ]
+    assert main(arguments) == 1
+    assert not touched
+    assert re.search(message, caplog.text)
+    assert not (tmp_path / "out").exists()

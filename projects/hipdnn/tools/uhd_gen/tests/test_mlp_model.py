@@ -1080,6 +1080,57 @@ def test_promote_refuses_an_mlp_data_uhd_the_runtime_would_refuse(tmp_path, eval
         plan(broken("wide", wide))
 
 
+def test_a_slotted_engines_l1_estimate_may_be_mlp_data(tmp_path, evaluator):
+    """A slot ranker must be metric-less, but the engine-level L1 estimate names a metric,
+    so it can be mlp_data: it records every slot's KMD (UHD 1.1) and installs at the engine.
+    """
+    from uhd_gen.immediate import validate_model
+    from uhd_gen.promote import _apply, _validate_descriptor, build_plan
+    from uhd_gen.provenance import snapshot_provenance
+    from uhd_gen.tests.test_promote_slots import KMD_DKDV, KMD_DQ, KMD_PREP, _tree
+
+    tree = _tree(tmp_path / "descriptors")
+    provenance = {
+        **snapshot_provenance(tree, arch="gfx942"),
+        "selector_revision": "provider-1",
+    }
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text(encoding="utf-8"))
+    for row in rows:
+        row["engine_name"] = row["binding"]["engine"] = "test:slotted"
+        row["binding"]["selector_revision"] = "provider-1"
+        row["binding"]["trained_against"] = provenance
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+
+    code, output = _train(tmp_path, evaluator)
+    assert code == 0
+    descriptor_path = output / "heuristic.uhd.json"
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    assert descriptor["version"] == "1.1"
+    assert descriptor["adapter"] == "mlp_data"
+    assert descriptor["score"]["metric"] == "tflops"
+    assert {
+        entry["slot"]: entry["id"] for entry in descriptor["trained_against"]["kmds"]
+    } == {
+        "prep": KMD_PREP,
+        "dkdv": KMD_DKDV,
+        "dq": KMD_DQ,
+    }
+    # The validators every consumer runs accept it.
+    _validate_descriptor(descriptor, descriptor_path)
+    assert validate_model(descriptor).name == "tflops"
+
+    original = json.loads((tree / "engine.ued.json").read_text(encoding="utf-8"))
+    plan = build_plan(
+        output, tree, role="predict_engine", arch="gfx942", feature_evaluator=evaluator
+    )
+    _apply(plan)
+    ued = json.loads((tree / "engine.ued.json").read_text(encoding="utf-8"))
+    assert plan.slot is None
+    assert ued["predict_engine"] == {"gfx942": [descriptor["id"]]}
+    assert ued["slots"] == original["slots"]
+
+
 def _probe_corpus(path, count=40):
     """An engine no UED describes, bound by selector revision alone."""
     rows = []
