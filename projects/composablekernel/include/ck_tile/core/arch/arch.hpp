@@ -1519,12 +1519,64 @@ CK_TILE_DEVICE void s_wait_dscnt()
 #endif
 }
 
+#if CK_TILE_HAS_ASYNCMARK
+namespace detail {
+// Some compilers take a trailing stage mask operand in the asyncmark builtins. MaskType holds its
+// type for those and is empty otherwise, which drops the mask: such compilers keep one sequence
+// of marks for all stages, so after each wait at least the async operations that the stage mask
+// asks for have completed.
+template <typename... MaskType>
+struct asyncmark_builtins
+{
+    template <unsigned int StageMask>
+    CK_TILE_DEVICE static void mark()
+    {
+        __builtin_amdgcn_asyncmark(MaskType{StageMask}...);
+    }
+
+    template <index_t NumMarks, unsigned int StageMask>
+    CK_TILE_DEVICE static void wait()
+    {
+        __builtin_amdgcn_wait_asyncmark(NumMarks, MaskType{StageMask}...);
+    }
+};
+
+// Overload resolution selects the arity the builtins accept. The probe sits in a function
+// template's return type because clang checks AMDGPU builtin calls against an enclosing function,
+// which partial specializations and default template arguments lack.
+template <typename StageMask>
+auto select_asyncmark_builtins(int) -> decltype(__builtin_amdgcn_asyncmark(StageMask{}),
+                                                asyncmark_builtins<StageMask>{});
+
+template <typename StageMask>
+asyncmark_builtins<> select_asyncmark_builtins(long);
+
+using asyncmark_builtins_t = decltype(select_asyncmark_builtins<unsigned int>(0));
+} // namespace detail
+
+// Appends an asyncmark to the sequence of each stage in StageMask, a mask of LLVM's async stage
+// bits in which zero names every stage.
+template <unsigned int StageMask = 0>
+CK_TILE_DEVICE void asyncmark()
+{
+    detail::asyncmark_builtins_t::template mark<StageMask>();
+}
+
+// Waits until the sequence of each stage in StageMask, where zero names every stage, holds at
+// most NumMarks asyncmarks.
+template <index_t NumMarks = 0, unsigned int StageMask = 0>
+CK_TILE_DEVICE void wait_asyncmark()
+{
+    detail::asyncmark_builtins_t::template wait<NumMarks, StageMask>();
+}
+#endif
+
 template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
 #if CK_TILE_HAS_ASYNCMARK
     // We consistently asyncmark DMAs, so this will have the same effect on gfx12+.
-    __builtin_amdgcn_wait_asyncmark(N);
+    wait_asyncmark<N>();
 #elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(N);
 #else
@@ -1602,7 +1654,7 @@ template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_async_load()
 {
 #if CK_TILE_HAS_ASYNCMARK
-    __builtin_amdgcn_wait_asyncmark(vmcnt);
+    wait_asyncmark<vmcnt>();
     block_sync_lds();
 #elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(vmcnt);
