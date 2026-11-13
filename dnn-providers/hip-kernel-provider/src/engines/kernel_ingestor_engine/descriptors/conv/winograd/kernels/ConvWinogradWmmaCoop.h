@@ -196,10 +196,20 @@ struct K5CoopMfma
     }
 };
 
-template <class T, class A, int MT, int NT, int KW, int M = 2>
+// TW 0: the transform-row layout (above). TW >= 1, the 16-bin layout (F(2,3)): a wave owns all 16
+// bins of 16 x MT out channels by 16 x NT tiles, so a tile's 16 Winograd-domain values per out
+// channel sit in one lane and the output transform runs in registers: no Z round trip through
+// LDS and no epilogue barrier. KW K waves x TW tile waves; BT = 16 x NT x TW.
+template <class T, class A, int MT, int NT, int KW, int M = 2, int TW = 0>
 struct K5CoopCfg
 {
-    static constexpr int BK = 16 * MT * KW, BT = 16 * NT, WAVES = 4 * KW, THREADS = A::WAVE * WAVES;
+    static constexpr bool B16 = TW > 0;
+    static constexpr int NB = B16 ? 16 : 4; // bins per wave
+    // U fragment slots in flight: a bin's slot is reloaded NBU bins ahead (16-bin layout on gfx11,
+    // whose 16-element fragments take 8 registers each: 4 bins ahead).
+    static constexpr int NBU = B16 && A::KPL == 16 ? 4 : NB;
+    static constexpr int BK = 16 * MT * KW, BT = 16 * NT * (B16 ? TW : 1),
+                         WAVES = B16 ? KW * TW : 4 * KW, THREADS = A::WAVE * WAVES;
     static constexpr int VB = 16 * BT * 16; // halves per V buffer: [bin][tile][16 channels]
     // (tile, channel pair) jobs per chunk: BT x 8; a lane takes one, 16 lanes per channel pair.
     static constexpr int JW = BT * 8 / A::WAVE; // waves of jobs per chunk
@@ -213,11 +223,11 @@ struct K5CoopCfg
     static constexpr int ZS
         = A::WAVE == 64 && 4 * M * 16 * KWP * (BT + 4) * 4 <= 2 * VB * 2 ? BT + 4 : BT;
     static constexpr int ZB = 4 * M * 16 * KWP * ZS; // floats per epilogue pass
-    static constexpr int LDSB = 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
+    static constexpr int LDSB = B16 || 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
     // latency-bound, so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the
     // registers. CDNA (512 registers per lane, accumulators may sit in AGPRs): 2.
-    static constexpr int WPE = A::WAVE == 64 ? 2 : MT * NT <= 2 ? 8 : 4;
+    static constexpr int WPE = A::WAVE == 64 ? 2 : B16 ? 4 : MT * NT <= 2 ? 8 : 4;
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
 };
 
@@ -233,10 +243,14 @@ template <class T,
           bool F16MATH,
           int M = 2,
           int DIR = K5_FORWARD,
-          int PF = 0>
+          int PF = 0,
+          int TW = 0>
 __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
 {
-    typedef K5CoopCfg<T, W, MT, NT, KW, M> C;
+    typedef K5CoopCfg<T, W, MT, NT, KW, M, TW> C;
+    constexpr bool B16 = C::B16;
+    constexpr int NB = C::NB, NBU = C::NBU;
+    static_assert(!B16 || M == 2, "16-bin layout: F(2,3)");
     typedef typename W::frag frag;
     constexpr int WAVE = W::WAVE, ACCN = W::ACCN;
     constexpr int BK = C::BK, BT = C::BT, THREADS = C::THREADS, VB = C::VB, JT = C::JT, JW = C::JW;
@@ -264,7 +278,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     const int tid = threadIdx.x, lane = tid % WAVE;
     // Wave-uniform role.
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
-    const int row = wave % 4, kw = wave / 4;
+    // Transform-row layout: row and K wave group. 16-bin layout: K wave and tile wave (row 0).
+    const int row = B16 ? 0 : wave % 4, kw = B16 ? wave % KW : wave / 4;
+    const int twv = B16 ? wave / KW : 0;
     const int col = lane & 15;
     T* out = static_cast<T*>(a.out);
     const unsigned chunkBytes
@@ -299,7 +315,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
     k5u3 raw[JT][4][2]; // the next chunk's input
     // The U fragments: with PF 1 the last chunk step loads the next item's chunk 0 here, so they
     // must outlive the item (a per-item array would be a fresh, uninitialised one each item).
-    frag ufr[4][MT];
+    frag ufr[NBU][MT];
 
     for(long long item = blockIdx.x; item < items; item += gridDim.x)
     {
@@ -324,7 +340,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         const int k0 = kb * BK, t0 = tb * BT;
 
         // ---- Transform jobs: lane -> (tile, channel pair). Job wave jw covers tiles
-        // 16 * (jw % NT) + col and channel pair 2 * (jw / NT) + lane / 16.
+        // 16 * (jw % (BT / 16)) + col and channel pair 2 * (jw / (BT / 16)) + lane / 16.
         auto setupJobs = [&](int t0, int g) __attribute__((always_inline))
         {
             bool anyNeg = false;
@@ -333,8 +349,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             {
                 const int jw = JT > 1 ? wave + q * C::WAVES : wave;
                 jobOn[q] = jw < JW;
-                tl[q] = 16 * (jw % NT) + col;
-                cp[q] = (WAVE / 16) * (jw / NT) + (lane >> 4);
+                tl[q] = 16 * (jw % (BT / 16)) + col;
+                cp[q] = (WAVE / 16) * (jw / (BT / 16)) + (lane >> 4);
                 shf[q] = 0;
 #pragma unroll
                 for(int r = 0; r < 4; ++r)
@@ -648,9 +664,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             }
         };
 
-        typename W::acc acc[4][MT][NT];
+        typename W::acc acc[NB][MT][NT];
 #pragma unroll
-        for(int b = 0; b < 4; ++b)
+        for(int b = 0; b < NB; ++b)
 #pragma unroll
             for(int m = 0; m < MT; ++m)
 #pragma unroll
@@ -668,7 +684,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         if(PF == 0 || item == blockIdx.x)
             uWave = uOf(g, kRow0);
         const unsigned binBytes = static_cast<unsigned>(kbs * nChU) * UNIT;
-        auto loadU = [&](int ch, int b) __attribute__((always_inline))
+        auto loadU = [&](int ch, int b, int slot) __attribute__((always_inline))
         {
             // uWave is wave-uniform (row is); readfirstlane says so. With PF 1 it is set under a
             // branch the compiler cannot prove uniform, and a per-lane scalar offset turns every
@@ -678,14 +694,14 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             for(int m = 0; m < MT; ++m)
             {
                 const unsigned so = uw + b * binBytes + static_cast<unsigned>(m * nChU + ch) * UNIT;
-                ufr[b][m] = W::loadA(rU, uLane, so);
+                ufr[slot][m] = W::loadA(rU, uLane, so);
             }
         };
         // B fragment: tile n * 16 + col of bin, channels kBase.
         auto loadB = [&](const unsigned* Vs, int bin, int n) __attribute__((always_inline))
         {
-            const unsigned* p
-                = Vs + (bin * BT + n * 16 + col) * 8 + ((W::kBase(lane) / 2) ^ vSwz(col));
+            const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * 8
+                                + ((W::kBase(lane) / 2) ^ vSwz(col));
             return W::loadB(p);
         };
 
@@ -698,8 +714,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         if(PF == 0 || item == blockIdx.x)
         {
 #pragma unroll
-            for(int b = 0; b < 4; ++b)
-                loadU(0, b);
+            for(int b = 0; b < NBU; ++b)
+                loadU(0, b, b);
         }
         transform(0, negWave);
         __syncthreads();
@@ -738,7 +754,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             K5_SCHED_BARRIER();
             const unsigned* Vs = Vd + P * (VB / 2);
 #pragma unroll
-            for(int b = 0; b < 4; ++b)
+            for(int b = 0; b < NB; ++b)
             {
                 frag bfr[NT];
 #pragma unroll
@@ -748,8 +764,12 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                 for(int m = 0; m < MT; ++m)
 #pragma unroll
                     for(int n = 0; n < NT; ++n)
-                        acc[b][m][n] = W::mma(ufr[b][m], bfr[n], acc[b][m][n]);
-                loadU(nx, b);
+                        acc[b][m][n] = W::mma(ufr[b % NBU][m], bfr[n], acc[b][m][n]);
+                // The slot's next bin: NBU on, in this chunk or (past its last bin) chunk nx.
+                if(b + NBU < NB)
+                    loadU(ch, b + NBU, b % NBU);
+                else
+                    loadU(nx, b + NBU - NB, b % NBU);
                 K5_SCHED_BARRIER();
             }
             if(ch + 1 < nCh)
@@ -761,6 +781,87 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
             step(ch, K5Int<0>{});
             if(ch + 1 < nCh)
                 step(ch + 1, K5Int<1>{});
+        }
+
+        if constexpr(B16)
+        {
+            // Output transform in registers: lane (col, dRow) holds the 16 bins 4i + j of its
+            // tile and out channel; Z = M A over j, then A^T over the rows i.
+#pragma unroll
+            for(int n = 0; n < NT; ++n)
+            {
+                const int t = t0 + twv * 16 * NT + n * 16 + col;
+                if(t >= a.tiles)
+                    continue;
+                const int tw = t % a.tw, r1 = t / a.tw;
+                const int th = r1 % a.th, img = r1 / a.th;
+                const long long eChan = static_cast<long long>(a.ho) * a.wo;
+                const long long base = (static_cast<long long>(img) * a.co + g * cgo) * eChan
+                                       + static_cast<long long>(th * 2) * a.wo + tw * 2;
+                // Live bits 2r + s, row-in-range bits 4 + r, second column in range bit 6.
+                unsigned mask = 0;
+#pragma unroll
+                for(int r = 0; r < 2; ++r)
+                {
+                    const int oh = th * 2 + r;
+                    if(oh < a.ho)
+                        mask |= 1u << (4 + r);
+#pragma unroll
+                    for(int c = 0; c < 2; ++c)
+                    {
+                        const int ow = tw * 2 + c;
+                        if(oh < a.ho && ow < a.wo && k5Live(a, oh, ow))
+                            mask |= 1u << (2 * r + c);
+                    }
+                }
+                if(tw * 2 + 1 < a.wo)
+                    mask |= 1u << 6;
+                const bool pair = (a.wo & 1) == 0 && sizeof(T) == 2;
+#pragma unroll
+                for(int m = 0; m < MT; ++m)
+#pragma unroll
+                    for(int e = 0; e < ACCN; ++e)
+                    {
+                        const int k = k0 + kw * 16 * MT + m * 16 + W::dRow(lane, e);
+                        if(k >= cgo)
+                            continue;
+                        float z[4][2];
+#pragma unroll
+                        for(int i = 0; i < 4; ++i)
+                        {
+                            const float m0 = acc[4 * i][m][n][e], m1 = acc[4 * i + 1][m][n][e],
+                                        m2 = acc[4 * i + 2][m][n][e], m3 = acc[4 * i + 3][m][n][e];
+                            z[i][0] = m0 + m1 + m2;
+                            z[i][1] = m1 - m2 - m3;
+                        }
+                        T* o = out + base + static_cast<long long>(k) * eChan;
+#pragma unroll
+                        for(int r = 0; r < 2; ++r)
+                        {
+                            if(!((mask >> (4 + r)) & 1u))
+                                continue;
+                            const float y0 = r == 0 ? z[0][0] + z[1][0] + z[2][0]
+                                                    : z[1][0] - z[2][0] - z[3][0];
+                            const float y1 = r == 0 ? z[0][1] + z[1][1] + z[2][1]
+                                                    : z[1][1] - z[2][1] - z[3][1];
+                            const T v0 = K5Elem<T>::store(((mask >> (2 * r)) & 1u) ? y0 : 0.0f);
+                            const T v1 = K5Elem<T>::store(((mask >> (2 * r + 1)) & 1u) ? y1 : 0.0f);
+                            if(pair)
+                            {
+                                const unsigned lo = __builtin_bit_cast(unsigned short, v0);
+                                const unsigned hi = __builtin_bit_cast(unsigned short, v1);
+                                *reinterpret_cast<unsigned*>(o + r * a.wo) = lo | (hi << 16);
+                            }
+                            else
+                            {
+                                o[r * a.wo] = v0;
+                                if((mask >> 6) & 1u)
+                                    o[r * a.wo + 1] = v1;
+                            }
+                        }
+                    }
+            }
+            continue;
         }
 
         if constexpr(M == 3)
