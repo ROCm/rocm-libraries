@@ -147,12 +147,14 @@ def buildable_list_path(arch: str, gemm_name: str) -> Path:
 @dataclass
 class BuildableList:
     """A buildable-MI list: the buildable MIs in list order, the DepthUs each builds at (when recorded), the
-    DepthUs the search tried, and the date it was generated."""
+    DepthUs the search tried, the date it was generated, and the ARCH and GEMM type its header names."""
 
     mis: List[MI]
     depthu: Dict[MI, List[int]] = field(default_factory=dict)
     searched_depthu: List[int] = field(default_factory=list)
     generated: Optional[datetime.date] = None
+    arch: Optional[str] = None
+    gemm_name: Optional[str] = None
 
     def allowed_depthu(self, mi: Sequence[int], offered: Sequence[Any]) -> List[Any]:
         """The offered DepthUs ``mi`` may build at: those the list records for it, and any the search did not
@@ -165,8 +167,8 @@ class BuildableList:
 
 def load_buildable_list(path: Path) -> BuildableList:
     """Read a buildable-MI list: ``DepthU`` (the DepthUs searched), ``MatrixInstructions``, each entry
-    ``{MatrixInstruction: <9 ints>, DepthU: <DepthUs it builds at>}``, and the date in ``Source``
-    (``rocm-libraries <commit>, YYYY-MM-DD``)."""
+    ``{MatrixInstruction: <9 ints>, DepthU: <DepthUs it builds at>}``, the date in ``Source``
+    (``rocm-libraries <commit>, YYYY-MM-DD``), and the ``Architecture`` and ``GemmType`` headers."""
     with open(path) as f:
         data = yaml.safe_load(f)
     entries = data.get("MatrixInstructions") if isinstance(data, dict) else None
@@ -183,4 +185,6 @@ def load_buildable_list(path: Path) -> BuildableList:
         {tuple(e["MatrixInstruction"]): list(e["DepthU"]) for e in entries if "DepthU" in e},
         list(data.get("DepthU") or []),
         datetime.date.fromisoformat(date.group(1)) if date else None,
+        data.get("Architecture"),
+        data.get("GemmType"),
     )

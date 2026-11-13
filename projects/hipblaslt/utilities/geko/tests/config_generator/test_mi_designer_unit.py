@@ -8,6 +8,7 @@ from pathlib import Path
 
 from geko.config_generator import mi_candidates
 from geko.config_generator import mi_designer as mid
+from geko.config_generator.constants import library_logic_architecture
 from geko.schemas import GemmConfig, GemmType
 
 
@@ -49,8 +50,9 @@ def _write_list(cfg: dict, mis: list, depthu: dict = None, generated: datetime.d
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = "".join(f"  - {{MatrixInstruction: {list(m)}" + (f", DepthU: {depthu[m]}" if m in depthu else "") + "}\n"
                    for m in mis)
+    header = f"Architecture: {library_logic_architecture(cfg['ARCH'])}\nGemmType: {cfg['GemmProblem'].name}\n"
     source = f"Source: rocm-libraries 0123456789, {generated.isoformat()}\n" if generated else ""
-    path.write_text(f"{source}DepthU: [32, 64, 128, 256, 512]\nMatrixInstructions:\n{rows}")
+    path.write_text(f"{header}{source}DepthU: [32, 64, 128, 256, 512]\nMatrixInstructions:\n{rows}")
 
 
 def _mi9(m: mid.MFMA) -> tuple:
@@ -100,6 +102,19 @@ def test_buildable_list_restricts_each_mi_to_its_depthus(monkeypatch, tmp_path: 
     pairs = {(tuple(g["MatrixInstruction"].values), g["DepthU"].values[0]) for g in groups}
     # 16 was never searched, so it stays allowed; c has no recorded DepthUs, so it keeps every offered one.
     assert pairs == {(a, 16), (a, 64), (b, 16), (c, 16), (c, 64), (c, 256)}
+
+
+def test_list_whose_headers_name_another_gemm_type_is_not_used(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = dict(_config(), BUILDABLE_MIS=True)
+    path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
+    every = mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
+    # A list copied to the wrong GEMM type or ARCH: its headers name the one it was generated for.
+    for right, wrong in (("GemmType: HHS_NN", "GemmType: HHS_TN"), ("Architecture: gfx950", "Architecture: gfx942")):
+        _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+        path.write_text(path.read_text().replace(right, wrong))
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+        assert [_mi9(m) for m in valid] == every, wrong
 
 
 def test_generated_lists_read_back_even_when_no_mi_builds(tmp_path: Path) -> None:

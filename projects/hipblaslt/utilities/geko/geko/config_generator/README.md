@@ -169,6 +169,8 @@ setting tried before code generation; the generator prints how many, since valid
 MI Designer warns, with the command that regenerates it, when a list it uses was generated (the UTC date in its
 `Source` line) more than 7 days from today in UTC, or records no date (`BUILDABLE_LIST_MAX_AGE_DAYS` in
 `mi_candidates.py`).
+A list whose `Architecture` and `GemmType` headers differ from the ARCH and GEMM type it was looked up for (e.g. one
+copied to the wrong file) is not used: MI Designer warns and uses every candidate MI.
 Finding where each MI stops building roughly doubles the time.
 On 352 workers: about 7 h for all 96 gfx950 lists, 3 h for the 52 gfx942 lists. Each MI runs in a fresh worker
 process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352

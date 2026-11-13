@@ -187,7 +187,8 @@ class MIDesign:
           gt = self.config["GemmProblem"].gemm_type
           path = buildable_list_path(arch, gemm_name)
           layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
-          generate = (f"python3 scripts/generate_buildable_mis.py --arch {library_logic_architecture(arch)} "
+          target = library_logic_architecture(arch)
+          generate = (f"python3 scripts/generate_buildable_mis.py --arch {target} "
                       f"--types {gt.data_type}:{gt.dest_data_type}:{gt.compute_data_type} --layouts {layout}")
           if gemm_name != gt.gemm_name:
               logger.warning(" No buildable-MI list applies to %s on %s: lists are generated per GEMM type (%s), "
@@ -201,7 +202,11 @@ class MIDesign:
                           "using every candidate MI.", override, path.name)
           else:
               buildable = load_buildable_list(path)
-              if not buildable.mis:
+              if (buildable.arch, buildable.gemm_name) != (target, gemm_name):
+                  logger.warning(" Buildable-MI list %s names Architecture %s and GemmType %s, not %s and %s: using "
+                                 "every candidate MI. Regenerate it (CPU only) with: %s",
+                                 path, buildable.arch, buildable.gemm_name, target, gemm_name, generate)
+              elif not buildable.mis:
                   logger.warning(" Buildable-MI list %s lists no MI: using every candidate MI.", path)
               else:
                   mis = [mi for mi in buildable.mis if list(mi[:4]) in allowable]
