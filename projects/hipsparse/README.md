@@ -114,8 +114,8 @@ The `install.sh` script builds and installs hipSPARSE on Ubuntu with a single co
 > [!NOTE]
 > Building the tests (`install.sh -c`, or the `coverage` and `asan` presets) needs GoogleTest and the
 > SuiteSparse test matrices. Install GoogleTest, for example the `libgtest-dev` package, and run
-> `dvc pull -R clients/matrices` from this directory first (in a sparse checkout, run
-> `git sparse-checkout add .dvc` before that). When you configure with CMake directly,
+> `dvc pull -R clients/matrices` from this directory first. For a sparse checkout, run
+> `git sparse-checkout add .dvc` before running `dvc pull`. When you configure with CMake directly,
 > `-DALLOW_FETCH_DEPS=ON` downloads both instead.
 
 ## Options {#options}
