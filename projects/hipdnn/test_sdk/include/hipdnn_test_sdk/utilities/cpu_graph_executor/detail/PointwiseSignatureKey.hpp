@@ -264,6 +264,10 @@ private:
                                                         PointwiseSignatureKey>& map)
     {
         // Add all implemented unary operations
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
