@@ -420,15 +420,18 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                    rocke_gemm_emit_hook_t before_issue);
 
 /* _emit_frag_smem_load(ctx, src, mn_in_atom, k_in_atom, atom_mn_base,
- * k_tile_base, frag_len): one frag_len-wide operand fragment from a row-major
- * LDS tile (8-wide chunked + vec_concat for wide WMMA frags). */
+ * k_tile_base, frag_len, swz_row): one frag_len-wide operand fragment from a
+ * row-major LDS tile (8-wide chunked + vec_concat for wide WMMA frags).
+ * swz_row is the parity-free row lds_swizzle was keyed on at the store, or
+ * NULL when the swizzle is off. */
 rocke_value_t* rocke_gemm_emit_frag_smem_load(rocke_gemm_build_ctx_t* ctx,
                                               rocke_value_t* src,
                                               rocke_value_t* mn_in_atom,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len);
+                                              int frag_len,
+                                              rocke_value_t* swz_row);
 
 /* _emit_wmma_phase(ctx, A_src, B_src, iter_vars[n], out_accs[n]): one K-tile of
  * WMMA atoms, fully contract-driven. Reads iter_vars (length ctx->num_accs),

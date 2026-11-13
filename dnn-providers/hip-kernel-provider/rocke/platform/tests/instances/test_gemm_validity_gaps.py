@@ -16,9 +16,11 @@ why every other test in this directory missed them.
    counts ``max(AB, C)`` on gfx1250 only, where it has run on silicon.
 
 2. **``lds_swizzle`` was admitted on the WMMA path**, where the store side
-   permutes the LDS column and ``_emit_wmma_phase`` never applies the inverse.
-   It emits, runs fast, and returns wrong answers, so a sweep ranks it as a
-   winner while it is incorrect.
+   permuted the LDS column and ``_emit_wmma_phase`` never applied the inverse.
+   It emitted, ran fast, and returned wrong answers, so a sweep ranked it as a
+   winner while it was incorrect. The WMMA read now applies the same XOR; the
+   gate admits it on gfx1201, where that pairing is verified on silicon, and
+   still rejects it on the other WMMA targets and under TDM.
 
 3. **``tdm`` was admitted on MFMA targets.** The ``has_tdm`` check sat inside
    the ``family == "wmma"`` block, which an MFMA target never enters. Not a
@@ -188,9 +190,8 @@ class TestWmmaRejectsLdsSwizzle(unittest.TestCase):
                 ok, why = is_valid_spec(spec, arch=ARCH)
                 self.assertFalse(
                     ok,
-                    "lds_swizzle is wrong on the WMMA read path (no _swz_col "
-                    "in _emit_wmma_phase) and inert under TDM; it must not be "
-                    "admitted either way",
+                    "lds_swizzle is not verified on gfx1250 WMMA and inert "
+                    "under TDM; it must not be admitted either way",
                 )
                 self.assertIn("lds_swizzle", why)
 
@@ -462,11 +463,15 @@ def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
 CDNA_CSHUFFLE = ((256, 256, 64), (2, 2), (32, 32, 16), "compv3", 64)
 # gfx1151 WMMA, the 16x16x16 atom on the mem pipeline.
 RDNA_WMMA = ((64, 64, 32), (2, 2), (16, 16, 16), "mem", 32)
+# The same RDNA geometry on the double-buffered (compv4) WMMA K loop.
+RDNA_WMMA_COMPV4 = ((64, 64, 32), (2, 2), (16, 16, 16), "compv4", 32)
 
 
 class TestTargetScope(unittest.TestCase):
     """The aliased cshuffle budget is a gfx1250 rule; the WMMA lds_swizzle
-    reject covers every WMMA target (gfx1151 returns wrong outputs with it)."""
+    reject and the WMMA compv4 reject cover every WMMA target except gfx1201,
+    the one where the swizzled read and the double-buffered loop are verified
+    on silicon."""
 
     def test_cdna_keeps_the_summed_cshuffle_budget(self):
         from rocke.instances.common.gemm_universal import is_valid_spec
@@ -484,6 +489,23 @@ class TestTargetScope(unittest.TestCase):
         ok, why = is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
         self.assertFalse(ok)
         self.assertIn("lds_swizzle", why)
+
+    def test_gfx1201_wmma_admits_lds_swizzle(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        self.assertEqual(
+            is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1201"),
+            (True, "ok"),
+        )
+
+    def test_compv4_wmma_is_gfx1201_only(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        spec = _bf16_spec(RDNA_WMMA_COMPV4)
+        self.assertEqual(is_valid_spec(spec, "gfx1201"), (True, "ok"))
+        ok, why = is_valid_spec(spec, "gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("'compv4'", why)
 
 
 class TestAbLoadElemBytesBounds(unittest.TestCase):
