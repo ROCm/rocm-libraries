@@ -1,13 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Real kpack archive loading tests. These open the build-tree .kpack archives
-// and extract known TOC keys to verify end-to-end packing + loading for each
-// supported architecture and kernel variant.
+// Real kpack archive loading tests. These open the .kpack archives -- the
+// build-tree copies, or the installed ones when the build tree is absent (as in
+// TheRock CI) -- and extract known TOC keys to verify end-to-end packing +
+// loading for each supported architecture and kernel variant.
 //
 // The tests use the kpack C API directly (not AsmKpackArchive singleton) so
-// they are independent of the plugin directory resolution and can run as unit
-// tests against the build-tree archives.
+// they are independent of the plugin directory resolution.
 
 #include <rocm_kpack/kpack.h>
 
@@ -16,7 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifndef ASM_KPACK_TEST_DIR
 #error "ASM_KPACK_TEST_DIR must be defined (set via CMake compile definition)"
@@ -152,6 +154,43 @@ TEST(TestAsmKpackLoading, Gfx950FwdHd128)
 TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
 {
     verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
+}
+
+// =============================================================================
+// Packaging guard: the running device's archive must be present
+// =============================================================================
+//
+// The per-kernel tests above skip a missing archive, because an artifact only
+// carries the archives of the arches it was built for. That leaves nothing to
+// notice if packaging drops the archive the engine needs on this device -- the
+// failure mode of ALMIOPEN-2767, where TheRock artifacts shipped no ASM kernels
+// and the suites stayed green. On a gfx942/gfx950 device the archive for that
+// arch must ship, so its absence fails here.
+
+TEST(TestGpuAsmKpackLoading, DeviceArchArchiveIsInstalled)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto arch = hip_kernel_provider_common::getDeviceString(nullptr);
+    std::string tocKey;
+    if(arch == "gfx942")
+    {
+        tocKey = "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co";
+    }
+    else if(arch == "gfx950")
+    {
+        tocKey = "fmha_v3_fwd/fwd_hd128_bf16.co";
+    }
+    else
+    {
+        GTEST_SKIP() << "ASM SDPA ships no kernels for " << arch;
+    }
+
+    const auto path = kpackPath(arch);
+    ASSERT_TRUE(std::filesystem::exists(path))
+        << "ASM SDPA archive for the device arch " << arch << " is missing: " << path;
+
+    verifyKernelExtraction(path, tocKey, arch);
 }
 
 // =============================================================================
