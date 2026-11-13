@@ -308,7 +308,6 @@ Solutions:
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: false
   EnableStinkyTofuESM2: false
-  ExpandPointerSwap: false
   ExpertSchedulingMode: 0
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 2
@@ -409,6 +408,7 @@ Solutions:
   NumWaveSplitK: 1
   NumWaves: 16
   OptNoLoadLoop: 0
+  PGR2DoubleG2L: true
   PackedC0IdxChars: [I]
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
@@ -419,7 +419,9 @@ Solutions:
   ScalarLoadB: 8
   ScalarLoadBPrefetch: 2
   ScheduleGROverBarrier: 0
+  ScheduleGlobalRead: 0
   ScheduleIterAlg: 1
+  ScheduleLocalWrite: 0
   StaggerU: 0
   StaggerUStride: 0
   StoreSwapAddr: false
@@ -526,7 +528,6 @@ Solutions:
   EnableF32XdlMathOp: false
   EnableMatrixInstruction: false
   EnableStinkyTofuESM2: false
-  ExpandPointerSwap: false
   ExpertSchedulingMode: 0
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 2
@@ -627,6 +628,7 @@ Solutions:
   NumWaveSplitK: 1
   NumWaves: 16
   OptNoLoadLoop: 0
+  PGR2DoubleG2L: true
   PackedC0IdxChars: [I]
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
@@ -637,7 +639,9 @@ Solutions:
   ScalarLoadB: 8
   ScalarLoadBPrefetch: 2
   ScheduleGROverBarrier: 0
+  ScheduleGlobalRead: 0
   ScheduleIterAlg: 1
+  ScheduleLocalWrite: 0
   StaggerU: 0
   StaggerUStride: 0
   StoreSwapAddr: false

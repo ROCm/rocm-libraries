@@ -2084,6 +2084,10 @@ class KernelWriterAssembly(KernelWriter):
           # additional definition G2LB2 for swapping register sets
           moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated//2))
 
+      if kernel.get("PGR2DoubleG2L"):
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated))
+        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated))
+
       if kernel["UnrollLoopSwapGlobalReadOrder"] and not kernel["DirectToLdsA"] and not kernel["DirectToLdsB"]:
         if kernel["ULSGRODoubleG2L"] == 0:
           moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LB2", "vgprG2LA_BASE", 0))
@@ -9651,6 +9655,12 @@ class KernelWriterAssembly(KernelWriter):
           # if we exit the main loop at an odd iter - need to swap LDS read pointers
           # so the ds_reads read from the 'high' buffer of LDS
           oddIterPreCode.addComment1("Select high bank of LDS")
+          if kernel.get("PGR2DoubleG2L"):
+            # The last copy read the block the no-global-load loop stores into the second G2L set.
+            oddIterCode.add(SWaitCnt(vlcnt=0, comment="wait for global read before moving it to the first G2L set"))
+            for tc, numG2L in (("A", self.states.a.numVgprG2LAllocated), ("B", self.states.b.numVgprG2LAllocated)):
+              for i in range(numG2L):
+                oddIterCode.add(VMovB32(dst=vgpr("G2L%s+%u"%(tc, i)), src=vgpr("G2L%s2+%u"%(tc, i))))
           # Generate local read address code only if DirectToVgpr is not enabled
           if not kernel["DirectToVgprA"] and not kernel["StoreSwapAddr"]:
             if kernel["ExpertSchedulingMode"] > 0:

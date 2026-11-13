@@ -513,6 +513,22 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
   return True
 
 
+def _pgr2DoubleG2L(state):
+  """True if PrefetchGlobalRead=2 with ExpandPointerSwap alternates between two sets of G2L registers.
+
+  The two loop copies then read into one set and local-write the other, so all reads of a block
+  go out at its top and are stored near the end of the next block. Needs unscheduled global
+  reads and local writes: the reads sit at the top of the block and one wait covers the writes.
+  """
+  pt = state["ProblemType"]
+  return state["PrefetchGlobalRead"] == 2 and state["KernelLanguage"] == "Assembly" \
+    and not state["EnableMatrixInstruction"] and state["_ScheduleIterAlg"] == 1 \
+    and not state["ScheduleGlobalRead"] and not state["ScheduleLocalWrite"] \
+    and not (state["DirectToVgprA"] or state["DirectToVgprB"] or state["DirectToLdsA"] or state["DirectToLdsB"]) \
+    and not (state["1LDSBuffer"] or state["UnrollLoopSwapGlobalReadOrder"] or state["HalfPLR"]) \
+    and not (pt["Sparse"] or pt["MXBlockA"] or pt["MXBlockB"])
+
+
 def _disableUnsupportedRuntimeStaggerU(state):
   # PAP+TDM StaggerU is not implemented (the staggered TDM descriptor isn't carried
   # across the PAP persistent-tile handoff), so force runtime StaggerU off.
@@ -2083,6 +2099,7 @@ class Solution(collections.abc.Mapping):
     if state["PrefetchGlobalRead"] >= 2 and state["ExpandPointerSwap"]:
       # force EPS=0 and continue
       state["ExpandPointerSwap"] = False
+      state["PGR2DoubleG2L"] = False
 
     # does not work with Sparse
     if state["ProblemType"]["Sparse"]:
@@ -3594,13 +3611,17 @@ class Solution(collections.abc.Mapping):
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
 
+    state["PGR2DoubleG2L"] = False
+
     if state["ExpandPointerSwap"]:
       # Pointer swap only used if PGR==1 or (PGR>1 and double/double complex) - so set ExpandPointerSwap=0 here
       # So far, EPS=1 and PGR>1 works only with double/double complex.
       #if not (bufferLoad and state["PrefetchGlobalRead"] == 1):
+      isDouble = state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()
+      # source kernels with unscheduled reads/writes: the loop copies alternate between two G2L sets
+      state["PGR2DoubleG2L"] = bufferLoad and not isDouble and _pgr2DoubleG2L(state)
       if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
-              or (state["PrefetchGlobalRead"] > 1 and \
-                  (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
+              or (state["PrefetchGlobalRead"] > 1 and (isDouble or state["PGR2DoubleG2L"]))
               or (state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]))):
         state["ExpandPointerSwap"] = False
 
@@ -7245,6 +7266,7 @@ class Solution(collections.abc.Mapping):
     # layout so rotation on/off uses the same buffering policy.
     if state["HalfPLR"]:
       state["ExpandPointerSwap"] = False
+      state["PGR2DoubleG2L"] = False
 
     # Resolve paired placement before LDS occupancy, epilogue reuse and MaxLDS checks.
     if state["LDSSegmentBRotate"]:
