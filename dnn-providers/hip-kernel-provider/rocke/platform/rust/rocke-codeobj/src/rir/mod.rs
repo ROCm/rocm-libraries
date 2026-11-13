@@ -30,6 +30,7 @@ pub mod print;
 pub mod reassoc;
 pub mod regalloc;
 mod reload;
+pub(crate) mod remat;
 pub mod unroll;
 mod scan;
 mod scan_line;
@@ -607,6 +608,14 @@ fn schedule_and_allocate(
     }
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
+    if debug_flag("tracepressure") {
+        eprintln!("pressure: sunk {} vgpr {} sgpr; hw {} vgpr; target waves {}", base_pressure.vgprs, base_pressure.sgprs, hw.vgprs, target);
+        regalloc::trace_pressure(sunk, "sunk");
+        for w in [64usize, 32, 16] {
+            let (_, p) = known.schedule(w);
+            eprintln!("pressure: window {w}: {} vgpr {} sgpr", p.vgprs, p.sgprs);
+        }
+    }
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
     let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
@@ -1281,6 +1290,68 @@ pub(crate) fn compile_parsed_by_on(
     threads: usize,
     target: Target,
 ) -> Result<CompiledKernel, CompileError> {
+    // gfx950: a kernel that spills, or runs fewer waves than it could, is compiled again with its
+    // loop-invariant addresses and masks computed where they are used (`remat`), and keeps that
+    // compile when it spills less or, spilling no more, runs more waves. The first compile notes whether
+    // the pass finds anything (`remat::hook`); when it finds nothing there is no second compile.
+    let retry = target == Target::Gfx950 && !debug_flag("noremat") && !remat::enabled() && !remat::off();
+    if retry {
+        remat::reset();
+    }
+    let first = compile_unrolling(text, parse, threads, target);
+    if !retry {
+        return first;
+    }
+    let hardware = target.info().max_vgprs;
+    if first.as_ref().is_ok_and(|u| !remat::could_gain(u.stats.vgprs, u.stats.waves, hardware, spilled(&u.stats) > 0)) {
+        return first;
+    }
+    remat::reset();
+    let second = remat::with(true, || compile_unrolling(text, parse, threads, target));
+    if debug_flag("tracepressure") {
+        eprintln!(
+            "remat retry: {} recomputations; first {:?}, second {:?}",
+            remat::changed(),
+            first.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats))),
+            second.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats)))
+        );
+    }
+    if remat::changed() == 0 {
+        return first;
+    }
+    match (first, second) {
+        (Ok(a), Ok(b)) => Ok(if debug_flag("rematforce") || keeps_remat(&b, &a) { b } else { a }),
+        (Err(_), Ok(b)) => Ok(b),
+        (first, _) => first,
+    }
+}
+
+/// Whether the compile with loop-invariant values recomputed (`recomputed`) is kept over `plain`: it spills less,
+/// or spills no more and runs more waves for at most 3% more instructions, or both are alike and it issues at
+/// least 3% fewer (the dead address chains and AGPR moves it saves). Instructions are counted with each block
+/// weighted by 8 to the power of its loop depth. More waves bought with many more instructions measured slower
+/// (the second level of `rir::remat` that was tried: persist bf16 d64 causal 256x32 at 4 waves and +22%; qbminor d64
+/// causal 128x64 at 3 waves instead of 2 for +6% was 12-13% slower).
+fn keeps_remat(recomputed: &CompiledKernel, plain: &CompiledKernel) -> bool {
+    let (r, p) = (&recomputed.stats, &plain.stats);
+    let weighted = |k: &CompiledKernel| k.func.blocks.iter().map(|b| b.insts.len() as u64 * 8u64.pow(b.loop_depth.min(4))).sum::<u64>();
+    let (wr, wp) = (weighted(recomputed), weighted(plain));
+    if spilled(r) != spilled(p) {
+        return spilled(r) < spilled(p);
+    }
+    if r.waves != p.waves {
+        return r.waves > p.waves && wr * 100 <= wp * 103;
+    }
+    wr * 100 <= wp * 97
+}
+
+/// `compile_parsed_by_on` before its retry with `remat`.
+fn compile_unrolling(
+    text: &str,
+    parse: &dyn Fn(&str) -> Result<ast::Kernel, CompileError>,
+    threads: usize,
+    target: Target,
+) -> Result<CompiledKernel, CompileError> {
     if debug_flag("nounroll") {
         return compile_retrying(text, parse, None, &mut 0, threads, target);
     }
@@ -1537,6 +1608,7 @@ fn compile_with(
         laps.lap("prepare");
         crate::target::gfx9::legalize::run(&mut sel.func);
         crate::target::gfx9::lits::share(&mut sel.func);
+        remat::hook(&mut sel.func, |vgprs| target.info().occupancy(vgprs.max(1), sel.lds_size, kernel.max_workgroup_size));
     } else {
         peephole::optimize(&mut sel.func);
         uniform_masks::reuse_masks(&mut sel.func);

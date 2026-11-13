@@ -694,6 +694,81 @@ fn pressure_of(f: &MFunc, live: &Live) -> Pressure {
     Pressure { vgprs: most(Class::V), sgprs: most(Class::S) }
 }
 
+/// Developer trace (`ROCKE_DIRECT_DEBUG=tracepressure`): per block of `f`
+/// (in the order it stands) the VGPR dwords live after each instruction, and
+/// at the busiest point the live registers by size and defining opcode.
+pub fn trace_pressure(f: &MFunc, label: &str) {
+    let Ok(live) = analyze(f) else { return };
+    let prof = profile(f, &live, Class::V);
+    let mut peak = (0u32, 0usize);
+    for (i, &p) in prof.iter().enumerate() {
+        if p > peak.0 {
+            peak = (p, i);
+        }
+    }
+    let slot = peak.1;
+    let inst_of = |s: usize| s / 2;
+    eprintln!("trace[{label}]: peak {} vgpr dwords at slot {slot} (inst {})", peak.0, inst_of(slot));
+    // Instruction index to (block, position).
+    let mut def_op: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    for blk in &f.blocks {
+        for inst in &blk.insts {
+            for d in &inst.defs {
+                if let Opnd::R(v) = d {
+                    def_op.entry(v.reg).or_insert_with(|| format!("{:?}", inst.op));
+                }
+            }
+        }
+    }
+    let mut by_kind: std::collections::BTreeMap<String, (u32, u32)> = std::collections::BTreeMap::new();
+    for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
+        let mut n = 0;
+        for u in live.base[v]..live.base[v + 1] {
+            if live.segs(u).iter().any(|&(s, e)| (s as usize) <= slot && slot <= e as usize) {
+                n += 1;
+            }
+        }
+        if n > 0 {
+            let key = def_op.get(&(v as u32)).cloned().unwrap_or_else(|| "-".into());
+            let e = by_kind.entry(key).or_default();
+            e.0 += n;
+            e.1 += 1;
+        }
+    }
+    for (k, (dw, regs)) in &by_kind {
+        eprintln!("trace[{label}]:   {k}: {dw} dwords in {regs} registers");
+    }
+    // Pressure curve of the block holding the peak, every 16th instruction.
+    let first = &live.first;
+    let blk = (0..first.len() - 1).find(|&b| (first[b] as usize) <= inst_of(slot) && inst_of(slot) < first[b + 1] as usize).unwrap_or(0);
+    eprintln!("trace[{label}]: peak block {blk} insts {}..{}", first[blk], first[blk + 1]);
+    if let Some(path) = std::env::var_os("ROCKE_DIRECT_TRACE_FILE") {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let fmt = |o: &Opnd| match o {
+            Opnd::R(v) => format!("v{}.{}.{}", v.reg, v.off, v.n),
+            Opnd::P(p, n) => format!("p{}", phys_name(*p, *n)),
+            Opnd::Imm(x) => format!("#{x}"),
+        };
+        let mut i = 0usize;
+        for (b, blk) in f.blocks.iter().enumerate() {
+            let _ = writeln!(out, "block {b}");
+            for inst in &blk.insts {
+                let d: Vec<String> = inst.defs.iter().map(fmt).collect();
+                let u: Vec<String> = inst.uses.iter().map(fmt).collect();
+                let _ = writeln!(out, "{i}\t{}\t{:?}\t{} <- {}\timm={}", prof[2 * i], inst.op, d.join(","), u.join(","), inst.imm);
+                i += 1;
+            }
+        }
+        let _ = std::fs::write(path, out);
+    }
+    let mut line = String::new();
+    for i in (first[blk] as usize..first[blk + 1] as usize).step_by(16) {
+        line.push_str(&format!("{} ", prof[2 * i]));
+    }
+    eprintln!("trace[{label}]: curve {line}");
+}
+
 /// The most VGPR and SGPR dwords live at one point of `f`: every assignment
 /// uses at least that many registers. Counts the live units slot by slot,
 /// as `profile` does over `analyze`'s segments, without building them.
