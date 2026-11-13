@@ -127,7 +127,8 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(ArchName, std::string)
+    X(ArchName, std::string)                      \
+    X(LowerViaLogicalIR, bool)
 
 // Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
 // WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which

@@ -392,6 +392,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT = 1018, /**<Scaling factors are 8-bit ``R_8F_UE8M0`` values, one for each 32-element block in the K dimension, shuffled in tiles of 128 rows by 4 blocks. For an operand with ``R`` rows (M for A, N for B), the scale of row ``r`` and K block ``kb`` is at byte ``((s*(R/128) + r/128)*64 + 16*g + r%16)*8 + (r%128)/16``, where ``s = kb/4`` and ``g = kb%4``. ``R`` must be a multiple of 128 and the number of K blocks a multiple of 4. Supported for ``HIP_R_6F_E2M3`` and ``HIP_R_6F_E3M2`` A and B only, on both A and B together, with ``HIPBLASLT_ORDER_COL256_R128_EXT`` on A and on B or ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLAS_OP_T`` for A and ``HIPBLAS_OP_N`` for B. Solutions are specific to an architecture and to exact problem sizes, and need beta = 0, which hipblasLtMatmulAlgoGetHeuristic() does not assume: query them with the extension API's heuristic. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
@@ -534,7 +535,20 @@ typedef enum {
    */
   HIPBLASLT_ORDER_COL16_4R8 = 101,
   HIPBLASLT_ORDER_COL16_4R4 = 102,
-  HIPBLASLT_ORDER_COL16_4R2 = 103
+  HIPBLASLT_ORDER_COL16_4R2 = 103,
+  /**
+   * 6-bit data (``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``) ordered in tiles of 256 columns and 128 rows,
+   * column tiles outermost. Column ``c`` stores its rows as a 6-bit bitstream, least significant bit
+   * first. A tile holds two planes: the first 16 bytes of each 32-row group of each column, then the
+   * last 8. With ``rows`` the number of rows, ``ct = c/256``, ``rt = row/128``, ``kg = (row%128)/32``
+   * and ``o = 64*((c%256)/16) + 16*kg + c%16``, the tile starts at byte
+   * ``(ct*(rows/128) + rt)*24576``; byte ``j`` of the group's 24 is at ``16*o + j`` for ``j < 16`` and
+   * at ``16384 + 8*o + (j - 16)`` otherwise. The number of columns (rows) has to be a multiple of
+   * 256 (128), and the leading dimension has to equal the number of rows. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this order or in
+   * ``HIPBLASLT_ORDER_COL``.
+   */
+  HIPBLASLT_ORDER_COL256_R128_EXT = 104
 } hipblasLtOrder_t;
 
 /** Matrix transform descriptor attributes to define details of the operation.
