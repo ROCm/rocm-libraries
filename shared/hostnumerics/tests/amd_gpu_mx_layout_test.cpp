@@ -108,11 +108,23 @@ TEST(MxScaleStoragePlanTest, RejectsZeroTileWidthAndOverflow) {
 // ============================================================================
 
 TEST(MxScaleStorageCopyTest, CopiesNaturalStorage) {
-    const auto emptyPlan = MxScaleStoragePlan::natural({0, 0});
-    EXPECT_TRUE(copyMxScaleStorageToPhysicalLayout(nullptr, 0, emptyPlan).empty());
-
     const std::vector<uint8_t> natural{1, 2, 3, 0, 4, 5, 6, 0};
     EXPECT_EQ(integers(copyScales(natural, MxScaleStoragePlan::natural({2, 4}))), natural);
+}
+
+TEST(MxScaleStorageCopyTest, EmptyPresetsAcceptNullStorage) {
+    for (const auto shape : {std::array<size_t, 2>{0, 0}, {0, 3}, {3, 0}}) {
+        SCOPED_TRACE(::testing::PrintToString(shape));
+        EXPECT_TRUE(
+            copyMxScaleStorageToPhysicalLayout(nullptr, 0, MxScaleStoragePlan::natural(shape))
+                .empty());
+        EXPECT_TRUE(
+            copyMxScaleStorageToPhysicalLayout(nullptr, 0, MxScaleStoragePlan::tile32x8(shape))
+                .empty());
+        EXPECT_TRUE(copyMxScaleStorageToPhysicalLayout(
+                        nullptr, 0, MxScaleStoragePlan::fastDimensionTiles(shape, 4))
+                        .empty());
+    }
 }
 
 TEST(MxScaleStorageCopyTest, RejectsStorageThatDoesNotMatchThePlan) {
