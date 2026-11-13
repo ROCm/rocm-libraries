@@ -529,6 +529,9 @@ def b_rotate_reason(state, persistent=False):
         else:
             return "MX: needs MatrixInstN == WavefrontSize/2 or WavefrontSize"
     if pt.get("Sparse"):                                      return "sparse not supported"
+    # The swizzled-TDM B read (LocalRead._localReadSwizzledTDM) does not pick LocalReadAddrB+h per rotated
+    # half. Today swizzle-B LSI (VWB >= WaveTileB) already excludes B-rotate (WaveTileB/VWB even); keep it explicit.
+    if pt.get("SwizzleTensorA") or pt.get("SwizzleTensorB"): return "SwizzleTensor not supported"
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
                 "PrefetchAcrossPersistent", "TDMFuse"):
