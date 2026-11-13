@@ -1615,9 +1615,8 @@ __device__ inline void v6_phase_block_nchw(const T* __restrict__ A,
 // A lane computes a TH x TW output tile of CPL adjacent channels; a block is 64 lanes over the
 // channel groups of one spatial tile (grid: W tiles, channel blocks, N x H tiles), so every
 // address and predicate except the channel is wave-uniform. The tile's (TH-1)*S+KH input rows
-// are streamed ((TW-1)*S+KW pixels each; the next row's loads in flight during this row's
-// FMAs), each added into every output row whose filter row it is, so two input rows are live.
-// Per output the taps add in (ky, kx) order, as in the other cores. Compile-time KH/KW and
+// are streamed ((TW-1)*S+KW pixels each), each added into every output row whose filter row it
+// is. Per output the taps add in (ky, kx) order, as in the other cores. Compile-time KH/KW and
 // stride S (both axes), unit dilation, C % CPL == 0.
 //
 // x and y go through one buffer resource per row, based at the row's start (a 64-bit scalar)
@@ -1701,6 +1700,48 @@ __device__ inline void dwRowStore(__amdgpu_buffer_rsrc_t r, unsigned off, const 
     }
 }
 
+/// Row ih of image n (SW pixels at the lane offsets xo) as FMA operands; a row outside the image
+/// reads zeros (a resource with no records).
+template <typename T, int SW, int CPL>
+__device__ inline void dwRowtileLoadRow(const T* __restrict__ A,
+                                        const ValuParams& p,
+                                        int n,
+                                        int ih,
+                                        unsigned rowBytes,
+                                        const unsigned (&xo)[SW],
+                                        typename DwOperand<T>::type (&row)[SW][CPL])
+{
+    const bool vy = dwIn(ih, p.Hi);
+    const __amdgpu_buffer_rsrc_t xr
+        = dwRsrc(A + ((long)n * p.Hi + (vy ? ih : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
+#pragma unroll
+    for(int sx = 0; sx < SW; ++sx)
+        dwRowLoad<T, CPL>(xr, xo[sx], row[sx]);
+}
+
+/// Input row r of the tile into every output row whose filter row it is.
+template <int KH, int KW, int TH, int TW, int CPL, int S, typename Op>
+__device__ inline void dwRowtileFmas(float (&acc)[CPL][TH][TW],
+                                     const Op (&w)[CPL][KH][KW],
+                                     const Op (&row)[(TW - 1) * S + KW][CPL],
+                                     int r)
+{
+#pragma unroll
+    for(int ty = 0; ty < TH; ++ty)
+    {
+        const int ky = r - ty * S;
+        if(ky < 0 || ky >= KH)
+            continue;
+#pragma unroll
+        for(int kx = 0; kx < KW; ++kx)
+#pragma unroll
+            for(int tx = 0; tx < TW; ++tx)
+#pragma unroll
+                for(int c = 0; c < CPL; ++c)
+                    acc[c][ty][tx] = dwFma(w[c][ky][kx], row[tx * S + kx][c], acc[c][ty][tx]);
+    }
+}
+
 template <typename T, int KH, int KW, int TH, int TW, int CPL, int S>
 __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
                                             const T* __restrict__ Wt,
@@ -1753,58 +1794,38 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
 #pragma unroll
     for(int sx = 0; sx < SW; ++sx)
         xo[sx] = static_cast<unsigned>((iw0 + sx) * p.C + k0) * EB;
-    // The rows: each one's loads issue before the previous row's FMAs (two rows live), and a
-    // scheduling fence after each row's FMAs keeps the rows streamed (without it every row's
-    // loads are hoisted and stay live). The next row lands in its own array and is copied over:
-    // a two-slot ring indexed by r & 1 (with a lambda for the row resource) compiles to the same
-    // code but crashed instruction selection in one config (f16 7x7 7x7 vec 2) with the pinned
-    // nightly HIPRTC.
+    // The rows, streamed: a scheduling fence after each row's FMAs keeps the rows apart (without
+    // it every row's loads are hoisted and stay live). On wave64 (CDNA) each row's loads issue
+    // before the previous row's FMAs, two rows live; on wave32 (RDNA) after them, one row live,
+    // which measured faster there (the f32 rows run at 85-92% of DRAM bandwidth on gfx1201, and
+    // the second row costs waves). The prefetched row lands in its own array and is copied over:
+    // a two-slot ring indexed by r & 1 compiles to the same code but crashed instruction
+    // selection in one config (f16 7x7 7x7 vec 2) with the pinned nightly HIPRTC.
     constexpr int R = (TH - 1) * S + KH;
+    constexpr bool PREFETCH = DW_WAVE == 64;
     Op cur[SW][CPL];
-    {
-        const bool vy = dwIn(ih0, p.Hi);
-        const __amdgpu_buffer_rsrc_t xr
-            = dwRsrc(A + ((long)n * p.Hi + (vy ? ih0 : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
-#pragma unroll
-        for(int sx = 0; sx < SW; ++sx)
-            dwRowLoad<T, CPL>(xr, xo[sx], cur[sx]);
-    }
+    dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0, rowBytes, xo, cur);
 #pragma unroll
     for(int r = 0; r < R; ++r)
     {
         Op nxt[SW][CPL];
-        if(r + 1 < R)
-        {
-            const int ih = ih0 + r + 1;
-            const bool vy = dwIn(ih, p.Hi);
-            const __amdgpu_buffer_rsrc_t xr
-                = dwRsrc(A + ((long)n * p.Hi + (vy ? ih : 0)) * p.Wi * p.C, vy ? rowBytes : 0);
-#pragma unroll
-            for(int sx = 0; sx < SW; ++sx)
-                dwRowLoad<T, CPL>(xr, xo[sx], nxt[sx]);
-        }
-#pragma unroll
-        for(int ty = 0; ty < TH; ++ty)
-        {
-            const int ky = r - ty * S;
-            if(ky < 0 || ky >= KH)
-                continue;
-#pragma unroll
-            for(int kx = 0; kx < KW; ++kx)
-#pragma unroll
-                for(int tx = 0; tx < TW; ++tx)
-#pragma unroll
-                    for(int c = 0; c < CPL; ++c)
-                        acc[c][ty][tx] = dwFma(w[c][ky][kx], cur[tx * S + kx][c], acc[c][ty][tx]);
-        }
+        if constexpr(PREFETCH)
+            if(r + 1 < R)
+                dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0 + r + 1, rowBytes, xo, nxt);
+        dwRowtileFmas<KH, KW, TH, TW, CPL, S>(acc, w, cur, r);
         __builtin_amdgcn_sched_barrier(0);
         if(r + 1 < R)
         {
+            if constexpr(PREFETCH)
+            {
 #pragma unroll
-            for(int sx = 0; sx < SW; ++sx)
+                for(int sx = 0; sx < SW; ++sx)
 #pragma unroll
-                for(int c = 0; c < CPL; ++c)
-                    cur[sx][c] = nxt[sx][c];
+                    for(int c = 0; c < CPL; ++c)
+                        cur[sx][c] = nxt[sx][c];
+            }
+            else
+                dwRowtileLoadRow<T, SW, CPL>(A, p, n, ih0 + r + 1, rowBytes, xo, cur);
         }
     }
 
