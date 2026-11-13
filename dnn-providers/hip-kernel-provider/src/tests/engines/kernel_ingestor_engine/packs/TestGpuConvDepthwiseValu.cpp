@@ -673,7 +673,10 @@ const std::vector<std::array<int64_t, 4>>& hankelSchedules()
                                                                  {32, 1, 2, 2},
                                                                  {16, 2, 1, 2},
                                                                  {16, 2, 2, 1},
-                                                                 {16, 1, 2, 2}};
+                                                                 {16, 1, 2, 2},
+                                                                 {16, 4, 1, 2},
+                                                                 {16, 4, 1, 1},
+                                                                 {32, 4, 1, 1}};
     return s_schedules;
 }
 

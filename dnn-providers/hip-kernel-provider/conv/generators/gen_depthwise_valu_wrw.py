@@ -45,8 +45,8 @@ CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
 # Depth multiplier 2 (two output channels per input channel; VALU variants only): the floor and
 # the common 2-D tiles.
 CONFIGS += [dict(c, mult=2) for c in CONFIGS if c["kd"] in (0, 1) and c["kh"] != 1]
-# Matrix core (gfx908 fp16, gfx90a / gfx942 / gfx950 fp16 and bf16; channels-last 16-bit, unit
-# stride): the schedules that won somewhere on gfx950's ConvNeXt / EfficientNet / MobileNet
+# Matrix core (gfx908 fp16, gfx90a / gfx942 / gfx950 fp16 and bf16; channels-last 16-bit,
+# stride 1 or 2): the schedules that won somewhere on gfx950's ConvNeXt / EfficientNet / MobileNet
 # shapes (q, g, nwg, bpc).
 HANKEL_SCHEDULES = (
     (32, 1, 1, 2),
@@ -57,6 +57,11 @@ HANKEL_SCHEDULES = (
     (16, 2, 1, 2),
     (16, 2, 2, 1),
     (16, 1, 2, 2),
+    # Four input rows a step (more loads in flight): ConvNeXt 7x7 and EfficientNet 3x3 on
+    # gfx950, 5-10% over two.
+    (16, 4, 1, 2),
+    (16, 4, 1, 1),
+    (32, 4, 1, 1),
 )
 # Stride 2 (both axes; EfficientNet / MobileNet downsampling layers) stages each x row as its
 # even and odd columns: the same schedules.
