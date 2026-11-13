@@ -12,6 +12,8 @@ Documentation for hipFFT is available at
   calls `hipDeviceEnablePeerAccess`. The copy uses `hipMemcpyPeerAsync`. The
   runtime stages through host memory when the devices cannot access each other.
 
+* Fixed the public headers to work in a pure-C (not C++) program.
+
 ## hipFFT 1.0.27 for ROCm 10.2
 
 ### Changed
