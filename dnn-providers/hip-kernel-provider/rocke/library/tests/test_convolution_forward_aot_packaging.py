@@ -514,6 +514,10 @@ def test_profile_dispatch_resolves_the_problem_including_grouped_pointwise():
     assert supports_gfx950_conv_fwd_aot_problem(problem) == (True, "ok")
     with pytest.raises(ValueError, match="2D"):
         gfx950_conv_fwd_aot_problem_for_request(replace(request, Di=4, Z=1))
+    with pytest.raises(ValueError, match="fp16 or bf16"):
+        gfx950_conv_fwd_aot_problem_for_request(replace(request, dtype="BF16"))
+    with pytest.raises(ValueError, match="NHWC"):
+        gfx950_conv_fwd_aot_problem_for_request(replace(request, layout="nhwc"))
 
 
 # ---- Runtime selection: which serving instances run ----
