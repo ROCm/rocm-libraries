@@ -40,7 +40,7 @@ def packed(tmp_path_factory, rocm_kpack_dir):
         source_root=FIXTURE,
         arches=[ARCH, GENERIC_MEMBER],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="hip-compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         source_label="slotted-hsaco-test",

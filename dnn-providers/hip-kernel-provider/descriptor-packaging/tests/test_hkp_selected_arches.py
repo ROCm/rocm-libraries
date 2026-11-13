@@ -4,7 +4,7 @@ Runs the real function from HkpPackaging.cmake under ``cmake -P``, so the regex,
 operator precedence and the warning are exercised as CMake evaluates them. The only
 spelling this must keep apart is a concrete target (gfx1250-strict) versus the family and
 generic names that merely look like one (gfx950-dcgpu, gfx11-generic): the first becomes a
-shard and reaches ``hipcc --offload-arch``, the second must be dropped with a warning.
+shard and reaches ``--offload-arch``, the second must be dropped with a warning.
 """
 
 import subprocess

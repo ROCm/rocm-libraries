@@ -21,7 +21,14 @@ from pack_helpers import (
 
 # --- Mixed hip+rocke integration (comgr-gated) -----------------------------
 def test_mixed_hip_rocke_one_kpack_per_arch(
-    tmp_path, main_fixture, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    main_fixture,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     # Two child folders under ONE root -> one kpack per arch holding BOTH kinds.
     # Producer selection is per-UKD on kernel_source.kind.
@@ -29,7 +36,15 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
     _nest(root, "hip/pointwise", main_fixture)
     _nest(root, "rocKE/attention", rocke_fixture)
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ROCKE_ARCH])
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ROCKE_ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     out = tmp_path / "out" / ROCKE_ARCH
     kpack_path = out / "kpack" / f"hip_kernel_provider_{ROCKE_ARCH}.kpack"
     assert kpack_path.exists()
@@ -73,7 +88,12 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
 
 # --- The shipped example tree, both producers ------------------------------
 def test_example_tree_packs_both_producers(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """The in-repo example tree must actually drive both producers end to end.
 
@@ -86,7 +106,9 @@ def test_example_tree_packs_both_producers(
         source_root=EXAMPLE_ROOT,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -114,7 +136,12 @@ def test_example_tree_packs_both_producers(
 
 
 def test_example_tree_keeps_both_shared_filenames(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """The example tree deliberately reuses `shared.umd.json` across its two
     child folders. A flat packer drops one silently; path preservation keeps
@@ -124,7 +151,9 @@ def test_example_tree_keeps_both_shared_filenames(
         source_root=EXAMPLE_ROOT,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -136,13 +165,18 @@ def test_example_tree_keeps_both_shared_filenames(
 
 # --- Toolchain provenance, both producers ----------------------------------
 def test_provenance_records_the_toolchain_that_built_each_kernel(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """Authored fields say what was asked for; these say what answered.
 
     Without them two builds of byte-identical descriptors are indistinguishable
-    after the fact, even though a hipcc, comgr, or rocKE wheel change may be the
-    whole difference between them.
+    after the fact, even though a compiler, comgr, or rocKE wheel change may be
+    the whole difference between them.
     """
     stamp = tmp_path / "wheels.sha256"
     stamp.write_text("deadbeefcafe\n", encoding="utf-8")
@@ -151,7 +185,9 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
         source_root=EXAMPLE_ROOT,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         rocke_wheel_stamp=stamp,
@@ -165,7 +201,7 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
             by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]
 
     # hip records the compiler that ran.
-    assert "hipcc_version" in by_kind["hip"]
+    assert "hip_version" in by_kind["hip"]
     # rocke records the comgr that was actually LOADED (not merely requested --
     # rocke falls through an unloadable override silently) and the wheel digest
     # the build keyed its staleness on.
@@ -173,5 +209,5 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
     assert by_kind["rocke"]["comgr_path"]
 
     # Producer-specific fields must not bleed across.
-    assert "hipcc_version" not in by_kind["rocke"]
+    assert "hip_version" not in by_kind["rocke"]
     assert "comgr_path" not in by_kind["hip"]

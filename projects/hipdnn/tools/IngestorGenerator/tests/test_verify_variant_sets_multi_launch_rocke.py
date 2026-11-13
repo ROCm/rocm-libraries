@@ -7,12 +7,12 @@ compiler.
 The two packaging fixtures (`multi_launch_decode_merge`, `multi_launch_same_kernel_twice`)
 are packed here with rocke and libamd_comgr, and the gate reads the result: every launch's
 code object is fetched from the archive and checked against that launch's compiler
-evidence. A machine without rocke, comgr or hipcc FAILS these tests rather than skipping
+evidence. A machine without rocke, comgr or a HIP compiler FAILS these tests rather than skipping
 them, the way the packaging suite's `tests/rocke/conftest.py` does: nothing here is
-meaningful without the real compiler.
+meaningful without the real HIP compiler (clang++).
 
 The environment is the packaging suite's: HIPKERNELPROVIDER_ROCM_KPACK_DIR (the rocm_kpack
-python directory), HKP_HIPCC, and PYTHONPATH holding the packer's python directory.
+python directory), HKP_HIP_COMPILER, and PYTHONPATH holding the packer's python directory.
 """
 
 from __future__ import annotations
@@ -49,10 +49,16 @@ FIXTURES = _DESCRIPTOR_PACKAGING / "tests" / "fixtures"
 
 
 @pytest.fixture(scope="session")
-def hipcc():
-    exe = os.environ.get("HKP_HIPCC") or shutil.which("hipcc")
+def hip_compiler():
+    exe = (
+        os.environ.get("HKP_HIP_COMPILER")
+        or shutil.which("amdclang++")
+        or shutil.which("clang++")
+    )
     if not exe:
-        pytest.fail("hipcc not found (set HKP_HIPCC or put hipcc on PATH)")
+        pytest.fail(
+            "HIP compiler not found (set HKP_HIP_COMPILER or put amdclang++/clang++ on PATH)"
+        )
     return exe
 
 
@@ -72,13 +78,13 @@ def rocke_available():
         )
 
 
-def _pack(fixture: str, tmp_path: Path, hipcc: str) -> Path:
+def _pack(fixture: str, tmp_path: Path, hip_compiler: str) -> Path:
     out = tmp_path / "out"
     run_pipeline(
         source_root=FIXTURES / fixture,
         arches=[ARCH],
         out_root=out,
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=_KPACK_DIR,
         inter_root=tmp_path / "inter",
     )
@@ -118,18 +124,18 @@ def _corrupt_kdp(root: Path, edit) -> None:
     "fixture", ["multi_launch_decode_merge", "multi_launch_same_kernel_twice"]
 )
 def test_the_gate_passes_a_packed_multi_launch_bundle(
-    tmp_path, capsys, hipcc, rocke_available, fixture
+    tmp_path, capsys, hip_compiler, rocke_available, fixture
 ):
-    root = _pack(fixture, tmp_path, hipcc)
+    root = _pack(fixture, tmp_path, hip_compiler)
     code, output = _gate_full(root, tmp_path, capsys)
     assert code == 0, output
     assert "GATE PASSED" in output
 
 
 def test_a_launch_whose_archive_member_is_missing_is_named(
-    tmp_path, capsys, hipcc, rocke_available
+    tmp_path, capsys, hip_compiler, rocke_available
 ):
-    root = _pack("multi_launch_decode_merge", tmp_path, hipcc)
+    root = _pack("multi_launch_decode_merge", tmp_path, hip_compiler)
 
     def drop_member(sources):
         sources["merge"]["toc_key"] = "no_such_member"
@@ -142,11 +148,11 @@ def test_a_launch_whose_archive_member_is_missing_is_named(
 
 
 def test_launches_whose_symbols_are_swapped_fail_naming_their_launches(
-    tmp_path, capsys, hipcc, rocke_available
+    tmp_path, capsys, hip_compiler, rocke_available
 ):
     """Each launch's entry is checked against its own compiler evidence, so a
     descriptor that points `decode` at the merge kernel cannot pass."""
-    root = _pack("multi_launch_decode_merge", tmp_path, hipcc)
+    root = _pack("multi_launch_decode_merge", tmp_path, hip_compiler)
 
     def swap(sources):
         sources["decode"]["symbol"], sources["merge"]["symbol"] = (

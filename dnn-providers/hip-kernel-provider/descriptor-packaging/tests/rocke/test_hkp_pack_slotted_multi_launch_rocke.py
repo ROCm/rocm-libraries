@@ -24,7 +24,14 @@ SLOTS = ("prep", "dkdv", "dq")
 
 
 @pytest.fixture(scope="module")
-def packed(tmp_path_factory, hipcc, rocm_kpack_dir, rocke_available):
+def packed(
+    tmp_path_factory,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+):
     tmp_path = tmp_path_factory.mktemp("slotted_multi_launch")
     override = os.environ.get("HKP_PACK_OUTPUT_DIR")
     out = Path(override) / FIXTURE.name if override else tmp_path / "out"
@@ -34,7 +41,9 @@ def packed(tmp_path_factory, hipcc, rocm_kpack_dir, rocke_available):
         source_root=FIXTURE,
         arches=[ARCH],
         out_root=out,
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -105,24 +114,28 @@ def _bound_dkdv_root(tmp_path, merge_head_size):
     return root
 
 
-def _pack_root(root, tmp_path, hipcc, rocm_kpack_dir):
+def _pack_root(
+    root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path=None, device_lib_path=None
+):
     run_pipeline(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
 
 
 def test_every_launch_of_a_slot_pack_is_observed_against_the_slot_kmd(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir, rocke_available
 ):
     # Two distinct variants in one slot pack, each compiled and each agreeing with the
     # declared `head_size`: both launches' observations must have been requested.
     root = _bound_dkdv_root(tmp_path, merge_head_size=128)
-    _pack_root(root, tmp_path, hipcc, rocm_kpack_dir)
+    _pack_root(root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path, device_lib_path)
 
     ukd = read_shipped(tmp_path / "out" / ARCH / "dkdv.kdp.json")["kernelDescriptors"][
         0
@@ -132,7 +145,7 @@ def test_every_launch_of_a_slot_pack_is_observed_against_the_slot_kmd(
 
 
 def test_a_slot_pack_launch_that_disagrees_with_the_slot_metadata_fails_the_pack(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir, rocke_available
 ):
     # The merge launch compiles at head_size 64 while the slot's metadata says 128;
     # the decode launch alone agrees, so a walk that stopped after the first launch
@@ -140,4 +153,6 @@ def test_a_slot_pack_launch_that_disagrees_with_the_slot_metadata_fails_the_pack
     root = _bound_dkdv_root(tmp_path, merge_head_size=64)
 
     with pytest.raises(HkpPackError, match=r"launch 'merge'.*disagrees"):
-        _pack_root(root, tmp_path, hipcc, rocm_kpack_dir)
+        _pack_root(
+            root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path, device_lib_path
+        )

@@ -2,7 +2,7 @@
 
 Two launches name two kernels of one translation unit built once; the packed UKD carries
 no compiler evidence, so the assertion applies the structural per-launch checks alone.
-Real hipcc compile.
+Real HIP compiler compile.
 """
 
 import json
@@ -14,8 +14,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     ARCH,
     comgr_lib,
     derive_and_pack,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     hip_source,
-    hipcc,
     read_packed,
     rocm_kpack_dir,
     run_assert,
@@ -64,10 +66,18 @@ def _hip_sources_root(dst):
 
 
 @pytest.fixture(scope="module")
-def hip_sources_probe(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def hip_sources_probe(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("hip_sources_probe")
     return derive_and_pack(
-        _hip_sources_root(work / "src"), work, rocm_kpack_dir, hipcc, comgr_lib
+        _hip_sources_root(work / "src"),
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 

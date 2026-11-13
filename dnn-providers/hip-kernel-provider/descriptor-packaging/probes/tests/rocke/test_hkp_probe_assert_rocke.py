@@ -7,7 +7,9 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     ARCH,
     STAMP_NAME,
     comgr_lib,
-    hipcc,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     packed_root,
     read_packed,
     rocm_kpack_dir,
@@ -230,7 +232,7 @@ def test_hip_kind_needs_no_rocke_provenance(tree):
     # A hip UKD records neither the wheel digest nor comgr; stripping them from a
     # UKD expected as hip must not fail.
     def as_hip(u):
-        u["provenance"] = {"origin_kind": "hip", "hipcc_version": "test"}
+        u["provenance"] = {"origin_kind": "hip", "hip_version": "test"}
 
     tree.mutate_ukd(as_hip)
     tree.write_expect([tree.entry(kind="hip")])
