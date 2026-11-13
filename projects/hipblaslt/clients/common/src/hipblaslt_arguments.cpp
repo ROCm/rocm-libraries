@@ -41,8 +41,11 @@
 #include <tuple>
 #include <utility>
 
-void hipblaslt_bench_options::apply_strict_verification(Arguments& arg)
+void hipblaslt_bench_options::apply_to(Arguments& arg)
 {
+    if(arg.uniform_summation_order < 0)
+        arg.uniform_summation_order = uniform_summation_order();
+
     if(verify_strict())
     {
         arg.norm_check     = 1;

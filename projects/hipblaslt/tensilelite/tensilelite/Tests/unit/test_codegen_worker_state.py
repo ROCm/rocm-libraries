@@ -1,0 +1,188 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Codegen in a worker process must leave the solutions as in-process codegen does.
+
+writeSolutionsAndKernels generates the kernels with ParallelMap2. In-process (one process,
+e.g. CpuThreads: 1) the kernel objects are the solutions themselves, so whatever codegen writes
+onto a kernel lands on its solution. In a worker the kernel is a pickled copy: only what
+passPostKernelInfoToSolution copies back from the KernelCodeGenResult reaches the solutions,
+and from them Data/*.yaml.
+
+Both ways are run here on kernels of real configs and the complete state of every solution
+(all attributes, compared deeply) must match, so a value codegen writes onto the kernel that
+the copy-back misses fails the test, not only the ones known when it was written (LdsNumBytes
+from the subtile LDS layout, LoopIters from ForceUnrollSubIter, _subtileUnitScaleVgpr from
+plain-FP8 subtile kernels, LdsOffsetBias from the GlobalSplitU epilogue), and a key the
+copy-back adds although in-process codegen would not (custom kernels have none of these).
+"""
+
+import enum
+import pickle
+
+import pytest
+
+from codegen_harness import _init_rocisa_for, run_where_backend_matches_isa
+from config_harness import (
+    _isolated_globals_with_isa,
+    _load_config,
+    _solutions_from_config_unguarded,
+    _toolchain_for,
+)
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.BenchmarkProblems import _generateCustomKernelSolutions
+from tensilelite.BenchmarkStructs import BenchmarkProcess
+from tensilelite.Common.Types import DebugConfig, makeDebugConfig
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.create_library.run import (
+    groupKernelRecords,
+    passPostKernelInfoToSolution,
+    processKernelSource,
+)
+
+pytestmark = pytest.mark.unit
+
+_COMMON = "tensilelite/Tests/common/"
+
+# Toolchain objects every solution shares by reference; they are not solution state and are
+# not serialized.
+_SHARED_ATTRS = {"assembler", "isaInfoMap"}
+
+
+def _flatten(obj, path, out, seen):
+    """Record every leaf of ``obj`` as ``out[path] = repr``, following containers and object
+    attributes (``__dict__`` and ``__slots__``)."""
+    if obj is None or isinstance(obj, (bool, int, float, str, bytes, enum.Enum)):
+        out[path] = repr(obj)
+        return
+    if id(obj) in seen:
+        out[path] = "<cycle>"
+        return
+    seen = seen | {id(obj)}
+    if isinstance(obj, dict):
+        out[path] = "dict"
+        items = [(repr(key), value) for key, value in obj.items()]
+    elif isinstance(obj, (list, tuple)):
+        out[path] = "%s[%d]" % (type(obj).__name__, len(obj))
+        items = [(str(index), value) for index, value in enumerate(obj)]
+    elif isinstance(obj, (set, frozenset)):
+        out[path] = repr(sorted(repr(value) for value in obj))
+        return
+    else:
+        attrs = dict(getattr(obj, "__dict__", {}))
+        for cls in type(obj).__mro__:
+            for slot in getattr(cls, "__slots__", ()):
+                if hasattr(obj, slot):
+                    attrs[slot] = getattr(obj, slot)
+        if not attrs:
+            out[path] = repr(obj)
+            return
+        out[path] = type(obj).__name__
+        items = [(key, value) for key, value in attrs.items() if key not in _SHARED_ATTRS]
+    for key, value in items:
+        _flatten(value, "%s/%s" % (path, key), out, seen)
+
+
+def _solutionStates(solutions):
+    out = {}
+    for index, solution in enumerate(solutions):
+        _flatten(solution, str(index), out, frozenset())
+    return out
+
+
+def _codegen(solutions, assembler, inWorker):
+    """The codegen + copy-back part of writeSolutionsAndKernels, with ParallelMap2 running
+    in-process (``inWorker`` False) or handing each task pickled arguments, as joblib does for
+    a worker process (``inWorker`` True)."""
+    kernels = [kernel for solution in solutions for kernel in solution.getKernels()]
+    representatives = [group.representative for group in groupKernelRecords(kernels, False)]
+    writer = KernelWriterAssembly(assembler, DebugConfig())
+    results = []
+    for kernel in representatives:
+        rocIsa = _init_rocisa_for(kernel)
+        args = (writer, rocIsa.getData(), rocIsa.getOutputOptions(), False, kernel)
+        if inWorker:
+            args = pickle.loads(pickle.dumps(args))
+        result = processKernelSource(*args)
+        assert result.err == 0, result.name
+        results.append(result)
+    keysBefore = [set(solution._state) for solution in solutions]
+    passPostKernelInfoToSolution(results, representatives, solutions, False)
+    if not inWorker:
+        # In-process a generated kernel is its solution: the copy-back may update values
+        # codegen left on it, but must not add a key codegen did not set. (Placement aliases
+        # are not generated; some keys are fanned out to them by design.)
+        generated = {id(kernel) for kernel in representatives}
+        added = {
+            index: sorted(set(solution._state) - keys)
+            for index, (solution, keys) in enumerate(zip(solutions, keysBefore))
+            if id(solution) in generated
+        }
+        assert not any(added.values()), added
+
+
+def _solutions(config, problemIndex, limit, assembler, isaInfoMap):
+    """The forked solutions of the problem, then its CustomKernels, as the Tensile backend
+    builds them."""
+    solutions = _solutions_from_config_unguarded(
+        _COMMON + config, assembler, isaInfoMap, limit, problemIndex
+    )
+    configDict = _load_config(_COMMON + config)
+    problemTypeConfig, problemSizeGroupConfig = configDict["BenchmarkProblems"][problemIndex][:2]
+    benchmarkProcess = BenchmarkProcess(problemTypeConfig, problemSizeGroupConfig, False)
+    benchmarkStep = benchmarkProcess[0]
+    solutions += _generateCustomKernelSolutions(
+        benchmarkProcess.problemType,
+        benchmarkStep.customKernels,
+        benchmarkStep.internalSupportParams,
+        not benchmarkStep.customKernelWildcard,
+        assembler,
+        makeDebugConfig(configDict.get("GlobalParameters", {})),
+        isaInfoMap,
+    )
+    return solutions
+
+
+@pytest.mark.parametrize(
+    "config,problemIndex,limit,changedKey",
+    [
+        # Subtile kernels: SubtileLdsLayout.applyLdsLayout sets LdsNumBytes.
+        ("gemm/gfx950/subtile_mxfp4.yaml", 0, 2, "LdsNumBytes"),
+        # The f8 problem's kernel takes ForceUnrollSubIter: KernelWriter sets LoopIters.
+        ("gemm/gfx950/custom_mainloop_scheduling.yaml", 6, None, "LoopIters"),
+        # Plain FP8 subtile kernel (MatrixInstK 128, no MX scale): Components/Subtile/Kernel.py
+        # stores the unit-scale VGPR as _subtileUnitScaleVgpr.
+        ("gemm/gfx950/subtile_fp8.yaml", 0, None, "_subtileUnitScaleVgpr"),
+        # GlobalSplitU 2 kernels with a bias epilogue: the epilogue codegen switches
+        # LdsOffsetBias between LdsOffsetBiasGSU / LdsOffsetBiasNonGSU and leaves the last.
+        ("sparse/gfx94x/bf16_activation.yaml", 0, None, "LdsOffsetBias"),
+        # Custom kernel (assembly read from a file): it never gets LdsNumBytes, LoopIters or
+        # LdsOffsetBias, in-process or in a worker; codegen sets CUOccupancy.
+        ("gemm/gfx950/custom_xfp32.yaml", 0, None, "CUOccupancy"),
+    ],
+)
+def test_worker_codegen_leaves_solutions_as_in_process(config, problemIndex, limit, changedKey):
+    # Every config here is gfx9. Under ROCISA_BACKEND=stinkytofu (the coverage lane) the adaptor
+    # emits gfx1250 only, so the comparison runs in a native-rocisa worker there.
+    run_where_backend_matches_isa(
+        gfxToIsa("gfx950"), _checkWorkerCodegen, config, problemIndex, limit, changedKey
+    )
+
+
+def _checkWorkerCodegen(config, problemIndex, limit, changedKey):
+    assembler, isaInfoMap = _toolchain_for("gfx950")
+    with _isolated_globals_with_isa(isaInfoMap):
+        inProcess = _solutions(config, problemIndex, limit, assembler, isaInfoMap)
+        inWorker = _solutions(config, problemIndex, limit, assembler, isaInfoMap)
+        assert inProcess
+        before = _solutionStates(inProcess)
+        assert _solutionStates(inWorker) == before
+
+        _codegen(inProcess, assembler, inWorker=False)
+        _codegen(inWorker, assembler, inWorker=True)
+
+    after = _solutionStates(inProcess)
+    # The case is only meaningful if codegen changed the key it was chosen for.
+    changed = {path for path in after if after[path] != before.get(path)}
+    assert any(path.endswith("/'%s'" % changedKey) for path in changed), sorted(changed)
+    assert _solutionStates(inWorker) == after
