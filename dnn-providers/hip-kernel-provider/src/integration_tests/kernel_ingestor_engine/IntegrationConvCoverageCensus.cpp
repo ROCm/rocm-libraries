@@ -18,7 +18,6 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <nlohmann/json.hpp>
@@ -40,16 +39,27 @@
  * Every graph is built and its engines are asked for (get_ranked_engine_ids); nothing is
  * compiled or executed, so the whole map takes seconds. The checks:
  *   (a) no graph is served below its mapped tier on this architecture (a regression);
- *       a graph served above it is an intended upgrade, listed for the map refresh;
- *   (b) the generic-tier engines a row names serve it on every architecture;
+ *       a graph served above it is an intended upgrade, listed for the map refresh. An
+ *       architecture the map has no column for skips this check;
+ *   (b) the generic-tier engines a row names (those that served it on every architecture the
+ *       row records) serve it here, on the architectures the row records;
  *   (c) every fwd/bwd graph some engine serves has a served wrw twin (same tensors), except
- *       twins the map records as known gaps; and naive wrw serves every scaled pair whose
- *       fwd/bwd original naive serves (the naive engines are the structural floor);
+ *       twins the map records as known gaps for this architecture, or, on an architecture
+ *       without a column, as known gaps on any architecture or served only by naive
+ *       (whose budget depends on the device); and naive wrw serves
+ *       every scaled pair whose fwd/bwd original naive serves (the naive engines are the
+ *       structural floor);
  *   (d) each gated engine serves the graph just below its limit on the architectures the
  *       map records.
+ * Engine names come from the backend, so every engine a provider loads is classified.
+ * A build without the explicit-GEMM conv engines (HIPBLASLTPROVIDER_ENABLE_CONV=OFF, the
+ * default) cannot check b rows or wrw twins only those engines serve; the test says so and
+ * checks the rest.
  * Known holes are rows with a b (or lower) tier: a fix that serves them with a HIP engine
  * shows as an upgrade. Refresh the map for this architecture with
- * HIPKERNELPROVIDER_CONV_COVERAGE_MAP_OUT=<file>, which writes the map with this run's tiers.
+ * HIPKERNELPROVIDER_CONV_COVERAGE_MAP_OUT=<file>, which writes the map with this run's tiers,
+ * known gaps, generic-tier requirements and gate acceptances (run it with the explicit-GEMM
+ * engines built, so b tiers are seen).
  */
 namespace
 {
@@ -58,46 +68,8 @@ constexpr const char* MAP_FILE = "hip_kernel_provider_conv_coverage_map.json";
 constexpr const char* MAP_OUT_ENV = "HIPKERNELPROVIDER_CONV_COVERAGE_MAP_OUT";
 constexpr std::string_view HIP_PREFIX = "hipkernel:CONV_";
 constexpr std::string_view NAIVE_PREFIX = "hipkernel:CONV_NAIVE_";
-constexpr std::array<const char*, 6> BLAS_ENGINES = {"ROCBLAS_CONV_ENGINE",
-                                                     "HIPBLASLT_CONV_ENGINE",
-                                                     "ROCBLAS_CONV_TF32_ENGINE",
-                                                     "HIPBLASLT_CONV_TF32_ENGINE",
-                                                     "ROCBLAS_CONV_RPR_ENGINE",
-                                                     "HIPBLASLT_CONV_RPR_ENGINE"};
-// The engines this census can name: the conv group and the explicit-GEMM engines.
-constexpr std::array<const char*, 33> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD",
-                                                       "hipkernel:CONV_NAIVE_BWD",
-                                                       "hipkernel:CONV_NAIVE_WRW",
-                                                       "hipkernel:CONV_DEPTHWISE_VALU_FWD",
-                                                       "hipkernel:CONV_DEPTHWISE_VALU_BWD",
-                                                       "hipkernel:CONV_DEPTHWISE_VALU_WRW",
-                                                       "hipkernel:CONV_DEPTHWISE_ROWS_FWD",
-                                                       "hipkernel:CONV_DEPTHWISE_ROWS_BWD",
-                                                       "hipkernel:CONV_DEPTHWISE_MFMA_FWD",
-                                                       "hipkernel:CONV_DEPTHWISE_MFMA_BWD",
-                                                       "hipkernel:CONV_IGEMM_FWD",
-                                                       "hipkernel:CONV_IGEMM_BWD",
-                                                       "hipkernel:CONV_IGEMM_NCHW_BWD",
-                                                       "hipkernel:CONV_WRW",
-                                                       "hipkernel:CONV_STEM_BWD",
-                                                       "hipkernel:CONV_WINOGRAD_FWD",
-                                                       "hipkernel:CONV_WINOGRAD_BWD",
-                                                       "hipkernel:CONV_DIRECT_FWD",
-                                                       "hipkernel:CONV_DIRECT_BWD",
-                                                       "hipkernel:CONV_SMALLC_FWD",
-                                                       "hipkernel:CONV_SMALLC_BWD",
-                                                       "hipkernel:CONV_GROUP_FWD",
-                                                       "hipkernel:CONV_GROUP_BWD",
-                                                       "hipkernel:CONV_GROUP_WRW",
-                                                       "hipkernel:CONV_FFT_FWD",
-                                                       "hipkernel:CONV_FFT_BWD",
-                                                       "hipkernel:CONV_FFT_WRW",
-                                                       "ROCBLAS_CONV_ENGINE",
-                                                       "HIPBLASLT_CONV_ENGINE",
-                                                       "ROCBLAS_CONV_TF32_ENGINE",
-                                                       "HIPBLASLT_CONV_TF32_ENGINE",
-                                                       "ROCBLAS_CONV_RPR_ENGINE",
-                                                       "HIPBLASLT_CONV_RPR_ENGINE"};
+// The explicit-GEMM conv engines (ROCBLAS_CONV_*, HIPBLASLT_CONV_*, any variant).
+constexpr std::array<std::string_view, 2> BLAS_PREFIXES = {"ROCBLAS_CONV_", "HIPBLASLT_CONV_"};
 
 enum class Tier
 {
@@ -166,7 +138,9 @@ std::string describe(const nlohmann::json& row)
 
 bool isBlas(const std::string& engine)
 {
-    return std::find(BLAS_ENGINES.begin(), BLAS_ENGINES.end(), engine) != BLAS_ENGINES.end();
+    return std::any_of(BLAS_PREFIXES.begin(), BLAS_PREFIXES.end(), [&](std::string_view prefix) {
+        return engine.rfind(prefix, 0) == 0;
+    });
 }
 
 Tier tierOf(const std::vector<std::string>& engines)
@@ -314,9 +288,33 @@ std::filesystem::path pluginDirectory()
         hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / pluginTarget.parent_path());
 }
 
+/// The name of a loaded engine, resolved through the backend (so engines this test does not
+/// know by name are classified too).
+std::string engineName(hipdnnHandle_t handle, int64_t id, std::map<int64_t, std::string>& names)
+{
+    const auto it = names.find(id);
+    if(it != names.end())
+    {
+        return it->second;
+    }
+    std::string name = "id:" + std::to_string(id);
+    size_t length = 0;
+    if(hipdnnGetEngineNameById_ext(handle, id, nullptr, &length) == HIPDNN_STATUS_SUCCESS
+       && length > 0)
+    {
+        std::vector<char> buffer(length);
+        if(hipdnnGetEngineNameById_ext(handle, id, buffer.data(), &length) == HIPDNN_STATUS_SUCCESS)
+        {
+            name = buffer.data();
+        }
+    }
+    names.emplace(id, name);
+    return name;
+}
+
 Observed discover(hipdnnHandle_t handle,
                   const nlohmann::json& row,
-                  const std::map<int64_t, std::string>& names)
+                  std::map<int64_t, std::string>& names)
 {
     Observed result;
     hipdnn_frontend::graph::Graph graph;
@@ -340,8 +338,7 @@ Observed discover(hipdnnHandle_t handle,
     }
     for(const auto id : ids)
     {
-        const auto it = names.find(id);
-        result.engines.push_back(it != names.end() ? it->second : "id:" + std::to_string(id));
+        result.engines.push_back(engineName(handle, id, names));
     }
     result.tier = tierOf(result.engines);
     return result;
@@ -402,10 +399,6 @@ const Census& census()
         }
 
         std::map<int64_t, std::string> names;
-        for(const auto* name : KNOWN_ENGINES)
-        {
-            names.emplace(hipdnn_data_sdk::utilities::engineNameToId(name), name);
-        }
         for(const auto& row : c.map.at("rows"))
         {
             auto observed = discover(handle, row, names);
@@ -439,6 +432,50 @@ const Census& census()
                     tiers[slot] = tierLetter(seen.tier);
                 }
                 row["tier"] = tiers;
+                // Requirements and gates hold where they were seen: a generic-tier engine this
+                // architecture does not offer for the row leaves the row's requirement, and the
+                // gated engine's acceptance just below its limit is recorded per architecture.
+                if(row.contains("require"))
+                {
+                    auto required = nlohmann::json::array();
+                    for(const auto& engine : row.at("require"))
+                    {
+                        if(std::find(
+                               seen.engines.begin(), seen.engines.end(), engine.get<std::string>())
+                           != seen.engines.end())
+                        {
+                            required.push_back(engine);
+                        }
+                    }
+                    if(required.empty())
+                    {
+                        row.erase("require");
+                    }
+                    else
+                    {
+                        row["require"] = required;
+                    }
+                }
+                if(row.contains("gate"))
+                {
+                    const auto prefix = row["gate"]["prefix"].get<std::string>();
+                    auto& gateArchs = row["gate"]["archs"];
+                    const bool accepted = std::any_of(
+                        seen.engines.begin(), seen.engines.end(), [&](const std::string& engine) {
+                            return engine.rfind(prefix, 0) == 0;
+                        });
+                    const bool listed
+                        = std::find(gateArchs.begin(), gateArchs.end(), c.arch) != gateArchs.end();
+                    if(accepted && !listed)
+                    {
+                        gateArchs.push_back(c.arch);
+                    }
+                    else if(!accepted && listed)
+                    {
+                        gateArchs.erase(std::remove(gateArchs.begin(), gateArchs.end(), c.arch),
+                                        gateArchs.end());
+                    }
+                }
                 if(row.value("pair_kind", std::string()) == "twin")
                 {
                     auto gaps = row.value("known_gap", nlohmann::json::array());
@@ -499,6 +536,52 @@ std::optional<Tier>
     return parseTier(tiers[slot]);
 }
 
+/// Whether the twin row is a recorded known gap on this architecture: listed for it, or, on
+/// an architecture the row records no tier for, listed for any architecture or served by the
+/// naive engines alone wherever it is served. Whether naive serves a twin depends on the
+/// device (its budget scales with the compute units), so an architecture without a column
+/// cannot tell such a gap from a new one.
+bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
+{
+    const auto gaps = row.value("known_gap", nlohmann::json::array());
+    if(std::find(gaps.begin(), gaps.end(), arch) != gaps.end())
+    {
+        return true;
+    }
+    if(mappedTier(map, row, arch))
+    {
+        return false;
+    }
+    const auto& tiers = row.at("tier").get_ref<const std::string&>();
+    return !gaps.empty() || tiers.find_first_of("hb") == std::string::npos;
+}
+
+/// Whether a twin's service may rest on the explicit-GEMM engines alone: the map records it
+/// as served only by them on this architecture, or records no HIP or naive service for it
+/// anywhere. On an architecture without a column the HIP engines' reach is unknown, so any
+/// twin may.
+bool mayNeedBlas(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
+{
+    const auto& tiers = row.at("tier").get_ref<const std::string&>();
+    if(tiers.find_first_of("hn") == std::string::npos)
+    {
+        return true;
+    }
+    const auto& archs = map.at("archs");
+    const auto slot = static_cast<size_t>(
+        std::distance(archs.begin(), std::find(archs.begin(), archs.end(), arch)));
+    if(slot < tiers.size() && tiers[slot] != '-')
+    {
+        return tiers[slot] == 'b';
+    }
+    return true;
+}
+
+constexpr const char* NO_BLAS_NOTE
+    = "this build serves no explicit-GEMM conv engine (ROCBLAS_CONV_*, HIPBLASLT_CONV_*); the "
+      "map's b rows and the wrw twins only those engines serve are not checked. Build with "
+      "HIPBLASLTPROVIDER_ENABLE_CONV=ON to check them.";
+
 #define SKIP_WITHOUT_CENSUS()              \
     do                                     \
     {                                      \
@@ -549,6 +632,10 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
                      << tierName(seen.tier);
         }
     }
+    if(!c.blasLoaded)
+    {
+        std::cout << "Note: " << NO_BLAS_NOTE << "\n";
+    }
     if(better > 0)
     {
         std::cout << better << " graphs are served above their mapped tier on " << c.arch
@@ -571,7 +658,9 @@ TEST(IntegrationConvCoverageCensus, GenericTierEnginesServeTheirRegion)
     int failures = 0;
     for(const auto& row : c.map.at("rows"))
     {
-        if(!row.contains("require"))
+        // The generic-tier engines a row names are those that served it on every architecture
+        // the map records; on others the requirement is unknown.
+        if(!row.contains("require") || !mappedTier(c.map, row, c.arch))
         {
             continue;
         }
@@ -598,6 +687,7 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
     std::ostringstream holes;
     int failures = 0;
     int pairs = 0;
+    int unchecked = 0;
     for(const auto& row : c.map.at("rows"))
     {
         if(row.value("pair_kind", std::string()) != "twin")
@@ -611,16 +701,21 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
         }
         ++pairs;
         const auto& id = row.at("id").get_ref<const std::string&>();
-        bool knownGap = false;
-        for(const auto& arch : row.value("known_gap", nlohmann::json::array()))
+        if(c.observed.at(id).tier != Tier::NONE || knownGap(c.map, row, c.arch))
         {
-            knownGap = knownGap || arch.get<std::string>() == c.arch;
+            continue;
         }
-        if(c.observed.at(id).tier == Tier::NONE && !knownGap)
+        if(!c.blasLoaded && mayNeedBlas(c.map, row, c.arch))
         {
-            ++failures;
-            holes << "\n  " << describe(row);
+            ++unchecked;
+            continue;
         }
+        ++failures;
+        holes << "\n  " << describe(row);
+    }
+    if(!c.blasLoaded)
+    {
+        std::cout << "Note: " << NO_BLAS_NOTE << " (" << unchecked << " twins unchecked)\n";
     }
     EXPECT_EQ(failures, 0) << failures << " of " << pairs << " served fwd/bwd graphs on " << c.arch
                            << " have a wrw twin no engine serves:" << holes.str();
