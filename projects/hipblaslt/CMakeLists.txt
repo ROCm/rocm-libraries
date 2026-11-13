@@ -438,37 +438,6 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
-# Configure the Windows version resource (PE VERSIONINFO) embedded into
-# libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
-# DLL reports file/product version metadata in its Windows file properties.
-# A resource compiler is required to compile version.rc; the ROCm toolchain
-# detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED/NOTFOUND
-# sentinel when none is available. When no real compiler is present, warn and
-# skip the resource rather than fail configuration, so the DLL still builds
-# (without version metadata) on machines lacking a resource compiler.
-if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
-    if(GIT)
-        execute_process(
-            COMMAND "${GIT}" log -1 --format=%H .
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            OUTPUT_VARIABLE hipblaslt_VERSION_COMMIT_ID
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET)
-    endif()
-    string(TIMESTAMP HIPBLASLT_COPYRIGHT_YEAR "%Y")
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
-        @ONLY)
-    set(_hipblaslt_have_version_rc TRUE)
-elseif(WIN32)
-    message(WARNING
-        "hipBLASLt: no Windows resource compiler (llvm-rc/rc) detected; "
-        "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
-        "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
-        "llvm/bin directory) to embed version info.")
-endif()
-
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
 # tensilelite/tests reach for it on the same condition, so we drive the
@@ -515,12 +484,6 @@ set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
     add_library(hipblaslt)
-    if(WIN32 AND BUILD_SHARED_LIBS AND _hipblaslt_have_version_rc)
-        target_sources(
-            hipblaslt
-            PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
-        )
-    endif()
     if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
@@ -866,6 +829,26 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
         COMPONENT clients-common
     )
 endif()
+
+# Windows VERSIONINFO for every hipBLASLt-family DLL and EXE installed to bin/.
+# rocm_libraries_check_version_resources at the end of this file fails configure
+# when a DLL/EXE target has no line here and is not in its EXCLUDE list.
+include(hipblaslt_version_resource)
+hipblaslt_add_version_resource(hipblaslt "AMD hipBLASLt - Lightweight BLAS Library for GPU Computing")
+hipblaslt_add_version_resource(tensilelite-host "AMD hipBLASLt TensileLite Host Library")
+hipblaslt_add_version_resource(hipblaslt-bench "AMD hipBLASLt Benchmark Client")
+hipblaslt_add_version_resource(hipblaslt-api-overhead "AMD hipBLASLt API Overhead Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-groupedgemm-fixed-mk "AMD hipBLASLt Grouped GEMM Fixed-MK Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-extop-layernorm "AMD hipBLASLt LayerNorm Extension Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-extop-matrixtransform "AMD hipBLASLt Matrix Transform Extension Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-extop-softmax "AMD hipBLASLt Softmax Extension Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-extop-amax "AMD hipBLASLt AMax Extension Benchmark")
+hipblaslt_add_version_resource(hipblaslt-bench-a2a "AMD hipBLASLt GEMM All-to-All Benchmark")
+hipblaslt_add_version_resource(hipblaslt-cotenant-kernel "AMD hipBLASLt Cotenant Kernel")
+hipblaslt_add_version_resource(hipblaslt-sequence "AMD hipBLASLt Sequence Benchmark")
+hipblaslt_add_version_resource(hipblaslt-test "AMD hipBLASLt Test Client")
+hipblaslt_add_version_resource(hipblaslt-test-hostunit "AMD hipBLASLt Host Unit Tests")
+hipblaslt_add_version_resource(hipblaslt-test-tuning-store "AMD hipBLASLt Tuning Store Tests")
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
@@ -1258,3 +1241,11 @@ if(HIPBLASLT_VALIDATE_INSTALL)
         endif()
     ")
 endif()
+
+# Every DLL/EXE target defined here needs hipblaslt_add_version_resource (above) unless it
+# is not installed to bin/: samples go to libexec/, the Python extension installs under
+# lib/hipblaslt/rocisa, and the TensileLite client and test tools are not shipped there.
+rocm_libraries_check_version_resources(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    EXCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/clients/samples"
+    EXCLUDE _rocisa tensilelite-client cpu-gemm-driver tensilelite-tests)

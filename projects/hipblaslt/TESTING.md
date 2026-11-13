@@ -664,6 +664,7 @@ the C++ build and test.
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
 | rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
+| Windows VERSIONINFO metadata | Yes, implicitly | Component team | `rocm_libraries_check_version_resources` at the end of the top-level `CMakeLists.txt` (and origami's) fails configure, on every platform, if a DLL or EXE target has no `hipblaslt_add_version_resource` line and is not in its exclusion list, so any build catches a new binary that would ship without metadata. No check name, no test report. It confirms the resource is requested, not that the linked binary contains it |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -681,6 +682,7 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
+  and the Windows version-resource completeness check
 - Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
   through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
