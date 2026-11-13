@@ -593,7 +593,21 @@ struct Em
     }
 };
 
-/* _split_merge: online LSE merge of `ns` split partials of one row. */
+/* _lse_nat: the natural-log LSE m + ln(l) where `has`, else -inf (m natural-log). */
+Val dec_lse_nat(const Em& e, Val m, Val l, Val has, Val ninf)
+{
+    rocke_ir_builder_t* b = e.b;
+    Val l2 = rocke_b_log2(b, l);
+    Val t = e.cf(DEC_LN2);
+    Val ml = rocke_b_fmul(b, l2, t);
+    Val a = rocke_b_fadd(b, m, ml);
+    return e.sel(has, a, ninf);
+}
+
+/* _split_merge: online LSE merge of `ns` split partials of one row (natural-log LSEs). A row
+ * whose every score sits near the f32 lowest value stores LSE_i == m_i (ln l_i is below the
+ * f32 spacing there), so its non-empty splits weigh equally: O is the mean of the per-split
+ * means, exact with one non-empty split. */
 void dec_split_merge(const Em& e,
                      Val ws_o,
                      Val ws_lse,
@@ -684,7 +698,9 @@ void dec_split_merge(const Em& e,
         Val alpha;
         {
             Val d = rocke_b_fsub(b, st[0], m_sf);
-            alpha = rocke_b_exp2_fast(b, d);
+            Val t = e.cf(DEC_LOG2E);
+            Val f = rocke_b_fmul(b, d, t);
+            alpha = rocke_b_exp2_fast(b, f);
         }
         Val l_new = rocke_b_fmul(b, st[1], alpha);
         Val av = rocke_b_vector_splat(b, alpha, DEC_MERGE_COLS);
@@ -696,7 +712,9 @@ void dec_split_merge(const Em& e,
             Val wgt;
             {
                 Val d = rocke_b_fsub(b, lses[i], m_sf);
-                wgt = rocke_b_exp2_fast(b, d);
+                Val t = e.cf(DEC_LOG2E);
+                Val f = rocke_b_fmul(b, d, t);
+                wgt = rocke_b_exp2_fast(b, f);
             }
             l_new = rocke_b_fadd(b, l_new, wgt);
             Val wv = rocke_b_vector_splat(b, wgt, DEC_MERGE_COLS);
@@ -1697,6 +1715,14 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
     }
     else
         cs = qk_scale;
+    /* Python: exp_nat. exp(x - m) in natural-log units: subtract, then scale, so a finite
+     * max near the f32 lowest value (a bf16 / f32 bias at its lowest) never overflows; such
+     * a row gets the softmax of its finite scores within one split (see dec_split_merge). */
+    auto exp_nat = [&](Val x, Val m) -> Val {
+        Val d = rocke_b_fsub(b, x, m);
+        Val f = rocke_b_fmul(b, d, cs);
+        return rocke_b_exp2_fast(b, f);
+    };
     auto slot_key = [&](int a, int el) { return a * 16 + (gfx12 ? el : 2 * el); };
     Val lane_key;
     if(gfx12)
@@ -2206,21 +2232,30 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             Val c = rocke_b_fcmp(b, "oeq", m_new, ninf);
             m_safe = e.sel(c, f0, m_new);
         }
-        Val nmc;
-        {
-            Val m = rocke_b_fmul(b, cs, m_safe);
-            nmc = rocke_b_fneg(b, m);
-        }
         Val alpha;
-        {
-            Val f = rocke_b_fma(b, m_i, cs, nmc);
-            alpha = rocke_b_exp2_fast(b, f);
-        }
         Vals ps;
-        for(Val sv : svals)
+        if(natural)
         {
-            Val f = rocke_b_fma(b, sv, cs, nmc);
-            ps.push_back(rocke_b_exp2_fast(b, f));
+            alpha = exp_nat(m_i, m_safe);
+            for(Val sv : svals)
+                ps.push_back(exp_nat(sv, m_safe));
+        }
+        else
+        {
+            Val nmc;
+            {
+                Val m = rocke_b_fmul(b, cs, m_safe);
+                nmc = rocke_b_fneg(b, m);
+            }
+            {
+                Val f = rocke_b_fma(b, m_i, cs, nmc);
+                alpha = rocke_b_exp2_fast(b, f);
+            }
+            for(Val sv : svals)
+            {
+                Val f = rocke_b_fma(b, sv, cs, nmc);
+                ps.push_back(rocke_b_exp2_fast(b, f));
+            }
         }
         Val l_loc = e.tree(ps, fadd_op);
         Val l_new;
@@ -2356,16 +2391,24 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
         Val c = rocke_b_fcmp(b, "oeq", m_all, ninf);
         m_all_safe = e.sel(c, f0, m_all);
     }
-    Val nmc;
-    {
-        Val m = rocke_b_fmul(b, cs, m_all_safe);
-        nmc = rocke_b_fneg(b, m);
-    }
     Vals fs;
-    for(Val mw : ms)
+    if(natural)
     {
-        Val f = rocke_b_fma(b, mw, cs, nmc);
-        fs.push_back(rocke_b_exp2_fast(b, f));
+        for(Val mw : ms)
+            fs.push_back(exp_nat(mw, m_all_safe));
+    }
+    else
+    {
+        Val nmc;
+        {
+            Val m = rocke_b_fmul(b, cs, m_all_safe);
+            nmc = rocke_b_fneg(b, m);
+        }
+        for(Val mw : ms)
+        {
+            Val f = rocke_b_fma(b, mw, cs, nmc);
+            fs.push_back(rocke_b_exp2_fast(b, f));
+        }
     }
     Val l_all;
     {
@@ -2374,15 +2417,22 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             prods.push_back(rocke_b_fmul(b, ls[w2], fs[w2]));
         l_all = e.tree(prods, fadd_op);
     }
-    Val has, inv_l, lse2;
+    /* lse: the natural-log LSE (stored and merged); natural-log units form it without cs * m. */
+    Val has, inv_l, lse2 = NULL, lse = NULL;
     if(s->sinks)
     {
+        /* Natural-log units keep the sink and the max as they are; log2 units scale both. */
         Val sink2;
         {
             Val ld = rocke_b_global_load(b, P("sink_ptr"), hq, elem, 2);
             Val f = rocke_b_cast_to_f32(b, ld);
-            Val t = e.cf(DEC_LOG2E);
-            sink2 = rocke_b_fmul(b, f, t);
+            if(natural)
+                sink2 = f;
+            else
+            {
+                Val t = e.cf(DEC_LOG2E);
+                sink2 = rocke_b_fmul(b, f, t);
+            }
         }
         {
             Val c = rocke_b_cmp_eq(b, split, c0);
@@ -2391,7 +2441,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
         Val m2;
         {
             Val c = rocke_b_fcmp(b, "ogt", l_all, f0);
-            Val mm = rocke_b_fmul(b, cs, m_all_safe);
+            Val mm = natural ? m_all_safe : rocke_b_fmul(b, cs, m_all_safe);
             m2 = e.sel(c, mm, ninf);
         }
         Val top = rocke_b_fmax(b, m2, sink2);
@@ -2399,23 +2449,27 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             Val c = rocke_b_fcmp(b, "oeq", top, ninf);
             top = e.sel(c, f0, top);
         }
-        Val keep;
-        {
-            Val d = rocke_b_fsub(b, m2, top);
-            keep = rocke_b_exp2_fast(b, d);
-        }
+        auto ex = [&](Val x, Val t) -> Val {
+            if(natural)
+                return exp_nat(x, t);
+            Val d = rocke_b_fsub(b, x, t);
+            return rocke_b_exp2_fast(b, d);
+        };
+        Val keep = ex(m2, top);
         Val den;
         {
             Val m = rocke_b_fmul(b, l_all, keep);
-            Val d = rocke_b_fsub(b, sink2, top);
-            Val ex = rocke_b_exp2_fast(b, d);
-            den = rocke_b_fadd(b, m, ex);
+            Val x = ex(sink2, top);
+            den = rocke_b_fadd(b, m, x);
         }
         has = rocke_b_fcmp(b, "ogt", den, f0);
         {
             Val d = rocke_b_fdiv(b, keep, den);
             inv_l = e.sel(has, d, f0);
         }
+        if(natural)
+            lse = dec_lse_nat(e, top, den, has, ninf);
+        else
         {
             Val l = rocke_b_log2(b, den);
             Val a = rocke_b_fadd(b, top, l);
@@ -2430,12 +2484,20 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             Val d = rocke_b_fdiv(b, one, l_all);
             inv_l = e.sel(has, d, f0);
         }
+        if(natural)
+            lse = dec_lse_nat(e, m_all_safe, l_all, has, ninf);
+        else
         {
             Val m = rocke_b_fmul(b, cs, m_all_safe);
             Val l = rocke_b_log2(b, l_all);
             Val a = rocke_b_fadd(b, m, l);
             lse2 = e.sel(has, a, ninf);
         }
+    }
+    if(lse == NULL)
+    {
+        Val t = e.cf(DEC_LN2);
+        lse = rocke_b_fmul(b, lse2, t);
     }
     if(v_mul != NULL)
         inv_l = rocke_b_fmul(b, inv_l, v_mul);
@@ -2579,16 +2641,16 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
         Val m2 = e.mul(qpos, P("stride_lse_token"));
         Val a = e.add(m1, m2);
         Val lse_off = e.add(ls_, a);
-        Val t = e.cf(DEC_LN2);
-        Val v = rocke_b_fmul(b, lse2, t);
-        rocke_b_global_store(b, P("LSE"), lse_off, v, 4);
+        rocke_b_global_store(b, P("LSE"), lse_off, lse, 4);
         e.if_end();
     }
     {
         Val n = rocke_b_lnot(b, single);
         Val cond = e.land(stats, n);
         e.if_begin(cond);
-        rocke_b_global_store(b, P("WS_LSE"), prow, lse2, 4);
+        /* The natural-log LSE: a row whose every key sits near the f32 lowest value has one
+         * (about -3.4e38) where log2 units would overflow to -inf. */
+        rocke_b_global_store(b, P("WS_LSE"), prow, lse, 4);
         e.if_end();
     }
 
@@ -2737,11 +2799,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
                     Val m2 = e.mul(qpos_m, P("stride_lse_token"));
                     Val a = e.add(m1, m2);
                     Val lse_off = e.add(ls_, a);
-                    Val l = rocke_b_log2(b, l_m);
-                    Val ad = rocke_b_fadd(b, m_sf, l);
-                    Val t = e.cf(DEC_LN2);
-                    Val m = rocke_b_fmul(b, ad, t);
-                    Val val = e.sel(has_m, m, ninf);
+                    Val val = dec_lse_nat(e, m_sf, l_m, has_m, ninf);
                     rocke_b_global_store(b, P("LSE"), lse_off, val, 4);
                     e.if_end();
                 }
@@ -2858,14 +2916,7 @@ rocke_status_t dec_emit_merge(rocke_ir_builder_t* b, const rocke_wmma_fmha_decod
     {
         Val cond = row_ok == NULL ? lse_ok : e.land(lse_ok, row_ok);
         e.if_begin(cond);
-        Val lse;
-        {
-            Val l = rocke_b_log2(b, l_all);
-            Val a = rocke_b_fadd(b, m_safe, l);
-            Val t = e.cf(DEC_LN2);
-            Val m = rocke_b_fmul(b, a, t);
-            lse = e.sel(has, m, ninf);
-        }
+        Val lse = dec_lse_nat(e, m_safe, l_all, has, ninf);
         Val lse_off;
         {
             Val first = lse_seq != NULL ? lse_seq : e.mul(batch, P("stride_lse_batch"));
