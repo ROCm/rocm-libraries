@@ -61,7 +61,11 @@ For example, to run ``fp32`` GEMM with validation, use this command:
 * ``norm_error`` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
 * ``atol`` and ``rtol`` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest ``atol`` first, and reports the first pair under which every element satisfies ``|reference - result| <= atol + rtol * |result|``. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. ``failed`` means at least one element is outside even ``atol 0.1 + rtol 0.1 * |result|``; the bench then also prints the number of such elements and the worst one to stderr.
 
-The exit code is 0 whether or not a check fails. Only the first launch of each solution is compared with the reference; the launches timed by ``--iters`` and ``--cold_iters`` are not checked.
+The norm check of D fails when any one batch's ``norm_error`` reaches the same limit ``hipblaslt-test`` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with ``c_f32_fast_bf16_r`` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch; ``hipblaslt-test`` applies the same limit to the sum of the batches instead, so with many batches it can fail a result the bench passes. The bench then prints the failing batch and its error to stderr, and the solution it was for. If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check. By default the exit code is 0 whether or not a check fails. With ``--verify_strict``, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and ``--ulp``, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by ``--iters`` and ``--cold_iters`` are not checked.
+
+Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of ``--algo_method all`` sweeps.
+
+To catch a solution that is wrong only on some launches, add ``--post_bench_verify_iters N``. After timing each solution, the bench relaunches it N more times, untimed and without host synchronization between relaunches, and compares each relaunch's D bit for bit with the first launch's D on the GPU. The timed launches themselves are not checked. The option implies ``--verify``, so it also computes the CPU reference. When a relaunch differs, the bench prints how many relaunches differed and the first element that changed, with its old and new values, for the solution named by library index and kernel. A difference counts as a failed check for ``--verify_strict``, but the solution stays in the ranking and in the ``HIPBLASLT_TUNING_FILE`` output, so read stderr before using a tuning result. The comparison is bitwise, so it fits solutions that give the same bits on every launch; a solution whose summation order changes from launch to launch (some split-K kernels, for example) can differ slightly and still be right, and it will be reported. If the first launch already failed the CPU check, the relaunches still run and are compared with that D. Timings from a run with this option may not be comparable with timings from a run without it.
 
 For more information, run the command with the ``--help`` option. The output of this command is shown below.
 
@@ -91,8 +95,8 @@ For more information, run the command with the ``--help`` option. The output of 
    --c_type <value>                   Precision of matrix C. Options: f32_r,f16_r,bf16_r,i8_r
    --d_type <value>                   Precision of matrix D. Options: f32_r,f16_r,bf16_r,i8_r
    --compute_type <value>             Precision of computation. Options: s,f32_r,x,xf32_r,f64_r,i32_r                     (Default value is: f32_r)
-   --compute_input_typeA <value>      Precision of computation input A. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
-   --compute_input_typeB <value>      Precision of computation input B. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
+   --compute_input_typeA <value>      Precision of computation input A. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.
+   --compute_input_typeB <value>      Precision of computation input B. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.
    --scale_type <value>               Precision of scalar. Options: f16_r,bf16_r
    --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01  (Default value is: hpl)
    --transA <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
@@ -102,6 +106,8 @@ For more information, run the command with the ``--help`` option. The output of 
    --batch_count <value>              Number of matrices. Only applicable to batched and strided_batched routines         (Default value is: 1)
    --HMM                              Parameter requesting the use of HipManagedMemory
    --verify |-v                       Validate GPU results with CPU?
+   --verify_strict                    Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify.
+   --post_bench_verify_iters <value>  After timing, relaunch each solution this many more times, untimed and without host synchronization between relaunches, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. 0 turns it off. Implies --verify, so it also runs the CPU reference.  (Default value is: 0)
    --iters |-i <value>                Iterations to run inside timing loop                                                (Default value is: 10)
    --cold_iters |-j <value>           Cold Iterations to run before entering the timing loop                              (Default value is: 2)
    --algo_method <value>              Use different algorithm search API. Options: heuristic, all, index.                 (Default value is: heuristic)
@@ -138,7 +144,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --splitk <value>                   [Tuning parameter] Set split K for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --wgm <value>                      [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --flush                            Flush icache, only works for gemm.
-   --uniform_summation_order <value>  Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. When omitted the bench leaves the attribute unset so the library default (off) applies.
+   --uniform_summation_order <value>  Set the handle-level uniform summation order request for every API method. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. A YAML case's explicit 0 or 1 overrides the command-line value. When neither specifies a value, the library default for the device applies.
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 

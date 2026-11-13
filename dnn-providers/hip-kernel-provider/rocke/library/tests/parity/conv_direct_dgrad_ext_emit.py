@@ -26,6 +26,20 @@
 # 40: xcd_tiles on gfx942, 44: waves_m = 2 with kpg = 16) and develop's forms
 # (41: persistent grid with the runtime K loop, 42: waves_q = waves_k = 2,
 # 43: runtime channels).
+# Indices 45..49: the MFMA form with fwd (the rotated filter; 48, fwd
+# without mfma, both reject; 49, a 9x9 depthwise filter).
+# Indices 50..58: its grouped forward form (cpg = kpg = 8 / 16 / 32; 52,
+# without fwd, and 55, a block narrower than a group, both reject); 56..58
+# the forward form at stride 2 (58, an odd block_h, both reject). Indices
+# 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
+# cpg 64 (stride 2).
+# Indices 62..72: the Toeplitz WMMA form of DirectDepthwiseDgradWindowedSpec
+# (mfma=True at wave_size 32, gfx1250): 5x5 and 7x7, 1 / 4 / 8 waves, the tall
+# 28- and 32-row tiles and shorter ones, every w_fold, fp16 and bf16, and a
+# 3x3 single pass; 68 (9x9: the fragments exceed the VGPR cap), 69 (wave32
+# on gfx950) and 70 (wave64 on gfx1250) reject; 71 is the depthwise fwd at
+# stride 1 (the gfx1250 depthwise forward's kernel) and 72 (fwd at stride 2,
+# a wave64 mode) rejects.
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -221,8 +235,8 @@ _FOURC_CFGS = (
 )
 
 
-def _fourc_spec(idx: int):
-    N, H, W, G, KH, dtype, arch, bq, bg, lds, sr = _FOURC_CFGS[idx]
+def _fourc_spec(idx: int, cfgs=_FOURC_CFGS):
+    N, H, W, G, KH, dtype, arch, bq, bg, lds, sr = cfgs[idx]
     problem = DirectConvProblem(
         N=N,
         H=H,
@@ -275,8 +289,8 @@ _GENERIC_CFGS = (
 )  # fmt: skip
 
 
-def _generic_spec(idx: int):
-    N, H, W, G, cpg, kpg, K, dtype, arch, knobs = _GENERIC_CFGS[idx]
+def _generic_spec(idx: int, cfgs=_GENERIC_CFGS):
+    N, H, W, G, cpg, kpg, K, dtype, arch, knobs = cfgs[idx]
     problem = DirectConvProblem(
         N=N,
         H=H,
@@ -293,22 +307,377 @@ def _generic_spec(idx: int):
     return DirectConvSpec(problem=problem, **knobs), arch
 
 
-def _build(spec, arch):
-    if isinstance(spec, DirectConv4cSpec):
-        return build_direct_conv_4c(spec, arch=arch)
-    if isinstance(spec, DirectConvSpec):
-        return build_direct_conv(spec, arch=arch)
-    return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+# The Toeplitz MFMA form with ``fwd`` (the rotated filter: the stride-1
+# depthwise forward pass over the transposed problem), after the generic
+# configs. 45: odd N under w_fold 2; 46: ragged rows, 2 W tiles and a partial
+# channel block; 47: 3x3, w_fold 4 with three rows in flight; 48: ``fwd``
+# without ``mfma`` -- both engines reject.
+_WIN_FWD_CFG_BASE = _GENERIC_CFG_BASE + len(_GENERIC_CFGS)
+_WIN_FWD_CFGS = (
+    (
+        3,
+        14,
+        14,
+        64,
+        7,
+        7,
+        3,
+        "bf16",
+        "gfx950",
+        dict(mfma=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14),
+    ),
+    (
+        2,
+        13,
+        37,
+        40,
+        5,
+        5,
+        2,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=1, block_h=4),
+    ),
+    (
+        1,
+        13,
+        13,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=8, w_fold=4, prefetch_rows=3, block_h=4),
+    ),
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_w=7, block_h=14)),
+    # 49: 9x9 depthwise (stride-1, "same" padding keeps the transposed
+    # problem identical to the forward one).
+    (
+        2,
+        17,
+        19,
+        32,
+        9,
+        9,
+        4,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=2, block_h=8),
+    ),
+)
 
 
-def _spec(idx: int):
-    if _GENERIC_CFG_BASE <= idx < _GENERIC_CFG_BASE + len(_GENERIC_CFGS):
-        return _generic_spec(idx - _GENERIC_CFG_BASE)
-    if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
-        return _fourc_spec(idx - _FOURC_CFG_BASE)
-    if not 0 <= idx < len(_WIN_CFGS):
-        raise SystemExit(f"unknown config index {idx}")
-    N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_CFGS[idx]
+# The grouped forward form (cpg = kpg, fwd, MFMA; ``_cpg`` defaults to 8):
+# 50 3x3 fp16 with a partial channel block, 51 7x7 bf16 under w_fold 2; 52
+# cpg = 8 without fwd -- both engines reject. G counts groups.
+_WIN_G8_CFG_BASE = _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS)
+_WIN_G8_CFGS = (
+    (
+        2,
+        13,
+        21,
+        10,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, fwd=True, block_waves=4, w_fold=2, prefetch_rows=2, block_h=8),
+    ),
+    (
+        3,
+        14,
+        14,
+        8,
+        7,
+        7,
+        3,
+        "bf16",
+        "gfx950",
+        dict(mfma=True, fwd=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14),
+    ),
+    (
+        2,
+        13,
+        21,
+        16,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=1, block_h=8),
+    ),
+    # 53: cpg 16 (two input chunks per wave); 54: cpg 32 bf16; 55: cpg 16 in
+    # a block of 8 channels -- both reject.
+    (
+        2,
+        13,
+        21,
+        6,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            block_waves=4,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=8,
+        ),
+    ),
+    (
+        2,
+        9,
+        11,
+        4,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=32,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=9,
+        ),
+    ),
+    (
+        2,
+        13,
+        21,
+        6,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            block_waves=1,
+            w_fold=1,
+            prefetch_rows=1,
+            block_h=8,
+        ),
+    ),
+    # 56: depthwise stride 2 (the stride-1 grid of the output, every second
+    # row and column kept); 57: cpg 16 stride 2, bf16, w_fold 2; 58: stride 2
+    # with an odd block_h -- both reject.
+    (
+        2,
+        14,
+        22,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=1,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=8,
+        ),
+    ),
+    (
+        2,
+        10,
+        12,
+        6,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=4,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=4,
+        ),
+    ),
+    (
+        2,
+        14,
+        22,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=1,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=7,
+        ),
+    ),
+    # 59: cpg 24 (not a power of two) at stride 1; 60: cpg 56 (not a power of
+    # two) at stride 1; 61: cpg 64 (the DW_WIN_MAX_GROUP_CH cap) at stride 2.
+    (
+        2,
+        12,
+        14,
+        3,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=24,
+            mfma=True,
+            fwd=True,
+            block_waves=3,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=12,
+        ),
+    ),
+    (
+        2,
+        10,
+        13,
+        2,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=56,
+            mfma=True,
+            fwd=True,
+            block_waves=7,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=4,
+        ),
+    ),
+    (
+        2,
+        12,
+        12,
+        2,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=64,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=8,
+        ),
+    ),
+)
+
+
+# Toeplitz WMMA configs from index _WMMA_WIN_CFG_BASE, in the _WIN_CFGS
+# columns (the knobs carry the wave size).
+_WMMA_WIN_CFG_BASE = _WIN_G8_CFG_BASE + len(_WIN_G8_CFGS)
+_W32 = dict(mfma=True, wave_size=32)
+_WMMA_WIN_CFGS = (
+    # 7x7, 28-row tiles over 30 rows (a ragged second tile), 8 waves.
+    (2, 30, 33, 64, 7, 7, 3, "bf16", "gfx1250", dict(block_waves=8, w_fold=1, prefetch_rows=2, block_h=28, **_W32)),
+    # 7x7, 32-row tiles, w_fold 2 with odd N, 4 waves.
+    (3, 32, 20, 32, 7, 7, 3, "fp16", "gfx1250", dict(block_waves=4, w_fold=2, prefetch_rows=2, block_h=32, **_W32)),
+    # 5x5, w_fold 4, a partial channel block (40 groups over 32 channels).
+    (5, 13, 9, 40, 5, 5, 2, "bf16", "gfx1250", dict(block_waves=4, w_fold=4, prefetch_rows=2, block_h=8, **_W32)),
+    # 5x5, 8 waves, one row in flight.
+    (2, 14, 14, 64, 5, 5, 2, "fp16", "gfx1250", dict(block_waves=8, w_fold=2, prefetch_rows=1, block_h=14, **_W32)),
+    # 7x7, short ragged row tiles.
+    (1, 13, 13, 64, 7, 7, 3, "fp16", "gfx1250", dict(block_waves=8, w_fold=2, prefetch_rows=2, block_h=4, **_W32)),
+    # 3x3 PAD 0 (single pass), one wave.
+    (1, 9, 12, 8, 3, 3, 0, "bf16", "gfx1250", dict(block_waves=1, w_fold=2, prefetch_rows=1, block_h=9, **_W32)),
+    # 9x9: the wave32 fragments exceed the VGPR cap, both engines reject.
+    (2, 10, 11, 16, 9, 9, 4, "bf16", "gfx1250", dict(block_waves=2, w_fold=4, prefetch_rows=1, block_h=5, **_W32)),
+    # wave32 on gfx950: both engines reject.
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
+    # wave64 (the MFMA form) on gfx1250: both engines reject.
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx1250", dict(mfma=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14)),
+    # fwd (the rotated filter) at stride 1: the depthwise forward on the
+    # WMMA; at stride 2 (a wave64 mode) both engines reject.
+    (2, 14, 14, 64, 3, 3, 1, "fp16", "gfx1250", dict(fwd=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
+    (2, 14, 14, 64, 3, 3, 1, "bf16", "gfx1250", dict(fwd=True, out_stride=2, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
+)  # fmt: skip
+
+
+# fp32-storage configs (dtype "fp32" / "tf32") from index _F32_CFG_BASE, after
+# the Toeplitz WMMA ones: the generic DirectConvSpec's row-stream knobs on both
+# arches and dtypes (prefetch, LDS-only barrier, XCD tiles, LDS pad, staged
+# output, row exit, 5x5 and 1x1), then the fused-weights forms both engines
+# reject for fp32 storage (gathered and LDS-staged), then the fp32 weight
+# preload (plain, with waves_m and staged output, and fold_k32 on gfx942),
+# then two specs both reject only at fp32 storage width (the preload's VGPRs
+# and the staged-output LDS footprint), then the 4c dgrad form both reject (no
+# 4x4 TF32 / fp32 atom). The rows are in the _GENERIC_CFGS / _FOURC_CFGS
+# columns.
+_F32_CFG_BASE = _WMMA_WIN_CFG_BASE + len(_WMMA_WIN_CFGS)
+_F32_GENERIC_CFGS = (
+    (8, 11, 19, 32, 16, 16, 3, "tf32", "gfx950", {"block_q": 32, "block_groups": 2, "block_h": 8, "lds_pad": 8, "row_exit": True, **_STREAM}),
+    (8, 11, 19, 32, 16, 16, 3, "fp32", "gfx950", {"block_q": 32, "block_groups": 2, "block_h": 8, "lds_pad": 8, "row_exit": True, **_STREAM}),
+    (2, 9, 14, 8, 8, 32, 5, "fp32", "gfx942", {"block_groups": 1, "block_h": 4, "prefetch_rows": 3, "lds_only_sync": True}),
+    (2, 9, 14, 8, 8, 32, 5, "tf32", "gfx942", {"block_groups": 1, "block_h": 4, "prefetch_rows": 3, "lds_only_sync": True}),
+    (9, 10, 13, 32, 16, 16, 3, "tf32", "gfx942", {"block_groups": 2, "stage_out": True, "lds_pad": 8}),
+    (2, 6, 21, 8, 20, 8, 1, "tf32", "gfx950", {"block_groups": 4, "block_h": 32, "row_exit": True}),
+    (2, 6, 21, 8, 20, 8, 1, "fp32", "gfx942", {"block_groups": 4, "block_h": 32, "row_exit": True}),
+    (2, 9, 17, 8, 16, 16, 3, "tf32", "gfx942", {"block_groups": 2, **_FW}),
+    (2, 9, 17, 8, 16, 16, 3, "fp32", "gfx950", {"block_groups": 2, **_FWL}),
+    (2, 9, 17, 8, 16, 32, 3, "fp32", "gfx942", {"block_groups": 2, "preload_weights": True, "row_guard": True}),
+    (2, 9, 14, 8, 16, 32, 3, "tf32", "gfx950", {"block_groups": 1, "block_h": 4, "preload_weights": True, "waves_m": 2, "stage_out": True, "lds_pad": 8, "prefetch_rows": 2, "lds_only_sync": True}),
+    (8, 7, 14, 16, 32, 32, 3, "tf32", "gfx942", {"block_groups": 1, "fold_k32": True, "preload_weights": True, "waves_m": 2, "stage_out": True}),
+    (2, 9, 17, 4, 32, 32, 3, "fp32", "gfx950", {"block_groups": 1, "preload_weights": True}),
+    (2, 9, 17, 8, 64, 64, 3, "fp32", "gfx942", {"block_q": 64, "block_groups": 2, "double_buffer": False, "stage_out": True}),
+)  # fmt: skip
+_F32_FOURC_CFGS = (
+    (1, 8, 8, 16, 3, "fp32", "gfx942", 8, 16, False, False),
+    (2, 13, 13, 32, 3, "tf32", "gfx950", 4, 16, True, False),
+)
+
+
+def _f32_spec(idx: int):
+    """Config ``_F32_CFG_BASE + idx``, or None past the last one."""
+    if idx < len(_F32_GENERIC_CFGS):
+        return _generic_spec(idx, _F32_GENERIC_CFGS)
+    idx -= len(_F32_GENERIC_CFGS)
+    if idx < len(_F32_FOURC_CFGS):
+        return _fourc_spec(idx, _F32_FOURC_CFGS)
+    return None
+
+
+def _win_spec(cfg):
+    N, H, W, G, KH, KW, PAD, dtype, arch, knobs = cfg
     problem = DirectConvProblem(
         N=N,
         H=H,
@@ -323,6 +692,56 @@ def _spec(idx: int):
         dtype=dtype,
     )
     return DirectDepthwiseDgradWindowedSpec(problem=problem, **knobs), arch
+
+
+def _build(spec, arch):
+    if isinstance(spec, DirectConv4cSpec):
+        return build_direct_conv_4c(spec, arch=arch)
+    if isinstance(spec, DirectConvSpec):
+        return build_direct_conv(spec, arch=arch)
+    return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+
+
+def _spec(idx: int):
+    if idx >= _F32_CFG_BASE:
+        sel = _f32_spec(idx - _F32_CFG_BASE)
+        if sel is None:
+            raise SystemExit(f"unknown config index {idx}")
+        return sel
+    if _WMMA_WIN_CFG_BASE <= idx < _WMMA_WIN_CFG_BASE + len(_WMMA_WIN_CFGS):
+        return _win_spec(_WMMA_WIN_CFGS[idx - _WMMA_WIN_CFG_BASE])
+    if _GENERIC_CFG_BASE <= idx < _GENERIC_CFG_BASE + len(_GENERIC_CFGS):
+        return _generic_spec(idx - _GENERIC_CFG_BASE)
+    if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
+        return _fourc_spec(idx - _FOURC_CFG_BASE)
+    if _WIN_G8_CFG_BASE <= idx < _WIN_G8_CFG_BASE + len(_WIN_G8_CFGS):
+        N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_G8_CFGS[
+            idx - _WIN_G8_CFG_BASE
+        ]
+        knobs = dict(knobs)
+        cpg = knobs.pop("_cpg", 8)
+        problem = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=G,
+            cpg=cpg,
+            kpg=cpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+        return DirectDepthwiseDgradWindowedSpec(problem=problem, **knobs), arch
+    if _WIN_FWD_CFG_BASE <= idx < _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS):
+        N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_FWD_CFGS[
+            idx - _WIN_FWD_CFG_BASE
+        ]
+        return _win_spec((N, H, W, G, KH, KW, PAD, dtype, arch, dict(knobs, fwd=True)))
+    if not 0 <= idx < len(_WIN_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    return _win_spec(_WIN_CFGS[idx])
 
 
 def main() -> int:

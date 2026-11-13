@@ -31,7 +31,6 @@
 #include "launch_params.h"
 #include "detail.h"
 #include "hip_util.h"
-#include "tolerance.h"
 #include "hipconv/conv_params.hpp"
 
 #include <algorithm>
@@ -1011,7 +1010,7 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_depthwise_1d_toeplitz
 
 // Stream images back-to-back to amortize setup, but fold only above 4 wg/CU to preserve grid depth.
 // "H-chunking and h_fold" in depthwise-1d-toeplitz-cdna5.md has the measurements for both.
-inline int h_fold_for(const Config& cfg, const ConvParams& par)
+inline int h_fold_for(const Config& cfg, const ConvParams& par, int cu_count)
 {
     // Throughput flattens near 128 streamed rows, so stop there.
     constexpr int TARGET_ROWS = 128;
@@ -1039,7 +1038,7 @@ inline int h_fold_for(const Config& cfg, const ConvParams& par)
                                ((par.n + cfg.w_fold - 1) / cfg.w_fold);
     // Preserve at least unit workgroups after folding; kh3 requires twice the entry grid because
     // its winners need full headroom.
-    const long long unit  = 4LL * cu_count();
+    const long long unit  = 4LL * cu_count;
     const long long entry = (cfg.kh == 3) ? 8 * unit : unit;
     if(base_wgs < entry)
         return 1; // no workgroups to spare -- folding would starve the grid
@@ -1049,6 +1048,7 @@ inline int h_fold_for(const Config& cfg, const ConvParams& par)
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device& dev,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -1074,7 +1074,7 @@ void launch_impl(const LaunchParams& lp,
             view.q(),
             view.pad_h(),
             view.pad_w(),
-            h_fold_for(cfg, par));
+            h_fold_for(cfg, par, dev.cu_count));
     };
     // elem_bytes picks the dtype family, so a 4-byte config compiles only tf32 and a 2-byte one
     // only the halves; is_valid_config pairs the width with par.input_type.
@@ -1101,15 +1101,9 @@ public:
 
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
-    void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
+    bool is_applicable(const Device& dev, const ConvParams& par) const override
     {
-        get_mixed_precision_tolerance(par, atol, rtol);
-        atol = std::max(atol, 1e-6f);
-    }
-
-    bool is_applicable(const ConvParams& par) const override
-    {
-        if(!DepthwiseConvKernel::is_applicable(par))
+        if(!DepthwiseConvKernel::is_applicable(dev, par))
             return false;
         if(par.direction != Direction::Fprop && par.direction != Direction::Dgrad)
             return false;
@@ -1124,16 +1118,10 @@ public:
             return false;
         if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
             return false;
-        if(par.n > 0)
-        {
-            ConvSize sz(par);
-            if(sz.input_bytes() / par.n > INT32_MAX || sz.output_bytes() / par.n > INT32_MAX)
-                return false;
-        }
         return true;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -1172,7 +1160,7 @@ public:
             return false;
         // Exactly one fold family is valid per shape, so on a narrow map the F=1 ladder
         // drops out and the folded one leads the auto-pick.
-        if(cfg_.w_fold != preferred_wfold(par))
+        if(cfg_.w_fold != preferred_wfold(par, dev.cu_count))
             return false;
         return true;
     }
@@ -1180,7 +1168,7 @@ public:
     // Batch-fold factor for `par` (1 = none). Fold only narrow maps (tile <= 50% full)
     // where the tail reclaim beats the extra segment loads; prefer the smallest F. Needs
     // UPS==1 and wide C, so dgrad-s2 and narrow-C stay F=1.
-    static int preferred_wfold(const ConvParams& par)
+    static int preferred_wfold(const ConvParams& par, int cu_count)
     {
         const bool is_dgrad = par.direction == Direction::Dgrad;
         if(par.dilation_h != 1 || par.dilation_w != 1)
@@ -1204,7 +1192,7 @@ public:
         // wave ladder so every rung agrees on the family.
         const long long wgs =
             (long long)divup(out_w, tile_out) * divup(par.c, GROUP_SIZE * 4) * par.n;
-        const long long cu = cu_count();
+        const long long cu = cu_count;
         const auto rounds  = [cu](long long w) { return (w + cu - 1) / cu; };
         // A fold only pays if the padded tail is majority-real and it saves a round.
         const auto fills = [&](int F) {
@@ -1226,7 +1214,7 @@ public:
         return tile_geometry(cfg_, (int)sizeof_data_type(par.input_type)).shared_bytes();
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override
     {
         const int stride         = cfg_.stride;
         const int ups            = cfg_.dilation;
@@ -1240,7 +1228,7 @@ public:
         // h_fold: the grid enumerates only g_slots of the n_groups. n_fold then folds eff_n_fold
         // of those into x and spreads the rest over z (must match the device decode).
         const int n_groups      = (par.n + F - 1) / F;
-        const int hf            = h_fold_for(cfg_, par);
+        const int hf            = h_fold_for(cfg_, par, dev.cu_count);
         const int g_slots       = (n_groups + hf - 1) / hf;
         const int eff_n_fold    = (cfg_.n_fold < g_slots) ? cfg_.n_fold : g_slots;
         const int blocks_n_fold = (g_slots + eff_n_fold - 1) / eff_n_fold;
@@ -1254,7 +1242,7 @@ public:
         if(ups == 1 && n_full_blocks > 1)
         {
             const int base_wgs    = (q_tiles * eff_n_fold) * ch_blocks * blocks_n_fold;
-            const int target_wgs  = 4 * cu_count();
+            const int target_wgs  = 4 * dev.cu_count;
             const int max_by_halo = std::max(2, n_full_blocks / 2);
             if(base_wgs < target_wgs)
             {
@@ -1264,7 +1252,7 @@ public:
                 num_h_chunks = std::max(num_h_chunks, 1);
                 // The split buys occupancy with (num_h_chunks-1)/n_full_blocks of extra input
                 // traffic, so it must clear both bars; see depthwise-1d-toeplitz-cdna5.md.
-                const bool grid_deep_enough = base_wgs >= (5 * cu_count()) / 2;
+                const bool grid_deep_enough = base_wgs >= (5 * dev.cu_count) / 2;
                 const bool reread_too_dear  = (num_h_chunks - 1) * 100 > 6 * n_full_blocks;
                 if(grid_deep_enough && reread_too_dear)
                     num_h_chunks = 1;

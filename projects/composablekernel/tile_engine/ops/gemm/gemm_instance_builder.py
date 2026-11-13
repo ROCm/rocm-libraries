@@ -36,7 +36,7 @@ GEMM_PACKED_B_PIPELINES = _validation_utils.GEMM_PACKED_B_PIPELINES
 
 # gfx1250 pipelines. Only the ops listed here may emit them; every other op
 # raises instead of silently generating an unsupported kernel.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3")
 ASYNC_PIPELINES = ("comp_async",)
 GFX1250_PIPELINES = TDM_PIPELINES + ASYNC_PIPELINES
 GFX1250_PIPELINE_OPS = ("gemm_universal", "batched_gemm")
@@ -53,6 +53,27 @@ DOUBLE_SMEM_BUFFER_PIPELINES = (
 ) + TDM_PIPELINES
 
 
+def _check_tdm_epilogue(pipeline, epilogue, kernel_name_prefix):
+    """Raise unless a TDM pipeline gets an epilogue it accepts on this op (its own one:
+    tdm, or cshuffle for comp_tdm_v3; cshuffle also for the split-K capable pipelines,
+    see tdm_epilogue_allowed) and the tdm epilogue gets a TDM pipeline that writes
+    through it."""
+    if pipeline in TDM_PIPELINES and not _validation_utils.tdm_epilogue_allowed(
+        pipeline, epilogue, kernel_name_prefix
+    ):
+        want = _validation_utils.tdm_pipeline_epilogue(pipeline)
+        raise ValueError(
+            f"{pipeline} pipeline requires the {want} epilogue, got '{epilogue}'"
+        )
+    tdm_epilogue_pipelines = tuple(
+        p for p in TDM_PIPELINES if _validation_utils.tdm_pipeline_epilogue(p) == "tdm"
+    )
+    if epilogue == "tdm" and pipeline not in tdm_epilogue_pipelines:
+        raise ValueError(
+            f"tdm epilogue requires a TDM pipeline {tdm_epilogue_pipelines}, got '{pipeline}'"
+        )
+
+
 def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
     """Strict map lookup: raise instead of emitting 'None' into generated code."""
     try:
@@ -61,6 +82,11 @@ def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
         raise ValueError(
             f"unknown {what} '{pipeline}'; supported: {sorted(pipeline_map)}"
         ) from None
+
+
+# Non-default output (C) types per input datatype. fp8/bf8 kernels write fp16 by
+# default; bf16 C is opt-in and adds a _c<dtype> suffix to the kernel name.
+C_DATATYPE_OVERRIDES = {"fp8": ("bf16",), "bf8": ("bf16",)}
 
 
 class GemmKernelBuilder:
@@ -81,6 +107,7 @@ class GemmKernelBuilder:
         seed=None,
         tier=None,
         manifest_path=None,
+        c_datatype=None,
     ):
         self.kernel_name_prefix = kernel_name_prefix
         self.working_path = Path(working_path)
@@ -92,6 +119,20 @@ class GemmKernelBuilder:
         self.seed = seed
         self.tier = tier
         self.manifest_path = manifest_path
+        # Output (C) type override. None, or the default C type of this datatype,
+        # keeps the default kernels and names unchanged.
+        default_c = self._default_c_datatype()
+        if c_datatype is not None and c_datatype != default_c:
+            if datatype not in C_DATATYPE_OVERRIDES or (
+                c_datatype not in C_DATATYPE_OVERRIDES[datatype]
+            ):
+                raise ValueError(
+                    f"c_datatype '{c_datatype}' is not supported for datatype "
+                    f"'{datatype}'; supported overrides: {C_DATATYPE_OVERRIDES}"
+                )
+            self.c_datatype = c_datatype
+        else:
+            self.c_datatype = None
 
         # Create working directory if it doesn't exist
         self.working_path.mkdir(parents=True, exist_ok=True)
@@ -101,6 +142,19 @@ class GemmKernelBuilder:
             with open(config_json, "r") as f:
                 self.config = json.load(f)
             self.group_size_k = self.config.get("group_size_k", 128)
+
+    def _default_c_datatype(self):
+        if self.datatype in ["fp4", "fp8", "bf8"]:
+            return "fp16"
+        return self.datatype
+
+    def _c_datatype(self):
+        """Output (C) datatype: the override if one was given, else the default."""
+        return self.c_datatype or self._default_c_datatype()
+
+    def _c_name_suffix(self):
+        """Kernel-name suffix for a non-default C type; empty for the default."""
+        return f"_c{self.c_datatype}" if self.c_datatype else ""
 
     def _apply_sampling(self, kernel_list):
         """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
@@ -217,7 +271,7 @@ class GemmKernelBuilder:
                 tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
                 tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
 
-                kernel_name += f"_{tile_str}"
+                kernel_name += f"_{tile_str}" + self._c_name_suffix()
 
                 kernel_list.append(
                     {
@@ -236,14 +290,12 @@ class GemmKernelBuilder:
         prefix = self.kernel_name_prefix
         if pipeline in GFX1250_PIPELINES and prefix not in GFX1250_PIPELINE_OPS:
             raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
-        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
-            raise ValueError(
-                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
-            )
-        if pipeline in TDM_PIPELINES and epilogue != "tdm":
-            raise ValueError(
-                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
-            )
+        if (
+            pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE
+            and prefix not in _validation_utils.GFX1250_TDM_V3_OPS
+        ):
+            raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
+        _check_tdm_epilogue(pipeline, epilogue, prefix)
         pad_reason = _validation_utils.tdm_pad_reject_reason(
             pipeline, epilogue, pad_m, pad_n, pad_k
         )
@@ -264,13 +316,19 @@ class GemmKernelBuilder:
             if async_pad_reason:
                 raise ValueError(f"{pipeline}/{epilogue}: {async_pad_reason}")
 
-    def _tdm_k_batch_guard(self, pipeline):
-        """Host-side split-K guard for TDM pipelines (empty for all others).
+    def _tdm_k_batch_guard(self, pipeline, epilogue):
+        """Host-side split-K guard for TDM pipelines on the tdm epilogue (empty
+        for all others).
 
-        TdmEpilogue ignores the memory operation, so k_batch > 1 would produce a
-        partial C without any error.
+        TdmEpilogue cannot accumulate, so k_batch > 1 is impossible; the kernel
+        rejects it too, this just fails earlier and louder. Only the split-K
+        capable pipelines (GEMM_TDM_CSHUFFLE_PIPELINES) can split K on the
+        cshuffle epilogue, and the kernel's IsSupportedArgument checks it.
         """
-        if pipeline not in TDM_PIPELINES:
+        if pipeline not in TDM_PIPELINES or (
+            epilogue == "cshuffle"
+            and pipeline in _validation_utils.GEMM_TDM_CSHUFFLE_PIPELINES
+        ):
             return ""
         return """
 
@@ -359,7 +417,7 @@ class GemmKernelBuilder:
         if tile_config is not None:
             kernel_name += f"_{self._format_tile_config_string(tile_config)}"
 
-        return kernel_name
+        return kernel_name + self._c_name_suffix()
 
     def _list_kernels(self):
         """Write kernel list to file for CMake to read (with comprehensive validation)"""
@@ -540,13 +598,9 @@ class GemmKernelBuilder:
         # Determine data types for validation
         a_datatype = self.datatype
         b_datatype = self.datatype
-        c_datatype = self.datatype
+        c_datatype = self._c_datatype()
 
         layout = self.layout
-
-        # Special handling for certain data types
-        if self.datatype in ["fp4", "fp8", "bf8"]:
-            c_datatype = "fp16"
 
         # Use the comprehensive validation function
         return is_tile_config_valid(
@@ -666,6 +720,7 @@ class GemmKernelBuilder:
                 "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
                 "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
                 "comp_tdm_pc": "ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer",
+                "comp_tdm_v3": "ck_tile::GemmPipelineAgBgCrCompTDMV3",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
@@ -676,6 +731,7 @@ class GemmKernelBuilder:
                 "comp_tdm": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_pc": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_v3": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
             self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
             if validate:
@@ -806,9 +862,7 @@ class GemmKernelBuilder:
         acc_type = "float"
 
         # Determine output type
-        c_type = self.datatype
-        if self.datatype in ["fp4", "fp8", "bf8"]:
-            c_type = "fp16"
+        c_type = self._c_datatype()
 
         # Assign layouts based on self.layout
         if self.kernel_name_prefix == "gemm_multi_d":
@@ -1023,8 +1077,17 @@ struct SelectedKernel {{
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>,
         false, false>;"""
 
-        # Tile partitioner
-        instance_code += """
+        # Tile partitioner. comp_tdm_v3 walks the output tiles in plain row-major
+        # order (tile id -> (id / NBlocks, id % NBlocks)), the raster of the
+        # rocKE kernel it ports; GemmTile2DPartitioner gives the same order but
+        # does not build with GemmKernel outside cluster launch.
+        if pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE:
+            instance_code += """
+
+    // Tile partitioner (plain row-major raster)
+    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;"""
+        else:
+            instance_code += """
 
     // Tile partitioner
     using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;"""
@@ -1171,7 +1234,10 @@ struct SelectedKernel {{
     // Launch function
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
 
-        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline in ("comp_tdm", "comp_tdm_v2"):
+        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline in (
+            "comp_tdm",
+            "comp_tdm_v2",
+        ):
             instance_code += """
         if (args.k_batch != 1 || args.N % TileN != 0 || args.K % TileK != 0) {
             throw std::runtime_error("Compute TDM requires complete N/K tiles and k_batch=1");
@@ -1317,9 +1383,10 @@ struct SelectedKernel {{
 
         elif self.kernel_name_prefix in ["gemm_universal", "gemm_preshuffle"]:
             persistent_check = (
-                'static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel, '
+                "static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel, "
                 '"Pipeline and launch disagree on persistent mode");'
-                if self.kernel_name_prefix == "gemm_preshuffle" else ""
+                if self.kernel_name_prefix == "gemm_preshuffle"
+                else ""
             )
             instance_code += f"""
 
@@ -1329,7 +1396,7 @@ struct SelectedKernel {{
         {persistent_check}
 
         // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
+        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline, epilogue)}
 
         if (!GemmKernel::IsSupportedArgument(kargs)) {{
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
@@ -1365,7 +1432,7 @@ struct SelectedKernel {{
         using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
         // Kernel arguments
-        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
+        auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline, epilogue)}
 
         if (!GemmKernel::IsSupportedArgument(kargs)) {{
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
@@ -1660,14 +1727,7 @@ struct SelectedKernel {{
         // Epilogue
         """
 
-        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
-            raise ValueError(
-                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
-            )
-        if pipeline in TDM_PIPELINES and epilogue != "tdm":
-            raise ValueError(
-                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
-            )
+        _check_tdm_epilogue(pipeline, epilogue, self.kernel_name_prefix)
         double_smem = pipeline in DOUBLE_SMEM_EPILOGUE_PIPELINES
 
         if epilogue == "tdm" and self.kernel_name_prefix in [

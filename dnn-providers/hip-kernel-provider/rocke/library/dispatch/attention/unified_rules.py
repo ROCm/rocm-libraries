@@ -43,7 +43,7 @@ from .common import (
     ATTENTION_ABI_VERSION,
     AttentionRequest,
     AttentionTuningSpec,
-    _problem,
+    attention_problem,
 )
 from .tuning_specs import (
     ExplicitAttention2DConfig,
@@ -151,6 +151,9 @@ def _variant_axes(variant: AttentionGeometryVariant):
     if variant.builder_kind == "gfx942_4warp_gqa":
         return ()  # the 4-warp GQA builder reads no tuning knobs
     return tuning_axes(variant.arch, variant.path)
+
+
+_LSE_OUTPUT_FIELDS = frozenset({"emit_lse", "lse_layout"})
 
 
 @lru_cache(maxsize=None)
@@ -389,21 +392,22 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
+            # The LSE output fields are outputs the caller selects, not defaults
+            # that knobs are a delta against: keeping them out of the kernel and
+            # the split-KV reduce defaults leaves every config_key, and so every
+            # stored pin, as before the fields existed.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded
+                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
             },
-            # ``emit_lse`` is an output the problem selects, not a default that
-            # knobs are a delta against: keeping it out leaves every split-KV
-            # config_key, and so every stored pin, as before the field existed.
             "reduce": (
                 None
                 if reduce is None
                 else {
                     name: value
                     for name, value in _declared_defaults(type(reduce))
-                    if name != "emit_lse"
+                    if name not in _LSE_OUTPUT_FIELDS
                 }
             ),
         }
@@ -515,7 +519,7 @@ def iter_tuning_specs(
     """Specs for one geometry at ``level``: ``production`` walks the curated
     stacks (no dead-end knobs); ``full`` walks every kernel knob -- consume it
     through :func:`sample_tuning_specs` unless the space is known to be small."""
-    return unified_space(variant).stream(_problem(req), level)
+    return unified_space(variant).stream(attention_problem(req), level)
 
 
 def sample_tuning_specs(
@@ -526,4 +530,4 @@ def sample_tuning_specs(
 ) -> Iterable[AttentionTuningSpec]:
     """Up to ``n`` distinct random legal specs from the full knob space, dead
     ends included; ``KNOWN_WRONG_KNOBS`` never."""
-    return unified_space(variant).sample(_problem(req), n, seed)
+    return unified_space(variant).sample(attention_problem(req), n, seed)

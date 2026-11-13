@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from dispatch.attention import AttentionRequest, _problem, dispatch_attention
+from dispatch.attention import AttentionRequest, attention_problem, dispatch_attention
 from kernels.common import attention_unified as au
 
 
@@ -106,6 +106,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         "use_mfma32_skip_legacy_qreg",
         "use_kq_lds_pad",
         "kq_lds_pad_halves",
+        "use_qblock_reverse",
     }
 
     def setUp(self):
@@ -121,6 +122,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         self.assertIs(ov["use_softmax_mfma_interleave"], True)
         self.assertEqual(ov["softmax_interleave_mode"], 2)
         self.assertIs(ov["use_register_pv"], False)
+        self.assertIs(ov["use_qblock_reverse"], True)
 
     def test_dispatched_spec_carries_overrides(self):
         # the candidate declares the knobs on the dispatched spec (via the SSOT).
@@ -136,7 +138,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         self.assertEqual(spec.tiled_overrides, ())
 
     def test_orchestrator_accepts_overrides(self):
-        problem = _problem(_d256())
+        problem = attention_problem(_d256())
         # no-arg path: _impl already applies the D256 override, and
         # _resolve_lds_budget still runs (a valid spec is returned).
         base = au._tiled_spec_from_problem(problem, "gfx950")
@@ -152,7 +154,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
     def test_overrides_reach_the_spec(self):
         # an override that violates a spec invariant is raised by the spec's
         # __post_init__ -> proves overrides= is really applied, not ignored.
-        problem = _problem(_d256())
+        problem = attention_problem(_d256())
         with self.assertRaises(ValueError):
             au._tiled_spec_from_problem(
                 problem, "gfx950", overrides={"use_register_pv": True}

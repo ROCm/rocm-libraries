@@ -92,6 +92,7 @@ class LogicalInstruction : public IRBase {
     std::optional<GLOBALModifiers> global;          ///< Global memory modifier
     std::optional<CacheScopeModifiers> cacheScope;  ///< SOPP fence scope (global_wb / global_inv)
     std::optional<MUBUFModifiers> mubuf;            ///< MUBUF (buffer load/store) modifier
+    std::optional<TENSORModifiers> tensor;          ///< Tensor op (tensor_load_to_lds) cache policy
     std::optional<SMEMModifiers> smem;              ///< SMEM (scalar load/store/atomic) modifier
     std::optional<VOP3PModifiers> vop3;             ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;          ///< True16 (.l/.h half-select) modifier
@@ -103,6 +104,9 @@ class LogicalInstruction : public IRBase {
     std::optional<std::string>
         longBranchLabel;  ///< s_setpc_b64 long-branch target label (forwarded to LabelData so
                           ///< CFGBuilderPass can build the CFG edge for the computed jump)
+    std::optional<std::vector<std::string>>
+        callTargets;  ///< s_swappc_b64 callee labels (forwarded to CallTargetData for call-graph
+                      ///< analysis only, not CFG edges) -- mirrors rocisa SSwapPCB64::calleeFuncs
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {

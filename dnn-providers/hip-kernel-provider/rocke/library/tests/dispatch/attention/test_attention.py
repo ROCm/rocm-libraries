@@ -22,14 +22,16 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
 # ``lse`` is an output feature, not part of ATTENTION_FEATURES: only candidates
-# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_3d`` and the
-# ``_u3d_`` split-KV tuning candidates) declare it, so every other candidate
-# must keep declining it. The generated ``_u3d_`` candidates are not in this map;
-# their feature set is checked in the tuning-candidate test below.
+# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_2d``,
+# ``attention_unified_3d`` and every unified tuning candidate except the gfx942
+# 4-warp GQA one) declare it, so every other candidate must keep declining it.
+# The generated tuning candidates are not in this map; their feature set is
+# checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
     "full_attention",
+    "layout_dense",
     "lse",
     "sinks",
     "sliding_window",
@@ -58,11 +60,52 @@ _RDNA_WMMA_FEATURES = {
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
         "strided_kv",
+        "layout_dense",
+        "layout_bhsd",
         "causal",
         "causal_bottom_right",
         "sliding_window",
     },
-    "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
+    "attention_gfx942_dense": {
+        "causal",
+        "causal_bottom_right",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx942_dense_qbminor": {
+        "causal",
+        "causal_bottom_right",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx942_dense_persist_aot": {
+        "causal",
+        "causal_bottom_right",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx942_dense_btminor_aot": {
+        "causal",
+        "causal_bottom_right",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx942_dense_hqswz_aot": {
+        "causal",
+        "causal_bottom_right",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
@@ -92,6 +135,7 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
+        "lse",
     },
     "attention_unified_3d": {
         "band",
@@ -101,7 +145,7 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
-        # Split-KV only: the 2D path writes no LSE (see attention_unified_2d).
+        # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
     },
 }
@@ -233,6 +277,106 @@ class TestAttentionMaskType(unittest.TestCase):
                     ValueError, r"mask_type.*exact integer ordinal"
                 ):
                     dispatch_attention(_attn(mask_type=value))
+
+
+class TestAttentionPublicSurface(unittest.TestCase):
+    def test_every_all_entry_resolves(self):
+        import dispatch.attention as attention
+
+        missing = [n for n in attention.__all__ if not hasattr(attention, n)]
+        self.assertEqual(missing, [])
+        self.assertEqual(len(attention.__all__), len(set(attention.__all__)))
+
+    def test_star_import_succeeds(self):
+        namespace: dict = {}
+        exec("from dispatch.attention import *", namespace)
+        import dispatch.attention as attention
+
+        for name in attention.__all__:
+            self.assertIn(name, namespace)
+
+    def test_all_is_exactly_the_public_api(self):
+        # The full ``dispatch.attention.__all__``: a name added to (or dropped
+        # from) ``__all__`` fails here until it is listed below, so the public
+        # surface only grows on purpose and a module-level helper cannot slip in.
+        import dispatch.attention as attention
+
+        self.assertEqual(set(attention.__all__), _ATTENTION_PUBLIC_API)
+
+    def test_all_exports_no_private_name_or_submodule(self):
+        import types
+
+        import dispatch.attention as attention
+
+        private = [n for n in attention.__all__ if n.startswith("_")]
+        modules = [
+            n
+            for n in attention.__all__
+            if isinstance(getattr(attention, n), types.ModuleType)
+        ]
+        self.assertEqual(private, [])
+        self.assertEqual(modules, [])
+
+    def test_exported_algorithm_names_are_registered(self):
+        # Each exported ``*_ALGORITHM`` names a registered candidate, and each
+        # ``*_ALGORITHMS`` set holds only such names.
+        import dispatch.attention as attention
+
+        registered = {c.algorithm for c in attention.ATTENTION_REGISTRY.candidates()}
+        singles = [n for n in attention.__all__ if n.endswith("_ALGORITHM")]
+        self.assertTrue(singles)
+        for name in singles:
+            with self.subTest(name=name):
+                self.assertIsInstance(getattr(attention, name), str)
+                self.assertIn(getattr(attention, name), registered)
+        for name in ("DENSE_ALGORITHMS", "UNIFIED_ALGORITHMS"):
+            with self.subTest(name=name):
+                self.assertLessEqual(set(getattr(attention, name)), registered)
+
+
+# The complete public surface of ``dispatch.attention`` (its ``__all__``).
+_ATTENTION_PUBLIC_API = frozenset(
+    {
+        "ATTENTION_ABI_VERSION",
+        "ATTENTION_DIM_VOCABULARY",
+        "ATTENTION_EXECUTION_REGISTRY",
+        "ATTENTION_FEATURES",
+        "ATTENTION_REGISTRY",
+        "ATTENTION_ROUTE_REGISTRY",
+        "AttentionMaskType",
+        "AttentionRequest",
+        "AttentionSpec",
+        "AttentionTuningSpec",
+        "D256_DECODE_ALGORITHM",
+        "D256_GFX950_ALGORITHM",
+        "DENSE_ALGORITHM",
+        "DENSE_ALGORITHMS",
+        "DENSE_GRID_ALGORITHM",
+        "DENSE_PERSIST_ALGORITHM",
+        "GFX942_DENSE_PIPE_ALGORITHM",
+        "UNIFIED_2D_ALGORITHM",
+        "UNIFIED_3D_ALGORITHM",
+        "UNIFIED_ALGORITHMS",
+        "UNIFIED_BLOCK_SIZES",
+        "UNIFIED_HEAD_SIZES",
+        "attention_band",
+        "attention_candidates",
+        "attention_dispatch_result",
+        "attention_execution_candidates",
+        "attention_problem",
+        "attention_sweep_space",
+        "attention_tuning_spec",
+        "dense_scale_range",
+        "dispatch_attention",
+        "dispatch_attention_all",
+        "dispatch_for_arches",
+        "iter_dispatch_attention_all",
+        "iter_registered_attention_combos",
+        "priority_ranker",
+        "registered_attention_combos",
+        "tuning_spec_with_knobs",
+    }
+)
 
 
 class TestAttentionBottomRightRouting(unittest.TestCase):
@@ -387,9 +531,9 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Only split-KV (u3d) geometries write the optional LSE output.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
             expected = set(ATTENTION_FEATURES) | (
-                {"lse"} if "_u3d_" in candidate.name else set()
+                set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)

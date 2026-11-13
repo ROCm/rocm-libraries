@@ -345,12 +345,14 @@ class TestTapOuterKIdentity(unittest.TestCase):
         for name in (
             "ws_replicas",
             "prefetch_addr",
+            "prefetch_global_regs",
             "patch",
             "tap_outer_k",
             "dy_halo",
             "dy_halo_setprio",
             "dy_halo_kouter_pad",
             "halo_max_wo",
+            "split_k_cluster",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]

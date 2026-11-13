@@ -129,10 +129,13 @@ def get_generated_kernels_dir() -> Path:
 
 def get_arch_filter_data() -> Dict[str, Any]:
     """Load arch filter data from arch_specs_generated if available."""
-    codegen_dir = get_dispatcher_root() / "codegen"
+    codegen_dir = str(get_dispatcher_root() / "codegen")
     import sys
 
-    sys.path.insert(0, str(codegen_dir))
+    # Called once per expanded config: inserting unconditionally grew sys.path
+    # by one entry per call, and every later import scanned all of them.
+    if codegen_dir not in sys.path:
+        sys.path.insert(0, codegen_dir)
 
     try:
         from arch_specs_generated import (
@@ -1128,7 +1131,11 @@ def _fail_reason(what: str, stderr: str, returncode: int) -> str:
 
 
 def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
-    """Module-level function to run hipcc compilation in parallel."""
+    """Module-level function to run hipcc compilation in parallel.
+
+    ``compile_timeout`` and ``link_timeout`` (seconds) bound the two steps; both
+    default to 300. A timeout is reported as ``Timeout: <step> exceeded N s``.
+    """
     import subprocess
     from pathlib import Path
 
@@ -1136,6 +1143,7 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
     link_cmd = args["link_cmd"]
     lib_path = Path(args["lib_path"])
 
+    step = "compile"
     try:
         lib_path.parent.mkdir(parents=True, exist_ok=True)
         res_c = subprocess.run(
@@ -1148,14 +1156,20 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
             reason = _fail_reason("Compile failed", res_c.stderr, res_c.returncode)
             return False, None, reason
 
-        res_l = subprocess.run(link_cmd, capture_output=True, text=True, timeout=300)
+        step = "link"
+        res_l = subprocess.run(
+            link_cmd,
+            capture_output=True,
+            text=True,
+            timeout=args.get("link_timeout", 300),
+        )
         if res_l.returncode != 0:
             reason = _fail_reason("Link failed", res_l.stderr, res_l.returncode)
             return False, None, reason
 
         return True, lib_path, ""
-    except subprocess.TimeoutExpired:
-        return False, None, "Timeout"
+    except subprocess.TimeoutExpired as e:
+        return False, None, f"Timeout: {step} exceeded {e.timeout:g} s"
     except Exception as e:
         return False, None, str(e)
 
@@ -1169,6 +1183,9 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
     Codegen writes into a private directory first. The shared output directory
     can already hold headers that differ only in fields the glob leaves open
     (padding), so the header returned must be the one this call emitted.
+
+    ``timeout`` (seconds, default 300) bounds the codegen subprocess; a timeout
+    is reported as ``Timeout: codegen exceeded N s``, like compile and link.
     """
     import subprocess
     import json
@@ -1205,8 +1222,17 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
                 args.get("variant", "standard"),
             ]
 
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            os.unlink(config_file)
+            try:
+                res = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=args.get("timeout", 300),
+                )
+            except subprocess.TimeoutExpired as e:
+                return False, None, f"Timeout: codegen exceeded {e.timeout:g} s"
+            finally:
+                os.unlink(config_file)
 
             if res.returncode != 0:
                 reason = _fail_reason("Codegen failed", res.stderr, res.returncode)

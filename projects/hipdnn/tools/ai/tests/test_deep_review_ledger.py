@@ -4,6 +4,7 @@
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -602,7 +603,7 @@ def test_fenced_finding_blocks_are_mapped_and_nested_code_survives(rl):
     assert [b["ID"] for b in blocks] == ["CORR1-p1", "CORR1-p2", "CORR1-p3"]
     assert blocks[0]["Actual"] == "Breaks:\n```cpp\nint x;\n```\nafter"
     assert "```" not in blocks[1]["Fix"] and blocks[1]["Fix"] == "clamp it"
-    assert rl.unparsed_ids(text) == 0
+    assert rl.unparsed_blocks(text) == 0
 
 
 def test_ids_fails_on_id_lines_it_cannot_parse(ledger, ev, capsys):
@@ -639,3 +640,127 @@ def test_gates_fail_on_a_report_below_a_nested_round_directory(ledger, ev, sub, 
     (nested / "CORR1.md").write_text(report("CORR1"))
     assert run(ledger, sub, ev) == 1
     assert "r1/r1/lanes/CORR1.md" in capsys.readouterr().err.replace("\\", "/")
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "**ID:**",
+        "- ID:",
+        "> ID:",
+        "`ID:`",
+        "1. ID:",
+        "+ ID:",
+        "### ID:",
+        "ID :",
+        "*ID:*",
+        "| ID: |",
+    ],
+)
+def test_ids_fails_on_a_marked_up_id_line(ledger, ev, markup, capsys):
+    seeded(ledger, ev)
+    block = finding("CORR1-p1").replace("ID:", markup, 1)
+    with_reports(ledger, ev, CORR1=report("CORR1", [block, finding("CORR1-p2")]))
+    assert run(ledger, "ids", ev) == 1
+    assert "unparsed finding blocks in CORR1.md" in capsys.readouterr().err
+
+
+def test_ids_fails_on_a_block_without_an_id_line(ledger, ev, capsys):
+    seeded(ledger, ev)
+    no_id = finding("CORR1-p2").replace("ID:        CORR1-p2\n", "", 1)
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1"), no_id]))
+    assert run(ledger, "ids", ev) == 1
+    assert "unparsed finding blocks in CORR1.md" in capsys.readouterr().err
+
+
+def test_quoted_or_prose_tier_lines_in_a_field_are_not_blocks(rl):
+    quote = "\n```\nVerdict: CONFIRMED\nTier:      IMPORTANT\n```\n- Tier: BLOCKING in CORR1"
+    text = report("CORR1", [finding("CORR1-p1", extra=quote)])
+    assert rl.unparsed_blocks(text) == 0
+
+
+def test_ids_fails_on_a_merged_lane_finding_written_as_a_table_row(ledger, ev, capsys):
+    seeded(ledger, ev)
+    row = "| DOCS-p2 | IMPORTANT | a.cpp:3 | README contradicts the header |"
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("DOCS-p1"), row]))
+    assert run(ledger, "ids", ev) == 1
+    assert "CORR1.md: DOCS-p2" in capsys.readouterr().err
+
+
+def test_ids_accepts_cited_ids_another_report_of_the_round_parsed(ledger, ev):
+    seeded(ledger, ev)
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1", [finding("CORR1-p1", extra="same root cause as TESTQ-p1")]
+        ),
+        TESTQ=report("TESTQ", [finding("TESTQ-p1")]),
+        AUTH=report("AUTH", [finding("AUTH-p1")]),
+        AUTH_f1=report("AUTH", [finding("AUTH-p2", extra="narrows AUTH-p1")]),
+    )
+    assert run(ledger, "ids", ev) == 0
+
+
+def test_ids_rejects_a_follow_up_prefix_in_a_provisional_id(ledger, rl, ev, capsys):
+    seeded(ledger, ev)
+    with_reports(ledger, ev, TESTQ_f1=report("TESTQ", [finding("TESTQ-f1-p1")]))
+    assert run(ledger, "ids", ev) == 1
+    assert "bad provisional ID TESTQ-f1-p1" in capsys.readouterr().err
+    with_reports(ledger, ev, TESTQ_f1=report("TESTQ", [finding("TESTQ-p1")]))
+    assert run(ledger, "ids", ev) == 0
+    assert [r["ID"] for r in table(rl, ev, "Findings").rows] == ["TESTQ-1"]
+
+
+@pytest.mark.parametrize("end", ["### Lane notes", "---"])
+def test_prose_after_a_heading_or_rule_stays_out_of_the_last_field(rl, end):
+    text = report("CORR1", [finding("CORR1-p1") + f"\n{end}\nAlso looked at c.cpp.\n"])
+    assert rl.parse_findings(text)[0]["Fix"] == "clamp it"
+
+
+def test_a_shell_comment_line_stays_inside_its_field(rl):
+    text = report("CORR1", [finding("CORR1-p1", extra="\n# exit 1\nlog tail")])
+    proof = rl.parse_findings(text)[0]["Proof"]
+    assert proof.endswith("\n# exit 1\nlog tail")
+
+
+def test_id_line_check_is_linear_on_long_marker_runs(rl):
+    text = report("CORR1", [finding("CORR1-p1", extra="\n```\n" + "#" * 500 + "\n```")])
+    start = time.perf_counter()
+    assert rl.unparsed_blocks(text) == 0
+    assert time.perf_counter() - start < 0.5
+
+
+def test_coverage_names_a_short_path_or_grouped_owner_row(ledger, ev, capsys):
+    (ev / "r1" / "owners.tsv").write_text("CORR1\tsrc/a.cpp\nCORR1\tsrc/b.cpp\n")
+    (ev / "r1" / "numstat.txt").write_text("3\t2\tsrc/a.cpp\n1\t0\tsrc/b.cpp\n")
+    seeded(ledger, ev)
+    rows = [
+        ("a.cpp", "full", "-"),
+        ("src/{b,c}.cpp", "full", "-"),
+        ("x.h", "full", "-"),
+    ]
+    with_reports(ledger, ev, CORR1=report("CORR1", coverage=rows))
+    assert run(ledger, "coverage", ev) == 0
+    out = capsys.readouterr().out
+    assert "ignored: CORR1: a.cpp (did you mean src/a.cpp?)" in out
+    assert "ignored: CORR1: src/{b,c}.cpp (one row per file" in out
+    assert "x.h" not in out
+
+
+def test_cluster_supersedes_repoints_chains_and_refuses_a_superseded_keep(
+    ledger, rl, ev, capsys
+):
+    make_candidates(ledger, ev, "IMPORTANT", "IMPORTANT", "IMPORTANT")
+    assert run(ledger, "cluster", ev, 1, "CORR-1", "CORR-2") == 0
+    assert run(ledger, "cluster", ev, 1, "CORR-3", "CORR-1") == 0
+    status = {r["ID"]: r["Status"] for r in table(rl, ev, "Findings").rows}
+    assert status == {
+        "CORR-1": "SUPERSEDED-BY:CORR-3",
+        "CORR-2": "SUPERSEDED-BY:CORR-3",
+        "CORR-3": "",
+    }
+    capsys.readouterr()
+    assert run(ledger, "cluster", ev, 1, "CORR-2", "CORR-3") == 1
+    assert "CORR-2 is itself superseded" in capsys.readouterr().err
+    assert run(ledger, "cluster", ev, 1, "CORR-3", "CORR-9") == 1

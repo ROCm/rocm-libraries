@@ -10,6 +10,7 @@ holding files.txt and numstat.txt, and exits non-zero with a one-line reason on 
   plan     areas.tsv + numstat.txt -> owners.tsv (`owner<TAB>path`) and a Lanes summary
   packets  owners.tsv + numstat.txt + areas.tsv -> packets/<LANE>.md
   gate     numstat.txt vs owners.tsv: owned once, in numstat, owned lines sum to the total
+  orient-gate  paths cited in CONTEXT.md and orient/*.md exist at BASE or are added files
 
 A `--sampled` file has one `path<TAB>generator[<TAB>sample]` row per generated, golden or
 bundle file: `generator` is the generator or source of truth, a third column `sample` marks
@@ -50,6 +51,18 @@ AREA_ROWS = [
     ("tooling", ("projects/hipdnn/tools/", "tools/")),
 ]
 
+# Changes under these trigger the IMPACT lane (lanes/runtime-impact.md): the kernel ingestor's
+# producers, packer, native packs, plugin SDK headers (the loader's include closure is worked out
+# per tree, so every header triggers), the generic-target table and its CMake template, and
+# generator configs. Keep in step with SURFACE_TABLE in hipdnn-ingestor-impact's scripts/impact.py.
+IMPACT_PREFIXES = (
+    "dnn-providers/hip-kernel-provider/",
+    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/",
+    "projects/hipdnn/plugin_sdk/cmake/GpuGenericTargets",
+    "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+    "projects/hipdnn/tools/IngestorGenerator/",
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
@@ -65,7 +78,14 @@ CONCERN_LANES = {
     "DOCS",
     "RUN",
     "DRIFT",
+    "IMPACT",
 }
+# Prefixes of every agent that writes a report. PROVISIONAL_ID matches `<prefix><k>-p<n>`
+# and the invalid follow-up form `<prefix><k>-f<j>-p<n>`.
+REPORT_LANES = ["CORR", "SCOUT", "SYNTH", "VER", "ORCH", *sorted(CONCERN_LANES)]
+PROVISIONAL_ID = re.compile(
+    rf"(?<![A-Za-z0-9-])(?:{'|'.join(REPORT_LANES)})\d*(?:-f\d+)?-p\d+\b"
+)
 
 
 def fail(msg: str):
@@ -335,6 +355,8 @@ def concern_scope(lane: str, rows):
             or re.fullmatch(r"requirements.*\.txt", name(r[0]))
             or re.search(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|hip|cu|cuh)$", name(r[0]))
         ]
+    if lane == "IMPACT":
+        return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
     return rows
 
 
@@ -392,9 +414,9 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD and DEPS scope to their trigger files, other concern lanes take every
-    changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The diff
-    is not read."""
+    scope). BUILD, DEPS and IMPACT scope to their trigger files, other concern lanes take
+    every changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The
+    diff is not read."""
     rd = Path(args.round_dir)
     rows = {r[0]: r for r in read_numstat(rd)}
     areas = read_areas(rd)
@@ -463,6 +485,50 @@ def cmd_gate(args) -> None:
         sys.exit(1)
 
 
+CITED_PATH = re.compile(r"`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)(?::[0-9]+)?`")
+
+
+def cmd_orient_gate(args) -> None:
+    """Orient Gate: every repository path CONTEXT.md and orient/*.md cite in backticks
+    (`dir/file` or `dir/file:<line>`) exists at PIN.md's BASE, or is a files.txt path absent
+    at BASE (a file the change adds). Prints `not at base: <path>` for any other; exit 0
+    only when it prints nothing."""
+    rd = Path(args.round_dir)
+    if not (rd / "PIN.md").is_file():
+        fail(f"PIN.md not found: {rd / 'PIN.md'}")
+    clone, base = rl.pin_value(rd, "CLONE"), rl.pin_value(rd, "BASE")
+    if not clone or not base:
+        fail("PIN.md lacks CLONE or BASE")
+    if not (rd / "CONTEXT.md").is_file():
+        fail(f"CONTEXT.md not found: {rd / 'CONTEXT.md'}")
+    docs = [rd / "CONTEXT.md", *sorted((rd / "orient").glob("*.md"))]
+    cited = sorted(
+        {
+            m.group(1).removeprefix("./")
+            for d in docs
+            for m in CITED_PATH.finditer(d.read_text("utf-8"))
+        }
+    )
+    # The tree listing needs no blobs, so a blobless clone fetches nothing.
+    code, out, err = rl.git(clone, "ls-tree", "-r", "--name-only", "--full-tree", base)
+    if code:
+        fail(f"git ls-tree {base} failed: {err.strip()}")
+    at_base = set()
+    for path in out.splitlines():
+        at_base.add(path)
+        while "/" in path:
+            path = path.rsplit("/", 1)[0]
+            if path in at_base:
+                break
+            at_base.add(path)
+    added = set(read_lines(rd / "files.txt", "files.txt"))
+    missing = [p for p in cited if p not in at_base and p not in added]
+    for path in missing:
+        print(f"not at base: {path}")
+    if missing:
+        sys.exit(1)
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -473,6 +539,7 @@ def main(argv=None) -> None:
         ("plan", cmd_plan),
         ("packets", cmd_packets),
         ("gate", cmd_gate),
+        ("orient-gate", cmd_orient_gate),
     ):
         p = sub.add_parser(
             name, help=fn.__doc__.splitlines()[0], description=fn.__doc__

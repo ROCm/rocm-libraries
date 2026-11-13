@@ -127,7 +127,8 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(ArchName, std::string)
+    X(ArchName, std::string)                      \
+    X(LowerViaLogicalIR, bool)
 
 // Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
 // WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
@@ -145,13 +146,11 @@
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
-    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
-    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
-    X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
-    X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
+    X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
+    X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)

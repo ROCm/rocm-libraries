@@ -11,7 +11,7 @@ from tensilelite.SolutionStructs.Naming import (
     getKernelCompileKey,
     getKernelNameMin,
 )
-from tensilelite.TensileCreateLibrary.Run import (
+from tensilelite.create_library.run import (
     groupKernelRecords,
     passPostKernelInfoToSolution,
 )
@@ -154,7 +154,7 @@ def test_wgmxcc_names_follow_codegen_categories():
 
 
 def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
-    import tensilelite.TensileCreateLibrary.Run as run
+    import tensilelite.create_library.run as run
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["ISA"] = (9, 4, 2)
@@ -213,6 +213,10 @@ def test_metadata_fans_out_to_all_placement_aliases():
         pgr=2,
         mathclk=4,
         customKernelDef=None,
+        ldsNumBytes=1024,
+        loopIters=8,
+        subtileUnitScaleVgpr=5,
+        ldsOffsetBias=512,
     )
 
     passPostKernelInfoToSolution(
@@ -221,6 +225,14 @@ def test_metadata_fans_out_to_all_placement_aliases():
 
     assert [solution._state["CUOccupancy"] for solution in solutions] == [3, 3]
     assert [solution._state["PrefetchGlobalRead"] for solution in solutions] == [2, 2]
+    assert [solution._state["LdsNumBytes"] for solution in solutions] == [1024, 1024]
+    assert [solution._state["LoopIters"] for solution in solutions] == [8, 8]
+    # Values codegen leaves on the kernel it generated reach only that solution: in-process
+    # codegen does not touch the alias either.
+    assert solutions[0]._state["_subtileUnitScaleVgpr"] == 5
+    assert solutions[0]._state["LdsOffsetBias"] == 512
+    assert "_subtileUnitScaleVgpr" not in solutions[1]._state
+    assert "LdsOffsetBias" not in solutions[1]._state
 
 
 def test_thread_tile_distinguishes_non_matrix_kernels():
@@ -232,7 +244,7 @@ def test_thread_tile_distinguishes_non_matrix_kernels():
 
 
 def test_collection_preserves_all_placement_aliases():
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["codeObjectFile"] = "other"

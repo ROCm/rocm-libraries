@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
+from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
+    _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
     _kv_block_bytes,
     _kv_cache_policy_3d,
@@ -178,6 +180,7 @@ _SEMANTIC_FIELDS = frozenset(
         "causal_top_left",
         "right_bound",
         "emit_lse",
+        "lse_layout",
     }
 )
 
@@ -208,6 +211,8 @@ def make_explicit_attention_2d_spec(
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
+    if problem.emit_lse and config.builder_kind == "gfx942_4warp_gqa":
+        raise ValueError(_GFX942_4WARP_LSE_REFUSAL)
     if config.num_warps not in NUM_WARPS:
         raise ValueError(f"num_warps must be one of {NUM_WARPS}")
     if config.block_m_per_warp not in BLOCK_M_PER_WARP:
@@ -231,6 +236,9 @@ def make_explicit_attention_2d_spec(
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
         waves_per_eu=config.waves_per_eu,
+        # The output the caller asked for, never a tuning knob (see
+        # _SEMANTIC_FIELDS); passed only when on, so LSE-off specs are as before.
+        **({"emit_lse": True} if problem.emit_lse else {}),
         **knobs,
     )
 
@@ -344,17 +352,11 @@ def make_explicit_attention_3d_specs(
     )
     if not ok:
         raise ValueError(f"unsupported explicit 3D attention config: {why}")
-    reduce = reduce_type(
-        head_size=problem.head_size,
-        num_query_heads=problem.num_query_heads,
-        num_kv_heads=problem.num_kv_heads,
-        dtype=problem.dtype,
-        num_segments=num_segments,
-        waves_per_eu=config.waves_per_eu,
-        # The output the caller asked for, never a tuning knob (see
-        # _SEMANTIC_FIELDS): every swept geometry keeps it.
-        emit_lse=problem.emit_lse,
-    )
+    # The kernels' one segment -> reduce derivation (the gfx950 module export's
+    # ``reduce_spec_for`` is the same), so the launched pair and the packed module agree.
+    # ``emit_lse`` is the output the caller asked for, never a tuning knob (see
+    # _SEMANTIC_FIELDS): every swept geometry keeps it.
+    reduce = split_kv_reduce_spec(reduce_type, segment, emit_lse=problem.emit_lse)
     return segment, reduce
 
 

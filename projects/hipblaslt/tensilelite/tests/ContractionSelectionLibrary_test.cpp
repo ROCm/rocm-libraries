@@ -33,6 +33,7 @@
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Distance.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <thread>
 #include <vector>
 
@@ -48,6 +49,8 @@ TEST(ContractionSelectionLibraryTest, Single)
     lib.solution = std::make_shared<ContractionSolution>();
 
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     EXPECT_EQ(lib.findBestSolution(*problem, *hardware), lib.solution);
 }
@@ -97,6 +100,8 @@ TEST(ContractionSelectionLibraryTest, GPUSelection)
     ContractionHardwareSelectionLibrary      lib({v20Row_64CU, v20Row});
 
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     EXPECT_EQ(lib.findBestSolution(*problem, *v20), v20Solution);
     EXPECT_EQ(lib.findBestSolution(*problem, *v20_64CU), v20Solution_64CU);
@@ -156,6 +161,9 @@ TEST(ContractionSelectionLibraryTest, RegionSelection)
         = ContractionProblemGemm::GEMM(false, false, 7000, 7500, 1000, 7000, 1000, 7000, 1.0, false, 1);
     auto OutRegionProblem
         = ContractionProblemGemm::GEMM(false, false, 5000, 2000, 1000, 5000, 1000, 5000, 1.0, false, 1);
+    // These placeholder solutions test region routing rather than launch validity.
+    for(auto* problem : {&Region1Problem, &Region2Problem, &OutRegionProblem})
+        problem->setParams().setUniformSummationOrder(0);
 
     AMDGPU gpu;
     EXPECT_EQ(lib.findBestSolution(Region1Problem, gpu), region1Solution);
@@ -201,6 +209,9 @@ TEST(ContractionSelectionLibraryTest, TransposeSelection)
     auto NTProblem = ContractionProblemGemm::GEMM(false, true, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
     auto TNProblem = ContractionProblemGemm::GEMM(true, false, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
     auto TTProblem = ContractionProblemGemm::GEMM(true, true, 4, 4, 4, 4, 4, 4, 1.2, false, 1);
+    // These placeholder solutions test transpose routing rather than launch validity.
+    for(auto* problem : {&NNProblem, &NTProblem, &TNProblem, &TTProblem})
+        problem->setParams().setUniformSummationOrder(0);
 
     // auto WeirdProblemC = ContractionProblemGemm::FromBLAS( true,  true, 4,4,4,
     // 4,4,4, false, false, 1); WeirdProblemC.c.transpose(0,1);
@@ -226,6 +237,8 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
     std::shared_ptr<Hardware> hardware = std::make_shared<AMDGPU>(
         AMDGPU::Processor::gfx900, 64, "AMD Radeon Vega Frontier Edition");
     auto problem = std::make_shared<ContractionProblemGemm>();
+    // Placeholder solutions exercise selection predicates without USO launch validation.
+    problem->setParams().setUniformSummationOrder(0);
 
     auto selectedSolution = std::make_shared<ContractionSolution>();
     auto fallbackSolution = std::make_shared<ContractionSolution>();
@@ -258,4 +271,153 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
 
     for(auto& worker : workers)
         worker.join();
+}
+
+TEST(ContractionSelectionLibraryTest, ScaleAlphaModesMatchTheRequestedSource)
+{
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    for(int supported : {0, 1, 2, 3, 5, 6, 7})
+        for(int requested : {0, 1, 2, ScaleAlphaVecDeviceScalarBit})
+        {
+            SCOPED_TRACE(::testing::Message() << "supported=" << supported
+                                             << " requested=" << requested);
+            problem.setUseScaleAlphaVec(requested);
+            Predicates::Contraction::UseScaleAlphaVecCheck predicate(supported);
+            EXPECT_EQ(predicate(problem), requested == 0 || (requested & supported) != 0);
+        }
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaRequiresAdvertisedKernelSupport)
+{
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(ScaleAlphaVecDeviceScalarBit);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    ContractionSolution solution;
+    solution.problemType.useScaleAlphaVec = 1;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.problemType.useScaleAlphaVec = 5;
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(true);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.problemType.useScaleAlphaVec = 0;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setParams().setDeviceScalarAlpha(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaSelectionWithoutUniformSummationOrder)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setParams().setUniformSummationOrder(0);
+    ASSERT_FALSE(problem.getParams().uniformSummationOrder());
+
+    auto solution = std::make_shared<ContractionSolution>();
+    SingleContractionLibrary lib(solution);
+    for(bool scalar : {false, true})
+        for(int sav : {0, 1, 2, 3, 5, 6, 7})
+        {
+            SCOPED_TRACE(::testing::Message() << "scalar=" << scalar << " SAV=" << sav);
+            problem.setUseScaleAlphaVec(scalar ? ScaleAlphaVecDeviceScalarBit
+                                              : scaleAlphaVectorMode(sav));
+            problem.setParams().setDeviceScalarAlpha(scalar);
+            solution->problemType.useScaleAlphaVec = sav;
+            Task task(hardware, problem, *solution);
+            const bool supported = !scalar || scaleAlphaSupportsDeviceScalar(sav);
+
+            EXPECT_EQ(selectionPredicate(task, hardware, *solution, problem), supported);
+            EXPECT_EQ(lib.findBestSolution(problem, hardware) != nullptr, supported);
+            EXPECT_EQ(lib.findAllSolutions(problem, hardware).size(), supported ? 1u : 0u);
+        }
+}
+
+TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeAndCapability)
+{
+    // Exercise selection without packing a synthetic kernel's launch arguments.
+    struct SelectionOnlySolution : ContractionSolution
+    {
+        size_t requiredWorkspaceSizeGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                               Hardware const&) const
+        {
+            return 0;
+        }
+    };
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setParams().setUniformSummationOrder(0);
+    problem.setUseScaleAlphaVec(1);
+    problem.setGroupedGemm(true);
+    auto solution = std::make_shared<SelectionOnlySolution>();
+    solution->problemType.useScaleAlphaVec = 5;
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+    solution->problemType.groupedGemm = true;
+    SingleSolutionLibrary<ContractionProblemGemm, SelectionOnlySolution> lib(solution);
+
+    for(bool scalar : {false, true})
+        for(bool capability : {false, true})
+        {
+            solution->problemType.useScaleAlphaVec = capability ? 5 : 1;
+            problem.setParams().setDeviceScalarAlpha(scalar);
+            std::vector<ContractionProblemGemm> problems{problem, problem};
+            const bool                          supported = !scalar || capability;
+            EXPECT_NO_THROW(
+                { EXPECT_EQ(lib.findBestSolution(problems, hardware) != nullptr, supported); });
+            EXPECT_NO_THROW({
+                EXPECT_EQ(lib.findAllSolutionsGroupedGemm(problems, hardware).size(),
+                          supported ? 1u : 0u);
+            });
+            problems[1].setParams().setDeviceScalarAlpha(!scalar);
+            EXPECT_EQ(lib.findBestSolution(problems, hardware), nullptr);
+            EXPECT_TRUE(lib.findAllSolutionsGroupedGemm(problems, hardware).empty());
+        }
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceUserScalarAlphaOffsetMatchesCodegen)
+{
+    // KernelWriterAssembly selects this fixed offset for the ArgType==2 record.
+    EXPECT_EQ(offsetof(DeviceUserArguments<float>, scaleAlphaVec), 144u);
+}
+
+TEST(ContractionSelectionLibraryTest, AlphaSupportModesControlInternalArgBit11AndGsuLimit)
+{
+    ContractionSolution solution;
+    solution.internalArgsSupport.version  = 3;
+    solution.internalArgsSupport.wgm      = false;
+    solution.internalArgsSupport.staggerU = false;
+    solution.sizeMapping.globalSplitUCoalesced = false;
+    solution.sizeMapping.globalSplitUWorkGroupMappingRoundRobin = false;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+
+    for(int mode : {0, 1, 2, 3, 5, 6, 7})
+        for(bool scalar : {false, true})
+            for(int gsu : {1, 2, 2047, 2048, 4095})
+            {
+                SCOPED_TRACE(::testing::Message() << "mode=" << mode << " scalar=" << scalar
+                                                 << " GSU=" << gsu);
+                solution.problemType.useScaleAlphaVec = mode;
+                problem.setParams().setDeviceScalarAlpha(scalar);
+                problem.setParams().setGSU(gsu);
+                uint32_t arg0 = 0, arg1 = 0;
+                auto pack = [&]() {
+                    solution.calculateInternalArgs<false>(arg0, arg1, nullptr, problem.getParams(),
+                                                          0, 0, 0, 0, 0, 0, 0, 1, {});
+                };
+                const bool capable = scaleAlphaSupportsDeviceScalar(mode);
+                if((scalar && !capable) || (capable && gsu > 2047))
+                {
+                    EXPECT_THROW(pack(), std::runtime_error);
+                    continue;
+                }
+                ASSERT_NO_THROW(pack());
+                EXPECT_EQ(arg0, static_cast<uint32_t>(gsu) | (scalar ? 0x800u : 0u));
+                EXPECT_EQ(arg1, 0u);
+            }
 }

@@ -93,7 +93,7 @@ def markNamed(name):
     return getattr(pytest.mark, name)
 
 
-def configMarks(filepath, rootDir, availableArchs):
+def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
 
@@ -101,11 +101,15 @@ def configMarks(filepath, rootDir, availableArchs):
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
      - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - skip-<deviceTag> (e.g. skip-mi300a) when the machine has that device. This is for
+       a product that shares its gfx architecture with others, so skip-<arch> would also
+       skip the tests where they pass. See gpu_detection.get_available_device_tags.
      - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
      - Kernel language(s) used in the YAML
+     - world, with every world the YAML's problems use
     """
     relpath = os.path.relpath(filepath, rootDir)
     components = relpath.split(os.path.sep)
@@ -130,7 +134,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone tensilelite.py configs. Signal the caller to
+    # files), which are not standalone run.py configs. Signal the caller to
     # skip them rather than crashing on doc["BenchmarkProblems"].
     if not isinstance(doc, dict):
         return None
@@ -165,10 +169,12 @@ def configMarks(filepath, rootDir, availableArchs):
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
 
-    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
-    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
-        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
+    # Device-specific skip, for a known bug on one product of an architecture (e.g.
+    # skip-mi300a). It is a skip, not an xfail: such a bug can be a hang, which xfail
+    # would still run, and xfail_strict would fail the run if it started passing.
+    for tag in deviceTags:
+        if markNamed("skip-%s" % tag) in marks:
+            marks.append(pytest.mark.skip(reason="Known bug on %s; see the ROCM ticket in the YAML" % tag))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
     # fails under FFM emulation only. Turn it into an xfail only when running 
@@ -201,12 +207,18 @@ def configMarks(filepath, rootDir, availableArchs):
     operationTypes = set([problem[0]["OperationType"] for problem in doc["BenchmarkProblems"]])
 
     languages = set()
+    worlds = set()
     for obj, path in walkDict(doc):
         if "KernelLanguage" in path and isinstance(obj, str):
             languages.add(obj)
+        if path.endswith(".world"):
+            worlds.add(obj)
 
     for l in languages:
         marks.append(markNamed(l))
+
+    if worlds:
+        marks.append(pytest.mark.world(*sorted(worlds)))
 
     for dt in dataTypes:
         dataType = DataType(dt)
@@ -237,7 +249,16 @@ def findAvailableArchs(gpu_targets=None):
     return get_available_archs()
 
 
-def findConfigs(rootDir=None, availableArchs=None):
+def findDeviceTags():
+    """Detect device tags (e.g. ["mi300a"]) for the GPUs on this machine.
+
+    TENSILE_TEST_DEVICE_TAGS (semicolon-separated) replaces detection.
+    """
+    from tensilelite.Tests.gpu_detection import get_available_device_tags
+    return get_available_device_tags()
+
+
+def findConfigs(rootDir=None, availableArchs=None, deviceTags=None, splitWorlds=True):
     """
     Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
@@ -246,6 +267,10 @@ def findConfigs(rootDir=None, availableArchs=None):
         rootDir: Directory to walk for YAML configs. Defaults to tensilelite/Tests.
         availableArchs: Pre-resolved list of GPU architectures.
             When None, calls findAvailableArchs() to auto-detect.
+        deviceTags: Pre-resolved list of device tags (e.g. ["mi300a"]).
+            When None, calls findDeviceTags() to auto-detect.
+        splitWorlds: Return one parameter per world for a YAML whose
+            problems use several worlds, each marked with that world alone.
     """
     if rootDir is None:
         rootDir = _TESTS_ROOT_DIR
@@ -255,6 +280,8 @@ def findConfigs(rootDir=None, availableArchs=None):
 
     if availableArchs is None:
         availableArchs = findAvailableArchs()
+    if deviceTags is None:
+        deviceTags = findDeviceTags()
     globalParamArchsStr = ';'.join(availableArchs)
     os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
@@ -271,11 +298,11 @@ def findConfigs(rootDir=None, availableArchs=None):
             # Skip build client script
             if filename == "build_client.yaml":
                 continue
-            # filter out yamls in logic_yaml since they are not meant for tensilelite.py
+            # filter out yamls in logic_yaml since they are not meant for run.py
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
-                    marks = configMarks(filepath, rootDir, availableArchs)
+                    marks = configMarks(filepath, rootDir, availableArchs, deviceTags)
                     if marks is None:
                         # Not a TensileLite config (e.g. a library logic YAML); skip.
                         continue
@@ -286,5 +313,13 @@ def findConfigs(rootDir=None, availableArchs=None):
                         marks.append(pytest.mark.xfail(reason=reason, strict=True))
 
                     relpath = os.path.relpath(filepath, printRoot)
-                    params.append(pytest.param(filepath, marks=marks, id=relpath))
+                    world = next((m for m in marks if m.name == "world"), None)
+                    if world is None or not splitWorlds:
+                        params.append(pytest.param(filepath, marks=marks, id=relpath))
+                        continue
+                    others = [m for m in marks if m is not world]
+                    for w in world.args:
+                        params.append(pytest.param(filepath,
+                                                   marks=others + [pytest.mark.world(w)],
+                                                   id=f"{relpath}-world{w}"))
     return params
