@@ -3839,8 +3839,10 @@ TEST(TestCpuReferencePointwiseCancellation, SoftplusKeepsTheNegativeTail)
 
 TEST(TestCpuReferencePointwiseCancellation, SoftplusDoesNotUnderflowInFloatCompute)
 {
-    // beta * x = -105, so exp stays representable in double (2.5e-46) but not in float;
-    // log1p(exp(-105)) / 1e-30 = 2.50656e-16. Expected value computed independently in double.
+    // The float inputs are -1.0500000445e32 and 1.0000000032e-30, so beta * x = -105.0000048. exp
+    // of that stays representable in double (2.5e-46) but not in float, and
+    // log1p(exp(beta * x)) / beta = 2.50655548e-16, computed independently in double from the
+    // float-rounded inputs.
     Tensor<float> input({1, 1, 1, 1});
     Tensor<float> output({1, 1, 1, 1});
     input.fillWithValue(-1.05e32f);

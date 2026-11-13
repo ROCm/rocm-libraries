@@ -94,9 +94,11 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        // Parameters a mode does not consume are ignored, as cuDNN does. Ternary modes take none.
+        // Parameters a mode does not consume are ignored, as cuDNN does. Ternary modes and GEN_INDEX
+        // take none and only run through the non-parameterized path.
         if(_params.hasModeParameters()
-           && !hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
+           && !hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode)
+           && _params.mode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
         {
             executeParameterized(variantPack);
         }
