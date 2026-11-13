@@ -22,23 +22,23 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 300)\n")
 
-# Oracle-free structured-logit checks of the shipped gfx942 dense kernel, the
-# second lane of tests/oracle_free (README_P4.md). Its own entries because of
-# its cost: the prediction is exact rational arithmetic over every output
+# Oracle-free structured-logit check of the shipped gfx942 dense kernel
+# (tests/oracle_free/README_structured.md). Its own entries because of its
+# cost: the prediction is exact rational arithmetic over every output
 # coordinate. The launches take about ten seconds per case on gfx942, and the
 # CPU contracts, which prove the prediction over the eight cases, about three
 # minutes. Both are standard-tier (ROCKE_ENGINE_test_categories_external.yaml)
 # and bake in the standard label so `ctest -L standard` finds them without
 # that file's labelling; the quick tier keeps its budget.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_structured_logit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_p4_analytical_gfx942.py\" -v -rs --timeout=120)\n")
+       "add_test(rocke_oracle_free_structured_logit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_analytical_gfx942.py\" -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_structured_logit_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_structured_logit_cpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_p4_contracts.py\" -v -rs --timeout=60)\n")
+       "add_test(rocke_oracle_free_structured_logit_cpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_structured_contracts.py\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_structured_logit_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"

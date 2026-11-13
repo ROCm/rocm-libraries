@@ -36,49 +36,51 @@ from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import cache
+from pathlib import Path
 
 import numpy as np
 import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
-from ._p4_analytical import (
+from ._structured_analytical import (
     A_DIV_DOMAIN,
     EPILOGUE_ASSUMPTION,
     F32_SMALLEST_NORMAL,
     F32_SMALLEST_SUBNORMAL,
     LOG2E_F32,
     MASKED_SCORE,
-    P4_ASSUMPTION_STATEMENTS,
-    P4_ASSUMPTIONS,
-    P4_CALIBRATION,
-    P4_EPILOGUE_ARTIFACTS,
-    P4_EXPOSURES,
-    P4_FAILURE_LABELS,
-    P4_HEAD_LOGITS,
-    P4_HEAD_SCALE_MARGIN,
-    P4_HEAD_SCALES,
-    P4_POLICY,
-    P4_QUICK_CASES,
-    P4_SEARCH_BASES,
-    P4_SEPARATION_ROWS,
-    P4_UNOBSERVED_VIOLATIONS,
-    P4_UNSEPARATED,
+    STRUCTURED_ASSUMPTION_STATEMENTS,
+    STRUCTURED_ASSUMPTIONS,
+    STRUCTURED_CALIBRATION,
+    STRUCTURED_EPILOGUE_ARTIFACTS,
+    STRUCTURED_EXPOSURES,
+    STRUCTURED_FAILURE_LABELS,
+    STRUCTURED_HEAD_LOGITS,
+    STRUCTURED_HEAD_SCALE_MARGIN,
+    STRUCTURED_HEAD_SCALES,
+    STRUCTURED_POLICY,
+    STRUCTURED_QUICK_CASES,
+    STRUCTURED_QUICK_SPECS,
+    STRUCTURED_SEARCH_BASES,
+    STRUCTURED_SEPARATION_ROWS,
+    STRUCTURED_UNOBSERVED_VIOLATIONS,
+    STRUCTURED_UNSEPARATED,
     SCORE_SCALE,
     SEPARATION_LABELS,
     EmulationMode,
     F32Interval,
-    P4CalibrationEntry,
-    P4Case,
-    P4Fixture,
-    P4Label,
-    P4Mutation,
-    P4ScopeError,
-    P4Violation,
+    StructuredCalibrationEntry,
+    StructuredCase,
+    StructuredFixture,
+    StructuredLabel,
+    StructuredMutation,
+    StructuredScopeError,
+    StructuredViolation,
     TileClass,
     accumulator_steps,
     add_faithful,
     add_rn,
-    analyze_p4_policy,
+    analyze_structured_policy,
     applicable_mutations,
     applicable_violations,
     cast_bits_hull,
@@ -98,7 +100,7 @@ from ._p4_analytical import (
     f32_quantum,
     fixture_family,
     floor_log2,
-    format_p4_result,
+    format_structured_result,
     format_separation,
     gamma,
     head_scale_margin,
@@ -110,15 +112,15 @@ from ._p4_analytical import (
     next_down,
     next_up,
     ordered_distance,
-    p4_diagnostics,
-    p4_inputs,
-    p4_query_key,
-    p4_quick_case,
-    p4_records,
+    structured_diagnostics,
+    structured_inputs,
+    structured_query_key,
+    structured_quick_case,
+    structured_records,
     prefix_selected_keys,
     rcp_a_div,
     rcp_rn,
-    require_p4_calibration,
+    require_structured_calibration,
     round_f32,
     rounding_boundaries,
     row_logit,
@@ -136,18 +138,17 @@ from ._p4_analytical import (
     tile_sum,
     visited_tiles,
 )
-from ._p4_capture_audit import audit_case, audit_captures, format_audit
-from ._p4_shared_analytical import (
-    UNIFORM_CALIBRATION,
-    UNIFORM_QUICK_CASES,
-    UniformCase,
-    UniformObservation,
+from ._structured_capture_audit import audit_case, audit_captures, format_audit
+from ._structured_shapes import (
+    QUICK_SHAPES,
+    DenseShape,
+    Observation,
     encode_bits,
+    exposure_values,
     legal_interval,
     target_bits,
-    uniform_expected_bits,
 )
-from ._p4_shared_subject import (
+from ._structured_subject import (
     _resolve_tuning_spec,
     _shape,
     _validate_supported_case,
@@ -574,7 +575,7 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
 
 
 @cache
-def _lowered_quick_case(case: UniformCase) -> str:
+def _lowered_quick_case(case: DenseShape) -> str:
     """Lower one quick case's dispatch-resolved spec to LLVM IR text on the CPU."""
     from kernels.gfx942.attention_dense import build_attention_dense
     from rocke.core.lower_llvm import (
@@ -593,8 +594,8 @@ def _lowered_quick_case(case: UniformCase) -> str:
 # shuffle, one rescale combine and one alpha. The FP16 causal kernel has one KV
 # loop; the BF16 window-64 kernel splits it into three phases.
 _TILE_BODIES: Mapping[str, int] = {
-    UNIFORM_QUICK_CASES[0].case_id: 1,
-    UNIFORM_QUICK_CASES[1].case_id: 3,
+    QUICK_SHAPES[0].case_id: 1,
+    QUICK_SHAPES[1].case_id: 3,
 }
 _LANE_CHAIN = 32
 _OUTPUT_CASTS = 32  # D = 64 over two 32-wide output tiles, 16 per lane
@@ -604,8 +605,8 @@ _MFMA_CHAIN = 8
 _MFMA_CHAINS_PER_BODY = (("pv", _MFMA_CHAIN),) * 2 + (("score", _MFMA_CHAIN),) * 2
 
 
-@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
-def test_ir_contract_pins_the_dense_path_model(case: UniformCase) -> None:
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
+def test_ir_contract_pins_the_dense_path_model(case: DenseShape) -> None:
     model = classify_dense_path(_lowered_quick_case(case), case.dtype)
     assert not model.violations, f"{_REDERIVE}: " + "; ".join(model.violations)
 
@@ -683,8 +684,8 @@ def _converted_mfma_operand(ir: str) -> str:
     vector pack or a bit-preserving cast."""
     line, match = _mfma_calls(ir)[0]
     kind, name = match.group(1), match.group(2)
-    extra = f"  %p4.operand = select i1 true, {kind} {name}, {kind} {name}\n"
-    edited = line.replace(f"{kind} {name},", f"{kind} %p4.operand,", 1)
+    extra = f"  %probe.operand = select i1 true, {kind} {name}, {kind} {name}\n"
+    edited = line.replace(f"{kind} {name},", f"{kind} %probe.operand,", 1)
     return ir.replace(line, extra + edited, 1)
 
 
@@ -746,14 +747,14 @@ _IR_EDITS = {
     "second-scale": (
         _append_to_line(
             f"= fmul float %scale, {_F32_LOG2E}",
-            f"\n  %p4.extra = fmul float %scale, {_F32_LOG2E}",
+            f"\n  %probe.extra = fmul float %scale, {_F32_LOG2E}",
         ),
         "expected one fmul(scale, LOG2E), found 2",
     ),
     "stray-fsub": (
         _append_to_line(
             f"= fmul float %scale, {_F32_LOG2E}",
-            "\n  %p4.extra = fsub float %scale, %scale",
+            "\n  %probe.extra = fsub float %scale, %scale",
         ),
         "fsub not consumed by exp2 only",
     ),
@@ -761,10 +762,8 @@ _IR_EDITS = {
 
 
 @pytest.mark.parametrize("edit", sorted(_IR_EDITS))
-@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
-def test_ir_contract_rejects_each_unmodeled_change(
-    case: UniformCase, edit: str
-) -> None:
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
+def test_ir_contract_rejects_each_unmodeled_change(case: DenseShape, edit: str) -> None:
     apply, reason = _IR_EDITS[edit]
     edited = apply(_lowered_quick_case(case))
     violations = classify_dense_path(edited, case.dtype).violations
@@ -772,7 +771,7 @@ def test_ir_contract_rejects_each_unmodeled_change(
 
 
 def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
-    case = UNIFORM_QUICK_CASES[0]
+    case = QUICK_SHAPES[0]
     ir = _lowered_quick_case(case)
     line = next(line for line in ir.splitlines() if " fdiv float " in line)
     name = line.split("=")[0].strip()
@@ -960,7 +959,7 @@ class IrSchedule:
     violations: list[str] = field(default_factory=list)
 
 
-def ir_tile_schedule(ir: str, case: UniformCase, block_m: int) -> IrSchedule:
+def ir_tile_schedule(ir: str, case: DenseShape, block_m: int) -> IrSchedule:
     """Evaluate the KV loop limits and the mask selects for every work item
     and lane of ``case``. A work item is a ``block_m``-row query block; each
     of its ``block_m / 32`` waves holds 32 rows in 64 lanes, and each lane
@@ -1058,10 +1057,10 @@ def _evaluate_lane(
         schedule.masked.setdefault((row, tile), set()).update(masked.get(tile, ()))
 
 
-def schedule_violations(ir: str, case: UniformCase) -> list[str]:
+def schedule_violations(ir: str, case: DenseShape) -> list[str]:
     """Compare the IR's tile loop and mask with the model's
     :func:`visited_tiles` and ``legal_interval`` on every row of ``case``."""
-    quick = p4_quick_case(case, P4Fixture.IDENTITY)
+    quick = structured_quick_case(case, StructuredFixture.IDENTITY)
     schedule = ir_tile_schedule(ir, case, quick.block_m)
     violations = list(schedule.violations)
     if violations:
@@ -1090,8 +1089,8 @@ def schedule_violations(ir: str, case: UniformCase) -> list[str]:
     return violations
 
 
-@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
-def test_ir_tile_loop_and_mask_are_the_modeled_ones(case: UniformCase) -> None:
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
+def test_ir_tile_loop_and_mask_are_the_modeled_ones(case: DenseShape) -> None:
     """The premises of the tile classes, read from the lowered IR: for every
     query row the kernel visits exactly the modeled tiles, scores all 64 keys of each
     and masks exactly the keys outside ``q - W < k <= q``. The resolved spec
@@ -1146,8 +1145,8 @@ _SCHEDULE_EDITS = {
 
 
 @pytest.mark.parametrize("edit", sorted(_SCHEDULE_EDITS))
-@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
-def test_ir_schedule_contract_rejects_each_change(case: UniformCase, edit: str) -> None:
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
+def test_ir_schedule_contract_rejects_each_change(case: DenseShape, edit: str) -> None:
     apply, reason = _SCHEDULE_EDITS[edit]
     ir = _lowered_quick_case(case)
     edited = apply(ir)
@@ -1159,7 +1158,7 @@ def test_ir_schedule_contract_rejects_each_change(case: UniformCase, edit: str) 
 def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
     """Changes the evaluator must catch by value, not by shape: a causal loop
     that stops one tile early, and a window one key too narrow."""
-    causal, window = UNIFORM_QUICK_CASES
+    causal, window = QUICK_SHAPES
     ir = _lowered_quick_case(causal)
     (limit,) = re.findall(r"= add nsw i32 %mul\d+, 2\n\s*%lt\d+ = icmp slt", ir)
     early = ir.replace(limit, limit.replace(", 2\n", ", 1\n"), 1)
@@ -1700,9 +1699,9 @@ def _disassemble(hsaco: bytes, directory) -> str:
     return completed.stdout
 
 
-@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
 def test_quick_code_objects_fuse_only_the_fp16_epilogue(
-    case: UniformCase, tmp_path
+    case: DenseShape, tmp_path
 ) -> None:
     """ISA contract (A-F): compile the quick spec as ``launch_attention_dense``
     does, with the loaded COMGR, and disassemble it.
@@ -1764,7 +1763,7 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     assert model.single_lanes is not None, model.stores
     assert model.mix_sites == len(model.single_lanes) * len(model.stores)
     if named is not None:
-        assert model.single_lanes == P4_EPILOGUE_ARTIFACTS[named].single_lanes
+        assert model.single_lanes == STRUCTURED_EPILOGUE_ARTIFACTS[named].single_lanes
 
 
 # ---------------------------------------------------------------------------
@@ -2126,7 +2125,7 @@ def test_exp2_candidates_refuse_non_f32_arguments() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _quick_id(case: P4Case) -> str:
+def _quick_id(case: StructuredCase) -> str:
     return f"{case.dtype}-{case.mask}-{case.fixture.value}"
 
 
@@ -2148,14 +2147,14 @@ def test_score_constants_match_the_kernel_and_the_ir_contract() -> None:
 
 
 def test_quick_matrix_covers_every_fixture_on_both_kernels() -> None:
-    ids = [case.case_id for case in P4_QUICK_CASES]
-    assert len(ids) == len(set(ids)) == 2 * len(P4Fixture)
-    for case in P4_QUICK_CASES:
-        family = "walsh" if case.fixture is P4Fixture.WALSH else "periodic"
+    ids = [case.case_id for case in STRUCTURED_QUICK_CASES]
+    assert len(ids) == len(set(ids)) == 2 * len(StructuredFixture)
+    for case in STRUCTURED_QUICK_CASES:
+        family = "walsh" if case.fixture is StructuredFixture.WALSH else "periodic"
         # The distinguished key of this row is 64 (even): the Walsh sign is +1.
         query = case.residue_shift + 64
         logits = tuple(row_logit(case, head, query) for head in range(4))
-        assert logits == P4_HEAD_LOGITS[family]
+        assert logits == STRUCTURED_HEAD_LOGITS[family]
 
 
 @pytest.mark.parametrize(
@@ -2168,21 +2167,23 @@ def test_quick_matrix_covers_every_fixture_on_both_kernels() -> None:
         ({"block_n": 32}, "block_n == 64"),
     ],
 )
-def test_p4_case_rejects_inexact_or_unsupported_configurations(kwargs, match) -> None:
+def test_structured_case_rejects_inexact_or_unsupported_configurations(
+    kwargs, match
+) -> None:
     arguments = {
-        "base": UNIFORM_QUICK_CASES[0],
+        "base": QUICK_SHAPES[0],
         "fixture": "identity",
         "q_scales": (1, 1, 1, 1),
         "k_scales": (1, 1, 1, 1),
     }
     arguments.update(kwargs)
     with pytest.raises(ValueError, match=match):
-        P4Case(**arguments)
+        StructuredCase(**arguments)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_generators_are_exact_and_match_the_score_model(case: P4Case) -> None:
-    q, k = p4_query_key(case)
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_generators_are_exact_and_match_the_score_model(case: StructuredCase) -> None:
+    q, k = structured_query_key(case)
     for values in (q, k):
         encode_bits(values, case.dtype)  # raises if any value would round
     dots = np.einsum("bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64))
@@ -2194,13 +2195,13 @@ def test_generators_are_exact_and_match_the_score_model(case: P4Case) -> None:
             ]
         )
         np.testing.assert_array_equal(dots[0, head], expected)
-    for exposure in P4_EXPOSURES:
-        encode_bits(p4_inputs(case, exposure)[2], case.dtype)
+    for exposure in STRUCTURED_EXPOSURES:
+        encode_bits(structured_inputs(case, exposure)[2], case.dtype)
 
 
 def test_visited_tiles_follow_the_kernel_block_schedule() -> None:
-    causal = next(case for case in P4_QUICK_CASES if case.mask == "causal")
-    window = next(case for case in P4_QUICK_CASES if case.mask == "window")
+    causal = next(case for case in STRUCTURED_QUICK_CASES if case.mask == "causal")
+    window = next(case for case in STRUCTURED_QUICK_CASES if case.mask == "window")
     assert [tuple(visited_tiles(causal, q)) for q in (0, 127, 128, 255)] == [
         (0, 1),
         (0, 1),
@@ -2247,13 +2248,13 @@ def _within(bits: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
     return (bits >= low) & (bits <= high)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_tier_b_is_nonempty_and_reports_its_widths(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_tier_b_is_nonempty_and_reports_its_widths(case: StructuredCase) -> None:
     """Tier B is nonempty everywhere. Its width is reported, not
     assumed: A-F lets an FP16 set reach a value either side of the IR's, so
     ``pytest -s`` prints the complete ``|B|`` histogram of each case."""
     histogram: Counter = Counter()
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         width = high.astype(np.int64) - low.astype(np.int64) + 1
         assert np.all(width >= 1), exposure
@@ -2261,13 +2262,13 @@ def test_tier_b_is_nonempty_and_reports_its_widths(case: P4Case) -> None:
     print(f"{_quick_id(case)} |B| histogram: {dict(sorted(histogram.items()))}")
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_tier_b_lies_inside_tier_a(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_tier_b_lies_inside_tier_a(case: StructuredCase) -> None:
     """Tier A: every Tier B value is within 1 target ULP of the certified
     target at row-max coordinates, within 2 elsewhere, and exactly the target
     (+0) at structural zeros. Values are nonnegative, so bit distance is ULP
     distance."""
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         center, radius, _ = tier_a_exposure(case, exposure)
         center = center.astype(np.int64)
@@ -2287,19 +2288,19 @@ _LANES = np.arange(64) % 4
 
 
 def _artifact_bits(artifact: str, double: np.ndarray, single: np.ndarray) -> np.ndarray:
-    lanes = sorted(P4_EPILOGUE_ARTIFACTS[artifact].single_lanes)
+    lanes = sorted(STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes)
     return np.where(np.isin(_LANES, lanes), single, double)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_emulated_paths_lie_inside_tier_b(case: StructuredCase) -> None:
     """Every emulation lands inside Tier B: the IR-exact path, each
     named artifact's epilogue, single rounding at every FP16 site, and
     randomized-semantic members of the modeled path (summation tree, E
     candidate per call, MFMA rounding direction, epilogue rounding per FP16
     site). The emulator is a test device, never a verdict."""
     rng = np.random.default_rng(_RNG_SEED)
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         for row in _EMULATED_ROWS:
             for head in range(case.base.nhead_q):
@@ -2308,7 +2309,7 @@ def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
                 realizations = [double, single]
                 realizations += [
                     _artifact_bits(name, double, single)
-                    for name in P4_EPILOGUE_ARTIFACTS
+                    for name in STRUCTURED_EPILOGUE_ARTIFACTS
                 ]
                 realizations.append(
                     emulate_row(
@@ -2331,19 +2332,19 @@ def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
     rule is observable there."""
     fp16 = next(
         c
-        for c in P4_QUICK_CASES
-        if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+        for c in STRUCTURED_QUICK_CASES
+        if c.dtype == "fp16" and c.fixture is StructuredFixture.IDENTITY
     )
     double, single = epilogue_alternatives(fp16, "folded", 207, 0)
     assert int(double[16]) == _COUNTEREXAMPLE["double"]
     assert int(single[16]) == _COUNTEREXAMPLE["single"]
     np.testing.assert_array_equal(emulate_row(fp16, "folded", 207, 0), double)
-    for name in P4_EPILOGUE_ARTIFACTS:
+    for name in STRUCTURED_EPILOGUE_ARTIFACTS:
         bits = emulate_row(
             fp16, "folded", 207, 0, mode=EmulationMode.ARTIFACT_EXACT, artifact=name
         )
         np.testing.assert_array_equal(bits, _artifact_bits(name, double, single))
-    bf16 = next(c for c in P4_QUICK_CASES if c.dtype == "bf16")
+    bf16 = next(c for c in STRUCTURED_QUICK_CASES if c.dtype == "bf16")
     for row in (0, 127, 255):
         double, single = epilogue_alternatives(bf16, "folded", row, 1)
         np.testing.assert_array_equal(double, single)
@@ -2361,14 +2362,14 @@ def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
 )
 def test_emulation_modes_refuse_ambiguous_arguments(kwargs, match) -> None:
     with pytest.raises(ValueError, match=match):
-        emulate_row(P4_QUICK_CASES[0], "basis@0", 0, 0, **kwargs)
+        emulate_row(STRUCTURED_QUICK_CASES[0], "basis@0", 0, 0, **kwargs)
 
 
 def test_epilogue_artifacts_name_their_code_objects() -> None:
     """Each named artifact gives a compiler, both quick code objects by digest
     and its single-rounded store elements; digests resolve back to it."""
     digests = set()
-    for name, artifact in P4_EPILOGUE_ARTIFACTS.items():
+    for name, artifact in STRUCTURED_EPILOGUE_ARTIFACTS.items():
         assert artifact.compiler and artifact.evidence
         assert artifact.single_lanes <= {0, 1, 2, 3}
         assert sorted(dtype for dtype, _ in artifact.code_objects) == ["bf16", "fp16"]
@@ -2376,7 +2377,7 @@ def test_epilogue_artifacts_name_their_code_objects() -> None:
             assert re.fullmatch(r"[0-9a-f]{64}", digest)
             assert epilogue_artifact_for(dtype, digest) == name
             digests.add(digest)
-    assert len(digests) == 2 * len(P4_EPILOGUE_ARTIFACTS)
+    assert len(digests) == 2 * len(STRUCTURED_EPILOGUE_ARTIFACTS)
     assert epilogue_artifact_for("fp16", "0" * 64) is None
 
 
@@ -2385,8 +2386,8 @@ def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
     70 digits, each with its midpoint margin."""
     classes = {
         (case.dtype, exponent, item)
-        for case in P4_QUICK_CASES
-        for exposure in P4_EXPOSURES
+        for case in STRUCTURED_QUICK_CASES
+        for exposure in STRUCTURED_EXPOSURES
         for exponent, item in tier_a_exposure(case, exposure)[2]
     }
     assert len(classes) > 100
@@ -2396,15 +2397,26 @@ def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
         )
 
 
-@pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
-def test_zero_logits_reproduce_the_uniform_targets(base: UniformCase) -> None:
-    """With every logit zero the targets are the uniform lane's, and Tier B
-    holds them."""
-    quick = next(case for case in P4_QUICK_CASES if case.base == base)
-    zero = P4Case(base, "identity", (0,) * 4, (0,) * 4, block_m=quick.block_m)
-    for exposure in P4_EXPOSURES:
+@pytest.mark.parametrize("base", QUICK_SHAPES, ids=lambda base: base.case_id)
+def test_zero_logits_give_the_uniform_distribution(base: DenseShape) -> None:
+    """With every logit zero each legal key has probability ``1 / N``: a
+    coordinate that selects ``m`` of a row's ``N`` legal keys has the target
+    ``q_T(2**h m / N)``, counted here key by key, and Tier B holds it."""
+    quick = next(case for case in STRUCTURED_QUICK_CASES if case.base == base)
+    zero = StructuredCase(base, "identity", (0,) * 4, (0,) * 4, block_m=quick.block_m)
+    for exposure in STRUCTURED_EXPOSURES:
+        selected = exposure_values(base, exposure)[0, :, 0, :] != 0  # [Sk, D]
+        expected = np.zeros(base.output_shape, dtype=np.uint16)
+        for row in range(base.seqlen_q):
+            first, last = legal_interval(base, row)
+            counts = selected[first : last + 1].sum(axis=0)
+            for head, exponent in enumerate(base.head_scale_exponents):
+                expected[0, row, head] = [
+                    target_bits(int(count) << exponent, last - first + 1, base.dtype)
+                    for count in counts
+                ]
         center = tier_a_exposure(zero, exposure)[0]
-        np.testing.assert_array_equal(center, uniform_expected_bits(base, exposure))
+        np.testing.assert_array_equal(center, expected)
         low, high = tier_b_exposure(zero, exposure)
         assert np.all(_within(center, low, high)), exposure
 
@@ -2415,8 +2427,8 @@ def test_fp16_head_scale_does_not_commute_with_the_cast() -> None:
     of head 0. One counterexample is kept here."""
     case = next(
         c
-        for c in P4_QUICK_CASES
-        if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+        for c in STRUCTURED_QUICK_CASES
+        if c.dtype == "fp16" and c.fixture is StructuredFixture.IDENTITY
     )
     found = []
     for row in range(256):
@@ -2450,8 +2462,10 @@ def test_fp16_subnormal_threshold_for_one_distinguished_key() -> None:
     assert thresholds == [7, 12, 23, 45]
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_weight_and_output_ranges_hold_on_the_quick_matrix(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_weight_and_output_ranges_hold_on_the_quick_matrix(
+    case: StructuredCase,
+) -> None:
     """Range result: every weight and rescale factor is either masked-small
     (at most 2**-149) or at least 2**-12; every nonstructural stored value is
     at least 2**-20; FP16-subnormal outputs occur only at c = -8
@@ -2462,7 +2476,7 @@ def test_weight_and_output_ranges_hold_on_the_quick_matrix(case: P4Case) -> None
             for step in row_trace(case, head, row).steps:
                 for item in (step.alpha, *step.weights):
                     assert item.hi <= ceiling_masked or item.lo >= floor_weight
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, _ = tier_b_exposure(case, exposure)
         _, radius, _ = tier_a_exposure(case, exposure)
         nonstructural = radius > 0
@@ -2479,13 +2493,13 @@ def test_weight_and_output_ranges_hold_on_the_quick_matrix(case: P4Case) -> None
             assert item.m_c > 0 and item.logit == -8, (exposure, row, head, dim)
 
 
-@pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
+@pytest.mark.parametrize("family", sorted(STRUCTURED_HEAD_SCALES))
 def test_head_scales_keep_their_committed_separation(family: str) -> None:
     """Every wrong single Q-head or K-head read moves some coordinate by
     at least the committed margin in target ULPs, on both quick kernels."""
-    q_scales, k_scales = P4_HEAD_SCALES[family]
-    margin = head_scale_margin(P4_SEARCH_BASES, family, q_scales, k_scales)
-    assert margin == P4_HEAD_SCALE_MARGIN[family] > 0
+    q_scales, k_scales = STRUCTURED_HEAD_SCALES[family]
+    margin = head_scale_margin(STRUCTURED_SEARCH_BASES, family, q_scales, k_scales)
+    assert margin == STRUCTURED_HEAD_SCALE_MARGIN[family] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -2528,13 +2542,13 @@ def test_target_ulp_distance_is_the_rank_difference(dtype: str) -> None:
             target_rank(bits, dtype)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_every_enclosure_endpoint_has_a_rank(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_every_enclosure_endpoint_has_a_rank(case: StructuredCase) -> None:
     """Every Tier B endpoint and Tier A center is a nonnegative finite value,
     so each bit difference taken on them (the Tier A radius, the separation
     gaps, the head-scale margin) is the rank distance."""
     infinity = _INFINITY_BITS[case.dtype]
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         center = tier_a_exposure(case, exposure)[0]
         for bits in (low, high, center):
@@ -2565,8 +2579,8 @@ def test_irrational_targets_clear_both_rounding_boundaries() -> None:
 
     classes = {
         (case.dtype, exponent, item)
-        for case in P4_QUICK_CASES
-        for exposure in P4_EXPOSURES
+        for case in STRUCTURED_QUICK_CASES
+        for exposure in STRUCTURED_EXPOSURES
         for exponent, item in tier_a_exposure(case, exposure)[2]
     }
     required = Fraction(1, 10**40)
@@ -2601,14 +2615,14 @@ def test_irrational_targets_clear_both_rounding_boundaries() -> None:
 _SCORE_EXPONENTS = {"periodic": ((2, 8), 0), "walsh": ((-4, 0), 6)}
 
 
-@pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
+@pytest.mark.parametrize("family", sorted(STRUCTURED_HEAD_SCALES))
 def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
     """Score exactness ranges: every Q and K entry is ``2**e`` with
     ``-2 <= e <= 6``; every operand product is ``2**r`` with ``r`` in the
     family's range; every partial sum ``z 2**r``, ``|z| <= 64``, of a Walsh
     score is zero or a normal FP32 number; every accumulator is ``2**rho``
     with ``2 <= rho <= 8``; and its product with each modeled score scale is exact."""
-    q_scales, k_scales = P4_HEAD_SCALES[family]
+    q_scales, k_scales = STRUCTURED_HEAD_SCALES[family]
     for value in (*q_scales, *k_scales):
         exponent = floor_log2(abs(value))
         assert abs(value) == Fraction(2) ** exponent and -2 <= exponent <= 6
@@ -2637,13 +2651,16 @@ def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
 
     # The generated tensors realize exactly these accumulators, for the correct
     # heads and for each wrong-head read.
-    for case in P4_QUICK_CASES:
+    for case in STRUCTURED_QUICK_CASES:
         if case.dtype != "fp16" or fixture_family(case.fixture) != family:
             continue
-        inputs = [p4_query_key(case)]
+        inputs = [structured_query_key(case)]
         inputs += [
             _mutated_query_key(case, mutation)[:2]
-            for mutation in (P4Mutation.Q_HEAD_ROTATE, P4Mutation.K_HEAD_ROTATE)
+            for mutation in (
+                StructuredMutation.Q_HEAD_ROTATE,
+                StructuredMutation.K_HEAD_ROTATE,
+            )
         ]
         for q, k in inputs:
             for value in _dot_products(q, k) - {Fraction(0)}:
@@ -2652,14 +2669,14 @@ def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
                 assert lowest + contraction <= rho <= highest + contraction
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_pv_products_are_exact_and_in_range(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_pv_products_are_exact_and_in_range(case: StructuredCase) -> None:
     """PV product range: a legal weight lies in ``[2**-12, 1 + 2**-23]`` and its
     PV product
     ``q_T(p) 2**h`` in ``[2**-12, 2**3]``, a normal FP32 number. A masked
     weight gives the product ``+0``, or ``2**h`` in a fully masked leading
     tile, where the weight is ``E(0)`` and casts to one."""
-    from ._p4_analytical import _scaled_cast
+    from ._structured_analytical import _scaled_cast
 
     unit_hull = exp2_interval(Fraction(0))
     floor_weight = Fraction(1, 1 << 12)
@@ -2682,15 +2699,15 @@ def test_pv_products_are_exact_and_in_range(case: P4Case) -> None:
                         assert weight.hi <= F32_SMALLEST_SUBNORMAL and product == zero
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_mutated_pv_products_stay_fp32_normal(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_mutated_pv_products_stay_fp32_normal(case: StructuredCase) -> None:
     """A mutated kernel's weights leave the correct range (a wrong scale gives
     weights near ``2**-93``), so its enclosure asserts what exactness needs:
     every nonzero PV product endpoint is a normal FP32 number."""
-    from ._p4_analytical import _scaled_cast
+    from ._structured_analytical import _scaled_cast
 
     for mutation in applicable_mutations(case):
-        for row in derived_rows(case, P4_SEPARATION_ROWS, mutation):
+        for row in derived_rows(case, STRUCTURED_SEPARATION_ROWS, mutation):
             for head in range(case.base.nhead_q):
                 exponent = case.head_scale_exponents[head]
                 for step in row_trace(case, head, row, mutation).steps:
@@ -2705,7 +2722,7 @@ _M0 = TileClass.MASKED_PREFIX
 _M1 = TileClass.MASKED_AFTER_LEGAL
 
 
-def _expected_tiles(case: P4Case, row: int) -> tuple[tuple[int, ...], tuple]:
+def _expected_tiles(case: StructuredCase, row: int) -> tuple[tuple[int, ...], tuple]:
     """The visited tiles of ``row`` and their classes, written out for
     the two quick kernels (causal ``block_m = 128``; window 64, ``block_m = 64``)."""
     block = row // 64
@@ -2717,8 +2734,8 @@ def _expected_tiles(case: P4Case, row: int) -> tuple[tuple[int, ...], tuple]:
     return (block - 1, block), (_M0 if row % 64 == 63 else _L, _L)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_tile_classes_match_the_masked_prefix_topology(case: StructuredCase) -> None:
     """Masked-prefix topology over every row and exposure: at most one fully
     masked leading
     tile, present exactly on rows 127, 191 and 255 of the window kernel; there
@@ -2735,7 +2752,7 @@ def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
         if not prefix:
             continue  # nothing to select: the count is zero by construction
         prefix_rows.append(row)
-        for exposure in P4_EXPOSURES:
+        for exposure in STRUCTURED_EXPOSURES:
             selected = {
                 prefix_selected_keys(case, exposure, row, dim)
                 for dim in range(case.base.head_dim)
@@ -2745,8 +2762,8 @@ def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
     assert prefix_rows == ([127, 191, 255] if case.mask == "window" else [])
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_tile_sums_follow_the_tile_class(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_tile_sums_follow_the_tile_class(case: StructuredCase) -> None:
     """The ``gamma`` bound is applied only to tiles with normal-scale terms. A
     legal tile holds a weight of at least ``2**-12``; a fully masked leading
     tile holds 64 copies of ``E(0)``; a fully masked tile after a legal one
@@ -2785,7 +2802,7 @@ def test_tile_sum_refuses_a_normal_weight_in_a_masked_tile() -> None:
     assert tile_sum(_M1, [masked] * 64) == F32Interval(
         Fraction(0), Fraction(1, 1 << 143)
     )
-    with pytest.raises(P4ScopeError, match="normal-scale weight"):
+    with pytest.raises(StructuredScopeError, match="normal-scale weight"):
         tile_sum(_M1, [masked, one])
     # The looser exponential used only for attribution: still explicit.
     loose = F32Interval(Fraction(0), 2 * F32_SMALLEST_SUBNORMAL)
@@ -2797,9 +2814,11 @@ def test_tile_sum_refuses_a_normal_weight_in_a_masked_tile() -> None:
 
 
 @pytest.mark.parametrize(
-    "case", [case for case in P4_QUICK_CASES if case.mask == "window"], ids=_quick_id
+    "case",
+    [case for case in STRUCTURED_QUICK_CASES if case.mask == "window"],
+    ids=_quick_id,
 )
-def test_masked_prefix_leaves_only_a_subnormal_residue(case: P4Case) -> None:
+def test_masked_prefix_leaves_only_a_subnormal_residue(case: StructuredCase) -> None:
     """The masked-prefix residue, recomputed from the propagated endpoints on
     the three prefix
     rows: (0) after the prefix ``l`` is the ``gamma_63`` sum of 64 ``E(0)``
@@ -2808,7 +2827,7 @@ def test_masked_prefix_leaves_only_a_subnormal_residue(case: P4Case) -> None:
     tile absorbs; (2) a coordinate with no legal product keeps a residue of at
     most ``2**(h-149)`` and stores ``+0``; (3) a later legal product ``pi``
     gives ``pi`` or its FP32 successor."""
-    from ._p4_analytical import _scaled_cast
+    from ._structured_analytical import _scaled_cast
 
     step = Fraction(1, 1 << 23)
     prefix_sum = F32Interval(
@@ -2829,7 +2848,7 @@ def test_masked_prefix_leaves_only_a_subnormal_residue(case: P4Case) -> None:
             assert mul_rn(prefix_sum, legal.alpha).hi < Fraction(1, 1 << 142)
             assert trace.denominator == tile_sum(_L, legal.weights)
             residue = F32Interval(Fraction(0), scale * F32_SMALLEST_SUBNORMAL)
-            for exposure in P4_EXPOSURES:
+            for exposure in STRUCTURED_EXPOSURES:
                 low, high = tier_b_exposure(case, exposure)
                 for dim in range(case.base.head_dim):
                     if not prefix_selected_keys(case, exposure, row, dim):
@@ -2858,12 +2877,12 @@ def test_reciprocal_is_modeled_only_on_the_a_div_domain() -> None:
         F32Interval(Fraction(1), high),
         F32Interval.point(Fraction(2981)),
     ):
-        with pytest.raises(P4ScopeError, match="A-DIV domain"):
+        with pytest.raises(StructuredScopeError, match="A-DIV domain"):
             rcp_a_div(outside)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_denominators_stay_in_the_a_div_domain(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_denominators_stay_in_the_a_div_domain(case: StructuredCase) -> None:
     """From the first legal tile on, every denominator of the correct
     quick matrix lies in ``[1/2, 2**9)``, the domain of A-DIV, so the
     reciprocal is at most 2."""
@@ -2878,7 +2897,9 @@ def test_denominators_stay_in_the_a_div_domain(case: P4Case) -> None:
             assert trace.reciprocal.hi <= 2
 
 
-def _underived_rows(case: P4Case, mutation: P4Mutation) -> dict[int, str]:
+def _underived_rows(
+    case: StructuredCase, mutation: StructuredMutation
+) -> dict[int, str]:
     """The sampled rows whose mutated enclosure is not derived, and why.
 
     Excluding the last key leaves causal row 0 without a key, which the
@@ -2886,18 +2907,20 @@ def _underived_rows(case: P4Case, mutation: P4Mutation) -> dict[int, str]:
     whose only key has
     logit -8 has weight ``e**8``, which takes the denominator out of the A-DIV
     domain."""
-    if mutation is P4Mutation.EXCLUDE_LAST_KEY:
+    if mutation is StructuredMutation.EXCLUDE_LAST_KEY:
         return {0: "fully masked leading tiles"}
     if (
-        mutation is P4Mutation.DENOMINATOR_PLUS_ONE
-        and case.fixture is P4Fixture.IDENTITY
+        mutation is StructuredMutation.DENOMINATOR_PLUS_ONE
+        and case.fixture is StructuredFixture.IDENTITY
     ):
         return {0: "A-DIV domain"}
     return {}
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_mutated_rows_outside_the_derivation_make_no_claim(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_mutated_rows_outside_the_derivation_make_no_claim(
+    case: StructuredCase,
+) -> None:
     """A mutated enclosure must establish the masked-prefix bound and the A-DIV
     domain for its
     own recurrence. On the sampled rows every mutation does, except the two
@@ -2907,23 +2930,25 @@ def test_mutated_rows_outside_the_derivation_make_no_claim(case: P4Case) -> None
         expected = _underived_rows(case, mutation)
         refused = {
             row: reason
-            for row in P4_SEPARATION_ROWS
+            for row in STRUCTURED_SEPARATION_ROWS
             if (reason := row_scope(case, row, mutation)) is not None
         }
         assert set(refused) == set(expected), mutation.value
         for row, reason in refused.items():
             assert expected[row] in reason
-            with pytest.raises(P4ScopeError):
+            with pytest.raises(StructuredScopeError):
                 for head in range(case.base.nhead_q):
                     tier_b_row(case, "basis@0", row, head, mutation=mutation)
-        kept = tuple(row for row in P4_SEPARATION_ROWS if row not in refused)
-        assert derived_rows(case, P4_SEPARATION_ROWS, mutation) == kept
+        kept = tuple(row for row in STRUCTURED_SEPARATION_ROWS if row not in refused)
+        assert derived_rows(case, STRUCTURED_SEPARATION_ROWS, mutation) == kept
         if not refused:
             continue
         observation = _tier_b_observation(case)
         with pytest.raises(ValueError, match="at least one query"):
-            analyze_p4_policy(case, observation, mutation=mutation, rows=tuple(refused))
-        result = analyze_p4_policy(
+            analyze_structured_policy(
+                case, observation, mutation=mutation, rows=tuple(refused)
+            )
+        result = analyze_structured_policy(
             case, observation, mutation=mutation, rows=(*refused, 1)
         )
         judged = sum(group.coordinates for group in result.groups["basis@0"].values())
@@ -2935,22 +2960,22 @@ def test_row_trace_fails_closed_on_two_masked_leading_tiles() -> None:
     leading tiles has no enclosure until its residue bound is derived."""
     window = next(
         case
-        for case in P4_QUICK_CASES
-        if case.mask == "window" and case.fixture is P4Fixture.IDENTITY
+        for case in STRUCTURED_QUICK_CASES
+        if case.mask == "window" and case.fixture is StructuredFixture.IDENTITY
     )
     wide = dataclasses.replace(window, block_m=128)
     assert visited_tiles(wide, 255) == (1, 2, 3)
     assert tile_classes(wide, 255) == (_M0, _M0, _L)
     assert len(masked_prefix(wide, 255)) == 2
     assert derived_rows(wide, (254, 255), None) == (254, 255)
-    with pytest.raises(P4ScopeError, match="2 fully masked leading tiles"):
+    with pytest.raises(StructuredScopeError, match="2 fully masked leading tiles"):
         row_trace(wide, 0, 255)
     assert tile_classes(wide, 254) == (_M0, _L, _L)
     assert row_scope(wide, 254, None) is None
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_exposed_atoms_hold_at_most_one_nonzero_product(case: StructuredCase) -> None:
     """What reduces an MFMA call to one faithful addition, and what makes the
     scores exact.
 
@@ -2961,8 +2986,8 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
     eight atoms; every atom of a Walsh score has eight."""
     tiles = case.base.seqlen_k // case.block_n
     scales = np.ldexp(1.0, np.array(case.head_scale_exponents)).astype(np.float32)
-    for exposure in P4_EXPOSURES:
-        v = p4_inputs(case, exposure)[2][0]  # [Sk, Hkv, D]
+    for exposure in STRUCTURED_EXPOSURES:
+        v = structured_inputs(case, exposure)[2][0]  # [Sk, Hkv, D]
         nonzero = v != 0
         per_tile = nonzero.reshape(tiles, case.block_n, *nonzero.shape[1:]).sum(axis=1)
         per_call = nonzero.reshape(tiles * 8, 8, *nonzero.shape[1:]).sum(axis=1)
@@ -2979,11 +3004,11 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
                     )
                     np.testing.assert_array_equal(v[key, :, dim], scales)
 
-    q, k = p4_query_key(case)
+    q, k = structured_query_key(case)
     for head in range(case.base.nhead_q):
         products = q[0, :, head, None, :] * k[0, None, :, head, :]  # [Sq, Sk, D]
         per_atom = (products != 0).reshape(*products.shape[:2], 8, 8).sum(axis=-1)
-        if case.fixture is P4Fixture.WALSH:
+        if case.fixture is StructuredFixture.WALSH:
             assert np.all(per_atom == 8)
         else:
             assert per_atom.max() <= 1 and per_atom.sum(axis=-1).max() <= 1
@@ -2996,40 +3021,44 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
 
 def test_mutation_applicability_follows_fixture_and_mask() -> None:
     covered = set()
-    for case in P4_QUICK_CASES:
+    for case in STRUCTURED_QUICK_CASES:
         mutations = applicable_mutations(case)
         assert len(mutations) == len(set(mutations))
         covered.update(mutations)
-        assert (P4Mutation.INVERSE_SHIFT in mutations) == (
-            case.fixture is P4Fixture.CYCLIC
+        assert (StructuredMutation.INVERSE_SHIFT in mutations) == (
+            case.fixture is StructuredFixture.CYCLIC
         )
-        assert (P4Mutation.WALSH_SIGN in mutations) == (case.fixture is P4Fixture.WALSH)
-        assert (P4Mutation.EXCLUDE_LAST_KEY in mutations) == (case.mask == "causal")
-        assert (P4Mutation.INCLUDE_OLD_WINDOW_KEY in mutations) == (
+        assert (StructuredMutation.WALSH_SIGN in mutations) == (
+            case.fixture is StructuredFixture.WALSH
+        )
+        assert (StructuredMutation.EXCLUDE_LAST_KEY in mutations) == (
+            case.mask == "causal"
+        )
+        assert (StructuredMutation.INCLUDE_OLD_WINDOW_KEY in mutations) == (
             case.mask == "window"
         )
-    assert covered == set(P4Mutation)
+    assert covered == set(StructuredMutation)
 
 
 def _mutated_query_key(
-    case: P4Case, mutation: P4Mutation
+    case: StructuredCase, mutation: StructuredMutation
 ) -> tuple[np.ndarray, np.ndarray, range]:
     """The Q and K a mutated kernel reads, and the keys they are defined for."""
-    q, k = p4_query_key(case)
+    q, k = structured_query_key(case)
     keys = range(case.base.seqlen_k)
-    if mutation is P4Mutation.Q_HEAD_ROTATE:
+    if mutation is StructuredMutation.Q_HEAD_ROTATE:
         q = np.roll(q, -1, axis=2)
-    elif mutation is P4Mutation.K_HEAD_ROTATE:
+    elif mutation is StructuredMutation.K_HEAD_ROTATE:
         k = np.roll(k, -1, axis=2)
-    elif mutation is P4Mutation.K_ROW_PLUS_ONE:
+    elif mutation is StructuredMutation.K_ROW_PLUS_ONE:
         k, keys = k[:, 1:], range(case.base.seqlen_k - 1)
-    elif mutation is P4Mutation.K_ROW_MINUS_ONE:
+    elif mutation is StructuredMutation.K_ROW_MINUS_ONE:
         k, keys = k[:, :-1], range(1, case.base.seqlen_k)
-    elif mutation is P4Mutation.INVERSE_SHIFT:
+    elif mutation is StructuredMutation.INVERSE_SHIFT:
         # Transpose each 64 x 64 key-by-dimension block of the periodic K.
         block = np.swapaxes(k[:, :64], 1, 3)
         k = np.tile(block, (1, case.base.seqlen_k // 64, 1, 1))
-    elif mutation is P4Mutation.WALSH_SIGN:
+    elif mutation is StructuredMutation.WALSH_SIGN:
         signs = np.where(np.arange(case.base.seqlen_k) & 1, -1.0, 1.0)
         k = k * signs[None, :, None, None].astype(np.float32)
     elif mutation.value.startswith("omit_walsh_block_"):
@@ -3040,24 +3069,24 @@ def _mutated_query_key(
 
 
 _SCORE_MUTATIONS = (
-    P4Mutation.Q_HEAD_ROTATE,
-    P4Mutation.K_HEAD_ROTATE,
-    P4Mutation.K_ROW_PLUS_ONE,
-    P4Mutation.K_ROW_MINUS_ONE,
-    P4Mutation.INVERSE_SHIFT,
-    P4Mutation.WALSH_SIGN,
-    P4Mutation.OMIT_WALSH_BLOCK_0,
-    P4Mutation.OMIT_WALSH_BLOCK_1,
-    P4Mutation.OMIT_WALSH_BLOCK_3,
+    StructuredMutation.Q_HEAD_ROTATE,
+    StructuredMutation.K_HEAD_ROTATE,
+    StructuredMutation.K_ROW_PLUS_ONE,
+    StructuredMutation.K_ROW_MINUS_ONE,
+    StructuredMutation.INVERSE_SHIFT,
+    StructuredMutation.WALSH_SIGN,
+    StructuredMutation.OMIT_WALSH_BLOCK_0,
+    StructuredMutation.OMIT_WALSH_BLOCK_1,
+    StructuredMutation.OMIT_WALSH_BLOCK_3,
 )
 
 
 @pytest.mark.parametrize(
     "case",
-    [case for case in P4_QUICK_CASES if case.dtype == "fp16"],
+    [case for case in STRUCTURED_QUICK_CASES if case.dtype == "fp16"],
     ids=lambda case: case.fixture.value,
 )
-def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
+def test_mutated_scores_are_the_mutated_dot_products(case: StructuredCase) -> None:
     """The closed-form mutated scores equal the exact QK dot products of the
     inputs a mutated kernel would read (heads rotated, K rows off by one, the
     cyclic K transposed, the Walsh sign dropped or one 16-dimension block of
@@ -3082,8 +3111,10 @@ def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
     from kernels.gfx942 import attention_dense
 
     scales = {
-        P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * f32(attention_dense.LOG2E)),
-        P4Mutation.EXP_ENCODING: f32(1.0 / 8.0),
+        StructuredMutation.OMIT_SQRT_D: round_f32(
+            f32(1.0) * f32(attention_dense.LOG2E)
+        ),
+        StructuredMutation.EXP_ENCODING: f32(1.0 / 8.0),
     }
     row = 64 + case.residue_shift
     key = row - case.residue_shift
@@ -3116,8 +3147,8 @@ def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
     }
     correct: set[Fraction] = set()
     rounded = set()
-    for case in P4_QUICK_CASES:
-        correct |= _dot_products(*p4_query_key(case))
+    for case in STRUCTURED_QUICK_CASES:
+        correct |= _dot_products(*structured_query_key(case))
         for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
             values = _dot_products(*_mutated_query_key(case, mutation)[:2])
             if any(round_f32(v * SCORE_SCALE) != v * SCORE_SCALE for v in values):
@@ -3132,25 +3163,24 @@ def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
                 round_f32(product) - row_max
             )
     assert rounded == {
-        P4Mutation.OMIT_WALSH_BLOCK_0,
-        P4Mutation.OMIT_WALSH_BLOCK_1,
-        P4Mutation.OMIT_WALSH_BLOCK_3,
+        StructuredMutation.OMIT_WALSH_BLOCK_0,
+        StructuredMutation.OMIT_WALSH_BLOCK_1,
+        StructuredMutation.OMIT_WALSH_BLOCK_3,
     }
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_every_mutation_is_separated_or_classified(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_every_mutation_is_separated_or_classified(case: StructuredCase) -> None:
     """Every applicable mutation's Tier B is disjoint from the correct
     Tier B at some coordinate (``G(m) > 0``), or the cell is listed in
-    ``P4_UNSEPARATED`` with its owner. ``G`` is taken over the sampled rows,
+    ``STRUCTURED_UNSEPARATED`` with its owner. ``G`` is taken over the sampled rows,
     a lower bound of the full gap; ``pytest -s`` prints each ``G`` and its
-    coordinate, including the denominator and one-key boundary gaps the uniform lane
-    also covers."""
+    coordinate."""
     unexplained = []
     for mutation in applicable_mutations(case):
         separation = mutation_separation(case, mutation)
         print(format_separation(case, separation))
-        label = P4_UNSEPARATED.get((case.case_id, mutation))
+        label = STRUCTURED_UNSEPARATED.get((case.case_id, mutation))
         if (separation.gap > 0) == (label is not None):
             unexplained.append(f"{mutation.value}: G={separation.gap}, label={label}")
     assert not unexplained, unexplained
@@ -3165,13 +3195,13 @@ def test_unseparated_cells_are_proven_and_owned() -> None:
     after the first visited tile admits 1, the mutated recurrence
     (``alpha = 1``) is a member of the correct one, and interval propagation is
     inclusion-monotone, so the mutated Tier B lies inside the correct Tier B."""
-    assert P4_UNSEPARATED
-    cases = {case.case_id: case for case in P4_QUICK_CASES}
-    for (case_id, mutation), label in P4_UNSEPARATED.items():
+    assert STRUCTURED_UNSEPARATED
+    cases = {case.case_id: case for case in STRUCTURED_QUICK_CASES}
+    for (case_id, mutation), label in STRUCTURED_UNSEPARATED.items():
         assert label in SEPARATION_LABELS
         case = cases[case_id]
         assert mutation in applicable_mutations(case)
-        if mutation is P4Mutation.OMIT_RESCALE:
+        if mutation is StructuredMutation.OMIT_RESCALE:
             for row in range(case.base.seqlen_q):
                 for head in range(case.base.nhead_q):
                     for step in row_trace(case, head, row).steps[1:]:
@@ -3181,10 +3211,10 @@ def test_unseparated_cells_are_proven_and_owned() -> None:
         if label == "owned by another fixture":
             owners = [
                 other
-                for other in P4_QUICK_CASES
+                for other in STRUCTURED_QUICK_CASES
                 if other.base == case.base
                 and mutation in applicable_mutations(other)
-                and (other.case_id, mutation) not in P4_UNSEPARATED
+                and (other.case_id, mutation) not in STRUCTURED_UNSEPARATED
             ]
             assert any(
                 mutation_separation(other, mutation).gap > 0 for other in owners
@@ -3195,8 +3225,8 @@ _MUTANT_EXPOSURES = ("basis@0", "folded")
 _MUTANT_ROWS = (0, 63, 64, 127, 128, 255)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_mutant_paths_lie_inside_their_tier_b(case: StructuredCase) -> None:
     """Containment for the mutated semantics: a mutated kernel's IR-exact and
     randomized-semantic realizations (A-F epilogue choices included) lie in the
     mutated Tier B. Without this, a disjoint pair of enclosures would not imply
@@ -3229,37 +3259,37 @@ def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _tier_b_observation(case: P4Case, end: int = 0) -> UniformObservation:
+def _tier_b_observation(case: StructuredCase, end: int = 0) -> Observation:
     """Synthetic outputs at one end (0 low, 1 high) of every Tier B set."""
-    return UniformObservation(
+    return Observation(
         tuple(
             (exposure, tier_b_exposure(case, exposure)[end])
-            for exposure in P4_EXPOSURES
+            for exposure in STRUCTURED_EXPOSURES
         )
     )
 
 
 def _with_bits(
-    observation: UniformObservation,
+    observation: Observation,
     exposure: str,
     coordinate: tuple[int, int, int, int],
     bits: int,
-) -> UniformObservation:
+) -> Observation:
     exposures = []
     for name, values in observation.exposures:
         values = values.copy()
         if name == exposure:
             values[coordinate] = bits
         exposures.append((name, values))
-    return UniformObservation(tuple(exposures))
+    return Observation(tuple(exposures))
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_structural_zeros_have_tier_b_plus_zero(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_structural_zeros_have_tier_b_plus_zero(case: StructuredCase) -> None:
     """Every structural coordinate (masked, no target) has Tier B
     ``{+0}``. The quick matrix has no trailing basis coordinate and no keyless
     row, so those sentinels cannot occur here."""
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         radius = tier_a_exposure(case, exposure)[1]
         structural = radius == 0
@@ -3271,21 +3301,23 @@ def test_structural_zeros_have_tier_b_plus_zero(case: P4Case) -> None:
     )
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_every_tier_b_value_passes(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_every_tier_b_value_passes(case: StructuredCase) -> None:
     """Synthetic outputs at either end of every Tier B set pass, and every
     two-value set is counted with the end that was observed."""
     for end in (0, 1):
-        result = analyze_p4_policy(case, _tier_b_observation(case, end))
-        assert not result.violations, format_p4_result(result)
-        assert result.labels[P4Label.PASS.value] == 5 * int(np.prod(case.output_shape))
+        result = analyze_structured_policy(case, _tier_b_observation(case, end))
+        assert not result.violations, format_structured_result(result)
+        assert result.labels[StructuredLabel.PASS.value] == 5 * int(
+            np.prod(case.output_shape)
+        )
         assert result.ambiguous_high == (result.ambiguous if end else 0)
 
 
 _LABEL_CASE = next(
     case
-    for case in P4_QUICK_CASES
-    if case.dtype == "fp16" and case.fixture is P4Fixture.IDENTITY
+    for case in STRUCTURED_QUICK_CASES
+    if case.dtype == "fp16" and case.fixture is StructuredFixture.IDENTITY
 )
 
 
@@ -3322,22 +3354,22 @@ def _unmatched(exposure: str, query: int, head: int, dim: int, bits: int) -> boo
     return matching_violation(_LABEL_CASE, exposure, query, head, dim, bits) is None
 
 
-def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
+def _label_input(label: StructuredLabel) -> tuple[str, tuple[int, int, int, int], int]:
     """An exposure, coordinate and stored bits that must carry ``label``."""
-    from ._p4_analytical import _genuine_addition
+    from ._structured_analytical import _genuine_addition
 
-    if label is P4Label.STRUCTURAL:
+    if label is StructuredLabel.STRUCTURAL:
         where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r == 0)
         return "basis@0", where, 0x0001
-    if label is P4Label.NEGATIVE:
+    if label is StructuredLabel.NEGATIVE:
         where, low, *_ = _find(
             "basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0
         )
         return "basis@0", where, low | 0x8000
-    if label is P4Label.INVALID:
+    if label is StructuredLabel.INVALID:
         where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0)
         return "basis@0", where, 0x7E00  # the adapter's unwritten-output prefill
-    if label is P4Label.A_MODE:  # the heuristic: near an FP16-subnormal target
+    if label is StructuredLabel.A_MODE:  # the heuristic: near an FP16-subnormal target
         where, _, high, *_ = _find(
             "basis@0",
             range(256),
@@ -3346,17 +3378,17 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
             and _unmatched("basis@0", q, h, d, hi + 1),
         )
         return "basis@0", where, high + 1
-    if label is P4Label.A_F:  # the store of the exact product, truncated
+    if label is StructuredLabel.A_F:  # the store of the exact product, truncated
         for query in range(1, 64):
             for head in range(4):
                 low, _ = tier_b_row(_LABEL_CASE, "basis@0", query, head)
                 stored, _ = epilogue_alternatives(
-                    _LABEL_CASE, "basis@0", query, head, P4Violation.F_TRUNCATED
+                    _LABEL_CASE, "basis@0", query, head, StructuredViolation.F_TRUNCATED
                 )
                 for dim in np.nonzero(stored < low)[0]:
                     return "basis@0", (0, query, head, int(dim)), int(stored[dim])
         raise AssertionError("no truncated FP16 store leaves Tier B")
-    if label is P4Label.A_MFMA:
+    if label is StructuredLabel.A_MFMA:
         where, _, high, *_ = _find(
             "folded",
             range(64, 256),
@@ -3365,7 +3397,7 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
             and _unmatched("folded", q, h, d, hi + 1),
         )
         return "folded", where, high + 1
-    if label is P4Label.A_E:
+    if label is StructuredLabel.A_E:
 
         def loosened(q, h, d, lo):
             relaxed_low, relaxed_high = _relaxed("basis@0", q, h)
@@ -3394,25 +3426,25 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
 
         return predicate
 
-    if label is P4Label.PATH_MODEL:  # one ULP outside an unambiguous Tier B
+    if label is StructuredLabel.PATH_MODEL:  # one ULP outside an unambiguous Tier B
         where, _, _, center, _ = _find("basis@0", range(1, 64), outside(1))
         return "basis@0", where, center + 1
-    assert label is P4Label.NUMERICAL
+    assert label is StructuredLabel.NUMERICAL
     where, _, _, center, radius = _find("basis@0", range(1, 64), outside(2))
     return "basis@0", where, center + radius + 1
 
 
 # No single-step violation of these assumptions leaves Tier B on the quick
-# matrix (``P4_UNOBSERVED_VIOLATIONS``), so no stored value can carry them here.
-_UNPRODUCIBLE_LABELS = (P4Label.A_DIV, P4Label.A_QK)
+# matrix (``STRUCTURED_UNOBSERVED_VIOLATIONS``), so no stored value can carry them here.
+_UNPRODUCIBLE_LABELS = (StructuredLabel.A_DIV, StructuredLabel.A_QK)
 
 
 @pytest.mark.parametrize(
     "label",
-    [label for label in P4_FAILURE_LABELS if label not in _UNPRODUCIBLE_LABELS],
+    [label for label in STRUCTURED_FAILURE_LABELS if label not in _UNPRODUCIBLE_LABELS],
     ids=lambda label: label.name,
 )
-def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
+def test_each_failure_label_is_produced_and_fails(label: StructuredLabel) -> None:
     """Policy: one synthetic coordinate per taxonomy label fails with that
     label and nothing else, starting from outputs that pass. One ULP outside an
     unambiguous Tier B fails as "path model"; the exact-zero sentinels (a
@@ -3423,7 +3455,7 @@ def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
     observation = _with_bits(
         _tier_b_observation(_LABEL_CASE), exposure, coordinate, bits
     )
-    result = analyze_p4_policy(_LABEL_CASE, observation, rows=(coordinate[1],))
+    result = analyze_structured_policy(_LABEL_CASE, observation, rows=(coordinate[1],))
     failures = {name: count for name, count in result.labels.items() if name != "pass"}
     assert failures == {**dict.fromkeys(failures, 0), label.value: 1}, failures
     assert result.first[label.value] == (exposure, coordinate)
@@ -3432,11 +3464,16 @@ def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
 
 def test_negative_zero_and_infinity_are_not_zero_or_finite() -> None:
     structural, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r == 0)
-    for bits, label in ((0x8000, P4Label.NEGATIVE), (0x7C00, P4Label.INVALID)):
+    for bits, label in (
+        (0x8000, StructuredLabel.NEGATIVE),
+        (0x7C00, StructuredLabel.INVALID),
+    ):
         observation = _with_bits(
             _tier_b_observation(_LABEL_CASE), "basis@0", structural, bits
         )
-        result = analyze_p4_policy(_LABEL_CASE, observation, rows=(structural[1],))
+        result = analyze_structured_policy(
+            _LABEL_CASE, observation, rows=(structural[1],)
+        )
         assert result.labels[label.value] == 1
 
 
@@ -3444,21 +3481,21 @@ def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
     """At an FP16-subnormal target a flushed ``+0`` or a nearby value is A-MODE, but
     a far value (such as a wrong scale stores) is numerical; a far folded
     value is numerical, not A-MFMA."""
-    exposure, coordinate, _ = _label_input(P4Label.A_MODE)
+    exposure, coordinate, _ = _label_input(StructuredLabel.A_MODE)
     _, _, _, center, radius = _find(
         exposure,
         range(coordinate[1], coordinate[1] + 1),
         lambda q, h, d, lo, hi, c, r: (0, q, h, d) == coordinate,
     )
-    folded, folded_at, _ = _label_input(P4Label.A_MFMA)
+    folded, folded_at, _ = _label_input(StructuredLabel.A_MFMA)
     folded_center = int(tier_a_exposure(_LABEL_CASE, folded)[0][folded_at])
     for where, at, bits, label in (
-        (exposure, coordinate, 0x0000, P4Label.A_MODE),
-        (exposure, coordinate, center + radius + 64, P4Label.NUMERICAL),
-        (folded, folded_at, folded_center + 64, P4Label.NUMERICAL),
+        (exposure, coordinate, 0x0000, StructuredLabel.A_MODE),
+        (exposure, coordinate, center + radius + 64, StructuredLabel.NUMERICAL),
+        (folded, folded_at, folded_center + 64, StructuredLabel.NUMERICAL),
     ):
         observation = _with_bits(_tier_b_observation(_LABEL_CASE), where, at, bits)
-        result = analyze_p4_policy(_LABEL_CASE, observation, rows=(at[1],))
+        result = analyze_structured_policy(_LABEL_CASE, observation, rows=(at[1],))
         assert result.labels[label.value] == 1, (where, bits, dict(result.labels))
 
 
@@ -3466,21 +3503,21 @@ def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
     "case",
     [
         case
-        for case in P4_QUICK_CASES
+        for case in STRUCTURED_QUICK_CASES
         if (case.dtype, case.fixture)
-        in {("fp16", P4Fixture.LATE_MAX), ("bf16", P4Fixture.WALSH)}
+        in {("fp16", StructuredFixture.LATE_MAX), ("bf16", StructuredFixture.WALSH)}
     ],
     ids=_quick_id,
 )
-def test_mutated_analysis_rejects_correct_outputs(case: P4Case) -> None:
+def test_mutated_analysis_rejects_correct_outputs(case: StructuredCase) -> None:
     """The analyzer-side mutations the GPU lane runs reject a correct output on
     the sampled rows, for every mutation not listed as inseparable."""
     observation = _tier_b_observation(case)
     for mutation in applicable_mutations(case):
-        if (case.case_id, mutation) in P4_UNSEPARATED:
+        if (case.case_id, mutation) in STRUCTURED_UNSEPARATED:
             continue
-        result = analyze_p4_policy(
-            case, observation, mutation=mutation, rows=P4_SEPARATION_ROWS
+        result = analyze_structured_policy(
+            case, observation, mutation=mutation, rows=STRUCTURED_SEPARATION_ROWS
         )
         assert result.violations, mutation.value
 
@@ -3488,44 +3525,53 @@ def test_mutated_analysis_rejects_correct_outputs(case: P4Case) -> None:
 def test_records_cover_every_coordinate_and_serialize() -> None:
     case = _LABEL_CASE
     observation = _tier_b_observation(case)
-    control = analyze_p4_policy(case, observation)
-    mutated = analyze_p4_policy(
-        case, observation, mutation=P4Mutation.OMIT_SQRT_D, rows=P4_SEPARATION_ROWS
+    control = analyze_structured_policy(case, observation)
+    mutated = analyze_structured_policy(
+        case,
+        observation,
+        mutation=StructuredMutation.OMIT_SQRT_D,
+        rows=STRUCTURED_SEPARATION_ROWS,
     )
-    separation = mutation_separation(case, P4Mutation.OMIT_SQRT_D)
+    separation = mutation_separation(case, StructuredMutation.OMIT_SQRT_D)
     code_object = {"compiler": "test", "hsaco_sha256": "0" * 64}
-    records = p4_records(
+    records = structured_records(
         case,
         "attention_gfx942_dense",
         {"none": control, "omit_sqrt_d": mutated},
         deterministic=True,
-        diagnostics=p4_diagnostics(case, observation, artifact="rocm-7.13.0"),
+        diagnostics=structured_diagnostics(case, observation, artifact="rocm-7.13.0"),
         separations={"omit_sqrt_d": separation},
         code_object=code_object,
     )
     for record in records:
         json.dumps(record)
-    groups = [r for r in records if r["record_type"] == "rocke_p4_group"]
+    groups = [r for r in records if r["record_type"] == "rocke_structured_group"]
     control_groups = [r for r in groups if r["mutation"] == "none"]
     per_exposure = Counter()
     for record in control_groups:
         per_exposure[record["exposure"]] += record["coordinates"]
-    assert per_exposure == dict.fromkeys(P4_EXPOSURES, int(np.prod(case.output_shape)))
+    assert per_exposure == dict.fromkeys(
+        STRUCTURED_EXPOSURES, int(np.prod(case.output_shape))
+    )
     summaries = {
-        r["mutation"]: r for r in records if r["record_type"] == "rocke_p4_summary"
+        r["mutation"]: r
+        for r in records
+        if r["record_type"] == "rocke_structured_summary"
     }
     assert not summaries["none"]["rejected"]
     assert summaries["omit_sqrt_d"]["rejected"]
     assert summaries["omit_sqrt_d"]["cpu_gap"] == separation.gap > 0
-    (diagnostics,) = [r for r in records if r["record_type"] == "rocke_p4_diagnostics"]
-    assert diagnostics["assumptions"] == list(P4_ASSUMPTIONS)
+    (diagnostics,) = [
+        r for r in records if r["record_type"] == "rocke_structured_diagnostics"
+    ]
+    assert diagnostics["assumptions"] == list(STRUCTURED_ASSUMPTIONS)
     assert diagnostics["deterministic"] is True
     assert diagnostics["code_object"] == code_object
     assert diagnostics["epilogue_artifact"] == "rocm-7.13.0"
     assert diagnostics["mfma_rn"] <= diagnostics["mfma_additions"]
     assert 0 < diagnostics["ir_exact"] <= diagnostics["path_compared"]
     assert 0 < diagnostics["artifact_exact"] <= diagnostics["path_compared"]
-    unnamed = p4_diagnostics(case, observation, rows=(0,))
+    unnamed = structured_diagnostics(case, observation, rows=(0,))
     assert unnamed.artifact is None and unnamed.artifact_exact is None
 
 
@@ -3537,15 +3583,15 @@ def test_records_cover_every_coordinate_and_serialize() -> None:
 # Block, tile and window edges, and row 207, where the two FP16 epilogue
 # roundings differ. Setting the environment variable below sweeps every row.
 _VIOLATION_ROWS = (0, 63, 64, 127, 128, 207, 255)
-_FULL_VIOLATION_SWEEP = "ROCKE_P4_FULL_VIOLATION_SWEEP"
+_FULL_VIOLATION_SWEEP = "ROCKE_STRUCTURED_FULL_VIOLATION_SWEEP"
 
 
 def _violation_observation(
-    case: P4Case, violation: P4Violation, rows: tuple[int, ...]
-) -> UniformObservation:
+    case: StructuredCase, violation: StructuredViolation, rows: tuple[int, ...]
+) -> Observation:
     """What the IR-exact path stores on ``rows`` with one assumption violated."""
     exposures = []
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         bits = np.zeros(case.output_shape, dtype=np.uint16)
         for row in rows:
             for head in range(case.base.nhead_q):
@@ -3553,31 +3599,33 @@ def _violation_observation(
                     case, exposure, row, head, violation
                 )[0]
         exposures.append((exposure, bits))
-    return UniformObservation(tuple(exposures))
+    return Observation(tuple(exposures))
 
 
 def test_every_violation_names_its_assumption() -> None:
-    from ._p4_analytical import _VIOLATION_LABEL
+    from ._structured_analytical import _VIOLATION_LABEL
 
-    assert set(_VIOLATION_LABEL) == set(P4Violation)
+    assert set(_VIOLATION_LABEL) == set(StructuredViolation)
     for violation, label in _VIOLATION_LABEL.items():
         assumption = violation.value.split("_")[1].upper()
         assert label.value == f"assumption A-{assumption}", violation.value
-    assert P4_UNOBSERVED_VIOLATIONS < set(P4Violation)
+    assert STRUCTURED_UNOBSERVED_VIOLATIONS < set(StructuredViolation)
     covered = set()
-    for case in P4_QUICK_CASES:
+    for case in STRUCTURED_QUICK_CASES:
         violations = applicable_violations(case)
         assert len(violations) == len(set(violations))
-        assert (P4Violation.QK_UP in violations) == (case.fixture is P4Fixture.WALSH)
-        assert (P4Violation.F_TRUNCATED in violations) == (case.dtype == "fp16")
+        assert (StructuredViolation.QK_UP in violations) == (
+            case.fixture is StructuredFixture.WALSH
+        )
+        assert (StructuredViolation.F_TRUNCATED in violations) == (case.dtype == "fp16")
         covered.update(violations)
-    assert covered == set(P4Violation)
+    assert covered == set(StructuredViolation)
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_violated_assumptions_fail_and_are_never_absorbed(case: P4Case) -> None:
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_violated_assumptions_fail_and_are_never_absorbed(case: StructuredCase) -> None:
     """For each named assumption, the IR-exact path with that one primitive
-    replaced by an excluded value (``P4Violation``):
+    replaced by an excluded value (``StructuredViolation``):
 
     - Tier B and the exponential candidate sets are the same before and after
       the violating output is judged: no tolerance absorbs it;
@@ -3585,24 +3633,26 @@ def test_violated_assumptions_fail_and_are_never_absorbed(case: P4Case) -> None:
       with a named assumption, and the capture audit reports the same
       coordinates as unexplained;
     - a violation that leaves Tier B nowhere is listed in
-      ``P4_UNOBSERVED_VIOLATIONS``: the stored bits cannot show it, which says
+      ``STRUCTURED_UNOBSERVED_VIOLATIONS``: the stored bits cannot show it, which says
       nothing about the assumption.
 
     ``pytest -s`` prints the number of coordinates each violation moves out of
     Tier B."""
-    from ._p4_analytical import _VIOLATION_LABEL, _VIOLATION_REACH
+    from ._structured_analytical import _VIOLATION_LABEL, _VIOLATION_REACH
 
     every_row = tuple(range(case.base.seqlen_q))
     rows = every_row if os.environ.get(_FULL_VIOLATION_SWEEP) else _VIOLATION_ROWS
     before = {
         exposure: [bits.copy() for bits in tier_b_exposure(case, exposure)]
-        for exposure in P4_EXPOSURES
+        for exposure in STRUCTURED_EXPOSURES
     }
     candidates = {x: exp2_candidates(x) for x in (Fraction(0), MASKED_SCORE)}
-    conversion_labels = {P4Label.A_F, P4Label.A_MODE} & {
+    conversion_labels = {StructuredLabel.A_F, StructuredLabel.A_MODE} & {
         _VIOLATION_LABEL[violation] for violation in applicable_violations(case)
     }
-    judged = len(rows) * len(P4_EXPOSURES) * case.base.nhead_q * case.base.head_dim
+    judged = (
+        len(rows) * len(STRUCTURED_EXPOSURES) * case.base.nhead_q * case.base.head_dim
+    )
     for violation in applicable_violations(case):
         observation = _violation_observation(case, violation, rows)
         outside = set()
@@ -3617,18 +3667,20 @@ def test_violated_assumptions_fail_and_are_never_absorbed(case: P4Case) -> None:
                     (exposure, row, int(head), int(dim))
                     for head, dim in zip(*np.nonzero(distance > 0))
                 )
-        result = analyze_p4_policy(case, observation, rows=rows)
+        result = analyze_structured_policy(case, observation, rows=rows)
         failures = {
             name: count
             for name, count in result.labels.items()
-            if count and name != P4Label.PASS.value
+            if count and name != StructuredLabel.PASS.value
         }
         print(
             f"{_quick_id(case)} {violation.value}: {len(outside)} of {judged} "
             f"coordinates leave Tier B (reach {reach}); labels {failures}"
         )
         assert reach <= _VIOLATION_REACH, violation.value
-        assert (not outside) == (violation in P4_UNOBSERVED_VIOLATIONS), violation.value
+        assert (not outside) == (
+            violation in STRUCTURED_UNOBSERVED_VIOLATIONS
+        ), violation.value
         assert sum(failures.values()) == len(outside), violation.value
         assert bool(result.violations) == bool(outside)
         if outside:
@@ -3641,7 +3693,7 @@ def test_violated_assumptions_fail_and_are_never_absorbed(case: P4Case) -> None:
         )
         assert set(audit.outside_tier_b) == outside, violation.value
         assert outside <= {where for where, _ in audit.unexplained}, violation.value
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         for cached, saved in zip(tier_b_exposure(case, exposure), before[exposure]):
             np.testing.assert_array_equal(cached, saved)
     assert {x: exp2_candidates(x) for x in candidates} == candidates
@@ -3656,12 +3708,14 @@ _AUDIT_ROWS = (0, 64, 207)
 _AUDIT_ARTIFACT = "rocm-7.13.0"
 
 
-def _write_capture(directory, case: P4Case = _AUDIT_CASE) -> dict[str, np.ndarray]:
+def _write_capture(
+    directory, case: StructuredCase = _AUDIT_CASE
+) -> dict[str, np.ndarray]:
     """A synthetic capture whose audited rows store what the named artifact
     stores; the other rows are not audited."""
     arrays = {
         exposure: np.zeros(case.output_shape, dtype=np.uint16)
-        for exposure in P4_EXPOSURES
+        for exposure in STRUCTURED_EXPOSURES
     }
     for exposure, array in arrays.items():
         for row in _AUDIT_ROWS:
@@ -3691,11 +3745,11 @@ def test_capture_audit_explains_an_artifact_capture(tmp_path) -> None:
     print(format_audit(audit))
     assert audit.explained and not audit.problems
     (item,) = audit.cases.values()
-    assert item.coordinates == len(_AUDIT_ROWS) * len(P4_EXPOSURES) * 4 * 64
+    assert item.coordinates == len(_AUDIT_ROWS) * len(STRUCTURED_EXPOSURES) * 4 * 64
     assert set(item.ir_mismatches) == {
         ("folded", 207, 0, dim) for dim in range(16, 64) if dim % 4 in (0, 1)
     }
-    single_lanes = P4_EPILOGUE_ARTIFACTS[_AUDIT_ARTIFACT].single_lanes
+    single_lanes = STRUCTURED_EPILOGUE_ARTIFACTS[_AUDIT_ARTIFACT].single_lanes
     for lane, (single, double) in item.lane_rule.items():
         assert (single > 0, double > 0) == (
             (True, False) if lane in single_lanes else (False, True)
@@ -3732,43 +3786,45 @@ def test_capture_audit_reports_rather_than_absorbs(tmp_path) -> None:
     assert "missing" in problems
 
 
-def _p4_entry(dtype: str, **overrides) -> P4CalibrationEntry:
-    spec = UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", dtype)].spec
+def _structured_entry(dtype: str, **overrides) -> StructuredCalibrationEntry:
+    spec = STRUCTURED_QUICK_SPECS[dtype]
     arguments = {
-        "policy": P4_POLICY,
-        "assumptions": P4_ASSUMPTIONS,
-        "case_ids": tuple(c.case_id for c in P4_QUICK_CASES if c.dtype == dtype),
+        "policy": STRUCTURED_POLICY,
+        "assumptions": STRUCTURED_ASSUMPTIONS,
+        "case_ids": tuple(
+            c.case_id for c in STRUCTURED_QUICK_CASES if c.dtype == dtype
+        ),
         "spec": spec,
     }
     arguments.update(overrides)
-    return P4CalibrationEntry(**arguments)
+    return StructuredCalibrationEntry(**arguments)
 
 
 def test_calibration_entry_has_no_numeric_width() -> None:
     """An entry names the policy, the assumption versions, the cases
     and the fingerprint; there is no field a measurement could widen."""
-    assert [item.name for item in dataclasses.fields(P4CalibrationEntry)] == [
+    assert [item.name for item in dataclasses.fields(StructuredCalibrationEntry)] == [
         "policy",
         "assumptions",
         "case_ids",
         "spec",
     ]
-    _p4_entry("fp16")
+    _structured_entry("fp16")
     with pytest.raises(ValueError, match="policy"):
-        _p4_entry("fp16", policy="ulp_budget")
+        _structured_entry("fp16", policy="ulp_budget")
     with pytest.raises(ValueError, match="assumptions"):
-        _p4_entry("fp16", assumptions=("A-E v2", "A-MFMA v1"))
+        _structured_entry("fp16", assumptions=("A-E v2", "A-MFMA v1"))
     with pytest.raises(ValueError, match="case_ids"):
-        _p4_entry("fp16", case_ids=())
+        _structured_entry("fp16", case_ids=())
     with pytest.raises(TypeError):
-        _p4_entry("fp16", ulp_budget=1)
+        _structured_entry("fp16", ulp_budget=1)
 
 
 def test_calibration_requires_every_assumption_version() -> None:
     """Tier B is sound under six named assumptions, each an antecedent of the
     soundness theorem. An entry that omits one, lists another version of one,
     or lists them in another order is refused."""
-    assert P4_ASSUMPTIONS == (
+    assert STRUCTURED_ASSUMPTIONS == (
         "A-E v1",
         "A-MFMA v1",
         "A-QK v1",
@@ -3776,29 +3832,31 @@ def test_calibration_requires_every_assumption_version() -> None:
         "A-F v1",
         "A-MODE v1",
     )
-    assert len(P4_ASSUMPTION_STATEMENTS) == len(P4_ASSUMPTIONS)
-    for version, statement in zip(P4_ASSUMPTIONS, P4_ASSUMPTION_STATEMENTS):
+    assert len(STRUCTURED_ASSUMPTION_STATEMENTS) == len(STRUCTURED_ASSUMPTIONS)
+    for version, statement in zip(
+        STRUCTURED_ASSUMPTIONS, STRUCTURED_ASSUMPTION_STATEMENTS
+    ):
         assert statement.startswith(f"{version}: ")
     assert EPILOGUE_ASSUMPTION.startswith("A-F v1:")
-    _p4_entry("fp16", assumptions=P4_ASSUMPTIONS)
+    _structured_entry("fp16", assumptions=STRUCTURED_ASSUMPTIONS)
     refused = [
-        P4_ASSUMPTIONS[:index] + P4_ASSUMPTIONS[index + 1 :]
-        for index in range(len(P4_ASSUMPTIONS))
+        STRUCTURED_ASSUMPTIONS[:index] + STRUCTURED_ASSUMPTIONS[index + 1 :]
+        for index in range(len(STRUCTURED_ASSUMPTIONS))
     ]
     refused += [
-        P4_ASSUMPTIONS[:index]
+        STRUCTURED_ASSUMPTIONS[:index]
         + (version.replace(" v1", " v2"),)
-        + P4_ASSUMPTIONS[index + 1 :]
-        for index, version in enumerate(P4_ASSUMPTIONS)
+        + STRUCTURED_ASSUMPTIONS[index + 1 :]
+        for index, version in enumerate(STRUCTURED_ASSUMPTIONS)
     ]
-    refused.append(tuple(reversed(P4_ASSUMPTIONS)))
+    refused.append(tuple(reversed(STRUCTURED_ASSUMPTIONS)))
     # The entry as ratified before A-QK, A-DIV and A-MODE were named.
     refused.append(("A-E v1", "A-MFMA v1", "A-F v1"))
     for assumptions in refused:
         with pytest.raises(ValueError, match="assumptions"):
-            _p4_entry("fp16", assumptions=assumptions)
-    for entry in P4_CALIBRATION.values():
-        assert entry.assumptions == P4_ASSUMPTIONS
+            _structured_entry("fp16", assumptions=assumptions)
+    for entry in STRUCTURED_CALIBRATION.values():
+        assert entry.assumptions == STRUCTURED_ASSUMPTIONS
 
 
 def test_observations_never_change_the_enclosures() -> None:
@@ -3807,19 +3865,21 @@ def test_observations_never_change_the_enclosures() -> None:
     case = _LABEL_CASE
     before = {
         exposure: [bits.copy() for bits in tier_b_exposure(case, exposure)]
-        for exposure in P4_EXPOSURES
+        for exposure in STRUCTURED_EXPOSURES
     }
     candidates = {x: exp2_candidates(x) for x in (Fraction(0), MASKED_SCORE)}
     for bits in (0x3C00, 0x7E00, 0x0000, 0x8001):
-        observation = UniformObservation(
+        observation = Observation(
             tuple(
                 (exposure, np.full(case.output_shape, bits, dtype=np.uint16))
-                for exposure in P4_EXPOSURES
+                for exposure in STRUCTURED_EXPOSURES
             )
         )
-        result = analyze_p4_policy(case, observation, rows=P4_SEPARATION_ROWS)
+        result = analyze_structured_policy(
+            case, observation, rows=STRUCTURED_SEPARATION_ROWS
+        )
         assert result.violations
-    for exposure in P4_EXPOSURES:
+    for exposure in STRUCTURED_EXPOSURES:
         for cached, saved in zip(tier_b_exposure(case, exposure), before[exposure]):
             assert not cached.flags.writeable
             np.testing.assert_array_equal(cached, saved)
@@ -3828,54 +3888,61 @@ def test_observations_never_change_the_enclosures() -> None:
 
 def test_calibration_scope_is_all_quick_cases_or_none() -> None:
     """No partial ratification: the calibrated case set is exactly the quick
-    matrix, one entry per dtype holding that dtype's cases, with the same
-    dispatch fingerprint as the uniform entries."""
-    quick = {case.case_id for case in P4_QUICK_CASES}
+    matrix, one entry per dtype holding that dtype's cases and that dtype's
+    dispatch fingerprint."""
+    quick = {case.case_id for case in STRUCTURED_QUICK_CASES}
     calibrated = {
-        case_id for entry in P4_CALIBRATION.values() for case_id in entry.case_ids
+        case_id
+        for entry in STRUCTURED_CALIBRATION.values()
+        for case_id in entry.case_ids
     }
     assert calibrated == quick
-    assert set(P4_CALIBRATION) == set(UNIFORM_CALIBRATION)
-    for (_, _, dtype), entry in P4_CALIBRATION.items():
+    assert set(STRUCTURED_CALIBRATION) == {
+        ("gfx942", "attention_gfx942_dense", base.dtype) for base in QUICK_SHAPES
+    }
+    for (_, _, dtype), entry in STRUCTURED_CALIBRATION.items():
         assert set(entry.case_ids) == {
-            case.case_id for case in P4_QUICK_CASES if case.dtype == dtype
+            case.case_id for case in STRUCTURED_QUICK_CASES if case.dtype == dtype
         }
-    for key, entry in P4_CALIBRATION.items():
-        assert entry.spec == UNIFORM_CALIBRATION[key].spec
-        assert entry.policy == P4_POLICY and entry.assumptions == P4_ASSUMPTIONS
+    for (_, _, dtype), entry in STRUCTURED_CALIBRATION.items():
+        assert entry.spec == STRUCTURED_QUICK_SPECS[dtype]
+        assert (
+            entry.policy == STRUCTURED_POLICY
+            and entry.assumptions == STRUCTURED_ASSUMPTIONS
+        )
 
 
-@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_require_p4_calibration_fails_closed(case: P4Case) -> None:
-    spec = UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", case.dtype)].spec
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_require_structured_calibration_fails_closed(case: StructuredCase) -> None:
+    spec = STRUCTURED_QUICK_SPECS[case.dtype]
     key = ("gfx942", "attention_gfx942_dense", case.dtype)
-    if key not in P4_CALIBRATION:
+    if key not in STRUCTURED_CALIBRATION:
         with pytest.raises(
             AssertionError, match="no structured-logit calibration"
         ) as raised:
-            require_p4_calibration("gfx942", "attention_gfx942_dense", case, spec)
+            require_structured_calibration(
+                "gfx942", "attention_gfx942_dense", case, spec
+            )
         assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in str(raised.value)
-    table = {key: _p4_entry(case.dtype)}
-    entry = require_p4_calibration(
+    table = {key: _structured_entry(case.dtype)}
+    entry = require_structured_calibration(
         "gfx942", "attention_gfx942_dense", case, spec, table=table
     )
     assert entry is table[key]
     drifted = dataclasses.replace(spec, block_m=spec.block_m // 2)
     with pytest.raises(AssertionError, match="block_m: calibrated"):
-        require_p4_calibration(
+        require_structured_calibration(
             "gfx942", "attention_gfx942_dense", case, drifted, table=table
         )
-    narrow = {key: _p4_entry(case.dtype, case_ids=("other",))}
+    narrow = {key: _structured_entry(case.dtype, case_ids=("other",))}
     with pytest.raises(AssertionError, match=f"case {case.case_id} not in"):
-        require_p4_calibration(
+        require_structured_calibration(
             "gfx942", "attention_gfx942_dense", case, spec, table=narrow
         )
 
 
-def _p4_gpu_lane_tree() -> ast.Module:
-    from pathlib import Path
-
-    path = Path(__file__).with_name("test_p4_analytical_gfx942.py")
+def _structured_gpu_lane_tree() -> ast.Module:
+    path = Path(__file__).with_name("test_structured_analytical_gfx942.py")
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
@@ -3889,12 +3956,12 @@ def _dotted(node: ast.AST) -> str:
     return ".".join(reversed(parts))
 
 
-def test_p4_gpu_lane_scope_and_gate() -> None:
-    """The structured-logit GPU lane runs exactly ``P4_QUICK_CASES``, gates once
+def test_structured_gpu_lane_scope_and_gate() -> None:
+    """The structured-logit GPU lane runs exactly ``STRUCTURED_QUICK_CASES``, gates once
     through the
     require-aware ``current_device_arch_in(("gfx942",), ...)``, never skips
-    otherwise, and ends in ``require_p4_calibration``."""
-    tree = _p4_gpu_lane_tree()
+    otherwise, and ends in ``require_structured_calibration``."""
+    tree = _structured_gpu_lane_tree()
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
     names = [_dotted(call.func) for call in calls]
     parametrized = [
@@ -3903,7 +3970,9 @@ def test_p4_gpu_lane_scope_and_gate() -> None:
     assert parametrized
     for call in parametrized:
         argvalues = call.args[1]
-        assert isinstance(argvalues, ast.Name) and argvalues.id == "P4_QUICK_CASES"
+        assert (
+            isinstance(argvalues, ast.Name) and argvalues.id == "STRUCTURED_QUICK_CASES"
+        )
     skip_calls = {"skip", "skipif", "importorskip", "xfail"}
     skips = [name for name in names if name.split(".")[-1] in skip_calls]
     assert not skips
@@ -3911,7 +3980,7 @@ def test_p4_gpu_lane_scope_and_gate() -> None:
         call for call, name in zip(calls, names) if name == "current_device_arch_in"
     ]
     assert len(gates) == 1 and ast.literal_eval(gates[0].args[0]) == ("gfx942",)
-    assert "require_p4_calibration" in names
+    assert "require_structured_calibration" in names
 
 
 # ---------------------------------------------------------------------------
@@ -3919,8 +3988,8 @@ def test_p4_gpu_lane_scope_and_gate() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_adapter_accepts_p4_cases_through_the_shape_protocol() -> None:
-    for case in P4_QUICK_CASES:
+def test_adapter_accepts_structured_cases_through_the_shape_protocol() -> None:
+    for case in STRUCTURED_QUICK_CASES:
         _validate_supported_case(case)
         shape = _shape(case)
         assert (shape.batch, shape.seqlen_q, shape.nhead_q, shape.head_dim) == (
@@ -3931,17 +4000,18 @@ def test_adapter_accepts_p4_cases_through_the_shape_protocol() -> None:
     assert parameter.default is None
 
 
-@pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
-def test_p4_cases_resolve_to_the_uniform_dispatch_identity(base: UniformCase) -> None:
-    """The structured-logit lane reuses the ratified uniform dispatch identity:
-    every case on a quick shape resolves to the same candidate and fingerprint
-    as the uniform case."""
-    uniform = resolve_dense_subject(base)
-    for case in (c for c in P4_QUICK_CASES if c.base == base):
+@pytest.mark.parametrize("base", QUICK_SHAPES, ids=lambda base: base.case_id)
+def test_every_fixture_resolves_to_the_calibrated_dispatch_identity(
+    base: DenseShape,
+) -> None:
+    """Dispatch sees only the shape, dtype and mask: every fixture on a quick
+    shape resolves to the gfx942 dense candidate and to the fingerprint the
+    calibration entry records for that dtype."""
+    for case in (c for c in STRUCTURED_QUICK_CASES if c.base == base):
         subject = resolve_dense_subject(case)
         assert subject.case_id == case.case_id
-        assert subject.candidate_name == uniform.candidate_name
-        assert subject.fingerprint == uniform.fingerprint
+        assert subject.candidate_name == "attention_gfx942_dense"
+        assert subject.fingerprint == STRUCTURED_QUICK_SPECS[base.dtype]
 
 
 def test_subject_side_wrong_scale_is_the_omitted_sqrt_d_mutation() -> None:
@@ -3949,18 +4019,18 @@ def test_subject_side_wrong_scale_is_the_omitted_sqrt_d_mutation() -> None:
     analyzer's ``omit_sqrt_d``: both give ``qk_scale = RN(scale * LOG2E)``."""
     from kernels.gfx942 import attention_dense
 
-    from .test_p4_analytical_gfx942 import _WRONG_SCALE
+    from .test_structured_analytical_gfx942 import _WRONG_SCALE
 
     case = _LABEL_CASE
     row, key = 64, 64
     numerator = score_numerator(case, 0, row, key)
     qk_scale = round_f32(f32(_WRONG_SCALE) * f32(attention_dense.LOG2E))
-    assert score(case, 0, row, key, P4Mutation.OMIT_SQRT_D) == round_f32(
+    assert score(case, 0, row, key, StructuredMutation.OMIT_SQRT_D) == round_f32(
         numerator * qk_scale
     )
 
 
-_P4_TORCH_BLOCKED_PROBE = """
+_STRUCTURED_TORCH_BLOCKED_PROBE = """
 import importlib
 import importlib.abc
 import json
@@ -3978,10 +4048,10 @@ sys.meta_path.insert(0, _RefuseTorch())
 config = json.loads(sys.argv[1])
 sys.path[:0] = config["path"]
 package = config["package"]
-p4 = importlib.import_module(package + "._p4_analytical")
-subject = importlib.import_module(package + "._p4_shared_subject")
-importlib.import_module(package + ".test_p4_analytical_gfx942")
-for case in p4.P4_QUICK_CASES:
+lane = importlib.import_module(package + "._structured_analytical")
+subject = importlib.import_module(package + "._structured_subject")
+importlib.import_module(package + ".test_structured_analytical_gfx942")
+for case in lane.STRUCTURED_QUICK_CASES:
     subject.resolve_dense_subject(case)
 loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")
 assert not loaded, loaded
@@ -3989,13 +4059,21 @@ print("torch-free import and resolution ok")
 """
 
 
-def test_p4_suite_imports_and_resolves_with_torch_blocked() -> None:
-    from .test_contracts import _package_root
+def _package_root() -> tuple[str, Path]:
+    """This suite's package name and the directory that makes it importable."""
+    package = __package__ or ""
+    assert package, "the contracts must be imported as part of their package"
+    root = Path(__file__).resolve().parent
+    for _ in package.split("."):
+        root = root.parent
+    return package, root
 
+
+def test_structured_suite_imports_and_resolves_with_torch_blocked() -> None:
     package, root = _package_root()
     config = {"package": package, "path": [str(root), *(e for e in sys.path if e)]}
     completed = subprocess.run(
-        [sys.executable, "-c", _P4_TORCH_BLOCKED_PROBE, json.dumps(config)],
+        [sys.executable, "-c", _STRUCTURED_TORCH_BLOCKED_PROBE, json.dumps(config)],
         capture_output=True,
         text=True,
         timeout=300,

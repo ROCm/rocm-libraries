@@ -219,10 +219,12 @@ the strategy's biggest holes live (see
   head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
-- The [structured-logit lane](library/tests/oracle_free/README_P4.md)
+- The [structured-logit check](library/tests/oracle_free/README_structured.md)
   (`rocke_oracle_free_structured_logit_pytest`, standard tier) launches the
-  same kernel with structured Q and K, so the QK contraction, the scale, the
-  softmax, the online rescale and the per-head Q and K reads reach the output.
+  shipped gfx942 dense kernel with structured Q and K, so the QK contraction,
+  the scale, the softmax, the mask, the online rescale and the per-head Q and K
+  reads reach the output. It is self-contained and shares no code with the
+  uniform-probability check above.
   Each stored value must lie in the set the kernel's pinned floating-point
   path can store, derived on the CPU from named assumptions and without an
   attention reference; no tolerance is calibrated from runs. Its CPU contracts
