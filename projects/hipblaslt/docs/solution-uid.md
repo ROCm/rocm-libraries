@@ -49,5 +49,10 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-Repository-wide assignment, runtime selection, and mandatory uniqueness are
-introduced by later migration steps.
+One Tensile process replaces a zero, malformed, or colliding UID in the files
+that run writes. Uniqueness across the shipped logic tree is checked by
+`test_solution_uid_uniqueness.py` in the logic-corpus lane
+(`tox -e logic-corpus`).
+
+Runtime metadata, runtime selection, and mandatory uniqueness are introduced
+by later migration steps.
