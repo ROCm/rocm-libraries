@@ -93,6 +93,7 @@ namespace TensileLite
 
             size_t m_benchmarkRun = 0;
             bool   m_runOnce      = false;
+            int    m_flopScale    = 1;
         };
     } // namespace Client
 } // namespace TensileLite

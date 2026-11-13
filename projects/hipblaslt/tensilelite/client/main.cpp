@@ -232,6 +232,7 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("split-m-devices",          po::value<int>()->default_value(1), "Split M of each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the M/N slices concurrently. Reported time is the slowest device; reported GFlops are for the full problem. For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -809,8 +810,33 @@ int main(int argc, const char* argv[])
     {
         ScopedTimer timer("hip_initialization");
         hardware         = GetHardware(args);
-        int    world     = fusedA2A ? FusedA2ARunner::worldSize(args) : 1;
+        int    splitM    = args["split-m-devices"].as<int>();
+        if(splitM < 1)
+            throw std::runtime_error("--split-m-devices must be >= 1");
+        if(splitM > 1 && fusedA2A)
+            throw std::runtime_error("--split-m-devices cannot be combined with --fused-gemm-a2a");
+        if(splitM > 1 && args["use-user-args"].as<bool>())
+            throw std::runtime_error("--split-m-devices does not support --use-user-args");
+        if(splitM > 1 && args["grouped-gemm"].as<bool>())
+            throw std::runtime_error("--split-m-devices does not support --grouped-gemm");
+        int    world     = fusedA2A ? FusedA2ARunner::worldSize(args) : splitM;
         size_t flagBytes = fusedA2A ? FusedA2ARunner::kFlagAllocBytes : 0;
+
+        if(splitM > 1)
+        {
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+            if(args["device-idx"].as<int>() + splitM > deviceCount)
+                throw std::runtime_error(concatenate("--split-m-devices=",
+                                                     splitM,
+                                                     " needs devices ",
+                                                     args["device-idx"].as<int>(),
+                                                     "..",
+                                                     args["device-idx"].as<int>() + splitM - 1,
+                                                     " but only ",
+                                                     deviceCount,
+                                                     " are visible"));
+        }
 
         std::vector<int> deviceIds(world);
         std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
@@ -1194,24 +1220,30 @@ int main(int argc, const char* argv[])
                                     {
                                         for(size_t r = 0; r < device0->inputArr.size(); r++)
                                         {
-                                            auto kernel
-                                                = useUserArgs
-                                                      ? solution->solveTensileGPU(
-                                                            (*problem),
-                                                            *device0->inputArr[r],
-                                                            *hardware,
-                                                            &dUA,
-                                                            &dUAHost,
-                                                            nullptr,
-                                                            0,
-                                                            device0->stream)
-                                                      : solution->solve((*problem),
-                                                                        *device0->inputArr[r],
-                                                                        *hardware,
-                                                                        nullptr,
-                                                                        0,
-                                                                        device0->stream);
-                                            kernels.push_back({kernel});
+                                            // One launch per device (split-m-devices > 1),
+                                            // each on its own inputs and stream.
+                                            std::vector<std::vector<KernelInvocation>> perDevice;
+                                            for(auto const& ctx : devices)
+                                            {
+                                                perDevice.push_back(
+                                                    useUserArgs
+                                                        ? solution->solveTensileGPU(
+                                                              (*problem),
+                                                              *ctx->inputArr[r],
+                                                              *hardware,
+                                                              &dUA,
+                                                              &dUAHost,
+                                                              nullptr,
+                                                              0,
+                                                              ctx->stream)
+                                                        : solution->solve((*problem),
+                                                                          *ctx->inputArr[r],
+                                                                          *hardware,
+                                                                          nullptr,
+                                                                          0,
+                                                                          ctx->stream));
+                                            }
+                                            kernels.push_back(std::move(perDevice));
                                         }
                                     }
                                 }

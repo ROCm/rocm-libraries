@@ -160,6 +160,26 @@ namespace TensileLite
                 std::runtime_error("Currently only accepts identifier as input.");
             }
 
+            // --split-m-devices N: every device runs an M/N slice of the requested problem.
+            int splitM = args.count("split-m-devices") ? args["split-m-devices"].as<int>() : 1;
+            if(splitM > 1)
+            {
+                auto mFree = std::find_if(
+                    m_freeIndices.begin(), m_freeIndices.end(), [](auto const& f) { return f.isA; });
+                if(mFree == m_freeIndices.end())
+                    throw std::runtime_error("--split-m-devices: problem has no free index in A");
+                for(auto& sizes : m_problemSizes)
+                {
+                    size_t& m = sizes.at(mFree->d);
+                    if(m % splitM != 0)
+                        throw std::runtime_error(concatenate("--split-m-devices=",
+                                                             splitM,
+                                                             " does not divide M=",
+                                                             m));
+                    m /= splitM;
+                }
+            }
+
             // Default datatype
             rocisa::DataType type = rocisa::DataType::None;
             if(args.count("type"))

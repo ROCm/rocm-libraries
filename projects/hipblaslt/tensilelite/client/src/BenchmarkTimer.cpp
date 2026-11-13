@@ -132,6 +132,7 @@ namespace TensileLite
             , m_numEnqueuesPerSync(args["num-enqueues-per-sync"].as<int>())
             , m_maxEnqueuesPerSync(args["max-enqueues-per-sync"].as<int>())
             , m_minFlopsPerSync(args["min-flops-per-sync"].as<size_t>())
+            , m_flopScale(args["split-m-devices"].as<int>())
             , m_numSyncsPerBenchmark(args["num-syncs-per-benchmark"].as<int>())
             , m_hardware(hardware)
             , m_numEnqueuesPerSolution(m_numEnqueuesPerSync * m_numSyncsPerBenchmark)
@@ -273,10 +274,12 @@ namespace TensileLite
                         "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                 }
 
-                gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+                // split-m-devices: the devices ran M/N slices concurrently, so the time is
+                // the slowest slice and the work is the full problem.
+                gflops      = !sol_is_skipped ? flopCount * m_flopScale / (timePerEnqueue_us) / 1000.0 : 0;
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
                 int    usedCus     = std::min(tiles, perf.CUs);
-                gflopsPerCu = gflops / usedCus;
+                gflopsPerCu = gflops / m_flopScale / usedCus;
 
                 if(!sol_is_skipped)
                 {

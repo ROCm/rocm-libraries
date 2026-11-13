@@ -106,6 +106,7 @@ namespace TensileLite
             const int    m_numSyncsPerBenchmark;
             const int    m_numEnqueuesPerSolution;
             const size_t m_minFlopsPerSync = 0;
+            const int    m_flopScale       = 1;
 
             const bool m_useGPUTimer;
             const bool m_syncAfterWarmups = true;
