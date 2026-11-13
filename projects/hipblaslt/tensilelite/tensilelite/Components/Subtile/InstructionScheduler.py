@@ -5076,7 +5076,9 @@ def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
     ahead of any write to its registers, of the next barrier, and _BALANCED_READ_LEAD_MFMAS
     MFMAs ahead of its consumer (else the first slot behind the barrier). One lgkm wait goes
     right before the first MFMA reading their destinations, unless an earlier wait retires
-    them. Returns False, leaving the module alone, when the body does not have that shape.
+    them. Returns False, leaving the module alone, when the body does not have that shape,
+    or when the barrier would move behind a buffer_load or m0 write that then issues
+    ahead of it.
     """
     items = list(module.flatitems())
     first = next((k for k, inst in enumerate(items) if _isMfma(inst)), None)
@@ -5107,6 +5109,9 @@ def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
             and rest[waits[0]].vlcnt < 0 and rest[waits[0]].vscnt < 0
             and not any(rest[k].dscnt >= 0 or rest[k].kmcnt >= 0
                         for k in syncs if _isWaitCnt(rest[k]))):
+        # What stays between them would issue ahead of the half's WAR barrier.
+        if any(_isBufferLoad(rest[k]) or _isM0Update(rest[k]) for k in range(barrier + 1, first)):
+            return False
         moved = set(syncs) | set(waits)
         head = [inst for k, inst in enumerate(rest[:first]) if k not in moved]
         rest = head + [rest[first]] + [rest[k] for k in syncs] + rest[first + 1:]

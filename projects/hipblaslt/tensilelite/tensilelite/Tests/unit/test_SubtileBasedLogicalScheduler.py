@@ -5381,6 +5381,26 @@ class TestDeferBalancedCurrentCellWait:
         assert labels.index("Wait for balanced current-cell LR") == labels.index("M8") - 1
         assert labels.index("A tile 3 low") > labels.index("M1")
 
+    @pytest.mark.parametrize("kind", ["load", "m0"])
+    def test_barrier_stays_ahead_of_a_prefix_load_or_m0_write(self, kind):
+        from rocisa.code import Module
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module, balanced = self._body()
+        items = list(module.flatitems())
+        extra = (BufferLoadB128(dst=vgpr(240, 4), vaddr=vgpr(1), saddr=sgpr(1),
+                                soffset=0, comment="prefix load")
+                 if kind == "load" else SMovB32(dst=mgpr(0), src=0, comment="prefix m0"))
+        items.insert(_labels(module).index("prefix drain"), extra)
+        rebuilt = Module("MAINLOOP")
+        for inst in items:
+            rebuilt.add(inst)
+        before = _labels(rebuilt)
+        assert not deferBalancedCurrentCellWait(rebuilt, balanced)
+        assert _labels(rebuilt) == before
+
     def test_unlisted_reads_are_a_no_op(self):
         from rocisa.code import Module
         from tensilelite.Components.Subtile.InstructionScheduler import (
