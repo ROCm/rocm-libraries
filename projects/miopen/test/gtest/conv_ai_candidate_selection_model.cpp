@@ -1243,6 +1243,44 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
             << "divfeat mismatch at " << kDivfeatNames[i];
 }
 
+// Exercises the depthwise branch of the divfeat flags: when groups == C_in, cpg_in = C_in/groups =
+// 1, so is_depthwise = (cpg_in <= 1) = 1 and log_cpg_in = log1p(1). The other divfeat goldens all
+// use cpg_in = 16, so the is_depthwise == 1 path is otherwise untested.
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatDepthwiseFlag)
+{
+    using namespace miopen::ai::common;
+    std::vector<std::string> names = kBaseDerivedNames;
+    names.insert(names.end(), kDivfeatNames.begin(), kDivfeatNames.end());
+
+    const auto f  = EngineeredConvFeaturesByName(1,
+                                                16, // C_in == groups -> depthwise
+                                                16,
+                                                28,
+                                                28,
+                                                28,
+                                                28,
+                                                3,
+                                                3,
+                                                16, // groups
+                                                256,
+                                                ConvDirection::Forward,
+                                                2,
+                                                1,
+                                                1,
+                                                1,
+                                                /*phys_in_channels=*/16,
+                                                miopenFloat,
+                                                names);
+    const auto at = [&](const char* n) {
+        return f.at(kBaseDerivedNames.size() +
+                    static_cast<std::size_t>(std::distance(
+                        kDivfeatNames.begin(),
+                        std::find(kDivfeatNames.begin(), kDivfeatNames.end(), std::string(n)))));
+    };
+    EXPECT_FLOAT_EQ(at("is_depthwise"), 1.0f);
+    EXPECT_NEAR(at("log_cpg_in"), static_cast<float>(std::log1p(1.0)), 1e-5f);
+}
+
 // Golden divfeat for the BACKWARD directions of the same grouped INT8 shape (C_in=256 !=
 // C_out=1024, group=16), pinned from the Python ConvInputPreprocessor. The GEMM dims are selected
 // by direction; cpg_in uses the physical in-channel count (256/16 = 16 -> log1p = 2.8332), NOT the

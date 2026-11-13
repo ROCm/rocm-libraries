@@ -225,29 +225,33 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
         .size();
 }
 
+// Fixed positional order of the base derived block (18 names), matching EngineeredConvFeatures and
+// the training preprocessor's derived_feature_names(); log_d_in is appended for 3D. Single source
+// shared by DefaultDerivedFeatureNames and the EngineeredConvFeaturesByName base block below.
+static constexpr std::array<const char*, 18> kBaseDerivedFeatureNames = {"log_flops",
+                                                                         "log_gemm_m",
+                                                                         "log_gemm_n",
+                                                                         "log_gemm_k",
+                                                                         "gemm_m_over_n",
+                                                                         "gemm_m_over_k",
+                                                                         "gemm_n_over_k",
+                                                                         "log_gemm_size",
+                                                                         "log_work_per_cu",
+                                                                         "spatial_reduction",
+                                                                         "filter_coverage",
+                                                                         "channel_ratio",
+                                                                         "group_density",
+                                                                         "log_h_in",
+                                                                         "log_w_in",
+                                                                         "log_c_in",
+                                                                         "log_c_out",
+                                                                         "log_batch"};
+
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> DefaultDerivedFeatureNames(int spatial_dim)
 {
-    // Fixed positional order of the base derived block, matching EngineeredConvFeatures and the
-    // training preprocessor's derived_feature_names(). 3D appends log_d_in after the 2D block.
-    std::vector<std::string> names = {"log_flops",
-                                      "log_gemm_m",
-                                      "log_gemm_n",
-                                      "log_gemm_k",
-                                      "gemm_m_over_n",
-                                      "gemm_m_over_k",
-                                      "gemm_n_over_k",
-                                      "log_gemm_size",
-                                      "log_work_per_cu",
-                                      "spatial_reduction",
-                                      "filter_coverage",
-                                      "channel_ratio",
-                                      "group_density",
-                                      "log_h_in",
-                                      "log_w_in",
-                                      "log_c_in",
-                                      "log_c_out",
-                                      "log_batch"};
-    if(spatial_dim == 3)
+    std::vector<std::string> names(kBaseDerivedFeatureNames.begin(),
+                                   kBaseDerivedFeatureNames.end());
+    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
         names.emplace_back("log_d_in");
     return names;
 }
@@ -281,7 +285,7 @@ EngineeredConvFeaturesByName(std::size_t N,
     // MIOpenFF training repo (feature-parity gtest).
 
     // Base engineered block, in canonical order (identical math/order to EngineeredConvFeatures).
-    const auto base                                     = EngineeredConvFeatures(N,
+    const auto base = EngineeredConvFeatures(N,
                                              C_in,
                                              C_out,
                                              H_in,
@@ -297,29 +301,11 @@ EngineeredConvFeaturesByName(std::size_t N,
                                              D_in,
                                              D_out,
                                              K_d);
-    static const std::array<const char*, 18> kBaseNames = {"log_flops",
-                                                           "log_gemm_m",
-                                                           "log_gemm_n",
-                                                           "log_gemm_k",
-                                                           "gemm_m_over_n",
-                                                           "gemm_m_over_k",
-                                                           "gemm_n_over_k",
-                                                           "log_gemm_size",
-                                                           "log_work_per_cu",
-                                                           "spatial_reduction",
-                                                           "filter_coverage",
-                                                           "channel_ratio",
-                                                           "group_density",
-                                                           "log_h_in",
-                                                           "log_w_in",
-                                                           "log_c_in",
-                                                           "log_c_out",
-                                                           "log_batch"};
     std::map<std::string, float> by_name;
-    for(std::size_t i = 0; i < kBaseNames.size(); ++i)
-        by_name[kBaseNames[i]] = base[i];
+    for(std::size_t i = 0; i < kBaseDerivedFeatureNames.size(); ++i)
+        by_name[kBaseDerivedFeatureNames[i]] = base[i];
     if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
-        by_name["log_d_in"] = base[kBaseNames.size()];
+        by_name["log_d_in"] = base[kBaseDerivedFeatureNames.size()];
 
     // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
     // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
