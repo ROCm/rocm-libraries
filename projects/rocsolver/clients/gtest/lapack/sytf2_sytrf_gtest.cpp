@@ -41,6 +41,8 @@ typedef std::tuple<vector<int>, printable_char> sytrf_tuple;
 // sytf2_sytrf_nan_pivot)
 // if singular = 3, then the matrices are random symmetric indefinite matrices (irregular 1x1 and
 // 2x2 pivots and interchanges)
+// if singular = 4, then the matrices are diagonally dominant, except for a column that becomes
+// exactly zero after the first pivot (in the panel factorization LASYF of SYTRF if n > 128)
 
 // each uplo_range is a {uplo}
 
@@ -65,7 +67,9 @@ const vector<vector<int>> matrix_size_range = {
     {40, 40, 2, 3},
     {40, 40, 3, 3},
     {100, 110, 3, 3},
-    {300, 300, 3, 3}};
+    {300, 300, 3, 3},
+    {40, 40, 4, 3},
+    {150, 150, 4, 3}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
@@ -120,7 +124,7 @@ protected:
 
         if constexpr(!(BATCHED || STRIDED))
             arg.batch_count = 1;
-        if(arg.singular == 1 || arg.singular == 2 || arg.singular == 3)
+        if(arg.singular != 0)
             testing_sytf2_sytrf<BATCHED, STRIDED, BLOCKED, T>(arg);
 
         arg.singular = 0;

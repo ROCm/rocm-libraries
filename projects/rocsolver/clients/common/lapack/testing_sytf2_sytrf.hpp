@@ -292,7 +292,7 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
                 // shuffle rows to test pivoting
                 // always the same permuation for debugging purposes
                 // (not with a NaN pivot, which must not be moved by interchanges)
-                for(rocblas_int i = 0; i < (singular == 2 ? 0 : n / 2); i++)
+                for(rocblas_int i = 0; i < (singular == 2 || singular == 4 ? 0 : n / 2); i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
                     {
@@ -309,6 +309,32 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
             if(knan >= 0)
                 hA[b][knan + size_t(knan) * lda]
                     = T(std::numeric_limits<decltype(std::real(T{}))>::quiet_NaN());
+
+            // singular = 4: the column factored second (k = 1 for lower, n - 2 for upper) becomes
+            // exactly zero after the 1-by-1 pivot of the column factored first (k = 0, or n - 1),
+            // although it is not zero in A: its entries are those of the first column times 1/2,
+            // with a pivot of 512, so that all the products of the update are exact. The
+            // factorization finds it singular, info points to it, and the updated (zero) column
+            // is stored in A, so that D has a zero there (as the reference LAPACK's xLASYF does
+            // since Reference-LAPACK/lapack#1433, but not LAPACK 3.12 and earlier: these cases
+            // are checked by the residual of the factorization)
+            if(singular == 4 && n >= 2)
+            {
+                const bool lower = (uplo == rocblas_fill_lower);
+                const rocblas_int k0 = lower ? 0 : n - 1;
+                const rocblas_int k1 = lower ? 1 : n - 2;
+                hA[b][k0 + size_t(k0) * lda] = 512;
+                hA[b][k1 + size_t(k0) * lda] = hA[b][k0 + size_t(k1) * lda] = 256;
+                hA[b][k1 + size_t(k1) * lda] = 128;
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    if(i == k0 || i == k1)
+                        continue;
+                    const T aik0 = hA[b][i + size_t(k0) * lda];
+                    hA[b][i + size_t(k0) * lda] = hA[b][k0 + size_t(i) * lda] = aik0;
+                    hA[b][i + size_t(k1) * lda] = hA[b][k1 + size_t(i) * lda] = aik0 / T(2);
+                }
+            }
 
             if(singular == 1 && (b == bc / 4 || b == bc / 2 || b == bc - 1))
             {
@@ -383,9 +409,10 @@ void sytf2_sytrf_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hIpivRes.transfer_from(dIpiv));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
-    // (the random indefinite matrices are kept to check the residual)
+    // (the random indefinite matrices, and those with a column that becomes zero, are kept to
+    // check the residual)
     std::vector<std::vector<T>> hA0;
-    if(singular == 3)
+    if(singular == 3 || singular == 4)
         for(rocblas_int b = 0; b < bc; ++b)
             hA0.emplace_back(hA[b], hA[b] + size_t(lda) * n);
 
@@ -402,12 +429,14 @@ void sytf2_sytrf_getError(const rocblas_handle handle,
     // using frobenius norm
     // (for the random indefinite matrices, the pivots are chosen by comparisons that rounding
     // can tip either way, so that the GPU and the host LAPACK can choose different and equally
-    // valid pivots; the error is then the residual of the factorization)
+    // valid pivots; the error is then the residual of the factorization. It is also the residual
+    // for the matrices with a column that becomes zero, whose factors in LAPACK 3.12 and earlier
+    // keep the original column in A)
     double err;
     *max_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        if(singular == 3)
+        if(singular == 3 || singular == 4)
         {
             err = sytf2_sytrf_residual(uplo, n, hA0[b].data(), lda, hARes[b], hIpivRes[b]);
             *max_err = rocblas_max_nan(*max_err, err);

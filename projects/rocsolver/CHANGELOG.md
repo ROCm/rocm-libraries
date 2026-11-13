@@ -18,8 +18,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
   factorizations, and memory access faults, for some matrices
 * SYTF2 (and SYTRF, for the columns that it factorizes with SYTF2) report a NaN pivot in info, as
   LAPACK's xSYTF2, instead of reading out of bounds
-* LASYF (and SYTRF for n > 128) did not store the updated column of a singular pivot in A, as LAPACK
-  does
+* LASYF (and SYTRF for n > 128) did not store in A a pivot column that became exactly zero, so that
+  D did not have a zero there and the factors did not reproduce A
 
 ### Known issues
 ### Upcoming changes
