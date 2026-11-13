@@ -32,8 +32,9 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
 5. Review every version change over each newly reachable property. That covers a raise of an advertised or declared version
    (plugin version macro, UED `sdk_version`, provider schema opt-in), and a schema or floor change with no engine touched. For a
    new or changed field an engine can receive, check that `computeMinimumEnginePluginApiVersion` gives its non-default values a
-   floor above every engine that does not read it; otherwise those engines receive it unread (`version-mismatch`). When no engine
-   changes, list the engines that receive the changed table and work steps 2 and 3 over them.
+   floor above every engine that does not read it, set by every caller that derives its flags (backend `GraphDescriptor` and
+   `EnginePluginResourceManager`, hip-kernel-provider `graphSchemaFloor`); otherwise those engines receive it unread
+   (`version-mismatch`). When no engine changes, list the engines that receive the changed table and work steps 2 and 3 over them.
 6. Decline tests: one per property value with boundary rows (below, at, above the limit), each a legal graph, failing when the
    guard is removed. Offer the guard removal to `VER` as the mutation.
 7. State, for every claimed hazard, the smallest legal graph mutation the engine accepts.
