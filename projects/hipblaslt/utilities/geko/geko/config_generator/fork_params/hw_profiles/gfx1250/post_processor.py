@@ -94,6 +94,16 @@ def _mi_wave_group(mi: Sequence[int]) -> Tuple[int, int]:
     return miwg0, waves // miwg0
 
 
+def _interleavable(wave_group: Tuple[int, int]) -> bool:
+    """Whether ``LDSSegmentInterleave=1`` supports this MIWaveGroup.
+
+    "LDSSegmentInterleave=1 requested but not applicable: MIWaveGroup
+    unsupported" (segment_interleave.py): only [2,2] and the asymmetric groups,
+    with exactly one dimension equal to 1, can interleave.
+    """
+    return wave_group == (2, 2) or (wave_group[0] == 1) != (wave_group[1] == 1)
+
+
 def _mis(mi_groups: GroupDimension) -> List[Sequence[int]]:
     """The 9-element MatrixInstruction of every group that carries one."""
     out = []
@@ -154,13 +164,9 @@ class _GFX1250GeometryNarrowing:
         restrict("HalfPLR", half_plr_usable, [0])
 
         # Rule C -- "LDSSegmentInterleave=1 requested but not applicable:
-        # MIWaveGroup unsupported" (segment_interleave.py): only [2,2] and the
-        # asymmetric groups, with exactly one dimension equal to 1, can
-        # interleave. Same "any group" policy.
-        def interleavable(wg):
-            return wg == (2, 2) or (wg[0] == 1) != (wg[1] == 1)
-
-        can_interleave = any(interleavable(_mi_wave_group(mi)) for mi in mis)
+        # MIWaveGroup unsupported" (see _interleavable). Same "any group"
+        # policy; _GFX1250SegmentInterleaveLayout narrows it per MI later.
+        can_interleave = any(_interleavable(_mi_wave_group(mi)) for mi in mis)
         restrict("LDSSegmentInterleave", lambda v: v != 1 or can_interleave, [0])
 
         return fork_params, mi_groups
@@ -254,6 +260,99 @@ class _GFX1250TDMFuseOneWave:
             values = one_wave if _mi_num_waves(entry) == 1 else list(fp.values)
             coupled.append({**entry, "TDMFuse": self._make_param("TDMFuse", values)})
         del fork_params["TDMFuse"]
+        return fork_params, coupled
+
+
+def _can_interleave(entry: Dict[str, ForkParameter]) -> bool:
+    """Whether an MI group entry can build ``LDSSegmentInterleave=1``.
+
+    Needs an interleavable MIWaveGroup (:func:`_interleavable`) and
+    LocalSplitU 1 (``WorkGroup[2]``): segment_interleave.py answers "not
+    applicable: LocalSplitU>1" otherwise. An MI this cannot read counts as
+    interleavable, like Rule C.
+    """
+    wg = getattr(entry.get("WorkGroup"), "values", None)
+    if isinstance(wg, list) and len(wg) == 3 and wg[2] > 1:
+        return False
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    return not mi or len(mi) != 9 or _interleavable(_mi_wave_group(mi))
+
+
+class _GFX1250SegmentInterleaveLayout:
+    """Give ``LDSSegmentInterleave=1`` the paired LDS layout, per MI group.
+
+    TensileLite pairs a tight interleave's ping/pong buffers only when
+    ``paired_buffer_reason`` (segment_interleave.py) finds nothing against it,
+    and ``TDMFuse > 0`` is one of its reasons. Without pairing a non-persistent
+    kernel is rejected ("LDSSegmentInterleave=1 requires paired LDS placement:
+    TDMFuse is not supported") and a persistent one keeps the unpaired
+    interleave. A persistent MX kernel also keeps it unless
+    ``ForceDisableShadowInit`` is set (``persistent_keeps_unpaired``). The
+    shipped gfx1250 kernels, and every ``LDSSegmentInterleave=1`` kernel
+    validated and timed for this profile, use the paired layout: TDMFuse 0
+    and ForceDisableShadowInit True.
+
+    So when the flat parameter offers 1 next to other values, it moves into
+    the MI groups. Every MI gets one entry per other value, with its TDMFuse;
+    an MI that can interleave (:func:`_can_interleave`) also gets an entry
+    with ``LDSSegmentInterleave=1`` and ``TDMFuse=0``. A flat TDMFuse moves
+    into the entries too, one entry per value, so no entry inherits a
+    conflicting flat value and every group value stays a single value, which
+    is how Tensile reads it. TDMFuse=0 makes TemporalHintA/B (0, 1) and
+    (1, 0) build the (0, 0) kernel on the 1 entries (see
+    ``GFX1250GAParams.tdm_fuse``); that costs duplicate draws, not invalid
+    ones.
+
+    For MX problems every entry also carries ``ForceDisableShadowInit=True``,
+    as the shipped gfx1250 perf yamls do. The LDSSegmentInterleave=1
+    entries need it for the paired layout. The other entries need it to
+    build at DepthU 512: some MX kernels with LDSSegmentInterleave 0 and
+    TDMFuse 1 fail in KernelWriter without it, and Tensile's solution check
+    does not catch that. With it, the two
+    LDSSegmentInterleave entries of an MI differ only in the layout and its
+    TDMFuse. ForceDisableShadowInit only turns off an optional
+    initialization done in the shadow of the global-read prefetch
+    (KernelWriter ``doShadowInit``).
+    """
+
+    @mark_post_process
+    def couple_lds_segment_interleave(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("LDSSegmentInterleave")
+        if fp is None or not fp.active or not isinstance(fp.values, list) or 1 not in fp.values:
+            return fork_params, mi_groups
+        others = [v for v in fp.values if v != 1]
+        if not others:
+            return fork_params, mi_groups
+        tdm = fork_params.get("TDMFuse")
+        flat_tdm = tdm if tdm is not None and tdm.active else None
+        mx = bool(getattr(self.config.get("GemmProblem"), "mx", False))
+        base = {}
+        if mx:
+            base["ForceDisableShadowInit"] = self._make_param("ForceDisableShadowInit", [True])
+        paired = {"LDSSegmentInterleave": self._make_param("LDSSegmentInterleave", [1]),
+                  "TDMFuse": self._make_param("TDMFuse", [0])}
+        coupled = []
+        for entry in mi_groups:
+            tdm_values = [None]
+            if flat_tdm is not None and "TDMFuse" not in entry:
+                tdm_values = list(flat_tdm.values)
+            for lsi in others:
+                for tdm_value in tdm_values:
+                    lsi_fp = self._make_param("LDSSegmentInterleave", [lsi])
+                    unpaired = {**entry, **base, "LDSSegmentInterleave": lsi_fp}
+                    if tdm_value is not None:
+                        unpaired["TDMFuse"] = self._make_param("TDMFuse", [tdm_value])
+                    coupled.append(unpaired)
+            if _can_interleave(entry):
+                coupled.append({**entry, **base, **paired})
+        del fork_params["LDSSegmentInterleave"]
+        if flat_tdm is not None:
+            del fork_params["TDMFuse"]
         return fork_params, coupled
 
 
@@ -419,14 +518,18 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapSplit
-# runs just before it, so the coupling ranks every (MI, SourceSwap) entry on
-# the tile it builds, and _GFX1250TDMFuseOneWave before that; each per-shape
-# copy inherits its group's SourceSwap and TDMFuse.
+# it runs last, on the final, de-duplicated MI groups. Before it, in run order:
+# _GFX1250TDMFuseOneWave; _GFX1250SegmentInterleaveLayout, which overrides
+# TDMFuse on its LDSSegmentInterleave=1 entries and so must follow it; and
+# _GFX1250SourceSwapSplit, just before the coupling, so every
+# (MI, SourceSwap) entry is ranked on the tile it builds. The two splits are
+# independent of each other. Each per-shape copy inherits its group's
+# SourceSwap, LDSSegmentInterleave and TDMFuse.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
     _GFX1250SourceSwapSplit,
+    _GFX1250SegmentInterleaveLayout,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
