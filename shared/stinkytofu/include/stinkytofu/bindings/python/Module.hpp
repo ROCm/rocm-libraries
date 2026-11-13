@@ -143,6 +143,8 @@
     X(EvenSpreadFillers, bool, true)                                                               \
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
     X(WaitAluHoldFirstWaitOnly, bool, false) /* move a free strict filler to after its barrier */ \
+    X(WaitAluHoldWideWindows, bool, false) /* strict-filler hold spans 6 WMMA windows, not 2 */  \
+    X(DsOneWaitAluPerWindow, bool, false) /* one s_wait_alu ds_load per WMMA window */         \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
@@ -151,6 +153,7 @@
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
     X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
     X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
+    X(DsReadCreditLifetimeB64, int, 0)    /* b64 ds_read credit lifetime; 0 = shared lifetime */   \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)

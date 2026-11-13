@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --no-ds-spread --wait-alu-scoreboard --ds-one-wait-alu-per-window --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# v24's ds_load needs s_wait_alu va_vdst(1); v100's needs none; v25's needs
+# va_vdst(0). The WMMAs do not read these loads, so one is ready to open the
+# next window. With DsOneWaitAluPerWindow the v100 load still issues beside
+# v24's load, and v25's load waits until the next WMMA. Without the flag,
+# v25's load issues before that WMMA.
+#
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: v24 = "st.v_add_nc_u32"
+# CHECK: v[8:11]{{.*}}ds_load_b128
+# CHECK: v[12:15]{{.*}}ds_load_b128
+# CHECK: v25 = "st.v_add_nc_u32"
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: v[16:19]{{.*}}ds_load_b128
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @test() {
+^entry:
+  v24 = "st.v_add_nc_u32"(v24, v24) { issueCycles = 1, latencyCycles = 5 }
+  v25 = "st.v_add_nc_u32"(v25, v25) { issueCycles = 1, latencyCycles = 5 }
+  v[8:11] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[16:19] = "st.ds_load_b128"(v25) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[40:47], v[40:47], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[48:55], v[48:55], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[56:63], v[56:63], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

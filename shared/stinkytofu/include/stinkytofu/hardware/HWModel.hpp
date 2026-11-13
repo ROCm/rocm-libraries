@@ -40,7 +40,13 @@ struct HWModel {
     struct Lds {
         int readQueueDepth;
         int readDrainLatency;
+        /// Default lifetime of one in-flight ds_read credit.
         int readCreditLifetime;
+        /// Experimental lifetime recorded for a ds_read whose destination
+        /// payload is exactly 64 bits. The scheduler does not apply this on
+        /// its own: DsReadCreditLifetimeB64 must be set to a positive value.
+        /// 0 means no separate b64 lifetime is recorded.
+        int readCreditLifetimeB64;
         /// Fallback overflow issue throughput (per WGP) when an opcode's
         /// HwInstDesc::dsThroughput is 0.
         int dsLoadDefaultThroughput;

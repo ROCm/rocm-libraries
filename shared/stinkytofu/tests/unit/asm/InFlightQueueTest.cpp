@@ -116,3 +116,18 @@ TEST(InFlightQueue, SeedFromResidualsDrainsEntriesAtTheirOwnTimeNotTheWorstCase)
     EXPECT_EQ(next.size(), 2) << "the entry seeded with residual 2 has drained";
     EXPECT_FALSE(next.full());
 }
+
+TEST(InFlightQueue, LaterShorterLifetimeExpiresBeforeEarlierLongerLifetime) {
+    InFlightQueue queue(/*depth=*/2);
+    queue.push(/*drainLatency=*/72);
+    queue.advance(1);
+    queue.push(/*drainLatency=*/64);
+    ASSERT_TRUE(queue.full());
+
+    queue.advance(64);
+    EXPECT_EQ(queue.size(), 1);
+    EXPECT_FALSE(queue.full());
+    EXPECT_EQ(queue.minResidual(), 7);
+    EXPECT_EQ(queue.residuals(), (std::vector<int>{7}))
+        << "the earlier b128-like entry remains after the later b64-like entry retires";
+}

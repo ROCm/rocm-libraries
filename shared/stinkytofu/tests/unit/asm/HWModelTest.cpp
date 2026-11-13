@@ -47,6 +47,7 @@ TEST(HWModel, Gfx1250KnownDefaults) {
     EXPECT_EQ(hw.lds.readQueueDepth, 16);
     EXPECT_EQ(hw.lds.readDrainLatency, 0);
     EXPECT_EQ(hw.lds.readCreditLifetime, 72);
+    EXPECT_EQ(hw.lds.readCreditLifetimeB64, 64);
 
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);
     EXPECT_EQ(hw.barrier.jumpOverheadCycles, 6);
@@ -96,6 +97,7 @@ TEST(HWModel, Gfx1250v0MatchesGfx1250ForNow) {
     EXPECT_EQ(v0.lds.readQueueDepth, base.lds.readQueueDepth);
     EXPECT_EQ(v0.lds.readDrainLatency, base.lds.readDrainLatency);
     EXPECT_EQ(v0.lds.readCreditLifetime, base.lds.readCreditLifetime);
+    EXPECT_EQ(v0.lds.readCreditLifetimeB64, base.lds.readCreditLifetimeB64);
     EXPECT_EQ(v0.barrier.signalToWaitLatency, base.barrier.signalToWaitLatency);
     EXPECT_EQ(v0.hazards.rules, base.hazards.rules);
 }

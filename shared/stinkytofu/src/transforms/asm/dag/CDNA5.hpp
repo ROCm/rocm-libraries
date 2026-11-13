@@ -480,10 +480,31 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
     }
-    // Lifetime of one in-flight ds_read credit.
+    // Conservative/default lifetime of one in-flight ds_read credit.
     int dsReadCreditLifetime() const {
         if (hw_.lds.readCreditLifetime > 0) return hw_.lds.readCreditLifetime;
         return 4 * dsReadQueueDepth();
+    }
+    // Destination payload width from the instruction descriptor. Pseudo LDS
+    // token operands are not part of operandFields and therefore cannot make a
+    // narrow load look wide.
+    static int dsReadDestWidthBits(const StinkyInstruction& inst) {
+        const HwInstDesc* desc = inst.getHwInstDesc();
+        if (desc == nullptr) return 0;
+        int width = 0;
+        for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields)
+            if (field.isDest) width = std::max(width, static_cast<int>(field.fieldSizeBits));
+        return width;
+    }
+    // Per-instruction credit lifetime. DsReadCreditLifetimeB64 == 0 keeps every
+    // load on the shared lifetime, which is the behavior before per-width
+    // lifetimes. A positive value is the lifetime of a ds_read whose destination
+    // payload is exactly 64 bits; every other width keeps the shared lifetime.
+    int dsReadCreditLifetime(const StinkyInstruction& inst) const {
+        const int b64 =
+            getPassContext().getPassFeatureConfig().dagFeatures.dsReadCreditLifetimeB64;
+        if (b64 > 0 && dsReadDestWidthBits(inst) == 64) return b64;
+        return dsReadCreditLifetime();
     }
     // Effective ds issue cost for one wave. The ISA number is single-wave; the
     // ds issue pipe is shared, so resident waves round-robin it and one wave's
@@ -644,6 +665,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // length. 0 = feature off.
     int fillQuotaPerWindow_ = 0;
     int fillsThisWindow_ = 0;
+    // DsOneWaitAluPerWindow: this WMMA window already issued a ds_load that
+    // InsertWaitAlu would put an s_wait_alu before. Cleared when the next WMMA opens.
+    bool windowTookWaitAluDs_ = false;
     // Critical fillers: a SALU/VALU becomes critical kCriticalSlackWmmas windows before the
     // planned window of the prefetch / tensor_load / ds_load it feeds. It then skips the
     // quota and takes the earliest window with a free co-issue slot, or issues as soon as it
@@ -938,15 +962,27 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // the DAG and the pass agree.
     std::unique_ptr<WaitAluTracker> waitAlu_;
     // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
-    // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
-    // windows before the next s_barrier_wait, where the wave stalls anyway. With
-    // waitAluHoldFirstWaitOnly that wait is the first one after the filler became ready, and a
-    // filler with no dependency path to it is held until the wait has issued, so it lands after
-    // the barrier instead of in those two windows. A filler the wait depends on stays in the two
-    // windows. Not held when it is the last pending predecessor of real work, feeds a prefetch's
-    // address, or no barrier wait is ahead.
+    // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the
+    // holdWindows (waitAluHoldWideWindows ? 6 : 2) WMMA windows before the next s_barrier_wait,
+    // where the wave stalls anyway. With waitAluHoldFirstWaitOnly that wait is the first one after
+    // the filler became ready, and a filler with no dependency path to it is held until the wait
+    // has issued, so it lands after the barrier instead of in those windows. A filler the wait
+    // depends on stays in those windows. Not held when it is the last pending predecessor of real
+    // work, feeds a prefetch's address, or no barrier wait is ahead.
     bool needsWaitAlu(const DAGNode* node) const {
         return waitAlu_ && needsWaitAlu(node, waitAlu_->query(*node->inst));
+    }
+    // A ds_load InsertWaitAlu would put an s_wait_alu immediately before.
+    bool dsNeedsWaitAlu(const DAGNode* node) const {
+        return waitAlu_ && node && waitAlu_->query(*node->inst).any();
+    }
+    // Hold a second wait-alu ds_load until the next WMMA. With no WMMA queued the
+    // ds_load still issues, so a window that cannot advance does not stall.
+    bool dsSecondWaitAluHeld(const DAGNode* ds) const {
+        if (!windowTookWaitAluDs_ || wmmaQueue.empty()) return false;
+        if (!getPassContext().getPassFeatureConfig().dagFeatures.dsOneWaitAluPerWindow)
+            return false;
+        return dsNeedsWaitAlu(ds);
     }
     bool needsWaitAlu(const DAGNode* node, const WaitAluNeed& need) const {
         if (!waitAlu_) return false;
@@ -964,6 +1000,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // waitAluHoldFirstWaitOnly the first one after it became ready.
         const bool firstWaitOnly =
             getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldFirstWaitOnly;
+        const int holdWindows =
+            getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldWideWindows ? 6 : 2;
         int since = wmmaIssuedCountThisRegion_;
         if (firstWaitOnly) {
             auto ready = readyWmmaCount_.find(node->inst);
@@ -971,10 +1009,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         for (const auto& [w, barrier] : barrierWaitWindows_) {
             if (since > w) continue;  // already past this wait
-            // Hold until the two windows before the wait. A filler that would take one of those
-            // windows, and that the wait does not depend on, stays held until the wait issues.
+            // Hold until holdWindows windows before the wait. A filler that would take one of
+            // those windows, and that the wait does not depend on, stays held until the wait issues.
             if (!firstWaitOnly || reachesBarrier(node, barrier))
-                return wmmaIssuedCountThisRegion_ < w - 2;
+                return wmmaIssuedCountThisRegion_ < w - holdWindows;
             return !barriersIssuedThisRegion_.count(barrier);
         }
         return false;
@@ -1268,8 +1306,13 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
-        dsReadInflight_.push(dsReadCreditLifetime());
+        dsReadInflight_.push(dsReadCreditLifetime(*node->inst));
         dsSpread_.noteIssue(node->id, wmmaIssuedCountThisRegion_);
+        // Query before onScheduled commits this ds, so the flag is the wait
+        // InsertWaitAlu would place in front of it.
+        if (getPassContext().getPassFeatureConfig().dagFeatures.dsOneWaitAluPerWindow &&
+            dsNeedsWaitAlu(node))
+            windowTookWaitAluDs_ = true;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1612,6 +1655,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     fillsThisWindow_ = 0;
+    windowTookWaitAluDs_ = false;  // the next window may carry one wait-alu ds_load
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
@@ -1692,7 +1736,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget || (spread && dsOverflow_)) {
-            if (!spread || dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
+            if (dsSecondWaitAluHeld(pickedDS)) {
+                // This window already has its one wait-alu ds_load. Credit may
+                // still have room; the next window issues this one.
+            } else if (!spread || dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -1752,7 +1799,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     // The spread holds a ds_load back only while a WMMA can still issue in its place; with none
     // ready, or nothing else to run, the ds_load goes.
-    if (dsHeldBySpread && wmmaQueue.empty() && (best == nullptr || bestWait > 0)) {
+    if (dsHeldBySpread && wmmaQueue.empty() && (best == nullptr || bestWait > 0) &&
+        !dsSecondWaitAluHeld(pickedDS)) {
         consider(pickedDS, kLocalRead, dsCreditWait);
         memWorkFitsWindow_ = true;
     }
@@ -1783,7 +1831,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     };
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
-    consider(pickedDS, kLocalRead);
+    if (!dsSecondWaitAluHeld(pickedDS)) consider(pickedDS, kLocalRead);
     // Held work (prefetch lead, strict-wait hold) is skipped while anything else can go;
     // it is still taken last, so the fallback always makes progress.
     auto firstUnheld = [&](const ReadySetByDAGid& q) -> DAGNode* {
@@ -1947,6 +1995,7 @@ bool CDNA5ReadyQueue::promoteDueLastDs() {
     for (DAGNode* n : localReadQueue) {
         if (!dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) continue;
         if (!dsWarClear(n) || !issuableNow(n) || dsReadInflight_.full()) continue;
+        if (dsSecondWaitAluHeld(n)) continue;
         if (!due || n->dsReadPriority < due->dsReadPriority) due = n;
     }
     if (!due) return false;
@@ -2291,9 +2340,17 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         } else if (latencyForAfterThreshold <= 0) {
             const int burstDrainLatency =
                 computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
+            long long totalCreditLifetime = 0;
+            for (const StinkyInstruction* load : matchingDsLoadInsts)
+                totalCreditLifetime += dsReadCreditLifetime(*load);
+            const int averageCreditLifetime =
+                matchingDsLoadCount > 0
+                    ? static_cast<int>((totalCreditLifetime + matchingDsLoadCount - 1) /
+                                       matchingDsLoadCount)
+                    : dsReadCreditLifetime();
             latencyForAfterThreshold = drainLatencyAfterIssueOffsets(
                 burstDrainLatency, matchingDsLoads.back().latency, matchingDsLoadCount,
-                dsReadQueueDepth(), dsReadCreditLifetime());
+                dsReadQueueDepth(), averageCreditLifetime);
         }
         int latencyWmmaBudget = latencyBudget(latencyForAfterThreshold);
         int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
@@ -2924,7 +2981,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     blockPrefetchLead_ =
         stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
     waitAlu_ =
-        feats.waitAluScoreboard || feats.waitAluHoldStrictCount >= 0
+        feats.waitAluScoreboard || feats.waitAluHoldStrictCount >= 0 || feats.dsOneWaitAluPerWindow
             ? std::make_unique<WaitAluTracker>(
                   getPassContext(), gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc))
             : nullptr;
@@ -2938,6 +2995,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     openBarrierIds_.clear();
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
+    windowTookWaitAluDs_ = false;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
@@ -3100,6 +3158,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     resetActiveWindow();
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
+    windowTookWaitAluDs_ = false;
     fillQuotaPerWindow_ = 0;
     wmmaPosByNode_.clear();
     remainingDs_.clear();
@@ -4100,12 +4159,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (!raiseStageAnchors()) break;
             buildStageLoads();
         }
-        // The most loads the LDS takes in one batch: its credits (readQueueDepth, each held
-        // readCreditLifetime cycles) over the batch's cycles.
+        // Do not let the pacer impose a stricter cap than the fastest load in
+        // this region. The actual mixed b64/b128 limit is enforced exactly by
+        // dsReadInflight_, where every entry carries its own lifetime.
+        int fastestCreditLifetime = dsReadCreditLifetime();
+        for (const DsSpreadPacer::Load& load : loads)
+            fastestCreditLifetime =
+                std::min(fastestCreditLifetime,
+                         dsReadCreditLifetime(*deps.dag.nodes[load.nodeId].inst));
         const int maxPerBatch = static_cast<int>(
             (static_cast<long long>(batch) * windowCycles * std::max(1, dsReadQueueDepth()) +
-             dsReadCreditLifetime() - 1) /
-            std::max(1, dsReadCreditLifetime()));
+             fastestCreditLifetime - 1) /
+            std::max(1, fastestCreditLifetime));
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, maxPerBatch,
                        effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
         dsOverflow_ =

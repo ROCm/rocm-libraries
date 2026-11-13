@@ -90,7 +90,7 @@ class InFlightQueue {
     int minResidual() const {
         evict();
         if (expiries_.empty()) return 0;
-        return std::max(0, expiries_.front() - currentTime_);
+        return std::max(0, *std::min_element(expiries_.begin(), expiries_.end()) - currentTime_);
     }
 
     // Remaining cycles until the longest-lived in-flight entry expires.
@@ -113,7 +113,16 @@ class InFlightQueue {
 
    private:
     void evict() const {
-        while (!expiries_.empty() && expiries_.front() <= currentTime_) expiries_.pop_front();
+        // Lifetimes are per entry, so a later narrow load may expire before an
+        // earlier wide load. Preserve issue order for residual carry while
+        // removing expired entries from anywhere in the queue. Equal lifetimes
+        // stay in issue order, so this matches front-only eviction.
+        for (auto it = expiries_.begin(); it != expiries_.end();) {
+            if (*it <= currentTime_)
+                it = expiries_.erase(it);
+            else
+                ++it;
+        }
     }
 
     int depth_ = 0;

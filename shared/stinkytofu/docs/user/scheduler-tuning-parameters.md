@@ -108,7 +108,8 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 | `DsBatchWmmas` | 4 | `--ds-batch-wmmas=N` | WMMAs per ds_load pacing batch (independent of the queue refill batch `WmmaBatchSize`). |
 | `DsReadCyclesPerLoad` | 6 (`stinkytofu-opt`: 0 = off) | `--ds-read-cycles-per-load=N` | LDS return rate: cycles per ds_load. Capped at the region's even spread (`WMMAs x WMMA latency / ds_loads`). Decides how long the stage's ds_loads take to issue: `ceil(ds_loads x N / WMMA window)` WMMA windows from the region start. The barrier is placed after the last of them; the gap from the last ds_load to the barrier is the drain already inside the barrier threshold. Replaces the old throttle latency T (one ds_load per `T / DsReadQueueDepth` cycles). Used only with `DsSpread`. |
 | `DsCatchUpPace` | 2 | `--ds-catch-up-pace=N` | ds_loads a batch may take above the even share when it began behind the even line. 0 = no catching up. |
-| `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
+| `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `readCreditLifetime` cycles unless `DsReadCreditLifetimeB64` gives a 64-bit destination load its own lifetime. |
+| `DsReadCreditLifetimeB64` | 0 (off) | `--ds-read-credit-lifetime-b64=N` | Lifetime of one in-flight `ds_load` whose destination payload is 64 bits. 0 keeps every load on `readCreditLifetime` (72 on gfx1250), the behavior before per-width lifetimes. The experimental gfx1250 value is 64. |
 | `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
 | `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
 | `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
@@ -160,6 +161,8 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | `PrefetchLeadMinStageWmmas` | 64 | `--prefetch-lead-min-stage-wmmas=N` | Blocks whose stages are shorter than N WMMAs run with no prefetch lead of 8 or more. A single-stage lead (below 8) is kept at any stage length. |
 | `WaitAluHoldStrictCount` | 2 (only with `EnableESM2`) | `--wait-alu-hold-strict-count=N` | A filler that would get an `s_wait_alu` of count ≤ N is held until the two windows before the next `s_barrier_wait`. < 0 = off. |
 | `WaitAluHoldFirstWaitOnly` | false | `--wait-alu-hold-first-wait-only` | Anchors the `WaitAluHoldStrictCount` hold to the first `s_barrier_wait` after the filler became ready. A filler that would land in the two windows before that wait, and that the wait does not depend on, is held until the wait has issued and then goes after it. A filler the wait depends on stays in those two windows. false = the filler is held again for every later wait. |
+| `WaitAluHoldWideWindows` | false | `--wait-alu-hold-wide-windows` | Widens the `WaitAluHoldStrictCount` hold from the two windows before the `s_barrier_wait` to six. false = two (default); true = six, so VALU fillers that would sit in the four windows before that wait move earlier. |
+| `DsOneWaitAluPerWindow` | false | `--ds-one-wait-alu-per-window` | One WMMA window issues at most one `ds_load` that would be preceded by `s_wait_alu`. A later `ds_load` that would also need one waits until the next WMMA. A `ds_load` that needs no wait still issues. With no WMMA left, the held `ds_load` issues anyway. |
 
 ## Hazards and barriers
 
@@ -175,7 +178,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | Source | Value (gfx1250) |
 |---|---|
 | `CDNA5Config` | `globalReadPerWmma = 1`, `tensorLoadWmmaSpace = 0`, `wmmaLatencyFallbackCycles = 8` (WMMA latency where a region has none), `warGateWmmas = 0` (derive) |
-| `HWModel::lds` | `readQueueDepth = 16`, `readCreditLifetime = 72`, `readDrainLatency = 0` (dynamic), `wavesPerDsIssuePipe = 1` |
+| `HWModel::lds` | `readQueueDepth = 16`, `readCreditLifetime = 72`, `readCreditLifetimeB64 = 64` (experimental, applied only when `DsReadCreditLifetimeB64` is set), `readDrainLatency = 0` (dynamic), `wavesPerDsIssuePipe = 1` |
 
 gfx1250v0 uses the same scheduling defaults.
 

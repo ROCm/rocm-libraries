@@ -128,6 +128,11 @@ struct PassFeatureConfig {
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
         int dsReadCyclesPerLoad = 0;
+        /// Lifetime of one in-flight ds_read whose destination payload is 64 bits.
+        /// 0 keeps every load on the shared readCreditLifetime (the behavior before
+        /// per-width lifetimes). A positive value is that b64 lifetime; gfx1250's
+        /// experimental measurement is HWModel::lds.readCreditLifetimeB64 (64).
+        int dsReadCreditLifetimeB64 = 0;
         /// ds_loads a WMMA batch (dsBatchWmmas WMMAs) may take above the region's even share when
         /// the batch began behind the even line (a dependency delayed its loads), so the region
         /// closes the gap gradually. 0 = no catching up.
@@ -170,11 +175,19 @@ struct PassFeatureConfig {
         /// query) is held until just before the next s_barrier_wait; < 0 = off.
         int waitAluHoldStrictCount = -1;
         /// The wait-alu hold above is anchored to the first s_barrier_wait after the filler
-        /// became ready. A filler that would take one of the two windows before that wait, and
-        /// that the wait does not depend on, is held until the wait has issued and then goes
-        /// after it. A filler the wait depends on stays in those two windows. Once that wait is
-        /// passed the filler is not held for a later one. false = held again for every later wait.
+        /// became ready. A filler that would take one of the windows before that wait (two, or six
+        /// with waitAluHoldWideWindows), and that the wait does not depend on, is held until the
+        /// wait has issued and then goes after it. A filler the wait depends on stays in those
+        /// windows. Once that wait is passed the filler is not held for a later one.
+        /// false = held again for every later wait.
         bool waitAluHoldFirstWaitOnly = false;
+        /// Mirrors ModuleOptions::WaitAluHoldWideWindows. false = a held strict filler is
+        /// released two WMMA windows before the s_barrier_wait it is held for; true = six.
+        bool waitAluHoldWideWindows = false;
+        /// Mirrors ModuleOptions::DsOneWaitAluPerWindow. One WMMA window issues at most
+        /// one ds_load that InsertWaitAlu would put an s_wait_alu before. A later ds_load
+        /// that would also need one waits for the next WMMA. false = off.
+        bool dsOneWaitAluPerWindow = false;
         /// Mirrors ModuleOptions::EnableESM2: InsertWaitAlu runs, so the queue keeps its
         /// scoreboard (WaitAluTracker) and asks it where fillers and unplaced memory ops go.
         bool waitAluScoreboard = false;

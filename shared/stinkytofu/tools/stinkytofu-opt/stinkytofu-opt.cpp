@@ -207,6 +207,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
+                arg.starts_with("--ds-read-credit-lifetime-b64=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -214,7 +215,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--enable-wmma-hide-budget-prescan" ||
                 arg == "--enable-esm2-track-valu-vsrc" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
-                arg == "--wait-alu-hold-first-wait-only" ||
+                arg == "--wait-alu-hold-first-wait-only" || arg == "--wait-alu-hold-wide-windows" ||
+                arg == "--ds-one-wait-alu-per-window" ||
                 arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
@@ -626,6 +628,9 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-read-cycles-per-load=")) {
             passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
                 std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));
+        } else if (a.starts_with("--ds-read-credit-lifetime-b64=")) {
+            passFeatureConfig.dagFeatures.dsReadCreditLifetimeB64 =
+                std::stoi(a.substr(std::string("--ds-read-credit-lifetime-b64=").size()));
         } else if (a.starts_with("--wmma-refill-mode=")) {
             const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
             passFeatureConfig.dagFeatures.wmmaRefillMode =
@@ -648,6 +653,10 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
         } else if (a == "--wait-alu-hold-first-wait-only") {
             passFeatureConfig.dagFeatures.waitAluHoldFirstWaitOnly = true;
+        } else if (a == "--wait-alu-hold-wide-windows") {
+            passFeatureConfig.dagFeatures.waitAluHoldWideWindows = true;
+        } else if (a == "--ds-one-wait-alu-per-window") {
+            passFeatureConfig.dagFeatures.dsOneWaitAluPerWindow = true;
         } else if (a == "--wait-alu-scoreboard") {
             passFeatureConfig.dagFeatures.waitAluScoreboard = true;
         } else if (a.starts_with("--prefetch-lead-wmmas=")) {

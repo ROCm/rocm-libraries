@@ -160,16 +160,20 @@ struct CDNA5ReadyQueueTestPeer {
     static void setQueueDepth(CDNA5ReadyQueue& q, const HwInstDesc& desc) {
         q.hardwareWmmaQueueDepth_ = std::max(1, static_cast<int>(desc.wmmaQueueDepth));
     }
+    static int dsReadCreditLifetime(const CDNA5ReadyQueue& q, const StinkyInstruction& inst) {
+        return q.dsReadCreditLifetime(inst);
+    }
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };
 
-PassContext makeQueueCtx(int cover) {
+PassContext makeQueueCtx(int cover, int dsReadCreditLifetimeB64 = 0) {
     PassContext ctx;
     GemmTileConfig config;
     config.arch = {12, 5, 0};
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.dagFeatures.wmmaQueueCoverCycles = cover;
+    pfc.dagFeatures.dsReadCreditLifetimeB64 = dsReadCreditLifetimeB64;
     ctx.setPassFeatureConfig(pfc);
     return ctx;
 }
@@ -181,6 +185,32 @@ DsLoadDrainEntry entryFromOpcode(const HWModel& hw, GFX opcode, int latency) {
 }
 
 }  // namespace
+
+TEST_F(CDNA5ReadyQueueTest, DsReadCreditLifetimeDefaultsToTheSharedLifetime) {
+    PassContext ctx = makeQueueCtx(/*cover=*/0);
+    CDNA5ReadyQueue queue(ctx);
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* b64 =
+        builder.create(getMCIDByUOp(GFX::ds_load_b64, GfxArchID::Gfx1250));
+    StinkyInstruction* b128 =
+        builder.create(getMCIDByUOp(GFX::ds_load_b128, GfxArchID::Gfx1250));
+
+    EXPECT_EQ(CDNA5ReadyQueueTestPeer::dsReadCreditLifetime(queue, *b64), 72);
+    EXPECT_EQ(CDNA5ReadyQueueTestPeer::dsReadCreditLifetime(queue, *b128), 72);
+}
+
+TEST_F(CDNA5ReadyQueueTest, DsReadCreditLifetimeUsesDestinationBitWidthWhenEnabled) {
+    PassContext ctx = makeQueueCtx(/*cover=*/0, /*dsReadCreditLifetimeB64=*/64);
+    CDNA5ReadyQueue queue(ctx);
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* b64 =
+        builder.create(getMCIDByUOp(GFX::ds_load_b64, GfxArchID::Gfx1250));
+    StinkyInstruction* b128 =
+        builder.create(getMCIDByUOp(GFX::ds_load_b128, GfxArchID::Gfx1250));
+
+    EXPECT_EQ(CDNA5ReadyQueueTestPeer::dsReadCreditLifetime(queue, *b64), 64);
+    EXPECT_EQ(CDNA5ReadyQueueTestPeer::dsReadCreditLifetime(queue, *b128), 72);
+}
 
 TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
     EXPECT_DEATH(

@@ -35,6 +35,7 @@ constexpr HWModel kGfx1250Model = {
             // matching ds_read count and the latest ds_read's own latency.
             .readDrainLatency = 0,
             .readCreditLifetime = 72,
+            .readCreditLifetimeB64 = 64,
             // Fallback when HwInstDesc::dsThroughput / dsMaxDrain are 0.
             .dsLoadDefaultThroughput = 4,
             .dsLoadDefaultMaxDrain = 120,

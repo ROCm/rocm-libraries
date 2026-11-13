@@ -13,7 +13,7 @@ GlobalParameters:
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
-  MXDataGenerator: False
+  MXDataGenerator: True
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 2
@@ -28,6 +28,8 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   SkipSlowSolutionRatio: 0.0
+  #StinkyTofuDebugLevel: 3
+  #StinkyTofuDebugPass: "StinkyDAGSchedulerPass"
 
 BenchmarkProblems:
   -
@@ -59,6 +61,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           #- [16, 16, 128, 1,  1,  8, 8,  2, 2]
           - [32, 16, 128, 1,  1,  8, 4,  2, 2]
+          #- [32, 16, 128, 1,  1,  4, 8,  2, 2] # ss0
         - DepthU: [512]
         - TDMInst: [3]
         - TDMPlusLdsBuf: [-1]
@@ -86,7 +89,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
+        - VectorWidthB: [2] #[-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
@@ -94,13 +97,20 @@ BenchmarkProblems:
         - ClusterAIDMapping: [-2]
         - InitCIterWmma: [1]
         - LDSSegmentInterleave: [1]
-        - LDSSegmentBRotate: [0, 1]
+        - LDSSegmentBRotate: [1] #[0, 1]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
+        - PrefetchGL2SAddr: [True]
+        - StinkyTofuRegisterAllocation: ["3,classes=s"]
+        - StinkyTofuParameters:
+          #- {DsReadCyclesPerLoad: 10, TensorLoadWmmaSpace: 8}
+          #- {DsReadCyclesPerLoad: 10}
+          #- {DsReadCreditLifetimeB64: 64}
+          - {DsBatchWmmas: 8, WaitAluHoldWideWindows: true, DsOneWaitAluPerWindow: true}
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
