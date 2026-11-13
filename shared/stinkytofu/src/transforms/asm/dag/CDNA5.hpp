@@ -939,9 +939,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::unique_ptr<WaitAluTracker> waitAlu_;
     // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
     // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
-    // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
-    // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
-    // wait is ahead.
+    // windows before the next s_barrier_wait, where the wave stalls anyway. With
+    // waitAluHoldFirstWaitOnly that wait is the first one after the filler became ready, and a
+    // filler with no dependency path to it is held until the wait has issued, so it lands after
+    // the barrier instead of in those two windows. A filler the wait depends on stays in the two
+    // windows. Not held when it is the last pending predecessor of real work, feeds a prefetch's
+    // address, or no barrier wait is ahead.
     bool needsWaitAlu(const DAGNode* node) const {
         return waitAlu_ && needsWaitAlu(node, waitAlu_->query(*node->inst));
     }
@@ -957,11 +960,33 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
-        for (int w : barrierWaitWindows_) {
-            if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
-            return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
+        // The wait it is held for: the first one it has not passed yet, or with
+        // waitAluHoldFirstWaitOnly the first one after it became ready.
+        const bool firstWaitOnly =
+            getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldFirstWaitOnly;
+        int since = wmmaIssuedCountThisRegion_;
+        if (firstWaitOnly) {
+            auto ready = readyWmmaCount_.find(node->inst);
+            since = ready != readyWmmaCount_.end() ? ready->second : 0;
+        }
+        for (const auto& [w, barrier] : barrierWaitWindows_) {
+            if (since > w) continue;  // already past this wait
+            // Hold until the two windows before the wait. A filler that would take one of those
+            // windows, and that the wait does not depend on, stays held until the wait issues.
+            if (!firstWaitOnly || reachesBarrier(node, barrier))
+                return wmmaIssuedCountThisRegion_ < w - 2;
+            return !barriersIssuedThisRegion_.count(barrier);
         }
         return false;
+    }
+    // True when some successor chain of \p node reaches \p barrier, so the filler cannot move
+    // past that wait.
+    bool reachesBarrier(const DAGNode* node, StinkyInstruction* barrier) const {
+        if (regionDag_ == nullptr || barrier == nullptr || node->inst == nullptr) return false;
+        const auto from = regionDag_->instToId.find(node->inst);
+        const auto to = regionDag_->instToId.find(barrier);
+        if (from == regionDag_->instToId.end() || to == regionDag_->instToId.end()) return false;
+        return hasPath(regionDag_->graph, from->second, to->second);
     }
     // Whether placing `node` later can drop the s_wait_alu it needs now. A wait no count of
     // WMMAs or FIFO ops hides, such as an EXEC writer's drain, stays wherever it goes. The
@@ -980,8 +1005,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     // The BB's first matrix op, which fixes the form the va_vdst hide counts before one issues.
     const StinkyInstruction* formWmma_ = nullptr;
-    // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
-    std::vector<int> barrierWaitWindows_;
+    // Planned WMMA window and the s_barrier_wait, ascending by window.
+    std::vector<std::pair<int, StinkyInstruction*>> barrierWaitWindows_;
+    // Barrier instructions already issued in this region.
+    std::unordered_set<const StinkyInstruction*> barriersIssuedThisRegion_;
+    // WMMAs issued in this region when each node became ready (push), for
+    // waitAluHoldFirstWaitOnly.
+    std::unordered_map<const StinkyInstruction*, int> readyWmmaCount_;
     // The region DAG being drained (live inDegree), for unblocksWork().
     const RegionDAG* regionDag_ = nullptr;
     bool unblocksWork(const DAGNode* node, int depth) const {
@@ -2622,6 +2652,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        if (isBarrier(*node->inst)) barriersIssuedThisRegion_.insert(node->inst);
         noteSccChainIssue(node);
         noteBarrierPairIssue(node);
         return node;
@@ -2830,6 +2861,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
 // Route ready DAG nodes into priority buckets.
 void CDNA5ReadyQueue::push(DAGNode* node) {
+    readyWmmaCount_[node->inst] = wmmaIssuedCountThisRegion_;
     if (isMatrixInstruction(*node->inst)) {
         wmmaQueue.push(node);
         return;
@@ -3042,6 +3074,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
     }
     wmmaIssuedCountThisRegion_ = 0;
+    readyWmmaCount_.clear();
+    barriersIssuedThisRegion_.clear();
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     wmmaQueueFillPending_ = false;
@@ -3769,8 +3803,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     prefetchEarliestWmma_.clear();
     barrierWaitWindows_.clear();
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
-        if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
-    std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end());
+        if (isBarrierWait(*barrier)) barrierWaitWindows_.emplace_back(window, barrier);
+    std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
     const int lead = blockPrefetchLead_;
     std::unordered_map<const StinkyInstruction*, int> loadPlannedWindow;
     if (!barrierWmmaThresholds_.empty()) {

@@ -159,6 +159,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | `PrefetchLeadWmmas` | 25 (KernelWriter sets 4 without HalfPLR; 25 sub-byte A, else 40) | `--prefetch-lead-wmmas=N` | A global prefetch is held until N WMMAs before its tensor_load. Below 8 = single-stage grouping; 0 = off. |
 | `PrefetchLeadMinStageWmmas` | 64 | `--prefetch-lead-min-stage-wmmas=N` | Blocks whose stages are shorter than N WMMAs run with no prefetch lead of 8 or more. A single-stage lead (below 8) is kept at any stage length. |
 | `WaitAluHoldStrictCount` | 2 (only with `EnableESM2`) | `--wait-alu-hold-strict-count=N` | A filler that would get an `s_wait_alu` of count ≤ N is held until the two windows before the next `s_barrier_wait`. < 0 = off. |
+| `WaitAluHoldFirstWaitOnly` | false | `--wait-alu-hold-first-wait-only` | Anchors the `WaitAluHoldStrictCount` hold to the first `s_barrier_wait` after the filler became ready. A filler that would land in the two windows before that wait, and that the wait does not depend on, is held until the wait has issued and then goes after it. A filler the wait depends on stays in those two windows. false = the filler is held again for every later wait. |
 
 ## Hazards and barriers
 

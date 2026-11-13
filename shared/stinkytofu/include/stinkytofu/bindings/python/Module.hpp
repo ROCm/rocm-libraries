@@ -142,6 +142,7 @@
     X(LockDsReadOrder, bool, true)                                                                 \
     X(EvenSpreadFillers, bool, true)                                                               \
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
+    X(WaitAluHoldFirstWaitOnly, bool, false) /* move a free strict filler to after its barrier */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \

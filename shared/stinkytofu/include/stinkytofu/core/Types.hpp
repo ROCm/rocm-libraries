@@ -169,6 +169,12 @@ struct PassFeatureConfig {
         /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
         /// query) is held until just before the next s_barrier_wait; < 0 = off.
         int waitAluHoldStrictCount = -1;
+        /// The wait-alu hold above is anchored to the first s_barrier_wait after the filler
+        /// became ready. A filler that would take one of the two windows before that wait, and
+        /// that the wait does not depend on, is held until the wait has issued and then goes
+        /// after it. A filler the wait depends on stays in those two windows. Once that wait is
+        /// passed the filler is not held for a later one. false = held again for every later wait.
+        bool waitAluHoldFirstWaitOnly = false;
         /// Mirrors ModuleOptions::EnableESM2: InsertWaitAlu runs, so the queue keeps its
         /// scoreboard (WaitAluTracker) and asks it where fillers and unplaced memory ops go.
         bool waitAluScoreboard = false;
