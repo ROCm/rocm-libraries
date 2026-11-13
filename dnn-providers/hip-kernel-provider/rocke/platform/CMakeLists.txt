@@ -452,8 +452,7 @@ if(ROCKE_INSTALL_TESTS)
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
               PATTERN "reference_bundles" EXCLUDE
-              PATTERN "check_torch_reference.py" EXCLUDE
-              PATTERN "run_all.py" EXCLUDE)
+              PATTERN "check_torch_reference.py" EXCLUDE)
 
     else()
       message(WARNING
@@ -465,6 +464,12 @@ if(ROCKE_INSTALL_TESTS)
     install(PROGRAMS
             "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/analysis/lds-bank-conflict-expert")
+    # The counted ISA gate uses the shared disassembler without installing the
+    # source dsl_docs tree. Stage that one support module at an explicit path;
+    # CTest supplies it through ROCKE_ISA_INSPECT_PROBE below.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/tools/dsl_probes/probe_isa_inspect.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/support")
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
@@ -566,6 +571,17 @@ if(ROCKE_INSTALL_TESTS)
       file(RELATIVE_PATH _ROCKE_INSTALLED_PYTHONPATH
            "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rocke"
            "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_INSTALL_DIR}")
+    endif()
+
+    # Library tests need both the staged library packages and the exact installed
+    # rocke package. Escape Windows' path separator because CTest ENVIRONMENT is
+    # itself a semicolon-separated list.
+    if(WIN32)
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library\\;${_ROCKE_INSTALLED_PYTHONPATH}")
+    else()
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library:${_ROCKE_INSTALLED_PYTHONPATH}")
     endif()
 
     # Python test entries invoke via "python" (resolved from PATH at test time)

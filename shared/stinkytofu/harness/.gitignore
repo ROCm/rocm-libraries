@@ -1,0 +1,4 @@
+# Run state and logs can contain confidential information. Never commit them.
+results.json
+progress.md
+runs/

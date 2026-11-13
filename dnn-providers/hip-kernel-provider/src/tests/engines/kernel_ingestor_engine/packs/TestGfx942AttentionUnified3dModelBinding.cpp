@@ -3,29 +3,17 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
-
-// The build's HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS, set on this file by CMake.
-#ifndef HKP_REQUIRE_DVC_DESCRIPTORS
-#define HKP_REQUIRE_DVC_DESCRIPTORS 0
-#endif
+#include "tests/engines/kernel_ingestor_engine/packs/ModelBindingTestSupport.hpp"
 
 /**
  * @file TestGfx942AttentionUnified3dModelBinding.cpp
@@ -41,14 +29,8 @@
  * falls back to priority as if no model shipped, and every other census case stays green.
  * This suite reads the revision the way makeEngine() does and fails the build instead.
  *
- * A model whose `model.bin` was never pulled (`dvc pull` not run) is packed without its
- * UHD, with a warning, unless the build sets HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS;
- * hkp_pack then also writes hkp-unpulled-models.record at the packed arch root, naming each
- * UHD it left out. The census accepts a bound model whose UHD the packed tree lacks only in
- * a non-strict build and only when that record names it. Any other absence (a packer that
- * lost the UHD or its model.bin) fails in every build, as does an absence in a strict
- * build. A bound model whose UHD the tree holds must load and its model file must be
- * present (the loader only warns about an absent one), whatever the mode.
+ * A bound model the packed tree lacks (its `model.bin` never pulled) is judged as
+ * ModelBindingTestSupport.hpp describes.
  *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx942AttentionUnified3dPacks, and is registered with its own
@@ -65,179 +47,21 @@ namespace ingestor = hipdnn_plugin_sdk::ingestor;
 constexpr const char* METRIC = "tflops";
 constexpr const char* ARCH = "gfx942";
 
-/// The skip record hkp_pack writes at the packed arch root when it leaves a UHD out for an
-/// un-pulled model (hkp_pack.pipeline.UNPULLED_RECORD).
-constexpr const char* UNPULLED_RECORD = "hkp-unpulled-models.record";
-
-using ModelMap = std::map<std::string, std::map<std::string, ingestor::HeuristicDescriptor>>;
-
 const ingestor::HeuristicDescriptor* find(const ModelMap& models)
 {
-    const auto byArch = models.find(METRIC);
-    if(byArch == models.end())
-    {
-        return nullptr;
-    }
-    const auto model = byArch->second.find(ARCH);
-    return model == byArch->second.end() ? nullptr : &model->second;
-}
-
-/// The ids a UED role map binds for ARCH.
-std::vector<std::string>
-    boundIds(const std::map<std::string, std::vector<ingestor::DescriptorId>>& role)
-{
-    std::vector<std::string> ids;
-    const auto byArch = role.find(ARCH);
-    if(byArch != role.end())
-    {
-        for(const auto& id : byArch->second)
-        {
-            ids.push_back(hipdnn_flatbuffers_sdk::utilities::formatUuid(id));
-        }
-    }
-    return ids;
-}
-
-/// Whether the packed tree this census reads holds a UHD file naming `id`. A model left
-/// out of the pack (its `model.bin` never pulled) has no UHD there.
-bool packedTreeHoldsUhd(const std::string& id)
-{
-    const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-    if(root.empty())
-    {
-        return true; // no explicit root to inspect: treat the model as shipped
-    }
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(root))
-    {
-        if(!entry.is_regular_file() || entry.path().string().find(".uhd.json") == std::string::npos)
-        {
-            continue;
-        }
-        const std::ifstream file(entry.path());
-        std::stringstream text;
-        text << file.rdbuf();
-        if(text.str().find(id) != std::string::npos)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// Whether hkp_pack's skip record in the packed tree names `id` as a UHD it left out for
-/// an un-pulled model. The packer writes the record only when it skips, so a UHD or model
-/// the packer lost for any other reason is in no record.
-bool packedTreeRecordsUnpulled(const std::string& id)
-{
-    const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-    if(root.empty())
-    {
-        return false;
-    }
-    std::ifstream file(std::filesystem::path(root) / UNPULLED_RECORD);
-    if(!file)
-    {
-        return false;
-    }
-    const auto record = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
-    if(!record.is_object() || !record.contains("unpulled_models")
-       || !record["unpulled_models"].is_array())
-    {
-        return false;
-    }
-    for(const auto& entry : record["unpulled_models"])
-    {
-        if(entry.is_object() && entry.value("uhd_id", std::string()) == id)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// Whether the case must check that the models `ids` name loaded. False only when the
-/// packed tree lacks a UHD that the pack's skip record names: a model left out because
-/// its `model.bin` was never pulled, which the pack warned about. A UHD absent for any
-/// other reason (nothing in the record), or absent in a strict build (where the pack
-/// should have failed), is a failure.
-bool packedTreeObligesLoad(const std::vector<std::string>& ids, const char* role)
-{
-    for(const auto& id : ids)
-    {
-        if(packedTreeHoldsUhd(id))
-        {
-            continue;
-        }
-        // The macro is a compile-time 0 or 1, so one arm is dead in each build.
-        // NOLINTNEXTLINE(misc-redundant-expression)
-        if(HKP_REQUIRE_DVC_DESCRIPTORS != 0)
-        {
-            ADD_FAILURE() << "the " << role << " model " << id
-                          << " has no UHD in the packed tree, and "
-                             "HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON; the pack "
-                             "should have failed";
-        }
-        else if(!packedTreeRecordsUnpulled(id))
-        {
-            ADD_FAILURE() << "the " << role << " model " << id
-                          << " has no UHD in the packed tree, and " << UNPULLED_RECORD
-                          << " does not name it, so its model.bin was not left out as "
-                             "un-pulled: the packer lost the UHD or its model";
-        }
-        else
-        {
-            std::cout << "[  NOTE    ] the " << role << " model " << id
-                      << " has no UHD in the packed tree (its model.bin was not pulled, as "
-                      << UNPULLED_RECORD
-                      << " records); the pack warned and the engine runs with that role "
-                         "off\n";
-        }
-        return false;
-    }
-    return true;
-}
-
-/// The loader only warns about a UHD whose model file is absent and keeps the model, so
-/// "it loaded" does not mean its `model.bin` shipped. A packer that drops the file from the
-/// packed tree would otherwise pass: check the file the loaded descriptor names.
-void expectModelArtifactPresent(const ingestor::HeuristicDescriptor& model, const char* role)
-{
-    std::error_code error;
-    const auto path = std::filesystem::path(model.baseDir) / model.modelArtifactPath;
-    EXPECT_TRUE(std::filesystem::is_regular_file(path, error))
-        << "the " << role << " model " << hipdnn_flatbuffers_sdk::utilities::formatUuid(model.id)
-        << " loaded, but its model file " << path.string()
-        << " is absent from the packed tree: the packer lost it";
+    return findModel(models, METRIC, ARCH);
 }
 
 TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL2KernelRankerLoads)
 {
-    const auto& set = loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME);
-
-    const auto ids = boundIds(set.engine.sortKernelCatalog);
-    ASSERT_FALSE(ids.empty()) << "the UED binds no " << ARCH << " sort_kernel_catalog ranker";
-
-    if(!packedTreeObligesLoad(ids, "L2 sort_kernel_catalog"))
-    {
-        return;
-    }
-
-    // The loader prunes a ranker it refuses into unavailableHeuristicArches; a pruned one
-    // is absent from the map, so presence is the whole check.
-    EXPECT_NE(find(set.heuristicsByMetric), nullptr)
-        << "no " << METRIC << " sort_kernel_catalog ranker for " << ARCH
-        << " survived the loader's pre-flight; kernels rank by priority";
-    if(const auto* model = find(set.heuristicsByMetric))
-    {
-        expectModelArtifactPresent(*model, "L2 sort_kernel_catalog");
-    }
+    expectBoundRankerLoads(loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME), METRIC, ARCH);
 }
 
 TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 {
     const auto& set = loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME);
 
-    const auto ids = boundIds(set.engine.predictEngine);
+    const auto ids = boundIds(set.engine.predictEngine, ARCH);
     if(ids.empty())
     {
         // No L1 ships. The check stays live: the day a UED binds one, the branches below

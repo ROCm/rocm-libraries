@@ -1155,13 +1155,22 @@ namespace
         return 0;
     }
 
+    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only
+    // layout that sets it.
+    constexpr int kMXScaleFormatHostPreSwizzle128x4
+        = static_cast<int>(TensileLite::MXScaleFormat::HostPreSwizzle128x4);
+
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockA() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB());
     }
 
     inline int benchScaleBFormat(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(problem.mxBlockB() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeB(), problem.mxBlockB(), problem.useScaleAB());
     }
     /// True on the W4A16 group-scale path.
@@ -2064,6 +2073,18 @@ namespace
         return format != RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
     }
 
+    // MXScaleFormat id (tensilelite Contractions.py) that the caller's scale layout
+    // requires of a solution; 0 for the layouts selection does not tell apart.
+    int hostMXScaleFormat(const RocblasltContractionProblem& prob)
+    {
+        return (prob.scaleAType
+                    == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+                || prob.scaleBType
+                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                   ? kMXScaleFormatHostPreSwizzle128x4
+                   : 0;
+    }
+
     // The adaptive launch's occupancy probe target; none outside one.
     void setOccupancyProbe(TensileLite::ContractionProblemParameters& params,
                            const RocblasltContractionProblem&         prob)
@@ -2315,6 +2336,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2365,6 +2387,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2446,16 +2469,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleA(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
                                      padMXScaleTensorFreeDim,
                                      hostMXScalesArePacked(prob.scaleAType));
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
           rocblaslt::setHostMXScaleB(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
@@ -2660,6 +2686,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2711,6 +2738,7 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2803,16 +2831,19 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleA(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
 	                               padMXScaleTensorFreeDim,
 	                               hostMXScalesArePacked(prob.scaleAType));
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
 	    rocblaslt::setHostMXScaleB(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
@@ -2910,6 +2941,7 @@ namespace
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2938,6 +2970,7 @@ namespace
 
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -3706,6 +3739,9 @@ struct TensileDataGroupedGemm
     rocblaslt_mx_scale_need mxScaleNeed = rocblaslt_mx_scale_need::Any;
 };
 
+inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm const& problem,
+                                          TensileLite::ContractionSolution const&    solution);
+
 namespace
 {
     void updateTensileData(const RocblasltContractionProblem& prob, TensileDataGemm& data)
@@ -3766,6 +3802,37 @@ namespace
         if(mxScaleLayoutFits(need, solution))
             return rocblaslt_status_success;
         log_error(caller, rocblaslt_mx_scale_mismatch_message(need));
+        return rocblaslt_status_invalid_value;
+    }
+
+    // A hand-written kernel may rely on its problem predicates to stay inside the
+    // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
+    // addresses, so an algo for one is refused once the problem it runs no longer
+    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
+    // path keep their existing launch checks.
+    rocblaslt_status checkHandwrittenKernelPredicates(
+        const char*                                caller,
+        const TensileLite::ContractionProblemGemm& problem,
+        const TensileLite::ContractionSolution&    solution)
+    {
+        if(isCustomKernelForPointerArray(problem, solution))
+        {
+            log_error(caller, "custom kernels do not support batch_mode=POINTER_ARRAY");
+            return rocblaslt_status_invalid_value;
+        }
+        if(solution.customKernel.name.empty() || solution.customKernel.generated
+           || (*solution.problemPredicate)(problem))
+            return rocblaslt_status_success;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Software match: " << solution.description();
+            solution.problemPredicate->debugEval(problem, msg);
+            log_info(caller, msg.str());
+        }
+        log_error(caller,
+                  "the algo's solution does not support this problem; query an algo for "
+                  "this problem instead");
         return rocblaslt_status_invalid_value;
     }
 }
@@ -4067,6 +4134,14 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     if(isFp8A && isFp8B && isShuffledScale)
+        return false;
+
+    // Nor for FP6 A + FP6 B with scales shuffled in 128-row by 4-K-block tiles
+    bool isScale128x4
+        = (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+           && prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT);
+    if(isFp6Datatype(prob.a_type) && isFp6Datatype(prob.b_type) && isScale128x4)
         return false;
 
     return handle->useRocRoller == 1
@@ -6440,6 +6515,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
             }
 
+            if(callerSuppliedAlgo)
+            {
+                if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+
             // Build the inputs here rather than inline, so the flag pointer can
             // be pointed at this solution's region before the kernel arguments
             // are packed. Passing GetTensileInputs(prob) straight in would use
@@ -6771,6 +6853,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+               st != rocblaslt_status_success)
+                return st;
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
@@ -6884,6 +6969,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               "Device scalar alpha with device user args requires GSU=1.");
                     return rocblaslt_status_invalid_value;
                 }
+            }
+
+            // Clustered StreamK rejects grouped GEMM by throwing from workspace
+            // sizing. Report that as an unsupported solution instead.
+            if(solution->usesStreamKSpatialCluster())
+            {
+                log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
+                return rocblaslt_status_invalid_value;
             }
 
             // User-args workspace holds no host args, only per-problem workspaces.
@@ -8244,6 +8337,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
         if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
         {
             log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
+            return rocblaslt_status_invalid_value;
+        }
+        // Workspace sizing for a clustered StreamK solution throws on a grouped
+        // problem. That rejection has to stay a skipped candidate: the throw
+        // would escape this search and fail the heuristic, including solutions
+        // already found.
+        if(solution->usesStreamKSpatialCluster())
+        {
+            log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
             return rocblaslt_status_invalid_value;
         }
 

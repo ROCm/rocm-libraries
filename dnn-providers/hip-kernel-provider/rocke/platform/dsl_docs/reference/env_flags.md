@@ -53,6 +53,10 @@ For setup and the most common flags in context, see
 | `ROCKE_PARITY_BUILD` / `ROCKE_PARITY_EMIT` | The binding-parity harness's `.so` dir and prebuilt-emitter dir — **must be the same fresh build** (mixing reports false mismatches). |
 | `ROCKE_PARITY_ALLOW_STALE` | Allow the parity harness to run with a build-id mismatch (debug only). |
 | `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
+| `ROCKE_EXPLICIT_GATE_RUN` / `ROCKE_EXPLICIT_GATE_PARTIAL` | Internal explicit-gate launcher contract. The source runner and installed CTest entries set these to attest that a non-discovered gate was selected intentionally and whether it is a focused diagnostic rather than a complete verdict. Do not set them to make an ordinary pytest invocation report complete coverage. |
+| `ROCKE_EXPLICIT_GATE_PREFLIGHT` / `ROCKE_EXPLICIT_GATE_SENTINEL` | Internal explicit-gate process contract. Preflight uses the first only in its isolated probe; the launcher supplies the second as a temporary pytest-session attestation path. They are not user-facing gate selectors. |
+| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` lets a developer run report `INCOMPLETE` when the qualified reference toolchain is unavailable; installed required coverage sets `0`. |
+| `ROCKE_ISA_INSPECT_PROBE` | Explicit path to the staged ISA inspection helper used by installed counted-compiler tests. CTest supplies it so relocated tests do not reach back into the source tree. |
 | `ROCKE_ROOT` | Override the detected repository root. |
 | `ROCKE_REMOTE_HOST` / `ROCKE_REMOTE_USER` / `ROCKE_REMOTE_KEY` / `ROCKE_REMOTE_STAGE` | Multi-arch remote-test orchestrator: SSH host/user/key and the staging dir. |
 | `ROCKE_SLURM_EXTRA` | Extra SLURM flags appended by the multi-arch submitter. |

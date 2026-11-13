@@ -684,7 +684,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  one entry.  Function pointer callbacks cannot be used on transforms
  *  that have fields specified on the plan description:
  *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
- *  case.
+ *  case.  The specified arrays must remain valid until either the execution
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  load callback for this execution info handle.
@@ -755,7 +756,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_
  *  one entry.  Function pointer callbacks cannot be used on transforms
  *  that have fields specified on the plan description:
  *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
- *  case.
+ *  case.  The specified arrays must remain valid until either the execution
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  store callback for this execution info handle.

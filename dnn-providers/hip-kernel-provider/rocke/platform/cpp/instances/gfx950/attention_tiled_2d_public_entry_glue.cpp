@@ -476,6 +476,12 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     {
         rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_fast_paged_kv_desc is restricted to dtype='bf16'");
     }
+    /* lse_layout (Python __post_init__): a layout without emit_lse would be a
+     * second name for the LSE-off kernel. */
+    if(spec->lse_head_major && !spec->emit_lse)
+    {
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, "lse_layout='head_major' requires emit_lse");
+    }
 
     /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.
      * Python __post_init__ accepts these flags (and the emitter wires the
@@ -1182,7 +1188,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
-            s->emit_lse ? "lse" : "",
+            s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

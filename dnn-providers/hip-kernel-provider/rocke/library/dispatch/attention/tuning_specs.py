@@ -190,6 +190,7 @@ _SEMANTIC_FIELDS = frozenset(
         "causal_top_left",
         "right_bound",
         "emit_lse",
+        "lse_layout",
     }
 )
 

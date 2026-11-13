@@ -20,14 +20,20 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::ExplicitGemm; }
 
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
     {
         const bool ok_fp16bf16 =
             (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
             par.weight_type == par.input_type &&
             (par.direction == Direction::Wgrad ? par.weight_grad_type == DataType::fp32
                                                : par.output_type == par.input_type);
-        if(!ok_fp16bf16)
+        // tf32 takes tf32 operands and an fp32 result, as the pointwise family does.
+        const bool ok_tf32 =
+            par.input_type == DataType::tf32 && par.weight_type == DataType::tf32 &&
+            par.output_type == DataType::fp32 &&
+            (par.direction != Direction::Wgrad || par.weight_grad_type == DataType::fp32);
+        if(!ok_fp16bf16 && !ok_tf32)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
@@ -35,19 +41,16 @@ public:
         return explicit_gemm::is_patch_embedding(par);
     }
 
-    bool runs_on_current_device(const hipconv::ConvParams& par) const override
-    {
-        return explicit_gemm::patch_embed_has_algorithm(par);
-    }
-
-    size_t get_workspace_size(const hipconv::ConvParams& par) const override
+    size_t get_workspace_size(const hipconv::Device& /*dev*/,
+                              const hipconv::ConvParams& par) const override
     {
         return explicit_gemm::patch_embed_workspace_bytes(par);
     }
 
     // Two launches and a round trip through the permuted A matrix, where a fused
     // kernel would need one pass; scored below the tuned 1x1 path to say so.
-    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::Device& /*dev*/,
+                                        const hipconv::ConvParams& /*par*/) const override
     {
         return 0.5f;
     }

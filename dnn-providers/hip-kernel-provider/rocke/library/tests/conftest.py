@@ -293,13 +293,16 @@ def pytest_sessionfinish(session, exitstatus):
     session.exitstatus = gpu_skipped_exit_status(stats, exitstatus)
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """``--rocke-reference-arch``: keep that arch's reference cases; then
     ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
     ``tests/run_device_shards.py``; unset: every item); then group the tests
     of one kernel (:func:`_group_by_parameter_set`)."""
     from reference_common.pytest_support import select_reference_items
+    from tests._affordable_lane import mark_exhaustive_items
 
+    mark_exhaustive_items(items)
     select_reference_items(config, items)
     if os.environ.get("ROCKE_TEST_SHARD", "").strip():
         from tests.run_device_shards import select_items

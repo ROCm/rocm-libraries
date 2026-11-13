@@ -214,6 +214,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
+    s.emit_lse = false;
     return s;
 }
 
@@ -503,6 +504,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_wave_page_id_load)
     {
         parts[np++] = "wpid";
+    }
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
