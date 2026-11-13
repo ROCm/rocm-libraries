@@ -17,9 +17,9 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Experimental
 
-* Experimental API tier in the new `hipblaslt/hipblaslt-experimental.h` header (experimental API version 1). The header is installed but not included by `hipblaslt.h`; consumers opt in by defining `HIPBLASLT_ENABLE_EXPERIMENTAL_API` to the experimental API version they have reviewed, and compilation fails on a missing or mismatched value. Adds `hipblasLtExperimentalGetApiVersion` for a runtime version check and reserves `HIPBLASLT_EXPERIMENTAL_ENUM_BIT` for experimental values of stable enums. Experimental APIs can change or be removed in any release.
-* Experimental API lifecycle enforcement: each feature is registered in `library/experimental/features.cmake` with a deadline of four releases, and configure fails once a feature is past it; `tools/scripts/check_experimental_api.py` fails a PR that breaks the experimental API or its contract tests without bumping `HIPBLASLT_EXPERIMENTAL_API_VERSION`.
-* Experimental feature DEMO (spike only, not for merge): `hipblasLtExperimentalDemoAlignSize`, a trivial function that exercises the checks above.
+* Experimental API tier in the new `hipblaslt/hipblaslt-experimental.h` header. The header is installed but not included by `hipblaslt.h`, and declares nothing unless the consumer defines the ROCm-wide `ROCM_ENABLE_EXPERIMENTAL_APIS` switch. Each feature defines a revision macro, `HIPBLASLT_EXPERIMENTAL_<FEATURE>`, and `hipblasLtExperimentalGetFeatureRevision` returns the loaded library's revision of a feature (0 if absent), so consumers can fall back on a mismatch. Reserves `HIPBLASLT_EXPERIMENTAL_ENUM_BIT` for experimental values of stable enums; experimental enumerator values are never reused. Experimental APIs can change or be removed in any ROCm release.
+* Experimental API lifecycle enforcement: each feature is registered in `library/experimental/features.cmake` with a deadline of four ROCm releases, and configure fails once a feature is past it; `tools/scripts/check_experimental_api.py` fails a PR that changes a function or enumerator in place, or breaks a feature or its contract tests without bumping that feature's revision.
+* Experimental feature DEMO, revision 1 (spike only, not for merge): `hipblasLtExperimentalDemoAlignSize`, a trivial function that exercises the checks above.
 
 ### Changed
 

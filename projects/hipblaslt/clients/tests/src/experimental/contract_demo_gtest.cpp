@@ -5,9 +5,9 @@
 //
 // These tests define the promised behavior of the feature. Adding a test is free. Changing
 // or deleting one is a breaking change: tools/scripts/check_experimental_api.py fails the PR
-// unless it also bumps HIPBLASLT_EXPERIMENTAL_API_VERSION.
+// unless it also bumps HIPBLASLT_EXPERIMENTAL_DEMO, the feature's revision.
 
-#define HIPBLASLT_ENABLE_EXPERIMENTAL_API HIPBLASLT_EXPERIMENTAL_API_VERSION
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
 #include <hipblaslt/hipblaslt-experimental.h>
 
 #include <gtest/gtest.h>
