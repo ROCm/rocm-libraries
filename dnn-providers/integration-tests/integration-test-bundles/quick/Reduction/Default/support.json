@@ -29,6 +29,16 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "4096_fp32_modeadd"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
       }
     ]
   },

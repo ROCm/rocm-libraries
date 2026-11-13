@@ -617,7 +617,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
@@ -663,7 +663,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
@@ -717,7 +717,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
@@ -771,7 +771,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
@@ -821,7 +821,7 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
@@ -863,7 +863,45 @@
       },
       "metadata": {
         "format_version": 1,
-        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-5, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "seed": 1,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "4096_fp32_modeadd",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "mode": "add"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "graph.template.json rendered with a single-output reduction over more than 1024 elements, which takes MIOpen's multi-block path; graph-only, verified by the GPU/CPU reference",
         "seed": 1,
         "generator": "import_graph.py"
       }
