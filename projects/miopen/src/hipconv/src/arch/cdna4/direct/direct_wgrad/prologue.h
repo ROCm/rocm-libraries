@@ -32,11 +32,18 @@ using ScratchStage = typename DeltaRowLoader<cfg, DT>::template StageRing<cfg.sc
 //
 // Ring rows are placed by iteration index: iteration i reads slot i % row_buffers, so the rows
 // the first prefetch_rows iterations consume go to slots 0 .. prefetch_rows - 1.
-template <Config cfg, hipconv::DataType DT>
+//
+// A row-segmented config loads the scratch rows through halo_loader, whose base sits kh - 1 rows
+// above the segment. It loads every scratch row; rows above the image read zero. Moving the main
+// loop's delta loader base up kh - 1 rows instead spills the 2×2 wave tiles.
+//
+// An unsegmented config passes anything as halo_loader and never touches it.
+template <Config cfg, hipconv::DataType DT, typename Halo>
 __device__ void issue_prologue_loads(int load_wave,
                                      const RowSchedule& sched,
                                      const SRowLoader<cfg, DT>& s_loader,
                                      const DeltaRowLoader<cfg, DT>& delta_loader,
+                                     const Halo& halo_loader,
                                      const SRing<cfg, DT>& s_ring,
                                      const DeltaRing<cfg, DT>& delta_ring,
                                      const DeltaScratch<cfg, DT>& scratch,
@@ -46,7 +53,10 @@ __device__ void issue_prologue_loads(int load_wave,
     bunnies::static_unroll<cfg.scratch_rows()>([&](auto j) {
         constexpr int slot = decltype(j)::value;
         const int row      = sched.prologue_delta_row(j);
-        if(row >= 0)
+        if constexpr(cfg.row_segments)
+            halo_loader.load(
+                load_wave, row, scratch.template get<slot>(), scratch_stage.template slot<slot>());
+        else if(row >= 0)
             delta_loader.load(
                 load_wave, row, scratch.template get<slot>(), scratch_stage.template slot<slot>());
     });
@@ -73,9 +83,9 @@ __device__ void issue_prologue_loads(int load_wave,
 // the drain below retires it. Ping publishes its share at its first iteration, ahead of the
 // barrier pong reads behind.
 //
-// A scratch row the image does not hold was never issued, so its registers hold whatever the
-// last item left there; prime_delta_ring zeroes that slot rather than reading it, and the
-// guard here keeps the write off it anyway.
+// In an unsegmented config, a scratch row outside the image is never loaded, so its registers hold
+// whatever the last item left there; prime_delta_ring zeroes that slot rather than reading it, and
+// the guard here keeps the write off it anyway.
 template <Config cfg, hipconv::DataType DT>
 __device__ void publish_prologue_rows(int wave_group,
                                       int load_wave,
@@ -90,7 +100,7 @@ __device__ void publish_prologue_rows(int wave_group,
 {
     bunnies::static_unroll<cfg.scratch_rows()>([&](auto j) {
         constexpr int slot = decltype(j)::value;
-        if(sched.prologue_delta_row(j) >= 0)
+        if(cfg.row_segments || sched.prologue_delta_row(j) >= 0)
             delta_loader.publish(
                 load_wave, scratch_stage.template slot<slot>(), scratch.template get<slot>());
     });
@@ -107,7 +117,8 @@ __device__ void publish_prologue_rows(int wave_group,
 }
 
 // Fill register-ring slots 0 .. kh-2 from the scratch buffers.
-// pad is wave-uniform, so the zero-row branch is scalar.
+// pad is wave-uniform, so the zero-row branch is scalar. A row-segmented config reads every slot;
+// its rows above the image loaded as zero.
 template <Config cfg, hipconv::DataType DT>
 __device__ void prime_delta_ring(const RowSchedule& sched,
                                  const DeltaScratch<cfg, DT>& scratch,
@@ -119,7 +130,7 @@ __device__ void prime_delta_ring(const RowSchedule& sched,
 
     bunnies::static_unroll<cfg.kh - 1>([&](auto j) {
         constexpr int slot = decltype(j)::value;
-        if(sched.prologue_delta_row(slot) < 0)
+        if(!cfg.row_segments && sched.prologue_delta_row(slot) < 0)
             zero_tile(ring.rows[slot]);
         else
             load_delta<cfg, DT, DeltaRowLayout<cfg>>(
@@ -137,16 +148,16 @@ __device__ void prime_delta_ring(const RowSchedule& sched,
 // the loop's first memory phase, before pong reaches a drain of its own, so the prologue is the
 // only place pong can confirm row 0 has landed.
 //
-// The barrier is the raw intrinsic because __syncthreads fences all address spaces, which
-// lowers to vmcnt(0) ahead of the barrier and drains the ring loads the schedule keeps in
-// flight.
-template <Config cfg, hipconv::DataType DT>
+// The barrier is the raw intrinsic because, while the 16-bit path's LDS DMA ring loads are in
+// flight, the release fence in __syncthreads lowers to s_waitcnt vmcnt(0), which drains them.
+template <Config cfg, hipconv::DataType DT, typename Halo>
 __device__ void run_prologue(int wave_group,
                              int load_wave,
                              int item,
                              const RowSchedule& sched,
                              const SRowLoader<cfg, DT>& s_loader,
                              const DeltaRowLoader<cfg, DT>& delta_loader,
+                             const Halo& halo_loader,
                              const SRing<cfg, DT>& s_ring,
                              const DeltaRing<cfg, DT>& delta_ring,
                              const DeltaScratch<cfg, DT>& scratch,
@@ -163,6 +174,7 @@ __device__ void run_prologue(int wave_group,
                                   sched,
                                   s_loader,
                                   delta_loader,
+                                  halo_loader,
                                   s_ring,
                                   delta_ring,
                                   scratch,

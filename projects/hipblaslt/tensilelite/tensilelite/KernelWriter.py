@@ -25,13 +25,13 @@
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
-from rocisa.instruction import SBitcmp1B32
+from .ir import SBitcmp1B32
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
 from rocisa.container import RegisterContainer, RegName, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
+from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
   DSLoadB32, DSLoadB64, DSLoadB192, DSStoreB192, DSLoadB64TrB16, DSLoadB128TrB16, \
   DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
@@ -43,7 +43,8 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
-from rocisa.instruction import SSchedulingFence
+from .ir import SSchedulingFence
+from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -7700,6 +7701,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                 or not globalParameters.get("DisableSTWaitCnt", True))
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # rocisa native tree -> logical IR -> ToStinkyAsmPass.
+                               # import rocisa stays the native module; only this
+                               # conversion target changes.
+                               "LowerViaLogicalIR": bool(globalParameters.get("StinkyTofuLowerViaLogicalIR", True)),
                                # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
@@ -7859,6 +7864,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         t_str_end = time.perf_counter()
         print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
+      # Like debugAsm above, but dumps the StinkyTofu logical IR instead of the
+      # emitted assembly. Captured here, before resolveDeferredRegisterOverflow
+      # can re-stub moduleKernelBody, so the logical IR matches what was lowered.
+      debugLogical = os.environ.get("ENABLE_DEBUG_STINKYTOFU_LOGICAL") is not None
+      if debugLogical:
+        t_logical_start = time.perf_counter()
+        logical_ir_str = rocisa.dumpLogicalModuleText(moduleKernelBody.body,
+                                                      self.states.version, "kernel_name")
+        t_logical_end = time.perf_counter()
+        print2(f"StinkyTofu dumpLogicalModuleText: {t_logical_end - t_logical_start:.4f}s")
+
       # Pay off the deferral, and realign the recorded counts and the occupancy
       # with them: both now come from what the emitted code declares, not from
       # the pool estimate. The guard is defensive -- error is always 0 here --
@@ -7907,6 +7923,33 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         t3_end = time.perf_counter()
         print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
 
+      if debugLogical:
+        t_logical_write_start = time.perf_counter()
+        import hashlib, fcntl
+        os.makedirs("cmpasm/logical", exist_ok=True)
+
+        kernel_name = self.states.kernelName
+        name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
+        base_name = f"{name_hash}"
+
+        logical_path = f"cmpasm/logical/{base_name}.stir"
+        suffix = 0
+        while os.path.exists(logical_path):
+          logical_path = f"cmpasm/logical/{base_name}_{suffix}.stir"
+          suffix += 1
+
+        with open(logical_path, "w") as f:
+          f.write(logical_ir_str)
+
+        manifest = f"cmpasm/manifest_logical.txt"
+        with open(manifest, "a") as f:
+          fcntl.flock(f, fcntl.LOCK_EX)
+          f.write(f"{os.path.basename(logical_path)} -> {kernel_name}\n")
+          fcntl.flock(f, fcntl.LOCK_UN)
+
+        t_logical_write_end = time.perf_counter()
+        print2(f"StinkyTofu (3L) logical dump write: {t_logical_write_end - t_logical_write_start:.4f}s")
+
       t0_end = time.perf_counter()
       print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
 
@@ -7941,6 +7984,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
+    # Record the ISA for the instruction facade (see ir.py). Today the facade is
+    # a pure passthrough, so this is a no-op; it is the hook the logical-IR
+    # migration flips on to let gfx1250 build logical instructions.
+    _set_active_ir_version(version)
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])

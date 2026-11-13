@@ -256,6 +256,8 @@ const TargetProperties& Handle::GetTargetProperties() const
 std::string Handle::GetDeviceNameImpl() const { return this->impl->device_name; }
 std::string Handle::GetDeviceName() const { return this->GetTargetProperties().Name(); }
 
+int Handle::GetDeviceId() const { return -1; }
+
 std::ostream& Handle::Print(std::ostream& os) const
 {
     os << "stream: " << this->impl->stream << ", device_id: " << this->impl->device;
