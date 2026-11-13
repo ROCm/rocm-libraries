@@ -382,7 +382,7 @@ public:
         {
             HIPDNN_RETURN_IF_FALSE(
                 attnMask,
-                ErrorCode::INVALID_VALUE,
+                ErrorCode::ATTRIBUTE_NOT_SET,
                 std::string("SdpaBwdNode: dBias requires a Bias tensor, whose shape it takes"));
             HIPDNN_CHECK_ERROR(
                 validateGradientOutput(dBias, attnMask->get_dim(), "dBias", "Bias", false));
@@ -516,8 +516,9 @@ private:
                                   "SdpaBwdNode: " + gradName + " stride[" + std::to_string(i)
                                       + "] must be positive, got " + std::to_string(strides[i]));
         }
+        // A legal layout that no kernel addresses: cuDNN's code for the same check.
         HIPDNN_RETURN_IF_TRUE(lastDimMustBeContiguous && strides.back() != 1,
-                              ErrorCode::INVALID_VALUE,
+                              ErrorCode::GRAPH_NOT_SUPPORTED,
                               "SdpaBwdNode: " + gradName
                                   + " stride for the last (head) dimension must be 1, got "
                                   + std::to_string(strides.back()));

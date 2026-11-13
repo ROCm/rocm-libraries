@@ -1030,7 +1030,7 @@ TEST(TestSdpaBwdNode, PreValidateChecksGradientStrides)
     EXPECT_EQ(validate({1024, 64, 1}), error_code_t::INVALID_VALUE) << "one stride per dim";
     EXPECT_EQ(validate({8192, 1024, 0, 1}), error_code_t::INVALID_VALUE) << "zero stride";
     EXPECT_EQ(validate({8192, -1024, 64, 1}), error_code_t::INVALID_VALUE) << "negative stride";
-    EXPECT_EQ(validate({16384, 2048, 128, 2}), error_code_t::INVALID_VALUE)
+    EXPECT_EQ(validate({16384, 2048, 128, 2}), error_code_t::GRAPH_NOT_SUPPORTED)
         << "head dim not contiguous";
 }
 
@@ -1040,7 +1040,7 @@ TEST(TestSdpaBwdNode, PreValidateRejectsDBiasWithoutBias)
     attrs.set_dbias(makeBroadcastBias());
 
     const auto err = preValidate(std::move(attrs));
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
     EXPECT_NE(err.err_msg.find("dBias requires a Bias"), std::string::npos) << err.err_msg;
 }
 
