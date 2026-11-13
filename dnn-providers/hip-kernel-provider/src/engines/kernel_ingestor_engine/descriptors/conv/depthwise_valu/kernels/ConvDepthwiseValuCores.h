@@ -14,6 +14,17 @@
 // wave32 and wave64 devices alike; each config's speed varies by device and is measured, not
 // assumed. K == C (depthwise), weights W[C,(KD,)KH,KW] contiguous.
 //
+// Code generation (from the HIP / rocKE / FlyDSL kernel comparison):
+//   - Per-lane load predicates are branchless: an out-of-range tap or halo element loads an
+//     in-range address and its value is selected away, so the loads of a group stay in flight
+//     together; a branch per load waits for each one alone. The LDS staging loops run a
+//     compile-time trip count (the block size is the config's), fully unrolled, so a thread's
+//     halo loads issue back to back.
+//   - Index math is 32-bit when the tensors (the one-thread-per-output floors) or the images
+//     (the block-staged cores, with a 64-bit image base) have fewer than 2^31 elements, with
+//     the thread decode by unsigned 32-bit division; larger tensors take the same code in 64-bit.
+//   - The staging barrier fences only LDS on gfx12 (dwLdsBarrier).
+//
 //   v2_wstrip_core_nhwc     generic W-strip floor; any stride/dilation/kernel size.
 //   v3a_microtile_core_nhwc register 2D halo reuse (no LDS); s=d=1, compile-time KH/KW.
 //   v4_fused_core_nhwc      LDS block stage + register micro-tile (two-level blocking).
@@ -26,6 +37,8 @@
 //                           S x S dx pixels of one dy position from the dy window they share
 //                           (compile-time filter and stride, unit dilation), both layouts.
 #pragma once
+
+#include "ConvArchFamily.h"
 
 namespace conv_depthwise_valu
 {
@@ -49,17 +62,15 @@ __device__ inline void valu_from_f32(float s, T& d)
 
 // The filter element filter tap (ky, kx) multiplies: itself, or its reflection when the filter
 // is flipped (true convolution, or backward data run as a forward convolution of dy).
-__device__ inline long dwTap2(int ky, int kx, int kh, int kw)
+__device__ inline int dwTap2(int ky, int kx, int kh, int kw)
 {
-    return CONV_DW_FLIP != 0 ? static_cast<long>(kh - 1 - ky) * kw + (kw - 1 - kx)
-                             : static_cast<long>(ky) * kw + kx;
+    return CONV_DW_FLIP != 0 ? (kh - 1 - ky) * kw + (kw - 1 - kx) : ky * kw + kx;
 }
 
-__device__ inline long dwTap3(int kz, int ky, int kx, int kd, int kh, int kw)
+__device__ inline int dwTap3(int kz, int ky, int kx, int kd, int kh, int kw)
 {
-    return CONV_DW_FLIP != 0
-               ? (static_cast<long>(kd - 1 - kz) * kh + (kh - 1 - ky)) * kw + (kw - 1 - kx)
-               : (static_cast<long>(kz) * kh + ky) * kw + kx;
+    return CONV_DW_FLIP != 0 ? ((kd - 1 - kz) * kh + (kh - 1 - ky)) * kw + (kw - 1 - kx)
+                             : (kz * kh + ky) * kw + kx;
 }
 
 // Runtime geometry passed to every core. K == C for depthwise.
@@ -73,23 +84,92 @@ struct ValuParams
     int Di, Do, kd, pd, sd, dd; // depth axis (3D only)
 };
 
+// The barrier between the LDS stage and its reads. The waves exchange only LDS, so on gfx12
+// the fences cover the local address space alone: __syncthreads() fences every address space at
+// workgroup scope, which adds a global_inv (L0 invalidate) after the barrier there. Other
+// families keep __syncthreads().
+__device__ inline void dwLdsBarrier()
+{
+#if HKP_ARCH_GFX12
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+    __syncthreads();
+#endif
+}
+
+/// a < bound for a signed a and a non-negative bound, as one unsigned compare.
+__device__ inline bool dwIn(int a, int bound)
+{
+    return static_cast<unsigned>(a) < static_cast<unsigned>(bound);
+}
+
+/// Division by a uniform runtime divisor. Index type int: unsigned 32-bit division (the
+/// divisor's reciprocal is uniform, so a lane pays a multiply-high and a correction). Magic
+/// numbers computed in the kernel cost a 64-bit division each per thread, more than a
+/// one-output-per-thread floor saves with them. Index type long: the plain 64-bit division.
+template <typename I>
+struct DwDivider
+{
+    I d;
+    __device__ explicit DwDivider(int divisor)
+        : d(divisor)
+    {
+    }
+    __device__ I div(I n) const
+    {
+        return n / d;
+    }
+};
+template <>
+struct DwDivider<int>
+{
+    unsigned d;
+    __device__ explicit DwDivider(int divisor)
+        : d(static_cast<unsigned>(divisor))
+    {
+    }
+    __device__ int div(int n) const
+    {
+        return static_cast<int>(static_cast<unsigned>(n) / d);
+    }
+};
+
+/// Whole-tensor 32-bit indexing: x, y and the launched threads below 2^31.
+__device__ inline bool dwTensorsFit32(const ValuParams& p)
+{
+    const long lim = 0x7fffffffL;
+    return (long)p.N * p.C * p.Di * p.Hi * p.Wi < lim && (long)p.N * p.C * p.Do * p.Ho * p.Wo < lim
+           && (long)gridDim.x * blockDim.x < lim;
+}
+
+/// Per-image 32-bit indexing (64-bit image base): one image of x and of y below 2^31 elements.
+__device__ inline bool dwImagesFit32(const ValuParams& p)
+{
+    const long lim = 0x7fffffffL;
+    return (long)p.C * p.Di * p.Hi * p.Wi < lim && (long)p.C * p.Do * p.Ho * p.Wo < lim;
+}
+
 // ---- v2 — register W-strip: WSTRIP output columns per thread; k innermost ----
 // Handles any stride / dilation / padding / kernel size. The universal floor.
-template <typename T, int WSTRIP>
-__device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
+template <typename T, int WSTRIP, typename I>
+__device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
                                            const T* __restrict__ Wt,
                                            T* __restrict__ D,
-                                           ValuParams p)
+                                           const ValuParams& p)
 {
     const int Wtiles = (p.Wo + WSTRIP - 1) / WSTRIP;
-    long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    const I tid = (I)blockIdx.x * (I)blockDim.x + (I)threadIdx.x;
 
-    const int k = tid % p.C; // channel — innermost/coalesced
-    long rest = tid / p.C;
-    const int wt = rest % Wtiles; // which W-strip
-    rest /= Wtiles;
-    const int ho = rest % p.Ho;
-    const int n = rest / p.Ho;
+    const DwDivider<I> byC(p.C), byTiles(Wtiles), byHo(p.Ho);
+    I rest = byC.div(tid);
+    const int k = static_cast<int>(tid - rest * p.C); // channel — innermost/coalesced
+    I next = byTiles.div(rest);
+    const int wt = static_cast<int>(rest - next * Wtiles); // which W-strip
+    rest = byHo.div(next);
+    const int ho = static_cast<int>(next - rest * p.Ho);
+    const int n = static_cast<int>(rest);
     if(n >= p.N)
         return;
 
@@ -105,9 +185,8 @@ __device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
     for(int ky = 0; ky < p.kh; ++ky)
     {
         const int ih = ho * p.sh - p.ph + ky * p.dh;
-        if(ih < 0 || ih >= p.Hi)
-            continue;
-        const long a_row = (((long)n * p.Hi + ih) * p.Wi) * p.C + k;
+        const bool vy = dwIn(ih, p.Hi);
+        const I a_row = (((I)n * p.Hi + (vy ? ih : 0)) * p.Wi) * p.C + k;
         for(int kx = 0; kx < p.kw; ++kx)
         {
             const float w = valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]); // loaded once per tap
@@ -115,12 +194,11 @@ __device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
             for(int j = 0; j < WSTRIP; ++j)
             {
                 const int wo = wo_base + j;
-                if(wo >= p.Wo)
-                    continue;
                 const int iw = wo * p.sw - p.pw + kx * p.dw;
-                if(iw < 0 || iw >= p.Wi)
-                    continue;
-                acc[j] += w * valu_to_f32(A[a_row + (long)iw * p.C]);
+                const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
+                const float a = valu_to_f32(A[a_row + (I)(v ? iw : 0) * p.C]);
+                const float t = acc[j] + w * a;
+                acc[j] = v ? t : acc[j];
             }
         }
     }
@@ -131,9 +209,21 @@ __device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
         const int wo = wo_base + j;
         if(wo >= p.Wo)
             continue;
-        const long o = (((long)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
+        const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
         valu_from_f32(acc[j], D[o]);
     }
+}
+
+template <typename T, int WSTRIP>
+__device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
+                                           const T* __restrict__ Wt,
+                                           T* __restrict__ D,
+                                           ValuParams p)
+{
+    if(dwTensorsFit32(p))
+        v2_wstrip_nhwc_body<T, WSTRIP, int>(A, Wt, D, p);
+    else
+        v2_wstrip_nhwc_body<T, WSTRIP, long>(A, Wt, D, p);
 }
 
 // ---- v2 (NCHW) — channel-outer 2D floor; W contiguous, coalesced on W ----
@@ -145,43 +235,57 @@ __device__ inline void v2_wstrip_core_nhwc(const T* __restrict__ A,
 // Any stride/dilation/padding/kernel size. Weights W[C,KH,KW] contiguous — the
 // depthwise filter [C,1,KH,KW] in NCHW is byte-identical to the NHWC [C,KH,KW,1]
 // case, so the weight addressing is shared with v2_wstrip_core_nhwc.
-template <typename T>
-__device__ inline void
-    v2_core_nchw(const T* __restrict__ A, const T* __restrict__ Wt, T* __restrict__ D, ValuParams p)
+template <typename T, typename I>
+__device__ inline void v2_nchw_body(const T* __restrict__ A,
+                                    const T* __restrict__ Wt,
+                                    T* __restrict__ D,
+                                    const ValuParams& p)
 {
-    const long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
-    const long total = (long)p.N * p.C * p.Ho * p.Wo;
+    const I tid = (I)blockIdx.x * (I)blockDim.x + (I)threadIdx.x;
+    const I total = (I)p.N * p.C * p.Ho * p.Wo;
     if(tid >= total)
         return;
 
-    const int wo = tid % p.Wo; // contiguous — coalesced across lanes
-    long rest = tid / p.Wo;
-    const int ho = rest % p.Ho;
-    rest /= p.Ho;
-    const int k = rest % p.C; // channel (outer plane)
-    const int n = rest / p.C;
+    const DwDivider<I> byWo(p.Wo), byHo(p.Ho), byC(p.C);
+    I rest = byWo.div(tid);
+    const int wo = static_cast<int>(tid - rest * p.Wo); // contiguous — coalesced across lanes
+    I next = byHo.div(rest);
+    const int ho = static_cast<int>(rest - next * p.Ho);
+    rest = byC.div(next);
+    const int k = static_cast<int>(next - rest * p.C); // channel (outer plane)
+    const int n = static_cast<int>(rest);
 
     float acc = 0.0f;
     const T* wbase = Wt + (long)k * p.kh * p.kw;
-    const long a_chanrow = ((long)n * p.C + k) * p.Hi; // ((n*C+k)*Hi)
+    const I a_chanrow = ((I)n * p.C + k) * p.Hi; // ((n*C+k)*Hi)
 
     for(int ky = 0; ky < p.kh; ++ky)
     {
         const int ih = ho * p.sh - p.ph + ky * p.dh;
-        if(ih < 0 || ih >= p.Hi)
-            continue;
-        const long a_row = (a_chanrow + ih) * p.Wi;
+        const bool vy = dwIn(ih, p.Hi);
+        const I a_row = (a_chanrow + (vy ? ih : 0)) * p.Wi;
         for(int kx = 0; kx < p.kw; ++kx)
         {
             const int iw = wo * p.sw - p.pw + kx * p.dw;
-            if(iw < 0 || iw >= p.Wi)
-                continue;
-            acc += valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * valu_to_f32(A[a_row + iw]);
+            const bool v = vy & dwIn(iw, p.Wi);
+            const float a = valu_to_f32(A[a_row + (v ? iw : 0)]);
+            const float t = acc + valu_to_f32(wbase[dwTap2(ky, kx, p.kh, p.kw)]) * a;
+            acc = v ? t : acc;
         }
     }
 
-    const long o = (((long)n * p.C + k) * p.Ho + ho) * p.Wo + wo;
+    const I o = (((I)n * p.C + k) * p.Ho + ho) * p.Wo + wo;
     valu_from_f32(acc, D[o]);
+}
+
+template <typename T>
+__device__ inline void
+    v2_core_nchw(const T* __restrict__ A, const T* __restrict__ Wt, T* __restrict__ D, ValuParams p)
+{
+    if(dwTensorsFit32(p))
+        v2_nchw_body<T, int>(A, Wt, D, p);
+    else
+        v2_nchw_body<T, long>(A, Wt, D, p);
 }
 
 // ---- v2 (3D) — register W-strip over NDHWC; the universal 3D floor ----
@@ -190,23 +294,25 @@ __device__ inline void
 // the 2D tap nest, with depth folded into the NDHWC address math. Register
 // footprint (acc[WSTRIP]) is identical to the 2D core. Any stride/dilation/pad/
 // kernel size on all three spatial axes. Weights W[C, kd, kh, kw].
-template <typename T, int WSTRIP>
-__device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
+template <typename T, int WSTRIP, typename I>
+__device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
                                             const T* __restrict__ Wt,
                                             T* __restrict__ D,
-                                            ValuParams p)
+                                            const ValuParams& p)
 {
     const int Wtiles = (p.Wo + WSTRIP - 1) / WSTRIP;
-    long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    const I tid = (I)blockIdx.x * (I)blockDim.x + (I)threadIdx.x;
 
-    const int k = tid % p.C; // channel — innermost/coalesced
-    long rest = tid / p.C;
-    const int wt = rest % Wtiles; // which W-strip
-    rest /= Wtiles;
-    const int ho = rest % p.Ho;
-    rest /= p.Ho;
-    const int do_ = rest % p.Do; // output depth
-    const int n = rest / p.Do;
+    const DwDivider<I> byC(p.C), byTiles(Wtiles), byHo(p.Ho), byDo(p.Do);
+    I rest = byC.div(tid);
+    const int k = static_cast<int>(tid - rest * p.C); // channel — innermost/coalesced
+    I next = byTiles.div(rest);
+    const int wt = static_cast<int>(rest - next * Wtiles); // which W-strip
+    rest = byHo.div(next);
+    const int ho = static_cast<int>(next - rest * p.Ho);
+    next = byDo.div(rest);
+    const int do_ = static_cast<int>(rest - next * p.Do); // output depth
+    const int n = static_cast<int>(next);
     if(n >= p.N)
         return;
 
@@ -222,14 +328,13 @@ __device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
     for(int kz = 0; kz < p.kd; ++kz)
     {
         const int id = do_ * p.sd - p.pd + kz * p.dd;
-        if(id < 0 || id >= p.Di)
-            continue;
+        const bool vz = dwIn(id, p.Di);
         for(int ky = 0; ky < p.kh; ++ky)
         {
             const int ih = ho * p.sh - p.ph + ky * p.dh;
-            if(ih < 0 || ih >= p.Hi)
-                continue;
-            const long a_row = ((((long)n * p.Di + id) * p.Hi + ih) * p.Wi) * p.C + k;
+            const bool vy = vz & dwIn(ih, p.Hi);
+            const I a_row
+                = ((((I)n * p.Di + (vz ? id : 0)) * p.Hi + (vy ? ih : 0)) * p.Wi) * p.C + k;
             for(int kx = 0; kx < p.kw; ++kx)
             {
                 const float w = valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]);
@@ -237,12 +342,11 @@ __device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
                 for(int j = 0; j < WSTRIP; ++j)
                 {
                     const int wo = wo_base + j;
-                    if(wo >= p.Wo)
-                        continue;
                     const int iw = wo * p.sw - p.pw + kx * p.dw;
-                    if(iw < 0 || iw >= p.Wi)
-                        continue;
-                    acc[j] += w * valu_to_f32(A[a_row + (long)iw * p.C]);
+                    const bool v = vy & (wo < p.Wo) & dwIn(iw, p.Wi);
+                    const float a = valu_to_f32(A[a_row + (I)(v ? iw : 0) * p.C]);
+                    const float t = acc[j] + w * a;
+                    acc[j] = v ? t : acc[j];
                 }
             }
         }
@@ -254,9 +358,21 @@ __device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
         const int wo = wo_base + j;
         if(wo >= p.Wo)
             continue;
-        const long o = ((((long)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
+        const I o = ((((I)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
         valu_from_f32(acc[j], D[o]);
     }
+}
+
+template <typename T, int WSTRIP>
+__device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
+                                            const T* __restrict__ Wt,
+                                            T* __restrict__ D,
+                                            ValuParams p)
+{
+    if(dwTensorsFit32(p))
+        v2_wstrip_ndhwc_body<T, WSTRIP, int>(A, Wt, D, p);
+    else
+        v2_wstrip_ndhwc_body<T, WSTRIP, long>(A, Wt, D, p);
 }
 
 // ---- v2 (NCDHW) — channel-outer 3D floor; W contiguous, coalesced on W ----
@@ -265,76 +381,90 @@ __device__ inline void v2_wstrip_core_ndhwc(const T* __restrict__ A,
 // extra output-depth (do_) decode level and a kz->id tap loop wrapping the 2D
 // nest. NCDHW address math. Any stride/dilation/pad/kernel size on all three
 // axes. Weights W[C,kd,kh,kw] contiguous.
+template <typename T, typename I>
+__device__ inline void v2_ncdhw_body(const T* __restrict__ A,
+                                     const T* __restrict__ Wt,
+                                     T* __restrict__ D,
+                                     const ValuParams& p)
+{
+    const I tid = (I)blockIdx.x * (I)blockDim.x + (I)threadIdx.x;
+    const I total = (I)p.N * p.C * p.Do * p.Ho * p.Wo;
+    if(tid >= total)
+        return;
+
+    const DwDivider<I> byWo(p.Wo), byHo(p.Ho), byDo(p.Do), byC(p.C);
+    I rest = byWo.div(tid);
+    const int wo = static_cast<int>(tid - rest * p.Wo); // contiguous — coalesced across lanes
+    I next = byHo.div(rest);
+    const int ho = static_cast<int>(rest - next * p.Ho);
+    rest = byDo.div(next);
+    const int do_ = static_cast<int>(next - rest * p.Do); // output depth
+    next = byC.div(rest);
+    const int k = static_cast<int>(rest - next * p.C); // channel (outer plane)
+    const int n = static_cast<int>(next);
+
+    float acc = 0.0f;
+    const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
+    const I a_chan = (I)n * p.C + k; // (n*C+k) — channel plane base
+
+    for(int kz = 0; kz < p.kd; ++kz)
+    {
+        const int id = do_ * p.sd - p.pd + kz * p.dd;
+        const bool vz = dwIn(id, p.Di);
+        for(int ky = 0; ky < p.kh; ++ky)
+        {
+            const int ih = ho * p.sh - p.ph + ky * p.dh;
+            const bool vy = vz & dwIn(ih, p.Hi);
+            const I a_row = (((a_chan * p.Di + (vz ? id : 0)) * p.Hi) + (vy ? ih : 0)) * p.Wi;
+            for(int kx = 0; kx < p.kw; ++kx)
+            {
+                const int iw = wo * p.sw - p.pw + kx * p.dw;
+                const bool v = vy & dwIn(iw, p.Wi);
+                const float a = valu_to_f32(A[a_row + (v ? iw : 0)]);
+                const float t = acc + valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * a;
+                acc = v ? t : acc;
+            }
+        }
+    }
+
+    const I o = ((((I)n * p.C + k) * p.Do + do_) * p.Ho + ho) * p.Wo + wo;
+    valu_from_f32(acc, D[o]);
+}
+
 template <typename T>
 __device__ inline void v2_core_ncdhw(const T* __restrict__ A,
                                      const T* __restrict__ Wt,
                                      T* __restrict__ D,
                                      ValuParams p)
 {
-    const long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
-    const long total = (long)p.N * p.C * p.Do * p.Ho * p.Wo;
-    if(tid >= total)
-        return;
-
-    const int wo = tid % p.Wo; // contiguous — coalesced across lanes
-    long rest = tid / p.Wo;
-    const int ho = rest % p.Ho;
-    rest /= p.Ho;
-    const int do_ = rest % p.Do; // output depth
-    rest /= p.Do;
-    const int k = rest % p.C; // channel (outer plane)
-    const int n = rest / p.C;
-
-    float acc = 0.0f;
-    const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
-    const long a_chan = (long)n * p.C + k; // (n*C+k) — channel plane base
-
-    for(int kz = 0; kz < p.kd; ++kz)
-    {
-        const int id = do_ * p.sd - p.pd + kz * p.dd;
-        if(id < 0 || id >= p.Di)
-            continue;
-        for(int ky = 0; ky < p.kh; ++ky)
-        {
-            const int ih = ho * p.sh - p.ph + ky * p.dh;
-            if(ih < 0 || ih >= p.Hi)
-                continue;
-            const long a_row = (((a_chan * p.Di + id) * p.Hi) + ih) * p.Wi;
-            for(int kx = 0; kx < p.kw; ++kx)
-            {
-                const int iw = wo * p.sw - p.pw + kx * p.dw;
-                if(iw < 0 || iw >= p.Wi)
-                    continue;
-                acc += valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)])
-                       * valu_to_f32(A[a_row + iw]);
-            }
-        }
-    }
-
-    const long o = ((((long)n * p.C + k) * p.Do + do_) * p.Ho + ho) * p.Wo + wo;
-    valu_from_f32(acc, D[o]);
+    if(dwTensorsFit32(p))
+        v2_ncdhw_body<T, int>(A, Wt, D, p);
+    else
+        v2_ncdhw_body<T, long>(A, Wt, D, p);
 }
 
 // ---- v3a microtile: register 2D halo reuse (no LDS, no barrier) ----
 // Each thread emits a TH×TW output tile and caches the (TH+KH-1)×(TW+KW-1) input
 // patch in registers. Bakes s=d=1 and compile-time KH/KW so the tap loops and the
 // register patch/accumulators fully unroll into named registers.
-template <typename T, int KH, int KW, int TH, int TW>
-__device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
+template <typename T, int KH, int KW, int TH, int TW, typename I>
+__device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
                                                const T* __restrict__ Wt,
                                                T* __restrict__ D,
-                                               ValuParams p)
+                                               const ValuParams& p)
 {
     const int Htiles = (p.Ho + TH - 1) / TH;
     const int Wtiles = (p.Wo + TW - 1) / TW;
-    long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    const I tid = (I)blockIdx.x * (I)blockDim.x + (I)threadIdx.x;
 
-    const int k = tid % p.C; // channel innermost
-    long rest = tid / p.C;
-    const int wt = rest % Wtiles;
-    rest /= Wtiles;
-    const int ht = rest % Htiles;
-    const int n = rest / Htiles;
+    const DwDivider<I> byC(p.C), byWt(Wtiles), byHt(Htiles);
+    I rest = byC.div(tid);
+    const int k = static_cast<int>(tid - rest * p.C); // channel innermost
+    I next = byWt.div(rest);
+    const int wt = static_cast<int>(rest - next * Wtiles);
+    rest = byHt.div(next);
+    const int ht = static_cast<int>(next - rest * Htiles);
+    const int n = static_cast<int>(rest);
     if(n >= p.N)
         return;
 
@@ -342,20 +472,22 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
     const int ih0 = ho0 - p.ph, iw0 = wo0 - p.pw; // s=d=1
     const int PH = TH + KH - 1, PW = TW + KW - 1;
 
-    // register input patch, loaded once per thread per channel
+    // register input patch, loaded once per thread per channel; every load issued (an element
+    // outside the image reads the image's first one) and its value masked
+    const I image = (I)n * p.Hi * p.Wi;
     float patch[PH][PW];
 #pragma unroll
     for(int py = 0; py < PH; ++py)
     {
         const int ih = ih0 + py;
-        const bool ihv = (ih >= 0 && ih < p.Hi);
-        const long arow = ihv ? ((((long)n * p.Hi + ih) * p.Wi) * p.C + k) : 0;
+        const bool ihv = dwIn(ih, p.Hi);
 #pragma unroll
         for(int px = 0; px < PW; ++px)
         {
             const int iw = iw0 + px;
-            patch[py][px]
-                = (ihv && iw >= 0 && iw < p.Wi) ? valu_to_f32(A[arow + (long)iw * p.C]) : 0.0f;
+            const bool v = ihv & dwIn(iw, p.Wi);
+            const float a = valu_to_f32(A[(image + (v ? ih * p.Wi + iw : 0)) * p.C + k]);
+            patch[py][px] = v ? a : 0.0f;
         }
     }
 
@@ -397,9 +529,64 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
             const int wo = wo0 + tx;
             if(wo >= p.Wo)
                 continue;
-            const long o = (((long)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
+            const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
             valu_from_f32(acc[ty][tx], D[o]);
         }
+    }
+}
+
+template <typename T, int KH, int KW, int TH, int TW>
+__device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
+                                               const T* __restrict__ Wt,
+                                               T* __restrict__ D,
+                                               ValuParams p)
+{
+    if(dwTensorsFit32(p))
+        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
+    else
+        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, long>(A, Wt, D, p);
+}
+
+// Stages the halo'd [LD][LH][LW][BK] channels-last block (LD = 1 in 2-D) of image An into LDS,
+// padding and the channel tail as zeros: NT threads, a compile-time trip count, fully unrolled,
+// every load issued (an element outside the image reads its first one) and its value selected.
+template <typename T, int LD, int LH, int LW, int BK, int NT, typename I>
+__device__ inline void dwStageChannelsLast(T* __restrict__ tile,
+                                           const T* __restrict__ An,
+                                           const ValuParams& p,
+                                           int id0,
+                                           int ih0,
+                                           int iw0,
+                                           int k_base)
+{
+    constexpr int TOTAL = LD * LH * LW * BK;
+    constexpr int ITERS = (TOTAL + NT - 1) / NT;
+    T zero;
+    valu_from_f32(0.0f, zero);
+    const int tid = static_cast<int>(threadIdx.x);
+    // All of the thread's loads first, then the LDS stores: the loads stay in flight together.
+    T v[ITERS];
+    bool in[ITERS];
+#pragma unroll
+    for(int it = 0; it < ITERS; ++it)
+    {
+        const int idx = tid + it * NT;
+        const int kc = idx % BK;
+        int t = idx / BK;
+        const int px = t % LW;
+        t /= LW;
+        const int py = t % LH;
+        const int pz = t / LH;
+        const int id = id0 + pz, ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
+        in[it] = dwIn(id, p.Di) & dwIn(ih, p.Hi) & dwIn(iw, p.Wi) & (kk < p.C);
+        v[it] = An[in[it] ? (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk : 0];
+    }
+#pragma unroll
+    for(int it = 0; it < ITERS; ++it)
+    {
+        const int idx = tid + it * NT;
+        if(TOTAL % NT == 0 || it < ITERS - 1 || idx < TOTAL)
+            tile[idx] = in[it] ? v[it] : zero;
     }
 }
 
@@ -407,27 +594,20 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
 // The workgroup stages a [BH+KH-1, BW+KW-1, BK] halo'd block into LDS once, then
 // each thread reads an (RH+KH-1)×(RW+KW-1) patch from LDS into registers and
 // accumulates RH×RW outputs. threads/block = (BH/RH)*(BW/RW)*BK.
-template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
-__device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW, typename I>
+__device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
                                           const T* __restrict__ Wt,
                                           T* __restrict__ D,
-                                          ValuParams p)
+                                          const ValuParams& p,
+                                          T* __restrict__ tile)
 {
-    // Tiling + LDS-budget invariants: a bad config would silently under-launch
-    // (partial-tile threads never spawned -> wrong output) or overflow LDS.
-    static_assert(BH % RH == 0, "v4_fused: BH must be divisible by RH");
-    static_assert(BW % RW == 0, "v4_fused: BW must be divisible by RW");
-    static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
-                  "v4_fused: LDS tile exceeds 64 KB");
-
     const int LH = BH + KH - 1, LW = BW + KW - 1;
-    __shared__ T tile[LH * LW * BK];
 
     const int Hblocks = (p.Ho + BH - 1) / BH;
     const int Wblocks = (p.Wo + BW - 1) / BW;
     const int Kblocks = (p.C + BK - 1) / BK;
 
-    long blk = blockIdx.x;
+    unsigned blk = blockIdx.x;
     const int kb = blk % Kblocks;
     blk /= Kblocks;
     const int wb = blk % Wblocks;
@@ -438,22 +618,11 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
     const int ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
     const int ih0 = ho_base - p.ph, iw0 = wo_base - p.pw; // s=d=1
 
-    T zero;
-    valu_from_f32(0.0f, zero);
-
     // cooperative halo stage into LDS
-    const int nthreads = blockDim.x;
-    for(int idx = threadIdx.x; idx < LH * LW * BK; idx += nthreads)
-    {
-        const int kc = idx % BK;
-        const int t = idx / BK;
-        const int px = t % LW;
-        const int py = t / LW;
-        const int ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
-        const bool in = ih >= 0 && ih < p.Hi && iw >= 0 && iw < p.Wi && kk < p.C;
-        tile[idx] = in ? A[(((long)n * p.Hi + ih) * p.Wi + iw) * p.C + kk] : zero;
-    }
-    __syncthreads();
+    const T* An = A + (long)n * p.Hi * p.Wi * p.C;
+    dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
+        tile, An, p, 0, ih0, iw0, k_base);
+    dwLdsBarrier();
 
     const int tid = threadIdx.x;
     const int klocal = tid % BK;
@@ -471,24 +640,14 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
         for(int px = 0; px < PWr; ++px)
             patch[py][px] = valu_to_f32(tile[(((oy + py) * LW) + (ox + px)) * BK + klocal]);
 
+    // A channel past C reads the last channel's filter; its outputs are not stored.
     float w[KH][KW];
-    if(k < p.C)
-    {
-        const T* wbp = Wt + (long)k * KH * KW;
+    const T* wbp = Wt + (long)(k < p.C ? k : p.C - 1) * KH * KW;
 #pragma unroll
-        for(int ky = 0; ky < KH; ++ky)
+    for(int ky = 0; ky < KH; ++ky)
 #pragma unroll
-            for(int kx = 0; kx < KW; ++kx)
-                w[ky][kx] = valu_to_f32(wbp[dwTap2(ky, kx, KH, KW)]);
-    }
-    else
-    {
-#pragma unroll
-        for(int ky = 0; ky < KH; ++ky)
-#pragma unroll
-            for(int kx = 0; kx < KW; ++kx)
-                w[ky][kx] = 0.0f;
-    }
+        for(int kx = 0; kx < KW; ++kx)
+            w[ky][kx] = valu_to_f32(wbp[dwTap2(ky, kx, KH, KW)]);
 
     float acc[RH][RW];
 #pragma unroll
@@ -509,6 +668,7 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
 
     if(k >= p.C)
         return;
+    T* Dn = D + (long)n * p.Ho * p.Wo * p.C;
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
@@ -521,35 +681,50 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
             const int wo = wo_base + ox + tx;
             if(wo >= p.Wo)
                 continue;
-            const long o = (((long)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-            valu_from_f32(acc[ty][tx], D[o]);
+            const I o = ((I)ho * p.Wo + wo) * p.C + k;
+            valu_from_f32(acc[ty][tx], Dn[o]);
         }
     }
+}
+
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
+__device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
+                                          const T* __restrict__ Wt,
+                                          T* __restrict__ D,
+                                          ValuParams p)
+{
+    // Tiling + LDS-budget invariants: a bad config would silently under-launch
+    // (partial-tile threads never spawned -> wrong output) or overflow LDS.
+    static_assert(BH % RH == 0, "v4_fused: BH must be divisible by RH");
+    static_assert(BW % RW == 0, "v4_fused: BW must be divisible by RW");
+    static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
+                  "v4_fused: LDS tile exceeds 64 KB");
+    // One LDS tile for both index widths (a __shared__ array per instantiation would be two).
+    __shared__ T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32(p))
+        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
+    else
+        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
 }
 
 // ---- v3b lds-direct: LDS block stage, tap loop reads from LDS ----
 // Register-light (no materialised patch) so it survives large KH/KW where v4's
 // register patch would spill. LDS tap traffic is KH*KW loads/output, but LDS
 // bandwidth >> DRAM, so this is the right tool for 9x9 depthwise.
-template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
-__device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW, typename I>
+__device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
                                          const T* __restrict__ Wt,
                                          T* __restrict__ D,
-                                         ValuParams p)
+                                         const ValuParams& p,
+                                         T* __restrict__ tile)
 {
-    static_assert(BH % RH == 0, "v3b_lds: BH must be divisible by RH");
-    static_assert(BW % RW == 0, "v3b_lds: BW must be divisible by RW");
-    static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
-                  "v3b_lds: LDS tile exceeds 64 KB");
-
     const int LH = BH + KH - 1, LW = BW + KW - 1;
-    __shared__ T tile[LH * LW * BK];
 
     const int Hblocks = (p.Ho + BH - 1) / BH;
     const int Wblocks = (p.Wo + BW - 1) / BW;
     const int Kblocks = (p.C + BK - 1) / BK;
 
-    long blk = blockIdx.x;
+    unsigned blk = blockIdx.x;
     const int kb = blk % Kblocks;
     blk /= Kblocks;
     const int wb = blk % Wblocks;
@@ -560,20 +735,10 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
     const int ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
     const int ih0 = ho_base - p.ph, iw0 = wo_base - p.pw;
 
-    T zero;
-    valu_from_f32(0.0f, zero);
-    const int nthreads = blockDim.x;
-    for(int idx = threadIdx.x; idx < LH * LW * BK; idx += nthreads)
-    {
-        const int kc = idx % BK;
-        const int t = idx / BK;
-        const int px = t % LW;
-        const int py = t / LW;
-        const int ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
-        const bool in = ih >= 0 && ih < p.Hi && iw >= 0 && iw < p.Wi && kk < p.C;
-        tile[idx] = in ? A[(((long)n * p.Hi + ih) * p.Wi + iw) * p.C + kk] : zero;
-    }
-    __syncthreads();
+    const T* An = A + (long)n * p.Hi * p.Wi * p.C;
+    dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
+        tile, An, p, 0, ih0, iw0, k_base);
+    dwLdsBarrier();
 
     const int tid = threadIdx.x;
     const int klocal = tid % BK;
@@ -590,13 +755,14 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
         for(int tx = 0; tx < RW; ++tx)
             acc[ty][tx] = 0.0f;
 
-    const T* wbp = (k < p.C) ? Wt + (long)k * KH * KW : nullptr;
+    // A channel past C reads the last channel's filter; its outputs are not stored.
+    const T* wbp = Wt + (long)(k < p.C ? k : p.C - 1) * KH * KW;
 #pragma unroll
     for(int ky = 0; ky < KH; ++ky)
 #pragma unroll
         for(int kx = 0; kx < KW; ++kx)
         {
-            const float wv = wbp ? valu_to_f32(wbp[dwTap2(ky, kx, KH, KW)]) : 0.0f;
+            const float wv = valu_to_f32(wbp[dwTap2(ky, kx, KH, KW)]);
 #pragma unroll
             for(int ty = 0; ty < RH; ++ty)
 #pragma unroll
@@ -609,6 +775,7 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
 
     if(k >= p.C)
         return;
+    T* Dn = D + (long)n * p.Ho * p.Wo * p.C;
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
@@ -621,10 +788,27 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
             const int wo = wo_base + ox + tx;
             if(wo >= p.Wo)
                 continue;
-            const long o = (((long)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-            valu_from_f32(acc[ty][tx], D[o]);
+            const I o = ((I)ho * p.Wo + wo) * p.C + k;
+            valu_from_f32(acc[ty][tx], Dn[o]);
         }
     }
+}
+
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
+__device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
+                                         const T* __restrict__ Wt,
+                                         T* __restrict__ D,
+                                         ValuParams p)
+{
+    static_assert(BH % RH == 0, "v3b_lds: BH must be divisible by RH");
+    static_assert(BW % RW == 0, "v3b_lds: BW must be divisible by RW");
+    static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
+                  "v3b_lds: LDS tile exceeds 64 KB");
+    __shared__ T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32(p))
+        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
+    else
+        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (3D) lds-direct over NDHWC: LDS block stage, tap loop reads from LDS ----
@@ -636,6 +820,120 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
 // cutting global traffic to one load per staged element. Register-light (only
 // acc[RD][RH][RW]; weights are scalar-per-tap) so the 27-tap nest never spills.
 // s=d=1 on all three axes; compile-time KD/KH/KW. NDHWC, channel (k) innermost.
+template <typename T,
+          int KD,
+          int KH,
+          int KW,
+          int BD,
+          int BH,
+          int BW,
+          int BK,
+          int RD,
+          int RH,
+          int RW,
+          typename I>
+__device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
+                                          const T* __restrict__ Wt,
+                                          T* __restrict__ D,
+                                          const ValuParams& p,
+                                          T* __restrict__ tile) // [pz][py][px][kc], kc innermost
+{
+    const int LD = BD + KD - 1, LH = BH + KH - 1, LW = BW + KW - 1;
+
+    const int Dblocks = (p.Do + BD - 1) / BD;
+    const int Hblocks = (p.Ho + BH - 1) / BH;
+    const int Wblocks = (p.Wo + BW - 1) / BW;
+    const int Kblocks = (p.C + BK - 1) / BK;
+
+    unsigned blk = blockIdx.x;
+    const int kb = blk % Kblocks;
+    blk /= Kblocks;
+    const int wb = blk % Wblocks;
+    blk /= Wblocks;
+    const int hb = blk % Hblocks;
+    blk /= Hblocks;
+    const int db = blk % Dblocks;
+    const int n = blk / Dblocks; // grid sized so n < N
+
+    const int do_base = db * BD, ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
+    const int id0 = do_base - p.pd, ih0 = ho_base - p.ph, iw0 = wo_base - p.pw; // s=d=1
+
+    const T* An = A + (long)n * p.Di * p.Hi * p.Wi * p.C;
+    dwStageChannelsLast<T, LD, LH, LW, BK, (BD / RD) * (BH / RH) * (BW / RW) * BK, I>(
+        tile, An, p, id0, ih0, iw0, k_base);
+    dwLdsBarrier();
+
+    const int tid = threadIdx.x;
+    const int klocal = tid % BK;
+    int rest = tid / BK;
+    const int wtile = rest % (BW / RW);
+    rest /= (BW / RW);
+    const int htile = rest % (BH / RH);
+    const int dtile = rest / (BH / RH);
+    const int oz = dtile * RD, oy = htile * RH, ox = wtile * RW;
+    const int k = k_base + klocal;
+
+    float acc[RD][RH][RW];
+#pragma unroll
+    for(int tz = 0; tz < RD; ++tz)
+#pragma unroll
+        for(int ty = 0; ty < RH; ++ty)
+#pragma unroll
+            for(int tx = 0; tx < RW; ++tx)
+                acc[tz][ty][tx] = 0.0f;
+
+    // A channel past C reads the last channel's filter; its outputs are not stored.
+    const T* wbp = Wt + (long)(k < p.C ? k : p.C - 1) * KD * KH * KW;
+#pragma unroll
+    for(int kz = 0; kz < KD; ++kz)
+#pragma unroll
+        for(int ky = 0; ky < KH; ++ky)
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+            {
+                const float wv = valu_to_f32(wbp[dwTap3(kz, ky, kx, KD, KH, KW)]);
+#pragma unroll
+                for(int tz = 0; tz < RD; ++tz)
+#pragma unroll
+                    for(int ty = 0; ty < RH; ++ty)
+#pragma unroll
+                        for(int tx = 0; tx < RW; ++tx)
+                            acc[tz][ty][tx]
+                                += wv
+                                   * valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
+                                                       + (ox + tx + kx))
+                                                          * BK
+                                                      + klocal]);
+            }
+
+    if(k >= p.C)
+        return;
+    T* Dn = D + (long)n * p.Do * p.Ho * p.Wo * p.C;
+#pragma unroll
+    for(int tz = 0; tz < RD; ++tz)
+    {
+        const int do_ = do_base + oz + tz;
+        if(do_ >= p.Do)
+            continue;
+#pragma unroll
+        for(int ty = 0; ty < RH; ++ty)
+        {
+            const int ho = ho_base + oy + ty;
+            if(ho >= p.Ho)
+                continue;
+#pragma unroll
+            for(int tx = 0; tx < RW; ++tx)
+            {
+                const int wo = wo_base + ox + tx;
+                if(wo >= p.Wo)
+                    continue;
+                const I o = (((I)do_ * p.Ho + ho) * p.Wo + wo) * p.C + k;
+                valu_from_f32(acc[tz][ty][tx], Dn[o]);
+            }
+        }
+    }
+}
+
 template <typename T,
           int KD,
           int KH,
@@ -658,114 +956,11 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
     static_assert((BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T))
                       <= 65536,
                   "v3b_lds_3d: LDS tile exceeds 64 KB");
-
-    const int LD = BD + KD - 1, LH = BH + KH - 1, LW = BW + KW - 1;
-    __shared__ T tile[LD * LH * LW * BK]; // [pz][py][px][kc], kc innermost
-
-    const int Dblocks = (p.Do + BD - 1) / BD;
-    const int Hblocks = (p.Ho + BH - 1) / BH;
-    const int Wblocks = (p.Wo + BW - 1) / BW;
-    const int Kblocks = (p.C + BK - 1) / BK;
-
-    long blk = blockIdx.x;
-    const int kb = blk % Kblocks;
-    blk /= Kblocks;
-    const int wb = blk % Wblocks;
-    blk /= Wblocks;
-    const int hb = blk % Hblocks;
-    blk /= Hblocks;
-    const int db = blk % Dblocks;
-    const int n = blk / Dblocks; // grid sized so n < N
-
-    const int do_base = db * BD, ho_base = hb * BH, wo_base = wb * BW, k_base = kb * BK;
-    const int id0 = do_base - p.pd, ih0 = ho_base - p.ph, iw0 = wo_base - p.pw; // s=d=1
-
-    T zero;
-    valu_from_f32(0.0f, zero);
-    const int nthreads = blockDim.x;
-    const int tile_sz = LD * LH * LW * BK;
-    for(int idx = threadIdx.x; idx < tile_sz; idx += nthreads)
-    {
-        const int kc = idx % BK;
-        int t = idx / BK;
-        const int px = t % LW;
-        t /= LW;
-        const int py = t % LH;
-        const int pz = t / LH;
-        const int id = id0 + pz, ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
-        const bool in
-            = id >= 0 && id < p.Di && ih >= 0 && ih < p.Hi && iw >= 0 && iw < p.Wi && kk < p.C;
-        tile[idx] = in ? A[((((long)n * p.Di + id) * p.Hi + ih) * p.Wi + iw) * p.C + kk] : zero;
-    }
-    __syncthreads();
-
-    const int tid = threadIdx.x;
-    const int klocal = tid % BK;
-    int rest = tid / BK;
-    const int wtile = rest % (BW / RW);
-    rest /= (BW / RW);
-    const int htile = rest % (BH / RH);
-    const int dtile = rest / (BH / RH);
-    const int oz = dtile * RD, oy = htile * RH, ox = wtile * RW;
-    const int k = k_base + klocal;
-
-    float acc[RD][RH][RW];
-#pragma unroll
-    for(int tz = 0; tz < RD; ++tz)
-#pragma unroll
-        for(int ty = 0; ty < RH; ++ty)
-#pragma unroll
-            for(int tx = 0; tx < RW; ++tx)
-                acc[tz][ty][tx] = 0.0f;
-
-    const T* wbp = (k < p.C) ? Wt + (long)k * KD * KH * KW : nullptr;
-#pragma unroll
-    for(int kz = 0; kz < KD; ++kz)
-#pragma unroll
-        for(int ky = 0; ky < KH; ++ky)
-#pragma unroll
-            for(int kx = 0; kx < KW; ++kx)
-            {
-                const float wv = wbp ? valu_to_f32(wbp[dwTap3(kz, ky, kx, KD, KH, KW)]) : 0.0f;
-#pragma unroll
-                for(int tz = 0; tz < RD; ++tz)
-#pragma unroll
-                    for(int ty = 0; ty < RH; ++ty)
-#pragma unroll
-                        for(int tx = 0; tx < RW; ++tx)
-                            acc[tz][ty][tx]
-                                += wv
-                                   * valu_to_f32(tile[((((oz + tz + kz) * LH) + (oy + ty + ky)) * LW
-                                                       + (ox + tx + kx))
-                                                          * BK
-                                                      + klocal]);
-            }
-
-    if(k >= p.C)
-        return;
-#pragma unroll
-    for(int tz = 0; tz < RD; ++tz)
-    {
-        const int do_ = do_base + oz + tz;
-        if(do_ >= p.Do)
-            continue;
-#pragma unroll
-        for(int ty = 0; ty < RH; ++ty)
-        {
-            const int ho = ho_base + oy + ty;
-            if(ho >= p.Ho)
-                continue;
-#pragma unroll
-            for(int tx = 0; tx < RW; ++tx)
-            {
-                const int wo = wo_base + ox + tx;
-                if(wo >= p.Wo)
-                    continue;
-                const long o = ((((long)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
-                valu_from_f32(acc[tz][ty][tx], D[o]);
-            }
-        }
-    }
+    __shared__ T tile[(BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK];
+    if(dwImagesFit32(p))
+        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
+    else
+        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, long>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (NCHW) — channel-first LDS plane tile + register micro-tile ----
@@ -776,19 +971,20 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
 // consecutive columns so the loads coalesce along the contiguous width. Each thread then
 // computes RH x RW outputs of one plane, reading each LDS row segment once per filter row and
 // reusing it across the filter's width. s=d=1, compile-time KH/KW; weights W[C,KH,KW].
-template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
-__device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW, typename I>
+__device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
                                          const T* __restrict__ Wt,
                                          T* __restrict__ D,
-                                         ValuParams p)
+                                         const ValuParams& p,
+                                         float (*__restrict__ tile)[BH + KH - 1][BW + KW]) // [BK]
 {
-    static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
     constexpr int HH = BH + KH - 1;
     constexpr int HW = BW + KW - 1;
     constexpr int TX = BW / RW;
     constexpr int TY = BH / RH;
     constexpr int THREADS = TX * TY * BK;
-    __shared__ float tile[BK][HH][HW + 1];
+    constexpr int TOTAL = BK * HH * HW;
+    constexpr int ITERS = (TOTAL + THREADS - 1) / THREADS;
 
     const int tilesW = (p.Wo + BW - 1) / BW;
     const int tilesH = (p.Ho + BH - 1) / BH;
@@ -808,23 +1004,37 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
     const int c0 = cb * BK;
     const int tid = static_cast<int>(threadIdx.x);
 
-    for(int i = tid; i < BK * HH * HW; i += THREADS)
+    // Compile-time trip count, fully unrolled; every load issued (outside the image or past
+    // the last channel: the image's first element) and its value selected. All of the thread's
+    // loads first, then the LDS stores: the loads stay in flight together.
+    const T* An = A + (long)n * p.C * p.Hi * p.Wi;
+    T v[ITERS];
+    bool in[ITERS];
+#pragma unroll
+    for(int it = 0; it < ITERS; ++it)
     {
+        const int i = tid + it * THREADS;
         const int col = i % HW;
         const int rest = i / HW;
         const int row = rest % HH;
-        const int kc = rest / HH;
-        const int c = c0 + kc;
+        const int c = c0 + rest / HH;
         const int iy = iy0 + row;
         const int ix = ix0 + col;
-        float v = 0.0f;
-        if(c < p.C && iy >= 0 && iy < p.Hi && ix >= 0 && ix < p.Wi)
-        {
-            v = valu_to_f32(A[((static_cast<long>(n) * p.C + c) * p.Hi + iy) * p.Wi + ix]);
-        }
-        tile[kc][row][col] = v;
+        in[it] = (c < p.C) & dwIn(iy, p.Hi) & dwIn(ix, p.Wi);
+        v[it] = An[in[it] ? ((I)c * p.Hi + iy) * p.Wi + ix : 0];
     }
-    __syncthreads();
+#pragma unroll
+    for(int it = 0; it < ITERS; ++it)
+    {
+        const int i = tid + it * THREADS;
+        if(TOTAL % THREADS == 0 || it < ITERS - 1 || i < TOTAL)
+        {
+            const int col = i % HW;
+            const int rest = i / HW;
+            tile[rest / HH][rest % HH][col] = in[it] ? valu_to_f32(v[it]) : 0.0f;
+        }
+    }
+    dwLdsBarrier();
 
     const int tx = tid % TX;
     const int ty = (tid / TX) % TY;
@@ -878,6 +1088,7 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
             }
         }
     }
+    T* Dn = D + (long)n * p.C * p.Ho * p.Wo;
 #pragma unroll
     for(int r = 0; r < RH; ++r)
     {
@@ -886,7 +1097,7 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
         {
             continue;
         }
-        T* out = D + ((static_cast<long>(n) * p.C + c) * p.Ho + oy) * p.Wo;
+        T* out = Dn + ((I)c * p.Ho + oy) * p.Wo;
 #pragma unroll
         for(int j = 0; j < RW; ++j)
         {
@@ -897,6 +1108,20 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
             }
         }
     }
+}
+
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
+__device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
+                                         const T* __restrict__ Wt,
+                                         T* __restrict__ D,
+                                         ValuParams p)
+{
+    static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
+    __shared__ float tile[BK][BH + KH - 1][BW + KW]; // a pad column: HW + 1
+    if(dwImagesFit32(p))
+        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
+    else
+        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
 }
 
 // ---- v5 — backward data as a gather; any stride, dilation and padding ----
@@ -1014,7 +1239,7 @@ __device__ inline void v6_phase_block_nhwc(const T* __restrict__ A,
         sW[tap][cc]
             = ch < p.C ? valu_to_f32(Wt[(long)ch * KH * KW + dwTap2(ky, kx, KH, KW)]) : 0.0f;
     }
-    __syncthreads();
+    dwLdsBarrier();
     const int qh = (p.Ho - 1 + p.ph) / S + 1, qw = (p.Wo - 1 + p.pw) / S + 1;
     const int cv = tid % CVB, tp = tid / CVB;
     const int c0 = cb + cv * VEC;
