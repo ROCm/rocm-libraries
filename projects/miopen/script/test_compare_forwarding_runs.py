@@ -28,6 +28,7 @@ needed:
 import contextlib
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -430,6 +431,25 @@ class ComparatorTest(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertNotIn("did not occur", out)
 
+    def test_a_required_line_and_an_optional_line_for_one_test_each_apply(self):
+        # The required line pins the devices where the gap does not depend on the build;
+        # the optional line leaves the others loose.
+        listing = "\n".join((KNOWN_LINE, KNOWN_LINE.replace("gfx942", "all,optional")))
+        cases = (
+            ("gfx942", SERVED, DECLINED, 0),
+            ("gfx942", DECLINED, DECLINED, 1),
+            ("gfx90a", SERVED, DECLINED, 0),
+            ("gfx90a", DECLINED, DECLINED, 0),
+        )
+        for device, disabled, enabled, expected in cases:
+            with self.subTest(device=device, diverges=disabled is SERVED):
+                rc, _, err = self.compare(
+                    suite(disabled, device=device),
+                    suite(enabled, device=device),
+                    known=listing,
+                )
+                self.assertEqual(rc, expected, err)
+
     def test_a_run_with_a_tolerated_and_an_unoccurred_optional_line_reports_both(self):
         listing = "\n".join(
             (
@@ -498,6 +518,39 @@ class ComparatorTest(unittest.TestCase):
         )
         self.assertEqual(rc, 1)
         self.assertIn("cannot be shown to be current", err)
+
+
+GTEST_DIR = Path(__file__).resolve().parents[1] / "test" / "gtest"
+
+
+@unittest.skipUnless(GTEST_DIR.is_dir(), "the gtest sources are not beside the scripts")
+class CommittedListTest(unittest.TestCase):
+    """The list that ships, not a fixture: nothing else reads it before a GPU parity run."""
+
+    def test_every_line_parses(self):
+        known = cmp.load_known_divergences(
+            GTEST_DIR / "known_forwarding_divergences.txt"
+        )
+        self.assertTrue(known)
+
+    def test_every_line_names_a_test_that_exists(self):
+        """A renamed or misspelled test leaves its line matching nothing, silently."""
+        sources = "".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in GTEST_DIR.glob("*.cpp")
+        )
+        known = cmp.load_known_divergences(
+            GTEST_DIR / "known_forwarding_divergences.txt"
+        )
+        for entry in known:
+            suite_name, test_name = entry.name.split(".", 1)
+            declared = re.search(
+                r"\bTEST(?:_F|_P)?\(\s*{}\s*,\s*{}\s*\)".format(
+                    re.escape(suite_name), re.escape(test_name)
+                ),
+                sources,
+            )
+            self.assertTrue(declared, entry.name)
 
 
 if __name__ == "__main__":

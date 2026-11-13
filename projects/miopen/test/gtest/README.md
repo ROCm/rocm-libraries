@@ -83,9 +83,12 @@ Why it is set up this way:
   Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
   The per-architecture entries use the same label list as the parity entries, so an architecture
   gets them only while it has an enabled suite.
-  `check_wrapper_registration.py` fails CI when an entry is missing or mislabelled, in the build
-  tree and the packaged list, comparing against the labels the shared parser gives for
-  `test_categories.yaml`; `test_check_wrapper_registration` covers the check itself.
+  `check_wrapper_registration.py` fails CI when an entry is missing, mislabelled, unexpected or
+  added twice, in the build tree and the packaged list. It compares against the labels of the
+  architectures with an enabled suite, so a label whose suites are all `DISABLED` is not
+  checked. It needs the bare parity entry, so it runs only on a `MIOPEN_TEST_DISCRETE=OFF`
+  configure (a build tree also needs a GPU or a `MIOPEN_TEST_GFX*` option).
+  `test_check_wrapper_registration` covers the check itself.
 - **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
   replay a filter that matches nothing, and the comparison rejects two empty runs.
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
@@ -126,8 +129,9 @@ no GPU and is registered whenever the flag is on. The packaged copy leaves out
 `--public-header`, which compares two source files that the build-tree entry already checks.
 
 `test_forwarding_parity_scripts` tests the harness scripts themselves. It needs no GPU or
-build output, so it carries only the tier labels. It uses `unittest` rather than `pytest`,
-because nothing installs `pytest` on a machine that builds MIOpen.
+build output, so it carries only the tier labels. The component CI runs it in its
+configure-only wrapper-on tree. It uses `unittest` rather than `pytest`, because nothing
+installs `pytest` on a machine that builds MIOpen.
 
 Two cache variables tune the harness:
 
@@ -177,6 +181,13 @@ two replays agree it is not an error, because the gap is not open on that build.
 names each optional line that did not occur, with the outcome both replays reported, and the
 final line ends with the count, so a log never hides which of the two happened. Use it only when
 the reason is a build option; a gap that depends on the device alone is listed by device.
+
+One test can have several lines, each checked on its own devices. List the devices where the gap
+does not depend on the build without `optional`, so it fails if it closes, and add an
+`all,optional` line for the rest. `GPU_HipdnnShimConvBiasActiv2d_FP16` is listed that way: a
+Winograd solver serves it on gfx942, gfx950 and gfx1200 with no CK plugin, but on gfx1151 and
+gfx110x only a CK solver does. `test_compare_forwarding_runs` also checks that every line names
+a test that exists.
 
 To add one, run the harness, copy the failing line's test name, the device it ran on, and both
 outcomes into the file, and write down the reason. The list's own rules are covered by
