@@ -3485,7 +3485,8 @@ class KernelWriterAssembly(KernelWriter):
     linear search:
     SizesFree/SizesSum = header, NumWG0 = tiles, AccumTiles = inclusive
     prefix, LoopCounter (sgprChunk) = gemm index + 1. Workgroups past the last
-    tile resolve to the last gemm, as in the linear search.
+    tile end here (see groupedSurplusEarlyExit), otherwise they resolve to the
+    last gemm, as in the linear search.
     """
     module = Module("GroupedGemm wave search")
     sgprBase  = tmpSgpr.idx
@@ -3581,12 +3582,16 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddU32(dst=sgpr(sgprChunk), src0=sgpr(sgprChunk), src1=64 * U))
     module.add(SBranch(labelName=labelLoop.getLabelName()))
 
+    surplusExit = self.groupedSurplusEarlyExit(kernel)
     for u in range(U):
       hdr = vHdr + 4 * u
       module.add(labelLast[u])
-      module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprNumsOfGemm), src1=1 + 64 * u))
-      module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprLane), src1=sgpr(sgprChunk), comment="past the last tile: last gemm"))
-      module.add(SBranch(labelName=labelSelect[u].getLabelName()))
+      if surplusExit:
+        module.add(SEndpgm(comment="past the last tile of every gemm: no work"))
+      else:
+        module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprNumsOfGemm), src1=1 + 64 * u))
+        module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprLane), src1=sgpr(sgprChunk), comment="past the last tile: last gemm"))
+        module.add(SBranch(labelName=labelSelect[u].getLabelName()))
       module.add(labelHit[u])
       module.add(SFf1B32(dst=sgpr(sgprScr), src=sgpr(sgprCmp + 1), comment="ff1(cmp_hi)"))
       module.add(SAddU32(dst=sgpr(sgprScr), src0=sgpr(sgprScr), src1=32))
@@ -3604,6 +3609,28 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SBranch(labelName=labelFound.getLabelName()))
 
     self.vgprPool.checkIn(vHdr)
+    return module
+
+  def groupedSurplusEarlyExit(self, kernel):
+    """Whether a grouped workgroup past the last gemm's tiles may end as soon as the
+    search finds no gemm. The grid is sized for the worst case, so such workgroups are
+    common; without this they load the last gemm's record and set it up before exiting
+    in remapWgSerial. Kernels whose workgroups wait on each other must keep them."""
+    if isPersistent(kernel) or clusterEnabled(kernel["ClusterDim"]):
+      return False
+    if kernel["GlobalSplitU"] != 0 and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel"
+                                        or kernel["AdaptiveGemmGSUA"] == 1):
+      return False
+    return True
+
+  def groupedSurplusExit(self, sgprTotalTiles, comment):
+    """End the workgroup if WorkGroup0 is past sgprTotalTiles, the tiles of every gemm."""
+    module = Module("groupedSurplusExit")
+    keepLabel = Label(self.labels.getNameInc("GG_HasTile"), "")
+    module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(sgprTotalTiles), comment="wg < tiles of every gemm?"))
+    module.add(SCBranchSCC1(labelName=keepLabel.getLabelName()))
+    module.add(SEndpgm(comment=comment))
+    module.add(keepLabel)
     return module
 
   def defineAndResources(self, kernel, tPA, tPB, tPM):
@@ -4214,6 +4241,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprGSU)))
         module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
+        if self.groupedSurplusEarlyExit(kernel):
+          module.add(self.groupedSurplusExit(tmpSgprAccumTiles, "past the last tile of every gemm: no work"))
 
         # gemmIndex found
         tmpSgprWgLeft = tmpSgpr.idx
