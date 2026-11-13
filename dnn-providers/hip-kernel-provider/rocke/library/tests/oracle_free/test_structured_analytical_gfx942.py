@@ -47,6 +47,7 @@ from ._structured_analytical import (
 from ._structured_shapes import Observation, encode_bits
 from ._structured_subject import (
     ResolvedDenseSubject,
+    launched_code_object,
     resolve_dense_subject,
     run_dense_case,
 )
@@ -111,35 +112,19 @@ def _not_rejected(
     )
 
 
-_CODE_OBJECTS: dict[str, dict[str, str]] = {}
-
-
 def _code_object(subject: ResolvedDenseSubject) -> dict[str, str]:
-    """The loaded compiler and the SHA-256 of the HSACO the launch ran.
-
-    ``launch_attention_dense`` caches its compiled kernel without exposing it,
-    so the same compile is repeated here; the digest names the epilogue
-    artifact (A-F) the records compare against. Evidence only."""
-    from kernels.gfx942.attention_dense import build_attention_dense
-    from rocke.helpers.compile import compile_kernel
+    """The loaded compiler and the SHA-256 of the HSACO the launch ran, read
+    from the launcher that ran it; the digest names the epilogue artifact (A-F)
+    the records compare against. Evidence only."""
     from rocke.runtime.comgr import loaded_compiler_info
 
-    spec = subject.tuning_spec.kernel_spec
-    key = spec.kernel_name()
-    if key not in _CODE_OBJECTS:
-        artifact = compile_kernel(
-            build_attention_dense(spec, arch="gfx942"),
-            arch="gfx942",
-            backend="python",
-            capture_ir_text=False,
-        )
-        compiler = loaded_compiler_info()
-        _CODE_OBJECTS[key] = {
-            "kernel_name": artifact.kernel_name,
-            "compiler": "unknown" if compiler is None else compiler.describe(),
-            "hsaco_sha256": hashlib.sha256(artifact.hsaco).hexdigest(),
-        }
-    return _CODE_OBJECTS[key]
+    kernel_name, hsaco = launched_code_object(subject)
+    compiler = loaded_compiler_info()
+    return {
+        "kernel_name": kernel_name,
+        "compiler": "unknown" if compiler is None else compiler.describe(),
+        "hsaco_sha256": hashlib.sha256(hsaco).hexdigest(),
+    }
 
 
 def _capture_records(
@@ -164,8 +149,9 @@ def _capture_records(
 def test_structured_logits(case: StructuredCase) -> None:
     """Gate a ratified case: deterministic, and every coordinate in Tier B.
 
-    Mutation self-checks and record capture run before the gate, so an
-    unratified case still records what ratification needs."""
+    Mutation self-checks and record capture run before any assertion, so a
+    mutation that goes unrejected and an unratified case both still record
+    what the offline audit and ratification need."""
     arch = current_device_arch_in(
         ("gfx942",), subject="the gfx942 dense structured-logit gate"
     )
@@ -175,6 +161,7 @@ def test_structured_logits(case: StructuredCase) -> None:
     control = analyze_structured_policy(case, observation)
     results: dict[str, StructuredResult] = {"none": control}
     separations = {}
+    unrejected: list[str] = []
 
     # Analyzer-side mutations on the same real output (sampled rows suffice to
     # reject); cells proven inseparable on the CPU are owned elsewhere.
@@ -184,7 +171,8 @@ def test_structured_logits(case: StructuredCase) -> None:
         mutated = analyze_structured_policy(
             case, observation, mutation=mutation, rows=STRUCTURED_SEPARATION_ROWS
         )
-        assert mutated.violations, _not_rejected(case, mutation.value, mutated, control)
+        if not mutated.violations:
+            unrejected.append(_not_rejected(case, mutation.value, mutated, control))
         results[mutation.value] = mutated
         separations[mutation.value] = mutation_separation(case, mutation)
 
@@ -194,8 +182,9 @@ def test_structured_logits(case: StructuredCase) -> None:
             case, subject, (_WRONG_SCALE_EXPOSURE,), scale_override=_WRONG_SCALE
         )
         mutated = analyze_structured_policy(case, wrong, require_complete=False)
-        what = f"the kernel launched with scale={_WRONG_SCALE}"
-        assert mutated.violations, _not_rejected(case, what, mutated, control)
+        if not mutated.violations:
+            what = f"the kernel launched with scale={_WRONG_SCALE}"
+            unrejected.append(_not_rejected(case, what, mutated, control))
         results["subject_scale_override"] = mutated
         separations["subject_scale_override"] = mutation_separation(
             case, StructuredMutation.OMIT_SQRT_D
@@ -219,6 +208,7 @@ def test_structured_logits(case: StructuredCase) -> None:
         observation,
     )
 
+    assert not unrejected, "\n".join(unrejected)
     summary = f"deterministic={deterministic}; {format_structured_result(control)}"
     require_structured_calibration(
         arch, subject.candidate_name, case, subject.fingerprint, detail=summary

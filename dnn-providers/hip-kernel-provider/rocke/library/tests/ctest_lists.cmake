@@ -25,9 +25,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Oracle-free structured-logit check of the shipped gfx942 dense kernel
 # (tests/oracle_free/README_structured.md). Its own entries because of its
 # cost: the prediction is exact rational arithmetic over every output
-# coordinate. The launches take about ten seconds per case on gfx942, and the
-# CPU contracts, which prove the prediction over the eight cases, about three
-# minutes. Both are standard-tier (ROCKE_ENGINE_test_categories_external.yaml)
+# coordinate, so both the launches and the CPU contracts, which prove the
+# prediction over the eight cases, are too slow for the quick tier's budget.
+# Both are standard-tier (ROCKE_ENGINE_test_categories_external.yaml)
 # and bake in the standard label so `ctest -L standard` finds them without
 # that file's labelling; the quick tier keeps its budget.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

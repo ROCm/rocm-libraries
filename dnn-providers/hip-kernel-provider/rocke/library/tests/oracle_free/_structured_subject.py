@@ -6,10 +6,12 @@ dense kernel.
 
 Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
 device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
-:func:`launch_attention_dense`, a pointer-level compile, cache and launch
-path kept in this module. Dispatch, the runner and the
-HIP runtime are imported only inside the functions that use them, so CPU
-collection and the analytical contracts need neither a GPU nor ROCm.
+the kernel's public ``run_attention_dense_torch``. That entry accepts device
+buffers whenever the spec has no sinks, no LSE and no KV split, which is the
+scope the adapter admits, so the check launches what the shipped entry
+launches. Dispatch, the runner and the HIP runtime are imported only inside the
+functions that use them, so CPU collection and the analytical contracts need
+neither a GPU nor ROCm.
 
 It accepts only the two four-head quick shapes the check's predictions are
 derived for.
@@ -30,97 +32,6 @@ _POINTER_ALIGNMENT = 16
 # Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
 # invalid instead of passing as a stale zero.
 _NAN_BITS = {"fp16": 0x7E00, "bf16": 0x7FC0}
-
-
-def launch_attention_dense(
-    *,
-    spec,
-    q,
-    k,
-    v,
-    out,
-    scale: float,
-    stream: int = 0,
-    arch: str = "gfx942",
-    sinks=None,
-    lse=None,
-    segment_workspace=None,
-) -> None:
-    """Torch-free compile (cached) + launch of the gfx942 dense prefill kernel.
-
-    A test-local pointer-level launcher: the kernel module exports only the
-    Torch entry, and this suite is Torch-free. ``q``/``k``/``v``/``out`` (and
-    ``sinks``, ``lse`` and the ``segment_workspace`` values) are anything the
-    launcher packs as a device pointer: an ``int`` address, a
-    :class:`rocke.runtime.DeviceMem`, or an object exposing ``data_ptr()``. The
-    layout contract is the torch entry's; this layer checks only spec legality
-    and that each spec-required buffer is present, so shape, dtype, placement
-    and aliasing are the caller's to guarantee.
-
-    ``spec.kv_segments > 1`` needs ``segment_workspace``, a mapping with one FP32
-    buffer per ``SEGMENT_PARAMS`` name; the caller then runs
-    ``launch_segment_combine``. The launch is fenced (``LaunchConfig`` default),
-    so ``out`` is complete on return."""
-    from kernels.gfx942 import attention_dense as kernel
-    from rocke.helpers.compile import compile_kernel
-    from rocke.runtime import KernelLauncher, LaunchConfig
-
-    spec = kernel._as_gfx942_spec(spec)
-    ok, why = kernel.supports_attention_dense(spec, arch=arch)
-    if not ok:
-        raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
-    for name, value, required in (
-        ("sinks", sinks, spec.use_sinks),
-        ("lse", lse, spec.emit_lse),
-        ("segment_workspace", segment_workspace, spec.kv_segments > 1),
-    ):
-        if required and value is None:
-            raise ValueError(f"the spec requires {name}, got None")
-        if not required and value is not None:
-            raise ValueError(f"{name} provided but the spec does not use it")
-    if segment_workspace is not None and set(segment_workspace) != set(
-        kernel.SEGMENT_PARAMS
-    ):
-        raise ValueError(
-            f"segment_workspace keys {sorted(segment_workspace)} != "
-            f"{sorted(kernel.SEGMENT_PARAMS)}"
-        )
-
-    key = kernel.attention_dense_cache_key(spec, arch=arch)
-    launcher = kernel._DENSE_LAUNCHER_CACHE.get(key)
-    if launcher is None:
-        art = compile_kernel(
-            kernel.build_attention_dense(spec, arch=arch),
-            arch=arch,
-            backend="python",
-            capture_ir_text=False,
-        )
-        assert art.kernel_name == spec.kernel_name(), (
-            art.kernel_name,
-            spec.kernel_name(),
-        )
-        launcher = KernelLauncher(
-            hsaco=art.hsaco,
-            kernel_name=art.kernel_name,
-            signature=kernel.attention_dense_signature(spec),
-        )
-        kernel._DENSE_LAUNCHER_CACHE[key] = launcher
-    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
-    vals.update(kernel.attention_dense_runtime_args(spec))
-    if spec.use_sinks:
-        vals["sink_ptr"] = sinks
-    if spec.emit_lse:
-        vals["lse_ptr"] = lse
-    if segment_workspace is not None:
-        vals.update(segment_workspace)
-    launcher(
-        vals,
-        config=LaunchConfig(
-            grid=kernel.attention_dense_grid(spec),
-            block=kernel.attention_dense_block(spec),
-            stream=int(stream),
-        ),
-    )
 
 
 class DenseCase(Protocol):
@@ -237,8 +148,9 @@ def _verify_resolved_spec(case: DenseCase, tuning_spec) -> SpecFingerprint:
     the request-shape echo the host buffers are sized from, the buffers the
     adapter does not supply (sinks, LSE), and scope the fingerprint does not
     record. Every other fingerprint field (persistence, runtime shape, tile, fast
-    exp2) is left to ``require_calibration``, so a drift there still launches,
-    writes calibration records, and fails with the re-ratification remedy."""
+    exp2) is left to ``require_structured_calibration``, so a drift there still
+    launches, writes calibration records, and fails with the re-ratification
+    remedy."""
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
     if tuning_spec.arch != "gfx942":
@@ -304,8 +216,11 @@ def _verify_resolved_spec(case: DenseCase, tuning_spec) -> SpecFingerprint:
 
 
 def _resolve_tuning_spec(case: DenseCase):
-    """Resolve ``gfx942_dense`` through the public attention tuning factory."""
-    from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+    """Resolve ``gfx942_dense`` at its default configuration: the spec dispatch
+    ships for the request, with no knob pinned. A retune that moves a
+    fingerprint field (onto the persistent grid, say) then reaches the
+    calibration gate instead of being overridden here."""
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     shape = _shape(case)
     request = AttentionRequest(
@@ -321,7 +236,7 @@ def _resolve_tuning_spec(case: DenseCase):
         sliding_window=case.window if case.mask == "window" else 0,
         dtype=case.dtype,
     )
-    tuning_spec = tuning_spec_with_knobs(request, "gfx942_dense", {"persistent": False})
+    tuning_spec = attention_tuning_spec(request, "gfx942_dense")
     _verify_resolved_spec(case, tuning_spec)
     return tuning_spec
 
@@ -356,6 +271,7 @@ def run_dense_case(
 
     ``scale_override`` replaces the softmax scale ``1/sqrt(D)``; it exists only
     for the subject-side wrong-scale mutation, whose output must be rejected."""
+    from kernels.gfx942 import attention_dense as runner
     from rocke.runtime import DeviceMem, Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
 
@@ -387,7 +303,7 @@ def run_dense_case(
     for name, array in host.items():
         runtime.memcpy_h2d(device[name].ptr(), as_u8_buffer(array), array.nbytes)
     # Fenced launch (LaunchConfig default): the output is complete on return.
-    launch_attention_dense(
+    runner.run_attention_dense_torch(
         spec=tuning_spec.kernel_spec,
         q=device["q"],
         k=device["k"],
@@ -402,3 +318,19 @@ def run_dense_case(
     out = host["out"]
     runtime.memcpy_d2h(as_u8_buffer(out), device["out"].ptr(), out.nbytes)
     return out
+
+
+def launched_code_object(subject: ResolvedDenseSubject) -> tuple[str, bytes]:
+    """The kernel name and HSACO of the launcher that ran ``subject``.
+
+    ``run_attention_dense_torch`` keeps its compiled launcher in the kernel
+    module's cache and exposes no accessor, so this reads that cache through
+    the production key function, as the pinned SDPA lane does. Raises
+    ``KeyError`` when the subject has not been launched in this process."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942 import attention_dense as runner
+
+    launcher = runner._DENSE_LAUNCHER_CACHE[
+        attention_dense_cache_key(subject.tuning_spec.kernel_spec, arch="gfx942")
+    ]
+    return str(launcher.kernel_name), bytes(launcher._hsaco)

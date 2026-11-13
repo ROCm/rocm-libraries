@@ -9,8 +9,9 @@ propagating closed intervals of FP32 values through each step of the path, so
 it encloses every reachable state rather than one chosen realization.
 
 Everything here is exact: values are :class:`fractions.Fraction`, rounding to
-FP32 is computed from the exact rational, and the only transcendental quantity,
-``2**x``, is enclosed by a certified :mod:`decimal` bracket. There is no
+FP32 is computed from the exact rational, and the transcendental quantities
+(``2**x`` behind ``v_exp_f32``, ``e**c`` behind the targets) are enclosed by
+series brackets with explicit tail bounds, in rational arithmetic. There is no
 attention implementation in this module; its inputs are closed-form scalars.
 
 Soundness rests on monotonicity. On nonnegative arguments, round-to-nearest,
@@ -28,7 +29,6 @@ from __future__ import annotations
 import itertools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields
-from decimal import Decimal, localcontext
 from enum import Enum
 from fractions import Fraction
 from functools import cache
@@ -82,6 +82,13 @@ def floor_log2(value: Fraction) -> int:
 
 def f32_quantum(value: Fraction) -> Fraction:
     """Spacing of the FP32 grid at ``|value|``, measured upward.
+
+    ``value`` is any real (rational) number, not only an FP32 value: for
+    ``r > 0`` the result is ``2**(max(floor(log2 r), -126) - 23)``, the
+    distance between consecutive FP32 values in the cell ``[2**e, 2**(e+1))``
+    that holds ``r``, with the subnormal range counted in the first normal
+    cell; for ``r = 0`` it is ``2**-149``. Equivalently it is
+    ``next_up(f) - f`` for ``f = round_f32(r, "rd")``.
 
     For a power of two this is the spacing above it (twice the spacing below),
     which is the wider of the two conventions for "one ULP of ``value``"."""
@@ -320,9 +327,16 @@ class EpilogueArtifact:
     ``v_fma_mix{lo,hi}_f16``, single rounding; the other elements are an FP32
     multiply then ``v_cvt_f16_f32``. Neither BF16 code object has a mixed
     instruction. Each code object is named by the SHA-256 of the HSACO that
-    ``launch_attention_dense`` compiles, so a record can say which one ran."""
+    ``run_attention_dense_torch`` compiles, so a record can say which one ran.
+
+    The digest covers the whole code object, so it names one kernel revision
+    under one compiler: any change to the dense builder's IR gives a new
+    digest, which matches no artifact until it is recorded again.
+    ``llvm_major`` lets :func:`epilogue_artifacts_for_llvm` tell that case
+    (a recorded compiler, an unrecorded digest) from an unrecorded compiler."""
 
     compiler: str
+    llvm_major: int
     code_objects: tuple[tuple[str, str], ...]  # (dtype, HSACO sha256)
     single_lanes: frozenset[int]
     evidence: str
@@ -338,6 +352,7 @@ STRUCTURED_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType
                 "ROCm 7.13.0 COMGR, AMD clang 23.0.0git ROCm/llvm-project "
                 "43215c73116c407735c85a180d174f718798c328"
             ),
+            llvm_major=23,
             code_objects=(
                 (
                     "fp16",
@@ -356,6 +371,7 @@ STRUCTURED_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType
                 "ROCm 7.1.0 COMGR, AMD LLVM 20.0.0git ROCm/llvm-project "
                 "1b0eada6b0ee93e2e694c8c146d23fca90bc11c5"
             ),
+            llvm_major=20,
             code_objects=(
                 (
                     "fp16",
@@ -381,20 +397,104 @@ def epilogue_artifact_for(dtype: str, code_object_sha256: str) -> str | None:
     return None
 
 
+def epilogue_artifacts_for_llvm(llvm_major: int) -> tuple[str, ...]:
+    """The named artifacts recorded under a compiler of this LLVM major. A
+    code object of such a compiler that :func:`epilogue_artifact_for` does not
+    name means the recorded digests are out of date for it."""
+    return tuple(
+        name
+        for name, artifact in STRUCTURED_EPILOGUE_ARTIFACTS.items()
+        if artifact.llvm_major == llvm_major
+    )
+
+
+# ---------------------------------------------------------------------------
+# Certified enclosures of ``e**x`` and ``ln 2``.
+#
+# Both transcendental quantities of the check are enclosed by a partial sum
+# of a series plus an explicit bound of its tail. The sums are evaluated in
+# fixed point with directed rounding, so every rounding moves an endpoint
+# outward and no floating-point or decimal library function is trusted. A
+# number of correct decimal digits is not an error bound; an enclosure is.
+# ---------------------------------------------------------------------------
+
+# Fraction bits of the fixed-point series, and the relative width every
+# enclosure must stay under.
+_SERIES_BITS = 320
+_ENCLOSURE_BITS = 192
+
+
+def _ceil_div(numerator: int, denominator: int) -> int:
+    return -((-numerator) // denominator)
+
+
+def _exp_enclosure(exponent: Fraction) -> tuple[Fraction, Fraction]:
+    """Rational ``(lo, hi)`` with ``lo <= e**x <= hi`` for a rational ``x``.
+
+    For ``x >= 0`` and ``N + 1 > x`` the partial sum
+    ``S_N = sum_{n < N} x**n / n!`` satisfies
+    ``0 < e**x - S_N <= (x**N / N!) (N + 1) / (N + 1 - x)``: the tail is
+    bounded by a geometric series of ratio ``x / (N + 1)``. Terms are rounded
+    down for the lower end and up for the upper end. ``e**-x`` is the
+    reciprocal interval. The relative width is at most
+    ``2**-_ENCLOSURE_BITS``; that postcondition is checked on return."""
+    exponent = Fraction(exponent)
+    if exponent < 0:
+        low, high = _exp_enclosure(-exponent)
+        return 1 / high, 1 / low
+    one = 1 << _SERIES_BITS
+    scaled = exponent * one
+    x_low = scaled.numerator // scaled.denominator
+    x_high = _ceil_div(scaled.numerator, scaled.denominator)
+    term_low = term_high = one  # x**0 / 0!
+    total_low = total_high = 0
+    count = 0  # terms summed so far; the term bounds are those of n = count
+    while True:
+        remaining = (count + 1) * one - x_high
+        if remaining > 0:
+            tail = _ceil_div(term_high * (count + 1) * one, remaining)
+            if tail << _ENCLOSURE_BITS + 2 <= total_low:
+                break
+        total_low += term_low
+        total_high += term_high
+        count += 1
+        term_low = term_low * x_low // (count * one)
+        term_high = _ceil_div(term_high * x_high, count * one)
+    low, high = Fraction(total_low, one), Fraction(total_high + tail, one)
+    if (high - low) * (1 << _ENCLOSURE_BITS) > low:
+        raise ArithmeticError(f"e**{float(exponent)!r} is not enclosed tightly enough")
+    return low, high
+
+
+def _ln2_enclosure() -> tuple[Fraction, Fraction]:
+    """Rational ``(lo, hi)`` with ``lo <= ln 2 <= hi``, from
+    ``ln 2 = sum_{n >= 1} 1 / (n 2**n)``, whose tail after ``N`` terms is
+    below ``1 / ((N + 1) 2**N)``."""
+    one = 1 << _SERIES_BITS
+    low = high = 0
+    for n in range(1, _SERIES_BITS + 1):
+        low += one // (n << n)
+        high += _ceil_div(one, n << n)
+    high += _ceil_div(one, (_SERIES_BITS + 1) << _SERIES_BITS)
+    return Fraction(low, one), Fraction(high, one)
+
+
+_LN2 = _ln2_enclosure()
+
+
 # ---------------------------------------------------------------------------
 # v_exp_f32 candidate sets (assumption A-E).
 #
 # The documented accuracy of the hardware base-2 exponential is "1 ULP" for
 # FP32 (LLVM AMDGPU usage notes, ``llvm.exp2``). The convention for "one ULP"
 # is not stated, so A-E takes the wider one: |E(x) - 2**x| <= f32_quantum(2**x),
-# the spacing above 2**x. At a power of two this admits four values, because
-# the spacing below a power of two is half the spacing above it.
+# the spacing of the FP32 cell that holds the real number 2**x, measured
+# upward. At a power of two this admits four values, because the spacing
+# below a power of two is half the spacing above it.
 # ---------------------------------------------------------------------------
 
 EXP2_ASSUMPTION = "A-E v1: |E(x) - 2**x| <= f32_quantum(2**x)"
 
-_DECIMAL_DIGITS = 110
-_DECIMAL_RELATIVE_ERROR = Fraction(1, 10**100)
 # Below this argument 2**x is far under the smallest subnormal, and the
 # candidate set is decided by the subnormal spacing alone.
 _EXP2_UNDERFLOW_ARGUMENT = Fraction(-300)
@@ -404,9 +504,10 @@ _EXP2_UNDERFLOW_ENCLOSURE = (Fraction(1, 1 << 1000), Fraction(1, 1 << 200))
 def _exp2_enclosure(argument: Fraction) -> tuple[Fraction, Fraction]:
     """Rational bracket ``[lo, hi]`` containing ``2**argument``.
 
-    Exact for an integer argument. Otherwise ``Decimal.ln`` and ``Decimal.exp``
-    are correctly rounded at 110 digits, so the evaluated value is within a
-    relative ``1e-100`` of ``2**argument`` for ``|argument| <= 300``."""
+    Exact for an integer argument. Otherwise ``2**x = 2**k e**(f ln 2)`` with
+    ``k = floor(x)`` and ``0 < f < 1``, and both ``ln 2`` and the exponential
+    are enclosed by their series, so the bracket is certified: its relative
+    width is below ``2**-190`` and no library function is trusted."""
     # Range checks first: large FP32 magnitudes are integers, and 2**(-1e30)
     # must not be formed exactly.
     if argument < _EXP2_UNDERFLOW_ARGUMENT:
@@ -416,18 +517,12 @@ def _exp2_enclosure(argument: Fraction) -> tuple[Fraction, Fraction]:
     if argument.denominator == 1:
         exact = Fraction(2) ** argument.numerator
         return exact, exact
-    with localcontext() as context:
-        context.prec = _DECIMAL_DIGITS
-        value = Fraction(
-            (
-                Decimal(argument.numerator)
-                / Decimal(argument.denominator)
-                * Decimal(2).ln()
-            ).exp()
-        )
+    whole = argument.numerator // argument.denominator
+    fraction = argument - whole
+    scale = Fraction(2) ** whole
     return (
-        value * (1 - _DECIMAL_RELATIVE_ERROR),
-        value * (1 + _DECIMAL_RELATIVE_ERROR),
+        _exp_enclosure(fraction * _LN2[0])[0] * scale,
+        _exp_enclosure(fraction * _LN2[1])[1] * scale,
     )
 
 
@@ -504,10 +599,26 @@ class StructuredScopeError(ArithmeticError):
 # is correctly rounded. A-DIV names that premise on the range the denominator
 # is shown to reach on the quick matrix; outside it the enclosure is not
 # derived.
+#
+# The stored bits cannot show a wrong reciprocal (a neighbor of ``RN(1 / l)``
+# leaves Tier B nowhere: ``STRUCTURED_UNOBSERVED_VIOLATIONS``), so passing
+# launches are no evidence for A-DIV. Its evidence is a device evaluation of
+# the expansion itself. A program outside this repository ran the sequence on
+# every FP32 denominator on gfx942 and got ``RN(1 / l)`` each time; the ISA
+# contract requires a compiled quick kernel to hold exactly that sequence, in
+# the modes it was evaluated in. That settles A-DIV for the sequence and the
+# device; it stays a named assumption of the model.
 # ---------------------------------------------------------------------------
 
 DIV_ASSUMPTION = "A-DIV v1: FDIV(1, l) = RN(1 / l) for every FP32 l in [1/2, 2**9)"
 A_DIV_DOMAIN = (Fraction(1, 2), Fraction(1 << 9))  # closed below, open above
+# A structural zero does not need A-DIV. A coordinate that selects no legal key
+# has an accumulator of exactly +0, or, after a fully masked leading tile, a
+# residue of at most 2**(h - 149). It stores +0 for any reciprocal below this
+# bound, correctly rounded or not: 2**(3 - 149 + 11) = 2**-135 is under half
+# the smallest positive BF16 value, and BF16 is the only quick kernel with such
+# a tile (FP16 would allow 2**120).
+STRUCTURAL_ZERO_RECIPROCAL_BOUND = Fraction(1 << 11)
 
 
 def rcp_a_div(denominator: F32Interval) -> F32Interval:
@@ -588,13 +699,14 @@ def ordered_distance(first: tuple[int, int], second: tuple[int, int]) -> int:
 
 STRUCTURED_PERIOD = 64
 # The softmax scale ``1/sqrt(64)`` the subject adapter passes, and ``log2 e``
-# rounded once to FP32 from a 50-digit value. Both come from the definition of
-# attention, not from the kernel: a contract checks the kernel's constant
-# against this one, so a wrong kernel constant fails instead of being copied.
+# rounded once to FP32 from the ``ln 2`` enclosure (both ends of ``1 / ln 2``
+# round to the same value). Both come from the definition of attention, not
+# from the kernel: a contract checks the kernel's constant against this one,
+# so a wrong kernel constant fails instead of being copied.
 _SCALE_ARGUMENT = 1.0 / 8.0
-with localcontext() as _context:
-    _context.prec = 50
-    LOG2E_F32 = round_f32(Fraction(1 / Decimal(2).ln()), "rn")
+LOG2E_F32 = round_f32(1 / _LN2[1], "rn")
+if round_f32(1 / _LN2[0], "rn") != LOG2E_F32:
+    raise ArithmeticError("log2(e) is too close to an FP32 rounding boundary")
 SCORE_SCALE = round_f32(f32(_SCALE_ARGUMENT) * LOG2E_F32)
 # The kernel's masked score and initial row max (pinned by the IR contract).
 # Spec masking excludes the key; Tier B inside Tier A shows that -1e30 stores
@@ -1335,26 +1447,31 @@ def coordinate_class(
 class CertifiedTarget:
     """``q_T(y*)`` and what certifies it.
 
-    A rational target is rounded exactly and has no boundary record. An
-    irrational one carries the two rounding boundaries adjacent to its bits
-    (``lower_boundary`` is ``None`` at ``+0``, where only the upper one
-    applies) and ``margin``, the distance of the evaluated value to the nearer
-    of them, which exceeds ``required``."""
+    A rational target is rounded by exact rational comparison with the
+    rounding boundaries of the format (ties to even); it is in general not
+    representable, and it has no interval record. An irrational target
+    carries a rational interval ``[lower, upper]`` that contains ``y*``, the
+    two rounding boundaries adjacent to its bits (``lower_boundary`` is
+    ``None`` at ``+0``, where only the upper one applies) and ``margin``, the
+    positive distance from the interval to the nearer boundary: the whole
+    interval lies inside one rounding cell."""
 
     bits: int
     rational: bool
+    lower: Fraction | None = None
+    upper: Fraction | None = None
     lower_boundary: Fraction | None = None
     upper_boundary: Fraction | None = None
     margin: Fraction | None = None
-    required: Fraction | None = None
 
 
 def rounding_boundaries(bits: int, dtype: str) -> tuple[Fraction | None, Fraction]:
     """The two rounding boundaries adjacent to a nonnegative finite target
     value: the midpoints to its lower and upper neighbors. At a power of two
-    the upper one is twice as far as the lower one, which is why the two
-    boundaries, and not one ULP size, are what a target is certified against.
-    ``+0`` has no lower boundary among nonnegative values."""
+    above the smallest normal the upper one is twice as far as the lower one,
+    which is why the two boundaries, and not one ULP size, are what a target
+    is certified against. ``+0`` has no lower boundary among nonnegative
+    values."""
     center = target_value(target_rank(bits, dtype), dtype)
     below = (target_value(bits - 1, dtype) + center) / 2 if bits else None
     above = (target_value(target_rank(bits + 1, dtype), dtype) + center) / 2
@@ -1363,16 +1480,20 @@ def rounding_boundaries(bits: int, dtype: str) -> tuple[Fraction | None, Fractio
 
 @cache
 def certify_target(
-    dtype: str, exponent: int, item: CoordinateClass, digits: int = 50
+    dtype: str, exponent: int, item: CoordinateClass
 ) -> CertifiedTarget:
     """``q_T(2**h (m_c e^c + m_0) / (n_c e^c + n_0))``, certified.
 
-    Rational when ``c = 0`` or the coordinate's class mix is proportional to the
-    row's, and then rounded exactly. Otherwise irrational
-    (Lindemann-Weierstrass), so never on a rounding boundary: the
-    ``digits``-digit value must lie more than ``10**-(digits - 10)`` from each
-    boundary adjacent to its bits (``10**-40`` at 50 digits). Every target is at
-    most ``2**3``, so the evaluation error is orders below that margin."""
+    The value is rational when ``c = 0`` or the coordinate's class mix is
+    proportional to the row's (``m_c n_0 = m_0 n_c``); it is then rounded
+    exactly. Otherwise it is transcendental (Lindemann-Weierstrass: the
+    counts are integers, ``2**h`` and ``c`` are rational, and the map from
+    ``e^c`` is invertible), so it is on no rounding boundary. It is certified
+    by interval containment, not by a number of digits: ``e^c`` is enclosed
+    by :func:`_exp_enclosure`, the target is monotone in ``e^c``, and the
+    resulting rational interval must lie strictly between the two rounding
+    boundaries adjacent to its bits. A target whose interval reaches a
+    boundary raises; it is never guessed."""
     if item.is_zero:
         return CertifiedTarget(0, True)
     scale = Fraction(2) ** exponent
@@ -1381,29 +1502,25 @@ def certify_target(
         return CertifiedTarget(
             target_bits(exact.numerator, exact.denominator, dtype), True
         )
-    with localcontext() as context:
-        context.prec = digits
-        growth = (Decimal(item.logit.numerator) / Decimal(item.logit.denominator)).exp()
-        value = (
-            Fraction((item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0))
-            * scale
-        )
-    bits = target_bits(value.numerator, value.denominator, dtype)
+    ends = [
+        scale * (item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0)
+        for growth in _exp_enclosure(item.logit)
+    ]
+    lower, upper = min(ends), max(ends)
+    bits = target_bits(lower.numerator, lower.denominator, dtype)
     below, above = rounding_boundaries(bits, dtype)
-    margin = above - value if below is None else min(value - below, above - value)
-    required = Fraction(1, 10 ** (digits - 10))
-    if margin <= required:
+    if (below is not None and lower <= below) or upper >= above:
         raise ArithmeticError(
-            f"target {float(value)!r} is not certified at {digits} digits"
+            f"target in [{float(lower)!r}, {float(upper)!r}] is not certified: "
+            "its interval reaches a rounding boundary"
         )
-    return CertifiedTarget(bits, False, below, above, margin, required)
+    margin = above - upper if below is None else min(lower - below, above - upper)
+    return CertifiedTarget(bits, False, lower, upper, below, above, margin)
 
 
-def certified_target_bits(
-    dtype: str, exponent: int, item: CoordinateClass, digits: int = 50
-) -> int:
+def certified_target_bits(dtype: str, exponent: int, item: CoordinateClass) -> int:
     """The bits of :func:`certify_target`."""
-    return certify_target(dtype, exponent, item, digits).bits
+    return certify_target(dtype, exponent, item).bits
 
 
 def tier_a_bounds(
@@ -1489,10 +1606,12 @@ class StructuredViolation(str, Enum):
     DIV_HIGH = "a_div_high"
     # A-F: an FP16 store of the exact product truncated toward zero.
     F_TRUNCATED = "a_f_truncated"
-    # A-MODE: FP32 add, subtract and multiply rounded toward zero; or the
-    # FP32-to-target conversion (probability cast and epilogue) truncating.
-    MODE_RZ_ARITHMETIC = "a_mode_rz_arithmetic"
-    MODE_TRUNCATING_CAST = "a_mode_truncating_cast"
+    # A-MODE32: FP32 add, subtract and multiply rounded toward zero.
+    MODE32_RZ_ARITHMETIC = "a_mode32_rz_arithmetic"
+    # A-CVT-F16, A-CVT-BF16: the FP32-to-target conversion (probability cast
+    # and epilogue) truncating, in the FP16 and in the BF16 kernel.
+    CVT_F16_TRUNCATING = "a_cvt_f16_truncating"
+    CVT_BF16_TRUNCATING = "a_cvt_bf16_truncating"
 
 
 _EXP2_VIOLATION = {StructuredViolation.E_LOW: -2, StructuredViolation.E_HIGH: 2}
@@ -1502,11 +1621,17 @@ _MFMA_VIOLATION = {
 }
 _QK_VIOLATION = {StructuredViolation.QK_DOWN: -1, StructuredViolation.QK_UP: 1}
 _DIV_VIOLATION = {StructuredViolation.DIV_LOW: -1, StructuredViolation.DIV_HIGH: 1}
+# The truncating conversion of each target format.
+_CVT_VIOLATION = {
+    StructuredViolation.CVT_F16_TRUNCATING: "fp16",
+    StructuredViolation.CVT_BF16_TRUNCATING: "bf16",
+}
 
 
 def applicable_violations(case: StructuredCase) -> tuple[StructuredViolation, ...]:
     """The violations ``case`` can express: only the Walsh contraction has a
-    dense score atom, and only FP16 has the A-F epilogue."""
+    dense score atom, only FP16 has the A-F epilogue, and each kernel has the
+    conversion of its own target format."""
     return tuple(
         violation
         for violation in StructuredViolation
@@ -1517,6 +1642,7 @@ def applicable_violations(case: StructuredCase) -> tuple[StructuredViolation, ..
             violation is StructuredViolation.F_TRUNCATED
             and case.dtype not in _SINGLE_ROUNDING_DTYPES
         )
+        and _CVT_VIOLATION.get(violation, case.dtype) == case.dtype
     )
 
 
@@ -1630,12 +1756,12 @@ def _store_bits(
     """``q_T(RN32(o R))``, or under A-F for FP16 ``q_T(o R)`` when ``single``."""
     exact = Fraction(float(value)) * Fraction(float(reciprocal))
     fused = dtype in _SINGLE_ROUNDING_DTYPES
-    truncating = violation is StructuredViolation.MODE_TRUNCATING_CAST
+    truncating = _CVT_VIOLATION.get(violation) == dtype
     if fused and (single or violation is StructuredViolation.F_TRUNCATED):
         if truncating or violation is StructuredViolation.F_TRUNCATED:
             return _truncated_target_bits(exact, dtype)
         return _exact_target_bits(exact, dtype)
-    if violation is StructuredViolation.MODE_RZ_ARITHMETIC:
+    if violation is StructuredViolation.MODE32_RZ_ARITHMETIC:
         product = np.float32(float(round_f32(exact, "rz")))
     else:
         product = np.float32(value * reciprocal)
@@ -1667,7 +1793,7 @@ def _emulate_tiles(
     Without ``rng``: the documented lane order and ``E = RN(2**x)``. With
     ``rng``: a random summation tree per tile and an ``E`` candidate per call.
     ``violation`` replaces one primitive (:class:`StructuredViolation`)."""
-    toward_zero = violation is StructuredViolation.MODE_RZ_ARITHMETIC
+    toward_zero = violation is StructuredViolation.MODE32_RZ_ARITHMETIC
 
     def rounded(exact: Fraction) -> np.float32:
         return np.float32(float(round_f32(exact, "rz")))
@@ -1793,8 +1919,8 @@ def _emulate_path(
         tiles, reciprocal = _emulated_tiles(case, query, head, mutation, violation)
     else:
         tiles, reciprocal = _emulate_tiles(case, query, head, rng, mutation, None)
-    toward_zero = violation is StructuredViolation.MODE_RZ_ARITHMETIC
-    truncating = violation is StructuredViolation.MODE_TRUNCATING_CAST
+    toward_zero = violation is StructuredViolation.MODE32_RZ_ARITHMETIC
+    truncating = _CVT_VIOLATION.get(violation) == case.dtype
     mfma_mode, mfma_steps = _MFMA_VIOLATION.get(violation, (None, 0))
     scale = np.float32(2.0 ** case.head_scale_exponents[head])
     accumulator = np.zeros(case.base.head_dim, dtype=np.float32)
@@ -2122,7 +2248,13 @@ def applicable_mutations(case: StructuredCase) -> tuple[StructuredMutation, ...]
 class Separation:
     """``G(m)``: the largest target-ULP distance between the correct and the
     mutated Tier B over the evaluated coordinates, and where it is attained
-    (``exposure`` and ``b:q:h:d``). ``gap > 0`` proves the mutation is caught."""
+    (``exposure`` and ``b:q:h:d``).
+
+    ``gap > 0`` certifies sensitivity: the two enclosures are disjoint at that
+    coordinate, so no stored value satisfies both semantics. The certificate
+    is sufficient, not necessary: Tier B is an outer enclosure, and two outer
+    enclosures can overlap where the reachable sets do not, so ``gap == 0``
+    decides nothing about the mutation."""
 
     mutation: StructuredMutation
     gap: int
@@ -2234,18 +2366,40 @@ def format_separation(case: StructuredCase, separation: Separation) -> str:
 # Analyzer: the Tier B verdict, the failure taxonomy and diagnostics.
 # ---------------------------------------------------------------------------
 
+# One MFMA call on one accumulator element is an atom. Zero neutrality and the
+# sign of a zero result are part of A-MFMA, not consequences of
+# representability: a structural coordinate must store the pattern +0, and it
+# does because every zero PV product is +0 (V and the cast weights are
+# nonnegative) and an all-zero atom returns its +0 accumulator unchanged.
 MFMA_ASSUMPTION = (
-    "A-MFMA v1: an MFMA atom with at most one nonzero product p returns RD or "
-    "RU of c + p"
+    "A-MFMA v1: an MFMA atom whose products are all zero returns its "
+    "accumulator c unchanged (c = +0 stays +0); with one nonzero product p it "
+    "returns RD or RU of c + p"
 )
+# The exponents and the total magnitude are those of the Walsh score atoms and
+# no more: products +-2**r with -4 <= r <= 0, at most 64 of them in a score.
+A_QK_EXPONENTS = (-4, 0)
+A_QK_MAGNITUDE = 64
 QK_ASSUMPTION = (
     "A-QK v1: an MFMA atom whose accumulator and eight products are multiples "
-    "of 2**e with total magnitude at most 2**(24 + e) returns their exact sum"
+    "of 2**e, -4 <= e <= 0, with total magnitude at most 64 * 2**e returns "
+    "their exact sum"
 )
-MODE_ASSUMPTION = (
-    "A-MODE v1: FP32 add, subtract and multiply round to nearest even; the "
-    "FP32-to-FP16 and FP32-to-BF16 conversions round to nearest even and keep "
+# Rounding and conversion: three assumptions, one per mechanism. They fail
+# differently and a compiler change touches one of them at a time (the BF16
+# conversion is an instruction sequence the compiler chooses).
+MODE32_ASSUMPTION = (
+    "A-MODE32 v1: each FP32 add, subtract and multiply rounds its exact result "
+    "to nearest even"
+)
+CVT_F16_ASSUMPTION = (
+    "A-CVT-F16 v1: the FP32-to-FP16 conversion, standalone or as the final "
+    "rounding of a mixed-precision FMA, rounds to nearest even and keeps "
     "subnormals"
+)
+CVT_BF16_ASSUMPTION = (
+    "A-CVT-BF16 v1: the instruction sequence selected for the FP32-to-BF16 "
+    "conversion rounds to nearest even and keeps subnormals"
 )
 # Every named assumption Tier B is conditional on, in the order of the
 # soundness theorem. A calibration entry lists exactly these versions.
@@ -2255,7 +2409,9 @@ STRUCTURED_ASSUMPTION_STATEMENTS = (
     QK_ASSUMPTION,
     DIV_ASSUMPTION,
     EPILOGUE_ASSUMPTION,
-    MODE_ASSUMPTION,
+    MODE32_ASSUMPTION,
+    CVT_F16_ASSUMPTION,
+    CVT_BF16_ASSUMPTION,
 )
 STRUCTURED_ASSUMPTIONS = tuple(
     statement.split(":", 1)[0] for statement in STRUCTURED_ASSUMPTION_STATEMENTS
@@ -2279,9 +2435,11 @@ class StructuredLabel(str, Enum):
     INVALID = "invalid"  # NaN (including the unwritten prefill) or Inf
     NEGATIVE = "negative"  # sign bit set, -0 included
     STRUCTURAL = "structural"  # a required +0 coordinate stores another pattern
-    # A truncating conversion or round-toward-zero arithmetic; or, at an
-    # FP16-subnormal target, a value near it or a flushed +0.
-    A_MODE = "assumption A-MODE"
+    A_MODE32 = "assumption A-MODE32"  # FP32 arithmetic rounded toward zero
+    # A truncating FP16 conversion; or, at an FP16-subnormal target, a value
+    # near it or a flushed +0.
+    A_CVT_F16 = "assumption A-CVT-F16"
+    A_CVT_BF16 = "assumption A-CVT-BF16"  # a truncating BF16 conversion
     A_F = "assumption A-F"  # an FP16 store that is neither epilogue rounding
     A_DIV = "assumption A-DIV"  # the reciprocal is a neighbor of RN(1 / l)
     A_QK = "assumption A-QK"  # a Walsh score accumulator is inexact
@@ -2305,8 +2463,9 @@ _VIOLATION_LABEL: Mapping[StructuredViolation, StructuredLabel] = MappingProxyTy
         StructuredViolation.DIV_LOW: StructuredLabel.A_DIV,
         StructuredViolation.DIV_HIGH: StructuredLabel.A_DIV,
         StructuredViolation.F_TRUNCATED: StructuredLabel.A_F,
-        StructuredViolation.MODE_RZ_ARITHMETIC: StructuredLabel.A_MODE,
-        StructuredViolation.MODE_TRUNCATING_CAST: StructuredLabel.A_MODE,
+        StructuredViolation.MODE32_RZ_ARITHMETIC: StructuredLabel.A_MODE32,
+        StructuredViolation.CVT_F16_TRUNCATING: StructuredLabel.A_CVT_F16,
+        StructuredViolation.CVT_BF16_TRUNCATING: StructuredLabel.A_CVT_BF16,
     }
 )
 # Violations whose stores stay inside Tier B at every coordinate of the quick
@@ -2324,7 +2483,7 @@ STRUCTURED_UNOBSERVED_VIOLATIONS = frozenset(
         StructuredViolation.QK_UP,
         StructuredViolation.DIV_LOW,
         StructuredViolation.DIV_HIGH,
-        StructuredViolation.MODE_RZ_ARITHMETIC,
+        StructuredViolation.MODE32_RZ_ARITHMETIC,
     }
 )
 # No violation stores a value farther than this many target ULPs outside
@@ -2425,11 +2584,12 @@ def _attribute(
     correct Tier B.
 
     A value that a single violated assumption stores carries that assumption.
-    Otherwise a mode or assumption label needs a value its failure can
-    produce: A-MODE a value inside Tier A or a flushed ``+0`` at an
-    FP16-subnormal target, A-MFMA a value inside Tier A. A far value there is
-    numerical, not a mode. ``relaxed()`` returns the row's Tier B under a
-    2-ULP exponential, computed at most once per row."""
+    Otherwise an assumption label needs a value its failure can produce:
+    A-CVT-F16 a value inside Tier A or a flushed ``+0`` at an FP16-subnormal
+    target (a conversion that does not keep subnormals), A-MFMA a value inside
+    Tier A. A far value there is numerical, not a conversion. ``relaxed()``
+    returns the row's Tier B under a 2-ULP exponential, computed at most once
+    per row."""
     if outside <= _VIOLATION_REACH:
         violation = matching_violation(case, exposure, query, head, dim, bits)
         if violation is not None:
@@ -2440,7 +2600,7 @@ def _attribute(
         and 0 < center < _FP16_SMALLEST_NORMAL_BITS
         and (near or bits == 0)
     ):
-        return StructuredLabel.A_MODE
+        return StructuredLabel.A_CVT_F16
     if (
         near
         and exposure == "folded"
@@ -2917,7 +3077,9 @@ STRUCTURED_CALIBRATION: Mapping[tuple[str, str, str], StructuredCalibrationEntry
                     "A-QK v1",
                     "A-DIV v1",
                     "A-F v1",
-                    "A-MODE v1",
+                    "A-MODE32 v1",
+                    "A-CVT-F16 v1",
+                    "A-CVT-BF16 v1",
                 ),
                 case_ids=(
                     "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-identity-p0xp6,p1xn5,n2xn2,n0xp2",
@@ -2935,7 +3097,9 @@ STRUCTURED_CALIBRATION: Mapping[tuple[str, str, str], StructuredCalibrationEntry
                     "A-QK v1",
                     "A-DIV v1",
                     "A-F v1",
-                    "A-MODE v1",
+                    "A-MODE32 v1",
+                    "A-CVT-F16 v1",
+                    "A-CVT-BF16 v1",
                 ),
                 case_ids=(
                     "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-identity-p0xp6,p1xn5,n2xn2,n0xp2",

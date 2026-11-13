@@ -30,6 +30,7 @@ import re
 import struct
 import subprocess
 import sys
+import warnings
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -44,6 +45,8 @@ from rocke.numeric.bf16 import f32_to_bf16
 
 from ._structured_analytical import (
     A_DIV_DOMAIN,
+    A_QK_EXPONENTS,
+    A_QK_MAGNITUDE,
     EPILOGUE_ASSUMPTION,
     F32_SMALLEST_NORMAL,
     F32_SMALLEST_SUBNORMAL,
@@ -63,6 +66,7 @@ from ._structured_analytical import (
     STRUCTURED_QUICK_SPECS,
     STRUCTURED_SEARCH_BASES,
     STRUCTURED_SEPARATION_ROWS,
+    STRUCTURAL_ZERO_RECIPROCAL_BOUND,
     STRUCTURED_UNOBSERVED_VIOLATIONS,
     STRUCTURED_UNSEPARATED,
     SCORE_SCALE,
@@ -93,6 +97,7 @@ from ._structured_analytical import (
     emulate_row,
     epilogue_alternatives,
     epilogue_artifact_for,
+    epilogue_artifacts_for_llvm,
     exp2_candidates,
     exp2_interval,
     exposure_key,
@@ -175,6 +180,21 @@ _BPERMUTE = "llvm.amdgcn.ds.bpermute"
 
 _FP_FLAGS = ("fast", "contract", "afn", "reassoc", "nnan", "ninf", "nsz", "arcp")
 _FP_OPCODES = ("fadd", "fsub", "fmul", "fdiv", "frem", "fneg", "fptrunc", "fpext")
+# What may touch a floating-point value: the arithmetic the model has a step
+# for, and the instructions that only move its bits (loads, vector packing,
+# selects, phis, same-width casts). Each arithmetic opcode has its own rule in
+# ``classify_dense_path``; anything else on a floating-point type (a
+# conversion, a comparison, ``fneg``, ``frem``) has no step in the model.
+_FP_MODELED_ARITHMETIC = ("fadd", "fsub", "fmul", "fdiv", "fptrunc")
+_FP_BIT_MOVES = (
+    "bitcast",
+    "extractelement",
+    "getelementptr",
+    "insertelement",
+    "load",
+    "phi",
+    "select",
+)
 _FP_TYPE = re.compile(r"\b(float|half|bfloat|double)\b")
 _FP_MODE_ATTRIBUTES = (
     "denormal-fp-math",
@@ -231,6 +251,8 @@ class PathModel:
     violations: list[str] = field(default_factory=list)
     counts: Counter = field(default_factory=Counter)
     chain_lengths: list[int] = field(default_factory=list)
+    # Scores folded into each lane's row-max chain before the shuffle.
+    max_chain_lengths: list[int] = field(default_factory=list)
     # One ``(kind, calls)`` per chain of MFMA calls on one accumulator: "score"
     # starts from zero, "pv" from the accumulator rescaled by alpha.
     mfma_chains: list[tuple[str, int]] = field(default_factory=list)
@@ -243,9 +265,15 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
 
     - ``qk_scale = fmul(scale, LOG2E)`` once; ``s = fmul(acc, qk_scale)`` with
       ``acc`` an element of a QK MFMA result; masking selects ``-1e30``.
-    - ``m_new = maxnum(...)``; every ``exp2`` reads ``fsub(x, m_new)``.
-      A probability ``exp2`` feeds one denominator ``fadd`` and one ``fptrunc``
-      to the subject dtype; a rescale ``exp2`` (``alpha``) feeds ``fmul`` only.
+    - The lane maximum is a sequential ``maxnum`` chain starting at ``-1e30``
+      over the tile's masked scores, then one ``maxnum`` with the shuffle-xor
+      partner's chain (``ds.bpermute``), then ``m_new = maxnum(m, ...)`` with
+      ``m`` the maximum carried from the previous tiles (a phi that starts at
+      ``-1e30`` and is fed by ``m_new`` only).
+    - Every ``exp2`` reads ``fsub(x, m_new)``. A probability ``exp2`` has ``x``
+      one of the scores ``m_new`` covers and feeds one denominator ``fadd`` and
+      one ``fptrunc`` to the subject dtype; a rescale ``exp2`` (``alpha``) has
+      ``x = m`` and feeds ``fmul`` only.
     - The lane denominator is a sequential ``fadd`` chain starting at ``+0``,
       then one ``fadd`` with the shuffle-xor partner's sum (``ds.bpermute``),
       then ``l = fadd(fmul(l_i, alpha), l_tile)``.
@@ -259,9 +287,12 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
     - The epilogue is one ``fdiv 1.0, l`` and ``fptrunc(fmul(o, rcp))``.
 
     No floating-point instruction may carry fast-math flags or ``!fpmath``, and
-    the function may set no floating-point mode attribute. This pins the IR
-    only; what an affected compiler selects for the FP16 epilogue is A-F and
-    the ISA contract below."""
+    the function may set no floating-point mode attribute. Any other
+    instruction on a floating-point type must only move bits (a load, vector
+    packing, a select, a phi, a ``bitcast``); a conversion, a comparison,
+    ``fneg`` or ``frem`` is outside the model. This pins the IR only; what an
+    affected compiler selects for the FP16 epilogue is A-F and the ISA contract
+    below."""
     model = PathModel()
     violations = model.violations
     counts = model.counts
@@ -324,6 +355,21 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
         if _FP_TYPE.search(returned) or _FP_TYPE.search(arguments):
             violations.append(f"unmodeled floating-point intrinsic @{callee}")
 
+    # Every other instruction on a floating-point type only moves bits. An
+    # ``fpext`` and another MFMA atom are reported below, for their own reason.
+    modeled = {
+        *_FP_MODELED_ARITHMETIC,
+        *_FP_BIT_MOVES,
+        _EXP2,
+        _MAXNUM,
+        _MFMA_ATOM[dtype],
+    }
+    for item in instructions.values():
+        if item.opcode in modeled or item.opcode == "fpext" or "mfma" in item.opcode:
+            continue
+        if _FP_TYPE.search(_VALUE.sub("", item.text)):
+            violations.append(f"unmodeled floating-point instruction: {item.text}")
+
     # Score scale: exactly one fmul(scale, LOG2E).
     scale_products = [
         item
@@ -356,24 +402,126 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
                 if constant not in (_F32_ZERO, _F32_MASKED):
                     violations.append(f"float phi starts at {constant}: {item.text}")
 
-    # exp2: probability or rescale, each reading fsub(x, maxnum).
+    def is_mfma_element(name: str) -> bool:
+        item = instructions.get(source(name))
+        return (
+            item is not None
+            and item.opcode == "extractelement"
+            and opcode(item.operands[0]) == _MFMA_ATOM[dtype]
+        )
+
+    def is_score(name: str) -> bool:
+        """``fmul(acc, qk_scale)`` with ``acc`` an element of an MFMA result."""
+        item = instructions.get(source(name))
+        return (
+            item is not None
+            and item.opcode == "fmul"
+            and qk_scale is not None
+            and qk_scale in item.operands
+            and any(is_mfma_element(value) for value in item.operands)
+        )
+
+    def is_masked_score(name: str) -> bool:
+        """A score, or the mask select that keeps it or replaces it by -1e30."""
+        item = instructions.get(source(name))
+        if item is not None and _MASK_SELECT.match(item.text):
+            return is_score(item.operands[1])
+        return is_score(name)
+
+    def shuffled_from(name: str) -> str | None:
+        """The value whose bits the shuffle partner sends: ``name`` is the
+        ``ds.bpermute`` of that value, cast back to float."""
+        received = instructions.get(source(name))
+        if received is None or received.opcode != "bitcast":
+            return None
+        permute = instructions.get(received.operands[0])
+        if permute is None or permute.opcode != _BPERMUTE:
+            return None
+        if len(permute.operands) != 2:
+            return None
+        sent = instructions.get(permute.operands[1])
+        if sent is None or sent.opcode != "bitcast":
+            return None
+        return source(sent.operands[0])
+
+    def carried_phi(name: str) -> str | None:
+        item = instructions.get(source(name))
+        if item is not None and item.text.startswith("phi float "):
+            return item.name
+        return None
+
+    # Row max: a sequential lane chain from -1e30 over the tile's masked
+    # scores, one maxnum with the shuffle partner's chain, and one with the
+    # maximum carried from the previous tiles. Each maps to the scores it
+    # covers, so an exp2 below can be held to a score of its own row max.
+    lane_max: dict[str, tuple[str, ...]] = {}
+    shuffle_max: dict[str, tuple[str, ...]] = {}
+    row_max: dict[str, tuple[str, ...]] = {}
+    carried_into: dict[str, str] = {}  # row max -> the phi it updates
+    for item in instructions.values():
+        if item.opcode != _MAXNUM:
+            continue
+        left, right = (*item.operands, None, None)[:2]
+        two = len(item.operands) == 2
+        chain = lane_max.get(source(left)) if two else None
+        if (
+            len(item.operands) == 1
+            and f"(float {_F32_MASKED}, float %" in item.text
+            and is_masked_score(left)
+        ):
+            lane_max[item.name] = (source(left),)
+        elif chain is not None and is_masked_score(right):
+            lane_max[item.name] = (*chain, source(right))
+        elif chain is not None and shuffled_from(right) == source(left):
+            shuffle_max[item.name] = chain
+            model.max_chain_lengths.append(len(chain))
+        elif two and carried_phi(left) and source(right) in shuffle_max:
+            row_max[item.name] = shuffle_max[source(right)]
+            carried_into[item.name] = carried_phi(left)
+        else:
+            violations.append(f"unmodeled maxnum: {item.text}")
+    counts["row_max"] = len(row_max)
+    carried = set(carried_into.values())
+    for name in sorted(carried):
+        for incoming in re.findall(r"\[ (\S+), %[-\w.]+ \]", instructions[name].text):
+            if incoming == _F32_MASKED:
+                continue
+            if source(incoming) not in row_max and source(incoming) not in carried:
+                violations.append(
+                    "row max carried from an unmodeled value: "
+                    f"{instructions[name].text}"
+                )
+
+    # exp2: probability or rescale, each reading fsub(x, row max).
     probability_exp2: set[str] = set()
     alpha_exp2: set[str] = set()
     for item in instructions.values():
         if item.opcode != _EXP2:
             continue
-        argument = item.operands[0]
-        if opcode(argument) != "fsub":
+        argument = instructions.get(source((*item.operands, None)[0]))
+        terms = () if argument is None else argument.operands
+        minuend = maximum = None
+        if argument is None or argument.opcode != "fsub":
             violations.append(f"exp2 argument is not an fsub: {item.text}")
-        elif opcode(instructions[source(argument)].operands[1]) != _MAXNUM:
+        elif len(terms) != 2 or source(terms[1]) not in row_max:
             violations.append(
                 f"exp2 argument does not subtract the row max: {item.text}"
             )
+        else:
+            minuend, maximum = source(terms[0]), source(terms[1])
         kinds = Counter(user.opcode for user in users(item.name))
         if kinds == Counter({"fadd": 1, "fptrunc": 1}):
             probability_exp2.add(item.name)
+            if maximum is not None and minuend not in row_max[maximum]:
+                violations.append(
+                    f"probability exp2 of a score outside its row max: {item.text}"
+                )
         elif kinds and set(kinds) == {"fmul"}:
             alpha_exp2.add(item.name)
+            if maximum is not None and minuend != carried_into[maximum]:
+                violations.append(
+                    f"rescale exp2 does not read the carried row max: {item.text}"
+                )
         else:
             violations.append(f"exp2 with unmodeled uses {dict(kinds)}: {item.text}")
     for item in instructions.values():
@@ -384,14 +532,6 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
 
     def is_alpha(name: str) -> bool:
         return source(name) in alpha_exp2
-
-    def is_mfma_element(name: str) -> bool:
-        item = instructions.get(source(name))
-        return (
-            item is not None
-            and item.opcode == "extractelement"
-            and opcode(item.operands[0]) == _MFMA_ATOM[dtype]
-        )
 
     rcp = [item for item in instructions.values() if item.opcode == "fdiv"]
     reciprocal = rf"fdiv float {_F32_ONE}, %[-\w.]+"
@@ -615,6 +755,8 @@ def test_ir_contract_pins_the_dense_path_model(case: DenseShape) -> None:
     assert model.counts["combine"] == bodies
     assert model.counts["shuffle"] == bodies
     assert model.chain_lengths == [_LANE_CHAIN] * bodies
+    assert model.counts["row_max"] == bodies
+    assert model.max_chain_lengths == [_LANE_CHAIN] * bodies
     assert model.counts["exp2_probability"] == _LANE_CHAIN * bodies
     assert model.counts["cast_probability"] == _LANE_CHAIN * bodies
     assert model.counts["cast_output"] == _OUTPUT_CASTS
@@ -689,6 +831,78 @@ def _converted_mfma_operand(ir: str) -> str:
     return ir.replace(line, extra + edited, 1)
 
 
+_MAX_CALL = "= call float @llvm.maxnum.f32("
+_MAX_HEAD = re.compile(
+    rf"= call float @llvm\.maxnum\.f32\(float {_F32_MASKED}, float (%[-\w.]+)\)"
+)
+_MAX_CARRIED = re.compile(r"\(float (%[-\w.]+), float ")
+
+
+def _row_max_lines(ir: str) -> tuple[str, str, str, str]:
+    """Of the first tile body: the head of the lane-max chain, the shuffle
+    ``maxnum``, the row ``maxnum`` and the first ``fsub`` (the rescale's)."""
+    lines = ir.splitlines()
+    first = next(i for i, line in enumerate(lines) if " = fsub float " in line)
+    maxima = [line for line in lines[:first] if _MAX_CALL in line]
+    assert len(maxima) == _LANE_CHAIN + 2 and _MAX_HEAD.search(maxima[0])
+    return maxima[0], maxima[-2], maxima[-1], lines[first]
+
+
+def _negated_max_operand(ir: str) -> str:
+    """The lane-max chain starts from a negated score."""
+    head = _row_max_lines(ir)[0]
+    score = _MAX_HEAD.search(head).group(1)
+    extra = f"  %probe.negated = fneg float {score}\n"
+    edited = head.replace(f"float {score})", "float %probe.negated)")
+    return ir.replace(head, extra + edited, 1)
+
+
+def _max_over_another_value(ir: str) -> str:
+    """The lane-max chain starts from the raw scale instead of a score."""
+    head = _row_max_lines(ir)[0]
+    score = _MAX_HEAD.search(head).group(1)
+    return ir.replace(head, head.replace(f"float {score})", "float %scale)"), 1)
+
+
+def _max_skips_a_score(ir: str) -> str:
+    """The second link of the lane-max chain folds the first score again, so
+    the row max no longer covers the second."""
+    head, second = [line for line in ir.splitlines() if _MAX_CALL in line][:2]
+    score = _MAX_HEAD.search(head).group(1)
+    edited = re.sub(r"float %[-\w.]+\)$", f"float {score})", second)
+    assert edited != second
+    return ir.replace(second, edited, 1)
+
+
+def _max_carried_from_another_value(ir: str) -> str:
+    """The carried row max is fed by the raw scale instead of the row max."""
+    row = _row_max_lines(ir)[2]
+    carried = _MAX_CARRIED.search(row).group(1)
+    line = _first_line(ir, f"  {carried} = phi float ")
+    edited = re.sub(r"\[ %[-\w.]+, (%[-\w.]+) \]$", r"[ %scale, \1 ]", line)
+    assert edited != line
+    return ir.replace(line, edited, 1)
+
+
+def _exp2_subtracts_the_lane_max(ir: str) -> str:
+    """The rescale exponent subtracts the shuffle maximum, not the row max."""
+    _, shuffle, row, fsub = _row_max_lines(ir)
+    lane, updated = (line.split(" = ")[0].strip() for line in (shuffle, row))
+    edited = fsub.replace(f", {updated}", f", {lane}")
+    assert edited != fsub
+    return ir.replace(fsub, edited, 1)
+
+
+def _alpha_reads_a_score(ir: str) -> str:
+    """The rescale exponent starts from a score instead of the carried max."""
+    head, _, row, fsub = _row_max_lines(ir)
+    score = _MAX_HEAD.search(head).group(1)
+    carried = _MAX_CARRIED.search(row).group(1)
+    edited = fsub.replace(f"fsub float {carried},", f"fsub float {score},")
+    assert edited != fsub
+    return ir.replace(fsub, edited, 1)
+
+
 # Each edit applies to the real lowered IR and must be rejected for its own
 # reason, so the contract above is shown able to fail on every assumption it pins.
 _IR_EDITS = {
@@ -757,6 +971,41 @@ _IR_EDITS = {
             "\n  %probe.extra = fsub float %scale, %scale",
         ),
         "fsub not consumed by exp2 only",
+    ),
+    "fcmp": (
+        _append_to_line(
+            f"= fmul float %scale, {_F32_LOG2E}",
+            "\n  %probe.extra = fcmp olt float %scale, %scale",
+        ),
+        "unmodeled floating-point instruction: fcmp",
+    ),
+    "int-to-float": (
+        _append_to_line(
+            f"= fmul float %scale, {_F32_LOG2E}",
+            "\n  %probe.extra = uitofp i32 %batch to float",
+        ),
+        "unmodeled floating-point instruction: uitofp",
+    ),
+    "max-of-negated-score": (
+        _negated_max_operand,
+        "unmodeled floating-point instruction: fneg",
+    ),
+    "max-over-another-value": (_max_over_another_value, "unmodeled maxnum"),
+    "max-skips-a-score": (
+        _max_skips_a_score,
+        "probability exp2 of a score outside its row max",
+    ),
+    "max-carried-from-another-value": (
+        _max_carried_from_another_value,
+        "row max carried from an unmodeled value",
+    ),
+    "exp2-subtracts-the-lane-max": (
+        _exp2_subtracts_the_lane_max,
+        "exp2 argument does not subtract the row max",
+    ),
+    "alpha-reads-a-score": (
+        _alpha_reads_a_score,
+        "rescale exp2 does not read the carried row max",
     ),
 }
 
@@ -1186,8 +1435,9 @@ def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
 # each 16-bit half of the epilogue registers into the four-half output stores,
 # so a store element is "single", "double" or "unknown". FP32 FMAs are allowed
 # only inside the expansion of the one division ``fdiv 1.0, l``; that the
-# expansion returns ``RN(1 / l)`` is assumption A-DIV, not something this
-# contract shows.
+# expansion returns ``RN(1 / l)`` is assumption A-DIV, which this contract
+# does not show: it pins which expansion the kernel holds
+# (``division_dataflow``).
 # ---------------------------------------------------------------------------
 
 _ISA_REGISTER = re.compile(r"^v(\d+)$|^v\[(\d+):(\d+)\]$")
@@ -1196,6 +1446,21 @@ _ISA_FP32_FMA = re.compile(
     r"^v_(?:pk_)?fma(?:c|ak|mk)?_f32|^v_mac_f32|^v_mad_f32|^v_div_fmas_f32"
 )
 _ISA_MIX = ("v_fma_mix", "v_mad_mix")
+_ISA_SCALAR = re.compile(r"^s(\d+)$|^s\[(\d+):(\d+)\]$")
+_ISA_LOADS = ("global_load", "ds_read", "buffer_load", "scratch_load", "flat_load")
+# VALU instructions whose second operand is a destination too: the scale flag
+# of a division, a carry or borrow, the high part of a 64-bit multiply-add.
+_ISA_SECOND_DESTINATION = (
+    "v_div_scale",
+    "v_add_co",
+    "v_addc_co",
+    "v_sub_co",
+    "v_subb_co",
+    "v_subrev_co",
+    "v_subbrev_co",
+    "v_mad_u64",
+    "v_mad_i64",
+)
 # v_perm_b32 selector that packs src1.lo into the low half and src0.lo above it.
 _PACK_LOW_HALVES = "0x5040100"
 
@@ -1207,6 +1472,16 @@ def _isa_registers(operand: str) -> list[int] | None:
     if match.group(1) is not None:
         return [int(match.group(1))]
     return list(range(int(match.group(2)), int(match.group(3)) + 1))
+
+
+def _isa_scalar_registers(operand: str) -> list[str]:
+    """The scalar registers an operand names, spelled as single registers."""
+    match = _ISA_SCALAR.match(operand)
+    if not match:
+        return []
+    if match.group(1) is not None:
+        return [operand]
+    return [f"s{n}" for n in range(int(match.group(2)), int(match.group(3)) + 1)]
 
 
 def _isa_instructions(text: str) -> list[tuple[str, list[str]]]:
@@ -1232,9 +1507,12 @@ class EpilogueIsa:
 
     ``stores`` lists, per output store, how each 16-bit element was rounded:
     "single" (``v_fma_mix*``), "double" (FP32 multiply then ``v_cvt_f16_f32``)
-    or "unknown"."""
+    or "unknown". ``mix_sites`` counts every mixed-precision FMA of the kernel,
+    the KV loop included; ``unmodeled_mix`` lists those that are not the
+    epilogue's ``R * o + 0``."""
 
     divisions: int = 0
+    division: tuple[str, ...] | None = None  # see ``division_dataflow``
     fma_outside_division: list[str] = field(default_factory=list)
     mode_writes: list[str] = field(default_factory=list)
     mix_sites: int = 0
@@ -1263,31 +1541,48 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
     ]
     ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
     model.divisions = len(ends)
+    model.division = division_dataflow(text)
     # A write to the MODE register changes the rounding or denormal mode the
-    # wave started with (A-MODE), and the change outlives the instruction that
-    # needed it. None is accepted, not even inside the division expansion:
-    # nothing here proves that a write there is undone before the epilogue.
+    # wave started with (A-MODE32, A-CVT-F16, and the mode the division was
+    # evaluated in), and the change outlives the instruction that needed it.
+    # None is accepted, not even inside the division expansion: nothing here
+    # proves that a write there is undone before the epilogue.
     model.mode_writes = [
         f"{name} {', '.join(operands)}"
         for name, operands in instructions
         if name.startswith("s_setreg")
     ]
+    model.mix_sites = sum(name.startswith(_ISA_MIX) for name, _ in instructions)
     if len(ends) != 1 or not starts:
         return model
     start, end = min(starts), ends[0]
     for index, (name, operands) in enumerate(instructions):
+        site = f"{name} {', '.join(operands)}"
         if _ISA_FP32_FMA.match(name) and not start <= index <= end:
-            model.fma_outside_division.append(f"{name} {', '.join(operands)}")
+            model.fma_outside_division.append(site)
+        # The reciprocal does not exist before the division, so a
+        # mixed-precision FMA there (the KV loop) is not the epilogue's.
+        if name.startswith(_ISA_MIX) and index < start:
+            model.unmodeled_mix.append(site)
     reciprocal = (_isa_registers(instructions[end][1][0]) or [None])[0]
 
     halves: dict[tuple[int, int], str] = {}  # (VGPR, 0 low | 1 high) -> rounding
     products: set[int] = set()  # VGPRs holding the FP32 product o * R
     scalars: dict[str, str] = {}
     for name, operands in instructions[start:]:
-        if name.startswith(_ISA_MIX):
-            model.mix_sites += 1
         if name == "s_mov_b32" and len(operands) == 2:
             scalars[operands[0]] = operands[1]
+            continue
+        # Any other write to a scalar register ends what ``s_mov_b32`` put
+        # there, and a load replaces whatever its destination held.
+        written = operands[: 2 if name.startswith(_ISA_SECOND_DESTINATION) else 1]
+        for operand in written:
+            for register in _isa_scalar_registers(operand):
+                scalars.pop(register, None)
+        if name.startswith(_ISA_LOADS) and operands:
+            for register in _isa_registers(operands[0]) or []:
+                products.discard(register)
+                halves[(register, 0)] = halves[(register, 1)] = "unknown"
             continue
         if name.startswith("global_store"):
             data = _isa_registers(operands[1]) or []
@@ -1352,6 +1647,141 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
     return model
 
 
+# ---------------------------------------------------------------------------
+# The division expansion (A-DIV).
+#
+# gfx942 has no FP32 divide instruction: the backend expands ``fdiv 1.0, l``
+# into a scaled reciprocal refined by FMAs. A-DIV says that expansion returns
+# ``RN(1 / l)``. The stored bits cannot show whether it does, so the evidence
+# is a device evaluation of one particular sequence on every FP32 denominator.
+# This contract ties a compiled kernel to that evidence: its expansion must be
+# the evaluated one, the same operations on the same values in the same order,
+# whatever registers and operand order the compiler chose.
+# ---------------------------------------------------------------------------
+
+_ISA_SUFFIX = re.compile(r"_e(?:32|64)$")
+# Operation and number of operands read; ``v_fmac_f32`` (destination += a * b)
+# is the FMA it computes.
+_ISA_DIVISION_OPERATIONS = {
+    "v_div_scale_f32": ("div_scale", 3),
+    "v_rcp_f32": ("rcp", 1),
+    "v_mul_f32": ("mul", 2),
+    "v_fma_f32": ("fma", 3),
+    "v_fmac_f32": ("fma", 3),
+    "v_div_fmas_f32": ("div_fmas", 3),
+    "v_div_fixup_f32": ("div_fixup", 3),
+}
+# The expansion both recorded compilers emit, and the one evaluated on the
+# device. ``t0`` and ``t2`` are the scaled denominator and numerator, ``t4`` a
+# Newton refinement of ``rcp(t0)``, ``t7`` two FMA corrections of the quotient
+# estimate ``t2 * t4``, ``t8`` its residual; the last two instructions undo the
+# scaling and fix the special cases.
+_ISA_DIVISION_DATAFLOW = (
+    "t0 = div_scale(x0, x0, 1.0)",
+    "t1 = rcp(t0)",
+    "t2 = div_scale(1.0, x0, 1.0)",
+    "t3 = fma(-t0*t1 + 1.0)",
+    "t4 = fma(t1*t3 + t1)",
+    "t5 = mul(t2*t4)",
+    "t6 = fma(-t0*t5 + t2)",
+    "t7 = fma(t4*t6 + t5)",
+    "t8 = fma(-t0*t7 + t2)",
+    "t9 = div_fmas(t8, t4, t7)",
+    "t10 = div_fixup(t9, x0, 1.0)",
+)
+
+
+def division_dataflow(text: str) -> tuple[str, ...] | None:
+    """The division expansion of one disassembled kernel, as value dataflow.
+
+    Every floating-point instruction of the expansion that the quotient
+    depends on becomes one line ``tN = operation(operands)``. An operand is an
+    earlier ``tN``, a value the expansion reads from outside (``x0`` is the
+    denominator) or a constant. Registers do not appear, a multiply-accumulate
+    is written as the FMA it computes and the two factors of a product are
+    ordered, so two register allocations or operand orders of one computation
+    give the same lines. An instruction the scheduler interleaves does not
+    appear either; if it overwrites a register of the expansion, the value
+    read from that register afterwards is an outside value and the lines
+    differ.
+
+    ``None`` unless the kernel holds exactly one expansion of that form."""
+    instructions = _isa_instructions(text)
+    starts = [
+        i for i, (name, _) in enumerate(instructions) if name == "v_div_scale_f32"
+    ]
+    ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
+    if len(ends) != 1 or not starts or starts[0] > ends[0]:
+        return None
+
+    # A value is ("step", index into ``steps``), ("outside", serial number) or
+    # ("constant", its text); an operand adds whether it is negated.
+    holds: dict[int, tuple[str, int]] = {}  # VGPR -> the value it holds
+    steps: list[tuple[str, list[tuple[bool, str, int | str]]]] = []
+    outside = itertools.count()
+
+    def read(operand: str) -> tuple[bool, str, int | str]:
+        negative, name = operand.startswith("-"), operand.lstrip("-")
+        registers = _isa_registers(name)
+        if registers is None:
+            return negative, "constant", name
+        if registers[0] not in holds:
+            holds[registers[0]] = ("outside", next(outside))
+        return (negative, *holds[registers[0]])
+
+    for name, operands in instructions[starts[0] : ends[0] + 1]:
+        mnemonic = _ISA_SUFFIX.sub("", name)
+        if mnemonic not in _ISA_DIVISION_OPERATIONS:
+            if operands and name.startswith(("v_", *_ISA_LOADS)):
+                for register in _isa_registers(operands[0]) or []:
+                    holds.pop(register, None)
+            continue
+        operation, arity = _ISA_DIVISION_OPERATIONS[mnemonic]
+        # ``v_div_scale_f32`` writes its scale flag as a second destination.
+        sources = operands[2:] if operation == "div_scale" else operands[1:]
+        values = [read(item) for item in sources]
+        if mnemonic == "v_fmac_f32":
+            values.append(read(operands[0]))
+        destination = _isa_registers(operands[0]) if operands else None
+        if len(values) != arity or not destination:
+            return None
+        steps.append((operation, values))
+        holds[destination[0]] = ("step", len(steps) - 1)
+
+    # Keep what the quotient (the last step, the fixup) depends on.
+    needed = {len(steps) - 1}
+    for index in range(len(steps) - 1, -1, -1):
+        if index in needed:
+            needed.update(key for _, kind, key in steps[index][1] if kind == "step")
+    order = {index: rank for rank, index in enumerate(sorted(needed))}
+    inputs: dict[int | str, int] = {}
+
+    def spell(operand: tuple[bool, str, int | str]) -> tuple[bool, str]:
+        negative, kind, key = operand
+        if kind == "step":
+            return negative, f"t{order[key]}"
+        if kind == "outside":
+            return negative, f"x{inputs.setdefault(key, len(inputs))}"
+        return negative, str(key)
+
+    lines = []
+    for index in sorted(needed):
+        operation, values = steps[index]
+        spelled = [spell(item) for item in values]
+        if operation in ("fma", "mul"):
+            (left_negative, left), (right_negative, right) = spelled[:2]
+            factors = sorted((left, right), key=lambda item: (len(item), item))
+            body = ("-" if left_negative != right_negative else "") + "*".join(factors)
+            if operation == "fma":
+                body += f" + {'-' if spelled[2][0] else ''}{spelled[2][1]}"
+        else:
+            body = ", ".join(
+                ("-" if negative else "") + item for negative, item in spelled
+            )
+        lines.append(f"t{order[index]} = {operation}({body})")
+    return tuple(lines)
+
+
 def _isa_excerpt(*lines: str) -> str:
     return "\n".join(f"\t{line}" for line in lines)
 
@@ -1364,8 +1794,26 @@ _ISA_DIVISION = (
     "v_fma_f32 v35, -v32, v33, 1.0",
     "v_fmac_f32_e32 v33, v35, v33",
     "v_mul_f32_e32 v35, v34, v33",
+    "v_fma_f32 v36, -v32, v35, v34",
+    "v_fmac_f32_e32 v35, v36, v33",
+    "v_fma_f32 v32, -v32, v35, v34",
     "v_div_fmas_f32 v32, v32, v33, v35",
     "v_div_fixup_f32 v32, v32, v84, 1.0",
+)
+# The same expansion as the other recorded compiler allocates it in a small
+# kernel: other registers, and the quotient written over the denominator.
+_ISA_DIVISION_OTHER_REGISTERS = (
+    "v_div_scale_f32 v3, s[0:1], v2, v2, 1.0",
+    "v_rcp_f32_e32 v4, v3",
+    "v_div_scale_f32 v5, vcc, 1.0, v2, 1.0",
+    "v_fma_f32 v6, -v3, v4, 1.0",
+    "v_fmac_f32_e32 v4, v6, v4",
+    "v_mul_f32_e32 v6, v5, v4",
+    "v_fma_f32 v7, -v3, v6, v5",
+    "v_fmac_f32_e32 v6, v7, v4",
+    "v_fma_f32 v3, -v3, v6, v5",
+    "v_div_fmas_f32 v3, v3, v4, v6",
+    "v_div_fixup_f32 v2, v3, v2, 1.0",
 )
 # One four-half store as the ROCm 7.13 code object emits it (elements 0 and 1
 # single), as ROCm 7.1 emits it (elements 0 and 3 single), and as a compiler
@@ -1421,6 +1869,55 @@ def test_isa_classifier_reads_each_epilogue_form(lanes: frozenset[int]) -> None:
     assert model.mix_sites == (2 if lanes else 0)
 
 
+def test_division_dataflow_is_the_evaluated_expansion() -> None:
+    """A-DIV: the expansion reduces to the evaluated dataflow under either
+    register allocation, with the factors of a product in either order, with
+    a multiply-accumulate written as an FMA and with unrelated instructions
+    interleaved. An expansion that computes anything else does not."""
+    for lines in (_ISA_DIVISION, _ISA_DIVISION_OTHER_REGISTERS):
+        assert division_dataflow(_isa_excerpt(*lines)) == _ISA_DIVISION_DATAFLOW
+    kernel = _isa_excerpt(*_ISA_DIVISION, *_ISA_STORES[frozenset()])
+    assert classify_epilogue_isa(kernel).division == _ISA_DIVISION_DATAFLOW
+
+    def edited(old: str, *new: str) -> tuple[str, ...] | None:
+        assert old in _ISA_DIVISION
+        lines: list[str] = []
+        for line in _ISA_DIVISION:
+            lines.extend(new if line == old else (line,))
+        return division_dataflow(_isa_excerpt(*lines))
+
+    multiply = "v_mul_f32_e32 v35, v34, v33"
+    residual = "v_fma_f32 v36, -v32, v35, v34"
+    same = (
+        (multiply, "v_mul_f32_e32 v35, v33, v34"),
+        (residual, "v_fma_f32 v36, v35, -v32, v34"),
+        ("v_fmac_f32_e32 v33, v35, v33", "v_fma_f32 v33, v33, v35, v33"),
+        (
+            multiply,
+            "v_mul_f32_e32 v60, v61, v62",
+            multiply,
+            "v_add_u32_e32 v63, v60, v61",
+        ),
+    )
+    for old, *new in same:
+        assert edited(old, *new) == _ISA_DIVISION_DATAFLOW, new
+    numerator = "v_div_scale_f32 v34, vcc, 1.0, v84, 1.0"
+    different = (
+        (residual,),  # one refinement step fewer
+        (residual, "v_fma_f32 v36, v32, v35, v34"),  # a residual of the wrong sign
+        ("v_rcp_f32_e32 v33, v32", "v_rcp_f32_e32 v33, v84"),  # unscaled reciprocal
+        (numerator, "v_div_scale_f32 v34, vcc, 2.0, v84, 1.0"),  # another numerator
+        (multiply, multiply, "v_mov_b32_e32 v33, v40"),  # a value overwritten
+    )
+    for old, *new in different:
+        found = edited(old, *new)
+        assert found is not None and found != _ISA_DIVISION_DATAFLOW, new
+    # No expansion, two expansions, an instruction of the wrong shape.
+    assert division_dataflow(_isa_excerpt(*_ISA_STORES[frozenset()])) is None
+    assert division_dataflow(_isa_excerpt(*_ISA_DIVISION, *_ISA_DIVISION)) is None
+    assert edited("v_rcp_f32_e32 v33, v32", "v_rcp_f32_e32 v33, v32, v32") is None
+
+
 @pytest.mark.parametrize(
     "extra,finding",
     [
@@ -1437,12 +1934,44 @@ def test_isa_classifier_rejects_an_unmodeled_fusion(extra: str, finding: str) ->
     assert getattr(classify_epilogue_isa(_isa_excerpt(*lines)), finding)
 
 
+@pytest.mark.parametrize(
+    "extra", ["v_fma_mixlo_f16 v2, v32, v0, 0", "v_mad_mixhi_f16 v7, v8, v9, v10"]
+)
+def test_isa_classifier_reports_a_mix_before_the_division(extra: str) -> None:
+    """A mixed-precision FMA in the KV loop comes before the division. It is
+    counted and reported whatever its operands: the reciprocal the epilogue
+    form reads does not exist yet."""
+    lanes = frozenset({0, 1})
+    lines = (extra, *_ISA_DIVISION, *_ISA_STORES[lanes])
+    model = classify_epilogue_isa(_isa_excerpt(*lines))
+    assert model.unmodeled_mix == [extra]
+    assert model.mix_sites == 3
+    assert model.single_lanes == lanes
+
+
+def test_isa_classifier_drops_what_a_later_write_replaces() -> None:
+    """A pack selector is trusted only while its scalar register still holds
+    it, and a store element only while no load has replaced its register."""
+    store = _ISA_STORES[frozenset({0, 3})]
+    perm = next(i for i, line in enumerate(store) if line.startswith("v_perm_b32"))
+    for write in ("s_add_u32 s0, s0, 4", "v_cmp_lt_u32_e64 s[0:1], v40, v41"):
+        lines = (*_ISA_DIVISION, *store[:perm], write, *store[perm:])
+        model = classify_epilogue_isa(_isa_excerpt(*lines))
+        assert model.stores == [("single", "double", "unknown", "unknown")], write
+        assert model.single_lanes is None
+    load = "global_load_dwordx2 v[16:17], v[18:19], off"
+    lines = (*_ISA_DIVISION, *store[:-1], load, store[-1])
+    model = classify_epilogue_isa(_isa_excerpt(*lines))
+    assert model.stores == [("unknown",) * 4]
+
+
 def test_isa_classifier_reports_a_mode_register_write() -> None:
-    """A-MODE: the wave keeps the modes of its kernel descriptor. Every write
-    to the MODE register is reported, wherever it is. One inside the division
-    expansion (a compiler that enables denormals around the refinement) is
-    reported too, alone or followed by a second write: the classifier does
-    not prove that the second restores the mode the wave started with."""
+    """A-MODE32 and A-CVT-F16: the wave keeps the modes of its kernel
+    descriptor. Every write to the MODE register is reported, wherever it is.
+    One inside the division expansion (a compiler that enables denormals
+    around the refinement) is reported too, alone or followed by a second
+    write: the classifier does not prove that the second restores the mode
+    the wave started with."""
     store = _ISA_STORES[frozenset({0, 1})]
     write = "s_setreg_imm32_b32 0x3, 0xf0"
     restore = "s_setreg_b32 0x3, s4"
@@ -1460,7 +1989,7 @@ def test_isa_classifier_reports_a_mode_register_write() -> None:
     assert paired.mode_writes == [write, restore] and paired.divisions == 1
 
 
-# A-MODE (c): gfx942 has no BF16 conversion instruction, so ``fptrunc float to
+# A-CVT-BF16: gfx942 has no BF16 conversion instruction, so ``fptrunc float to
 # bfloat`` is an integer sequence the compiler chooses. From LLVM 19 it rounds
 # to nearest even: ``x + 0x7fff + ((x >> 16) & 1)``, upper 16 bits kept; LLVM
 # 18 and earlier kept the upper 16 bits of ``x`` unrounded. The ROCm 7.1.0
@@ -1693,70 +2222,171 @@ def _toolchain_unavailable(reason: str):
     pytest.skip(reason)
 
 
-def _disassemble(hsaco: bytes, directory) -> str:
-    from rocke.tests.llc import find_llvm_tool
+def _require_own_compiler() -> None:
+    """Skip, or fail where gfx942 is required, unless COMGR loads a compiler of
+    a known LLVM version and the kernel IR is lowered in that compiler's own
+    flavor (``ROCKE_LLVM_FLAVOR`` unset, or naming it).
+
+    Only these make a code object unavailable. Past them a compile error is
+    the kernel's, and it fails the contract instead of skipping it."""
+    from rocke.core.lower_llvm import _flavor_for_llvm, _resolve_llvm_flavor
+    from rocke.runtime.comgr import loaded_compiler_info
+
+    info = loaded_compiler_info()
+    if info is None or info.llvm_version is None:
+        found = "COMGR could not be loaded" if info is None else info.describe()
+        _toolchain_unavailable(f"comgr toolchain unavailable: {found}")
+    try:
+        own = _flavor_for_llvm(info.llvm_version[0])
+    except ValueError as error:
+        _toolchain_unavailable(f"comgr toolchain unavailable: {error}")
+    lowered = _resolve_llvm_flavor()
+    if lowered != own:
+        _toolchain_unavailable(
+            f"the kernel IR is lowered for {lowered} but the loaded compiler "
+            f"takes {own}: {info.describe()}"
+        )
+
+
+@cache
+def _compiled_quick_case(case: DenseShape):
+    """Compile one quick case's dispatch-resolved spec with the loaded COMGR,
+    as ``run_attention_dense_torch`` does."""
+    from kernels.gfx942.attention_dense import build_attention_dense
+    from rocke.helpers.compile import compile_kernel
+
+    _require_own_compiler()
+    spec = _resolve_tuning_spec(case).kernel_spec
+    return compile_kernel(
+        build_attention_dense(spec, arch="gfx942"),
+        arch="gfx942",
+        backend="python",
+        capture_ir_text=False,
+    )
+
+
+@cache
+def _amdgpu_objdump() -> str | None:
+    """An ``llvm-objdump`` that lists the AMDGPU backend, or None.
+
+    ``find_llvm_tool`` falls back to ``PATH``, where a distro LLVM may lack the
+    target. Such a tool cannot read these code objects, so the ISA contract
+    treats it as missing instead of failing on its output. Looked up once per
+    process."""
+    from rocke.tests.llc import find_llvm_tool, lists_amdgpu_backend
 
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
+        return None
+    try:
+        version = subprocess.run(
+            [objdump, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if version.returncode != 0 or not lists_amdgpu_backend(version.stdout):
+        return None
+    return objdump
+
+
+def _disassemble(hsaco: bytes, directory) -> str:
+    objdump = _amdgpu_objdump()
+    if objdump is None:
         _toolchain_unavailable(
-            "llvm-objdump not found: the ISA contract needs a disassembler"
+            "no llvm-objdump with the AMDGPU backend: the ISA contract needs a "
+            "disassembler"
         )
     path = directory / "kernel.hsaco"
     path.write_bytes(hsaco)
     completed = subprocess.run(
-        [objdump, "-d", str(path)], capture_output=True, text=True, check=True
+        [objdump, "-d", str(path)], capture_output=True, text=True, check=False
     )
+    # A tool that predates the processor exits nonzero or prints words it
+    # cannot decode; neither is a statement about the kernel.
+    if completed.returncode != 0 or "<unknown>" in completed.stdout:
+        _toolchain_unavailable(
+            f"{objdump} cannot decode the gfx942 code object: "
+            f"{completed.stderr.strip()[-400:] or 'undecoded instructions'}"
+        )
     return completed.stdout
+
+
+@pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
+def test_quick_code_objects_start_waves_in_the_modeled_modes(case: DenseShape) -> None:
+    """A-MODE32 and A-CVT-F16, from the kernel descriptor of the compiled
+    quick spec: every wave starts in round-to-nearest-even for FP32 and FP16,
+    with FP16 denormals kept. No enclosure depends on the FP32 denormal mode
+    (every FP32 subnormal of the path is enclosed with its flushed value), but
+    the division expansion was evaluated with FP32 denormals kept, so the
+    evidence for A-DIV applies only to a kernel that starts in that mode.
+
+    The descriptor is read from the ELF itself, so this needs COMGR but no
+    disassembler and still runs where ``llvm-objdump`` is missing."""
+    artifact = _compiled_quick_case(case)
+    modes = kernel_descriptor_modes(artifact.hsaco, artifact.kernel_name)
+    print(f"{case.case_id}: modes={modes}")
+    assert (modes.round_32, modes.round_16_64) == (0, 0), f"{_REDERIVE}: {modes}"
+    assert modes.denorm_16_64 == 3, f"{_REDERIVE}: {modes}"
+    assert modes.denorm_32 == 3, f"{_REDERIVE}: evaluate the division again: {modes}"
 
 
 @pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
 def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     case: DenseShape, tmp_path
 ) -> None:
-    """ISA contract (A-F): compile the quick spec as ``launch_attention_dense``
+    """ISA contract (A-F): compile the quick spec as ``run_attention_dense_torch``
     does, with the loaded COMGR, and disassemble it.
 
     - One division, and every FP32 FMA lies inside it: the denominator combine
       ``fadd(fmul(l, alpha), l_tile)`` is not fused.
-    - Every ``v_fma_mix*`` is ``R * o + 0`` feeding an output store; BF16 has
-      none. FP16 stores are classified element by element. No mix instruction
-      at all is a compiler that requires ``contract`` for the fold, and is
-      accepted.
-    - A named artifact (by HSACO digest) must show its recorded lanes.
-    - A-MODE: the kernel descriptor starts every wave in round-to-nearest-even
-      for FP32 and FP16, with FP16 denormals kept, and no instruction, the
-      division expansion included, writes the MODE register. The FP32 denormal
-      mode is printed, not required: every FP32 subnormal of the path is
-      enclosed with its flushed value, so no verdict depends on it.
-    - A-MODE: every ``fptrunc float to bfloat`` of the BF16 kernel is the
+    - Every ``v_fma_mix*`` of the kernel, the KV loop included, is
+      ``R * o + 0`` feeding an output store; BF16 has none. FP16 stores are
+      classified element by element. No mix instruction at all is a compiler
+      that requires ``contract`` for the fold, and is accepted.
+    - A named artifact (by HSACO digest) must show its recorded lanes. A digest
+      no artifact names, from a compiler version an artifact was recorded
+      under, raises a warning: the recorded digests are out of date for it.
+    - A-DIV: the division expansion is the one evaluated on the device
+      (``division_dataflow``). Another expansion has no evidence behind it.
+    - A-MODE32, A-CVT-F16: no instruction, the division expansion included,
+      writes the MODE register. The modes the waves start with are the
+      descriptor contract above.
+    - A-CVT-BF16: every ``fptrunc float to bfloat`` of the BF16 kernel is the
       round-to-nearest-even integer sequence, and every pack of upper halves
       takes rounded values. A compiler with another sequence is not guessed."""
     import hashlib
 
-    from kernels.gfx942.attention_dense import build_attention_dense
-    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.comgr import loaded_compiler_info
 
-    spec = _resolve_tuning_spec(case).kernel_spec
-    kernel = build_attention_dense(spec, arch="gfx942")
-    try:
-        artifact = compile_kernel(
-            kernel, arch="gfx942", backend="python", capture_ir_text=False
-        )
-    except (ImportError, OSError, RuntimeError) as error:
-        _toolchain_unavailable(f"comgr toolchain unavailable: {error}")
+    artifact = _compiled_quick_case(case)
     disassembly = _disassemble(artifact.hsaco, tmp_path)
     model = classify_epilogue_isa(disassembly)
-    modes = kernel_descriptor_modes(artifact.hsaco, artifact.kernel_name)
     digest = hashlib.sha256(artifact.hsaco).hexdigest()
     named = epilogue_artifact_for(case.dtype, digest)
     print(
         f"{case.case_id}: sha256={digest} artifact={named} mix={model.mix_sites} "
-        f"single_lanes={model.single_lanes} modes={modes}"
+        f"single_lanes={model.single_lanes}"
     )
-    assert (modes.round_32, modes.round_16_64) == (0, 0), f"{_REDERIVE}: {modes}"
-    assert modes.denorm_16_64 == 3, f"{_REDERIVE}: {modes}"
+    if named is None:
+        major = loaded_compiler_info().llvm_version[0]
+        recorded = epilogue_artifacts_for_llvm(major)
+        if recorded:
+            warnings.warn(
+                f"{case.case_id}: LLVM {major} compiled HSACO {digest}, which "
+                f"none of {recorded} records; STRUCTURED_EPILOGUE_ARTIFACTS is "
+                "out of date for this kernel and no record can name its artifact",
+                stacklevel=1,
+            )
     assert not model.mode_writes, f"{_REDERIVE}: {model.mode_writes}"
     assert model.divisions == 1, f"{_REDERIVE}: {model.divisions} divisions"
+    assert model.division == _ISA_DIVISION_DATAFLOW, (
+        f"{_REDERIVE}: the division expansion is not the evaluated one: "
+        f"{model.division}"
+    )
     assert not model.fma_outside_division, f"{_REDERIVE}: {model.fma_outside_division}"
     assert not model.unmodeled_mix, f"{_REDERIVE}: {model.unmodeled_mix}"
     assert len(model.stores) == _OUTPUT_CASTS // 4
@@ -1846,6 +2476,32 @@ def test_f32_grid_steps_across_a_binade_and_into_subnormals() -> None:
     smallest_normal = Fraction(1, 1 << 126)
     assert next_down(smallest_normal) == smallest_normal - F32_SMALLEST_SUBNORMAL
     assert f32_quantum(smallest_normal / 2) == F32_SMALLEST_SUBNORMAL
+
+
+def test_upward_spacing_is_defined_for_real_arguments() -> None:
+    """A-E measures its bound in ``f32_quantum(2**x)``, and ``2**x`` is in
+    general not an FP32 value. For a real ``r > 0`` the spacing is that of the
+    FP32 cell ``[2**e, 2**(e+1))`` holding ``r``: the step from the largest
+    FP32 value not above ``r`` to its successor. At a power of two it is the
+    spacing above, twice the spacing below."""
+    one = Fraction(1)
+    reals = [
+        Fraction(1, 3),
+        one - Fraction(1, 1 << 30),
+        one,
+        one + Fraction(1, 1 << 30),
+        Fraction(7, 5),
+        Fraction(3, 1 << 130),
+        F32_SMALLEST_SUBNORMAL / 3,
+        Fraction(2981) + Fraction(1, 7),
+    ]
+    for value in reals:
+        below = round_f32(value, "rd")
+        assert f32_quantum(value) == next_up(below) - below, value
+        exponent = max(floor_log2(value), -126)
+        assert f32_quantum(value) == Fraction(2) ** (exponent - 23), value
+    assert f32_quantum(Fraction(0)) == F32_SMALLEST_SUBNORMAL
+    assert f32_quantum(one) == 2 * f32_quantum(one - Fraction(1, 1 << 30))
 
 
 def test_gamma_is_higham_bound() -> None:
@@ -2076,6 +2732,58 @@ def test_epilogue_hull_rejects_negative_intervals() -> None:
         for dtype in ("fp16", "bf16"):
             with pytest.raises(ValueError, match="nonnegative"):
                 cast_single_or_double_hull(accumulator, reciprocal, dtype)
+
+
+# Series enclosures of e**x, ln 2 and 2**x.
+
+
+def _decimal_power(value: Fraction, *, base: int | None = None) -> Fraction:
+    """``e**value``, or ``base**value``, from a 110-digit decimal evaluation."""
+    with localcontext() as context:
+        context.prec = 110
+        exponent = Decimal(value.numerator) / Decimal(value.denominator)
+        if base is not None:
+            exponent *= Decimal(base).ln()
+        return Fraction(exponent.exp())
+
+
+def test_series_enclosures_bracket_the_decimal_evaluations() -> None:
+    """Both transcendental quantities of the model are enclosed by a series
+    with an explicit tail bound, not by a count of digits. The enclosures
+    hold the 110-digit decimal evaluations (a regression, not the proof), are
+    narrower than ``2**-190`` relative, and are exact where the value is
+    rational."""
+    from ._structured_analytical import _LN2, _exp2_enclosure, _exp_enclosure
+
+    narrow = Fraction(1, 1 << 190)
+    assert _exp_enclosure(Fraction(0)) == (1, 1)
+    logits = [Fraction(n, d) for n in (1, 2, 4, 8, 25) for d in (1, 2, 3, 7)]
+    for logit in [*logits, *(-value for value in logits)]:
+        low, high = _exp_enclosure(logit)
+        assert 0 < low < _decimal_power(logit) < high, logit
+        assert high - low < narrow * low, logit
+        inverse_low, inverse_high = _exp_enclosure(-logit)
+        assert low * inverse_low < 1 < high * inverse_high
+
+    with localcontext() as context:
+        context.prec = 110
+        ln2 = Fraction(Decimal(2).ln())
+    assert _LN2[0] < ln2 < _LN2[1] and _LN2[1] - _LN2[0] < narrow
+    assert LOG2E_F32 == round_f32(1 / ln2, "rn")
+
+    for power in (-149, -12, 0, 3):
+        assert _exp2_enclosure(Fraction(power)) == (Fraction(2) ** power,) * 2
+    arguments = [-Fraction(logit) * LOG2E_F32 for logit in (8, 4, 2, 1)]
+    arguments += [Fraction(-1, 1 << 20), Fraction(-599, 2), Fraction(1, 3)]
+    for argument in arguments:
+        low, high = _exp2_enclosure(argument)
+        decimal = _decimal_power(argument, base=2)
+        # The decimal value carries its own rounding, far below the bracket.
+        slack = decimal / 10**100
+        assert low - slack < decimal < high + slack, argument
+        assert 0 < low < high and high - low < narrow * low, argument
+    low, high = _exp2_enclosure(f32(-1e30))
+    assert 0 < low < high < F32_SMALLEST_SUBNORMAL
 
 
 # The v_exp_f32 candidate set from the documented bound.
@@ -2377,10 +3085,14 @@ def test_emulation_modes_refuse_ambiguous_arguments(kwargs, match) -> None:
 
 def test_epilogue_artifacts_name_their_code_objects() -> None:
     """Each named artifact gives a compiler, both quick code objects by digest
-    and its single-rounded store elements; digests resolve back to it."""
+    and its single-rounded store elements; digests resolve back to it, and its
+    LLVM major (the one its compiler string states) finds it again, so an
+    unrecorded digest of a recorded compiler can be told apart."""
     digests = set()
     for name, artifact in STRUCTURED_EPILOGUE_ARTIFACTS.items():
         assert artifact.compiler and artifact.evidence
+        assert f" {artifact.llvm_major}.0.0git " in artifact.compiler
+        assert name in epilogue_artifacts_for_llvm(artifact.llvm_major)
         assert artifact.single_lanes <= {0, 1, 2, 3}
         assert sorted(dtype for dtype, _ in artifact.code_objects) == ["bf16", "fp16"]
         for dtype, digest in artifact.code_objects:
@@ -2389,22 +3101,41 @@ def test_epilogue_artifacts_name_their_code_objects() -> None:
             digests.add(digest)
     assert len(digests) == 2 * len(STRUCTURED_EPILOGUE_ARTIFACTS)
     assert epilogue_artifact_for("fp16", "0" * 64) is None
+    assert epilogue_artifacts_for_llvm(0) == ()
 
 
-def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
-    """Every distinct target of the quick matrix rounds the same at 50 and
-    70 digits, each with its midpoint margin."""
+def _decimal_target_bits(dtype: str, exponent: int, item, digits: int) -> int:
+    """The target rounded from a ``digits``-digit decimal evaluation: what
+    certified a target before the interval certificate."""
+    with localcontext() as context:
+        context.prec = digits
+        growth = (Decimal(item.logit.numerator) / Decimal(item.logit.denominator)).exp()
+        value = Fraction(
+            (item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0)
+        ) * Fraction(2) ** exponent
+    return target_bits(value.numerator, value.denominator, dtype)
+
+
+def test_decimal_evaluations_reproduce_the_certified_targets() -> None:
+    """Regression, not proof: every distinct target of the quick matrix,
+    certified by interval containment, has the bits a 50-digit and a 70-digit
+    decimal evaluation round to."""
     classes = {
         (case.dtype, exponent, item)
         for case in STRUCTURED_QUICK_CASES
         for exposure in STRUCTURED_EXPOSURES
         for exponent, item in tier_a_exposure(case, exposure)[2]
     }
-    assert len(classes) > 100
+    irrational = 0
     for dtype, exponent, item in classes:
-        assert certified_target_bits(dtype, exponent, item, 50) == (
-            certified_target_bits(dtype, exponent, item, 70)
-        )
+        record = certify_target(dtype, exponent, item)
+        assert record.bits == certified_target_bits(dtype, exponent, item)
+        if record.rational:
+            continue
+        irrational += 1
+        for digits in (50, 70):
+            assert record.bits == _decimal_target_bits(dtype, exponent, item, digits)
+    assert irrational > 100
 
 
 @pytest.mark.parametrize("base", QUICK_SHAPES, ids=lambda base: base.case_id)
@@ -2566,13 +3297,14 @@ def test_every_enclosure_endpoint_has_a_rank(case: StructuredCase) -> None:
         assert np.all(low <= high), exposure
 
 
-def test_irrational_targets_clear_both_rounding_boundaries() -> None:
-    """An irrational target is certified against the two rounding
-    boundaries adjacent to its bits, by more than ``10**-40`` at 50 digits.
-    The boundaries are the midpoints to the two neighbors: twice as far above
-    a power of two as below it, equidistant at the smallest normal (subnormals
-    share the spacing of the first normal binade), and only the upper one
-    exists at ``+0``."""
+def test_irrational_targets_lie_inside_one_rounding_cell() -> None:
+    """An irrational target is certified by a rational interval that holds it
+    and lies strictly between the two rounding boundaries adjacent to its
+    bits: no count of digits and no library function enters. The boundaries
+    are the midpoints to the two neighbors: twice as far above a power of two
+    as below it, equidistant at the smallest normal (subnormals share the
+    spacing of the first normal binade), and only the upper one exists at
+    ``+0``. A rational target is rounded exactly and has no interval."""
     for dtype, ((subnormal, normal), (_, power)) in _FORMAT_EDGES.items():
         below, above = rounding_boundaries(power, dtype)
         center = target_value(power, dtype)
@@ -2593,30 +3325,29 @@ def test_irrational_targets_clear_both_rounding_boundaries() -> None:
         for exposure in STRUCTURED_EXPOSURES
         for exponent, item in tier_a_exposure(case, exposure)[2]
     }
-    required = Fraction(1, 10**40)
     irrational = binade_edges = subnormals = 0
     for dtype, exponent, item in classes:
         record = certify_target(dtype, exponent, item)
         if record.rational:
             assert record.margin is None and record.lower_boundary is None
+            assert record.lower is None and record.upper is None
+            proportional = item.m_c * item.n_0 == item.m_0 * item.n_c
+            assert item.is_zero or item.logit == 0 or proportional
             continue
         irrational += 1
         assert record.bits > 0
         below, above = rounding_boundaries(record.bits, dtype)
         assert (record.lower_boundary, record.upper_boundary) == (below, above)
-        assert below < target_value(record.bits, dtype) < above
-        assert record.required == required < record.margin <= (above - below) / 2
+        assert below < record.lower < record.upper < above
+        assert record.margin == min(record.lower - below, above - record.upper) > 0
+        # The interval is far narrower than its cell, so the margin says how
+        # close the target itself comes to a boundary.
+        assert (record.upper - record.lower) * 10**50 < above - below
         fraction = record.bits & _FRACTION_MASK[dtype]
         binade_edges += fraction == 0 and record.bits > _FORMAT_EDGES[dtype][0][1]
         subnormals += dtype == "fp16" and record.bits < 0x0400
     # The matrix exercises both asymmetric geometries.
     assert irrational > 100 and binade_edges and subnormals
-    dtype, exponent, item = next(
-        entry
-        for entry in sorted(classes, key=str)
-        if not certify_target(*entry).rational
-    )
-    assert certify_target(dtype, exponent, item, 70).required == Fraction(1, 10**60)
 
 
 # Per family: the range of ``log2 |a_h b_h'|`` over every pairing of a Q head
@@ -2639,6 +3370,10 @@ def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
     (lowest, highest), contraction = _SCORE_EXPONENTS[family]
     exponents = {floor_log2(abs(a * b)) for a in q_scales for b in k_scales}
     assert (min(exponents), max(exponents)) == (lowest, highest)
+    if family == "walsh":
+        # A-QK is stated for exactly this range and this many products.
+        assert (lowest, highest) == A_QK_EXPONENTS
+        assert A_QK_MAGNITUDE == 1 << contraction
 
     assert SCORE_SCALE == LOG2E_F32 / 8
     assert Fraction(1, 8) <= SCORE_SCALE < Fraction(1, 4)
@@ -2646,7 +3381,7 @@ def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
     for exponent in exponents:
         unit = Fraction(2) ** exponent
         if family == "walsh":
-            for count in range(-64, 65):
+            for count in range(-A_QK_MAGNITUDE, A_QK_MAGNITUDE + 1):
                 partial = count * unit
                 assert is_f32(partial)
                 assert count == 0 or abs(partial) >= F32_SMALLEST_NORMAL
@@ -2992,12 +3727,16 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: StructuredCase) ->
     PV: for every exposure, KV head and output dimension, V is nonzero at no
     more than one key of a tile (hence of each group of eight keys an MFMA
     call covers), that key is the one the model reads, and its value is
-    ``2**h``. QK: a periodic score has at most one nonzero product over its
-    eight atoms; every atom of a Walsh score has eight."""
+    ``2**h``. No V entry has its sign bit set, so every zero PV product is
+    ``+0`` and a structural coordinate keeps the accumulator ``+0`` (A-MFMA).
+    QK: a periodic score has at most one nonzero product over its eight
+    atoms; every atom of a Walsh score has eight, each ``+-2**r`` with ``r``
+    in the A-QK range, 64 per score (the A-QK magnitude)."""
     tiles = case.base.seqlen_k // case.block_n
     scales = np.ldexp(1.0, np.array(case.head_scale_exponents)).astype(np.float32)
     for exposure in STRUCTURED_EXPOSURES:
         v = structured_inputs(case, exposure)[2][0]  # [Sk, Hkv, D]
+        assert not np.signbit(v).any(), exposure
         nonzero = v != 0
         per_tile = nonzero.reshape(tiles, case.block_n, *nonzero.shape[1:]).sum(axis=1)
         per_call = nonzero.reshape(tiles * 8, 8, *nonzero.shape[1:]).sum(axis=1)
@@ -3020,6 +3759,11 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: StructuredCase) ->
         per_atom = (products != 0).reshape(*products.shape[:2], 8, 8).sum(axis=-1)
         if case.fixture is StructuredFixture.WALSH:
             assert np.all(per_atom == 8)
+            assert products.shape[-1] == A_QK_MAGNITUDE
+            (magnitude,) = np.unique(np.abs(products))
+            exponent = floor_log2(Fraction(float(magnitude)))
+            assert Fraction(float(magnitude)) == Fraction(2) ** exponent
+            assert A_QK_EXPONENTS[0] <= exponent <= A_QK_EXPONENTS[1]
         else:
             assert per_atom.max() <= 1 and per_atom.sum(axis=-1).max() <= 1
 
@@ -3312,6 +4056,39 @@ def test_structural_zeros_have_tier_b_plus_zero(case: StructuredCase) -> None:
 
 
 @pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
+def test_structural_zeros_need_only_a_coarse_reciprocal_bound(
+    case: StructuredCase,
+) -> None:
+    """A structural zero does not rest on A-DIV. On the block, tile and window
+    edge rows, which include the three rows with a fully masked leading tile,
+    the accumulator of every structural coordinate is exactly ``+0`` or, after
+    that tile, the residue of at most ``2**(h-149)``. Either stores ``+0`` for
+    every reciprocal below ``STRUCTURAL_ZERO_RECIPROCAL_BOUND``, correctly
+    rounded or not. FP16 has no such tile here and would allow ``2**120``."""
+    bf16 = case.dtype == "bf16"
+    bound = STRUCTURAL_ZERO_RECIPROCAL_BOUND if bf16 else Fraction(1 << 120)
+    coarse = F32Interval(Fraction(0), next_down(bound))
+    scales = [Fraction(2) ** exponent for exponent in case.head_scale_exponents]
+    residues = 0
+    for exposure in STRUCTURED_EXPOSURES:
+        radius = tier_a_exposure(case, exposure)[1][0]
+        for row in STRUCTURED_SEPARATION_ROWS:
+            for head, dim in np.argwhere(radius[row] == 0):
+                head, dim = int(head), int(dim)
+                steps = accumulator_steps(case, exposure, row, head, dim)
+                final = steps[-1][1]
+                assert final.lo == 0
+                assert final.hi <= scales[head] * F32_SMALLEST_SUBNORMAL
+                selected = prefix_selected_keys(case, exposure, row, dim)
+                assert (final.hi > 0) == (selected == 1)
+                residues += selected
+                stored = cast_single_or_double_hull(final, coarse, case.dtype)
+                assert stored == (0, 0), (exposure, row, head, dim)
+    prefix_rows = 3 if case.mask == "window" else 0
+    assert residues == prefix_rows * case.base.nhead_q * case.base.head_dim
+
+
+@pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=_quick_id)
 def test_every_tier_b_value_passes(case: StructuredCase) -> None:
     """Synthetic outputs at either end of every Tier B set pass, and every
     two-value set is counted with the end that was observed."""
@@ -3379,7 +4156,7 @@ def _label_input(label: StructuredLabel) -> tuple[str, tuple[int, int, int, int]
     if label is StructuredLabel.INVALID:
         where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0)
         return "basis@0", where, 0x7E00  # the adapter's unwritten-output prefill
-    if label is StructuredLabel.A_MODE:  # the heuristic: near an FP16-subnormal target
+    if label is StructuredLabel.A_CVT_F16:  # heuristic: near an FP16-subnormal target
         where, _, high, *_ = _find(
             "basis@0",
             range(256),
@@ -3444,9 +4221,16 @@ def _label_input(label: StructuredLabel) -> tuple[str, tuple[int, int, int, int]
     return "basis@0", where, center + radius + 1
 
 
-# No single-step violation of these assumptions leaves Tier B on the quick
-# matrix (``STRUCTURED_UNOBSERVED_VIOLATIONS``), so no stored value can carry them here.
-_UNPRODUCIBLE_LABELS = (StructuredLabel.A_DIV, StructuredLabel.A_QK)
+# No single-step violation of the first three assumptions leaves Tier B on the
+# quick matrix (``STRUCTURED_UNOBSERVED_VIOLATIONS``), so no stored value can
+# carry them; the BF16 conversion label belongs to the BF16 kernel, and the
+# label case is FP16 (the assumption-failure contract produces it there).
+_UNPRODUCIBLE_LABELS = (
+    StructuredLabel.A_DIV,
+    StructuredLabel.A_QK,
+    StructuredLabel.A_MODE32,
+    StructuredLabel.A_CVT_BF16,
+)
 
 
 @pytest.mark.parametrize(
@@ -3488,10 +4272,11 @@ def test_negative_zero_and_infinity_are_not_zero_or_finite() -> None:
 
 
 def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
-    """At an FP16-subnormal target a flushed ``+0`` or a nearby value is A-MODE, but
-    a far value (such as a wrong scale stores) is numerical; a far folded
-    value is numerical, not A-MFMA."""
-    exposure, coordinate, _ = _label_input(StructuredLabel.A_MODE)
+    """At an FP16-subnormal target a flushed ``+0`` or a nearby value is
+    A-CVT-F16 (a conversion that does not keep subnormals), but a far value
+    (such as a wrong scale stores) is numerical; a far folded value is
+    numerical, not A-MFMA."""
+    exposure, coordinate, _ = _label_input(StructuredLabel.A_CVT_F16)
     _, _, _, center, radius = _find(
         exposure,
         range(coordinate[1], coordinate[1] + 1),
@@ -3500,7 +4285,7 @@ def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
     folded, folded_at, _ = _label_input(StructuredLabel.A_MFMA)
     folded_center = int(tier_a_exposure(_LABEL_CASE, folded)[0][folded_at])
     for where, at, bits, label in (
-        (exposure, coordinate, 0x0000, StructuredLabel.A_MODE),
+        (exposure, coordinate, 0x0000, StructuredLabel.A_CVT_F16),
         (exposure, coordinate, center + radius + 64, StructuredLabel.NUMERICAL),
         (folded, folded_at, folded_center + 64, StructuredLabel.NUMERICAL),
     ):
@@ -3616,9 +4401,17 @@ def test_every_violation_names_its_assumption() -> None:
     from ._structured_analytical import _VIOLATION_LABEL
 
     assert set(_VIOLATION_LABEL) == set(StructuredViolation)
+    named = set()
     for violation, label in _VIOLATION_LABEL.items():
-        assumption = violation.value.split("_")[1].upper()
-        assert label.value == f"assumption A-{assumption}", violation.value
+        # "assumption A-CVT-F16" names the violations "a_cvt_f16_...".
+        assumption = label.value.removeprefix("assumption ")
+        assert assumption.startswith("A-"), label.value
+        assert violation.value.startswith(
+            assumption.lower().replace("-", "_") + "_"
+        ), violation.value
+        named.add(f"{assumption} v1")
+    # Every named assumption has a violating variant, and only those.
+    assert named == set(STRUCTURED_ASSUMPTIONS)
     assert STRUCTURED_UNOBSERVED_VIOLATIONS < set(StructuredViolation)
     covered = set()
     for case in STRUCTURED_QUICK_CASES:
@@ -3627,7 +4420,10 @@ def test_every_violation_names_its_assumption() -> None:
         assert (StructuredViolation.QK_UP in violations) == (
             case.fixture is StructuredFixture.WALSH
         )
-        assert (StructuredViolation.F_TRUNCATED in violations) == (case.dtype == "fp16")
+        fp16 = case.dtype == "fp16"
+        assert (StructuredViolation.F_TRUNCATED in violations) == fp16
+        assert (StructuredViolation.CVT_F16_TRUNCATING in violations) == fp16
+        assert (StructuredViolation.CVT_BF16_TRUNCATING in violations) == (not fp16)
         covered.update(violations)
     assert covered == set(StructuredViolation)
 
@@ -3657,9 +4453,11 @@ def test_violated_assumptions_fail_and_are_never_absorbed(case: StructuredCase) 
         for exposure in STRUCTURED_EXPOSURES
     }
     candidates = {x: exp2_candidates(x) for x in (Fraction(0), MASKED_SCORE)}
-    conversion_labels = {StructuredLabel.A_F, StructuredLabel.A_MODE} & {
-        _VIOLATION_LABEL[violation] for violation in applicable_violations(case)
-    }
+    conversion_labels = {
+        StructuredLabel.A_F,
+        StructuredLabel.A_CVT_F16,
+        StructuredLabel.A_CVT_BF16,
+    } & {_VIOLATION_LABEL[violation] for violation in applicable_violations(case)}
     judged = (
         len(rows) * len(STRUCTURED_EXPOSURES) * case.base.nhead_q * case.base.head_dim
     )
@@ -3694,8 +4492,9 @@ def test_violated_assumptions_fail_and_are_never_absorbed(case: StructuredCase) 
         assert sum(failures.values()) == len(outside), violation.value
         assert bool(result.violations) == bool(outside)
         if outside:
-            # A truncated FP16 store is A-F; where a truncating cast stores
-            # the same bits it is attributed to A-F as well, else to A-MODE.
+            # A truncated FP16 store is A-F; where a truncating conversion
+            # stores the same bits it is attributed to A-F as well, else to
+            # the conversion assumption of the kernel's format.
             assert _VIOLATION_LABEL[violation].value in failures, violation.value
             assert set(failures) <= {label.value for label in conversion_labels}
         audit = audit_case(
@@ -3831,16 +4630,19 @@ def test_calibration_entry_has_no_numeric_width() -> None:
 
 
 def test_calibration_requires_every_assumption_version() -> None:
-    """Tier B is sound under six named assumptions, each an antecedent of the
-    soundness theorem. An entry that omits one, lists another version of one,
-    or lists them in another order is refused."""
+    """Tier B is sound under eight named assumptions, each an antecedent of
+    the soundness theorem. An entry that omits one, lists another version of
+    one, or lists them in another order is refused; so is an entry that still
+    names the rounding and conversion assumptions as one."""
     assert STRUCTURED_ASSUMPTIONS == (
         "A-E v1",
         "A-MFMA v1",
         "A-QK v1",
         "A-DIV v1",
         "A-F v1",
-        "A-MODE v1",
+        "A-MODE32 v1",
+        "A-CVT-F16 v1",
+        "A-CVT-BF16 v1",
     )
     assert len(STRUCTURED_ASSUMPTION_STATEMENTS) == len(STRUCTURED_ASSUMPTIONS)
     for version, statement in zip(
@@ -3860,8 +4662,12 @@ def test_calibration_requires_every_assumption_version() -> None:
         for index, version in enumerate(STRUCTURED_ASSUMPTIONS)
     ]
     refused.append(tuple(reversed(STRUCTURED_ASSUMPTIONS)))
-    # The entry as ratified before A-QK, A-DIV and A-MODE were named.
+    # The entry as ratified before A-QK, A-DIV and the mode assumptions were
+    # named, and the one that named a single A-MODE.
     refused.append(("A-E v1", "A-MFMA v1", "A-F v1"))
+    refused.append(
+        ("A-E v1", "A-MFMA v1", "A-QK v1", "A-DIV v1", "A-F v1", "A-MODE v1")
+    )
     for assumptions in refused:
         with pytest.raises(ValueError, match="assumptions"):
             _structured_entry("fp16", assumptions=assumptions)
@@ -3944,6 +4750,13 @@ def test_require_structured_calibration_fails_closed(case: StructuredCase) -> No
         require_structured_calibration(
             "gfx942", "attention_gfx942_dense", case, drifted, table=table
         )
+    # The adapter resolves dispatch's default spec and pins no knob, so a
+    # retune onto the persistent grid arrives here as a fingerprint mismatch.
+    regridded = dataclasses.replace(spec, persistent=True)
+    with pytest.raises(AssertionError, match="persistent: calibrated False"):
+        require_structured_calibration(
+            "gfx942", "attention_gfx942_dense", case, regridded, table=table
+        )
     narrow = {key: _structured_entry(case.dtype, case_ids=("other",))}
     with pytest.raises(AssertionError, match=f"case {case.case_id} not in"):
         require_structured_calibration(
@@ -4022,6 +4835,19 @@ def test_every_fixture_resolves_to_the_calibrated_dispatch_identity(
         assert subject.case_id == case.case_id
         assert subject.candidate_name == "attention_gfx942_dense"
         assert subject.fingerprint == STRUCTURED_QUICK_SPECS[base.dtype]
+
+
+def test_adapter_resolves_the_default_spec_with_no_knob_pinned() -> None:
+    """The check must launch the kernel dispatch ships, so the adapter may not
+    choose a configuration itself: it resolves ``gfx942_dense`` from the
+    request and the spec id alone, and a retune reaches the calibration gate."""
+    tree = ast.parse(inspect.getsource(_resolve_tuning_spec))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    names = [_dotted(call.func) for call in calls]
+    assert "tuning_spec_with_knobs" not in names
+    assert names.count("attention_tuning_spec") == 1
+    resolve = calls[names.index("attention_tuning_spec")]
+    assert len(resolve.args) == 2 and not resolve.keywords
 
 
 def test_subject_side_wrong_scale_is_the_omitted_sqrt_d_mutation() -> None:

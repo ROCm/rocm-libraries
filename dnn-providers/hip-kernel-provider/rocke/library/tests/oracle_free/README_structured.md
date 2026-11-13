@@ -95,28 +95,56 @@ The path itself is pinned twice on the CPU. An IR contract lowers both quick
 specs and classifies every floating-point instruction, follows each MFMA
 operand back to a stored value or the probability cast, and requires eight
 chained calls per accumulator, from zero for a score and from the rescaled
-accumulator for PV. It also evaluates the KV loop limits and the mask selects
-of the lowered IR for every row: the kernel must visit exactly the modeled
-tiles and keep exactly the keys with `q - W < k <= q`. An ISA contract
-disassembles the compiled code objects: one division with every FP32 FMA
-inside it, the FP16 epilogue as the only fused site, round-to-nearest-even
-modes in the kernel descriptor, no write to the MODE register, and the
-round-to-nearest-even sequence at every BF16 conversion. Any instruction
-outside the model fails with "re-derive the path model": Tier B is re-derived
-for the new path, never widened to absorb it.
+accumulator for PV. Every exponent must subtract the row maximum, which is
+itself traced: a chain over the tile's masked scores, the shuffle partner's
+chain and the maximum carried from the previous tiles. An instruction on a
+floating-point type that is neither a modeled step nor a move of bits (a
+conversion, a comparison, a negation) is outside the model. The contract also
+evaluates the KV loop limits and the mask selects of the lowered IR for every
+row: the kernel must visit exactly the modeled tiles and keep exactly the keys
+with `q - W < k <= q`.
 
-Tier B rests on six named assumptions, each versioned in the calibration
-entry. A-QK, A-DIV and A-MODE name premises the enclosure has always used;
-they add no value to any set.
+The compiled code objects are checked in two parts. The kernel descriptor,
+read from the ELF itself, must start every wave in round-to-nearest-even with
+FP16 and FP32 denormals kept; this needs COMGR but no disassembler. An ISA
+contract then disassembles the code objects: one division with every FP32 FMA
+inside it, that division being the expansion evaluated on the device (see
+A-DIV below), the FP16 epilogue as the only fused site anywhere in the kernel,
+no write to the MODE register, and the round-to-nearest-even sequence at every
+BF16 conversion. Any instruction outside the model fails with "re-derive the
+path model": Tier B is re-derived for the new path, never widened to absorb
+it.
+
+Tier B rests on eight named assumptions, each versioned in the calibration
+entry. A-QK, A-DIV and the three rounding and conversion assumptions name
+premises the enclosure has always used; they add no value to any set.
 
 | Assumption | Statement |
 |---|---|
-| A-E v1 | `v_exp_f32` returns an FP32 value within `ulp32(2^x)` (the spacing above `2^x`) of `2^x` |
-| A-MFMA v1 | an MFMA call with at most one nonzero product `p` returns `c + p` rounded down or up (exact when `c = 0`) |
-| A-QK v1 | an MFMA call whose accumulator and products are multiples of `2^e` with total magnitude at most `2^(24+e)` returns their exact sum (the Walsh scores) |
+| A-E v1 | `v_exp_f32` returns an FP32 value within `ulp32(2^x)` of `2^x`, where `ulp32(r)` is the spacing of the FP32 cell `[2^e, 2^(e+1))` that holds the real number `r` (at a power of two, the spacing above it) |
+| A-MFMA v1 | an MFMA call whose products are all zero returns its accumulator `c` unchanged (`+0` stays `+0`); with one nonzero product `p` it returns `c + p` rounded down or up (exact when `c = 0`) |
+| A-QK v1 | an MFMA call whose accumulator and eight products are multiples of `2^e`, `-4 <= e <= 0`, with total magnitude at most `64 * 2^e` returns their exact sum (the Walsh scores, and no wider range) |
 | A-DIV v1 | the executed `fdiv 1.0, l` returns `RN(1/l)` for every FP32 `l` in `[1/2, 2^9)` |
 | A-F v1 | each FP16 output store is `q(RN32(o R))` or `q(o R)`; every other operation, BF16 stores included, follows the IR |
-| A-MODE v1 | FP32 add, subtract and multiply round to nearest even; the FP16 and BF16 conversions round to nearest even and keep subnormals |
+| A-MODE32 v1 | each FP32 add, subtract and multiply rounds its exact result to nearest even |
+| A-CVT-F16 v1 | the FP32-to-FP16 conversion, standalone or as the final rounding of a mixed-precision FMA, rounds to nearest even and keeps subnormals |
+| A-CVT-BF16 v1 | the instruction sequence the compiler selects for the FP32-to-BF16 conversion rounds to nearest even and keeps subnormals |
+
+The rounding and conversion assumptions are separate because they rest on
+different mechanisms: a hardware rounding mode, a hardware conversion, and an
+integer sequence the compiler generates. A compiler that changes one lowering
+changes one version, and a failure is attributed to one of them.
+
+A-DIV is the assumption every nonzero output depends on, and the stored bits
+cannot test it: a reciprocal one FP32 step from `RN(1/l)` leaves Tier B at no
+coordinate. Its evidence is a device evaluation of the division expansion
+itself. A program outside this repository ran that expansion on every FP32
+denominator on gfx942 and obtained `RN(1/l)` each time. The ISA contract
+reduces the expansion of each compiled quick kernel to its dataflow and
+requires the evaluated one, in the modes it was evaluated in; a compiler that
+expands the division differently fails the contract until its expansion is
+evaluated. Structural zeros do not depend on A-DIV at all: they store `+0`
+for any reciprocal below `2^11`.
 
 A-F covers an AMDGPU backend behaviour: affected compilers select some
 unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
@@ -127,7 +155,17 @@ folds and one that does not, and checks that the denominator combine is never
 fused.
 
 **Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
-radius, is diagnostic: it names the failure class, never the verdict.
+radius, is diagnostic: it names the failure class, never the verdict. A
+rational target is rounded by exact comparison with the rounding boundaries.
+An irrational one is certified by a rational interval that contains it and
+lies inside one rounding cell; `e^c` and `2^x` are enclosed by series with
+explicit tail bounds, so no count of decimal digits and no library function
+is part of the argument.
+
+Tier B is an outer enclosure, not a list of reachable outputs: numerator and
+denominator are propagated as independent intervals although they share
+choices. A stored value inside Tier B need not correspond to one consistent
+realization.
 
 ## Policy and failure labels
 
@@ -143,7 +181,9 @@ carries that assumption's label; the other assumption labels are heuristics:
 | `invalid` | NaN (including the unwritten prefill) or Inf |
 | `negative` | sign bit set, `-0` included |
 | `structural` | a required `+0` coordinate stores another value |
-| `assumption A-MODE` | the store of a truncating conversion; or an FP16-subnormal target stored near it or flushed to `+0` |
+| `assumption A-MODE32` | the store of FP32 arithmetic rounded toward zero |
+| `assumption A-CVT-F16` | the store of a truncating FP16 conversion; or an FP16-subnormal target stored near it or flushed to `+0` |
+| `assumption A-CVT-BF16` | the store of a truncating BF16 conversion |
 | `assumption A-F` | an FP16 store of the exact product truncated toward zero |
 | `assumption A-DIV` | the store of a reciprocal one FP32 step from `RN(1/l)` |
 | `assumption A-QK` | the store of a Walsh score one FP32 step from exact |
@@ -177,7 +217,9 @@ rejected:
 | window | `include_old_window_key`, `exclude_oldest_window_key` |
 
 A CPU contract proves, for every applicable pair, that the correct and mutated
-Tier B are disjoint at some coordinate and records the gap. The exception is
+Tier B are disjoint at some coordinate and records the gap. Disjoint
+enclosures certify that the mutation is caught; overlapping ones decide
+nothing, because both are outer enclosures. The exception is
 `omit_rescale` on the causal `identity`, `cyclic` and `walsh` cases: their row
 maximum is always in the first visited tile, so the omitted rescale lies inside
 the correct Tier B. `late_max` separates it on the same kernel.
@@ -194,7 +236,7 @@ The kernel is also launched once with scale `1` instead of `1/sqrt(D)` on the
 
 `STRUCTURED_CALIBRATION` has one entry per dtype, keyed by
 `(arch, candidate_name, dtype)`. A `StructuredCalibrationEntry` names the policy
-(`tier_b`), the six assumption versions, the literal case IDs and a fingerprint
+(`tier_b`), the eight assumption versions, the literal case IDs and a fingerprint
 of the dispatch-resolved spec (`STRUCTURED_QUICK_SPECS`: path, persistence,
 runtime shape, head size, `block_m`, `block_n`, fast exp2, sinks, LSE). It has no width, ULP or tolerance
 field, so no measurement can enlarge Tier B. A CPU contract requires the
@@ -205,11 +247,17 @@ closed with the re-ratification remedy.
 The GPU cases skip only when the visible device is not gfx942, through the
 shared `rocke.tests.gpu.current_device_arch_in` gate; a lane that sets
 `ROCKE_REQUIRE_GFX942=1` fails instead of skipping, and then the code-object
-contract also fails, instead of skipping, when `llvm-objdump` is missing. On
-gfx942 a missing entry, a case outside the entry, a fingerprint mismatch or a
-run that compared nothing is a failure, never a skip. Mutation self-checks and
-record capture run before the calibration gate, so a failing run still writes
-its records.
+contracts also fail, instead of skipping, for want of a tool. Only three
+things count as a missing tool: COMGR does not load a compiler of known
+version, `ROCKE_LLVM_FLAVOR` lowers the IR for another compiler than the
+loaded one, or (for the ISA contract alone) no `llvm-objdump` with the AMDGPU
+backend can decode the code object. A quick kernel that the loaded compiler
+rejects is a failure everywhere. On gfx942 a missing entry, a case outside the
+entry, a fingerprint mismatch or a run that compared nothing is a failure,
+never a skip. The adapter launches the spec dispatch resolves by default and
+pins no knob, so a retune that changes a fingerprint field reaches this gate.
+Mutation self-checks and record capture run before any assertion, so a failing
+run, one with an unrejected mutation included, still writes its records.
 
 Each case runs the five exposures twice, and the two runs must be
 bit-identical. With `ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>` set, each case
@@ -239,7 +287,11 @@ To re-ratify, run the complete suite on gfx942 with records enabled, confirm
 zero coordinates outside Tier B, every mutation rejected and determinism, run
 the audit on the captures, then update `STRUCTURED_CALIBRATION` (`spec`, `case_ids`)
 and, when the code objects changed, the digests in `STRUCTURED_EPILOGUE_ARTIFACTS`, in
-one reviewed change that names the develop revision and the gfx942 run.
+one reviewed change that names the develop revision and the gfx942 run. A
+digest names one kernel revision under one compiler, so any change to the
+dense builder's IR leaves the recorded ones behind; the ISA contract raises a
+warning when a compiler version an artifact was recorded under produces a
+digest that no artifact names.
 
 ## Oracle prohibition
 
