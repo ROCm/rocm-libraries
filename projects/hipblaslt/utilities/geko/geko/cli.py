@@ -189,6 +189,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target benchmark duration in seconds (used with --search)",
     )
     parser.add_argument(
+        "--skip-workload-bench",
+        dest="skip_workload_bench",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the before/after hipblaslt-bench of the workload that "
+            "--tune and --search run after writing results. "
+            "Outputs are results/before_tune.* and results/after_tune.*."
+        ),
+    )
+    parser.add_argument(
         "--benchmark-duration",
         type=float,
         default=0.5,
@@ -275,6 +286,7 @@ class CliArgs:
     retry: bool
     bench_freq: bool
     skip_gpu_check: bool = False
+    skip_workload_bench: bool = False
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -355,6 +367,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
         skip_gpu_check=ns.skip_gpu_check,
+        skip_workload_bench=ns.skip_workload_bench,
     )
 
 
@@ -442,6 +455,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             duration=args.duration,
             bench_freq=args.bench_freq,
             custom_lib_src=args.custom_lib_src,
+            workload_bench=not args.skip_workload_bench,
         )
         logger.info(f"Search outputs under '{run_root_str}'")
         return 0
@@ -468,6 +482,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             retry=args.retry,
             verbose=args.verbose,
             bench_freq=args.bench_freq,
+            workload_bench=not args.skip_workload_bench,
         )
         logger.info(f"Tuning outputs under '{run_root_str}'")
         return 0

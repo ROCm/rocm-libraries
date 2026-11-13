@@ -155,6 +155,29 @@ def run_bench(
     return 0
 
 
+def _run_workload_benchmarks(
+    hipblaslt_path: Path,
+    workload: str,
+    tuned_dir: Path,
+    results_dir: Path,
+    devices: Sequence[int],
+    staging_root: Path,
+    bench_freq: bool,
+) -> None:
+    """Benchmark the original workload before tuning and after stage merge."""
+    from geko.bench.workload_report import benchmark_before_and_after
+
+    benchmark_before_and_after(
+        hipblaslt_path,
+        workload,
+        tuned_dir,
+        results_dir,
+        list(devices),
+        staging_root,
+        bench_freq=bench_freq,
+    )
+
+
 def run_search(
     hipblaslt_path: str,
     log_file: str,
@@ -167,6 +190,7 @@ def run_search(
     duration: float = 0.04,
     bench_freq: bool = False,
     custom_lib_src: str | Path | None = None,
+    workload_bench: bool = True,
 ) -> None:
     """Run the dense search workflow end-to-end.
 
@@ -347,9 +371,21 @@ def run_search(
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
-    logger.info("Search workflow completed successfully!")
     state.optimized = True
     state.dump(state_path)
+
+    if workload_bench:
+        _run_workload_benchmarks(
+            hipblaslt_path,
+            state.input_path,
+            final_output_dir,
+            results_dir,
+            devices,
+            workdir / "stage_merge",
+            bench_freq,
+        )
+
+    logger.info("Search workflow completed successfully!")
 
 
 
@@ -482,6 +518,7 @@ def run_optimize(
     stall_timeout: float = 900.0,
     abort_after_consecutive_failures: int = 8,
     max_shape_failures: int = 0,
+    workload_bench: bool = True,
 ) -> None:
     """Run optim.run, merge 3_LibraryLogic YAMLs, analyze, and optionally write final_libs.
 
@@ -510,6 +547,10 @@ def run_optimize(
         max_shape_failures: Retire a shape after this many failed attempts
             (tracked in a persistent .failcount file); 0 disables
             retirement. Forwarded to optim.run.
+        workload_bench: When True, after the tuned library is written, benchmark
+            the original workload on the installed library and again on a
+            stage-merged copy of that library. Logs and CSVs go to
+            ``workdir/results/before_tune.*`` and ``after_tune.*``.
 
     Raises:
         FileNotFoundError: hipBLASLt, workdir, optimizations/, or state file missing.
@@ -654,7 +695,18 @@ def run_optimize(
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
-    logger.info("Optimization workflow completed successfully!")
-
     state.optimized = True
     state.dump(state_path)
+
+    if workload_bench:
+        _run_workload_benchmarks(
+            hipblaslt_path,
+            state.input_path,
+            final_output_dir,
+            results_dir,
+            devices,
+            workdir / "stage_merge",
+            bench_freq,
+        )
+
+    logger.info("Optimization workflow completed successfully!")

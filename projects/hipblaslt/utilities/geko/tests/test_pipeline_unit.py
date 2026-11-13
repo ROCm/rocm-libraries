@@ -14,6 +14,11 @@ from geko import pipeline
 from geko.schemas import RunState
 
 
+@pytest.fixture(autouse=True)
+def _skip_workload_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline, "_run_workload_benchmarks", lambda *args, **kwargs: None)
+
+
 def _make_workload(path: Path) -> Path:
     path.write_text("[]\n")
     return path

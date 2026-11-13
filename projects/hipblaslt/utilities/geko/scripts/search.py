@@ -93,6 +93,17 @@ def main() -> None:
         help="Logging verbosity: 0=WARNING, 1=INFO, 2=DEBUG",
     )
     parser.add_argument(
+        "--skip-workload-bench",
+        dest="skip_workload_bench",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the before/after hipblaslt-bench of the original workload. "
+            "By default that benchmark runs after results are written and "
+            "saves results/before_tune.* and results/after_tune.*."
+        ),
+    )
+    parser.add_argument(
         "--bench-freq",
         dest="bench_freq",
         action="store_true",
@@ -141,6 +152,7 @@ def main() -> None:
         duration=args.duration,
         bench_freq=args.bench_freq,
         custom_lib_src=args.custom_lib_src,
+        workload_bench=not args.skip_workload_bench,
     )
 
 

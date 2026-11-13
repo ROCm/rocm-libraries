@@ -120,6 +120,9 @@ class TestPipelineFast:
             pipeline_mod.optim,
             "analyze",
             mock_analyze,
+        ), patch.object(
+            pipeline_mod,
+            "_run_workload_benchmarks",
         ):
             run_optimize(str(hip), workdir=str(workdir), devices=[0], verbose=0)
 

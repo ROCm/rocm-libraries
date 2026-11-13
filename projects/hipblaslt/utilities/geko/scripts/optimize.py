@@ -129,6 +129,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--skip-workload-bench",
+        dest="skip_workload_bench",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the before/after hipblaslt-bench of the original workload. "
+            "By default, after results are written, the workload is benchmarked "
+            "on the installed library and again on a stage-merged copy of "
+            "final_libs. Logs and CSVs are results/before_tune.* and "
+            "results/after_tune.*."
+        ),
+    )
+    parser.add_argument(
         "--skip-gpu-check",
         dest="skip_gpu_check",
         action="store_true",
@@ -172,6 +185,7 @@ def main() -> None:
         stall_timeout=args.stall_timeout,
         abort_after_consecutive_failures=args.abort_after_consecutive_failures,
         max_shape_failures=args.max_shape_failures,
+        workload_bench=not args.skip_workload_bench,
     )
 
 
