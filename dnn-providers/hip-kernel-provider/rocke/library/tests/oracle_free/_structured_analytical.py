@@ -273,11 +273,11 @@ def _exact_target_bits(value: Fraction, dtype: str) -> int:
 # The IR stores ``fptrunc(fmul(o, R))``: the product rounded to FP32, then to
 # the subject dtype. Affected AMDGPU LLVM revisions select some of these FP16
 # sites as ``v_fma_mix{lo,hi}_f16 R, o, 0``, which rounds the exact product
-# once to FP16, without the ``contract`` flag that permits it; LLVM PR #236759
-# makes the fold require ``contract``. gfx942 has no BF16 form, and no other
-# operation is fused: the denominator combine stays a separate FP32 multiply
-# and add in every inspected code object (the IR contract and the ISA contract
-# in ``test_structured_contracts.py``).
+# once to FP16, without the ``contract`` flag that permits it; a compiler that
+# requires ``contract`` for the fold selects none. gfx942 has no BF16 form, and
+# no other operation is fused: the denominator combine stays a separate FP32
+# multiply and add in every inspected code object (the IR contract and the ISA
+# contract in ``test_structured_contracts.py``).
 # ---------------------------------------------------------------------------
 
 EPILOGUE_ASSUMPTION = (
