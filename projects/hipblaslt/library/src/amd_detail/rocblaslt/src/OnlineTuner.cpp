@@ -58,6 +58,8 @@ namespace rocblaslt
         m_repeats     = std::clamp(config.repeats, 1, c_maxRepeats);
         m_coldCalls   = std::max(config.coldCalls, 0);
         m_livePairCap = std::max(config.livePairCap, 1);
+
+        m_minImprovementPct = std::clamp(config.minImprovementPct, 0, 100);
         m_trace       = config.trace;
 
         m_livePairCapReached = config.livePairCapReached;
@@ -599,6 +601,19 @@ namespace rocblaslt
                 winnerIndex = static_cast<int>(i);
                 winnerScore = candidateScore;
                 winner      = state.m_candidates[i];
+            }
+        }
+
+        // A challenger replaces candidate 0 only by the configured margin.
+        if(winnerIndex > 0 && m_minImprovementPct > 0 && !state.m_samples[0].empty())
+        {
+            const float incumbent
+                = *std::min_element(state.m_samples[0].begin(), state.m_samples[0].end());
+            if(winnerScore > incumbent * (1.0f - m_minImprovementPct / 100.0f))
+            {
+                winnerIndex = 0;
+                winnerScore = incumbent;
+                winner      = state.m_candidates[0];
             }
         }
 

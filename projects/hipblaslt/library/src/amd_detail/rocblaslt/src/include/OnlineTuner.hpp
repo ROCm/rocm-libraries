@@ -33,6 +33,10 @@ namespace rocblaslt
         int  repeats   = 1; // timed launches per candidate
         int  coldCalls = 0; // untimed visits of a problem before exploration
 
+        // How much faster than candidate 0, the heuristic's pick, in percent,
+        // another candidate must measure to win; 0 lets the fastest win.
+        int minImprovementPct = 0;
+
         // Not scaled by the search depth.
         static constexpr int c_defaultLivePairCap = 4096;
 
@@ -345,6 +349,8 @@ namespace rocblaslt
         int  m_repeats     = 0;
         int  m_coldCalls   = 0;
         int  m_livePairCap = 1;
+
+        int m_minImprovementPct = 0;
 
         void (*m_trace)(const char* func, const std::string& message) = nullptr;
 

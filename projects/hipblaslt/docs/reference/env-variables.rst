@@ -207,6 +207,11 @@ notices go depends on logging:
           in flight runs untimed.
       - | Positive integer (default: 4096)
 
+    * - | ``HIPBLASLT_TUNING_MIN_IMPROVEMENT_PCT``
+        | ``online`` only: how much faster than default selection's pick, in percent, another
+          candidate must measure to be recorded instead of it.
+      - | Integer from 0 to 100 (default: 0, the fastest candidate wins)
+
     * - | ``HIPBLASLT_TUNING_ROTATING_MB``
         | Sets the target rotating-buffer footprint.
       - | MiB (default: 512)

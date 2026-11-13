@@ -4162,6 +4162,10 @@ namespace
         {
             return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
         }
+        static int onlineMinImprovementPercent()
+        {
+            return envInt("HIPBLASLT_TUNING_MIN_IMPROVEMENT_PCT", 0);
+        }
         static int onlineLivePairCap()
         {
             return std::max(1,
@@ -5744,6 +5748,8 @@ namespace rocblaslt
         config.repeats     = TuningPolicy::onlineHotIterations();
         config.coldCalls   = TuningPolicy::onlineColdIterations();
         config.livePairCap = TuningPolicy::onlineLivePairCap();
+
+        config.minImprovementPct = TuningPolicy::onlineMinImprovementPercent();
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             config.trace = traceOnlineTuner;
 
