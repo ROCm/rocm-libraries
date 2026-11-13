@@ -74,6 +74,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1250ConvDgradAot",
          &registerGfx1250ConvDgradAotSymbols,
          &resetGfx1250ConvDgradAotModuleCache},
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+        {MEGAKERNEL_ENGINE_NAME, &registerMegakernelSymbols, &resetMegakernelModuleCache},
+#endif
     };
     return s_packs;
 }

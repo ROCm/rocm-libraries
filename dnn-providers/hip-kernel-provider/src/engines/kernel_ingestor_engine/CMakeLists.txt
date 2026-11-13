@@ -231,3 +231,11 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()
+
+# The megakernel family's native pack; its descriptors are gated by the same option in
+# HKP_DESCRIPTOR_FAMILIES (HkpPackaging.cmake).
+if(ENABLE_MEGAKERNEL_ENGINE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/MegakernelNative.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC ENABLE_MEGAKERNEL_ENGINE=1)
+endif()

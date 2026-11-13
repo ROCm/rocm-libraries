@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "5c8f3ba1-72d4-5e19-a02f-d3b9e46c8f13",
+  "name": "megakernel stand-in dispatch",
+  "dispatch_symbol": "megakernel.dispatch"
+}

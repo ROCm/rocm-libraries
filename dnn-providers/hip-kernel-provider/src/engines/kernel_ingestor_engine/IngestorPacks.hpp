@@ -159,6 +159,16 @@ void setConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
 /// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
 int64_t convDgradAotImplicitLaunchCountForTesting();
 
+/// The engine name descriptors/megakernel/megakernel.ued.json declares. The pack table and
+/// the pack's decline lines read it here.
+inline constexpr std::string_view MEGAKERNEL_ENGINE_NAME = "hipkernel:Megakernel";
+
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+/// @see packs/MegakernelNative.cpp
+void registerMegakernelSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetMegakernelModuleCache();
+#endif
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.
