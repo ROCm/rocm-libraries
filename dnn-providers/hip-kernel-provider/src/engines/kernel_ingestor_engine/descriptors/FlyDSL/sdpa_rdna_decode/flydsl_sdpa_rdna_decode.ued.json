@@ -10,7 +10,16 @@
     "default": "5c419b88-8ce4-5bb5-89c0-c572c5849290"
   },
   "predict_engine": {
-    "default": "d9ea0851-b585-536e-8e0f-8ea0d00971c2"
+    "default": "d9ea0851-b585-536e-8e0f-8ea0d00971c2",
+    "gfx1100": [
+      "7c1a97e4-e7e2-440d-9864-bd5a91a9208f"
+    ],
+    "gfx1151": [
+      "971d6c08-5261-4fc8-bf09-83395e6de4f2"
+    ],
+    "gfx1201": [
+      "422c0f50-28bf-4bbb-b184-ccd99de039a9"
+    ]
   },
   "metadata": "8dc88fc8-9501-5c69-b49c-1a45e312639e",
   "knobs": [
