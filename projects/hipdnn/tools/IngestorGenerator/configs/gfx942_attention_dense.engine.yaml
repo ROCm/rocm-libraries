@@ -350,7 +350,10 @@ enumerate:
   space: full
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds, use_additive_bias]
+  # use_bias_x4 is carried as null like the other policy fields (the kernel's policy
+  # resolves it); an explicit value would rename the symbol (`_bx41`), and the
+  # enumerated registry never sets one.
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds, use_additive_bias, use_bias_x4]
   # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
   # bound is reduction.aot_budget_per_arch).
   max_kernels: 1600
