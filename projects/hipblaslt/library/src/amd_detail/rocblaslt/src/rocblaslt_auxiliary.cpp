@@ -771,16 +771,14 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
     {
     }
-    const bool firstLookup = told < tally && TensileLite::recordTuningLookup(key, index >= 0);
+    if(told < tally)
+        static_cast<void>(TensileLite::recordTuningLookup(key, index >= 0));
 
-    // Online misses on every call that explores a shape, so it counts the
-    // shape's first miss only: in online mode misses counts keys, hits calls.
+    // Calls, in every mode, like hits.
     auto& counters = TensileLite::TuningCounters::instance();
     if(index >= 0)
         counters.hits++;
-    else if(firstLookup
-            || TensileLite::TuningModeSingleton::getInstance().mode()
-                   != TensileLite::TuningMode::Online)
+    else
         counters.misses++;
 
     log_lookup(__func__, key, index >= 0, index);

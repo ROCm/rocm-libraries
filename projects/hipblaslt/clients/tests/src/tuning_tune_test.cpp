@@ -3274,14 +3274,17 @@ namespace
 
         ASSERT_GE(problem.distinctCandidates(), 2u);
         ASSERT_GE(problem.distinctCandidates(), 2u);
-        const uint64_t queryMisses = counters().misses;
+        const uint64_t missesBefore = counters().misses;
+        const uint64_t hitsBefore   = counters().hits;
 
         EXPECT_GT(runToResolution(problem).size(), 1u)
             << "online launched one kernel throughout, so it never probed";
 
         ASSERT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
         EXPECT_EQ(counters().tuned, 1u);
-        EXPECT_LE(counters().misses, queryMisses + 1) << "each exploring call counted a cache miss";
+        EXPECT_EQ(counters().misses - missesBefore + counters().hits - hitsBefore,
+                  static_cast<uint64_t>(kOnlineVisits))
+            << "a call was not counted once, as a hit or a miss";
         EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
 
         // Later calls launch the recorded winner, each one a replay hit.
