@@ -47,7 +47,6 @@
 #include <cstring>
 #include <fstream>
 #include <mutex>
-#include <optional>
 #include <unordered_map>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
@@ -1867,11 +1866,13 @@ ConfigEmbeddingTable ParseConfigEmbeddingTable(const std::string& path, const st
             {
                 table.vocab.reserve(num_rows);
                 table.vocab_embeddings.reserve(num_rows);
+                // Reject an absurd kernel-id length (> 1 MiB) instead of trusting the stored size.
+                constexpr std::uint32_t max_kernel_id_bytes = 1u << 20;
                 for(std::uint32_t r = 0; r < num_rows; ++r)
                 {
                     std::uint32_t len = 0;
                     is.read(reinterpret_cast<char*>(&len), sizeof(len));
-                    if(!is.good() || len > (1u << 20))
+                    if(!is.good() || len > max_kernel_id_bytes)
                     {
                         vocab_ok = false;
                         break;

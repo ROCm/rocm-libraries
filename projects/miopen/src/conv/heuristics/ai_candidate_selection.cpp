@@ -39,7 +39,6 @@
 #include <miopen/stringutils.hpp>
 #include <algorithm>
 #include <functional>
-#include <set>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -715,7 +714,7 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
         }
         catch(...)
         {
-            split_k = 1;
+            // non-numeric suffix: keep split_k = 1
         }
         return {kid.substr(0, plus), split_k};
     };

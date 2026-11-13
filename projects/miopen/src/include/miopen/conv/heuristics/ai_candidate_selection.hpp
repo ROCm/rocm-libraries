@@ -30,7 +30,6 @@
 #include <memory>
 #include <optional>
 #include <map>
-#include <set>
 #include <functional>
 #include <miopen/config.hpp>
 
@@ -67,10 +66,10 @@ LoadConfigEmbeddingVocabFromFile(const std::string& bin_path,
 /// Rank-then-lazy-applicability candidate selection. Ranks the whole precomputed config vocabulary
 /// by the two-tower score (input encoder + stored config embeddings -- no FillValidKernels, no
 /// fdeep config encoder), then walks the ranking best-first and returns the first candidate
-/// accepted by is_args_supported(kernel_id, split_k). Returns {kernel_id (with "+split_k" suffix
-/// where the solver uses one), split_k} or nullopt when no vocab is available or none is applicable
-/// (caller fails closed to the solver's non-AI default). Behaviour-preserving: first applicable in
-/// score order is the argmax over applicable candidates.
+/// accepted by is_args_supported. Returns {bare kernel id (the GetTypeString; the caller re-appends
+/// the "+split_k" suffix for split-k solvers), split_k} or nullopt when no vocab is available or
+/// none is applicable (caller fails closed to the solver's non-AI default). Behaviour-preserving:
+/// first applicable in score order is the argmax over applicable candidates.
 MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVocabCandidate(
     const std::string& arch,
     const std::string& solver,
