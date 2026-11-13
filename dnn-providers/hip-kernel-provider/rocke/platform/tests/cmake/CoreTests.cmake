@@ -32,6 +32,20 @@ if(BUILD_TESTING)
         TIMEOUT 1800
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+    # The committed column of compiler_options.json for the loaded compiler,
+    # re-measured. The installed manifest registers the same gate.
+    add_test(
+      NAME rocke_compiler_options_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_compiler_options.py"
+              --check)
+    set_tests_properties(
+      rocke_compiler_options_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;toolchain;generated-artifact;standard"
+        TIMEOUT 600
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
     # installed test tree does not carry, so CMakeLists.txt keeps it out of the
     # installed pytest cohort; run it here, from the source tree, instead.
@@ -60,8 +74,9 @@ if(BUILD_TESTING)
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
-            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
-            "CTest is not registered")
+            "rocKE: Python3 interpreter not found; the Python-driven build-tree "
+            "CTests (reproducibility gates and engine-parity checks) are not "
+            "registered")
   endif()
 
   # The binding consumes Python-built IR; this binary exercises the independent

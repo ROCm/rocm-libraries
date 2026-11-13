@@ -474,11 +474,12 @@ struct EngineDescriptor
     std::optional<DescriptorId> heuristicId;
 
     /// RFC 0019 §3.1 role-scoped UHDs, each optional, keyed by `gcnArchName` with an optional
-    /// `default`. The scoring roles list UHDs per arch; the loader indexes them by each UHD's
-    /// own `score.metric` rather than restating the metric here.
+    /// `default`. Every role lists UHDs per arch; the loader indexes the scoring roles by each
+    /// UHD's own `score.metric` rather than restating the metric here. The candidate generators
+    /// (`predict_applicable_kernels`) are a list too, for the JIT spaces that will consume them.
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
-    std::map<std::string, DescriptorId> predictApplicableKernels;
+    std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.

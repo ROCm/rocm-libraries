@@ -37,10 +37,8 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     if(node.scheme != CS_KERNEL_BLUESTEIN_SINGLE)
         return generator;
 
-    auto lengthBlue = node.lengthBlue;
-
     // find kernel config from function pool
-    auto config = node.pool.get_kernel(FMKey(lengthBlue, node.precision));
+    auto config = node.pool.get_kernel(FMKey(node.blue->get_padded_length(), node.precision));
 
     // get factors from the leaf node, which might have overridden what's in the pool
     auto&                     leafNode = static_cast<const LeafNode&>(node);
@@ -135,7 +133,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         return generator;
 
     size_t N = node.length[0];
-    size_t M = node.lengthBlue;
+    size_t M = node.blue->get_padded_length();
 
     size_t numof = 0;
     if(scheme == CS_KERNEL_FFT_MUL)

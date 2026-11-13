@@ -1081,6 +1081,15 @@ TEST_F(TestGfx950AttentionDensePacks, CarriesExactlyOneSharedKernelScopedMatcher
     EXPECT_EQ(kernelScoped, 1);
 }
 
+TEST_F(TestGfx950AttentionDensePacks, DeclaresItsConfiguredBehaviorNotes)
+{
+    const auto& notes = _set->engine.behaviorNotes;
+    EXPECT_NE(std::find(notes.begin(),
+                        notes.end(),
+                        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)),
+              notes.end());
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

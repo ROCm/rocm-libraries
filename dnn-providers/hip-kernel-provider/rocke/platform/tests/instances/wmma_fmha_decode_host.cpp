@@ -9,13 +9,20 @@
  * port is pinned to Python reference vectors here (mirrors
  * library/tests/test_wmma_fmha_decode_spec.py). It also pins the unknown
  * scheduler refusal of the decode and of the prefill (wmma_fmha_fwd_v2) to
- * normalize_scheduler_strategy's ValueError text.
+ * normalize_scheduler_strategy's ValueError text. Finally it pins the split-merge
+ * padded-slot mask (dec_split_merge) in the serialized IR of both kernels.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include <regex>
+#include <set>
+#include <string>
 
 #include "rocke/instance_gfx1151_wmma_fmha_decode.h"
 #include "rocke/instance_gfx1151_wmma_fmha_fwd_v2.h"
+#include "rocke/ir_serialize.h"
 
 static int g_failures = 0;
 
@@ -405,6 +412,139 @@ static void test_scheduler_reason(void)
     check_str("fwd_v2 sched bogus reason", reason, want);
 }
 
+/* Serialized IR of the decode (merge == false) or merge kernel. */
+static std::string build_ir(bool merge, const char* arch)
+{
+    rocke_wmma_fmha_decode_spec_t spec = rocke_wmma_fmha_decode_spec_default();
+    spec.head_size = 128;
+    rocke_ir_builder_t b;
+    std::string out;
+    if(rocke_ir_builder_init(&b, "decode_ir") != ROCKE_OK)
+    {
+        fprintf(stderr, "FAIL builder init\n");
+        ++g_failures;
+        return out;
+    }
+    rocke_kernel_def_t* k = merge ? rocke_build_wmma_fmha_decode_merge(&b, &spec, arch)
+                                  : rocke_build_wmma_fmha_decode(&b, &spec, arch);
+    char* text = NULL;
+    if(k == NULL || rocke_ir_serialize(k, &text) != ROCKE_OK)
+    {
+        fprintf(stderr, "FAIL build/serialize %s %s\n", merge ? "merge" : "decode", arch);
+        ++g_failures;
+    }
+    else
+        out = text;
+    free(text);
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
+static bool i32_const(const std::string& text, const std::string& name, long* value)
+{
+    std::smatch m;
+    std::regex re(name
+                  + R"( : i32 = arith\.constant \(\s*\) \{ ity = s:"i32", value = i:(-?\d+) \})");
+    if(!std::regex_search(text, m, re))
+        return false;
+    *value = atol(m[1].str().c_str());
+    return true;
+}
+
+/* A padded merge slot (s >= ns) re-reads split 0's partial under a zero weight; an Inf
+ * there gave Inf * 0 = NaN. Every WS_O partial load of the merge loop (the merge kernel
+ * and the fused merge in the main kernel share dec_split_merge) must feed an
+ * arith.select whose condition is the `slot < num_splits` compare (slot = sg * 8 + i for
+ * i in 0..7) and whose false operand is a zero constant vector. The byte-identity gate
+ * cannot see a revert here: its goldens come from the Python builder. Mirrors
+ * test_merge_padded_slots_load_masked_to_zero in test_wmma_fmha_decode_spec.py. */
+static void test_merge_padded_slots_load_masked_to_zero(void)
+{
+    static const char* const archs[] = {"gfx11-generic", "gfx12-generic"};
+    for(const char* arch : archs)
+    {
+        for(int merge = 0; merge < 2; ++merge)
+        {
+            char what[128];
+            const std::string text = build_ir(merge != 0, arch);
+            std::set<long> slots;
+            int nloads = 0;
+            std::regex load_re(R"((%\w+) : vec<f32x4> = memref\.global_load_vN \( %WS_O,)");
+            for(std::sregex_iterator it(text.begin(), text.end(), load_re), end; it != end; ++it)
+            {
+                const std::string name = (*it)[1].str();
+                snprintf(what,
+                         sizeof what,
+                         "%s %s load %s",
+                         merge ? "merge" : "decode",
+                         arch,
+                         name.c_str());
+                ++nloads;
+                std::smatch m;
+                if(!std::regex_search(text,
+                                      m,
+                                      std::regex(R"(vec<f32x4> = arith\.select \( (%\w+), )" + name
+                                                 + R"(, (%\w+) \))")))
+                {
+                    fprintf(stderr, "FAIL %s: not masked by a select\n", what);
+                    ++g_failures;
+                    continue;
+                }
+                const std::string cond = m[1].str(), false_val = m[2].str();
+                if(!std::regex_search(
+                       text,
+                       m,
+                       std::regex(
+                           cond
+                           + R"( : i1 = arith\.cmp \( (%\w+), %num_splits \) \{ pred = s:"lt" \})")))
+                {
+                    fprintf(stderr, "FAIL %s: select cond is not slot < num_splits\n", what);
+                    ++g_failures;
+                    continue;
+                }
+                const std::string slot = m[1].str();
+                if(!std::regex_search(
+                       text, m, std::regex(slot + R"( : i32 = arith\.add \( (%\w+), (%\w+) \))")))
+                {
+                    fprintf(stderr, "FAIL %s: slot is not mul + const\n", what);
+                    ++g_failures;
+                    continue;
+                }
+                const std::string prod = m[1].str(), idx = m[2].str();
+                long unroll = 0, i = 0;
+                if(!std::regex_search(
+                       text, m, std::regex(prod + R"( : i32 = arith\.mul \( %sg, (%\w+) \))"))
+                   || !i32_const(text, m[1].str(), &unroll) || !i32_const(text, idx, &i))
+                {
+                    fprintf(stderr, "FAIL %s: slot is not sg * const + const\n", what);
+                    ++g_failures;
+                    continue;
+                }
+                check_int(what, unroll, 8);
+                slots.insert(i);
+                if(!std::regex_search(
+                       text,
+                       std::regex(
+                           false_val
+                           + R"( : vec<f32x4> = arith\.constant_vec \(\s*\) \{ elem = s:"f32", fill = f:0\.0, vec = i:4 \})")))
+                {
+                    fprintf(stderr, "FAIL %s: false operand is not a zero vector\n", what);
+                    ++g_failures;
+                }
+            }
+            snprintf(
+                what, sizeof what, "%s %s WS_O load count >= 8", merge ? "merge" : "decode", arch);
+            check_int(what, nloads >= 8, 1);
+            snprintf(what,
+                     sizeof what,
+                     "%s %s slot indices cover 0..7",
+                     merge ? "merge" : "decode",
+                     arch);
+            check_int(what, slots == std::set<long>({0, 1, 2, 3, 4, 5, 6, 7}), 1);
+        }
+    }
+}
+
 int main(void)
 {
     test_scheduler_reason();
@@ -414,6 +554,7 @@ int main(void)
     test_num_splits();
     test_grids_workspace();
     test_names_lds_validity();
+    test_merge_padded_slots_load_masked_to_zero();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);

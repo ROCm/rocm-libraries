@@ -26,7 +26,7 @@ def test_parse_arguments_defaults(monkeypatch):
     args = PA.parseArguments()
     assert args.LogicPath == "/logic"
     assert args.Verbose == 1
-    assert args.Jobs == 48
+    assert args.Jobs == 0
     assert args.CheckAll is False
     assert args.CheckOnlyCustomKernels is False
 

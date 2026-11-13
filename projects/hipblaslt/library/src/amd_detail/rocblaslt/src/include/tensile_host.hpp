@@ -257,20 +257,25 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *
  *******************************************************************************/
+// In both getBestSolutions overloads, layoutRuledOut, if given, is set when no
+// solution is returned and the MX scale layout rule refused a candidate, or the
+// scale modes accept no layout.
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool*                              layoutRuledOut = nullptr);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
                                   const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool* layoutRuledOut = nullptr);
 
 /**
  * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent

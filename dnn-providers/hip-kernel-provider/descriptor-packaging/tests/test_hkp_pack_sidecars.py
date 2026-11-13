@@ -1081,7 +1081,7 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         tmp_path,
         main_fixture,
         predict_engine={"gfx942": [_TFLOPS_ID, _TIME_ID]},
-        predict_applicable_kernels={"default": _ORDERING_ID},
+        predict_applicable_kernels={"default": [_ORDERING_ID]},
     )
     ued_path = root / "pointwise.ued.json"
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
@@ -1108,6 +1108,14 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         (
             {
                 "sort_kernel_catalog": {
+                    "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
+                }
+            },
+            "no metric",
+        ),
+        (
+            {
+                "predict_applicable_kernels": {
                     "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
                 }
             },
@@ -1171,7 +1179,7 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
-        ued["behavior_notes"] = ["runtime_compilation"]
+        ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
         ued["numerical_notes"] = ["ftz"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}
@@ -1292,11 +1300,6 @@ def test_packaging_rejects_a_model_named_outside_an_arch_map(
             "twice",
         ),
         ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
-        # A candidate generator has no metric, so no list form (RFC 0019 §3.1).
-        (
-            {"predict_applicable_kernels": {"default": [_ORDERING_ID]}},
-            "requires a UUID",
-        ),
     ],
 )
 def test_packaging_rejects_malformed_role_values(

@@ -103,6 +103,15 @@ enum class fpfmt : int
     // scale layouts (unsigned)
     ue8m0 = 0x1080,
 };
+// The bunnies format of DT's values; tf32 maps to e8m10 although stored as fp32.
+template <hipconv::DataType DT>
+constexpr fpfmt fpfmt_of = DT == hipconv::DataType::fp16   ? fpfmt::e5m10
+                           : DT == hipconv::DataType::bf16 ? fpfmt::e8m7
+                           : DT == hipconv::DataType::tf32 ? fpfmt::e8m10
+                           : DT == hipconv::DataType::fp32 ? fpfmt::e8m23
+                           : DT == hipconv::DataType::fp8  ? fpfmt::e4m3
+                                                           : fpfmt::e5m2;
+
 constexpr auto bits_per_item(fpfmt f)
 {
     return (static_cast<int>(f) >> 4) & 0xFF;
@@ -171,13 +180,14 @@ constexpr auto next_power_of_two(T x) -> T
 }
 
 template <typename F, int... Is>
-__device__ constexpr void static_unroll(std::integer_sequence<int, Is...> trips, F&& f)
+__device__ __forceinline__ constexpr void static_unroll(std::integer_sequence<int, Is...> trips,
+                                                        F&& f)
 {
     (f(std::integral_constant<int, Is>()), ...);
 }
 
 template <int TripCount, typename F>
-__device__ constexpr void static_unroll(F&& f)
+__device__ __forceinline__ constexpr void static_unroll(F&& f)
 {
     static_unroll(std::make_integer_sequence<int, TripCount>{}, std::forward<F>(f));
 }
@@ -275,8 +285,60 @@ __device__ __forceinline__ auto wave_id() -> int
     return __builtin_amdgcn_readfirstlane(threadIdx.x / warpSize);
 }
 
+// Lane index within the wave, from mbcnt so v0 (threadIdx.x) can die; LICM cannot hoist the asm.
+__device__ __forceinline__ auto volatile_lane_id() -> int
+{
+    int result;
+    asm volatile("v_mbcnt_lo_u32_b32 %0, -1, 0\n\t"
+                 "v_mbcnt_hi_u32_b32 %0, -1, %0"
+                 : "=v"(result));
+    return result;
+}
+
+// Whether pin_sgpr pins. Its asm takes an SGPR, which holds a value only where the compiler proves
+// it uniform: at -O0 values are reloaded from the stack, which is per lane, and where lambdas stay
+// out of line, at -Oz or under -fno-inline, their arguments are VGPRs and what they capture lives
+// on the stack. -Os defines the same macros as -Oz.
+#if defined(__OPTIMIZE__) && !defined(__OPTIMIZE_SIZE__) && !defined(__NO_INLINE__)
+constexpr bool enable_pin_sgpr = true;
+#else
+constexpr bool enable_pin_sgpr = false;
+#endif
+
+// x in an SGPR; LICM cannot hoist the asm or what is computed from it. Without enable_pin_sgpr it
+// returns x as is.
+template <class T>
+__device__ __forceinline__ auto pin_sgpr(T x) -> T
+{
+    if constexpr(enable_pin_sgpr)
+        asm volatile("" : "+s"(x));
+    return x;
+}
+
+// x in a VGPR; LICM cannot hoist the asm or what is computed from it.
+template <class T>
+__device__ __forceinline__ auto pin_vgpr(T x) -> T
+{
+    asm volatile("" : "+v"(x));
+    return x;
+}
+
+// Keeps the instructions that write a's and b's blocks ahead of this point.
+//
+// One asm statement per pair of blocks: a separate asm for each tile's block raised VGPR use and
+// scratch.
+template <reg_tile_concept RegTile>
+__device__ __forceinline__ void pin(RegTile& a, RegTile& b)
+{
+#pragma unroll
+    for(int mb = 0; mb < RegTile::row_blocks; ++mb)
+#pragma unroll
+        for(int nb = 0; nb < RegTile::col_blocks; ++nb)
+            asm volatile("" : "+v"(a.block(mb, nb).data), "+v"(b.block(mb, nb).data));
+}
+
 template <int num_rounds, int num_waves, typename F>
-__device__ void wave_distribute(int wave, F&& f)
+__device__ constexpr void wave_distribute(int wave, F&& f)
 {
     constexpr int num_rounds_per_wave = num_rounds / num_waves;
     constexpr int remainder_rounds    = num_rounds - num_rounds_per_wave * num_waves;
@@ -656,14 +718,20 @@ __device__ void load_sparse(RegTile& rt, MemT* ptr_base, Map&& map, NonZeroMap&&
     }
 }
 
-template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
-__device__ void store_tile(RegTile& rt, MemT* base, Map&& map)
+// store_tile's body, with the lane from lane_of().
+// Calling lane_id inside keeps its range [0, 64) known where store_tile_lane is not inlined.
+template <typename StoreInst,
+          reg_tile_concept RegTile,
+          typename MemT,
+          typename Map,
+          typename LaneOf>
+__device__ void store_tile_lane(RegTile& rt, MemT* base, Map&& map, LaneOf&& lane_of)
 {
     using st_t                        = typename StoreInst::type;
     constexpr int bpi                 = bits_per_item(RegTile::matrix::fmt);
     constexpr int num_items_per_round = StoreInst::bits_per_store / bpi;
     constexpr int num_rounds          = RegTile::matrix::num_items / num_items_per_round;
-    const int lane                    = lane_id();
+    const int lane                    = lane_of();
 #pragma unroll
     for(int mb = 0; mb < RegTile::row_blocks; ++mb)
     {
@@ -681,6 +749,20 @@ __device__ void store_tile(RegTile& rt, MemT* base, Map&& map)
             }
         }
     }
+}
+
+template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
+__device__ __forceinline__ void store_tile(RegTile& rt, MemT* base, Map&& map)
+{
+    store_tile_lane<StoreInst>(rt, base, std::forward<Map>(map), [] { return lane_id(); });
+}
+
+// lane is a parameter so a caller can pass volatile_lane_id, which keeps LICM from hoisting the
+// addresses.
+template <typename StoreInst, reg_tile_concept RegTile, typename MemT, typename Map>
+__device__ __forceinline__ void store_tile(RegTile& rt, MemT* base, Map&& map, int lane)
+{
+    store_tile_lane<StoreInst>(rt, base, std::forward<Map>(map), [lane] { return lane; });
 }
 
 // Prefetch MxN matrix stored in row-major format, i.e. address calculation is m * stride + n

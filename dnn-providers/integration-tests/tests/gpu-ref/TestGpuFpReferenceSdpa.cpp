@@ -27,6 +27,9 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
+
+#include <hip/hip_runtime_api.h>
 
 #include <algorithm>
 #include <array>
@@ -1709,6 +1712,395 @@ INSTANTIATE_TEST_SUITE_P(,
                              return std::string(info.param.name);
                          });
 
+namespace
+{
+
+// A device buffer whose first granule is mapped and whose second is reserved but unmapped, so a
+// read past the end of the mapped granule faults the GPU. liveEnd(bytes) is where `bytes` of
+// live data must start to end exactly at the boundary.
+class HalfMappedRegion
+{
+public:
+    HalfMappedRegion() = default;
+    HalfMappedRegion(const HalfMappedRegion&) = delete;
+    HalfMappedRegion& operator=(const HalfMappedRegion&) = delete;
+    HalfMappedRegion(HalfMappedRegion&&) = delete;
+    HalfMappedRegion& operator=(HalfMappedRegion&&) = delete;
+
+    ~HalfMappedRegion()
+    {
+        if(_mapped)
+        {
+            (void)hipMemUnmap(_reserved, _granularity);
+        }
+        if(_created)
+        {
+            (void)hipMemRelease(_handle);
+        }
+        if(_reserved != nullptr)
+        {
+            (void)hipMemAddressFree(_reserved, 2 * _granularity);
+        }
+    }
+
+    // 0 on success, else the step that failed (10-15).
+    int map()
+    {
+        int device = 0;
+        if(hipGetDevice(&device) != hipSuccess)
+        {
+            return 10;
+        }
+        hipMemAllocationProp prop{};
+        prop.type = hipMemAllocationTypePinned;
+        prop.location.type = hipMemLocationTypeDevice;
+        prop.location.id = device;
+        if(hipMemGetAllocationGranularity(&_granularity, &prop, hipMemAllocationGranularityMinimum)
+           != hipSuccess)
+        {
+            return 11;
+        }
+        if(hipMemAddressReserve(&_reserved, 2 * _granularity, 0, nullptr, 0) != hipSuccess)
+        {
+            return 12;
+        }
+        if(hipMemCreate(&_handle, _granularity, &prop, 0) != hipSuccess)
+        {
+            return 13;
+        }
+        _created = true;
+        if(hipMemMap(_reserved, _granularity, 0, _handle, 0) != hipSuccess)
+        {
+            return 14;
+        }
+        _mapped = true;
+        hipMemAccessDesc access{};
+        access.location = prop.location;
+        access.flags = hipMemAccessFlagsProtReadWrite;
+        return hipMemSetAccess(_reserved, _granularity, &access, 1) == hipSuccess ? 0 : 15;
+    }
+
+    void* liveEnd(size_t liveBytes) const
+    {
+        return static_cast<char*>(_reserved) + _granularity - liveBytes;
+    }
+
+private:
+    void* _reserved = nullptr;
+    size_t _granularity = 0;
+    hipMemGenericAllocationHandle_t _handle{};
+    bool _created = false;
+    bool _mapped = false;
+};
+
+// Copies `values` to the end of a HalfMappedRegion's mapped granule; returns the copy's start.
+template <typename T>
+void* uploadToLiveEnd(const HalfMappedRegion& region, const std::vector<T>& values)
+{
+    const auto bytes = values.size() * sizeof(T);
+    void* base = region.liveEnd(bytes);
+    return hipMemcpy(base, values.data(), bytes, hipMemcpyHostToDevice) == hipSuccess ? base
+                                                                                      : nullptr;
+}
+
+// 0 when every row s >= liveQ of the [1, H, sq, D] O / [1, H, sq] LSE is O = 0, LSE = -inf
+// (SEM-010) and every live row is finite; else 20 (LSE) or 21 (O).
+int checkPaddedRowsEmpty(Tensor<float>& o, Tensor<float>& lse, int64_t liveQ)
+{
+    o.memory().hostData();
+    lse.memory().hostData();
+    int result = 0;
+    for(int64_t h = 0; h < o.dims()[1]; ++h)
+    {
+        for(int64_t s = 0; s < o.dims()[2]; ++s)
+        {
+            const float rowLse = lse.getHostValue(0, h, s);
+            const bool padded = s >= liveQ;
+            const bool lseOk = padded ? std::isinf(rowLse) && rowLse < 0 : std::isfinite(rowLse);
+            if(!lseOk)
+            {
+                result = 20;
+            }
+            for(int64_t d = 0; d < o.dims()[3]; ++d)
+            {
+                const float value = o.getHostValue(0, h, s, d);
+                if(padded ? value != 0.0f : !std::isfinite(value))
+                {
+                    result = 21;
+                }
+            }
+        }
+    }
+    return result;
+}
+
+// Runs the forward with Q's padded rows (sq >= seq_len_q) in reserved but unmapped device
+// memory, so reading any of them faults the GPU. Returns 0 when the kernel finished and wrote
+// every padded row as O = 0, LSE = -inf (SEM-008, SEM-010); any other value names the step that
+// failed (18: fprop threw, e.g. on the fault).
+int runForwardWithUnmappedQPadding()
+{
+    constexpr int64_t SQ = 4;
+    constexpr int64_t LIVE_Q = 2;
+    constexpr int64_t SKV = 4;
+    constexpr int64_t D = 8;
+    HalfMappedRegion region;
+    if(const int rc = region.map(); rc != 0)
+    {
+        return rc;
+    }
+    Tensor<float> qLive({LIVE_Q * D});
+    qLive.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    void* qBase = uploadToLiveEnd(
+        region,
+        std::vector<float>(qLive.memory().hostData(), qLive.memory().hostData() + LIVE_Q * D));
+    if(qBase == nullptr)
+    {
+        return 16;
+    }
+    ShallowGpuTensor<float> q(qBase, {1, 1, SQ, D}, {SQ * D, SQ * D, D, 1});
+    Tensor<float> k({1, 1, SKV, D});
+    Tensor<float> v({1, 1, SKV, D});
+    Tensor<float> o({1, 1, SQ, D});
+    Tensor<float> lse({1, 1, SQ});
+    Tensor<int32_t> lenQ({1, 1, 1, 1});
+    Tensor<int32_t> lenKv({1, 1, 1, 1});
+    k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
+    v.fillWithRandomValues(-1.0f, 1.0f, SEED_V);
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lse.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lenQ.setHostValue(static_cast<int32_t>(LIVE_Q), 0, 0, 0, 0);
+    lenKv.setHostValue(static_cast<int32_t>(SKV), 0, 0, 0, 0);
+    lenQ.memory().hostData();
+    lenKv.memory().hostData();
+    // A GPU memory fault surfaces as a HIP error, which fprop throws.
+    try
+    {
+        GpuFpReferenceSdpa::fprop(
+            q,
+            k,
+            v,
+            o,
+            GpuSdpaFwdOptions<float>{}.setScale(0.25f).setSeqLens(&lenQ, &lenKv).setLse(&lse));
+    }
+    catch(const std::exception&)
+    {
+        return 18;
+    }
+    if(hipDeviceSynchronize() != hipSuccess)
+    {
+        return 17;
+    }
+    return checkPaddedRowsEmpty(o, lse, LIVE_Q);
+}
+
+// Random fp8 values for `count` elements.
+std::vector<fp8_e4m3> fp8Values(int64_t count, unsigned int seed)
+{
+    Tensor<float> values({count});
+    values.fillWithRandomValues(-2.0f, 2.0f, seed);
+    std::vector<fp8_e4m3> out;
+    out.reserve(static_cast<size_t>(count));
+    for(int64_t i = 0; i < count; ++i)
+    {
+        out.emplace_back(values.getHostValue(i));
+    }
+    return out;
+}
+
+// The fp8 forward (dequantize first, then the float pipeline) with its padding in unmapped
+// memory: Q's rows past seq_len_q, and the paged K / V slots past seq_len_kv (the tail of the
+// last table block). Reading any of them faults the GPU. Returns 0 when the run finished, the
+// padded Q rows are O = 0, LSE = -inf, and the live rows match the CPU reference on the same
+// live data (22 otherwise); else the step that failed (18: fprop threw, e.g. on the fault).
+int runFp8ForwardWithUnmappedPadding()
+{
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 4;
+    constexpr int64_t LIVE_Q = 3;
+    constexpr int64_t D = 8;
+    constexpr int64_t BLOCK = 4;
+    constexpr int64_t BLOCKS = 2;
+    constexpr int64_t LIVE_KV = 6;
+    constexpr int64_t MAX_KV = BLOCKS * BLOCK;
+    // Q is token-major ([1, H, SQ, D] with strides [SQ*H*D, D, H*D, 1]), so its padded rows are
+    // its tail. The containers are [BLOCKS, H, BLOCK, D] with token-major blocks
+    // ([.., D, H*D, 1]); the table maps logical keys 0-3 to block 0 and 4-7 to block 1, so keys
+    // 6-7 (padding) are the containers' tail.
+    const std::vector<int64_t> qStrides = {SQ * H * D, D, H * D, 1};
+    const std::vector<int64_t> cStrides = {BLOCK * H * D, D, H * D, 1};
+    const auto qLive = fp8Values(LIVE_Q * H * D, SEED_Q);
+    const auto kLive = fp8Values(LIVE_KV * H * D, SEED_K);
+    const auto vLive = fp8Values(LIVE_KV * H * D, SEED_V);
+
+    HalfMappedRegion qRegion;
+    HalfMappedRegion kRegion;
+    HalfMappedRegion vRegion;
+    for(auto* region : {&qRegion, &kRegion, &vRegion})
+    {
+        if(const int rc = region->map(); rc != 0)
+        {
+            return rc;
+        }
+    }
+    void* qBase = uploadToLiveEnd(qRegion, qLive);
+    void* kBase = uploadToLiveEnd(kRegion, kLive);
+    void* vBase = uploadToLiveEnd(vRegion, vLive);
+    if(qBase == nullptr || kBase == nullptr || vBase == nullptr)
+    {
+        return 16;
+    }
+    ShallowGpuTensor<fp8_e4m3> q(qBase, {1, H, SQ, D}, qStrides);
+    ShallowGpuTensor<fp8_e4m3> kCache(kBase, {BLOCKS, H, BLOCK, D}, cStrides);
+    ShallowGpuTensor<fp8_e4m3> vCache(vBase, {BLOCKS, H, BLOCK, D}, cStrides);
+    Tensor<int32_t> table({1, 1, BLOCKS, 1});
+    Tensor<int32_t> lenQ({1, 1, 1, 1});
+    Tensor<int32_t> lenKv({1, 1, 1, 1});
+    table.setHostValue(0, 0, 0, 0, 0);
+    table.setHostValue(1, 0, 0, 1, 0);
+    lenQ.setHostValue(static_cast<int32_t>(LIVE_Q), 0, 0, 0, 0);
+    lenKv.setHostValue(static_cast<int32_t>(LIVE_KV), 0, 0, 0, 0);
+    Tensor<float> descaleQ({1});
+    Tensor<float> descaleK({1});
+    Tensor<float> descaleV({1});
+    descaleQ.fillWithValue(0.5f);
+    descaleK.fillWithValue(1.25f);
+    descaleV.fillWithValue(0.75f);
+    Tensor<float> o({1, H, SQ, D});
+    Tensor<float> lse({1, H, SQ});
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lse.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    table.memory().hostData();
+    lenQ.memory().hostData();
+    lenKv.memory().hostData();
+    try
+    {
+        GpuFpReferenceSdpa::fprop<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+            q,
+            kCache,
+            vCache,
+            o,
+            GpuSdpaFwdOptions<float>{}
+                .setScale(0.25f)
+                .setSeqLens(&lenQ, &lenKv)
+                .setPaged(&table, &table, MAX_KV)
+                .setLse(&lse)
+                .setDescales(&descaleQ, &descaleK, &descaleV));
+    }
+    catch(const std::exception&)
+    {
+        return 18;
+    }
+    if(hipDeviceSynchronize() != hipSuccess)
+    {
+        return 17;
+    }
+    if(const int rc = checkPaddedRowsEmpty(o, lse, LIVE_Q); rc != 0)
+    {
+        return rc;
+    }
+
+    // The CPU reference on dense host copies of the live data (padding zero, never read).
+    Tensor<fp8_e4m3> qCpu({1, H, SQ, D});
+    Tensor<fp8_e4m3> kCpu({1, H, MAX_KV, D});
+    Tensor<fp8_e4m3> vCpu({1, H, MAX_KV, D});
+    qCpu.fillWithValue(fp8_e4m3(0.0f));
+    kCpu.fillWithValue(fp8_e4m3(0.0f));
+    vCpu.fillWithValue(fp8_e4m3(0.0f));
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t d = 0; d < D; ++d)
+        {
+            for(int64_t s = 0; s < LIVE_Q; ++s)
+            {
+                qCpu.setHostValue(qLive[static_cast<size_t>((s * H + h) * D + d)], 0, h, s, d);
+            }
+            for(int64_t s = 0; s < LIVE_KV; ++s)
+            {
+                kCpu.setHostValue(kLive[static_cast<size_t>((s * H + h) * D + d)], 0, h, s, d);
+                vCpu.setHostValue(vLive[static_cast<size_t>((s * H + h) * D + d)], 0, h, s, d);
+            }
+        }
+    }
+    Tensor<float> oCpu({1, H, SQ, D});
+    Tensor<float> lseCpu({1, H, SQ, 1});
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+        qCpu,
+        kCpu,
+        vCpu,
+        oCpu,
+        SdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setSeqLens(&lenQ, &lenKv)
+            .setLse(&lseCpu)
+            .setDescales(&descaleQ, &descaleK, &descaleV));
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t s = 0; s < LIVE_Q; ++s)
+        {
+            const float lseWant = lseCpu.getHostValue(0, h, s, 0);
+            if(std::fabs(lse.getHostValue(0, h, s) - lseWant)
+               > 1e-5F * std::max(1.0F, std::fabs(lseWant)))
+            {
+                return 22;
+            }
+            for(int64_t d = 0; d < D; ++d)
+            {
+                if(std::fabs(o.getHostValue(0, h, s, d) - oCpu.getHostValue(0, h, s, d))
+                   > gpuRefFwdTolerance<float>())
+                {
+                    return 22;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+// Runs `run` in a child process (threadsafe death-test style re-execs this binary rather than
+// forking a process that already holds HIP state) and expects it to exit 0. Skips when the
+// device has no virtual memory management.
+void expectChildExitsZero(int (*run)())
+{
+    int device = 0;
+    int vmmSupported = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(
+                  &vmmSupported, hipDeviceAttributeVirtualMemoryManagementSupported, device),
+              hipSuccess);
+    if(vmmSupported == 0)
+    {
+        GTEST_SKIP() << "the device has no virtual memory management (hipMemAddressReserve)";
+    }
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    // EXPECT_EXIT expands to a switch without a default label (see
+    // TestBackendLibraryResolution.cpp); -Werror would make the diagnostic fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(std::_Exit(run()), ::testing::ExitedWithCode(0), "");
+#pragma clang diagnostic pop
+}
+
+} // namespace
+
+// SEM-008: padding contents are never read. A padded query row must leave the kernel before it
+// computes any score, so its Q row is never loaded. Values cannot show such a read (the row is
+// overwritten with O = 0, LSE = -inf either way), so Q's padded rows sit in unmapped memory and
+// the forward runs in a child process: a read faults the GPU and the child does not exit 0.
+TEST(TestGpuSdpaFwdUnmappedQPaddingFp32, PaddedRowsNeverReadQPadding)
+{
+    SKIP_IF_NO_DEVICES();
+    expectChildExitsZero(&runForwardWithUnmappedQPadding);
+}
+
+// The same for the fp8 path, whose dequantize pre-pass must read only live Q rows and the live
+// rows of a paged K / V (the slots its table maps below seq_len_kv).
+TEST(TestGpuSdpaFwdUnmappedPaddingFp8, DequantizeNeverReadsPadding)
+{
+    SKIP_IF_NO_DEVICES();
+    expectChildExitsZero(&runFp8ForwardWithUnmappedPadding);
+}
+
 // ============================================================================
 // Paged KV cache: GPU reference (direct page-table addressing) vs CPU reference
 // (gather then dense). NHD cache strides, shuffled blocks, and NaN in the null
@@ -2272,6 +2664,86 @@ TEST(TestGpuSdpaFwdFp8, PerHeadDescaleOnPagedKvThrows)
                          .setPaged(&table, &table, 6)
                          .setDescales(&scalar, &perHead, &scalar))),
                  std::invalid_argument);
+}
+
+// The positive control for PerHeadDescaleOnPagedKvThrows: scalar descales on a paged fp8 K/V are
+// well defined and match the CPU reference on the gathered (dense) K/V. Block 1 holds keys 0-3
+// and block 0 keys 4-5, so the table order matters.
+TEST(TestGpuSdpaFwdFp8, ScalarDescaleOnPagedKvMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 2;
+    constexpr int64_t D = 8;
+    constexpr int64_t MAX_KV = 6;
+    Tensor<fp8_e4m3> q({1, H, SQ, D});
+    Tensor<fp8_e4m3> kCache({2, H, 4, D});
+    Tensor<fp8_e4m3> vCache({2, H, 4, D});
+    fillFp8(q, SEED_Q);
+    fillFp8(kCache, SEED_K);
+    fillFp8(vCache, SEED_V);
+    Tensor<int32_t> table({1, 1, 2, 1});
+    Tensor<int32_t> lenQ({1, 1, 1, 1});
+    Tensor<int32_t> lenKv({1, 1, 1, 1});
+    table.setHostValue(1, 0, 0, 0, 0);
+    table.setHostValue(0, 0, 0, 1, 0);
+    lenQ.setHostValue(static_cast<int32_t>(SQ), 0, 0, 0, 0);
+    lenKv.setHostValue(static_cast<int32_t>(MAX_KV), 0, 0, 0, 0);
+    Tensor<float> descaleQ({1});
+    Tensor<float> descaleK({1});
+    Tensor<float> descaleV({1});
+    descaleQ.fillWithValue(0.5f);
+    descaleK.fillWithValue(1.25f);
+    descaleV.fillWithValue(0.75f);
+    // Non-const accesses so the host edits migrate to the device.
+    q.memory().hostData();
+    kCache.memory().hostData();
+    vCache.memory().hostData();
+    table.memory().hostData();
+    lenQ.memory().hostData();
+    lenKv.memory().hostData();
+
+    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, lenKv, MAX_KV);
+    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, lenKv, MAX_KV);
+    Tensor<float> oCpu({1, H, SQ, D});
+    Tensor<float> oGpu({1, H, SQ, D});
+    Tensor<float> lseCpu({1, H, SQ, 1});
+    Tensor<float> lseGpu({1, H, SQ});
+    oGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+        q,
+        kDense,
+        vDense,
+        oCpu,
+        SdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setSeqLens(&lenQ, &lenKv)
+            .setLse(&lseCpu)
+            .setDescales(&descaleQ, &descaleK, &descaleV));
+    ASSERT_NO_THROW((GpuFpReferenceSdpa::fprop<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
+        q,
+        kCache,
+        vCache,
+        oGpu,
+        GpuSdpaFwdOptions<float>{}
+            .setScale(0.25f)
+            .setSeqLens(&lenQ, &lenKv)
+            .setPaged(&table, &table, MAX_KV)
+            .setLse(&lseGpu)
+            .setDescales(&descaleQ, &descaleK, &descaleV))));
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+    lseGpu.memory().hostData();
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t s = 0; s < SQ; ++s)
+        {
+            const float lseWant = lseCpu.getHostValue(0, h, s, 0);
+            EXPECT_NEAR(
+                lseGpu.getHostValue(0, h, s), lseWant, 1e-5F * std::max(1.0F, std::fabs(lseWant)))
+                << "h=" << h << " s=" << s;
+        }
+    }
 }
 
 // ============================================================================

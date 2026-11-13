@@ -726,17 +726,16 @@ def _validate_unique_strings(values, key, where):
 
 
 def _validate_role_map(entries, role, where):
-    """An arch-to-UUID map; a scoring role may list one UHD per metric."""
+    """An arch-to-UUID map; every role may list one UHD per metric (RFC 0019 §3.1)."""
     if not isinstance(entries, dict) or not entries:
         raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
     for arch, value in entries.items():
         if arch != "default":
             _reject_nonbare_arch([arch], where)
         entry_where = f"{where}.{role}.{arch}"
-        if isinstance(value, str) or role not in _METRIC_ROLES:
+        if isinstance(value, str):
             _validate_uuid(value, entry_where)
             continue
-        # RFC 0019 §3.1: a scoring role may list one UHD per metric.
         if not isinstance(value, list) or not value:
             raise HkpPackError(
                 f"{entry_where} must be a UUID or a nonempty list of UUIDs"
@@ -816,13 +815,10 @@ _UHD_ADAPTERS = (
     "linear_data",
     "custom_library",
 )
-_BEHAVIOR_NOTES = ("runtime_compilation",)
+_BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
-# Roles mapping an arch to one UHD per ranking metric. A candidate generator has no
-# metric, so predict_applicable_kernels stays single.
-_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
 _UED_KEYS = (
     "version",
     "revision",
@@ -1292,6 +1288,42 @@ def _validate_shape(desc, source_root, log=print, *, require_dvc=False):
         _validate_kmd(desc)
 
 
+def _excluded_prefixes(exclude_folders):
+    """Each `exclude_folders` entry as a tuple of lower-cased path segments."""
+    prefixes = set()
+    for name in exclude_folders:
+        parts = tuple(
+            part.lower() for part in name.replace("\\", "/").split("/") if part
+        )
+        if parts:
+            prefixes.add(parts)
+    return prefixes
+
+
+def _under_excluded(rel_path, excluded):
+    """Whether a file at `rel_path` (relative to the root) is inside an excluded folder."""
+    parts = tuple(part.lower() for part in rel_path.parts)
+    return any(
+        len(parts) > len(prefix) and parts[: len(prefix)] == prefix
+        for prefix in excluded
+    )
+
+
+def _find_folder(root, prefix):
+    """The folder of `root` whose segments match `prefix` case-insensitively, or None."""
+    folder = root
+    for segment in prefix:
+        matches = sorted(
+            child
+            for child in folder.iterdir()
+            if child.is_dir() and child.name.lower() == segment
+        )
+        if not matches:
+            return None
+        folder = matches[0]
+    return folder
+
+
 def load_flat_input(
     root,
     generic_targets,
@@ -1316,10 +1348,13 @@ def load_flat_input(
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged.
 
-    `exclude_folders` names top-level child folders of the root that are not
-    content in this build: nothing under one is read, validated or shipped.
-    A name matches case-insensitively, as the reserved `kpack/` folder does,
-    and one naming no folder is ignored (a root need not carry every family).
+    `exclude_folders` names folders of the root that are not content in this
+    build: nothing under one is read, validated or shipped. An entry is a
+    top-level child (a disabled family, `rocKE`) or a `/`-separated path under
+    the root (a bundle whose large files were not fetched,
+    `rocKE/<bundle>`). It matches case-insensitively, as the reserved `kpack/`
+    folder does, and one naming no folder is ignored (a root need not carry
+    every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.
@@ -1349,17 +1384,19 @@ def load_flat_input(
 
     # Case-insensitive for the same reason as the `kpack/` guard below: the packed
     # tree is also consumed on Windows, where `rocKE` and `rocke` are one directory.
-    excluded = {name.lower() for name in exclude_folders}
-    for name in sorted(p.name for p in root.iterdir() if p.is_dir()):
-        if name.lower() in excluded:
-            log(f"excluding disabled family folder {name}/")
+    excluded = _excluded_prefixes(exclude_folders)
+    for prefix in sorted(excluded):
+        folder = _find_folder(root, prefix)
+        if folder is not None:
+            log(f"excluding folder {folder.relative_to(root).as_posix()}/")
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
-        # A disabled family folder is not content in this build: its files are never
-        # read, so they can neither ship nor fail validation.
-        if len(rel_path.parts) > 1 and rel_path.parts[0].lower() in excluded:
+        # An excluded folder (a disabled family, or a bundle whose DVC files were not
+        # pulled) is not content in this build: its files are never read, so they can
+        # neither ship nor fail validation.
+        if _under_excluded(rel_path, excluded):
             continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,
@@ -1778,13 +1815,13 @@ def _validate_slot_packs(flat):
 
 
 def _validate_role_metrics(ued, uhd_by_id):
-    """At most one model per metric for each architecture a scoring role names.
+    """At most one model per metric for each architecture a role names.
 
     RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
     model must declare a metric. A slot ranker must not (RFC 0021 §7): a slot has
     no time of its own, so the loader rejects an engine whose slot ranker names one.
     """
-    scopes = [(f"UED {ued.path.name}", ued.doc, _METRIC_ROLES, False)]
+    scopes = [(f"UED {ued.path.name}", ued.doc, _UHD_ROLES, False)]
     scopes += [
         (who, slot, ("sort_kernel_catalog",), True)
         for who, slot in _selection_scopes(ued)
