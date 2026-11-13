@@ -27,8 +27,11 @@
 //   convert_array (numeric datatype pairs, index base, strided and same-type shortcuts),
 //   dnvec_transfer_from, ell2dense / coo2dense_aos templates (also reached from sddmm
 //   alg_dense), the ggthr generic dispatch, csxsldu_compute, gell2csr (ELL to CSR through
-//   rocsparse_sparse_to_sparse) and rocsparse_sparse_to_sparse between data types that
-//   convert_array cannot convert.
+//   rocsparse_sparse_to_sparse), and rocsparse_sparse_to_sparse between data types and
+//   index types: the data type pairs that convert_array cannot convert, the supported
+//   value conversions, matrices with zero nonzeros, the index types of the COO AoS to CSR
+//   and CSC to CSR conversions, and the target pointer checks that run before any target
+//   array is written.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -1013,39 +1016,207 @@ namespace
             reject(dt, dt, i32, col_ind, ell_val);
     }
 
-    // A 3 x 3 matrix with f32 values converted to CSR, COO and COO AoS targets with i32
-    // values, a pair without a conversion kernel. The conversion is rejected, and the
-    // target arrays keep their contents. CSC -> CSR has no value conversion and rejects
-    // any data type change.
-    TEST_F(ConvInternal, SparseToSparseMixedDatatypes)
+    // ------------------------------------------------------------------
+    // rocsparse_sparse_to_sparse between data types and index types
+    // ------------------------------------------------------------------
+
+    // The matrix of the tests below, row-major.
+    constexpr int64_t s2s_m                   = 3;
+    constexpr float   s2s_dense[s2s_m][s2s_m] = {{1, 0, 0}, {2, 0, 3}, {0, 4, 0}};
+
+    // The arrays of s2s_dense in one format: CSR and BSR (row pointer, column indices), CSC
+    // (column pointer, row indices), COO (row indices, column indices), COO AoS
+    // (interleaved indices, b unused) and ELL (column indices, b unused). nnz is the number
+    // of blocks for BSR and m * width for ELL.
+    struct S2sArrays
     {
-        Silence                    silence;
-        constexpr int64_t          m = 3, nnz = 4;
-        const std::vector<int32_t> ptr = {0, 1, 3, 4}, row = {0, 1, 1, 2}, col = {0, 0, 2, 1},
-                                   ind = {0, 0, 1, 0, 1, 2, 2, 1};
-        DevBuf<int32_t>            s_ptr(ptr), s_row(row), s_col(col), s_ind(ind);
-        DevBuf<float>              s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
-        const std::vector<int32_t> guard(2 * nnz, -7);
-        const auto                 create = [&](Spmat&             d,
-                                rocsparse_format   f,
-                                void*              p,
-                                void*              r,
-                                void*              c,
-                                void*              i,
-                                void*              v,
-                                rocsparse_datatype dt) {
-            switch(f)
+        std::vector<int32_t> a, b;
+        std::vector<float>   val;
+        int64_t              nnz = 0;
+    };
+
+    // ELL is column-major with -1 padding, BSR blocks are row-major.
+    S2sArrays s2s_arrays(rocsparse_format f, int64_t block_dim = 1)
+    {
+        constexpr int64_t m = s2s_m;
+        const auto        at
+            = [](int64_t i, int64_t j) { return (i < m && j < m) ? s2s_dense[i][j] : 0.0f; };
+        S2sArrays s;
+        switch(f)
+        {
+        case rocsparse_format_csc:
+        {
+            s.a.push_back(0);
+            for(int64_t j = 0; j < m; ++j)
             {
-            case rocsparse_format_csr:
-                return rocsparse_create_csr_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt);
-            case rocsparse_format_csc:
-                return rocsparse_create_csc_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt);
-            case rocsparse_format_coo_aos:
-                return rocsparse_create_coo_aos_descr(&d, m, m, nnz, i, v, i32, base0, dt);
-            default:
-                return rocsparse_create_coo_descr(&d, m, m, nnz, r, c, v, i32, base0, dt);
+                for(int64_t i = 0; i < m; ++i)
+                {
+                    if(at(i, j) != 0)
+                    {
+                        s.b.push_back(i);
+                        s.val.push_back(at(i, j));
+                    }
+                }
+                s.a.push_back(s.val.size());
             }
-        };
+            s.nnz = s.val.size();
+            break;
+        }
+        case rocsparse_format_ell:
+        {
+            int64_t width = 0;
+            for(const auto& row : s2s_dense)
+                width = std::max<int64_t>(
+                    width, std::count_if(row, row + m, [](float v) { return v != 0; }));
+            s.a.assign(m * width, -1);
+            s.val.assign(m * width, 0.0f);
+            for(int64_t i = 0; i < m; ++i)
+            {
+                int64_t k = 0;
+                for(int64_t j = 0; j < m; ++j)
+                {
+                    if(at(i, j) != 0)
+                    {
+                        s.a[k * m + i]   = j;
+                        s.val[k * m + i] = at(i, j);
+                        ++k;
+                    }
+                }
+            }
+            s.nnz = m * width;
+            break;
+        }
+        case rocsparse_format_bsr:
+        {
+            const int64_t mb = (m + block_dim - 1) / block_dim;
+            s.a.push_back(0);
+            for(int64_t bi = 0; bi < mb; ++bi)
+            {
+                for(int64_t bj = 0; bj < mb; ++bj)
+                {
+                    bool nonzero = false;
+                    for(int64_t r = 0; r < block_dim; ++r)
+                        for(int64_t c = 0; c < block_dim; ++c)
+                            nonzero |= at(bi * block_dim + r, bj * block_dim + c) != 0;
+                    if(!nonzero)
+                        continue;
+                    s.b.push_back(bj);
+                    for(int64_t r = 0; r < block_dim; ++r)
+                        for(int64_t c = 0; c < block_dim; ++c)
+                            s.val.push_back(at(bi * block_dim + r, bj * block_dim + c));
+                }
+                s.a.push_back(s.b.size());
+            }
+            s.nnz = s.b.size();
+            break;
+        }
+        default:
+        {
+            if(f == rocsparse_format_csr)
+                s.a.push_back(0);
+            for(int64_t i = 0; i < m; ++i)
+            {
+                for(int64_t j = 0; j < m; ++j)
+                {
+                    if(at(i, j) == 0)
+                        continue;
+                    if(f == rocsparse_format_csr)
+                        s.b.push_back(j);
+                    else if(f == rocsparse_format_coo)
+                    {
+                        s.a.push_back(i);
+                        s.b.push_back(j);
+                    }
+                    else
+                    {
+                        s.a.push_back(i);
+                        s.a.push_back(j);
+                    }
+                    s.val.push_back(at(i, j));
+                }
+                if(f == rocsparse_format_csr)
+                    s.a.push_back(s.val.size());
+            }
+            s.nnz = s.val.size();
+            break;
+        }
+        }
+        return s;
+    }
+
+    // Descriptor of an s2s_m x s2s_m matrix in format f with i32 indices, from arrays laid out
+    // as in S2sArrays.
+    rocsparse_status create_s2s(Spmat&             d,
+                                rocsparse_format   f,
+                                rocsparse_datatype dt,
+                                int64_t            nnz,
+                                void*              a,
+                                void*              b,
+                                void*              val,
+                                int64_t            block_dim = 1)
+    {
+        constexpr int64_t m  = s2s_m;
+        const int64_t     mb = (m + block_dim - 1) / block_dim;
+        switch(f)
+        {
+        case rocsparse_format_csr:
+            return rocsparse_create_csr_descr(&d, m, m, nnz, a, b, val, i32, i32, base0, dt);
+        case rocsparse_format_csc:
+            return rocsparse_create_csc_descr(&d, m, m, nnz, a, b, val, i32, i32, base0, dt);
+        case rocsparse_format_coo:
+            return rocsparse_create_coo_descr(&d, m, m, nnz, a, b, val, i32, base0, dt);
+        case rocsparse_format_coo_aos:
+            return rocsparse_create_coo_aos_descr(&d, m, m, nnz, a, val, i32, base0, dt);
+        case rocsparse_format_ell:
+            return rocsparse_create_ell_descr(&d, m, m, a, val, nnz / m, i32, base0, dt);
+        case rocsparse_format_bsr:
+            return rocsparse_create_bsr_descr(
+                &d, mb, mb, nnz, dir_r, block_dim, a, b, val, i32, i32, base0, dt);
+        default:
+            return rocsparse_status_invalid_value;
+        }
+    }
+
+    // Device copy of s2s_arrays(f, block_dim) with values of type T, and its descriptor. A
+    // target (filled) has the same array sizes with every element set to -7.
+    template <typename T>
+    struct S2sMat
+    {
+        S2sArrays       host;
+        DevBuf<int32_t> a, b;
+        DevBuf<T>       val;
+        Spmat           descr;
+
+        S2sMat(rocsparse_format f, rocsparse_datatype dt, bool filled, int64_t block_dim = 1)
+            : host(s2s_arrays(f, block_dim))
+            , a(filled ? std::vector<int32_t>(host.a.size(), -7) : host.a)
+            , b(filled ? std::vector<int32_t>(host.b.size(), -7) : host.b)
+            , val(filled ? std::vector<T>(host.val.size(), T(-7))
+                         : std::vector<T>(host.val.begin(), host.val.end()))
+        {
+            EXPECT_EQ(create_s2s(descr, f, dt, host.nnz, a, b, val, block_dim), st_ok);
+        }
+
+        std::vector<int32_t> read_a() const
+        {
+            return a.read(host.a.size());
+        }
+        std::vector<int32_t> read_b() const
+        {
+            return b.read(host.b.size());
+        }
+        std::vector<T> read_val() const
+        {
+            return val.read(host.val.size());
+        }
+    };
+
+    // f32 values into targets with i32 values, a pair without a conversion kernel. The
+    // conversion is rejected, and the target arrays keep their contents. CSC -> CSR has no
+    // value conversion and rejects any data type change.
+    TEST_F(ConvInternal, SparseToSparseMixedDatatypesRejected)
+    {
+        Silence                                             silence;
         const std::pair<rocsparse_format, rocsparse_format> pairs[]
             = {{rocsparse_format_csr, rocsparse_format_csr},
                {rocsparse_format_coo, rocsparse_format_csr},
@@ -1059,65 +1230,22 @@ namespace
         for(const auto& [sf, tf] : pairs)
         {
             SCOPED_TRACE(testing::Message() << "source " << sf << " target " << tf);
-            DevBuf<int32_t> t_ptr(guard), t_row(guard), t_col(guard), t_ind(guard), t_val(guard);
-            Spmat           source, target;
-            ASSERT_EQ(create(source, sf, s_ptr, s_row, s_col, s_ind, s_val, f32), st_ok);
-            ASSERT_EQ(
-                create(target, tf, t_ptr, t_row, t_col, t_ind, t_val, rocsparse_datatype_i32_r),
-                st_ok);
-            EXPECT_EQ(sparse_to_sparse(handle, source, target), rocsparse_status_not_implemented);
-            EXPECT_EQ(t_ptr.read(), guard);
-            EXPECT_EQ(t_row.read(), guard);
-            EXPECT_EQ(t_col.read(), guard);
-            EXPECT_EQ(t_ind.read(), guard);
-            EXPECT_EQ(t_val.read(), guard);
+            S2sMat<float>   source(sf, f32, false);
+            S2sMat<int32_t> target(tf, rocsparse_datatype_i32_r, true);
+            EXPECT_EQ(sparse_to_sparse(handle, source.descr, target.descr),
+                      rocsparse_status_not_implemented);
+            EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
+            EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
+            EXPECT_EQ(target.read_val(), std::vector<int32_t>(target.host.val.size(), -7));
         }
     }
 
-    // The same 3 x 3 matrix with f32 values converted to targets with f64 values, a supported
-    // pair. The values are converted and the indices match a host reference, for the same
-    // format, cross-format COO, COO AoS and CSR conversions, and the permissive CSC, ELL and
-    // BSR to COO conversions through an intermediate CSR matrix.
+    // f32 values into targets with f64 values, a supported pair. The values are converted
+    // and the indices match the target format, for the same format, cross-format COO, COO
+    // AoS and CSR conversions, and the permissive CSC, ELL and BSR to COO conversions
+    // through an intermediate CSR matrix.
     TEST_F(ConvInternal, SparseToSparseMixedDatatypesConvert)
     {
-        constexpr int64_t          m = 3, nnz = 4;
-        const std::vector<int32_t> ptr = {0, 1, 3, 4}, row = {0, 1, 1, 2}, col = {0, 0, 2, 1},
-                                   ind = {0, 0, 1, 0, 1, 2, 2, 1};
-        const std::vector<float> val   = {1.0f, 2.0f, 3.0f, 4.0f};
-        // CSC: the columns hold rows {0, 1}, {2} and {1}. ELL (width 2, column-major, -1
-        // padding): rows {0}, {0, 2} and {1}. BSR with 1 x 1 blocks: the CSR arrays.
-        const std::vector<int32_t> csc_ptr = {0, 2, 3, 4}, csc_row = {0, 1, 2, 1},
-                                   ell_col = {0, 0, 1, -1, 2, -1};
-        const std::vector<float> csc_val   = {1.0f, 2.0f, 4.0f, 3.0f},
-                                 ell_val   = {1.0f, 2.0f, 4.0f, 0.0f, 3.0f, 0.0f};
-        const std::vector<double> want_val(val.begin(), val.end());
-
-        DevBuf<int32_t> s_ptr(ptr), s_row(row), s_col(col), s_ind(ind), s_csc_ptr(csc_ptr),
-            s_csc_row(csc_row), s_ell_col(ell_col);
-        DevBuf<float> s_val(val), s_csc_val(csc_val), s_ell_val(ell_val);
-        const auto    f64           = rocsparse_datatype_f64_r;
-        const auto    create_source = [&](Spmat& d, rocsparse_format f) {
-            switch(f)
-            {
-            case rocsparse_format_csr:
-                return rocsparse_create_csr_descr(
-                    &d, m, m, nnz, s_ptr, s_col, s_val, i32, i32, base0, f32);
-            case rocsparse_format_csc:
-                return rocsparse_create_csc_descr(
-                    &d, m, m, nnz, s_csc_ptr, s_csc_row, s_csc_val, i32, i32, base0, f32);
-            case rocsparse_format_ell:
-                return rocsparse_create_ell_descr(
-                    &d, m, m, s_ell_col, s_ell_val, 2, i32, base0, f32);
-            case rocsparse_format_bsr:
-                return rocsparse_create_bsr_descr(
-                    &d, m, m, nnz, dir_r, 1, s_ptr, s_col, s_val, i32, i32, base0, f32);
-            case rocsparse_format_coo_aos:
-                return rocsparse_create_coo_aos_descr(&d, m, m, nnz, s_ind, s_val, i32, base0, f32);
-            default:
-                return rocsparse_create_coo_descr(
-                    &d, m, m, nnz, s_row, s_col, s_val, i32, base0, f32);
-            }
-        };
         struct Case
         {
             rocsparse_format sf, tf;
@@ -1138,39 +1266,13 @@ namespace
         for(const Case& c : cases)
         {
             SCOPED_TRACE(testing::Message() << "source " << c.sf << " target " << c.tf);
-            DevBuf<int32_t> t_a(std::vector<int32_t>(2 * nnz, -7)),
-                t_b(std::vector<int32_t>(2 * nnz, -7));
-            DevBuf<double> t_val(std::vector<double>(nnz, -7.0));
-            Spmat          source, target;
-            ASSERT_EQ(create_source(source, c.sf), st_ok);
-            if(c.tf == rocsparse_format_csr)
-                ASSERT_EQ(rocsparse_create_csr_descr(
-                              &target, m, m, nnz, t_a, t_b, t_val, i32, i32, base0, f64),
-                          st_ok);
-            else if(c.tf == rocsparse_format_coo_aos)
-                ASSERT_EQ(
-                    rocsparse_create_coo_aos_descr(&target, m, m, nnz, t_a, t_val, i32, base0, f64),
-                    st_ok);
-            else
-                ASSERT_EQ(rocsparse_create_coo_descr(
-                              &target, m, m, nnz, t_a, t_b, t_val, i32, base0, f64),
-                          st_ok);
-            ASSERT_EQ(sparse_to_sparse(handle, source, target, c.permissive), st_ok);
-            if(c.tf == rocsparse_format_csr)
-            {
-                EXPECT_EQ(t_a.read(m + 1), ptr);
-                EXPECT_EQ(t_b.read(nnz), col);
-            }
-            else if(c.tf == rocsparse_format_coo_aos)
-            {
-                EXPECT_EQ(t_a.read(2 * nnz), ind);
-            }
-            else
-            {
-                EXPECT_EQ(t_a.read(nnz), row);
-                EXPECT_EQ(t_b.read(nnz), col);
-            }
-            EXPECT_EQ(t_val.read(), want_val);
+            S2sMat<float>    source(c.sf, f32, false);
+            S2sMat<double>   target(c.tf, rocsparse_datatype_f64_r, true);
+            const S2sArrays& want = target.host;
+            ASSERT_EQ(sparse_to_sparse(handle, source.descr, target.descr, c.permissive), st_ok);
+            EXPECT_EQ(target.read_a(), want.a);
+            EXPECT_EQ(target.read_b(), want.b);
+            EXPECT_EQ(target.read_val(), std::vector<double>(want.val.begin(), want.val.end()));
         }
     }
 
@@ -1178,9 +1280,10 @@ namespace
     // values into i32 values, for the conversions that convert the values.
     TEST_F(ConvInternal, SparseToSparseMixedDatatypesEmpty)
     {
-        constexpr int64_t m = 3;
-        DevBuf<int32_t>   s_ptr(std::vector<int32_t>(m + 1, 0)), s_idx(1);
-        DevBuf<float>     s_val(1);
+        constexpr int64_t                                   m = s2s_m;
+        const std::vector<int32_t>                          zeros(m + 1, 0);
+        DevBuf<int32_t>                                     s_ptr(zeros), s_idx(1);
+        DevBuf<float>                                       s_val(1);
         const std::pair<rocsparse_format, rocsparse_format> pairs[]
             = {{rocsparse_format_csr, rocsparse_format_csr},
                {rocsparse_format_csr, rocsparse_format_coo},
@@ -1192,27 +1295,25 @@ namespace
             SCOPED_TRACE(testing::Message() << "source " << sf << " target " << tf);
             DevBuf<int32_t> t_ptr(std::vector<int32_t>(m + 1, -7)), t_idx(1), t_val(1);
             Spmat           source, target;
-            const auto      create = [&](Spmat&             d,
-                                    rocsparse_format   f,
-                                    void*              p,
-                                    void*              i,
-                                    void*              v,
-                                    rocsparse_datatype dt) {
-                switch(f)
-                {
-                case rocsparse_format_csr:
-                    return rocsparse_create_csr_descr(&d, m, m, 0, p, i, v, i32, i32, base0, dt);
-                case rocsparse_format_coo_aos:
-                    return rocsparse_create_coo_aos_descr(&d, m, m, 0, i, v, i32, base0, dt);
-                default:
-                    return rocsparse_create_coo_descr(&d, m, m, 0, i, i, v, i32, base0, dt);
-                }
-            };
-            ASSERT_EQ(create(source, sf, s_ptr, s_idx, s_val, f32), st_ok);
-            ASSERT_EQ(create(target, tf, t_ptr, t_idx, t_val, rocsparse_datatype_i32_r), st_ok);
+            ASSERT_EQ(create_s2s(source,
+                                 sf,
+                                 f32,
+                                 0,
+                                 sf == rocsparse_format_csr ? s_ptr.get() : s_idx.get(),
+                                 s_idx,
+                                 s_val),
+                      st_ok);
+            ASSERT_EQ(create_s2s(target,
+                                 tf,
+                                 rocsparse_datatype_i32_r,
+                                 0,
+                                 tf == rocsparse_format_csr ? t_ptr.get() : t_idx.get(),
+                                 t_idx,
+                                 t_val),
+                      st_ok);
             EXPECT_EQ(sparse_to_sparse(handle, source, target), st_ok);
             if(tf == rocsparse_format_csr)
-                EXPECT_EQ(t_ptr.read(), std::vector<int32_t>(m + 1, 0));
+                EXPECT_EQ(t_ptr.read(), zeros);
         }
     }
 
@@ -1270,14 +1371,13 @@ namespace
     TEST_F(ConvInternal, SparseToSparseCscToCsrIndexTypes)
     {
         Silence                    silence;
-        constexpr int64_t          m = 3, nnz = 4;
-        const std::vector<int32_t> guard(2 * nnz, -7);
-        DevBuf<int32_t>            p32(std::vector<int32_t>{0, 1, 3, 4}),
-            i32_ind(std::vector<int32_t>{0, 2, 1, 1});
-        DevBuf<int64_t> p64(std::vector<int64_t>{0, 1, 3, 4}),
-            i64_ind(std::vector<int64_t>{0, 2, 1, 1});
-        DevBuf<float> s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
-        const auto    i64 = rocsparse_indextype_i64;
+        const S2sArrays            csc = s2s_arrays(rocsparse_format_csc);
+        const std::vector<int64_t> ptr64(csc.a.begin(), csc.a.end()),
+            ind64(csc.b.begin(), csc.b.end());
+        DevBuf<int32_t> p32(csc.a), i32_ind(csc.b);
+        DevBuf<int64_t> p64(ptr64), i64_ind(ind64);
+        DevBuf<float>   s_val(csc.val);
+        const auto      i64 = rocsparse_indextype_i64;
         struct Case
         {
             void*               ptr;
@@ -1287,20 +1387,25 @@ namespace
         for(const Case& c : {Case{p64, i32_ind, i64, i32}, Case{p32, i64_ind, i32, i64}})
         {
             SCOPED_TRACE(testing::Message() << "ptr " << c.ptr_type << " ind " << c.ind_type);
-            DevBuf<int32_t> t_ptr(guard), t_col(guard);
-            DevBuf<float>   t_val(std::vector<float>(2 * nnz, -7.0f));
-            Spmat           source, target;
-            ASSERT_EQ(
-                rocsparse_create_csc_descr(
-                    &source, m, m, nnz, c.ptr, c.ind, s_val, c.ptr_type, c.ind_type, base0, f32),
-                st_ok);
-            ASSERT_EQ(rocsparse_create_csr_descr(
-                          &target, m, m, nnz, t_ptr, t_col, t_val, i32, i32, base0, f32),
+            Spmat source;
+            ASSERT_EQ(rocsparse_create_csc_descr(&source,
+                                                 s2s_m,
+                                                 s2s_m,
+                                                 csc.nnz,
+                                                 c.ptr,
+                                                 c.ind,
+                                                 s_val,
+                                                 c.ptr_type,
+                                                 c.ind_type,
+                                                 base0,
+                                                 f32),
                       st_ok);
-            EXPECT_EQ(sparse_to_sparse(handle, source, target), rocsparse_status_not_implemented);
-            EXPECT_EQ(t_ptr.read(), guard);
-            EXPECT_EQ(t_col.read(), guard);
-            EXPECT_EQ(t_val.read(), std::vector<float>(2 * nnz, -7.0f));
+            S2sMat<float> target(rocsparse_format_csr, f32, true);
+            EXPECT_EQ(sparse_to_sparse(handle, source, target.descr),
+                      rocsparse_status_not_implemented);
+            EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
+            EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
+            EXPECT_EQ(target.read_val(), std::vector<float>(target.host.val.size(), -7.0f));
         }
     }
 
@@ -1308,26 +1413,12 @@ namespace
     // column index array fails the pointer check before any target array is written.
     TEST_F(ConvInternal, SparseToSparseChecksPointersFirst)
     {
-        Silence           silence;
-        constexpr int64_t m = 3, nnz = 4;
-        DevBuf<int32_t>   s_ptr(std::vector<int32_t>{0, 1, 3, 4}),
-            s_col(std::vector<int32_t>{0, 0, 2, 1});
-        DevBuf<float>              s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
-        const std::vector<int32_t> ptr_guard(m + 1, -7);
-        const std::vector<double>  val_guard(nnz, -7.0);
-        DevBuf<int32_t>            t_ptr(ptr_guard), t_col(std::vector<int32_t>(nnz, -7));
-        DevBuf<double>             t_val(val_guard);
-        Spmat                      source, target;
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &source, m, m, nnz, s_ptr, s_col, s_val, i32, i32, base0, f32),
-                  st_ok);
-        ASSERT_EQ(
-            rocsparse_create_csr_descr(
-                &target, m, m, nnz, t_ptr, t_col, t_val, i32, i32, base0, rocsparse_datatype_f64_r),
-            st_ok);
-        target.get()->col_data = nullptr;
-        EXPECT_EQ(sparse_to_sparse(handle, source, target), st_ptr);
-        EXPECT_EQ(t_ptr.read(), ptr_guard);
-        EXPECT_EQ(t_val.read(), val_guard);
+        Silence        silence;
+        S2sMat<float>  source(rocsparse_format_csr, f32, false);
+        S2sMat<double> target(rocsparse_format_csr, rocsparse_datatype_f64_r, true);
+        target.descr.get()->col_data = nullptr;
+        EXPECT_EQ(sparse_to_sparse(handle, source.descr, target.descr), st_ptr);
+        EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
+        EXPECT_EQ(target.read_val(), std::vector<double>(target.host.val.size(), -7.0));
     }
 } // namespace
