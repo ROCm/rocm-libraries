@@ -53,9 +53,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <ios>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -1419,8 +1421,7 @@ namespace
             for(void* ptr : {dA, dB, dScaleA, dScaleB, dD, dWorkspace})
                 static_cast<void>(hipFree(ptr));
         };
-        if(hipMalloc(&dA, tiledA.size()) != hipSuccess
-           || hipMalloc(&dB, dataB.size()) != hipSuccess
+        if(hipMalloc(&dA, tiledA.size()) != hipSuccess || hipMalloc(&dB, dataB.size()) != hipSuccess
            || hipMalloc(&dScaleA, shuffledA.size()) != hipSuccess
            || hipMalloc(&dScaleB, shuffledB.size()) != hipSuccess
            || hipMalloc(&dD, static_cast<size_t>(m * n) * sizeof(uint16_t)) != hipSuccess
@@ -1572,7 +1573,7 @@ namespace
         EXPECT_EQ(badRow, -1) << "D(" << badRow << ", " << badCol << ") differs bitwise from D(0, "
                               << badCol << ") with uniform summation order enabled";
         EXPECT_NE(std::count(hostD.begin(), hostD.begin() + m * n, hostD[0]),
-                  static_cast<ptrdiff_t>(m * n))
+                  static_cast<std::ptrdiff_t>(m * n))
             << "D is constant, so the fill did not reach the output";
 
         int mismatches = 0;
@@ -1643,8 +1644,13 @@ namespace
         ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
         ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-        hipblaslt_ext::GemmProblemType problemType(
-            HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                   HIPBLAS_OP_N,
+                                                   c.type,
+                                                   c.type,
+                                                   HIP_R_16BF,
+                                                   HIP_R_16BF,
+                                                   HIPBLAS_COMPUTE_32F);
         problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
         if(c.tiledB)
             problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
@@ -1661,8 +1667,14 @@ namespace
         inputs.setScaleA(storage);
         inputs.setScaleB(storage);
 
-        hipblaslt_ext::Gemm gemm(
-            handle, HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::Gemm           gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 c.type,
+                                 c.type,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
         hipblaslt_ext::GemmPreference preference;
         preference.setMaxWorkspaceBytes(kWorkspaceBytes);
         std::vector<hipblasLtMatmulHeuristicResult_t> picks;
@@ -1686,8 +1698,9 @@ namespace
         if(c.hasKernel)
         {
             ASSERT_FALSE(picks.empty());
-            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
-                      0u);
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
         }
         else
         {
@@ -1837,8 +1850,9 @@ namespace
                 ADD_FAILURE() << "No solution for the registered problem";
                 return {};
             }
-            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
-                      0u);
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
             return picks[0].algo;
         }
 
@@ -1854,10 +1868,13 @@ namespace
             hipblasLtMatrixLayout_t  lb     = nullptr;
             hipblasLtMatrixLayout_t  ld     = nullptr;
             hipblasStatus_t          status = HIPBLAS_STATUS_INTERNAL_ERROR;
-            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F) == HIPBLAS_STATUS_SUCCESS
-               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
                       == HIPBLAS_STATUS_SUCCESS
-               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
                       == HIPBLAS_STATUS_SUCCESS
                && hipblasLtMatmulDescSetAttribute(
                       desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))

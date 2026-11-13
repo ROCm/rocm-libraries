@@ -219,7 +219,7 @@ The solutions for this scale mode are rocKE GEMM kernels, which add these restri
 *  Atype and Btype must be the same type.
 *  Ctype and Dtype must be ``HIP_R_16BF``, and the compute type must be ``HIPBLAS_COMPUTE_32F``.
 *  ``ldd`` must be equal to ``m``.
-*  ``B`` must be equal to ``1``.
+*  The batch count must be equal to ``1``.
 *  Epilogues are not supported.
 *  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
 *  Solutions are registered for gfx950 PCI chip IDs ``0x75a0`` and ``0x75a3``, at ``m = n = 4096`` with

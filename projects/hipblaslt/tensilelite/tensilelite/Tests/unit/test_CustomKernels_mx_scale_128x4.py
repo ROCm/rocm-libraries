@@ -228,9 +228,7 @@ def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
     for k in _KS:
         struct = library.solutions[rows[(4096, 4096, 1, k)]]
         assert struct["CustomKernelName"] == _kernel_name(fmt, k)
-        solution = C.Solution.FromSolutionStruct(
-            struct, False, False, False, assembler, gfx950_iim
-        )
+        solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
         preds = {}
         for p in _flatten(solution.problemPredicate):
             preds.setdefault(p.tag, []).append((p.index, p.value))
