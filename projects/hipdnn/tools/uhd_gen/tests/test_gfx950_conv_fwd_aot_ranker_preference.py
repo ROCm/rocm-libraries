@@ -6,12 +6,11 @@ unambiguously worse one, scored through the project's own flatbuffer walk
 (:func:`uhd_gen.evaluate._flatbuffer_scorer`), not a hand-rolled or deterministic
 stand-in.
 
-TESTB-1 (PR 15070 deep review): nothing anywhere exercised the trained ranker's
-relative preference between two candidates for the same problem; every existing test
-either checks self-consistency (prepared vs. plain) or the *deterministic* fallback
-score (``aotScore``, which explicitly "nothing yet measures which wins where" for most
-family pairs -- see ``Gfx950ConvFwdNative.cpp``). This test scores the real shipped
-`model.bin` artifact instead.
+Nothing else exercised the trained ranker's relative preference between two candidates
+for the same problem; every existing test either checks self-consistency (prepared vs.
+plain) or the *deterministic* fallback score (``aotScore``, which explicitly "nothing
+yet measures which wins where" for most family pairs -- see ``Gfx950ConvFwdNative.cpp``).
+This test scores the real shipped `model.bin` artifact instead.
 
 The two rows differ only in `$kernel.vector_size_c`: 8 (a full vectorized store) vs. 1
 (scalar), everything else held identical -- a difference the model's own training

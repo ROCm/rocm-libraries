@@ -446,34 +446,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # The packaged forward AOT-instance engine's own external-integration-check:
-    # dnn-providers/integration-tests/integration-test-bundles/*/Gfx950ConvFwd/ claims
-    # hipkernel:Gfx950ConvFwdAot, but nothing short of this target checks that claim --
-    # IntegrationGpuGfx950ConvFwd.cpp (integration_tests/) is the provider's own suite,
-    # built from rocKE's sweep grid directly, and never reads these bundle files. Gated
-    # like the dgrad/knob suites above (hkp_product_offers_engine): a build whose
-    # `product` root ships only another bundle would otherwise fail here as a missing
-    # engine instead of reading as absent.
-    hkp_product_offers_engine(_hkp_conv_fwd_aot_external_bundle "hipkernel:Gfx950ConvFwdAot")
-    if(_hkp_conv_fwd_aot_external_bundle AND TARGET hipdnn_integration_tests)
-        add_external_integration_test_target(
-            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check
-            PLUGIN_TARGET  hip_kernel_provider
-            ENGINE_NAME    "hipkernel:Gfx950ConvFwdAot"
-            INSTALL_SUBDIR hip_kernel_provider
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwdAot.toml
-            ENVIRONMENT    ${TEST_ENVIRONMENT}
-            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-        )
-        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check target")
-    elseif(NOT _hkp_conv_fwd_aot_external_bundle)
-        message(STATUS "hipkernel:Gfx950ConvFwdAot not shipped by this configuration - "
-                       "skipping gfx950-conv-fwd-aot-external-integration-check")
-    else()
-        message(STATUS "hipdnn_integration_tests not found - skipping "
-                       "gfx950-conv-fwd-aot-external-integration-check")
-    endif()
-
     # _hkp_census_external_test_file(<out> <arch>)
     #   The per-arch file an engine-pinned entry's categorized suites are appended to, as
     #   INSTALL_TEST_FILE, for hkp_finalize_census_install() to fold into <arch>'s shard:
@@ -489,6 +461,55 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         endif()
         set(${out_var} "${_file}" PARENT_SCOPE)
     endfunction()
+
+    # The packaged forward AOT-instance engine's own external-integration-check:
+    # dnn-providers/integration-tests/integration-test-bundles/*/Gfx950ConvFwd/ claims
+    # hipkernel:Gfx950ConvFwdAot, but nothing short of this target checks that claim --
+    # IntegrationGpuGfx950ConvFwd.cpp (integration_tests/) is the provider's own suite,
+    # built from rocKE's sweep grid directly, and never reads these bundle files. Routed
+    # into gfx950's own census shard (INSTALL_DESTINATION/INSTALL_STAGING_KEY) and
+    # categorized, like the pinned attention engines below, rather than the common
+    # arch-neutral file: without a tier, ctest -L standard never selected it. Gated on
+    # hkp_product_ships_engine_for_arch for gfx950: a build whose `product` root ships
+    # only another bundle reads as absent rather than a missing-engine failure.
+    set(_hkp_conv_fwd_aot_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_hkp_conv_fwd_aot_available "hipkernel:Gfx950ConvFwdAot" gfx950)
+    endif()
+    if(_hkp_conv_fwd_aot_available AND TARGET hipdnn_integration_tests)
+        _hkp_census_external_test_file(_hkp_conv_fwd_aot_shard_ctest gfx950)
+        set(_hkp_conv_fwd_aot_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwdAot.toml")
+        hkp_reserve_census_shard(_hkp_conv_fwd_aot_shard_dest gfx950 FILES "${_hkp_conv_fwd_aot_config}")
+
+        set(_hkp_conv_fwd_aot_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _hkp_conv_fwd_aot_category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_hkp_conv_fwd_aot_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration
+            )
+        endif()
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvFwdAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_conv_fwd_aot_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950
+            TEST_CONFIG    "${_hkp_conv_fwd_aot_config}"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_hkp_conv_fwd_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check target")
+    elseif(NOT _hkp_conv_fwd_aot_available)
+        message(STATUS "hipkernel:Gfx950ConvFwdAot not shipped by this configuration - "
+                       "skipping gfx950-conv-fwd-aot-external-integration-check")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping "
+                       "gfx950-conv-fwd-aot-external-integration-check")
+    endif()
 
     # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
     # serving the bundles its filter variable names (the unified 3D engines serve only

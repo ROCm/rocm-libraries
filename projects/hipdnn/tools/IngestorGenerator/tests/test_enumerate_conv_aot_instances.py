@@ -134,17 +134,11 @@ def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(packaged_catal
     )
 
 
-def test_every_catalog_entry_is_a_forward_sweep_identity(catalog):
+def test_every_catalog_entry_is_a_forward_sweep_identity(catalog, monkeypatch):
     """Each entry is a gfx950 forward identity of rocKE's implicit-GEMM AOT grid or of
     its direct grid."""
-    from kernels.conv.kernel_identity import current_llvm_flavor
-
     flavor = catalog[0]["llvm_flavor"]
-    if flavor != current_llvm_flavor():
-        pytest.skip(
-            f"the catalog is for LLVM flavor {flavor}, this process lowers to "
-            f"{current_llvm_flavor()}, so every identity differs"
-        )
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     jobs = min(16, os.cpu_count() or 1)
     for dtype in tool.DTYPES:
         swept = tool.sweep_hashes(dtype, jobs)
@@ -405,12 +399,10 @@ def test_main_applies_a_real_exclude_to_the_dispatcher_source(
     assert f"excluded {dropped_label}" in capsys.readouterr().err
 
 
-def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
+def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, monkeypatch):
     """The shipped catalog's lists are the tool's output for the committed labels and
     the rocKE tree beside them: a change to either has to regenerate the lists (and
     the bundle make_conv_aot_config.py builds from them)."""
-    from kernels.conv.kernel_identity import current_llvm_flavor
-
     committed = {
         dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
         for dtype in tool.DTYPES
@@ -418,11 +410,7 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
     with committed["fp16"].open() as handle:
         handle.readline()
         flavor = json.loads(handle.readline().rstrip(",\n"))["llvm_flavor"]
-    if flavor != current_llvm_flavor():
-        pytest.skip(
-            f"the lists are for LLVM flavor {flavor}, this process lowers to "
-            f"{current_llvm_flavor()}, so every identity differs"
-        )
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     out = tmp_path / "lists"
     jobs = str(min(16, os.cpu_count() or 1))
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", jobs]

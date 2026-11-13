@@ -61,6 +61,8 @@ import sys
 import uuid
 from pathlib import Path
 
+import conv_aot_common as _common
+
 #: Namespace for kernel UUIDs derived from an instance_id (uuid5).
 INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
 
@@ -510,43 +512,7 @@ def build_config(
     }
 
 
-class _FlowRow(dict):
-    """A mapping :func:`dump_config` writes on one line (a YAML flow mapping)."""
-
-
-def dump_config(config: dict, dumper=None) -> str:
-    """``config`` as YAML, each ``shapes`` row a one-line flow mapping.
-
-    ``dumper`` defaults to libyaml's ``CSafeDumper`` when PyYAML was built with
-    it, else to the pure-Python ``SafeDumper``; both emit the same text.
-    """
-    import yaml
-
-    if dumper is None:
-        dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
-
-    class _Dumper(dumper):
-        pass
-
-    _Dumper.add_representer(
-        _FlowRow,
-        lambda representer, row: representer.represent_mapping(
-            "tag:yaml.org,2002:map", row, flow_style=True
-        ),
-    )
-    packs = [
-        dict(
-            pack,
-            variants=[
-                dict(variant, shapes=[_FlowRow(row) for row in variant["shapes"]])
-                for variant in pack["variants"]
-            ],
-        )
-        for pack in config["packs"]
-    ]
-    return yaml.dump(
-        dict(config, packs=packs), Dumper=_Dumper, sort_keys=False, width=1000
-    )
+dump_config = _common.dump_config
 
 
 def stabilize_ids(

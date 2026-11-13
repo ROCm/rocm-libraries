@@ -46,6 +46,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -96,11 +97,6 @@ struct Variant
     // Implicit-GEMM kernels that serve this graph, both tile_k arms.
     size_t implicitArms = 0;
 };
-
-std::string dtypeSuffix(DataType dtype)
-{
-    return dtype == DataType::HALF ? "Fp16" : "Bf16";
-}
 
 std::shared_ptr<Graph>
     buildConvGraph(DataType dtype, const ConvProblem& problem = {}, bool channelsLast = true)
@@ -158,11 +154,6 @@ KnobSetting disableBenchmarkingKnob()
 KnobSetting kernelFamilyKnob(int64_t family)
 {
     return {KERNEL_FAMILY_KNOB, family};
-}
-
-std::string candidateCount(size_t candidates)
-{
-    return std::to_string(candidates) + " candidate(s)";
 }
 
 // The kernel the last non-benchmarked plan build selected, or empty.

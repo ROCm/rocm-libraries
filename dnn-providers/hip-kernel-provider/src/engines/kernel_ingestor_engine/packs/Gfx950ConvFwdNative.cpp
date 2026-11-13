@@ -37,6 +37,7 @@
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -113,55 +114,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-bool isDeviceTensor(const data_objects::TensorAttributes* tensor)
-{
-    return tensor != nullptr && !tensor->virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
-           && !tensor->ragged_offset_tensor_uid().has_value() && tensor->alignment() >= 16
-           && tensor->alignment() % 16 == 0
-           && (tensor->data_type() == data_objects::DataType::HALF
-               || tensor->data_type() == data_objects::DataType::BFLOAT16);
-}
-
-bool hasPackedNhwcStrides(const data_objects::TensorAttributes* tensor)
-{
-    if(tensor == nullptr || tensor->dims() == nullptr || tensor->strides() == nullptr
-       || tensor->dims()->size() != 4 || tensor->strides()->size() != 4)
-    {
-        return false;
-    }
-    const auto* dims = tensor->dims();
-    const std::array<int64_t, 4> extents{dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3)};
-    // Bound the byte count in i64, not the launch ABI's i32: a batch rocKE runs in pieces
-    // (conv::nongroupedBatchChunks) holds more, and matchedOf decides what launches it.
-    int64_t bytes = 2;
-    for(const auto extent : extents)
-    {
-        if(extent <= 0 || extent > std::numeric_limits<int64_t>::max() / 2 / bytes)
-        {
-            return false;
-        }
-        bytes *= extent;
-    }
-    // hipDNN [N,C,H,W] -> NHWC; filter [K,C,Y,X] -> KYXC; output [N,K,Ho,Wo] -> NHWK.
-    // The byte-count guard above bounds every multiplication here.
-    const std::array<int64_t, 4> expected{
-        extents[1] * extents[2] * extents[3], 1, extents[1] * extents[3], extents[1]};
-    for(flatbuffers::uoffset_t axis = 0; axis < 4; ++axis)
-    {
-        // A unit-extent axis never contributes to an address, whatever its stride.
-        if(extents[axis] != 1 && tensor->strides()->Get(axis) != expected[axis])
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
-{
-    return values != nullptr && values->size() == 2;
-}
+using gfx950_conv::hasPackedNhwcStrides;
+using gfx950_conv::hasSpatialRankTwo;
+using gfx950_conv::isDeviceTensor;
 
 /// Whether @p output is packed NHWK with @p matched's inferred convolution dimensions.
 /// hipDNN's frontend infers a sole, non-virtual graph output's dims/strides during

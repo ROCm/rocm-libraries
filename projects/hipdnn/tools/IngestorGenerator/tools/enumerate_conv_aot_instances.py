@@ -36,8 +36,6 @@ from __future__ import annotations
 
 import argparse
 import collections
-import dataclasses
-import json
 import os
 import sys
 from pathlib import Path
@@ -69,11 +67,7 @@ DISPATCHER_INSTANCE_LIST = Path(
 EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.excludes.json"
 
 
-def _bind_rocke(rocke_root: Path) -> None:
-    for sub in ("platform/python", "library"):
-        path = str((rocke_root / sub).resolve())
-        if path not in sys.path:
-            sys.path.insert(0, path)
+_bind_rocke = _common.bind_rocke
 
 
 def _converter():
@@ -126,14 +120,7 @@ def read_rocke_catalog(direction: str) -> list:
     (``dispatch.grouped_convolution``'s module docstring), so this makes no
     claim about that order mattering; it is simply whatever rocKE's loader
     returns. rocKE must already be bound (:func:`_bind_rocke`)."""
-    from dispatch.grouped_convolution import (
-        _INSTANCE_DIR,
-        _INSTANCE_LISTS,
-        load_instance_list,
-    )
-
-    path = _INSTANCE_DIR / _INSTANCE_LISTS[(ARCH, direction)]
-    return [i.to_dict() for i in load_instance_list(path).identities]
+    return _common.read_rocke_catalog(direction, arch=ARCH)
 
 
 #: ``label -> reason`` of :data:`EXCLUDES`-style instances; ``{}`` when ``path``
@@ -158,10 +145,7 @@ def sweep_hashes(dtype: str, jobs: int) -> set:
     return {job.identity.stable_hash() for job in [*implicit, *direct]}
 
 
-def stable_hash(identity: dict) -> str:
-    from kernels.conv.kernel_identity import KernelIdentity
-
-    return KernelIdentity.from_dict(identity).stable_hash()
+stable_hash = _common.stable_hash
 
 
 def validate(identities: list, jobs: int = 1) -> list:
@@ -174,36 +158,8 @@ def validate(identities: list, jobs: int = 1) -> list:
     ]
 
 
-def compact_identity(identity: dict) -> dict:
-    """``identity`` without the fields that hold their ``KernelIdentity`` default.
-
-    A field with no plain default is always kept: the required ones, and
-    ``llvm_flavor``, whose default is this process's flavor and which
-    ``KernelIdentity.from_dict`` fills with ``""`` when it is missing. A value
-    equal to its default but of another type (``0`` for ``False``) is kept, so
-    ``from_dict`` rebuilds exactly the identity, and its ``stable_hash()``.
-    """
-    from kernels.conv.kernel_identity import KernelIdentity
-
-    compact = {}
-    for field in dataclasses.fields(KernelIdentity):
-        value = identity[field.name]
-        default = field.default
-        if (
-            default is dataclasses.MISSING
-            or type(value) is not type(default)
-            or value != default
-        ):
-            compact[field.name] = value
-    return compact
-
-
-def write_instances(path: Path, identities: list) -> None:
-    """A JSON list, one :func:`compact_identity` per line."""
-    body = ",\n".join(
-        json.dumps(compact_identity(i), separators=(",", ":")) for i in identities
-    )
-    path.write_text(f"[\n{body}\n]\n")
+compact_identity = _common.compact_identity
+write_instances = _common.write_instances
 
 
 def main(argv=None) -> int:
@@ -301,10 +257,7 @@ def main(argv=None) -> int:
     return 0
 
 
-def identity_label(identity: dict) -> str:
-    from kernels.conv.kernel_identity import KernelIdentity
-
-    return KernelIdentity.from_dict(identity).label()
+identity_label = _common.identity_label
 
 
 if __name__ == "__main__":

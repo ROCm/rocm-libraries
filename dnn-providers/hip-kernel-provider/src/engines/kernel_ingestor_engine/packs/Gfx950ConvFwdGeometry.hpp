@@ -319,46 +319,6 @@ inline bool isPointwise(const Problem& problem)
            && problem.padH == 0 && problem.padW == 0;
 }
 
-/// The widest of 8, 4, 2, 1 that divides @p extent: rocKE's
-/// ImplicitGemmConvSpec.default_vector_sizes for 2-byte elements.
-inline int64_t defaultVectorWidth(int64_t extent)
-{
-    for(const int64_t width : {8, 4, 2})
-    {
-        if(extent % width == 0)
-        {
-            return width;
-        }
-    }
-    return 1;
-}
-
-/// rocke.helpers.spec.choose_load_vec for 2-byte elements: the widest width up to 8 that
-/// divides tile_k and spreads both tiles' loads evenly over the block's threads.
-inline std::optional<int64_t>
-    tileLoadWidth(int64_t tileM, int64_t tileN, int64_t tileK, int64_t blockSize)
-{
-    if(tileM <= 0 || tileN <= 0 || tileK <= 0 || blockSize <= 0)
-    {
-        return std::nullopt;
-    }
-    for(int64_t width = 8; width >= 1; width /= 2)
-    {
-        if(tileK % width != 0)
-        {
-            continue;
-        }
-        const auto aLoads = tileM * tileK / width;
-        const auto bLoads = tileN * tileK / width;
-        if(aLoads >= blockSize && bLoads >= blockSize && aLoads % blockSize == 0
-           && bLoads % blockSize == 0)
-        {
-            return width;
-        }
-    }
-    return std::nullopt;
-}
-
 /// What an AOT implicit-GEMM binary keeps from the problem it was compiled for. Every
 /// extent, stride, padding, dilation and channel count is a kernel argument; these are
 /// the only build-time decisions that bound which problems the binary computes.
@@ -597,7 +557,7 @@ constexpr int64_t DIRECT_WAVE_SIZE = 64;
 constexpr int64_t DIRECT_MAX_BLOCK_WAVES = 16;
 /// rocKE's grid bound for the direct kernels, applied to every axis.
 constexpr int64_t DIRECT_MAX_GRID_DIM = 65535;
-/// The default direct arm, gfx950_conv_fwd_direct_spec_for_request with no overrides:
+/// The default direct arm, gfx950_conv_fwd_aot_problem_for_request with no overrides:
 /// spatial with one wave below 64 groups, otherwise std with this block width.
 constexpr int64_t DEFAULT_DIRECT_BLOCK_W = 4;
 constexpr int64_t DEFAULT_DIRECT_BLOCK_WAVES = 1;
@@ -1259,7 +1219,7 @@ inline bool isDepthwiseDirectVariant(DirectVariant variant)
            || variant == DirectVariant::TILED || variant == DirectVariant::COL;
 }
 
-/// Whether @p variant, @p blockW and @p blockWaves are gfx950_conv_fwd_direct_spec_for_request's
+/// Whether @p variant, @p blockW and @p blockWaves are gfx950_conv_fwd_aot_problem_for_request's
 /// choice with no overrides for @p groups: spatial with one wave below 64 groups, otherwise
 /// std with block_w 4 and one wave.
 inline bool

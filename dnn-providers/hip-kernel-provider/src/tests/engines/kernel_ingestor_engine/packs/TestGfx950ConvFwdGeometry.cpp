@@ -1253,7 +1253,7 @@ TEST(TestGfx950ConvFwdGeometry, GroupMergedInstanceLaunchesGroupsOverMerge)
 
 TEST(TestGfx950ConvFwdGeometry, DefaultDirectArmFollowsTheGroupCount)
 {
-    // gfx950_conv_fwd_direct_spec_for_request with no overrides.
+    // gfx950_conv_fwd_aot_problem_for_request with no overrides.
     EXPECT_TRUE(isDefaultDirectArm(63, DirectVariant::SPATIAL, 0, 1));
     EXPECT_FALSE(isDefaultDirectArm(63, DirectVariant::SPATIAL, 0, 2));
     EXPECT_FALSE(isDefaultDirectArm(63, DirectVariant::STD, 4, 1));

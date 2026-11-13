@@ -19,6 +19,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 namespace
@@ -61,15 +62,6 @@ struct GraphSpec
     int64_t wUid = 2;
     int64_t yUid = 3;
 };
-
-DeviceProperties gfx950Properties(std::string arch = "gfx950")
-{
-    // Deliberately by value: matcher tests must run on CPU-only and non-gfx950 hosts.
-    DeviceProperties properties;
-    properties.gcnArchName = std::move(arch);
-    properties.warpSize = 64;
-    return properties;
-}
 
 flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec = {})
 {
@@ -256,7 +248,7 @@ KernelDefinition implicitKernel(const ConvShape& shape, int64_t tileK = 64)
 }
 
 /// A direct depthwise kernel compiled for exactly @p shape, with the exact placeholders
-/// gfx950_conv_fwd_direct_spec_for_request writes into the implicit-GEMM fields.
+/// gfx950_conv_fwd_aot_problem_for_request writes into the implicit-GEMM fields.
 KernelDefinition directKernel(const ConvShape& shape,
                               const std::string& variant,
                               int64_t blockW,

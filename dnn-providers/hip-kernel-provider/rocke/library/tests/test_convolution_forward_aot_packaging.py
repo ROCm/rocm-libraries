@@ -71,8 +71,18 @@ def _packaged(identity: KernelIdentity) -> bool:
 
 def _unmerged(identity: KernelIdentity) -> bool:
     """A packaged implicit-GEMM identity whose widths are its own (no group merge):
-    the width classes and rocKE's width selection below are about these."""
-    return _packaged(identity) and identity.group_merge == 1
+    the width classes and rocKE's width selection below are about these.
+
+    Also excludes split-K identities (``split_k`` / ``split_k_cluster`` off their
+    default): the packaged contract does not carry those fields, so
+    :func:`gfx950_conv_fwd_aot_spec_for_identity` refuses them with their own
+    reason, and a sample built for ``supports_gfx950_conv_fwd_aot`` must not pick
+    one as a knob class's representative."""
+    if not (_packaged(identity) and identity.group_merge == 1):
+        return False
+    if identity.is_direct:
+        return True
+    return gfx950_conv_fwd_aot_spec_for_identity(identity)[0] is not None
 
 
 def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
@@ -198,10 +208,10 @@ def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor="llvm22"
+            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor="llvm22"
+            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
             theirs.name, "@K"
@@ -255,10 +265,10 @@ def test_group_merged_identities_are_packaged_with_the_sweeps_ir(merged_jobs):
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor="llvm22"
+            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor="llvm22"
+            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
             theirs.name, "@K"
@@ -353,10 +363,10 @@ def test_packaged_ir_is_the_sweep_kernel_up_to_its_symbol(sweep_jobs):
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor="llvm22"
+            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor="llvm22"
+            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
             theirs.name, "@K"
@@ -753,10 +763,10 @@ def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         assert ours.name == spec.kernel_name()
         ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor="llvm22"
+            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor="llvm22"
+            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
         )
         assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
             theirs.name, "@K"
