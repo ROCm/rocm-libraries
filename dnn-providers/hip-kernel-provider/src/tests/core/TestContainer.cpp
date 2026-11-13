@@ -223,12 +223,25 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
-    // The schema id is what a state exposes of the set it was built from, so a slot
-    // serving another set's state shows up only between sets whose schemas differ.
-    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    // The schema ids are what a state exposes of the set it was built from (one per kernel
+    // slot of a slotted engine), so a slot serving another set's state shows up only
+    // between sets whose schemas differ.
+    const auto schemaIdsOfSet = [](const hipdnn_plugin_sdk::ingestor::DescriptorSet& set) {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+        if(set.slots.empty())
+        {
+            ids.push_back(set.schema.id);
+        }
+        for(const auto& slot : set.slots)
+        {
+            ids.push_back(slot.schema.id);
+        }
+        return ids;
+    };
+    std::set<std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId>> schemaIds;
     for(const auto& set : sets)
     {
-        schemaIds.insert(set.schema.id);
+        schemaIds.insert(schemaIdsOfSet(set));
     }
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
@@ -238,7 +251,13 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
         const auto state = discoveredSharedState(set.engine.id);
         ASSERT_NE(state.get(), nullptr)
             << "no shared state for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> stateIds;
+        stateIds.reserve(state->slots().size());
+        for(const auto& slot : state->slots())
+        {
+            stateIds.push_back(slot.schema.id);
+        }
+        EXPECT_EQ(stateIds, schemaIdsOfSet(set))
             << "the id of '" << set.engine.name << "' serves the state of another set";
         // Shared, not rebuilt or handed out once: a second lookup is the same object.
         EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
@@ -421,7 +440,7 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 
 // The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
 // schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
-// and the six FlyDSL SDPA engines claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
+// and the eight FlyDSL SDPA engines (six forward, two backward) claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
 // their matchers reviewed against every field up to it). The gfx950 rocKE conv dgrad engine
 // claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
 // tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
@@ -439,7 +458,9 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:flydsl_sdpa_aiw", "1.4.0"},
         {"hipkernel:flydsl_sdpa_cdna", "1.4.0"},
         {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"}};
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
     Container container;
     auto& manager = container.getEngineManager();
     const auto baseline = providerBaselineGraphSchema();

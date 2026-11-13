@@ -882,9 +882,8 @@ Rules:
   this rule. The run treats a missing sidecar as "no claims", and
   `verify_support_claims.py` checks the sidecars that exist, not the missing
   ones. Older bundles break the rule: most SDPA single-graph bundles and a few
-  sweeps (`quick/SdpaBackward/Default`, `quick/Reduction/Default`,
-  `quick/Pointwise/Binary`, `{quick,full}/BlockScaleDequantizeMatmul/Default`)
-  have none.
+  sweeps (`BlockScaleDequantizeMatmul/Default`, `Reduction/Default`,
+  `Pointwise/Binary` and `Pointwise/Activation`, in every tier that has them) have none.
 - Sidecars are **machine-written** by `--write-support-claims`. The form is
   stricter than valid JSON: sorted keys, 2-space indent, one array element per
   line, trailing newline, LF line endings, sorted platforms and case ids, and
@@ -928,7 +927,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml` |
 
 ```toml
 [meta]
@@ -1014,7 +1013,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.

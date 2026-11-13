@@ -228,6 +228,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaDropoutMaskNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaHeadPadNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaBwdMergedNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaBwdSplitNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()

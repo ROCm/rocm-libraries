@@ -52,9 +52,7 @@ set(FLYDSL_CONTENT_DIR "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/FlyDSL")
 #
 # GPU_TARGETS entries may carry target features (gfx942:sramecc+:xnack-). The
 # content tree keys on the bare arch, so match on the part before the first colon.
-set(_flydsl_families_json "${CMAKE_CURRENT_SOURCE_DIR}/generators/arch_families.json")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_flydsl_families_json}")
-file(READ "${_flydsl_families_json}" _flydsl_families)
+include("${CMAKE_CURRENT_SOURCE_DIR}/FlydslArchFamilies.cmake")
 
 # Each content directory is a DVC output (git holds <op>/<target>.dvc). The
 # provider's top-level CMakeLists.txt checks every pointer against what was
@@ -62,30 +60,6 @@ file(READ "${_flydsl_families_json}" _flydsl_families)
 # HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS fails -- when one is missing. A
 # directory that was not pulled is absent below: it adds to the content set
 # through its pointer but ships nothing.
-
-# The architectures a content target stands for: itself, or every member of an
-# LLVM generic target.
-function(_flydsl_target_members target entry out)
-    if(NOT target MATCHES "-generic$")
-        set(${out} "${target}" PARENT_SCOPE)
-        return()
-    endif()
-    string(JSON _count ERROR_VARIABLE _flydsl_json_error
-           LENGTH "${_flydsl_families}" "${target}" members)
-    if(_flydsl_json_error)
-        message(FATAL_ERROR
-            "flydsl: content '${entry}' names generic target '${target}', which "
-            "generators/arch_families.json does not list")
-    endif()
-    set(_members "")
-    math(EXPR _last "${_count} - 1")
-    # cmake-lint: disable=E1120
-    foreach(_index RANGE ${_last})
-        string(JSON _member GET "${_flydsl_families}" "${target}" members ${_index})
-        list(APPEND _members "${_member}")
-    endforeach()
-    set(${out} "${_members}" PARENT_SCOPE)
-endfunction()
 
 file(GLOB _flydsl_pointers RELATIVE "${FLYDSL_CONTENT_DIR}"
      CONFIGURE_DEPENDS "${FLYDSL_CONTENT_DIR}/*/gfx*.dvc")
