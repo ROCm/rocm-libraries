@@ -48,6 +48,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MXScaleFormat.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"

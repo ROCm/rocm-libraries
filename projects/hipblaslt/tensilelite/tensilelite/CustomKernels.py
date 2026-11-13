@@ -573,6 +573,17 @@ def getCustomKernelConfig(
     if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
 
+    # A handwritten kernel skips the derivation that resolves "Auto", and the
+    # runtime picks which scale modes it serves from this field.
+    problemType = kernelConfig.get("ProblemType", {})
+    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                                     "HostPreSwizzle128x4"):
+        raise RuntimeError(
+            f"Custom kernel {kernelName} has MX scales, so its config must set 'MXScaleFormat' to "
+            "the scale layout it reads: NoSwizzle, HostPreSwizzle, InMemorySwizzle or "
+            "HostPreSwizzle128x4")
+
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
     # consuming solution was regenerated with DataParallel argument layout v1.

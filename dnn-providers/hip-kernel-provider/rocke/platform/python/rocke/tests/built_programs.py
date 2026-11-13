@@ -5,9 +5,10 @@
 
 A Python test that compares the C++ engine with the Python one through a small C++
 program reads the program's path from an environment variable (for example
-``ROCKE_INTEXPR_CLI``). ``tests/run_all.py`` sets it from a configured build and the
-installed ``rocke_pytest`` ctest sets it. With the variable unset the test skips; a value
-that names no file is a broken setup, so it fails instead of skipping.
+``ROCKE_INTEXPR_CLI``). ``tests/run_all.py`` sets it from a configured build and
+the installed ``rocke_pytest_*`` ctest entries set it. With the variable unset the
+test skips; a value that names no file is a broken setup, so it fails instead of
+skipping.
 """
 
 from __future__ import annotations

@@ -514,6 +514,56 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
         stride_d = rocblas_stride(ldd) * n;
     }
 
+    // Tensile and hipBLASLt pass batch strides to their kernels as 32-bit values, so a strided-batched
+    // problem with a batch stride of 2^32 elements or more reads and writes the wrong batches while
+    // returning success (hipBLASLt refuses such problems since ROCM-32140). Issue those batches one at
+    // a time as non-batched calls (batch_count 1, strides 0); the 64-bit element offsets select the batch.
+    if(!BATCHED && batch_count > 1)
+    {
+        constexpr rocblas_stride stride_limit = rocblas_stride(1) << 32;
+        if(stride_a >= stride_limit || stride_b >= stride_limit || stride_c >= stride_limit
+           || stride_d >= stride_limit)
+        {
+            for(rocblas_int i = 0; i < batch_count; i++)
+            {
+                RETURN_IF_ROCBLAS_ERROR(rocblas_gemm_ex_template<BATCHED>(handle,
+                                                                          trans_a,
+                                                                          trans_b,
+                                                                          m,
+                                                                          n,
+                                                                          k,
+                                                                          alpha,
+                                                                          a,
+                                                                          a_type,
+                                                                          offsetAin + i * stride_a,
+                                                                          lda,
+                                                                          0,
+                                                                          b,
+                                                                          b_type,
+                                                                          offsetBin + i * stride_b,
+                                                                          ldb,
+                                                                          0,
+                                                                          beta,
+                                                                          c,
+                                                                          c_type,
+                                                                          offsetCin + i * stride_c,
+                                                                          ldc,
+                                                                          0,
+                                                                          d,
+                                                                          d_type,
+                                                                          offsetDin + i * stride_d,
+                                                                          ldd,
+                                                                          0,
+                                                                          1,
+                                                                          compute_type,
+                                                                          algo,
+                                                                          solution_index,
+                                                                          flags));
+            }
+            return rocblas_status_success;
+        }
+    }
+
     bool sourceSolutionBased
         = algo == rocblas_gemm_algo_solution_index && solution_index == c_rocblas_source_solution;
 

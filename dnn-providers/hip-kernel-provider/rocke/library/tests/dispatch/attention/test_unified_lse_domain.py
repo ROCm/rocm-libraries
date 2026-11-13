@@ -22,7 +22,7 @@ from dispatch.attention import (
     attention_candidates,
     dispatch_attention,
 )
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from kernels.common.attention_unified import select_auto_path
 from rocke.helpers.spec import kernel_name_join
 
@@ -170,7 +170,7 @@ def _reroute(off, request):
     must take from the LSE-off result ``off``, or None when it must not move."""
     if (
         off.spec.path == "2d"
-        and select_auto_path(_problem(request), request.arch) == "3d"
+        and select_auto_path(attention_problem(request), request.arch) == "3d"
     ):
         # The tiled 2D gate declines the LSE problem, so auto hands it to split-KV.
         return "tiled_2d_lse_handover", "attention_unified_3d", "3d"

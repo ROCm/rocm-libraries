@@ -26,6 +26,7 @@ pybind11>=3.0
 # --- test / dev --------------------------------------------------------------
 pytest>=7.0
 pytest-subtests>=0.11
+pytest-timeout>=2.4
 # Independent FP4/FP6/FP8 reference types:
 ml_dtypes>=0.6.0
 

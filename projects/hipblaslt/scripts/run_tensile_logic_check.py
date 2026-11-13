@@ -148,7 +148,7 @@ def _changed_architectures(root: Path, list_file: Path):
     repo_root = root.parents[1]
     lib_root = (root / "library").resolve()
     validators = [
-        (root / "tensilelite" / "tensilelite" / "TensileLogic").resolve(),
+        (root / "tensilelite" / "tensilelite" / "logic").resolve(),
         (root / "tensilelite" / "tensilelite" / "CustomYamlLoader.py").resolve(),
         Path(__file__).resolve(),
     ]
@@ -202,7 +202,7 @@ def main() -> None:
     # TensileLogic: LOGIC_PATH [options] --check-all
     sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
 
-    from tensilelite.TensileLogic import main as tensile_logic_main
+    from tensilelite.logic import main as tensile_logic_main
     tensile_logic_main()
 
 

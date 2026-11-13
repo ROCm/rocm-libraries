@@ -17,6 +17,7 @@ from __future__ import annotations
 import itertools
 import json
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
@@ -30,6 +31,8 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
+    DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
+    DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -42,11 +45,14 @@ from kernels.conv.direct_variants import (
     PER_AXIS_PAD_VARIANTS,
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
+    DIRECT_WGRAD_REDUCE,
+    DIRECT_WGRAD_TWO_STAGE as _WGRAD_TWO_STAGE,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
     make_direct_spec as make_spec,
     select_direct_kernel_builder as _build_kernel,
     validate_direct_spec as validate_spec,
+    direct_wgrad_replicas,
 )
 from kernels.conv.kernel_identity import DIRECTIONS, KernelIdentity
 
@@ -59,10 +65,60 @@ _FWD_HELPER = "direct_fwd_helper"
 # time (--compile-all --dtype); each binary records its dtype and is only
 # offered to problems of that dtype. Variants without a kernel for a dtype
 # (the 4c atom is fp16-only) are dropped by their spec validators.
-DIRECT_DTYPES = ("fp16", "bf16")
+#
+# "fp32" and "tf32" both store fp32 tensors: "fp32" runs the MFMA kernels on
+# the exact fp32 atoms, "tf32" feeds them TF32 operands (native XF32 on gfx942,
+# BF16x3 emulation on gfx950). The scalar-FMA kernels serve both in fp32.
+DIRECT_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+# What --compile-all builds when --dtype names none; fp32/tf32 are opt-in
+# (--dtype fp32 / --dtype tf32), as for implicit GEMM.
+DIRECT_COMPILE_DTYPES = ("fp16", "bf16")
 DIRECT_DTYPE = "fp16"  # the default dtype
 # Convolution directions the direct cache holds kernels for: all of them.
 DIRECT_DIRECTIONS = DIRECTIONS
+
+
+def direct_storage_dtype(dtype: str) -> str:
+    """The element type of a direct problem's tensors: ``fp32`` for tf32.
+
+    The kernels' own rule (``conv_direct_grouped._storage_dtype``), so the
+    cache and the builders cannot disagree on how a dtype is stored; an
+    unknown dtype raises ``ValueError``.
+    """
+    from kernels.common.conv_direct_grouped import _storage_dtype
+
+    return _storage_dtype(dtype)
+
+
+def direct_dtype_triple(dtype: str) -> Tuple[str, str, str]:
+    """``(dtype_a, dtype_b, dtype_d)`` of a direct kernel's cache identity.
+
+    TF32 is fp32 storage with TF32 operands at the MMA, so its triple is
+    ``("tf32", "tf32", "fp32")`` -- the implicit-GEMM cache's spelling. Every
+    other dtype is all three, which keeps the fp16/bf16 identities (and their
+    cache hashes) exactly as they were.
+    """
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return ("tf32", "tf32", "fp32") if dtype == "tf32" else (dtype,) * 3
+
+
+@lru_cache(maxsize=None)
+def tf32_is_emulated(arch: str) -> bool:
+    """Does ``arch`` run TF32 as BF16x3 emulation (gfx950) rather than as
+    native XF32 (gfx942)? Asked of the catalog's 16x16 TF32 atom; an arch with
+    no TF32 atom counts as native (the looser bound)."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except Exception:  # noqa: BLE001 - unknown arch: no catalog to ask
+        return False
+    family = "wmma" if target.wave_size == 32 else "mma"
+    op = target.mma.select_largest_k(
+        family=family, a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16
+    )
+    return op is not None and not op.is_native
+
 
 # ---------------------------------------------------------------------------
 # Tuning grids -- shared with benchmark_direct_conv's JIT sweep so the cache
@@ -73,6 +129,9 @@ DIRECT_DIRECTIONS = DIRECTIONS
 BLOCK_Q = (16, 32)
 BLOCK_GROUPS = (1, 2, 4, 8, 16)
 DOUBLE_BUFFER = (True, False)
+# Grouped forward K-atom width for fp32-storage problems only (fp32/tf32):
+# fold_k32 reduces 32 channels per atom (cpg % 32 == 0), else 16.
+GROUPED_FOLD_K32 = (False, True)
 # Depthwise (cpg == 1) forward and dgrad.
 # block_w=32 is omitted from both directions: across the depthwise corpus, at
 # both dtypes, it never won a single geometry -- every shape whose best config
@@ -271,6 +330,26 @@ DGRAD_WAVES = (
     (1, 2, False, False, True),
     (1, 6, False, False, True),
 )
+
+
+def dgrad_waves(dtype: str) -> Tuple[Tuple[int, int, bool, bool, bool], ...]:
+    """The MFMA dgrad fprop-pass waves grid for problem dtype ``dtype``.
+
+    fp16/bf16 get :data:`DGRAD_WAVES` as is. fp32-storage problems (fp32 and
+    tf32) also get the K-32 fold of every unfolded entry: gfx950's emulated
+    TF32 atom is K-32 wide, so an unfolded (16-channel) atom is zero-padded to
+    it, and :func:`tf32_narrow_reason` keeps the padded one only where the
+    fold cannot run the shape.
+    """
+    if direct_storage_dtype(dtype) != "fp32":
+        return DGRAD_WAVES
+    out = list(DGRAD_WAVES)
+    for wq, wk, rk, pg, k32 in DGRAD_WAVES:
+        if not k32 and (wq, wk, rk, pg, True) not in out:
+            out.append((wq, wk, rk, pg, True))
+    return tuple(out)
+
+
 # Direct wgrad (DirectConvWgradSpec): (waves_k, waves_c, waves_q). The JIT
 # sweep tries waves_c in {1, 2, ceil(cpg/16)}; with runtime channels the cache
 # cannot know cpg, so it carries the ceil(cpg/16) values of the common channel
@@ -861,6 +940,78 @@ FWD_WMMA_POLY_KNOBS = (
     (2, 4, 4, 4, 256, 64, 2, True),
 )
 # END FWD_WMMA TABLES
+# Wave32 (gfx1250) wgrad runs the image-per-block kernel: one block per image
+# and k x c tile, KH rows staged per LDS sync. (waves_k, waves_c) and
+# (wave_tiles_k, wave_tiles_c); the spec's register estimate drops the
+# combinations that would spill, and _wgrad_image_spills the register-staged
+# multi-tile bodies a block of more than 8 waves cannot hold.
+WGRAD_W32_WAVES = (
+    (1, 1),
+    (2, 1),
+    (1, 2),
+    (2, 2),
+    (4, 1),
+    (4, 2),
+    (2, 4),
+    (4, 4),
+    (8, 1),
+    (8, 2),
+)
+WGRAD_W32_TILES = ((1, 1), (2, 1), (1, 2))
+WGRAD_W32_ROWS_PER_SYNC = (1, 3)
+# Its two-stage reduction: every block adds into one of WGRAD_W32_WS_REPLICAS
+# fp32 scratch slabs (spreading the atomics over them takes the same-line
+# contention off), staged channel-fastest through LDS where the block's dW
+# tile fits (lds_epilogue; the job falls back to the direct epilogue where it
+# does not). row_blocks splits the rows of an image over grid y for shapes
+# whose k x c tiling leaves few workgroups; tdm_stages=3 stages the rows
+# through a 3-deep TDM ring instead of registers.
+WGRAD_W32_ROW_BLOCKS = (1, 2, 4, 16)
+WGRAD_W32_TDM_STAGES = (0, 3)
+WGRAD_W32_WS_REPLICAS = 8
+# Past this many waves per block the compiler caps a wave32 wave at 256 VGPRs.
+WGRAD_W32_UNCAPPED_WAVES = 8
+# Small-channel wgrad (C=3 / C=4 stems; wave32). ((waves_k, waves_c, wave_tiles_k,
+# wave_tiles_c, vec_x, sub_steps, ws_replicas, uniform_wave), row_blocks):
+# the winners of the stem sweeps, from a narrow 3x3/s2 stem (one 16-wide K
+# tile) to the wide patchify stems (K up to 1152), each with the pixel-range
+# splits over grid y it won with. A narrow K tile leaves few dW tiles, so it
+# wins with a deep split; the wide patchify tiles with a shallow one.
+WGRAD_SMALL_C_CONFIGS = (
+    ((1, 1, 2, 2, 0, 2, 8, False), (512, 2048)),
+    ((8, 1, 1, 3, 4, 4, 32, True), (256, 512)),
+    ((8, 1, 1, 3, 4, 2, 32, False), (256, 512)),
+    ((2, 4, 2, 3, 8, 1, 32, False), (256, 512)),
+    ((4, 4, 2, 2, 8, 4, 4, True), (8, 16, 32)),
+    ((4, 4, 2, 2, 8, 2, 4, True), (8, 16, 32)),
+    ((4, 4, 2, 2, 4, 2, 4, True), (8, 16, 32)),
+    # uniform_wave=False here: with it on, this 16-wave vec_x=4 / sub_steps=4
+    # tile spills SGPRs into VGPR lanes at the 128-VGPR cap and the binary
+    # returns an all-zero dW, so both validators refuse it. Off, it verifies.
+    ((4, 4, 2, 2, 4, 4, 4, False), (8, 16, 32)),
+)
+# Depthwise wgrad, VALU kernel (wave32). (chan_per_lane, waves, rows_per_wave,
+# wo_chunk, r_split, ws_replicas, prefetch, carry): the winners of the
+# depthwise sweeps over 3x3 (stride 1 and 2) and 7x7 layers. r_split > 1
+# splits the filter rows of a 7x7 over wave groups to keep its accumulators
+# in registers; the validator drops the splits a filter cannot take.
+DW_WGRAD_CONFIGS = (
+    (2, 4, 1, 8, 1, 32, True, False),
+    (2, 8, 1, 8, 1, 32, True, True),
+    (2, 8, 1, 8, 1, 16, True, True),
+    (2, 8, 1, 8, 1, 16, True, False),
+    (2, 8, 4, 8, 1, 16, False, True),
+    (2, 4, 4, 8, 1, 16, False, True),
+    (4, 8, 4, 8, 1, 16, False, False),
+    (4, 8, 4, 8, 1, 16, False, True),
+    (4, 8, 1, 8, 1, 16, True, False),
+    (4, 8, 2, 8, 1, 16, True, True),
+    (2, 8, 8, 8, 2, 16, False, True),
+    (2, 4, 8, 8, 2, 16, False, True),
+    (2, 8, 8, 8, 2, 16, True, True),
+    (2, 8, 8, 16, 4, 16, False, True),
+    (2, 8, 4, 8, 2, 16, False, True),
+)
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
 # waves_c) arrangements, (prefetch, row_unroll) pipelines, rows per segment,
@@ -1006,6 +1157,63 @@ FWD_SMALLC_KNOBS = (
     (2, 8, 2, 2, 8, 32, 4, 1),
     (2, 8, 2, 4, 8, 64, 2, 1),
 )
+# fwd_smallc_mfma (gfx950): (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
+# tiles_per_block, prefetch); the best few per stem of a tuning sweep.
+FWD_SMALLC_MFMA_KNOBS = (
+    (1, 4, 1, 4, 4, 64, 1, False),
+    (1, 4, 1, 4, 8, 32, 1, False),
+    (1, 4, 1, 4, 8, 32, 4, False),
+    (1, 4, 1, 4, 8, 32, 4, True),
+    (1, 4, 1, 4, 16, 16, 1, False),
+    (1, 4, 2, 2, 1, 128, 1, False),
+    (1, 4, 2, 2, 4, 32, 1, False),
+    (1, 4, 2, 2, 4, 32, 4, True),
+    (1, 4, 2, 2, 4, 32, 8, True),
+    (1, 4, 2, 2, 8, 16, 1, False),
+    (1, 4, 2, 4, 2, 128, 1, False),
+    (1, 4, 2, 4, 2, 128, 4, True),
+    (1, 4, 2, 4, 2, 128, 8, True),
+    (1, 4, 2, 4, 4, 64, 1, False),
+    (1, 4, 2, 4, 4, 64, 4, True),
+    (1, 4, 2, 4, 8, 32, 1, False),
+    (1, 4, 2, 4, 8, 32, 4, False),
+    (1, 4, 2, 4, 8, 32, 4, True),
+    (1, 4, 2, 4, 16, 16, 1, False),
+    (1, 4, 2, 4, 16, 16, 4, True),
+    (1, 4, 4, 1, 8, 8, 8, True),
+    (1, 4, 4, 2, 2, 64, 4, True),
+    (1, 4, 4, 2, 2, 64, 8, False),
+    (1, 4, 4, 4, 4, 64, 1, False),
+    (1, 4, 4, 4, 4, 64, 4, True),
+    (1, 4, 4, 4, 4, 64, 8, True),
+    (1, 4, 4, 4, 8, 32, 4, True),
+    (1, 4, 4, 4, 8, 32, 8, True),
+    (1, 4, 4, 4, 16, 16, 8, True),
+    (1, 8, 4, 2, 8, 32, 4, True),
+    (2, 2, 2, 2, 1, 64, 1, False),
+    (2, 2, 2, 2, 2, 32, 1, False),
+    (2, 2, 2, 2, 2, 32, 4, True),
+    (2, 2, 2, 2, 4, 16, 1, False),
+    (2, 2, 2, 2, 4, 16, 4, True),
+    (2, 2, 2, 2, 8, 8, 1, False),
+    (2, 4, 2, 2, 2, 64, 1, False),
+)
+# fwd_smallk_mfma (gfx950): (waves, out_h, out_w); a first grid of 4 / 8 waves
+# over 8..32-pixel square-ish output tiles and full-width 1-row strips.
+FWD_SMALLK_MFMA_KNOBS = tuple(
+    (w, oh, ow)
+    for w in (4, 8)
+    for oh, ow in (
+        (8, 8),
+        (8, 16),
+        (16, 16),
+        (16, 32),
+        (32, 32),
+        (4, 64),
+        (1, 128),
+        (2, 128),
+    )
+)
 # fwd_smallk_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
 # stages, prefetch); prefetch builds with the iterative-ilp scheduler.
 FWD_SMALLK_KNOBS = (
@@ -1135,6 +1343,27 @@ _WGRAD_FILTERS = (3, 5, 7)
 _GATHER_CHANNELS = (3, 4, 8, 16, 24, 32)
 # Channels per group (= filters per group) the 4x4x4 MFMA grouped wgrad bakes.
 _GROUPED_MFMA_CHANNELS = (4, 8)
+# Small-channel (C=3) stems: (filter, stride, padding, output channels). The
+# kernel bakes the channel counts, so each stem a network uses is a row: the
+# 3x3/s2 and 7x7/s2 convolutional stems and the patchify stems of the
+# transformer-style networks (4x4/s4, 14x14/s14, 16x16/s16).
+_SMALL_C_STEMS = (
+    (3, 2, 1, (16, 24, 32, 48, 64)),
+    # The stride-1 3x3 input layers of the UNet / VAE / super-resolution
+    # networks and the unpadded 3x3/s2 Inception stem.
+    (3, 1, 1, (32, 64)),
+    (3, 2, 0, (32,)),
+    (7, 2, 3, (64,)),
+    (4, 4, 0, (96, 128, 192)),
+    (14, 14, 0, (1024, 1152, 1280)),
+    (16, 16, 0, (768, 1024)),
+)
+# Stems with 4 input channels (filter, stride, padding, output channels): the
+# latent-space input convolution of the latent diffusion UNets (4 latent
+# channels -> 320, and the 512-wide variant).
+_SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
+# Depthwise wgrad filters (VALU kernel), stride 1 and 2.
+_DW_WGRAD_FILTERS = (3, 5, 7)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
 # kernel bounds its rows and columns by the runtime output extents, so any
 # padding works; the rows bake the "same" padding of the symmetric dilations
@@ -1560,6 +1789,31 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _col_pads(k)
         ),
     ),
+    # Small-channel stems (groups == 1, cpg == 3 or 4), wave32 only: one row
+    # per stem, channel counts baked.
+    "direct_wgrad_small_c": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=3, kpg=kpg)
+            for k, s, pad, kpgs in _SMALL_C_STEMS
+            for kpg in kpgs
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=4, kpg=kpg)
+            for k, s, pad, kpgs in _SMALL_C4_STEMS
+            for kpg in kpgs
+        ),
+    ),
+    # Depthwise wgrad, VALU kernel (wave32): the channel count is runtime;
+    # "valid" and "same" padding at stride 1 and 2.
+    "direct_depthwise_wgrad": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k, s in itertools.product(_DW_WGRAD_FILTERS, _STRIDES)
+            for pad in _col_pads(k)
+        ),
+    ),
     # Forward of tiny channel counts on wave32 WMMA, ungrouped: the small
     # channel count baked, the other one runtime.
     _FWD_SMALLC: (
@@ -1567,6 +1821,34 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
             for k, pad, st, c in FWD_SMALLC_STEMS
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same stems, but only those whose
+    # flattened (r, s, c) reduction fits the resident weight fragments (at most
+    # 5 MFMA steps: 7x7x3); the 14x14 / 16x16 patchify stems stay on implicit
+    # GEMM.
+    _FWD_SMALLC_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in FWD_SMALLC_STEMS
+            if k * k * c <= 5 * 32
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same layers.
+    _FWD_SMALLK_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
     _FWD_SMALLK: (
@@ -1611,6 +1893,10 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     ),
 }
 
+# The Stage 2 fold of the two-stage wgrad kernels reads every extent from its
+# kernargs: one binary per replica count, keyed by these placeholder caps.
+_WGRAD_REDUCE_CAPS = DirectCaps(KH=1, PAD=0, stride=1, cpg=0, kpg=0)
+
 
 def dgrad_rtc_k_atoms(waves_k: int, fold_k32: bool) -> Tuple[int, ...]:
     """The K-atom counts the runtime-channel dgrad cache builds for a split.
@@ -1625,15 +1911,18 @@ def dgrad_rtc_k_atoms(waves_k: int, fold_k32: bool) -> Tuple[int, ...]:
     return tuple(range(waves_k, DGRAD_RTC_MAX_KPG // atom + 1, waves_k))
 
 
-def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
-    """Would this runtime-channel dgrad binary spill (see
-    :data:`DGRAD_RTC_VGPR_FILL`)?"""
+def dgrad_rtc_spills(
+    knobs: dict, KH: int, KW: int, arch: str, dtype: str = DIRECT_DTYPE
+) -> bool:
+    """Would this runtime-channel dgrad binary for problem dtype ``dtype``
+    spill on ``arch`` (see :data:`DGRAD_RTC_VGPR_FILL`)?"""
     from rocke.core.arch import ArchTarget
 
     limits = ArchTarget.from_gfx(arch).limits
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
-    return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
+    vgprs = dgrad_rtc_vgprs(knobs, KH, KW, dtype, arch)
+    return vgprs > DGRAD_RTC_VGPR_FILL * budget
 
 
 def _fwd_wmma_1d_knobs(kw: int = 3) -> Iterator[dict]:
@@ -1760,7 +2049,17 @@ def _knob_grid(
         yield from grouped_knobs(arch, dtype)
     elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
-            yield dict(block_q=bq, block_groups=bg, double_buffer=db)
+            if direct_storage_dtype(dtype) != "fp32":
+                # The 16-bit grid predates the fold knob: its knobs (and so
+                # its identities) carry none.
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db)
+                continue
+            # fp32 storage: the K-32 fold is what feeds gfx950's emulated
+            # 16x16x32 TF32 atom one-to-one (a 16-channel atom is zero-padded
+            # to it); tf32_narrow_reason drops the narrow one where the fold
+            # covers the shape.
+            for k32 in GROUPED_FOLD_K32:
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db, fold_k32=k32)
     elif variant == "direct_depthwise":
         for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
@@ -1890,7 +2189,7 @@ def _knob_grid(
             yield knobs
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
-            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
         ):
             yield dict(
                 block_q=bq,
@@ -1904,7 +2203,7 @@ def _knob_grid(
             )
     elif variant == "direct_dgrad_mfma_rtc":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
-            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
         ):
             if wk > 1 and rk:
                 # A K split preloads its weights, which takes precedence over
@@ -2174,6 +2473,28 @@ def _knob_grid(
             DW_FWD_WMMA_PREFETCH,
         ):
             yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
+    elif variant == _FWD_SMALLK_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for waves, oh, ow in FWD_SMALLK_MFMA_KNOBS:
+            yield dict(waves=waves, out_h=oh, out_w=ow)
+    elif variant == _FWD_SMALLC_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for wk, wp, tk, tp, oh, ow, tb, pf in FWD_SMALLC_MFMA_KNOBS:
+            knobs = dict(
+                waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, out_h=oh, out_w=ow
+            )
+            if tb > 1:
+                knobs["tiles_per_block"] = tb
+            if pf:
+                # The next tile's window loads in flight over this one's work.
+                knobs["prefetch"] = True
+            yield knobs
     elif variant in (_FWD_SMALLC, _FWD_SMALLK):
         from rocke.core.arch import ArchTarget
 
@@ -2210,10 +2531,72 @@ def _knob_grid(
                     knobs.update(prefetch=True, sched="iterative-ilp")
                 yield knobs
     elif variant == "direct_wgrad":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size == 32:
+            for (wk, wc), (tk, tc), rps, rb, tdm in itertools.product(
+                WGRAD_W32_WAVES,
+                WGRAD_W32_TILES,
+                WGRAD_W32_ROWS_PER_SYNC,
+                WGRAD_W32_ROW_BLOCKS,
+                WGRAD_W32_TDM_STAGES,
+            ):
+                yield dict(
+                    wave_size=32,
+                    mfma_k=32,
+                    image_per_block=True,
+                    waves_k=wk,
+                    waves_c=wc,
+                    wave_tiles_k=tk,
+                    wave_tiles_c=tc,
+                    rows_per_sync=rps,
+                    row_blocks=rb,
+                    tdm_stages=tdm,
+                    ws_replicas=WGRAD_W32_WS_REPLICAS,
+                    lds_epilogue=True,
+                )
+            return
         for (wk, wc, wq), hpb, mk in itertools.product(
             wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
         ):
             yield dict(waves_k=wk, waves_c=wc, waves_q=wq, ho_per_block=hpb, mfma_k=mk)
+    elif variant == "direct_wgrad_small_c":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in WGRAD_SMALL_C_CONFIGS:
+            for rb in row_blocks:
+                yield dict(
+                    waves_k=wk,
+                    waves_c=wc,
+                    wave_tiles_k=tk,
+                    wave_tiles_c=tc,
+                    vec_x=vx,
+                    sub_steps=ss,
+                    ws_replicas=wsr,
+                    uniform_wave=uw,
+                    row_blocks=rb,
+                )
+    elif variant == "direct_depthwise_wgrad":
+        from rocke.core.arch import ArchTarget
+
+        # Cached for the wave32 targets (gfx11, gfx12, gfx1250) only; the
+        # VALU kernel also builds at wave64, but the cache does not carry it.
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for cpl, waves, rpw, woc, rs, wsr, pf, cy in DW_WGRAD_CONFIGS:
+            yield dict(
+                wave_size=32,
+                chan_per_lane=cpl,
+                waves=waves,
+                rows_per_wave=rpw,
+                wo_chunk=woc,
+                r_split=rs,
+                ws_replicas=wsr,
+                prefetch=pf,
+                carry=cy,
+            )
     else:
         raise ValueError(f"unknown direct conv variant {variant!r}")
 
@@ -2374,6 +2757,29 @@ def _dw_dgrad_packed_spills(caps: DirectCaps, knobs: dict, arch: str) -> bool:
     return live > DW_DGRAD_PACKED_LIVE_BUDGET
 
 
+def _wgrad_image_spills(spec) -> bool:
+    """Would this wave32 image-per-block wgrad binary spill registers?
+
+    The spec's estimate counts the accumulators and the dY/X fragments only.
+    The register-staged body (``tdm_stages=0``) of a multi-tile wave
+    (``wave_tiles_k * wave_tiles_c > 1``) also holds the staged rows and
+    compiles to more than 256 VGPRs: a block of up to
+    :data:`WGRAD_W32_UNCAPPED_WAVES` waves holds that, but a larger block caps
+    a wave at 256, so the binary spills to scratch. Such a tiling reaches the
+    grid as the direct-epilogue fallback of a block whose dW tile does not fit
+    the LDS epilogue. The TDM-staged body of the same tiling stays under the
+    cap and is still cached. Not a validity rule (a spilling kernel is still
+    correct), so it is a grid filter, like the other ``*_spills`` here.
+    """
+    if not getattr(spec, "image_per_block", False):
+        return False
+    return (
+        spec.waves_k * spec.waves_c > WGRAD_W32_UNCAPPED_WAVES
+        and spec.tdm_stages == 0
+        and spec.wave_tiles_k * spec.wave_tiles_c > 1
+    )
+
+
 def _depthwise_stream_spills(spec) -> bool:
     """Would this row-streaming depthwise kernel spill registers? Such a binary
     takes minutes to compile and runs far slower than the output-stationary
@@ -2397,13 +2803,14 @@ def _identity(
     knobs: dict,
     dtype: str = DIRECT_DTYPE,
 ) -> KernelIdentity:
+    dtype_a, dtype_b, dtype_d = direct_dtype_triple(dtype)
     return KernelIdentity(
         arch=arch,
         direction=direction,
         algorithm=variant,
-        dtype_a=dtype,
-        dtype_b=dtype,
-        dtype_d=dtype,
+        dtype_a=dtype_a,
+        dtype_b=dtype_b,
+        dtype_d=dtype_d,
         # Direct conv is not a GEMM: no tile, warp or vector fields.
         tile_m=0,
         tile_n=0,
@@ -2445,6 +2852,9 @@ def _helper_identity(
     # stride and padding are zeroed so every pipeline entry that shares a
     # filter shares the helper binary. The wgrad fold depends on its knobs
     # alone (the dW extent it folds), so it zeroes the channel counts too.
+    # The two-stage reduce depends on its replica count alone.
+    if variant == DIRECT_WGRAD_REDUCE:
+        return wgrad_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
     if variant == _WGRAD_FOLD:
         return _identity(
             arch,
@@ -2480,6 +2890,21 @@ def _split_reduce_identity(
         _FWD_HELPER,
         _NO_CAPS,
         {"split_c": split_c},
+        dtype,
+    )
+
+
+def wgrad_reduce_identity(
+    arch: str, wave_size: int, ws_replicas: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The cached Stage 2 fold of a two-stage wgrad kernel with ``ws_replicas``."""
+    return _identity(
+        arch,
+        wave_size,
+        DIRECT_WGRAD_REDUCE,
+        "direct_wgrad_helper",
+        _WGRAD_REDUCE_CAPS,
+        {"ws_replicas": ws_replicas},
         dtype,
     )
 
@@ -2564,7 +2989,7 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
-    if variant in (_FWD_SMALLC, _FWD_SMALLK):
+    if variant in (_FWD_SMALLC, _FWD_SMALLK, _FWD_SMALLC_MFMA, _FWD_SMALLK_MFMA):
         # Ungrouped, the small channel count baked; 128 of the runtime one
         # (a multiple of every channel block and chunk) on a 64x64 image.
         return DirectConvProblem(
@@ -2721,6 +3146,8 @@ def probe_problem(
         # needs.
         groups = 64
         n_images = 8
+    elif variant == "direct_wgrad_small_c":
+        groups = 1
     elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
         # Dense channel counts serve groups == 1: one group per block. Wider
         # blocks would only build kernels no problem with these counts can
@@ -2765,6 +3192,70 @@ def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
     )
 
 
+# Non-grouped atoms whose K is half the wide atom of the same tile; on an arch
+# that emulates TF32 only the wide (K-32 / K-16) atoms exist, so these are
+# zero-padded to them.
+_NONGROUPED_NARROW_ATOMS = {"32x32x8": "32x32x16", "16x16x16": "16x16x32"}
+
+
+def tf32_narrow_reason(variant: str, problem, knobs: dict, arch: str) -> Optional[str]:
+    """Why a TF32 config is not worth building or timing, or ``None``.
+
+    gfx950 has only the wide emulated TF32 atoms (16x16x32 / 32x32x16, eight
+    fp32 per lane); a 16-channel K-atom (four per lane) is zero-padded to one,
+    so it issues the same three bf16 MFMAs for half the work. Such a config is
+    dropped -- but only where a wide config computes the same ``problem``;
+    elsewhere the padded one is the only kernel and stays. Never drops
+    anything for another dtype or on an arch with native TF32 (gfx942, where a
+    narrow fragment is split exactly, not padded).
+    """
+    if getattr(problem, "dtype", None) != "tf32" or not tf32_is_emulated(arch):
+        return None
+    if variant == "direct_grouped":
+        if not knobs.get("fold_k32") and problem.cpg % 32 == 0:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers cpg"
+        return None
+    if variant in _MFMA_DGRAD:
+        if knobs.get("fold_k32"):
+            return None
+        # The fprop pass reduces over kpg: the fold covers it when the grid
+        # has the folded twin, kpg is a multiple of 32, its atom count
+        # splits over the same waves_k and the twin fits its registers.
+        twin = (
+            knobs.get("waves_q", 1),
+            knobs["waves_k"],
+            knobs.get("runtime_k_loop", False),
+            knobs.get("persistent_grid", False),
+            True,
+        )
+        if twin not in dgrad_waves("tf32"):
+            return None
+        wide = dict(knobs, fold_k32=True)
+        if variant == "direct_dgrad_mfma_rtc":
+            if problem.kpg % 32 or problem.kpg // 32 not in dgrad_rtc_k_atoms(
+                knobs["waves_k"], True
+            ):
+                return None
+            wide["k_atoms"] = problem.kpg // 32
+            if dgrad_rtc_spills(wide, problem.KH, problem.KW, arch, problem.dtype):
+                return None
+        if _mfma_knobs_reason(problem, wide, arch) is None:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers kpg"
+        return None
+    if variant == "direct_nongrouped":
+        if knobs.get("atom") in _NONGROUPED_NARROW_ATOMS and problem.cpg % 32 == 0:
+            return (
+                f"tf32 atom {knobs['atom']} zero-padded on an emulated arch; "
+                f"{_NONGROUPED_NARROW_ATOMS[knobs['atom']]} covers C"
+            )
+        return None
+    if variant == "direct_wgrad":
+        # The wgrad MFMA K is the output-column axis: mfma_k=16 pads.
+        if knobs.get("mfma_k", 32) < 32:
+            return "tf32 mfma_k=16 zero-padded on an emulated arch; mfma_k=32 covers it"
+    return None
+
+
 def _caps_jobs(
     arch: str,
     wave_size: int,
@@ -2794,9 +3285,9 @@ def _caps_jobs(
         n_raw += 1
         if knob_probe:
             probe = probe_problem(caps, dtype, variant, knobs)
-        if rtc_dgrad and dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch):
+        if rtc_dgrad and dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch, dtype):
             continue
-        if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs):
+        if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs, arch):
             continue
         if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
             caps, knobs, arch
@@ -2810,12 +3301,29 @@ def _caps_jobs(
             caps, knobs, arch
         ):
             continue
+        # The probe's channel counts are the binary's own when they are
+        # baked; a runtime-channel binary is judged per problem in plan_for.
+        if (
+            caps.cpg
+            and not rtc_dgrad
+            and tf32_narrow_reason(variant, probe, knobs, arch)
+        ):
+            continue
         spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
-            continue
+            if not knobs.get("lds_epilogue"):
+                continue
+            # The block's dW tile does not fit the LDS epilogue: the same
+            # tiling with the direct epilogue instead.
+            knobs = dict(knobs, lds_epilogue=False)
+            spec = make_spec(variant, probe, knobs, wave_size)
+            if not validate_spec(variant, spec, arch)[0]:
+                continue
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
             continue
         if variant == "direct_depthwise" and _depthwise_stream_spills(spec):
+            continue
+        if variant == "direct_wgrad" and _wgrad_image_spills(spec):
             continue
         cell = [
             _job(
@@ -2852,6 +3360,13 @@ def _caps_jobs(
                         helper_knobs,
                     )
                 )
+        if variant in _WGRAD_TWO_STAGE and direct_wgrad_replicas(spec) > 1:
+            reduce_id = wgrad_reduce_identity(
+                arch, wave_size, direct_wgrad_replicas(spec), dtype
+            )
+            cell.append(
+                _job(reduce_id, _WGRAD_REDUCE_CAPS, json.loads(reduce_id.knobs))
+            )
         out.extend((job.identity.stable_hash(), job) for job in cell)
     return n_raw, out
 
@@ -2865,6 +3380,29 @@ def count_direct_jobs(
         sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        for caps in caps_list
+    )
+
+
+def grid_caches_variant(variant: str, arch: str, dtype: str = DIRECT_DTYPE) -> bool:
+    """Whether the direct-conv AOT grid has a valid job of ``variant`` for
+    ``arch``: some capability of :data:`DIRECT_CAPABILITIES` with a tuning
+    knob there that the variant's validator accepts.
+
+    The grid and the validators are where each variant's arch scope lives
+    (the depthwise wgrad one, for example, is the wave32 targets), so a test
+    that should run wherever the cache ships a kernel asks this rather than
+    keeping its own arch list. An arch rocke has no target for has no job.
+    """
+    from rocke.core.arch import ArchTarget
+
+    try:
+        wave_size = ArchTarget.from_gfx(arch).wave_size
+    except KeyError:
+        return False
+    direction, caps_list = DIRECT_CAPABILITIES[variant]
+    return any(
+        _caps_jobs(arch, wave_size, variant, direction, caps, dtype)[1]
         for caps in caps_list
     )
 

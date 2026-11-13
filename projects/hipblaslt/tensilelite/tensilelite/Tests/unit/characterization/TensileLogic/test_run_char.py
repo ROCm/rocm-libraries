@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.Run`` (the CLI orchestrator).
+"""Characterization tests for ``tensilelite.logic.run`` (the CLI orchestrator).
 
 ``Run`` is Tier C: it wires argparse + toolchain + a ``ParallelMap2`` fan-out
 over ``_runChecks``, with a background progress thread. The strategy
@@ -46,8 +46,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import tensilelite.TensileLogic.Run as Run
-from tensilelite.TensileLogic.KnownBugs import normalize_logic_relative_path
+import tensilelite.logic.run as Run
+from tensilelite.logic.known_bugs import normalize_logic_relative_path
 
 pytestmark = pytest.mark.unit
 
@@ -186,6 +186,8 @@ def stub_setup_externals(monkeypatch):
     monkeypatch.setattr(Run, "assignGlobalParameters",
                         lambda cfg, iim: recorded.__setitem__("gp_config", cfg))
     monkeypatch.setattr(Run, "setVerbosity", lambda v: None)
+    # --jobs defaults to 0, which _setup resolves to the CPU budget of the host.
+    monkeypatch.setattr(Run, "CPUThreadCount", lambda: 12)
     return recorded
 
 
