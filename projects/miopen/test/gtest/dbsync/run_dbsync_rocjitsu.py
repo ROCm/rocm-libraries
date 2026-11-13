@@ -50,6 +50,11 @@ FAMILY_MAP = {
         "rj_config": "gfx950_mi355x_kmd.json",
         "cus": [256],
     },
+    "gfx90a": {
+        "arch": "gfx90a",
+        "rj_config": "gfx90a_mi210_kmd.json",
+        "cus": [104, 110],
+    },
 }
 
 # StaticFDBSync's default thread fan-out (min(hw_concurrency, 32)) can deadlock/stall under the
