@@ -98,20 +98,25 @@ struct BlockFmhaPipelineQRKSVSTdm
     // both carry it, so it cancels in O = o_acc/l; LSE and the sink seed undo it explicitly.
     static constexpr index_t kPShift     = kQuantized ? 8 : 0;
     static constexpr float kPScaleFactor = kQuantized ? 256.0f : 1.0f;
+    // fp8 (or bf8) K/V: gates every fp8 tuning below, so fp16/bf16 stay on develop's path.
+    static constexpr bool kIsFp8 = is_any_of<KDataType, fp8_t, bf8_t>::value;
     // fp8 double-buffer mainloop keeps only its two RAW barriers: each drains this wave's LDS
     // reads first, so the V-ready barrier also frees the K buffer gemm0 read, and the K-ready
     // barrier frees the V buffer gemm1 read. The separate WAR barriers go.
-    static constexpr bool kMergedWarBarriers = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    static constexpr bool kMergedWarBarriers = kIsFp8;
     // TDM ops per K or V tile: MX follows each with its scale tile (MxScaleTiles).
     static constexpr index_t kTdmPerKvTile = kMx ? 2 : 1;
+    // TDM ops the double-buffer V-ready and K-ready waits leave in flight: fp8 retires only the
+    // tile it reads next (<2>), fp16/bf16 keep the stricter <1>.
+    static constexpr index_t kTdmKeepInFlight = kIsFp8 ? 2 * kTdmPerKvTile : 1;
     // fp8 double-buffer K/V loads pack their TDM descriptor in SGPRs (load_tile_tdm_uniform):
     // the strides are taken once before the loop instead of riding a VGPR through it.
-    static constexpr bool kUniformTdmLoad = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    static constexpr bool kUniformTdmLoad = kIsFp8;
     // fp8 O goes to global through LDS and one TDM store per wave (the kernel's tdm_store_2d),
     // so no per-lane O address is carried through the mainloop.
-    static constexpr bool kTdmOStore = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    static constexpr bool kTdmOStore = kIsFp8;
     // fp8 casts and sums P one M band at a time (MakePForGemm1AndRowSum).
-    static constexpr bool kBandedPCast = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    static constexpr bool kBandedPCast = kIsFp8;
 
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
@@ -236,13 +241,15 @@ struct BlockFmhaPipelineQRKSVSTdm
     // Row sum as a pairwise tree over each row's columns in thread-buffer order. The leaves
     // pair neighbours inside the PK8 cast groups, so P is read in the order it is produced
     // (a chain split interleaved exp2 across groups and scattered them), and the
-    // independent pairs replace the serial add chain and can dual-issue.
+    // independent pairs replace the serial add chain and can dual-issue. fp8 only: fp16/bf16
+    // keep the serial sum, which their deferred-denominator path also uses.
     template <typename Tensor>
     CK_TILE_DEVICE static auto ReduceRowSumLocal(const Tensor& values)
     {
         constexpr auto spans            = Tensor::get_distributed_spans();
         constexpr index_t local_columns = container_reduce(spans[I1].impl_, multiplies<>{}, 1);
-        if constexpr(local_columns > 1 && (local_columns & (local_columns - 1)) == 0)
+        if constexpr(kBandedPCast && local_columns > 1 &&
+                     (local_columns & (local_columns - 1)) == 0)
         {
             constexpr auto columns =
                 make_naive_tensor_descriptor_packed(sequence_to_tuple_of_number(spans[I1].impl_));
@@ -303,7 +310,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     // lets it own the max frame and pushes every real P down the fp8 grid. That is a
     // property of the cast, not of gemm1's scale operand -- MergeSink reads only m, l,
     // o_acc and kPShift. kHwGemm1Scale stood in for it because both landed together.
-    static constexpr bool kDeferSink = kHasSink;
+    // fp16/bf16 keep the pre-seeded sink.
+    static constexpr bool kDeferSink = kHasSink && kIsFp8;
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -737,7 +745,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
     // fp8 runs gemm1 one 16-column V fragment at a time (Gemm1ByVFragment): kVReadAhead + 1
     // fragments of V are live instead of the whole tile. Needs one gemm1 K step and one N warp.
-    static constexpr bool kVFragments = is_any_of<KDataType, fp8_t, bf8_t>::value && kN0 == kK1 &&
+    static constexpr bool kVFragments = kIsFp8 && kN0 == kK1 &&
                                         kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) &&
                                         BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1;
     static constexpr index_t kVReadAhead = 2; // fragments in flight ahead of the current one
@@ -755,8 +763,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     // Needs one gemm0 K slice and one N warp. A fragment spans the whole head dim if its 6+
     // WMMAs hide the next read (d160 / d192), else one K step (d256 / d512). d32-d128 have one
     // K step and keep the whole tile.
-    static constexpr bool kKFragments = is_any_of<KDataType, fp8_t, bf8_t>::value &&
-                                        kK0 == kQKHeaddim &&
+    static constexpr bool kKFragments = kIsFp8 && kK0 == kQKHeaddim &&
                                         BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1 &&
                                         (kKFragWmmas >= 6 || kGemm0KSteps >= 2);
     static constexpr index_t kKFragKSteps  = kKFragWmmas >= 6 ? kGemm0KSteps : 1;
@@ -1719,13 +1726,20 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
+            // fp16/bf16 keep develop's generic reductions in this single-V path.
             auto m_local = [&]() { // m_local = rowmax(S{j})
                 if constexpr(kFoldKDescale)
                     return ReduceRowMaxKDescaled(s_new, kv_descale);
-                else
+                else if constexpr(kIsFp8)
                     return ReduceRowMaxLocal(s_new);
+                else
+                    return block_tile_reduce<SMPLComputeDataType>(
+                        s_new, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
             }();
-            ReduceRowSync(m_local, f_max);
+            if constexpr(kIsFp8)
+                ReduceRowSync(m_local, f_max);
+            else
+                block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
 
             const auto m_old = m; // m{j-1}
             tile_elementwise_inout(
@@ -1793,7 +1807,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             });
 
             auto rowsum_p = ReduceRowSumLocal(p_compute); // rowsum(Pcompute{j})
-            ReduceRowSync(rowsum_p, f_sum);
+            if constexpr(kIsFp8)
+                ReduceRowSync(rowsum_p, f_sum);
+            else
+                block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
             // Normalize with the undropped mass; dropout changes only the PV numerator.
             if constexpr(kHasDropout)
@@ -2307,8 +2324,15 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
-        const auto k_tdm_strides = make_tdm_uniform_strides(k_dram_window);
-        const auto v_tdm_strides = make_tdm_uniform_strides(v_dram_window);
+        // Only the fp8 uniform TDM loads read the strides; fp16/bf16 pass an unused placeholder.
+        const auto uniform_strides_of = [](const auto& dram_window) {
+            if constexpr(kUniformTdmLoad)
+                return make_tdm_uniform_strides(dram_window);
+            else
+                return number<0>{};
+        };
+        const auto k_tdm_strides = uniform_strides_of(k_dram_window);
+        const auto v_tdm_strides = uniform_strides_of(v_dram_window);
 
         // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
         // physical_seqlen_k_start. k_origin below and the blockscale descale index
@@ -2430,32 +2454,6 @@ struct BlockFmhaPipelineQRKSVSTdm
             [[maybe_unused]] constexpr index_t kKEarlyAccesses = kKAccesses / 2;
             [[maybe_unused]] const auto kv_descale =
                 kDeferKDescaleClamp ? clamp_k_descale(next_kv_descale) : next_kv_descale;
-
-            // Prefetch K into the buffer gemm0 of this call reads; callers free it first.
-            auto prefetch_k = [&]() {
-                // K's sink->normal window jump (prefill path). K is prefetched 2
-                // loop-iterations ahead of consumption (ptrk0/ptrk1 ping-pong -- the write
-                // below feeds i_total_loops+2, not i_total_loops+1 like V/bias), so the
-                // jump must fire 2 iterations before the first normal tile is consumed,
-                // i.e. at i_total_loops == num_sink_loop - 2, not num_sink_loop - 1. When
-                // num_sink_loop == 1 there is no such iteration (it would be -1); that
-                // case is instead handled in the prologue, see the comment there.
-                if constexpr(kHasSink)
-                {
-                    if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
-                    {
-                        move_tile_window(k_dram_window,
-                                         {physical_seqlen_k_start - sink_seq_end, 0});
-                    }
-                }
-                move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
-                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                LoadTdmFullTileOrPadded(
-                    tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
-                if constexpr(kMx)
-                    mx_tiles.load_k(i_total_loops + 2,
-                                    kv_tile_start_of(min(i_total_loops + 2, num_total_loop - 1)));
-            };
 
             // move V tile windows
             if constexpr(!kMergedWarBarriers)
@@ -2633,7 +2631,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                       decltype(i_n)::value * kWmmaRows + mx_lane,
                                       decltype(i_k)::value);
             };
-            if constexpr(is_any_of<KDataType, fp8_t, bf8_t>::value)
+            if constexpr(kIsFp8)
             {
                 static_assert(k0_loops == 1 && !Problem::kProgressiveDsLoadK);
                 Gemm0Fp8(s_acc, q_tile, k_tile, k_frag_window, mx_q_scale, mx_k_scale);
@@ -2707,11 +2705,30 @@ struct BlockFmhaPipelineQRKSVSTdm
                 // dscnt 0: gemm0's K reads are done in every wave past this barrier. <1> also
                 // retires K(i+1), which the PV tail reads.
                 s_wait_tensorcnt_barrier<kTdmPerKvTile, 0>();
-                prefetch_k();
+                // Prefetch K into the buffer gemm0 of this call read (inline, as in the fp16/bf16
+                // branch below: a shared closure changed their codegen against develop).
+                // K's sink->normal window jump: K is prefetched 2 loop-iterations ahead of
+                // consumption (ptrk0/ptrk1 ping-pong), so the jump fires at i_total_loops ==
+                // num_sink_loop - 2; num_sink_loop == 1 is handled in the prologue.
+                if constexpr(kHasSink)
+                {
+                    if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
+                    {
+                        move_tile_window(k_dram_window,
+                                         {physical_seqlen_k_start - sink_seq_end, 0});
+                    }
+                }
+                move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+                LoadTdmFullTileOrPadded(
+                    tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+                if constexpr(kMx)
+                    mx_tiles.load_k(i_total_loops + 2,
+                                    kv_tile_start_of(min(i_total_loops + 2, num_total_loop - 1)));
             }
             else
             {
-                s_wait_tensorcnt_barrier<2 * kTdmPerKvTile>();
+                s_wait_tensorcnt_barrier<kTdmKeepInFlight>();
             }
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             v_frag_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -2726,6 +2743,32 @@ struct BlockFmhaPipelineQRKSVSTdm
                 tile_elementwise_inout([&features](auto& x) { x = features.at(I0)(x); }, s_acc);
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
+
+            // Standard causal ranges round their end to N64
+            // (nonpositive ranges already returned above). With no sink/split,
+            // each processed score column is strictly below that physical end.
+            // Other mask types retain this independent tail clamp. Dense keeps
+            // its original control flow for the measured QK/PV loop scheduling.
+            constexpr bool kScoreTailClampRedundant =
+                kTdmBoxesAlwaysInBounds &&
+                std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>;
+            // fp8 skips it: its unpadded kernels dispatch only on a whole number of KV tiles,
+            // and the padded / masked ones take the clamp below.
+            if constexpr(kHasUnevenSplits && !kScoreTailClampRedundant && !kIsFp8)
+            {
+                if(i_total_loops == (num_total_loop - 1))
+                {
+                    set_tile_if(s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
+                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
+
+                                    {
+                                        return physical_seqlen_k_end_ <= col;
+                                    }
+                                });
+                }
+            }
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -2897,35 +2940,39 @@ struct BlockFmhaPipelineQRKSVSTdm
             constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking && !kHasDropout;
             static_assert(!(kBandedPCast && kDeferDenominator));
 
-            // Cast P before its row sum: the sum's tree then overwrites fp32 P registers the
-            // cast has consumed, instead of holding its partials beside all of P.
-            int32_t p_scale   = 0;
-            auto p_and_rowsum = [&]() {
+            // fp8 casts P before its row sum, so the sum's tree overwrites fp32 P registers the
+            // cast has consumed. fp16/bf16 keep develop's order and form: sum and sync, dropout,
+            // then the cast, with no tuple around them (it changed their codegen).
+            int32_t p_scale = 0;
+            decltype(MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale)) p_tile;
+            auto rowsum_p = [&]() {
                 if constexpr(kBandedPCast)
                 {
-                    return MakePForGemm1AndRowSum<decltype(gemm_1)>(p_compute, p_scale);
+                    auto p_and_sum = MakePForGemm1AndRowSum<decltype(gemm_1)>(p_compute, p_scale);
+                    p_tile         = p_and_sum.at(I0);
+                    ReduceRowSync(p_and_sum.at(I1), f_sum);
+                    return p_and_sum.at(I1);
                 }
-                else if constexpr(kHasDropout)
+                else if constexpr(kDeferDenominator)
                 {
-                    // Normalize with the undropped mass; dropout changes only the PV numerator.
-                    auto rowsum = ReduceRowSumLocal(p_compute);
-                    features.at(I1)(p_compute, q_origin.at(I0), kv_tile_start);
-                    return make_tuple(MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale), rowsum);
+                    return m;
                 }
                 else
                 {
-                    auto p = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-                    if constexpr(kDeferDenominator)
-                        return make_tuple(p, m);
-                    else
-                        return make_tuple(p, ReduceRowSumLocal(p_compute));
+                    auto sum = ReduceRowSumLocal(p_compute);
+                    ReduceRowSync(sum, f_sum);
+                    return sum;
                 }
             }();
-            auto p_tile   = p_and_rowsum.at(I0);
-            auto rowsum_p = p_and_rowsum.at(I1);
-            if constexpr(!kDeferDenominator)
-                ReduceRowSync(rowsum_p, f_sum);
             auto l_correction = m;
+
+            if constexpr(!kBandedPCast)
+            {
+                // Normalize with the undropped mass; dropout changes only the PV numerator.
+                if constexpr(kHasDropout)
+                    features.at(I1)(p_compute, q_origin.at(I0), kv_tile_start);
+                p_tile = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            }
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -2988,7 +3035,22 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(!kMergedWarBarriers)
             {
                 block_sync_lds<v_lds_insts>();
-                prefetch_k();
+                // Prefetch K, as in the merged-barrier branch above.
+                if constexpr(kHasSink)
+                {
+                    if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
+                    {
+                        move_tile_window(k_dram_window,
+                                         {physical_seqlen_k_start - sink_seq_end, 0});
+                    }
+                }
+                move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+                LoadTdmFullTileOrPadded(
+                    tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+                if constexpr(kMx)
+                    mx_tiles.load_k(i_total_loops + 2,
+                                    kv_tile_start_of(min(i_total_loops + 2, num_total_loop - 1)));
             }
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
@@ -3093,7 +3155,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             // The barrier frees the V buffer for the next call: fp8 drained its V reads before
             // the early K reads (k_early), which may stay in flight past it, as K(i+1)'s buffer
             // is rewritten only after the next mid barrier's dscnt 0. Others wait on dscnt 0.
-            s_wait_tensorcnt_barrier<2 * kTdmPerKvTile,
+            s_wait_tensorcnt_barrier<kTdmKeepInFlight,
                                      kVFragments || !kMergedWarBarriers ? waitcnt_arg::kMaxLgkmCnt
                                                                         : 0>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
