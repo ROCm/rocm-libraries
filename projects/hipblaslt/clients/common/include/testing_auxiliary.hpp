@@ -3739,6 +3739,8 @@ inline void testing_aux_hipblaslt_func(const Arguments& arg)
                 == HIPBLAS_STATUS_INVALID_VALUE);
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_arch_mismatch)
                 == HIPBLAS_STATUS_ARCH_MISMATCH);
+    ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_not_supported)
+                == HIPBLAS_STATUS_NOT_SUPPORTED);
 
     // Test default case - should throw HIPBLAS_STATUS_INVALID_ENUM
     bool            exception_thrown = false;

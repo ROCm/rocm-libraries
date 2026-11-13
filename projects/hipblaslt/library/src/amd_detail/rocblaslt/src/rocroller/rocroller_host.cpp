@@ -594,7 +594,8 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
             return status;
         if(returnAlgoCount == 0)
         {
-            return rocblaslt_status_not_implemented;
+            log_error(__func__, "no rocRoller algorithm supports this problem");
+            return rocblaslt_status_not_supported;
         }
         algo = &heuristicResult.algo;
     }
