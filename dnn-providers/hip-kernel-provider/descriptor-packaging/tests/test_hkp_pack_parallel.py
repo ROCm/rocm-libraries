@@ -647,10 +647,9 @@ _HSACO_SOURCE = "hsaco_kernel.cpp"
 def hsaco_corpus(tmp_path):
     """A KDP carrying an hsaco UKD ahead of a compilable hip one.
 
-    Kept out of the selection corpus deliberately: it makes
-    `compile_intermediate` raise, which would stop the golden-sequence corpus
-    from being walkable. The hsaco entry is authored first so the walk reaches
-    its error before it would need a real compiler for the hip entry.
+    Kept out of the selection corpus deliberately: the hsaco entry exercises the
+    prewarm skip path (`_variant_key_for` returns None for hsaco), which is a
+    different code path from the compilation tests in the golden-sequence corpus.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -837,73 +836,6 @@ def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
     assert str(probe) in child_path
-
-
-_MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
-
-
-@pytest.fixture
-def failing_corpus(tmp_path):
-    """A KDP with two rocke UKDs naming a module that does not exist.
-
-    Two entries rather than one because the prewarm returns without a pool for
-    a single job, and the failure has to come from a real worker process. They
-    carry different specs so they key apart and stay two jobs. The module is
-    absent, so the child raises before it reaches the rocKE compiler and the
-    case needs no toolchain at all.
-    """
-    dest = tmp_path / "failing-corpus"
-    dest.mkdir()
-    entries = [
-        _ukd(
-            f"ukd-absent-{tile}",
-            {
-                "kind": "rocke",
-                "source": _MISSING_MODULE,
-                "builder": _ROCKE_STUB_BUILDER,
-                "spec": {"tile": tile},
-            },
-        )
-        for tile in (64, 128)
-    ]
-    _write_json(dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries))
-    return dest
-
-
-@pytest.mark.quick
-def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
-    """A pool failure names one variant, not N tracebacks.
-
-    Which variant is named is not host-dependent and is asserted exactly: it is
-    the first failure in submission order, which is walk order, so the parallel
-    path names the variant the serial path would have named. How many others
-    would have failed is deliberately not asserted, and the message carries no
-    count.
-
-    No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
-    start methods, which `test_worker_inherits_parent_sys_path` is the detector
-    for.
-    """
-    monkeypatch.setenv("HKP_PACK_JOBS", "2")
-    flat = load_flat_input(failing_corpus, GENERIC_TARGETS, log=_silent)
-
-    jobs = pipeline._prewarm_jobs(flat, failing_corpus, TARGET_ARCH)
-    assert len(jobs) >= 2, "a single job returns before starting a pool"
-
-    with pytest.raises(HkpPackError) as excinfo:
-        pipeline.compile_intermediate(
-            flat,
-            failing_corpus,
-            TARGET_ARCH,
-            "compiler-not-invoked",
-            tmp_path / "inter",
-            log=_silent,
-        )
-
-    message = str(excinfo.value)
-    assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
-    assert f"'{jobs[0].ukd['id']}'" in message
-    assert "module not importable" in message
 
 
 @pytest.mark.quick

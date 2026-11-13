@@ -111,10 +111,9 @@ endfunction()
 #
 #   Elsewhere in this repo a gfxNNX-style label is a selector matched against a
 #   concrete arch (shared/ctest/parse_test_categories.py,
-#   test/therock/test_runner.py, .github/scripts/amdgpu_family_matrix.py); here
-#   the value reaches --offload-arch, where a family name is unusable
-#   rather than coarse. Hence drop-with-warning, not passthrough, and no
-#   family-to-arch expansion table.
+#   test/therock/test_runner.py); here the value reaches --offload-arch,
+#   where a family name is unusable rather than coarse. Hence
+#   drop-with-warning, not passthrough, and no family-to-arch expansion table.
 # ---------------------------------------------------------------------------
 function(hkp_selected_arches out_var out_source_var)
     set(_targets "")
@@ -137,9 +136,9 @@ function(hkp_selected_arches out_var out_source_var)
         if(NOT _concrete)
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
-                "architecture and cannot be passed to --offload-arch. Nothing "
-                "is packed for it. Name real gfx architectures in ${_source} to pack "
-                "for them.")
+                "target name (a TheRock family, a generic target, or an unrecognised "
+                "spelling), so no device can select it. Nothing is packed for it. "
+                "Name concrete gfx targets in ${_source} to pack for them.")
             continue()
         endif()
         list(APPEND _selected "${_bare}")
@@ -1106,9 +1105,9 @@ endfunction()
 # ---------------------------------------------------------------------------
 # cmake-lint: disable=R0912
 function(hkp_require_ingestor_toolchain out_arches)
-    # Use the HIP compiler (clang++/amdclang++) directly with
-    # --offload-device-only instead of hipcc --genco. CMAKE_HIP_COMPILER is
-    # set by TheRock's toolchain; fall back to CMAKE_CXX_COMPILER.
+    # Resolve the HIP compiler. CMAKE_HIP_COMPILER is preferred (set by
+    # TheRock's toolchain); CMAKE_CXX_COMPILER is the fallback and the
+    # typical path outside TheRock.
     if(CMAKE_HIP_COMPILER)
         set(HKP_HIP_COMPILER "${CMAKE_HIP_COMPILER}" PARENT_SCOPE)
         set(HKP_HIP_COMPILER "${CMAKE_HIP_COMPILER}")
@@ -2013,7 +2012,7 @@ function(hkp_register_tests rocm_kpack_dir hip_compiler hip_path
     #
     # HKP_HIP_COMPILER names the HIP compiler (clang++) that configure found.
     # HKP_HIP_PATH and HKP_DEVICE_LIB_PATH supply the --hip-path and
-    # --hip-device-lib-path flags the compiler needs (hipcc auto-injected these).
+    # --hip-device-lib-path flags required for standalone device compilation.
     #
     # HKP_CMAKE_COMMAND and HKP_CMAKE_MAKE_PROGRAM name this build's own CMake
     # and build tool. The python environment tests drive real sub-configures and
