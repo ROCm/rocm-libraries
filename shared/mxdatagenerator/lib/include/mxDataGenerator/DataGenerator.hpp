@@ -291,6 +291,30 @@ namespace DGen
         }
     };
 
+    // MAF2.1 block-scaled data: each element is x ~ U[dataMin, dataMax] drawn in double and
+    // rounded once to the element format at a scale of one (nearest even, saturating, sign kept),
+    // so the values are uniform and the encodings are not. Each block scale is drawn
+    // independently of the data. E8M0 scales are 2^e with the integer e uniform over
+    // [round(log2(max(scaleMin, smallest scale))), round(log2(scaleMax))] ([0, 1] gives
+    // 2^-127 .. 2^0); the other scale formats take y ~ U[scaleMin, scaleMax] rounded to the
+    // nearest finite scale (ties to even, saturating, so small draws can give a zero scale).
+    // Scaled DTYPEs only; min/max, clampToF32, includeNaN/Inf, forceDenorm and scaleInitMode are
+    // ignored.
+    struct Maf2_1
+    {
+        double dataMin  = -1.0;
+        double dataMax  = 1.0;
+        double scaleMin = 0.0;
+        double scaleMax = 1.0;
+
+        std::string toString() const
+        {
+            return "Maf2_1(data U[" + std::to_string(dataMin) + ", " + std::to_string(dataMax)
+                   + "], scale U[" + std::to_string(scaleMin) + ", " + std::to_string(scaleMax)
+                   + "])";
+        }
+    };
+
     using DataInitMode = std::variant<Bounded,
                                       BoundedAlternatingSign,
                                       Unbounded,
@@ -313,7 +337,8 @@ namespace DGen
                                       Infs,
                                       RandInt,
                                       Maf1_0,
-                                      Maf2_0>;
+                                      Maf2_0,
+                                      Maf2_1>;
 
     inline std::string toString(DataInitMode const& initMode)
     {
@@ -574,6 +599,7 @@ namespace DGen
                                   const std::vector<index_t>& size,
                                   const std::vector<index_t>& stride);
         void generate_data_maf2_0(Maf2_0 const& mode);
+        void generate_data_maf2_1(Maf2_1 const& mode);
 
         uint32_t scale_block_mean(const std::vector<uint32_t>& scales,
                                   std::vector<uint64_t>&       data,
@@ -741,6 +767,27 @@ namespace DGen
         }
     }
 
+    // Scale bytes a Maf2_1 power-of-two (E8M0) scale is drawn from, uniformly: 2^e for every
+    // integer e from round(log2(max(lo, smallest scale))) to round(log2(hi)), clamped to the
+    // format's exponents ([0, 1] gives 2^-127 .. 2^0 for E8M0). `scales` is
+    // sortedFiniteScales<DTYPE>().
+    inline std::vector<uint8_t> maf2_1PowerOfTwoScaleBytes(
+        double lo, double hi, std::vector<std::pair<double, uint8_t>> const& scales)
+    {
+        const int formatMin = static_cast<int>(std::log2(scales.front().first));
+        const int formatMax = static_cast<int>(std::log2(scales.back().first));
+        auto      exponent  = [&](double v) {
+            const int e = static_cast<int>(std::nearbyint(std::log2(v)));
+            return std::clamp(e, formatMin, formatMax);
+        };
+        const int            eMin = exponent(std::max(lo, scales.front().first));
+        const int            eMax = std::max(eMin, exponent(hi));
+        std::vector<uint8_t> table;
+        for(int e = eMin; e <= eMax; e++)
+            table.push_back(nearestScaleByteRne(scales, std::ldexp(1.0, e)));
+        return table;
+    }
+
     // Non-negative finite element encodings of DTYPE under a scale of one, as (value, code)
     // in ascending value order, and the element's sign bit.
     template <typename DTYPE>
@@ -805,7 +852,8 @@ namespace DGen
                             [&](const Infs&) { generate_data_infs(); },
                             [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); },
                             [&](const Maf1_0& m) { generate_data_maf1_0(m, size, stride); },
-                            [&](const Maf2_0& m) { generate_data_maf2_0(m); }},
+                            [&](const Maf2_0& m) { generate_data_maf2_0(m); },
+                            [&](const Maf2_1& m) { generate_data_maf2_1(m); }},
                    m_options.initMode);
     }
 
@@ -2194,6 +2242,77 @@ namespace DGen
                         = mode.unitScaleNormalData
                               ? maf2_0ElementCode(normal_dist[tid](m_gen[tid]), magnitudes, signBit)
                               : codes[code_dist(m_gen[tid])];
+                    std::memcpy(
+                        &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
+                }
+            }
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_maf2_1(Maf2_1 const& mode)
+    {
+        if constexpr(!isScaled<DTYPE>())
+        {
+            throw std::invalid_argument(
+                "DataGenerator::generate_data_maf2_1: Maf2_1 needs a block-scaled data type");
+        }
+        else
+        {
+            if(!std::isfinite(mode.dataMin) || !std::isfinite(mode.dataMax)
+               || !(mode.dataMin < mode.dataMax))
+                throw std::invalid_argument("DataGenerator::generate_data_maf2_1: dataMin and "
+                                            "dataMax must be finite with dataMin < dataMax");
+            if(!std::isfinite(mode.scaleMax) || !(mode.scaleMin >= 0.0)
+               || !(mode.scaleMin < mode.scaleMax))
+                throw std::invalid_argument("DataGenerator::generate_data_maf2_1: scaleMin and "
+                                            "scaleMax must be finite with 0 <= scaleMin < "
+                                            "scaleMax");
+            // The scale blocks tile memory in runs of the contiguous dimension.
+            if(m_contiguousDim > 0 && m_dataDesc.array_size % m_contiguousDim != 0)
+                throw std::invalid_argument(
+                    "DataGenerator::generate_data_maf2_1: the buffer size must be a multiple of "
+                    "the contiguous dimension");
+
+            constexpr bool powerOfTwoScale = scale_info_t<DTYPE>::mantissaBits == 0;
+            const auto     scales          = sortedFiniteScales<DTYPE>();
+            const auto     pow2Scales
+                = powerOfTwoScale ? maf2_1PowerOfTwoScaleBytes(mode.scaleMin, mode.scaleMax, scales)
+                                  : std::vector<uint8_t>{};
+            const auto block_size = m_options.blockScaling;
+            const auto numBlocks  = numScaleBlocks(block_size);
+
+            // Element magnitudes under a scale of one, for rounding each draw.
+            std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+            std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+            setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+            const uint8_t signBit = static_cast<uint8_t>(
+                1u << (DTYPE::dataInfo.exponentBits + DTYPE::dataInfo.mantissaBits));
+            const auto magnitudes = sortedNonNegativeCodes<DTYPE>(s_one[0], signBit);
+
+            // The distributions keep no state between draws, so each thread can use a copy.
+            std::uniform_real_distribution<double> data_dist(mode.dataMin, mode.dataMax);
+            std::uniform_real_distribution<double> scale_dist(mode.scaleMin, mode.scaleMax);
+            std::uniform_int_distribution<size_t>  pow2_dist(
+                0, pow2Scales.empty() ? 0 : pow2Scales.size() - 1);
+
+            // Per block: the scale draw, then the block's elements in order.
+#pragma omp parallel for num_threads(m_num_threads) firstprivate(data_dist, scale_dist, pow2_dist)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                const auto    tid   = omp_get_thread_num();
+                const uint8_t scale = powerOfTwoScale
+                                          ? pow2Scales[pow2_dist(m_gen[tid])]
+                                          : nearestScaleByteRne(scales, scale_dist(m_gen[tid]));
+                std::memcpy(
+                    &m_scaleBytes[scale_i * m_scaleDesc.byte_size], &scale, m_scaleDesc.byte_size);
+
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size);
+                    block_i++)
+                {
+                    const auto    data_i = dataIndex(scale_i, block_i, block_size);
+                    const uint8_t code
+                        = maf2_0ElementCode(data_dist(m_gen[tid]), magnitudes, signBit);
                     std::memcpy(
                         &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
                 }

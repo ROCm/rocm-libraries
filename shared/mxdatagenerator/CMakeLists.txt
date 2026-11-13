@@ -133,6 +133,7 @@ if(MXDATAGENERATOR_BUILD_TESTING)
       test/ocp_e2m1_mxfp4_e4m3_e5m3_scale_test.cpp
       test/maf1_0_test.cpp
       test/maf2_0_test.cpp
+      test/maf2_1_test.cpp
       test/preswizzle_test.cpp
     )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
