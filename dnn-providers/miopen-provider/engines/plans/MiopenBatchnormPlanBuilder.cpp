@@ -5,6 +5,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <optional>
 #include <string>
 #include <unordered_set>
 
@@ -376,6 +377,23 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
     }
 }
 
+void checkSingleNodeTensorsNonVirtual(
+    const std::vector<std::optional<int64_t>>& tensorUids,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    for(const auto& uid : tensorUids)
+    {
+        if(uid.has_value() && miopen_utils::findTensorAttributes(tensorMap, *uid).virtual_())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Single-node batchnorm tensors must be non-virtual");
+        }
+    }
+}
+
 } // namespace
 
 bool MiopenBatchnormPlanBuilder::isApplicable(
@@ -459,23 +477,61 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormFwdTrainingTensorConfigSupported(
-                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
-                break;
+            {
+                const auto& attr = *node.attributes_as_BatchnormAttributes();
+                checkBatchnormFwdTrainingTensorConfigSupported(attr, opGraph.getTensorMap());
+                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
+                                                  attr.y_tensor_uid(),
+                                                  attr.scale_tensor_uid(),
+                                                  attr.bias_tensor_uid(),
+                                                  attr.mean_tensor_uid(),
+                                                  attr.inv_variance_tensor_uid()},
+                                                 opGraph.getTensorMap());
+            }
+            break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormInferenceTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
-                break;
+            {
+                const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+                checkBatchnormInferenceTensorConfigSupported(attr, opGraph.getTensorMap());
+                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
+                                                  attr.y_tensor_uid(),
+                                                  attr.scale_tensor_uid(),
+                                                  attr.bias_tensor_uid(),
+                                                  attr.mean_tensor_uid(),
+                                                  attr.inv_variance_tensor_uid()},
+                                                 opGraph.getTensorMap());
+            }
+            break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-                checkBatchnormInferenceVarianceExtTensorConfigSupported(
-                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
-                    opGraph.getTensorMap());
-                break;
+            {
+                const auto& attr = *node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+                checkBatchnormInferenceVarianceExtTensorConfigSupported(attr,
+                                                                        opGraph.getTensorMap());
+                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
+                                                  attr.y_tensor_uid(),
+                                                  attr.scale_tensor_uid(),
+                                                  attr.bias_tensor_uid(),
+                                                  attr.mean_tensor_uid(),
+                                                  attr.variance_tensor_uid()},
+                                                 opGraph.getTensorMap());
+            }
+            break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                checkBatchnormBackwardTensorConfigSupported(
-                    *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
-                break;
+            {
+                const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
+                checkBatchnormBackwardTensorConfigSupported(attr, opGraph.getTensorMap());
+                checkSingleNodeTensorsNonVirtual({attr.x_tensor_uid(),
+                                                  attr.dy_tensor_uid(),
+                                                  attr.dx_tensor_uid(),
+                                                  attr.scale_tensor_uid(),
+                                                  attr.dscale_tensor_uid(),
+                                                  attr.dbias_tensor_uid(),
+                                                  attr.mean_tensor_uid(),
+                                                  attr.inv_variance_tensor_uid()},
+                                                 opGraph.getTensorMap());
+            }
+            break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                                "Unexpected node attribute type");

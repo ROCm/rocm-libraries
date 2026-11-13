@@ -2411,6 +2411,108 @@ std::vector<BnTrainingStatsParam> allBnTrainingStatsParams()
     return params;
 }
 
+enum class BnSingleNodeMode
+{
+    INFERENCE,
+    INFERENCE_WITH_VARIANCE,
+    BACKWARD,
+    TRAINING,
+};
+
+struct BnVirtualRoleParam
+{
+    BnSingleNodeMode mode;
+    int64_t uid;
+    const char* role;
+};
+
+const char* modeName(BnSingleNodeMode mode)
+{
+    switch(mode)
+    {
+    case BnSingleNodeMode::INFERENCE:
+        return "Inference";
+    case BnSingleNodeMode::INFERENCE_WITH_VARIANCE:
+        return "InferenceWithVariance";
+    case BnSingleNodeMode::BACKWARD:
+        return "Backward";
+    case BnSingleNodeMode::TRAINING:
+        return "Training";
+    default:
+        return "Unknown";
+    }
+}
+
+flatbuffers::FlatBufferBuilder createSingleNodeGraph(BnSingleNodeMode mode)
+{
+    namespace utils = hipdnn_test_sdk::utilities;
+    switch(mode)
+    {
+    case BnSingleNodeMode::INFERENCE:
+        return utils::createValidBatchnormInferenceGraph();
+    case BnSingleNodeMode::INFERENCE_WITH_VARIANCE:
+        return utils::createValidBatchnormWithVarianceInferenceGraph();
+    case BnSingleNodeMode::BACKWARD:
+        return utils::createValidBatchnormBwdGraph();
+    case BnSingleNodeMode::TRAINING:
+        return utils::createValidBatchnormFwdTrainingGraph();
+    default:
+        throw std::logic_error("unknown batchnorm mode");
+    }
+}
+
+// Returns the graph with one tensor flagged virtual; a negative uid leaves the graph unchanged.
+flatbuffers::FlatBufferBuilder createSingleNodeGraphWithVirtualTensor(BnSingleNodeMode mode,
+                                                                      int64_t virtualUid)
+{
+    auto original = createSingleNodeGraph(mode);
+    auto graphT = std::unique_ptr<fb::GraphT>(fb::GetGraph(original.GetBufferPointer())->UnPack());
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == virtualUid)
+        {
+            tensor->virtual_ = true;
+        }
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(fb::CreateGraph(builder, graphT.get()));
+    return builder;
+}
+
+// Every tensor role the single-node plan reads or writes. Uids follow the test-sdk graph helpers.
+const std::vector<BnVirtualRoleParam>& singleNodeVirtualRoles()
+{
+    static const std::vector<BnVirtualRoleParam> s_roles = {
+        {BnSingleNodeMode::INFERENCE, 1, "X"},
+        {BnSingleNodeMode::INFERENCE, 2, "Y"},
+        {BnSingleNodeMode::INFERENCE, 3, "Scale"},
+        {BnSingleNodeMode::INFERENCE, 4, "Bias"},
+        {BnSingleNodeMode::INFERENCE, 5, "Mean"},
+        {BnSingleNodeMode::INFERENCE, 6, "InvVariance"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 1, "X"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 2, "Y"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 3, "Scale"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 4, "Bias"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 5, "Mean"},
+        {BnSingleNodeMode::INFERENCE_WITH_VARIANCE, 6, "Variance"},
+        {BnSingleNodeMode::BACKWARD, 1, "X"},
+        {BnSingleNodeMode::BACKWARD, 2, "Dy"},
+        {BnSingleNodeMode::BACKWARD, 3, "Dx"},
+        {BnSingleNodeMode::BACKWARD, 4, "Scale"},
+        {BnSingleNodeMode::BACKWARD, 5, "Dscale"},
+        {BnSingleNodeMode::BACKWARD, 6, "Dbias"},
+        {BnSingleNodeMode::BACKWARD, 7, "Mean"},
+        {BnSingleNodeMode::BACKWARD, 8, "InvVariance"},
+        {BnSingleNodeMode::TRAINING, 1, "X"},
+        {BnSingleNodeMode::TRAINING, 2, "Y"},
+        {BnSingleNodeMode::TRAINING, 3, "Scale"},
+        {BnSingleNodeMode::TRAINING, 4, "Bias"},
+        {BnSingleNodeMode::TRAINING, 6, "SavedMean"},
+        {BnSingleNodeMode::TRAINING, 7, "SavedInvVariance"},
+    };
+    return s_roles;
+}
+
 } // namespace
 
 // The single-node training plan only honours a complete running-statistics set or
@@ -2463,3 +2565,39 @@ INSTANTIATE_TEST_SUITE_P(AllRunningStatsAndSavedStatsSubsets,
                          TestMiopenBatchnormPlanBuilderTrainingStats,
                          ::testing::ValuesIn(allBnTrainingStatsParams()),
                          bnTrainingStatsParamName);
+
+class TestMiopenBatchnormPlanBuilderVirtualRole
+    : public ::testing::TestWithParam<BnVirtualRoleParam>
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
+    MiopenBatchnormPlanBuilder _planBuilder;
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
+};
+
+// The single-node plans execute against caller-supplied device buffers, which a virtual
+// tensor never has.
+TEST_P(TestMiopenBatchnormPlanBuilderVirtualRole, DeclinesVirtualTensor)
+{
+    const auto& p = GetParam();
+
+    auto servedBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, -1);
+    const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(*_dummyHandle, served));
+
+    auto virtualBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, p.uid);
+    const GraphWrapper graph(virtualBuilder.GetBufferPointer(), virtualBuilder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryRolePerMode,
+                         TestMiopenBatchnormPlanBuilderVirtualRole,
+                         ::testing::ValuesIn(singleNodeVirtualRoles()),
+                         [](const ::testing::TestParamInfo<BnVirtualRoleParam>& info) {
+                             return std::string(modeName(info.param.mode)) + "_" + info.param.role;
+                         });
