@@ -17,11 +17,14 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "rocke/instance_mx_gemm.h"
@@ -207,16 +210,24 @@ static void rocke_mxg_setreason(char* reason, size_t cap, const char* msg)
  * computes into A, B, AScale, BScale and C, in that order. A wave whose tile
  * starts inside C computes the offsets of its whole 32x32 tile, so the rows and
  * columns past the edge count too, up to the next multiple of 32. Called only
- * after M, N and K are known positive and K a multiple of group_k. */
-static void rocke_mxg_largest_byte_offsets(const rocke_mx_gemm_spec_t* spec, long long out[5])
+ * after M, N and K are known positive and K a multiple of group_k.
+ *
+ * Computed in uint64_t so every offset is exact, as Python's are, and the
+ * refusal prints the same number: with M, N and K int, each factor is at most
+ * 2^31, so every offset is below 2^64 (C's bound, 4 * 2^62, is the largest; in
+ * long long C's offset overflows, e.g. for M = N = 1600000000). */
+static void rocke_mxg_largest_byte_offsets(const rocke_mx_gemm_spec_t* spec, uint64_t out[5])
 {
-    const long long M = spec->M;
-    const long long N = spec->N;
-    const long long K = spec->K;
-    const long long groups = K / spec->group_k;
-    const long long tile = ROCKE_MX_GEMM_WAVE_TILE;
-    const long long padded_rows = (M + tile - 1) / tile * tile;
-    const long long padded_cols = (N + tile - 1) / tile * tile;
+    static_assert(std::is_same_v<decltype(spec->M), int> && std::is_same_v<decltype(spec->N), int>
+                      && std::is_same_v<decltype(spec->K), int>,
+                  "the uint64_t offsets are exact only for int M, N and K");
+    const uint64_t M = (uint64_t)spec->M;
+    const uint64_t N = (uint64_t)spec->N;
+    const uint64_t K = (uint64_t)spec->K;
+    const uint64_t groups = K / (uint64_t)spec->group_k;
+    const uint64_t tile = ROCKE_MX_GEMM_WAVE_TILE;
+    const uint64_t padded_rows = (M + tile - 1) / tile * tile;
+    const uint64_t padded_cols = (N + tile - 1) / tile * tile;
     out[0] = padded_rows * K - 1;
     out[1] = (K - 1) * N + padded_cols - 1;
     out[2] = (groups - 1) * M + padded_rows - 1;
@@ -337,16 +348,16 @@ bool rocke_mx_gemm_is_valid_spec(const rocke_mx_gemm_spec_t* spec,
     /* for tensor, offset in _largest_byte_offsets(spec).items(): <= _I32_MAX */
     {
         const char* tensors[5] = {"A", "B", "AScale", "BScale", "C"};
-        long long offsets[5];
+        uint64_t offsets[5];
         rocke_mxg_largest_byte_offsets(spec, offsets);
         for(int i = 0; i < 5; ++i)
         {
-            if(offsets[i] > ROCKE_MX_GEMM_I32_MAX)
+            if(offsets[i] > (uint64_t)ROCKE_MX_GEMM_I32_MAX)
             {
                 snprintf(buf,
                          sizeof(buf),
-                         "the largest byte offset into %s is %lld, expected at most %lld: the "
-                         "kernel computes every buffer offset in i32",
+                         "the largest byte offset into %s is %" PRIu64
+                         ", expected at most %lld: the kernel computes every buffer offset in i32",
                          tensors[i],
                          offsets[i],
                          ROCKE_MX_GEMM_I32_MAX);
@@ -1084,8 +1095,10 @@ void rocke_mx_gemm_grid(const rocke_mx_gemm_spec_t* spec, int* out_gx, int* out_
     }
     else
     {
-        n_tiles = (spec->N + spec->block_tile_n - 1) / spec->block_tile_n;
-        m_tiles = (spec->M + spec->block_tile_m - 1) / spec->block_tile_m;
+        /* Rounded up in long long: N + block_tile_n - 1 overflows int for an N
+         * near INT_MAX. The quotient is at most N, so it fits back in int. */
+        n_tiles = (int)(((long long)spec->N + spec->block_tile_n - 1) / spec->block_tile_n);
+        m_tiles = (int)(((long long)spec->M + spec->block_tile_m - 1) / spec->block_tile_m);
     }
     if(out_gx != NULL)
     {
