@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -284,7 +284,13 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetTolerance(double tolerance);
 
-        /** \brief Get the convergence history */
+        /** \brief Get the convergence history
+      * \details
+      * On the host, and on the accelerator in builds with \p BUILD_PTRTYPE_64, the
+      * preconditioner computes the exact ILU(0) factorization, ignoring the algorithm,
+      * the options, the iteration limit and the tolerance, and records no convergence
+      * history: \p niter is 0 and no entry of the returned history is written.
+      */
         ROCALUTION_EXPORT
         const double* GetConvergenceHistory(int* niter);
 
