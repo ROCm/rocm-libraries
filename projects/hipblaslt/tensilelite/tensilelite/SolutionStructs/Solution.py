@@ -5323,11 +5323,6 @@ class Solution(collections.abc.Mapping):
           if bpeTc not in (0.5, 1, 2):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
             return
-          # F4 is handled as packed bytes (two F4 per byte == the F8 byte layout). The VW>1 LDS pad
-          # (TDM iterate-mode) is not validated for F4 yet.
-          if bpeTc == 0.5 and state["VectorWidth%s" % tc] > 1:
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM: F4 supports VectorWidth{tc}==1 only (got {state['VectorWidth%s' % tc]})")
-            return
           # StreamK starts a workgroup mid-tile in K; the swizzled operand's K start would need the
           # MI-row scaling (see StreamK._preShuffleRows, subtile-only today). Not supported yet.
           if isStreamK(state):
@@ -5498,11 +5493,11 @@ class Solution(collections.abc.Mapping):
           # A tile of <= 1024B would need the descriptor pad_interval field instead, whose 16B pad is an
           # odd-dword pad_amount (silently wrong on hardware), so small tiles stay unpadded (correct,
           # just bank-conflicted).
-          bpeA = int(state["ProblemType"]["DataTypeA"].numBytes())
-          mOStrideBytes = state["MatrixInstM"] * state["_DepthUA"] * bpeA     # per-mO LDS tile size
+          bpeA = state["ProblemType"]["DataTypeA"].numBytes()                # 0.5 for F4 (packed bytes)
+          mOStrideBytes = int(state["MatrixInstM"] * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
           if swizzleAIsTDM and state["VectorWidthA"] > 1 and mOStrideBytes > 1024:
             state["LdsBlockSizePerPadA"] = mOStrideBytes
-            state["LdsPadA"] = 16 // bpeA                                      # 16B = 4-bank shift (ds_load b128 width)
+            state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
             state["_TDMIterateModeA"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 1              # kernel naming (bit0 = A)
           else:
@@ -5539,11 +5534,11 @@ class Solution(collections.abc.Mapping):
           # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
           # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
           # Tiles of <= 1024B stay unpadded (see swizzle-A above: the pad_interval route is an odd-dword pad).
-          bpeB = int(state["ProblemType"]["DataTypeB"].numBytes())
-          nOStrideBytes = state["MatrixInstN"] * state["_DepthUB"] * bpeB     # per-nO LDS tile size
+          bpeB = state["ProblemType"]["DataTypeB"].numBytes()                # 0.5 for F4 (packed bytes)
+          nOStrideBytes = int(state["MatrixInstN"] * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
           if swizzleBIsTDM and state["VectorWidthB"] > 1 and nOStrideBytes > 1024:
             state["LdsBlockSizePerPadB"] = nOStrideBytes
-            state["LdsPadB"] = 16 // bpeB                                      # 16B = 4-bank shift (ds_load b128 width)
+            state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
             state["_TDMIterateModeB"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
           else:
