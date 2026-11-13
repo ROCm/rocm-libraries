@@ -2408,8 +2408,12 @@ class Solution(collections.abc.Mapping):
       mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
       mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
                                   min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
+      # TN only: the staged store addresses D from the TN global-read shape.
+      isTN = (bool(state["ProblemType"]["TransposeA"])
+              and not bool(state["ProblemType"]["TransposeB"]))
       # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
       structuralFail = ((not isFloat4)
+                        or (not isTN)
                         or (not state["UseSubtileImpl"])
                         or (not isgfx950)
                         or (not state["EnableMatrixInstruction"])
