@@ -976,8 +976,9 @@ def cmake_build(Map conf=[:]){
             // Note: This else block is when NINJA_BUILD_TRACE=false and BUILD_INSTANCES_ONLY=false
             // So no ninja trace processing needed here
             if (!params.BUILD_INSTANCES_ONLY){
-                if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
+                if (!runAllUnitTests ){
                     // Smart Build: Run smart_build_and_test.sh
+                    if( !setup_args.contains("gfx1250") ){
                     sh """
                         export WORKSPACE_ROOT=${env.WORKSPACE}
                         export PARALLEL=32
@@ -987,13 +988,27 @@ def cmake_build(Map conf=[:]){
                         export NINJA_FTIME_TRACE=false
                         bash ../script/dependency-parser/smart_build_and_test.sh
                     """
+                    }
+                    else{ //add extra environment variables for gfx1250
+                    sh """
+                        export HSA_MODEL_LIB=/libhsakmtmodel.so
+                        export HSA_MODEL_TOPOLOGY=/topology/mi450
+                        export WORKSPACE_ROOT=${env.WORKSPACE}
+                        export PARALLEL=32
+                        export NINJA_JOBS=${nt}
+                        export ARCH_NAME=${arch_name}
+                        export PROCESS_NINJA_TRACE=false
+                        export NINJA_FTIME_TRACE=false
+                        bash ../script/dependency-parser/smart_build_and_test.sh
+                    """
+                    }
                 }
                 else{ //run all tests if runAllUnitTests = true
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} install check"
                     }
-                    else{ //do not run tests on gfx1250, just build everything
+                    else{ //on gfx1250 ffm run only smoke tests because regression tests will take forever
                         echo "Building for gfx1250"
                         sh """
                             export HSA_MODEL_LIB=/libhsakmtmodel.so
