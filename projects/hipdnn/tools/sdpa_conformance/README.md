@@ -177,8 +177,8 @@ non-empty `--out` without `--resume`, pre-set pins, `--exhaustive` without `hipd
 directory. `replay.py`: 0 the child completed; the errors it prints (against the saved hipDNN output and against the FP32 reference) are the verdict (a wrong-result fault such as a NaN output reproduces with exit 0). 1 reproduced: the child died with a signal at any point, including during `Handle()` or setup, or failed (an exception or a nonzero exit) after the failing direction's graph began executing (bad execute status, HIP error at synchronise, the CPU copy); the parent prints `reproduced: exited with status N` or `reproduced: died with signal N`, and a signal death is exit 1 whatever the marker. 70 a setup error: an exception or nonzero exit before the failing direction's graph began executing (`from_json`, engine or candidate selection, no HIP device (checked before any child starts with `--device cuda`), a device or handle initialisation exception), including a setup failure (`from_json`, engine or candidate selection) of the second direction of a fwd+bwd repro after the first executed fine.
 `reconcile.py`: 0, or 2 for a missing run directory. `sync.py --check`: 1 when it reports a problem.
 
-AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
-`FWD_IMPL`, `BWD_IMPL`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
+AOTriton's calibration, backend and suite-narrowing knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
+`FWD_IMPL`, `BWD_IMPL`, `AOTRITON_UT_ARCH`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
 `AOTRITON_REF_DEVICE_OPTION` pass through.
 
 Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`):

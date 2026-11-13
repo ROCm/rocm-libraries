@@ -17,6 +17,7 @@ enum class rocblaslt_mx_scale_need
     Natural, // packed MX scales: NoSwizzle or InMemorySwizzle
     PreSwizzled, // Block_32_UE8M0_32_8_EXT: HostPreSwizzle
     Conflict, // packed on one side, pre-swizzled on the other: no layout
+    PreSwizzled128x4, // Block_32_UE8M0_128_4_EXT: HostPreSwizzle128x4
 };
 
 inline rocblaslt_mx_scale_need
@@ -34,6 +35,8 @@ inline rocblaslt_mx_scale_need
         return rocblaslt_mx_scale_need::Natural;
     case Scale::Block_32_UE8M0_32_8_EXT:
         return rocblaslt_mx_scale_need::PreSwizzled;
+    case Scale::Block_32_UE8M0_128_4_EXT:
+        return rocblaslt_mx_scale_need::PreSwizzled128x4;
     default:
         return rocblaslt_mx_scale_need::Any;
     }
@@ -71,6 +74,8 @@ inline bool rocblaslt_mx_scale_layout_ok(rocblaslt_mx_scale_need need, int kerne
         return kernelLayout == static_cast<int>(Layout::HostPreSwizzle);
     case rocblaslt_mx_scale_need::Conflict:
         return false;
+    case rocblaslt_mx_scale_need::PreSwizzled128x4:
+        return kernelLayout == static_cast<int>(Layout::HostPreSwizzle128x4);
     }
     return false;
 }
@@ -83,6 +88,8 @@ inline const char* rocblaslt_mx_scale_mismatch_message(rocblaslt_mx_scale_need n
         return "packed MX scales need a NoSwizzle or InMemorySwizzle kernel";
     case rocblaslt_mx_scale_need::PreSwizzled:
         return "Block_32_UE8M0_32_8_EXT scales need a HostPreSwizzle kernel";
+    case rocblaslt_mx_scale_need::PreSwizzled128x4:
+        return "Block_32_UE8M0_128_4_EXT scales need a HostPreSwizzle128x4 kernel";
     case rocblaslt_mx_scale_need::Conflict:
         return "scale A and scale B need different MX scale layouts";
     default:

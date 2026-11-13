@@ -24,6 +24,11 @@ struct Config
     // (PF-1) row loads in flight to hide TDM latency (`s_wait_tensorcnt`).
     int prefetch_depth           = 2;
     hipconv::Direction direction = hipconv::Direction::Fprop;
+    // Waves that share one group and divide its H. 1 is the whole H.
+    // G=32 is one group per wave and splits H the same way.
+    int h_split = 1;
+    // amdgpu_waves_per_eu min and max. At most one SIMD's 4 waves.
+    int waves_per_simd = 4;
 
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
 };
