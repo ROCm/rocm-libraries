@@ -924,6 +924,12 @@ SdpaBackwardAttributes makeGqaAttrs()
         makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 4, 32, 64), makeTensor4D(2, 4, 32, 32));
 }
 
+// A bias that broadcasts over batch: [1, H_q, S_q, S_kv] for the makeGqaAttrs() shapes.
+std::shared_ptr<TensorAttributes> makeBroadcastBias()
+{
+    return makeTensor4D(1, 8, 16, 32);
+}
+
 Error preValidate(SdpaBackwardAttributes&& attrs)
 {
     const GraphAttributes graphAttrs;
@@ -1026,6 +1032,57 @@ TEST(TestSdpaBwdNode, PreValidateChecksGradientStrides)
     EXPECT_EQ(validate({8192, -1024, 64, 1}), error_code_t::INVALID_VALUE) << "negative stride";
     EXPECT_EQ(validate({16384, 2048, 128, 2}), error_code_t::INVALID_VALUE)
         << "head dim not contiguous";
+}
+
+TEST(TestSdpaBwdNode, PreValidateRejectsDBiasWithoutBias)
+{
+    auto attrs = makeGqaAttrs();
+    attrs.set_dbias(makeBroadcastBias());
+
+    const auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("dBias requires a Bias"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, PreValidateChecksDBiasAgainstBias)
+{
+    const auto validate
+        = [](const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) {
+              auto attrs = makeGqaAttrs();
+              attrs.set_bias(makeBroadcastBias());
+              auto dBias = std::make_shared<TensorAttributes>();
+              dBias->set_dim(dims).set_stride(strides);
+              attrs.set_dbias(dBias);
+              return preValidate(std::move(attrs)).code;
+          };
+
+    EXPECT_EQ(validate({}, {}), error_code_t::OK) << "left to inference";
+    EXPECT_EQ(validate({1, 8, 16, 32}, {4096, 512, 32, 1}), error_code_t::OK);
+    // dBias ends in seq_kv, not the head dim, so its last stride is not held to 1.
+    EXPECT_EQ(validate({1, 8, 16, 32}, {8192, 1024, 64, 2}), error_code_t::OK);
+
+    // The expanded [B, H_q, S_q, S_kv] gradient is not the broadcast bias's shape.
+    EXPECT_EQ(validate({2, 8, 16, 32}, {}), error_code_t::INVALID_VALUE) << "expanded batch";
+    EXPECT_EQ(validate({8, 16, 32}, {}), error_code_t::INVALID_VALUE) << "rank";
+    EXPECT_EQ(validate({1, 8, 16, 32}, {4096, 512, 0, 1}), error_code_t::INVALID_VALUE)
+        << "zero stride";
+}
+
+TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasFromBias)
+{
+    auto attrs = makeGqaAttrs();
+    attrs.set_bias(makeBroadcastBias());
+    auto dBias = std::make_shared<TensorAttributes>();
+    attrs.set_dbias(dBias);
+
+    const GraphAttributes graphAttrs;
+    SdpaBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_EQ(node.pre_validate_node().code, error_code_t::OK);
+    ASSERT_EQ(node.infer_properties_node().code, error_code_t::OK);
+
+    // The bias's broadcast shape, not [B, H_q, S_q, S_kv] from Q, K and V.
+    EXPECT_EQ(dBias->get_dim(), (std::vector<int64_t>{1, 8, 16, 32}));
+    EXPECT_EQ(dBias->get_stride(), (std::vector<int64_t>{4096, 512, 32, 1}));
 }
 
 TEST(TestSdpaBwdNode, GetNodeTypeReturnsSdpaBwd)

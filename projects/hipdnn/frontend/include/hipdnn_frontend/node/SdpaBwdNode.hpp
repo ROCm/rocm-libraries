@@ -374,6 +374,20 @@ public:
         HIPDNN_CHECK_ERROR(validateGradientOutput(dk, kDims, "dK", "K", true));
         HIPDNN_CHECK_ERROR(validateGradientOutput(dv, vDims, "dV", "V", true));
 
+        // Rule 12: dBias has the bias tensor's shape (SdpaSemanticsRegister SEM-014), so it
+        // needs a bias to take that shape from. Its last dimension is seq_kv, not the head
+        // dimension, so the contiguity rule does not apply.
+        const auto dBias = attributes.get_dbias();
+        if(dBias)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attnMask,
+                ErrorCode::INVALID_VALUE,
+                std::string("SdpaBwdNode: dBias requires a Bias tensor, whose shape it takes"));
+            HIPDNN_CHECK_ERROR(
+                validateGradientOutput(dBias, attnMask->get_dim(), "dBias", "Bias", false));
+        }
+
         return {};
     }
 
@@ -416,6 +430,22 @@ public:
         if(dv->get_stride().empty())
         {
             dv->set_stride(hipdnn_data_sdk::utilities::generateStrides(dv->get_dim()));
+        }
+
+        // dBias has same shape as Bias. It is never inferred from Q, K and V: a bias may
+        // broadcast over batch, heads or queries, and only the bias tensor says which.
+        const auto dBias = attributes.get_dbias();
+        const auto bias = attributes.get_bias();
+        if(dBias && bias)
+        {
+            if(dBias->get_dim().empty())
+            {
+                dBias->set_dim(bias->get_dim());
+            }
+            if(dBias->get_stride().empty())
+            {
+                dBias->set_stride(hipdnn_data_sdk::utilities::generateStrides(dBias->get_dim()));
+            }
         }
 
         return {};
