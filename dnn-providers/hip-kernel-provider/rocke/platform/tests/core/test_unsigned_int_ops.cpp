@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: MIT
 /*
  * test_unsigned_int_ops.cpp -- the C++ engine's unsigned compare (cmp_ult), its
- * no-unsigned-wrap add (add_nuw) and the arith.assume_range range marker.
+ * no-unsigned-wrap add (add_nuw), its logical shift right (lshr) and the
+ * arith.assume_range range marker.
  *
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
- * both ops, the builders' operand-type refusals, the verifier's acceptance of
- * the new attrs and its refusals of bad marker attrs (texts identical to the
- * Python verifier), and the constant folder (unsigned compare at the operand
- * width; constants read at their width; a marker on a constant folds to the
- * constant; signed div / mod rounded toward zero, undefined ones left
- * unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
+ * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
+ * through the unsigned type of the operand's own width) and its refusal of a
+ * non-integer operand, the HIP refusal of a pred the verifier refuses, the
+ * builders' operand-type refusals, the verifier's acceptance of the new attrs
+ * and its refusals of bad marker attrs (texts identical to the Python
+ * verifier), and the constant folder (unsigned compare at the operand width;
+ * constants read at their width; a marker on a constant folds to the constant;
+ * signed div / mod rounded toward zero, undefined ones left unfolded), and the
+ * verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -75,16 +79,25 @@ std::string lower_llvm(rocke_ir_builder_t* b)
     return out;
 }
 
-std::string lower_hip(rocke_ir_builder_t* b)
+/* Lower b's kernel to HIP for gfx942; the text on success, else "" with the
+ * status (and the builder's error message) left for the caller. */
+rocke_status_t lower_hip_status(rocke_ir_builder_t* b, std::string* hip)
 {
     rocke_strbuf_t out;
     rocke_strbuf_init(&out, 0);
     rocke_lower_hip_opts_t opts{};
     opts.arch = "gfx942";
-    std::string hip;
-    if(rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out) == ROCKE_OK)
-        hip = rocke_strbuf_cstr(&out);
+    const rocke_status_t status
+        = rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out);
+    hip->assign(status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "");
     rocke_strbuf_free(&out);
+    return status;
+}
+
+std::string lower_hip(rocke_ir_builder_t* b)
+{
+    std::string hip;
+    lower_hip_status(b, &hip);
     return hip;
 }
 
@@ -152,6 +165,67 @@ void case_hip_text()
            "HIP cmp_ult form");
     EXPECT(hip.find("int " + r + " = a;") != std::string::npos, "HIP marker copy");
     rocke_ir_builder_free(&b);
+}
+
+/* lshr reads its operand through the unsigned type of the operand's own width,
+ * as LLVM's lshr does: a negative i8 or i16 shifts in no sign bits and an i64
+ * keeps its high word. The same text as the Python engine (test_lshr.py). */
+void case_lshr_hip_text()
+{
+    struct LshrCase
+    {
+        const rocke_type_t* type;
+        const char* hip_type;
+        const char* unsigned_type;
+    };
+    const LshrCase cases[] = {
+        {rocke_i8(), "int8_t", "uint8_t"},
+        {rocke_i16(), "int16_t", "uint16_t"},
+        {rocke_i32(), "int", "uint32_t"},
+        {rocke_i64(), "int64_t", "uint64_t"},
+    };
+    for(const LshrCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* s = rocke_b_param(&b, "s", c.type, nullptr);
+        rocke_value_t* shifted = rocke_b_lshr(&b, a, s);
+        rocke_b_ret(&b);
+        const std::string hip = lower_hip(&b);
+        const std::string name = std::string(shifted->name + 1);
+        const std::string want = std::string(c.hip_type) + " " + name + " = (" + c.hip_type + ")(("
+                                 + c.unsigned_type + ")a >> s);";
+        EXPECT(hip.find(want) != std::string::npos,
+               std::string("HIP lshr form for ") + c.type->name + ": want '" + want + "'");
+        rocke_ir_builder_free(&b);
+    }
+
+    /* An f32 shift, scalar or lane by lane, has no unsigned type of its width:
+     * refused with the Python engine's TypeError text, naming the op. */
+    for(const bool vector : {false, true})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
+        const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
+        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
+        if(vector)
+            rocke_b_vector_lshr(&b, a, a);
+        else
+            rocke_b_lshr(&b, a, a);
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        const std::string want = std::string("HIP lowering of ")
+                                 + (vector ? "vector.lshr" : "arith.lshr")
+                                 + " failed - element type='f32', expected an integer type, "
+                                   "one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')";
+        EXPECT(status == ROCKE_ERR_TYPE && msg && want == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_TYPE) + " '" + want + "', got status "
+                   + std::to_string((int)status) + " '" + (msg ? msg : "") + "'");
+        rocke_ir_builder_free(&b);
+    }
 }
 
 void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
@@ -323,8 +397,55 @@ void case_unsigned_forms_need_i32_or_i64()
     }
 }
 
+/* The HIP lowering checks an arith.cmp pred against the verifier's rule before
+ * reading it and refuses it with ROCKE_ERR_VALUE in the verifier's words: ult
+ * takes i32 or i64 operands, and an unknown or non-string pred is not read as
+ * lt. The same cases and texts as test_unsigned_int_ops.py. */
+void case_hip_refuses_a_bad_pred()
+{
+    struct PredCase
+    {
+        const char* pred; /* nullptr: the int attr 1 */
+        const rocke_type_t* type;
+        const char* want;
+    };
+    const PredCase cases[] = {
+        {"ult", rocke_f32(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
+        {"ult", rocke_i8(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
+        {"ugt", rocke_i32(), "arith.cmp: unknown pred 'ugt'"},
+        {nullptr, rocke_i32(), "arith.cmp: pred must be a string"},
+    };
+    for(const PredCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "refused_pred");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* operands[2] = {a, a};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(c.pred)
+        {
+            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
+        }
+        else
+        {
+            rocke_attr_set_int(&b, &attrs, "pred", 1);
+        }
+        rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        EXPECT(status == ROCKE_ERR_VALUE && msg && std::string(c.want) == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_VALUE) + " '" + c.want
+                   + "', got status " + std::to_string((int)status) + " '" + (msg ? msg : "")
+                   + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
 /* A wrap or pred of another attr kind is refused, not read as the default
- * (nsw, lt): by the verifier, and for the wrap by both lowerers. */
+ * (nsw, lt): by the verifier, and for the wrap by both lowerers (the HIP
+ * lowerer's refusal of such a pred is case_hip_refuses_a_bad_pred). */
 void case_non_string_wrap_and_pred()
 {
     const char* wrap_error = "arith.add: wrap must be the string 'nsw' or 'nuw'";
@@ -543,6 +664,8 @@ int main(int argc, char** argv)
     }
     case_llvm_text();
     case_hip_text();
+    case_lshr_hip_text();
+    case_hip_refuses_a_bad_pred();
     case_builder_refusals();
     case_verifier_accepts();
     case_verifier_rejects_marker_attrs();

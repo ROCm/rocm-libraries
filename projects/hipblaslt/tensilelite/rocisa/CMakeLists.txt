@@ -330,25 +330,6 @@ block()
             add_dependencies(_rocisa rocisa_stage_intrinsics)
         endif()
 
-        # Stage the adaptor as a sibling of rocisa/ and stinkytofu/ so
-        # `import rocisa_stinkytofu_adaptor` resolves from the same PYTHONPATH
-        # root (build/tensilelite/rocisa). Copy the inner package directory;
-        # the source tree wraps it in an extra path component.
-        set(_adaptor_src
-            "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor")
-        set(_adaptor_dst "${CMAKE_CURRENT_BINARY_DIR}/rocisa_stinkytofu_adaptor")
-        file(GLOB _adaptor_py CONFIGURE_DEPENDS "${_adaptor_src}/*.py")
-        add_custom_command(
-            OUTPUT "${_adaptor_dst}/__init__.py"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    "${_adaptor_src}" "${_adaptor_dst}"
-            DEPENDS ${_adaptor_py}
-            COMMENT "Staging rocisa_stinkytofu_adaptor next to rocisa"
-            VERBATIM
-        )
-        add_custom_target(rocisa_stage_adaptor ALL
-            DEPENDS "${_adaptor_dst}/__init__.py")
-        add_dependencies(_rocisa rocisa_stage_adaptor)
     endif()
 
     if(ROCISA_STANDALONE)
@@ -390,7 +371,6 @@ block()
         # module removes it for the gfx1250 FFM run.
         if(TARGET stinkytofu_python)
             set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
-            set(_adaptor_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa_stinkytofu_adaptor")
             # _stinkytofu.so statically embeds libstinkytofu in the integrated
             # build (stinkytofu is configured with BUILD_SHARED_LIBS OFF), so its
             # INSTALL_RPATH of $ORIGIN is self-sufficient; mirror _rocisa's
@@ -407,12 +387,6 @@ block()
                 install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
                     DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
             endif()
-            # The adaptor is a pure-Python package; install the inner package
-            # directory so `import rocisa_stinkytofu_adaptor` resolves.
-            install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
-                DESTINATION "${_adaptor_install_dir}"
-                COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
-                FILES_MATCHING PATTERN "*.py")
         endif()
     endif()
 

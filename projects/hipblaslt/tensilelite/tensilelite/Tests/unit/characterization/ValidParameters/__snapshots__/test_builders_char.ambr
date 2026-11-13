@@ -1367,6 +1367,7 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaValue',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
     'AssertSizeEqual',
@@ -1417,6 +1418,7 @@
     'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrStoreShuffle',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -1618,6 +1620,13 @@
     'AssertAILessThanEqual': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'AssertAlphaValue': dict({
+      'head': list([
+        1,
+      ]),
+      'len': 1,
+      'type': 'list',
     }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
@@ -2028,6 +2037,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'LDSTrStoreShuffle': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'LdsBlockSizePerPadA': dict({
       'head': list([
         -1,
@@ -2177,7 +2195,7 @@
         'NoSwizzle',
         'HostPreSwizzle',
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'MacroTile': dict({

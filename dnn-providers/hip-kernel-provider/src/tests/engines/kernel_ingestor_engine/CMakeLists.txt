@@ -39,6 +39,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionGeneralBwdMatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionGeneralBwdGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionGeneralBwdSignature.cpp
@@ -121,6 +123,8 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionGeneralBwdPacks.cpp
 )
 

@@ -71,13 +71,14 @@ all its own ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)).
 
 ## 2. How we answer them — the oracle types
 
-Four kinds of test oracle, in decreasing order of strength. The names are the
+Five kinds of test oracle, in decreasing order of strength. The names are the
 standard ones from the testing literature; naming them matters because each proves
 something *different*, and conflating them is how false confidence creeps in.
 
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
 | **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
+| **Oracle-free (closed-form / property)** | Is the math correct, without a reference implementation? | Run on GPU on inputs whose exact output follows from first principles (e.g. zero-Q attention: uniform probabilities over the legal keys); check the stored bits exactly or against a modeled error bound, and re-run the check under deliberately wrong rules that must be rejected | Kernel correctness (A), on the constructed inputs |
 | **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
 | **Implicit oracle** | Did it crash / NaN / hang? | Signal death, non-finite output, timeout | Both A and B |
@@ -92,8 +93,11 @@ Two notes that matter:
   special case of it.
 - **Agreement is not correctness.** The differential oracle is a *pseudo-oracle*
   (two implementations checking each other because no cheap true oracle exists).
-  Two implementations can agree on a wrong answer. Only the reference oracle
-  establishes ground truth — and only on real hardware.
+  Two implementations can agree on a wrong answer. Only the reference oracle and
+  the oracle-free checks establish ground truth — and only on real hardware. The
+  oracle-free checks trade input generality for independence: they cover only
+  the inputs they construct, but there is no reference implementation to share
+  a bug with the kernel.
 
 ---
 
@@ -204,6 +208,16 @@ the strategy's biggest holes live (see
   `library/tests/conv_reference/gradient_cases.py` on gfx942 and gfx950
   against live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md)
   distinguishes production-selected instances from explicit kernel configurations.
+
+- The [oracle-free attention lane](library/tests/oracle_free/README.md)
+  (`rocke_oracle_free_pytest`, quick tier) launches the shipped gfx942 dense
+  kernel, at whatever configuration dispatch resolves, on zero-Q inputs whose
+  outputs are uniform probabilities over the legal keys. It requires every
+  stored bit to equal the correctly rounded closed form (a proven zero-ULP
+  result for single-pass dense attention), on GQA causal and sliding-window
+  cases, and fails if any one-key or denominator mutation of the mask rule, or a
+  head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
+  contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -530,6 +544,75 @@ suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
+
+### 5.0.1 Unit discovery versus explicit resource gates
+
+For every new or migrated host cohort, a `test_*.py` module is a promise that
+ordinary pytest discovery is fast. GPU-marked reference-oracle suites are owned
+separately by their GPU lane. A host unit module must not hide an exhaustive
+product, invoke comgr or an object disassembler, or require a large resource
+budget. A marker alone is insufficient because pytest imports modules and
+materializes parameters before marker deselection. Existing violations remain
+migration debt in G9.
+
+Resource-bound validation lives outside the `test_*.py` pattern. Its target
+ownership model has three parts: an explicit component `run_all.py` stage, a
+separately named installed CTest with timeout/resource policy, and a provider
+category at its cumulative tier. Such a gate pins its case manifest, fails on
+zero selected work, checks external prerequisites once, and rejects selection
+filters unless the caller explicitly requests a partial diagnostic run. The
+developer runner stops before resource-bound stages after a fast-stage failure
+by default; `--keep-going` is an explicit request to gather additional failures.
+
+The counted backward synchronization split is the reference implementation:
+fast validator/model/mutation contracts remain in source discovery; the
+exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
+subset are explicit source-runner stages and registered installed CTests. The
+new CTests start at comprehensive/full so nightly coverage owns them without
+adding work to quick/standard pre-merge and post-merge runs. Fast
+counted/resource files remain source-runner coverage rather than expanding the
+existing quick attention CTest. The compiler gate preserves the
+existing resource-table qualification:
+LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
+expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
+emission/parity profiles but are not qualified by this code-object resource gate.
+An unavailable or mismatched reference compiler produces one gate-level outcome
+before any rows compile. Exact installed
+CTest names and scopes live in the
+[rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
+
+[`library/tests/run_all.py`](library/tests/run_all.py) keeps the default local
+lane affordable by collecting once, selecting files that own non-GPU,
+non-`exhaustive`, non-`worker_integration`, non-`compiler_integration` items,
+and running each selected file
+in a fresh process. Real process-lifecycle contracts have their own
+comprehensive/full CTest (and remain available in explicit `--exhaustive` source
+runs). Host
+runs use at most eight workers, further capped by process affinity and cgroup
+quota; GPU-inclusive runs default to one. Fresh-process exit releases
+module-local kernel/IR caches. The affordable lane has a five-minute default
+whole-stage budget covering collection and all file workers; each file also has
+an independently reported budget (60 seconds by default, 600 seconds for GPU or
+`--exhaustive`). A timeout or outer termination kills the owned POSIX process
+group or Windows Job Object so ordinary compiler children cannot outlive the
+slot. A POSIX child that deliberately creates a new session leaves that ownership
+boundary and is not part of this contract. `--jobs 0` retains one
+traditional pytest process for focused debugging and suite-wide outputs. These
+local defaults bound pathological work; they are not a general timeout policy
+for pytest items, CTest, or outer CI.
+
+The transitional `exhaustive` markers preserve the matrices under
+`--exhaustive` while removing them from the affordable execution lane. Pytest
+still imports and parameterizes those modules during the manifest collection,
+so markers do not close G9; each cohort should eventually move behind a named
+non-discovered gate. Pass `--require-compiler-gate` for a complete required host
+verdict. An unavailable optional compiler gate reports `INCOMPLETE` with a zero
+exit status for local iteration, not plain `GREEN`.
+[`tools/run_checks.py`](tools/run_checks.py) coordinates its existing platform,
+parity, pytest, and numeric checks, but does not enroll these new explicit
+library gates. Run the library runner directly for their combined source verdict.
+The separately registered CTests also support exact-name installed replay and
+are enrolled only in comprehensive/full nightly coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -893,6 +976,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 |---|---|---|---|
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
+| G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
 
 ### 7.3 What "green" does and does not mean today
 

@@ -11,7 +11,8 @@ baselines/
     ├── gfx942.yaml
     ├── gfx950.yaml
     ├── gfx1100.yaml
-    └── gfx1201.yaml
+    ├── gfx1201.yaml
+    └── gfx1250.yaml
 ```
 
 Each architecture has its own YAML file containing rankings for all dtype/transpose

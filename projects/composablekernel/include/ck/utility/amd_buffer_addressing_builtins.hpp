@@ -4,6 +4,7 @@
 #pragma once
 #include "data_type.hpp"
 #include "ck/utility/amd_buffer_coherence.hpp"
+#include "ck/utility/synchronization.hpp"
 #if defined(__gfx125__)
 #include "ck/utility/amd_address_space.hpp"
 #endif
@@ -698,7 +699,8 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
 // It is user's responsibility to make sure that is true.
 template <typename T,
           index_t N,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          bool UseOobOffsetTrick           = CK_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK>
 __device__ typename vector_type_maker<T, N>::type::type
 amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
                                             index_t src_thread_element_offset,
@@ -715,17 +717,18 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
 
     constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
 
-#if CK_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK
-    uint32_t src_addr_shift = src_thread_element_valid ? 0 : 0x80000000;
-    return amd_buffer_load_impl<scalar_t, vector_size, coherence>(
-        src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
-
-#else
-
-    vector_t tmp{amd_buffer_load_impl<scalar_t, vector_size, coherence>(
-        src_wave_buffer_resource, src_thread_addr_offset, 0)};
-    return src_thread_element_valid ? tmp : vector_t(0);
-#endif
+    if constexpr(UseOobOffsetTrick)
+    {
+        uint32_t src_addr_shift = src_thread_element_valid ? 0 : 0x80000000;
+        return amd_buffer_load_impl<scalar_t, vector_size, coherence>(
+            src_wave_buffer_resource, src_addr_shift + src_thread_addr_offset, 0);
+    }
+    else
+    {
+        vector_t tmp{amd_buffer_load_impl<scalar_t, vector_size, coherence>(
+            src_wave_buffer_resource, src_thread_addr_offset, 0)};
+        return src_thread_element_valid ? tmp : vector_t(0);
+    }
 }
 
 // buffer_load requires:
@@ -943,7 +946,7 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
 #endif
     __builtin_amdgcn_raw_ptr_buffer_load_async_lds(
         src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
-    __builtin_amdgcn_asyncmark();
+    asyncmark();
 #elif CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
     T* lds_ptr = lds_base_ptr + lds_offset;
 #ifndef CK_CODE_GEN_RTC
@@ -1270,7 +1273,7 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
         *lds_ptr = {};
     }
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_asyncmark();
+    asyncmark();
 #endif
 }
 

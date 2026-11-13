@@ -648,6 +648,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
         "hipkernel.gfx950_attention_unified_2d.dispatch",

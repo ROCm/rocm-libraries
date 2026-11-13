@@ -286,6 +286,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR
@@ -754,3 +755,4 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
+hipdnn_apply_long_path_manifest()
