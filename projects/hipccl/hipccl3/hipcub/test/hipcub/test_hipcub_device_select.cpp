@@ -76,7 +76,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -169,13 +169,13 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -207,7 +207,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -221,7 +221,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -338,7 +338,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
     constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -425,13 +425,13 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -463,7 +463,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -476,7 +476,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -493,7 +493,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
     constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -590,13 +590,13 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
@@ -628,7 +628,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -642,7 +642,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -662,7 +662,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
     using U = typename TestFixture::output_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -741,7 +741,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 HIP_CHECK(hipDeviceSynchronize());
 
                 test_utils::GraphHelper gHelper;
-                if (TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.startStreamCapture(stream);
 
                 // Run
@@ -753,7 +753,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                                                        input.size(),
                                                        stream));
 
-                if (TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.createAndLaunchGraph(stream);
 
                 HIP_CHECK(hipDeviceSynchronize());
@@ -777,7 +777,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
 
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
-                if(TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.cleanupGraphHelper();
 
                 HIP_CHECK(hipFree(d_input));
@@ -788,7 +788,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -1040,7 +1040,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
     using selected_count_type = typename TestFixture::selected_count_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1151,7 +1151,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                     test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
                 test_utils::GraphHelper gHelper;
-                if (TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.startStreamCapture(stream);
 
                 // run
@@ -1166,7 +1166,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                                                             equality_op,
                                                             stream));
 
-                if (TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.createAndLaunchGraph(stream);
 
                 // Check if number of selected value is as expected
@@ -1198,7 +1198,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                 ASSERT_NO_FATAL_FAILURE(
                     test_utils::assert_eq(output_values, expected_values, expected_values.size()));
 
-                if(TestFixture::use_graphs)
+                if constexpr(TestFixture::use_graphs)
                     gHelper.cleanupGraphHelper();
 
                 HIP_CHECK(hipFree(d_keys_input));
@@ -1211,7 +1211,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 

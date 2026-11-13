@@ -66,6 +66,36 @@
 #include <cstddef>
 #include <type_traits>
 
+/**
+ * \brief Common type specialization - Because some thread operators do not work with
+ * <custom_test_type<T>, custom_test_type<U>> for different types T and U.
+ */
+template<class T, class U>
+struct std::common_type<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
+{
+    using type = test_utils::custom_test_type<typename std::common_type<T, U>::type>;
+};
+
+/**
+ * \brief Common type specialization - Because min and max don't work with
+ * <float, test_utils::half>.
+ */
+template<>
+struct std::common_type<float, test_utils::half>
+{
+    using type = float;
+};
+
+/**
+ * \brief Common type specialization - Because min and max don't work with
+ * <float, test_utils::bfloat16>.
+ */
+template<>
+struct std::common_type<float, test_utils::bfloat16>
+{
+    using type = float;
+};
+
 namespace test_utils
 {
 
@@ -648,14 +678,11 @@ inline constexpr auto ceiling_div(const T a, const U b)
 
 #if defined(__HIP_PLATFORM_AMD__)
 
-template<typename IndexType, std::size_t... Dims>
-using extents = ::hipcub::extents<IndexType, Dims...>;
-
 template<typename Extents>
 struct extents_size;
 
 template<typename IndexType, std::size_t... Dims>
-struct extents_size<extents<IndexType, Dims...>>
+struct extents_size<_HIPCUB_STD::extents<IndexType, Dims...>>
 {
     static constexpr std::size_t value = (Dims * ... * 1);
 };
@@ -791,6 +818,70 @@ struct segments_index_to_offset_op
     }
 };
 
+template<class...>
+struct merge_sequence
+{};
+
+template<class... Args>
+struct merge_sequence<::testing::Types<Args...>>
+{
+    using type = ::testing::Types<Args...>;
+};
+
+template<class... Args1, class... Args2>
+struct merge_sequence<::testing::Types<Args1...>, ::testing::Types<Args2...>>
+{
+    using type = ::testing::Types<Args1..., Args2...>;
+};
+
+template<class T1, class T2, class... Ts>
+struct merge_sequence<T1, T2, Ts...>
+{
+    using type = typename merge_sequence<typename merge_sequence<T1, T2>::type, Ts...>::type;
+};
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<!std::is_floating_point_v<T> && !test_utils::is_half<T>::value
+                            && !test_utils::is_bfloat16<T>::value,
+                        bool>
+{
+    if constexpr(std::is_signed_v<T> == std::is_signed_v<U>)
+    {
+        return t < u;
+    }
+    else if constexpr(std::is_signed_v<T>)
+    {
+        return t < 0 || std::make_unsigned_t<T>(t) < u;
+    }
+    return u >= 0 && t < std::make_unsigned_t<U>(u);
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<(std::is_floating_point_v<T> || test_utils::is_half<T>::value
+                         || test_utils::is_bfloat16<T>::value)
+                            && std::is_unsigned_v<U>,
+                        bool>
+{
+    using F = typename std::common_type<float, T>::type;
+    F f     = t;
+
+    if(f < 0)
+    {
+        return true;
+    }
+    // Use the next power of two after the maximum of U
+    constexpr F limit = std::numeric_limits<U>::digits == 64
+                            ? F(0x1p64) /*2^64*/
+                            : F(std::numeric_limits<U>::max()) + F(1);
+
+    if(f >= limit)
+    {
+        return false;
+    }
+    return static_cast<U>(f) < u;
+}
 } // namespace test_utils
 
 // Need for hipcub::DeviceReduce::Min/Max etc.

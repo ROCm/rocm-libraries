@@ -17,8 +17,7 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
-
-#include <cuda/iterator>
+#include <thrust/iterator/permutation_iterator.h>
 
 #include <vector>
 
@@ -100,8 +99,8 @@ void TestCUDAPermutationIterator()
     thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     thrust::device_vector<int> off{5, 2, 7, 0};
     thrust::device_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (thrust::device_vector<int>{6, 3, 8, 1, -1}));
   }
@@ -109,8 +108,8 @@ void TestCUDAPermutationIterator()
     thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     thrust::host_vector<int> off{5, 2, 7, 0};
     thrust::host_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (thrust::host_vector<int>{6, 3, 8, 1, -1}));
   }
@@ -119,8 +118,8 @@ void TestCUDAPermutationIterator()
     std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<int> off{5, 2, 7, 0};
     std::vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (std::vector<int>{6, 3, 8, 1, -1}));
   }

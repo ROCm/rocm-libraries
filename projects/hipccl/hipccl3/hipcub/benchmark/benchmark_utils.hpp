@@ -54,7 +54,7 @@
     #define HIPCUB_WARP_THREADS_MACRO warp_threads
 #endif
 
-#include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
 
 namespace benchmark_utils
 {

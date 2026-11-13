@@ -98,7 +98,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
     using compare_function = typename TestFixture::params::compare_function;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -190,7 +190,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
             }
@@ -206,7 +206,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
                                                      compare_op,
                                                      stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -222,7 +222,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
             // Check if keys_output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -233,7 +233,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -252,7 +252,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
     using key_value = std::pair<key_type, value_type>;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -388,7 +388,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
             }
@@ -407,7 +407,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
                                                       compare_op,
                                                       stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -438,7 +438,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -453,7 +453,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }

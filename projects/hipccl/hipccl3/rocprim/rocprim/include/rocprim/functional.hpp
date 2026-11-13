@@ -415,6 +415,23 @@ struct identity<void>
     }
 };
 
+/// \brief Functor that clamps a value to the range [lo, hi].
+template<class T, class OpT>
+ROCPRIM_HOST_DEVICE
+inline constexpr const T& clamp(const T& v, const T& lo, const T& hi, OpT op)
+{
+    return op(v, lo) ? lo : op(hi, v) ? hi : v;
+}
+
+/// \brief Functor that clamps a value to the range [lo, hi].
+/// This version is a specialization for \p Op = \p rocprim::less<T>.
+template<class T>
+ROCPRIM_HOST_DEVICE
+inline constexpr const T& clamp(const T& v, const T& lo, const T& hi)
+{
+    return clamp(v, lo, hi, rocprim::less<T>{});
+}
+
 /**
  * \brief Statically determine log2(N), rounded up.
  *
