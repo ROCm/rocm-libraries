@@ -556,17 +556,90 @@ class Library:
 
         return str(bench_file), str(verif_file)
 
+    @staticmethod
+    def _solution_key(sol: dict) -> tuple:
+        """Return a hashable fingerprint for a solution, ignoring bookkeeping keys.
+
+        Two solutions that produce the same ``_solution_key`` are functionally
+        identical and compile to the same kernel binary.  The key is a sorted
+        tuple of ``(param, value)`` pairs with transient / index-only fields
+        excluded.
+
+        Args:
+            sol: Solution dictionary.
+
+        Returns:
+            tuple: Hashable key suitable for deduplication.
+        """
+        _SKIP = frozenset({"SolutionIndex", "SolutionNameMin", "KernelNameMin", "BaseName"})
+        return tuple(sorted(
+            (k, str(v)) for k, v in sol.items() if k not in _SKIP
+        ))
+
+    def dedup_solutions(self) -> int:
+        """Merge solutions with identical parameters, remapping sizes.
+
+        After tuning, the same kernel configuration can appear multiple times
+        (e.g. from different build directories or tuning iterations).  This
+        method keeps the first occurrence of each unique configuration and
+        remaps all ``sizes`` entries that referenced the duplicates.
+
+        Returns:
+            int: Number of duplicate solutions removed.
+
+        Side effects:
+            Modifies ``self.solutions`` and ``self.sizes`` in place.
+        """
+        seen: dict[tuple, int] = {}
+        old_to_new: dict[int, int] = {}
+        new_sols = []
+
+        for sol in self.solutions:
+            key = self._solution_key(sol)
+            old_idx = sol["SolutionIndex"]
+            if key in seen:
+                old_to_new[old_idx] = seen[key]
+            else:
+                new_idx = len(new_sols)
+                seen[key] = new_idx
+                old_to_new[old_idx] = new_idx
+                sol = copy.deepcopy(sol)
+                sol["SolutionIndex"] = new_idx
+                new_sols.append(sol)
+
+        n_removed = len(self.solutions) - len(new_sols)
+        if n_removed == 0:
+            return 0
+
+        for size in self.sizes:
+            size[1][0] = old_to_new[size[1][0]]
+
+        self.solutions = new_sols
+        logger.info(
+            f"{self.name} | Removed {n_removed} duplicate solution(s) "
+            f"({len(self.solutions) + n_removed} -> {len(self.solutions)})"
+        )
+        return n_removed
+
     def trim(self) -> None:
         """Remove duplicate solutions for the same problem size, keeping the best performing one.
 
         For each unique problem size, if multiple solutions exist, only the solution
-        with the highest GFLOPS performance is retained. Also removes unused solutions
-        that are not referenced by any size and renumbers solution indices.
+        with the highest GFLOPS performance is retained. Also deduplicates solutions
+        with identical parameters (same kernel configuration) and removes unused
+        solutions that are not referenced by any size.  Solution indices are
+        renumbered to be contiguous.
 
         Side effects:
             Modifies 'self.sizes' and 'self.solutions' in place.
         """
-        # Remove duplicate sizes
+        # Step 1 — Deduplicate solutions with identical parameters.
+        # This must run before size dedup so that sizes pointing to
+        # duplicate solutions are consolidated first, giving the
+        # per-size best-performer selection correct solution counts.
+        self.dedup_solutions()
+
+        # Step 2 — Remove duplicate sizes (keep best performer per size).
         size_map = {
             tuple(size[0]): [sidx for sidx, sz in enumerate(self.sizes) if sz[0] == size[0]] for size in self.sizes
         }
@@ -583,7 +656,7 @@ class Library:
             )
         self.sizes = [self.sizes[keep_idx] for keep_idx in keep]
 
-        # Trim unused solutions and invalid sizes
+        # Step 3 — Trim unused solutions and invalid sizes.
         sol_indices = set([size[1][0] for size in self.sizes])
         if len(sol_indices) != len(self.solutions) or max(sol_indices) > len(self.solutions):
             new_sols = []
@@ -704,6 +777,14 @@ class LibraryCollection:
         """Call 'trim' on each Library in the collection."""
         for lib in self.libs:
             lib.trim()
+
+    def dedup_solutions(self) -> int:
+        """Call 'dedup_solutions' on each Library in the collection.
+
+        Returns:
+            int: Total number of duplicate solutions removed across all libraries.
+        """
+        return sum(lib.dedup_solutions() for lib in self.libs)
 
     def dump(self, output_dir: str | Path) -> None:
         """Call 'dump' on each Library in the collection.

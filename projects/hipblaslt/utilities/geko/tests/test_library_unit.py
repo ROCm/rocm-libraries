@@ -184,6 +184,93 @@ def test_trim_removes_duplicate_size_entries() -> None:
     assert lib.sizes[0][1][0] == 0
 
 
+def test_dedup_solutions_removes_identical_solutions() -> None:
+    """Solutions with the same parameters (ignoring SolutionIndex) are merged."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64, "MacroTile0": 128, "MacroTile1": 128},
+        {"SolutionIndex": 1, "DepthU": 64, "MacroTile0": 128, "MacroTile1": 128},
+        {"SolutionIndex": 2, "DepthU": 128, "MacroTile0": 256, "MacroTile1": 256},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+        [[64, 64, 1, 128], [2, 300.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    removed = lib.dedup_solutions()
+    assert removed == 1
+    assert len(lib.solutions) == 2
+    assert lib.sizes[0][1][0] == 0
+    assert lib.sizes[1][1][0] == 0
+    assert lib.sizes[2][1][0] == 1
+
+
+def test_dedup_solutions_no_duplicates() -> None:
+    """When all solutions are unique, nothing is removed."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 128},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    removed = lib.dedup_solutions()
+    assert removed == 0
+    assert len(lib.solutions) == 2
+
+
+def test_dedup_solutions_ignores_bookkeeping_keys() -> None:
+    """SolutionNameMin, KernelNameMin, BaseName differences don't prevent dedup."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64, "SolutionNameMin": "name_a", "KernelNameMin": "kern_a"},
+        {"SolutionIndex": 1, "DepthU": 64, "SolutionNameMin": "name_b", "KernelNameMin": "kern_b"},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    removed = lib.dedup_solutions()
+    assert removed == 1
+    assert len(lib.solutions) == 1
+    assert lib.sizes[0][1][0] == 0
+    assert lib.sizes[1][1][0] == 0
+
+
+def test_dedup_solutions_no_sizes() -> None:
+    """Dedup works on Prediction/Origami libraries with no ExactLogic (empty sizes)."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64, "MacroTile0": 128},
+        {"SolutionIndex": 1, "DepthU": 64, "MacroTile0": 128},
+        {"SolutionIndex": 2, "DepthU": 64, "MacroTile0": 128},
+        {"SolutionIndex": 3, "DepthU": 128, "MacroTile0": 256},
+    ]
+    lib = _mk_lib(solutions=sols, sizes=[])
+    removed = lib.dedup_solutions()
+    assert removed == 2
+    assert len(lib.solutions) == 2
+
+
+def test_trim_deduplicates_solutions_before_sizes() -> None:
+    """trim() calls dedup_solutions before size dedup, consolidating correctly."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 64},
+        {"SolutionIndex": 2, "DepthU": 128},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 50.0]],
+        [[16, 16, 1, 64], [1, 100.0]],
+        [[32, 32, 1, 128], [2, 300.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert len(lib.solutions) == 2
+    assert len(lib.sizes) == 2
+
+
 def test_library_setters_validate_types() -> None:
     lib = _mk_lib()
     with pytest.raises(TypeError, match="Must be a list"):
