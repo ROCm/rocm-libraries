@@ -35,6 +35,9 @@
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/scan.h>
 
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+
 #  include <iterator> // IWYU pragma: export
 
 // rocprim include
@@ -57,7 +60,7 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
   // Use the transformed input iterator's value type per https://wg21.link/P0571
   using input_type  = thrust::detail::it_value_t<InputIt>;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
-  using value_type  = ::internal::remove_cvref_t<result_type>;
+  using value_type  = _THRUST_STD::remove_cvref_t<result_type>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));
@@ -78,7 +81,7 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
 {
   using input_type  = thrust::detail::it_value_t<InputIt>;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
-  using value_type  = ::internal::remove_cvref_t<result_type>;
+  using value_type  = _THRUST_STD::remove_cvref_t<result_type>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));
@@ -99,7 +102,7 @@ OutputIt THRUST_HOST_DEVICE transform_exclusive_scan(
   ScanOp scan_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-  using result_type = ::internal::remove_cvref_t<InitialValueType>;
+  using result_type = _THRUST_STD::remove_cvref_t<InitialValueType>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));

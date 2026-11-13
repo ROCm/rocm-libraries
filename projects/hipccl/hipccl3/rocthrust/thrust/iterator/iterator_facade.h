@@ -40,14 +40,8 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/iterator_facade_category.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -57,9 +51,9 @@ namespace detail
 // it's legal to access IteratorFacade2::difference_type
 template <typename IteratorFacade1, typename IteratorFacade2>
 using distance_from_result =
-  ::internal::If<_THRUST_STD::is_convertible_v<IteratorFacade2, IteratorFacade1>,
-                 typename IteratorFacade1::difference_type,
-                 typename IteratorFacade2::difference_type>;
+  _THRUST_STD::_If<_THRUST_STD::is_convertible_v<IteratorFacade2, IteratorFacade1>,
+                   typename IteratorFacade1::difference_type,
+                   typename IteratorFacade2::difference_type>;
 } // namespace detail
 
 /*! \addtogroup iterators
@@ -369,8 +363,7 @@ public:
 
   /*! The type of iterator category of \p iterator_facade.
    */
-  using iterator_category =
-    typename thrust::detail::iterator_facade_category<System, Traversal, Value, Reference>::type;
+  using iterator_category = detail::iterator_facade_category_t<System, Traversal>;
 
   /*! \p operator*() dereferences this \p iterator_facade.
    *  \return A reference to the element pointed to by this \p iterator_facade.

@@ -42,7 +42,6 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -50,15 +49,15 @@
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/pair.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(iterator)
-#  endif
-
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
@@ -72,7 +71,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -110,7 +109,11 @@ THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(
   const hipStream_t stream,
   bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
 {
-  return rocprim::reduce_by_key(
+  // Need to overwrite the accumulator type for parity with thrust
+  using value_type = thrust::detail::it_value_t<ValuesInputIt>;
+  return rocprim::detail::reduce_by_key_impl<rocprim::detail::lookback_scan_determinism::default_determinism,
+                                             rocprim::default_config,
+                                             value_type>(
     temporary_storage,
     storage_size,
     keys_input,
@@ -148,19 +151,22 @@ THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(
   const hipStream_t stream,
   bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
 {
-  return rocprim::deterministic_reduce_by_key(
-    temporary_storage,
-    storage_size,
-    keys_input,
-    values_input,
-    size,
-    unique_output,
-    aggregates_output,
-    unique_count_output,
-    reduce_op,
-    key_compare_op,
-    stream,
-    debug_sync);
+  // Need to overwrite the accumulator type for parity with thrust
+  using value_type = thrust::detail::it_value_t<ValuesInputIt>;
+  return rocprim::detail::
+    reduce_by_key_impl<rocprim::detail::lookback_scan_determinism::deterministic, rocprim::default_config, value_type>(
+      temporary_storage,
+      storage_size,
+      keys_input,
+      values_input,
+      size,
+      unique_output,
+      aggregates_output,
+      unique_count_output,
+      reduce_op,
+      key_compare_op,
+      stream,
+      debug_sync);
 }
 
 template <typename Derived,
@@ -170,7 +176,7 @@ template <typename Derived,
           typename ValuesOutputIt,
           typename EqualityOp,
           typename ReductionOp>
-THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
   execution_policy<Derived>& policy,
   KeysInputIt keys_first,
   KeysInputIt keys_last,
@@ -191,7 +197,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 
   if (num_items == 0)
   {
-    return thrust::make_pair(keys_output, values_output);
+    return _THRUST_STD::make_pair(keys_output, values_output);
   }
 
   hip_rocprim::throw_on_error(
@@ -248,7 +254,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 
   const auto num_runs_out = hip_rocprim::get_value(policy, d_num_runs_out);
 
-  return thrust::make_pair(keys_output + num_runs_out, values_output + num_runs_out);
+  return _THRUST_STD::make_pair(keys_output + num_runs_out, values_output + num_runs_out);
 }
 
 } // namespace __reduce_by_key
@@ -265,7 +271,7 @@ template <class Derived,
           class ValOutputIt,
           class BinaryPred,
           class BinaryOp>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -278,7 +284,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<KeyOutputIt, ValOutputIt>
+    THRUST_HOST static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     par(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -293,7 +299,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
     }
 
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
+    THRUST_DEVICE static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -325,7 +331,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt, class BinaryPred>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -334,15 +340,15 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   ValOutputIt values_output,
   BinaryPred binary_pred)
 {
-  using value_type = ::internal::If<thrust::detail::is_output_iterator<ValOutputIt>,
-                                    thrust::detail::it_value_t<ValInputIt>,
-                                    thrust::detail::it_value_t<ValOutputIt>>;
+  using value_type = _THRUST_STD::_If<thrust::detail::is_output_iterator<ValOutputIt>,
+                                      thrust::detail::it_value_t<ValInputIt>,
+                                      thrust::detail::it_value_t<ValOutputIt>>;
   return hip_rocprim::reduce_by_key(
     policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, plus<value_type>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,

@@ -129,9 +129,9 @@ int main(void)
   std::cout << "] \n";
 
   std::cout << "Result   [ ";
-  for (size_t i = 0; i < size; i++)
+  for (const auto& value : C_h)
   {
-    std::cout << C_h[i] << " ";
+    std::cout << value << " ";
   }
   std::cout << "] \n";
 

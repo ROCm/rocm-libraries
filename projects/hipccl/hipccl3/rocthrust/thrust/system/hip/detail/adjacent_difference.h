@@ -45,12 +45,12 @@
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/dispatch.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
-#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>

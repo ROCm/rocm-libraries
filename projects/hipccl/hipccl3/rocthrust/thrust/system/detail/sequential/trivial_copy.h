@@ -35,13 +35,8 @@
 #include _THRUST_STD_INCLUDE(cstring)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::sequential
 {
-namespace detail
-{
-namespace sequential
-{
-
 template <typename T>
 THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result)
 {
@@ -55,8 +50,5 @@ THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result
   _THRUST_STD::memmove(result, first, n * sizeof(T));
   return result + n;
 } // end trivial_copy_n()
-
-} // end namespace sequential
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END
