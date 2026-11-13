@@ -220,22 +220,6 @@ public:
 
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
 
-        // Native HEURISTICS_CHOICE moves off a failing active plan for any failure, but never
-        // off a barred active plan; cuDNN narrows the candidates, so retarget onto the
-        // top-ranked plan this shim's filters did not bar. build_plan_at_index does not walk
-        // that fallback, so a failing retarget target returns its error.
-        int64_t activeEngineId = -1;
-        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE && !_shimBarredEngineIds.empty()
-           && _graph->get_execution_plan_engine_id(activeEngineId).is_good()
-           && isShimBarred(activeEngineId))
-        {
-            int64_t survivingIndex = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(findTopSurvivingPlanIndex(survivingIndex));
-            CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(survivingIndex));
-            _stage = Stage::PlansBuilt;
-            return {};
-        }
-
         auto err = _graph->build_plans(policy);
         if(err.is_good())
         {
@@ -1726,9 +1710,9 @@ private:
 
     error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
-        // create_execution_plans() clears the native graph's filter state, so the
-        // shim's record of what it barred is rebuilt on every pass rather than
-        // accumulated.
+        // The native graph keeps the filters it was given and its deselect_engines() only
+        // accumulates, so the shim's record of what it barred is rebuilt on every pass from
+        // the filters it holds rather than accumulated.
         _shimBarredEngineIds.clear();
 
         if(_maxWorkspaceAllowed.has_value())

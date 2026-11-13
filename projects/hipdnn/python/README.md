@@ -298,13 +298,11 @@ Remaining differences from `cudnn.pygraph`:
   methods. `moe_grouped_matmul_bwd` is not yet bound in Python, although the
   C++ `Graph` provides it.
 - Not provided: `backend_version*`, `get_last_error_string`, `knob` and
-  `knob_type`, `numerical_note`, `tensor_reordering`, `reshape_mode`,
+  `knob_type`, `tensor_reordering`, `reshape_mode`,
   `create_kernel_cache`, `create_device_properties`; the graph methods `key`,
   `create_execution_plan`, `get_engine_count`, `get_behavior_notes`,
-  `get_behavior_notes_for_plan_at_index`, `query_tensor_attributes_of_uid`,
-  `select_behavior_notes`,
-  `deselect_behavior_notes`, `select_numeric_notes` and
-  `deselect_numeric_notes`; and the `cudnn.Graph` wrapper class (`Graph` here
+  `get_behavior_notes_for_plan_at_index` and `query_tensor_attributes_of_uid`;
+  and the `cudnn.Graph` wrapper class (`Graph` here
   is hipDNN's own graph).
 - The keyword forms of `layernorm`, `layernorm_backward`, `rmsnorm`,
   `rmsnorm_backward`, `block_scale_quantize`, `sdpa` and `sdpa_backward`
@@ -315,8 +313,10 @@ Remaining differences from `cudnn.pygraph`:
 - `GraphNotSupportedError` (`cudnnGraphNotSupportedError`) derives from
   `RuntimeError`, so `except RuntimeError` also catches it.
 - `create_execution_plans()` defaults `modes` to `[heur_mode.FALLBACK]`.
-- `deselect_engines()` and `deselect_workspace_greater_than()` return the
-  graph, so calls can be chained.
+- `deselect_engines()`, `deselect_workspace_greater_than()` and the note
+  filters (`select_numeric_notes()`, `deselect_numeric_notes()`,
+  `select_behavior_notes()`, `deselect_behavior_notes()`) return the graph,
+  where cuDNN returns `None`, so calls can be chained.
 - Enum values differ where the libraries differ: `data_type` has no
   `FAST_FLOAT_FOR_FP8`, `INT8x4`, `UINT8x4` or `INT8x32`, `heur_mode` has no
   `OPENSOURCE`, and `behavior_note` values are vendor-specific.
