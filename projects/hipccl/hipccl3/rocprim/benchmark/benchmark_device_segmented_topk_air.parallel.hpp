@@ -67,10 +67,15 @@ auto config_name()
 template<typename Key,
          typename Value                = rocprim::empty_type,
          typename Config               = rocprim::default_config,
-         unsigned int MinSegmentLength = 0,
+         unsigned int MinSegmentLength = 100,
          unsigned int MaxSegmentLength = 1000>
 struct device_segmented_topk_air_benchmark : public primbench::benchmark_interface
 {
+    // k is derived from the shortest segment; a zero-length segment gives k == 0 and
+    // rocPRIM returns without launching a kernel.
+    static_assert(MinSegmentLength >= 2, "MinSegmentLength must be at least 2 so that k > 0");
+    static_assert(MinSegmentLength <= MaxSegmentLength, "Invalid segment length range");
+
     using size_out_type = size_t;
     using size_in_type  = size_t;
     using offsets_type  = size_in_type;
@@ -150,11 +155,15 @@ struct device_segmented_topk_air_benchmark : public primbench::benchmark_interfa
         auto                      min_segment_length = static_cast<offsets_type>(size);
         while(offset < size)
         {
-            const offsets_type segment_length = segment_length_dis(gen);
+            offsets_type       segment_length = segment_length_dis(gen);
+            const offsets_type remaining      = size - offset;
+            // Absorb the tail into this segment if it would otherwise be too short.
+            if(remaining < segment_length + MinSegmentLength)
+            {
+                segment_length = remaining;
+            }
             offsets.push_back(offset);
-
-            const auto end     = std::min<offsets_type>(size, offset + segment_length);
-            min_segment_length = std::min<offsets_type>(min_segment_length, end - offset);
+            min_segment_length = std::min<offsets_type>(min_segment_length, segment_length);
 
             offset += segment_length;
         }
