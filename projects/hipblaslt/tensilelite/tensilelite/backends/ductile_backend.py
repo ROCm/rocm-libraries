@@ -304,10 +304,19 @@ class DuctileBackend(OptimizationBackend):
                 scores = scores[None, ...]
             
             # Build multi-dimensional fitness array: (n_sizes, len(individuals))
-            # nGFlops[i, j] = performance of solution j at problem size i
+            # nGFlops[i, j] = performance of solution j at problem size i.
+            # Candidates that never produced a solution (duplicates/invalid params) keep
+            # the -1.0 sentinel below, distinguishing "never built" from "built but
+            # nan/inf/negative", which the guard below coalesces to 0.
             nGFlops = np.full((n_sizes, len(individuals)), -1.0, dtype=np.float32)
             idxs = [si.solIdx for si in solutions]
             nGFlops[:, idxs] = scores
+
+            # Guard against non-finite fitness values (e.g. inf from a zero-time benchmark
+            # measurement) in addition to negative/failed scores, so a single bad sample
+            # can't poison best.F for the rest of the run.
+            nGFlops[~np.isfinite(nGFlops) | np.isnan(nGFlops)] = 0
+            nGFlops[nGFlops < 0] = -1.0
             
             return nGFlops
         
@@ -381,7 +390,7 @@ class DuctileBackend(OptimizationBackend):
                     res = res[None, ...]
                 
                 # Find solutions that passed validation
-                keep = (res > 0).all(axis=0)
+                keep = (res >= 0).all(axis=0)
                 
                 if keep.sum() == 0:
                     printExit(f"DuctileBackend:No solutions passed the verification stage")
