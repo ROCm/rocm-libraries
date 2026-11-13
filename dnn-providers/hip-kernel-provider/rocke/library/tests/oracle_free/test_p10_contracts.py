@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import ast
 import ctypes
+import importlib
 import itertools
 import math
-from dataclasses import replace
+from dataclasses import fields, replace
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
@@ -60,6 +61,17 @@ from ._p10_analytical import (
     row_codeword_collisions,
     row_moments,
     visited_tiles,
+)
+from ._p10_controls import (
+    P10_BLIND_CONTROL_CASES,
+    P10_EMITTED_CONTROL_CASES,
+    P10_EMITTED_CONTROLS,
+    P10_ROW_BOUND_CASES,
+    P10_SUBJECT_CONTROLS,
+    _mutant_builder,
+    lowered_ir,
+    private_build,
+    row_bound_bypass_spec,
 )
 from ._p10_policy import (
     P10_KILL_MATRIX,
@@ -1547,33 +1559,43 @@ def test_bf16_rows_past_128_are_one_step_apart_and_still_rejected(
     assert (result.near, result.worst_ulp) == (swapped, 1)
 
 
-def _gpu_lane_tree() -> ast.Module:
-    path = Path(__file__).with_name("test_p10_dense.py")
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+# Each GPU module and the case matrices its tests may be parametrized over.
+_GPU_LANES = {
+    "test_p10_dense.py": {"P10_SUBJECT_CASES"},
+    "test_p10_dense_controls.py": {
+        "P10_EMITTED_CONTROL_CASES",
+        "P10_BLIND_CONTROL_CASES",
+        "P10_ROW_BOUND_CASES",
+    },
+}
 
 
-def test_gpu_lane_parametrizes_over_the_subject_matrix() -> None:
+def _gpu_lane_calls(filename: str) -> list[ast.Call]:
+    path = Path(__file__).with_name(filename)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+
+
+@pytest.mark.parametrize("filename", _GPU_LANES)
+def test_gpu_lanes_parametrize_over_their_case_matrices(filename: str) -> None:
     argvalues: list[ast.AST] = []
-    for node in ast.walk(_gpu_lane_tree()):
-        if not isinstance(node, ast.Call):
-            continue
+    for node in _gpu_lane_calls(filename):
         if not _dotted_name(node.func).endswith("mark.parametrize"):
             continue
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
         argvalues.append(node.args[1] if len(node.args) > 1 else keywords["argvalues"])
-    assert argvalues, "the GPU lane has no parametrized test"
     for value in argvalues:
         assert isinstance(value, ast.Name), ast.dump(value)
-        assert value.id == "P10_SUBJECT_CASES"
+    assert {value.id for value in argvalues} == _GPU_LANES[filename]
+    assert len(argvalues) == len(_GPU_LANES[filename])
 
 
-def test_gpu_lane_skips_only_through_the_require_aware_arch_gate() -> None:
+@pytest.mark.parametrize("filename", _GPU_LANES)
+def test_gpu_lanes_skip_only_through_the_require_aware_arch_gate(filename: str) -> None:
     """The shared architecture gate on the case's own architecture is the only
     permitted skip, so ``ROCKE_REQUIRE_<ARCH>=1`` fails a lane that lost its GPU,
     and an out-of-scope dispatch outcome on the architecture fails, never skips."""
-    calls = [
-        node for node in ast.walk(_gpu_lane_tree()) if isinstance(node, ast.Call)
-    ]
+    calls = _gpu_lane_calls(filename)
     escapes = [
         f"line {node.lineno}: {_dotted_name(node.func)}"
         for node in calls
@@ -1583,10 +1605,12 @@ def test_gpu_lane_skips_only_through_the_require_aware_arch_gate() -> None:
     gates = [
         node for node in calls if _dotted_name(node.func) == "current_device_arch_in"
     ]
-    assert len(gates) == 1, [ast.dump(gate) for gate in gates]
-    arches = gates[0].args[0]
-    assert isinstance(arches, ast.Tuple), ast.dump(arches)
-    assert [_dotted_name(item) for item in arches.elts] == ["arch"]
+    # One gate per parametrized test, each on the case's own architecture.
+    assert len(gates) == len(_GPU_LANES[filename])
+    for gate in gates:
+        arches = gate.args[0]
+        assert isinstance(arches, ast.Tuple), ast.dump(arches)
+        assert [_dotted_name(item) for item in arches.elts] == ["arch"]
 
 
 @pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
@@ -1624,3 +1648,158 @@ def test_gpu_lane_judgement_blames_the_output_for_a_cancelled_mutation() -> None
     assert "analyzer failed to reject adjacent_row_swap" in _not_rejected(
         "label", mutation, clean, clean
     )
+
+
+def test_subject_controls_cover_every_seam_of_the_kill_matrix_once() -> None:
+    seams = [P10_KILL_MATRIX[mutation].seam for mutation in P10_SUBJECT_CONTROLS]
+    assert len(set(seams)) == len(seams)
+    assert set(seams) == {row.seam for row in P10_KILL_MATRIX.values()}
+    # Every control is emitted but the row bound, which the host enforces.
+    assert P10_EMITTED_CONTROLS == P10_SUBJECT_CONTROLS[:-1]
+    assert P10_SUBJECT_CONTROLS[-1] is P10Mutation.ROW_BOUND_BYPASS
+
+
+def test_control_matrices_run_each_control_where_it_can_be_separated() -> None:
+    batch_two = [case for case in P10_QUICK_CASES if case.batch == 2]
+    assert P10_EMITTED_CONTROL_CASES == tuple(
+        (arch, case, mutation)
+        for arch in P10_ARCHES
+        for case in batch_two
+        for mutation in P10_EMITTED_CONTROLS
+        if mutation in applicable_mutations(case)
+    )
+    # Both dtypes, and both head configurations where the control is owned.
+    for mutation in P10_EMITTED_CONTROLS:
+        cases = [
+            case for _, case, found in P10_EMITTED_CONTROL_CASES if found is mutation
+        ]
+        assert {case.dtype for case in cases} == {"fp16", "bf16"}
+        grouped = {case.nhead_q > case.nhead_k for case in cases}
+        owned_grouped = mutation is not P10Mutation.OUT_HEAD_SWAP
+        assert grouped == ({True, False} if owned_grouped else {False})
+    # The head swap that the grouped cases cannot see is still launched on them,
+    # as a control that must pass.
+    assert P10_BLIND_CONTROL_CASES == tuple(
+        (arch, case, P10Mutation.OUT_HEAD_SWAP)
+        for arch in P10_ARCHES
+        for case in batch_two
+        if case.nhead_q > case.nhead_k
+    )
+    assert P10_ROW_BOUND_CASES == tuple(
+        (arch, case)
+        for arch in P10_ARCHES
+        for case in P10_GROUPED_CASES
+        if case.batch == 1
+    )
+    assert len(P10_EMITTED_CONTROL_CASES) == 34
+    assert len(P10_BLIND_CONTROL_CASES) == len(P10_ROW_BOUND_CASES) == 2
+
+
+@pytest.mark.parametrize(
+    "subject_case",
+    [item for item in P10_SUBJECT_CASES if item[1].batch == 2],
+    ids=_subject_case_id,
+)
+def test_emitted_controls_change_the_lowered_ir(
+    subject_case: tuple[str, UniformCase],
+) -> None:
+    """A control must be a different kernel. The mechanism alone changes
+    nothing, so what differs in a control's IR is its defect; and no two controls
+    of a case lower to the same IR."""
+    arch, case = subject_case
+    shipped = lowered_ir(arch, case, private=False)
+    assert lowered_ir(arch, case) == shipped
+    controls = [
+        mutation
+        for found_arch, found_case, mutation in (
+            *P10_EMITTED_CONTROL_CASES,
+            *P10_BLIND_CONTROL_CASES,
+        )
+        if (found_arch, found_case) == (arch, case)
+    ]
+    assert len(controls) == len(P10_EMITTED_CONTROLS)
+    texts = [lowered_ir(arch, case, mutation) for mutation in controls]
+    assert shipped not in texts
+    assert len(set(texts)) == len(texts)
+
+
+def test_private_build_restores_the_runner_also_after_a_failure() -> None:
+    arch, case = P10_SUBJECT_CASES[1]
+    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
+    builder, cache = runner.IRBuilder, runner._DENSE_LAUNCHER_CACHE
+    with pytest.raises(RuntimeError, match="stop"):
+        with private_build(arch, case, P10Mutation.D_HALF_SWAP):
+            assert issubclass(runner.IRBuilder, builder)
+            assert runner.IRBuilder is not builder
+            # A cache of its own: the shipped launchers are not served to it.
+            assert runner._DENSE_LAUNCHER_CACHE == {}
+            assert runner._DENSE_LAUNCHER_CACHE is not cache
+            raise RuntimeError("stop")
+    assert runner.IRBuilder is builder
+    assert runner._DENSE_LAUNCHER_CACHE is cache
+
+
+def test_emitted_control_refuses_what_it_cannot_keep_inside_the_tensor() -> None:
+    case = P10_SUBJECT_CASES[1][1]
+    with pytest.raises(ValueError, match=r"mutation='row_bound_bypass'"):
+        _mutant_builder(object, P10Mutation.ROW_BOUND_BYPASS, case)
+    # Flipping one index bit swaps neighbours only when the extent is a power of
+    # two; otherwise it would address past the tensor.
+    with pytest.raises(ValueError, match=r"seqlen_q=384, expected a power of two"):
+        _mutant_builder(object, P10Mutation.BATCH_SWAP, replace(case, seqlen_q=384))
+
+
+@pytest.mark.parametrize("control", P10_ROW_BOUND_CASES, ids=_subject_case_id)
+def test_row_bound_control_is_the_shipped_kernel_on_a_refused_shape(
+    control: tuple[str, UniformCase],
+) -> None:
+    """The row-bound control cannot be told from the shipped kernel by its IR:
+    the query length is a kernel argument. Its identity is host-side instead."""
+    arch, case = control
+    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
+    shipped = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    mutant = row_bound_bypass_spec(arch, case)
+
+    # The host refuses the shape twice: on construction and in the predicate.
+    with pytest.raises(ValueError, match=r"seqlen_q must be a multiple of block_m"):
+        replace(shipped, seqlen_q=mutant.seqlen_q)
+    supported, reason = runner.supports_attention_dense(mutant, arch=arch)
+    assert not supported and "seqlen_q" in reason
+
+    # It is the shipped spec in every field but the query length, which is one
+    # row past a whole query tile; the shipped spec itself is left alone.
+    differing = [
+        field.name
+        for field in fields(shipped)
+        if getattr(shipped, field.name) != getattr(mutant, field.name)
+    ]
+    assert differing == ["seqlen_q"]
+    assert (shipped.seqlen_q, mutant.seqlen_q) == (256, shipped.block_m + 1)
+    # So it compiles to the shipped kernel and is launched as it: same launcher
+    # key, same IR, and kernel arguments that differ in the query length only.
+    assert mutant.runtime_shape and not mutant.persistent
+    assert p10_kernel_key(arch, mutant) == p10_kernel_key(arch, shipped)
+    arguments = runner.attention_dense_runtime_args(mutant)
+    shipped_arguments = runner.attention_dense_runtime_args(shipped)
+    assert {
+        name for name in arguments if arguments[name] != shipped_arguments[name]
+    } == {"seqlen_q"}
+    # The grid is sized with a ceiling: two query blocks per head.
+    assert math.prod(runner.attention_dense_grid(mutant)) == 2 * case.nhead_q
+
+    # What the launch must then show: every logical row stored, and the rest of
+    # the second query tile after the tensor, inside the guard.
+    ragged = replace(case, seqlen_q=mutant.seqlen_q)
+    require_p10_scope(ragged)
+    schedule = TileSchedule(int(shipped.block_m), int(shipped.block_n))
+    layout = guard_layout(ragged, schedule)
+    assert (layout.guard, layout.logical) == (65536, 129 * 8 * 64)
+    raw = layout.new_buffer()
+    raw[layout.guard : layout.guard + layout.logical] = codeword_target_bits(
+        ragged
+    ).ravel()
+    stored = GuardedOutput(layout, raw)
+    overrun = apply_mutation(ragged, schedule, P10Mutation.ROW_BOUND_BYPASS, stored)
+    result = analyze_codeword(ragged, overrun, path_exact_admissible(ragged))
+    assert result.safety == StoreSafety(0, 65024, 0, 0)
+    assert result.channels == frozenset({Channel.SUFFIX})
