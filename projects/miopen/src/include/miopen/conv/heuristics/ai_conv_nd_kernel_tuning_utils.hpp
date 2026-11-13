@@ -153,6 +153,21 @@ struct SolverHeuristicConfig
         // Future versions may relax this constraint.
         return IsPowerOfTwo(split_k_value);
     }
+
+    /// @brief The split-k gate the lazy-applicability walk applies before the CK validator.
+    /// A deterministic request forbids split_k != 1 on split-k solvers, and split-k solvers must
+    /// pass IsValidSplitK. Non-split-k solvers are never gated on split_k: their vocab ids are bare
+    /// so parse_kernel_id yields split_k 1, which IsValidSplitK would wrongly reject (it accepts
+    /// only 0 for them) -- gating them here silently disabled the AI pick for Fwd/3D-Fwd/3D-Bwd.
+    /// @return true if a candidate with this split_k may be considered.
+    bool PassesSplitKGate(bool is_deterministic, int split_k_value) const
+    {
+        if(is_deterministic && uses_split_k && split_k_value != 1)
+            return false;
+        if(uses_split_k && !IsValidSplitK(split_k_value))
+            return false;
+        return true;
+    }
 };
 
 /**
@@ -356,16 +371,10 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
             // GetTypeString.
             auto ck_validator = ck_val_creator(problem);
             auto lazy_check   = [&](const std::string& base, int split_k, bool fp32_pass) -> bool {
-                if(is_deterministic && solver_cfg.uses_split_k && split_k != 1)
-                    return false;
-                // Only gate on split_k for solvers that use it. Non-split-k solvers carry a bare
-                // kernel id (parse_kernel_id yields split_k 1), and IsValidSplitK accepts only 0 for
-                // them -- applying it here rejected every candidate and silently disabled the AI
-                // pick for 2D-Fwd, 3D-Fwd and 3D-Bwd. The pick below already forces split_k 0 for
-                // non-split-k solvers.
-                if(solver_cfg.uses_split_k && !solver_cfg.IsValidSplitK(split_k))
-                    return false;
-                return ck_validator(base, split_k, fp32_pass);
+                // PassesSplitKGate does not gate non-split-k solvers on split_k; the pick below
+                // already forces split_k 0 for them.
+                return solver_cfg.PassesSplitKGate(is_deterministic, split_k) &&
+                       ck_validator(base, split_k, fp32_pass);
             };
             auto lazy = ai::tuning::candidate_selection::SelectBestVocabCandidate(
                 arch, solver_name, fp_features, use_tf32, lazy_check);

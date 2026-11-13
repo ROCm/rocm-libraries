@@ -389,6 +389,31 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NoSplitKSolver)
     EXPECT_FALSE(cfg.IsValidSplitK(2));
 }
 
+TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_NonSplitKAcceptsBareCandidate)
+{
+    // Non-split-k solver (Forward / 3D-Fwd / 3D-Bwd): a bare kernel id yields split_k 1. The lazy
+    // walk's gate must NOT reject it -- IsValidSplitK accepts only 0 for these solvers, so gating
+    // them on it rejected every candidate and silently disabled the AI pick. Regression guard.
+    SolverHeuristicConfig fwd{"TestSolver", "TestSolverKTN", 2, false, 0, 0, false, true};
+    EXPECT_TRUE(fwd.PassesSplitKGate(/*is_deterministic=*/false, /*split_k=*/1));
+    EXPECT_TRUE(fwd.PassesSplitKGate(/*is_deterministic=*/true, /*split_k=*/1));
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_SplitKValidatesValue)
+{
+    SolverHeuristicConfig wrw{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+    EXPECT_TRUE(wrw.PassesSplitKGate(false, 8));    // power-of-two in range
+    EXPECT_FALSE(wrw.PassesSplitKGate(false, 3));   // not a power of two
+    EXPECT_FALSE(wrw.PassesSplitKGate(false, 256)); // out of range
+}
+
+TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_DeterministicForcesUnitSplitK)
+{
+    SolverHeuristicConfig wrw{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
+    EXPECT_TRUE(wrw.PassesSplitKGate(/*is_deterministic=*/true, 1));
+    EXPECT_FALSE(wrw.PassesSplitKGate(/*is_deterministic=*/true, 8));
+}
+
 TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx90a)
 {
     SolverHeuristicConfig cfg{"ConvHipImplicitGemmGroupBwdXdlops",
