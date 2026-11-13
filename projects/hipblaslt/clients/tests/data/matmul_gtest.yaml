@@ -3705,6 +3705,55 @@ Tests:
   cold_iters: 0
   gpu_arch: '942'
 
+# The candidate search (timing 1) launches each solution more than once, and with
+# c_equal_d each launch after the first reads the previous launch's D as C. The
+# checks of E and amaxD must compare the first launch, as the check of D does.
+# Runtime on gfx942: 2 cases, under 1 s.
+- name: matmul_c_equal_d_checks_first_launch_aux
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: relu
+  c_equal_d: true
+  requested_solution_num: 4
+  unit_check: 0
+  norm_check: 1
+  timing: 1
+  iters: 2
+  cold_iters: 0
+
+- name: matmul_c_equal_d_checks_first_launch_amaxD
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_f8_fnuz
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 1.0
+  scaleA: 1
+  scaleB: 1
+  scaleD: 1
+  amaxD: 1
+  c_equal_d: true
+  requested_solution_num: 4
+  unit_check: 0
+  norm_check: 1
+  timing: 1
+  iters: 2
+  cold_iters: 0
+  gpu_arch: '942'
+
 ###############################################################################
 # fast_check: verification without a host reference GEMM.
 #
