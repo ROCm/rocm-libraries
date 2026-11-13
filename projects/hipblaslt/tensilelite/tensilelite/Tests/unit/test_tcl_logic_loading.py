@@ -7,7 +7,7 @@ import pickle
 
 import pytest
 
-import tensilelite.TensileCreateLibrary.Run as Run
+import tensilelite.create_library.run as Run
 from tensilelite import LibraryIO
 from tensilelite.SolutionLibrary import IndexSolutionLibrary, MasterSolutionLibrary, MatchingLibrary
 

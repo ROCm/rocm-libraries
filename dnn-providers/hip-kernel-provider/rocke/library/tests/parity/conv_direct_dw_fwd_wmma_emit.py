@@ -23,12 +23,15 @@
 #   9  9x9 PAD 4 (fragments past the VGPR budget)
 #  10  column padding 0 with PAD 1
 #  11  5x5, 16 waves with 4 prefetch rows (past the 16-wave fragment budget)
+#  built (rectangular filters, one forward PAD on both axes):
+#  12  bf16, 3x5 PAD 1, 6 rows, w_fold 2
+#  13  fp16, 1x7 PAD 3, 2 waves, 4 rows
 from _emit_common import run_emit
 from kernels.common.conv_direct_dw_fwd_wmma import DwFwdWmmaSpec, build_dw_fwd_wmma
 from kernels.common.conv_direct_grouped import DirectConvProblem
 
 
-def _p(K=3, PAD=1, dtype="bf16", G=64, H=20, W=37, pad_w=-1):
+def _p(K=3, PAD=1, dtype="bf16", G=64, H=20, W=37, pad_w=-1, KW=None):
     return DirectConvProblem(
         N=2,
         H=H,
@@ -37,7 +40,7 @@ def _p(K=3, PAD=1, dtype="bf16", G=64, H=20, W=37, pad_w=-1):
         cpg=1,
         kpg=1,
         KH=K,
-        KW=K,
+        KW=K if KW is None else KW,
         PAD=PAD,
         pad_w=pad_w,
         stride=1,
@@ -81,6 +84,8 @@ def _spec(idx: int):
         9: (S(problem=_p(9, 4)), "gfx1250"),
         10: (S(problem=_p(pad_w=0)), "gfx1250"),
         11: (S(problem=_p(5, 2), block_waves=16, prefetch_rows=4), "gfx1250"),
+        12: (S(problem=_p(3, 1, KW=5), block_h=6, w_fold=2), "gfx1250"),
+        13: (S(problem=_p(1, 3, "fp16", KW=7), block_waves=2, block_h=4), "gfx1250"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

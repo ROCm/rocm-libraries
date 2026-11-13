@@ -409,6 +409,17 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe, so it only
   needs scaling by the runtime K stride.  When K is itself unit-stride the window
   is the plain TLU=0 advance, which that case and the TDM path both defer to.
+
+  The window lands in the persistent GlobalReadIncs{tc} rather than a pool temp.
+  PostLoopStoreInNll weaves the fused store's coordinate VALU into this block's
+  MFMA gaps (LogicalScheduler._emitNGLL), and that splice happens AFTER both
+  streams are generated -- so a temp whose allocTmpSgpr scope has already closed
+  gets handed out again to the coord stream and the two live ranges overlap. A
+  pinned register cannot be re-handed. The pin is guaranteed here: this branch
+  writes Srd{tc}, so BufferLoad is on (globalReadIncsUseVgpr False), and TLU=1
+  keeps useConstSgprGlobalReadIncs off, so numSgprGlobalReadIncs{tc} >= 1 and
+  removeGROffsetsVariableSgprsFromPool holds it out of the pool for the whole
+  loop. The value is also exactly what GlobalReadIncs{tc} is defined to hold.
   """
   tc = ti.tc
   strideK = writer.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
@@ -417,14 +428,15 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
 
   module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    incSgpr = tmpSgprRes.idx
-    module.add(SMulI32(dst=sgpr(incSgpr), src0=inc, src1=strideK,
-               comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
-    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(incSgpr),
-               comment=f"{tc}: advance SRD by DepthU K-window"))
-    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-               comment=f"{tc}: carry"))
+  incSgpr = writer.globalReadIncsOperand(tc, writer.states.unrollIdx)
+  assert not isinstance(incSgpr, str), \
+    f"GR Ptr Update ({tc}): TLU=1 must hold its K-window in a GlobalReadIncs SGPR"
+  module.add(SMulI32(dst=incSgpr, src0=inc, src1=strideK,
+             comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=incSgpr,
+             comment=f"{tc}: advance SRD by DepthU K-window"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+             comment=f"{tc}: carry"))
   return module
 
 

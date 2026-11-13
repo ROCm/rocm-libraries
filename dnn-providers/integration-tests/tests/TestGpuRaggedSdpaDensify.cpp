@@ -209,6 +209,28 @@ TEST(TestGpuRaggedSdpaDensify, ForwardWithBiasMatchesCpu)
         1e-5F);
 }
 
+// Philox dropout over packed operands, validated through the dense RNG dump (SEM-015): both
+// executors apply the dump through the dense rewrite.
+TEST(TestGpuRaggedSdpaDensify, PhiloxDropoutWithItsDumpMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<float> dump(static_cast<size_t>(B * H * SQ * SKV));
+    for(size_t i = 0; i < dump.size(); ++i)
+    {
+        dump[i] = (i * 7U + i / 5U) % 4U == 0U ? 0.0F : 1.0F;
+    }
+    // The INT64 seed and offset, each as two INT32 words (little-endian): bound, not read.
+    expectGpuMatchesCpu(
+        withPhiloxDropout(raggedGraph(false, false), 0.25F),
+        {{Q, packedValues(10, H * D, 51)},
+         {K, packedValues(13, H * D, 52)},
+         {V, packedValues(13, H * D, 53)},
+         {RNG_DUMP, dump}},
+        {{O, static_cast<size_t>(10 * H * D)}, {STATS, static_cast<size_t>(10 * H)}},
+        1e-5F,
+        {{SEED, {1234, 0}}, {OFFSET, {8, 0}}});
+}
+
 TEST(TestGpuRaggedSdpaDensify, BackwardMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();

@@ -249,12 +249,14 @@ protected:
         auto initResult = initializeBundle(graph, gpuBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
         initResult = initializeBundle(graph, refBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
@@ -446,6 +448,17 @@ protected:
         }
     }
 
+    // A recipe that cannot fill its tensor is an error in the test, so it fails. A
+    // graph whose inputs the harness cannot fill skips.
+    static void reportFillFailure(const FillResult& result)
+    {
+        if(result.status == FillResult::Status::INVALID)
+        {
+            FAIL() << "input fill failed: " << result.reason;
+        }
+        GTEST_SKIP() << result.reason;
+    }
+
     FillResult fillGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
                                hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
@@ -526,7 +539,7 @@ public:
         }
 
         nlohmann::json meta;
-        meta["format_version"] = 1;
+        meta["format_version"] = requiredFormatVersion(_inputFillRecipes);
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";

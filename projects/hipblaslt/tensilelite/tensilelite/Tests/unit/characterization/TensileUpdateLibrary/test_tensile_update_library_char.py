@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Characterization test for TensileUpdateLibrary.py.
+"""Characterization test for update_library.py.
 
 Pins actual behavior of TensileUpdateLibrary main execution with minimal
 library logic YAML fixtures. Executes uncovered lines [25-165] in module.
@@ -86,7 +86,7 @@ class TestTensileUpdateLibraryMain:
 
     def test_tensile_update_library_with_argv_and_minimal_yaml(self, temp_logic_dir, tmp_path):
         """TensileUpdateLibrary() processes minimal LibraryLogic YAML."""
-        from tensilelite import TensileUpdateLibrary
+        from tensilelite import update_library as TensileUpdateLibrary
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -119,7 +119,7 @@ class TestTensileUpdateLibraryMain:
 
     def test_tensile_update_library_main_entry_point_with_argv(self, temp_logic_dir, tmp_path):
         """TensileUpdateLibrary.main() entry point processes sys.argv."""
-        from tensilelite import TensileUpdateLibrary
+        from tensilelite import update_library as TensileUpdateLibrary
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -154,13 +154,13 @@ class TestTensileUpdateLibraryMain:
 
     def test_update_logic_function_processes_yaml_structure(self, temp_logic_dir, tmp_path):
         """UpdateLogic function processes YAML and converts data types."""
-        from tensilelite import TensileUpdateLibrary
+        from tensilelite import update_library as TensileUpdateLibrary
 
         logic_file = list(temp_logic_dir.glob("*.yaml"))[0]
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        # Call UpdateLogic directly - executes lines 41-111 of TensileUpdateLibrary.py
+        # Call UpdateLogic directly - executes lines 41-111 of update_library.py
         exception_raised = False
         exception_type = None
         try:

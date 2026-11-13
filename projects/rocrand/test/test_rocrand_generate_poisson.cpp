@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,78 @@ void test_multiple_lambdas(const rocrand_rng_type rng_type, const hipStream_t st
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
+// Number of positions where the two equally sized buffers differ.
+size_t count_mismatches(const std::vector<unsigned int>& a, const std::vector<unsigned int>& b)
+{
+    size_t mismatches = 0;
+    for(size_t i = 0; i < a.size(); ++i)
+    {
+        mismatches += a[i] != b[i];
+    }
+    return mismatches;
+}
+
+// Generates the given lambdas back to back on one generator and copies each buffer to h_results.
+// If sync_each is set, the stream is synchronized after every call.
+void generate_lambda_sequence(const rocrand_rng_type                  rng_type,
+                              const hipStream_t                       stream,
+                              const std::vector<double>&              lambdas,
+                              const size_t                            size,
+                              const bool                              sync_each,
+                              std::vector<std::vector<unsigned int>>& h_results)
+{
+    rocrand_generator generator;
+    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
+    ROCRAND_CHECK(rocrand_set_stream(generator, stream));
+
+    std::vector<unsigned int*> d_results(lambdas.size());
+    for(auto& d_ptr : d_results)
+    {
+        HIP_CHECK(hipMallocHelper(&d_ptr, sizeof(*d_ptr) * size));
+    }
+
+    for(size_t i = 0; i < lambdas.size(); ++i)
+    {
+        ROCRAND_CHECK(rocrand_generate_poisson(generator, d_results[i], size, lambdas[i]));
+        if(sync_each)
+        {
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    h_results.assign(lambdas.size(), std::vector<unsigned int>(size));
+    for(size_t i = 0; i < lambdas.size(); ++i)
+    {
+        HIP_CHECK(hipMemcpy(h_results[i].data(),
+                            d_results[i],
+                            sizeof(*d_results[i]) * size,
+                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipFree(d_results[i]));
+    }
+
+    ROCRAND_CHECK(rocrand_destroy_generator(generator));
+}
+
+// Switching lambda and back without synchronizing must give the same output as
+// synchronizing after each call: the third call must not reuse a stale table.
+void test_lambda_change_back_to_back(const rocrand_rng_type rng_type, const hipStream_t stream)
+{
+    constexpr size_t          size = 65536;
+    const std::vector<double> lambdas{1000.0, 10.0, 1000.0};
+
+    std::vector<std::vector<unsigned int>> expected;
+    std::vector<std::vector<unsigned int>> actual;
+    generate_lambda_sequence(rng_type, stream, lambdas, size, true, expected);
+    generate_lambda_sequence(rng_type, stream, lambdas, size, false, actual);
+
+    for(size_t i = 0; i < lambdas.size(); ++i)
+    {
+        SCOPED_TRACE(testing::Message() << "call " << i << ", lambda " << lambdas[i]);
+        EXPECT_EQ(count_mismatches(actual[i], expected[i]), 0u);
+    }
+}
+
 TEST_P(rocrand_generate_poisson_tests, generate_test)
 {
     test_generate<unsigned int>(
@@ -194,6 +266,27 @@ TEST_P(rocrand_generate_poisson_tests, multiple_lambdas_non_blocking_stream)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     test_multiple_lambdas(GetParam(), stream);
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TEST_P(rocrand_generate_poisson_tests, lambda_change_back_to_back_null_stream)
+{
+    test_lambda_change_back_to_back(GetParam(), nullptr);
+}
+
+TEST_P(rocrand_generate_poisson_tests, lambda_change_back_to_back_blocking_stream)
+{
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault));
+    test_lambda_change_back_to_back(GetParam(), stream);
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TEST_P(rocrand_generate_poisson_tests, lambda_change_back_to_back_non_blocking_stream)
+{
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    test_lambda_change_back_to_back(GetParam(), stream);
     HIP_CHECK(hipStreamDestroy(stream));
 }
 

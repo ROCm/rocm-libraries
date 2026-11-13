@@ -47,6 +47,7 @@ extern "C" {
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
  *  pBufferSizeInBytes temporary storage buffer size.
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
@@ -82,6 +83,7 @@ hipsparseStatus_t hipsparseSgemvi_bufferSize(hipsparseHandle_t    handle,
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
  *  pBufferSizeInBytes temporary storage buffer size.
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
@@ -116,6 +118,7 @@ hipsparseStatus_t hipsparseDgemvi_bufferSize(hipsparseHandle_t    handle,
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
  *  pBufferSizeInBytes temporary storage buffer size.
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
@@ -150,6 +153,7 @@ hipsparseStatus_t hipsparseCgemvi_bufferSize(hipsparseHandle_t    handle,
  *  nnz         number of non-zero entries in the sparse vector.
  *  @param[out]
  *  pBufferSizeInBytes temporary storage buffer size.
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
@@ -210,7 +214,7 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  @param[in]
  *  n           number of columns of the dense matrix.
  *  @param[in]
- *  alpha       scalar \f$\alpha\f$.
+ *  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
@@ -222,7 +226,7 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  @param[in]
  *  xInd        array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
- *  beta        scalar \f$\beta\f$.
+ *  beta        scalar \f$\beta\f$, which can be in host or device memory.
  *  @param[inout]
  *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
  *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -296,7 +300,7 @@ hipsparseStatus_t hipsparseSgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  n           number of columns of the dense matrix.
  *  @param[in]
- *  alpha       scalar \f$\alpha\f$.
+ *  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
@@ -308,7 +312,7 @@ hipsparseStatus_t hipsparseSgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  xInd        array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
- *  beta        scalar \f$\beta\f$.
+ *  beta        scalar \f$\beta\f$, which can be in host or device memory.
  *  @param[inout]
  *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
  *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -381,7 +385,7 @@ hipsparseStatus_t hipsparseDgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  n           number of columns of the dense matrix.
  *  @param[in]
- *  alpha       scalar \f$\alpha\f$.
+ *  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
@@ -393,7 +397,7 @@ hipsparseStatus_t hipsparseDgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  xInd        array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
- *  beta        scalar \f$\beta\f$.
+ *  beta        scalar \f$\beta\f$, which can be in host or device memory.
  *  @param[inout]
  *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
  *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -466,7 +470,7 @@ hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  n           number of columns of the dense matrix.
  *  @param[in]
- *  alpha       scalar \f$\alpha\f$.
+ *  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
  *  @param[in]
  *  A           pointer to the dense matrix.
  *  @param[in]
@@ -478,7 +482,7 @@ hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
  *  @param[in]
  *  xInd        array of \p nnz elements containing the indices of the sparse vector.
  *  @param[in]
- *  beta        scalar \f$\beta\f$.
+ *  beta        scalar \f$\beta\f$, which can be in host or device memory.
  *  @param[inout]
  *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
  *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).

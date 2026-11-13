@@ -265,6 +265,72 @@ TEST(pre_checkin_device_scalar_alpha_ext, DescriptorGemm)
     checkExtensionAlpha(AlphaPath::Descriptor);
 }
 
+TEST(pre_checkin_device_scalar_alpha_ext, EmptyGroupedInputs)
+{
+    hipblaslt_local_handle handle;
+
+    hipblaslt_ext::GroupedGemm grouped(handle,
+                                       HIPBLAS_OP_N,
+                                       HIPBLAS_OP_N,
+                                       HIP_R_16F,
+                                       HIP_R_16F,
+                                       HIP_R_32F,
+                                       HIP_R_32F,
+                                       HIPBLAS_COMPUTE_32F);
+
+    std::vector<int64_t>                     m, n, k, batches, ld, strides;
+    std::vector<hipblaslt_ext::GemmEpilogue> epilogues;
+    std::vector<hipblaslt_ext::GemmInputs>   inputs;
+    hipblaslt_ext::GemmProblemType           problemType(HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               HIP_R_16F,
+                                               HIP_R_16F,
+                                               HIP_R_32F,
+                                               HIP_R_32F,
+                                               HIPBLAS_COMPUTE_32F);
+
+    EXPECT_EQ(grouped.setProblem(m, n, k, batches, epilogues, inputs), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(grouped.getGemmCount(), 0u);
+    EXPECT_EQ(grouped.setProblem(m,
+                                 n,
+                                 k,
+                                 batches,
+                                 ld,
+                                 ld,
+                                 ld,
+                                 ld,
+                                 strides,
+                                 strides,
+                                 strides,
+                                 strides,
+                                 epilogues,
+                                 inputs,
+                                 problemType),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(grouped.getGemmCount(), 0u);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, RejectsMissingGroupedInputs)
+{
+    hipblaslt_local_handle handle;
+
+    hipblaslt_ext::GroupedGemm grouped(handle,
+                                       HIPBLAS_OP_N,
+                                       HIPBLAS_OP_N,
+                                       HIP_R_16F,
+                                       HIP_R_16F,
+                                       HIP_R_32F,
+                                       HIP_R_32F,
+                                       HIPBLAS_COMPUTE_32F);
+
+    std::vector<int64_t>                     dimensions{4}, batches{1};
+    std::vector<hipblaslt_ext::GemmEpilogue> epilogues(1);
+    std::vector<hipblaslt_ext::GemmInputs>   inputs;
+
+    EXPECT_EQ(grouped.setProblem(dimensions, dimensions, dimensions, batches, epilogues, inputs),
+              HIPBLAS_STATUS_INVALID_VALUE);
+}
+
 TEST(pre_checkin_device_scalar_alpha_ext, DescriptorRejectsNonFp32Scale)
 {
     // Rejection happens before kernel selection, regardless of the GPU architecture.

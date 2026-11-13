@@ -1158,6 +1158,11 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# --- idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+# idx71 is cfg71 above (bf16 D192 one warp); these three sit after it.
+_CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
+_CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
+_CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

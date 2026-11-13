@@ -4,7 +4,8 @@
 // fp8 layers around the SDPA forward reference (the device side of CpuFpReferenceSdpa::forward's
 // fp8 wrappers). One thread per element. Compiled via HipRTC with -DCOMPUTE_TYPE=float and
 // -DIN_TYPE=<type> for sdpaDequantRef or -DO_TYPE=<type> for sdpaScaleOutRef.
-//   sdpaDequantRef:  out[b, h, s, d] = float(in[b, h, s, d]) * descale(b, h / headsPerKv), packed.
+//   sdpaDequantRef:  out[b, h, s, d] = float(in[b, h, s, d]) * descale(b, h / headsPerKv), packed;
+//                    padding rows past seq_len are skipped, a paged container goes through its table.
 //   sdpaScaleOutRef: out[b, h, s, d] = O_TYPE(in * scale) from a packed float O; amax gets
 //                    max |in| (cuDNN amax_o).
 
@@ -32,13 +33,43 @@ extern "C" __global__ void sdpaDequantRef(SdpaDequantArgs args)
     const long long h = tmp % args.dims[1];
     const long long b = tmp / args.dims[1];
 
+    // Padding rows (s >= this batch's seq_len, clamped like the forward's liveLength) are never
+    // read (SEM-008); their float copy stays zero (the host zero-fills it), and the forward never
+    // reads it either.
+    if(args.seqLen != nullptr)
+    {
+        long long live = static_cast<long long>(args.seqLen[b * args.seqLenStride]);
+        live = live < 0 ? 0 : (live > args.dims[2] ? args.dims[2] : live);
+        if(s >= live)
+        {
+            return;
+        }
+    }
+
+    // Element (b, h, s, d) of x, and its slot in the packed float copy.
+    long long inIdx = 0;
+    long long outIdx = idx;
+    if(args.pageTable == nullptr)
+    {
+        inIdx
+            = b * args.inStr.s[0] + h * args.inStr.s[1] + s * args.inStr.s[2] + d * args.inStr.s[3];
+    }
+    else
+    {
+        const auto block = static_cast<long long>(
+            args.pageTable[b * args.pageTableStrB + (s / args.blockSize) * args.pageTableStrT]);
+        const long long slot = s % args.blockSize;
+        inIdx = block * args.inStr.s[0] + h * args.inStr.s[1] + slot * args.inStr.s[2]
+                + d * args.inStr.s[3];
+        outIdx = ((block * args.dims[1] + h) * args.blockSize + slot) * args.dims[3] + d;
+    }
+
     const float factor = args.descale == nullptr
                              ? 1.0f
                              : args.descale[b * args.descaleBatchStride
                                             + (h / args.headsPerKv) * args.descaleHeadStride];
-    const float x = toAccum(
-        in[b * args.inStr.s[0] + h * args.inStr.s[1] + s * args.inStr.s[2] + d * args.inStr.s[3]]);
-    args.out[idx] = x * factor;
+    // Two batches whose tables name the same block write the same value to the same slot.
+    args.out[outIdx] = toAccum(in[inIdx]) * factor;
 }
 #endif
 

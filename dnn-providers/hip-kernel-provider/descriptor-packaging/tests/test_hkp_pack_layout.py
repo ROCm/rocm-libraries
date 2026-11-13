@@ -2344,6 +2344,32 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
 
 
 @pytest.mark.quick
+def test_an_excluded_bundle_path_is_never_read(tmp_path, main_fixture):
+    """A `/`-separated entry excludes one bundle (a bundle whose DVC outputs were
+    not pulled, so what git holds of it may name a missing descriptor), matched
+    case-insensitively; a sibling that merely shares its name as a prefix is still
+    read."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    for bundle in ("unpulled", "unpulled2"):
+        folder = root / "rocKE" / bundle
+        folder.mkdir(parents=True)
+        (folder / "broken.kdp.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(
+            root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE/unpulled",)
+        )
+    (root / "rocKE" / "unpulled2" / "broken.kdp.json").unlink()
+    logged = []
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=logged.append, exclude_folders=("rocke/UNPULLED/",)
+    )
+    assert flat.kdps()
+    assert "excluding folder rocKE/unpulled/" in logged
+
+
+@pytest.mark.quick
 def test_disabling_an_unknown_kind_is_an_error(tmp_path, main_fixture):
     """A misspelled kind in the build's filter must not silently disable nothing."""
     root = tmp_path / "root"

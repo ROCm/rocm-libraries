@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -249,7 +249,14 @@ public:
         // Create rocsparse handle
         rocsparse_local_handle handle;
 
-        rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
+        // init_csc builds the CSR arrays of the transpose, which stores the other triangle.
+        Arguments arg_csc = arg;
+        if(FORMAT == rocsparse_format_csc)
+        {
+            arg_csc.uplo = (uplo == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                                               : rocsparse_fill_mode_lower;
+        }
+        rocsparse_matrix_factory<T, I, J> matrix_factory(arg_csc);
 
         // Allocate host memory for CSR matrix
         host_sparse_matrix hA;

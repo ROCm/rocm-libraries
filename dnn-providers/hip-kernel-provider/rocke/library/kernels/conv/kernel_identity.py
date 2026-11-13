@@ -143,6 +143,9 @@ class KernelIdentity:
     # Left out of the hash while False, like ws_replicas, so identities that
     # predate the field keep their hash and their cache entries.
     prefetch_addr: bool = False
+    # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
+    # Left out of the hash while False, like prefetch_addr.
+    prefetch_global_regs: bool = False
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
@@ -250,6 +253,8 @@ class KernelIdentity:
             del fields["ws_replicas"]
         if not fields["prefetch_addr"]:
             del fields["prefetch_addr"]
+        if not fields["prefetch_global_regs"]:
+            del fields["prefetch_global_regs"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:

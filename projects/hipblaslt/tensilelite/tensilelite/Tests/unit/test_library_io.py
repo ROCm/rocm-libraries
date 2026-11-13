@@ -270,7 +270,7 @@ def test_writeMsgPackIndexed_omits_absent_version(tmp_path):
 
 
 def test_writeMsgPackIndexed_does_not_mutate_caller_dict(tmp_path):
-    """Run.py reuses the state dict, so splitting must not consume it."""
+    """create_library/run.py reuses the state dict, so splitting must not consume it."""
     dest = str(tmp_path / "library.dat")
     data = _masterLibraryState()
     before = copy.deepcopy(data)
