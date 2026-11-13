@@ -50,9 +50,10 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.conv_direct_dgrad_wmma import _tdm_descriptor_3d
 from kernels.common.conv_direct_grouped import (
@@ -61,15 +62,9 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import CH_PAD, I32_MAX, WMMA_K, wmma_fwd_op
 
-WMMA_K = 32
-CH_PAD = 8
 PATCH_WMMA_VGPR_BUDGET = 448
-_I32_MAX = (1 << 31) - 1
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 def is_patch_dgrad_problem(p: DirectConvProblem) -> bool:
@@ -176,8 +171,8 @@ class DgradPatchWmmaSpec:
         p = self.problem
         return (
             p.N
-            * _ceil_div(p.Ho, self.tile_h)
-            * _ceil_div(p.Wo, self.tile_w)
+            * ceil_div(p.Ho, self.tile_h)
+            * ceil_div(p.Wo, self.tile_w)
             * (self.P // self.r_blk)
         )
 
@@ -189,11 +184,14 @@ class DgradPatchWmmaSpec:
         extra = self.problem.N if self.has_border() else 0
         return (self.main_blocks() + extra, 1, 1)
 
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
+
 
 def dgrad_patch_tile_efficiency(spec: DgradPatchWmmaSpec) -> float:
     p = spec.problem
     th, tw = spec.tile_h, spec.tile_w
-    pix = (p.Ho * p.Wo) / (_ceil_div(p.Ho, th) * th * _ceil_div(p.Wo, tw) * tw)
+    pix = (p.Ho * p.Wo) / (align_up(p.Ho, th) * align_up(p.Wo, tw))
     return pix * spec.block_cols / spec.block_c
 
 
@@ -250,16 +248,15 @@ def dgrad_patch_reason(spec: DgradPatchWmmaSpec, arch: str = "gfx1250") -> str |
     )
     if vgprs > PATCH_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     tensor_bytes = (
         2 * p.N * p.Ho * p.Wo * p.total_k,
         2 * p.total_k * p.KH * p.KW * p.cpg,
         2 * p.N * p.H * p.W * p.total_c,
     )
-    if max(tensor_bytes) > _I32_MAX:
+    if max(tensor_bytes) > I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
     return None
 
@@ -282,10 +279,7 @@ def build_dgrad_patch_wmma(
     P, C = spec.P, p.cpg
     RB = spec.r_blk
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WC = spec.waves_c

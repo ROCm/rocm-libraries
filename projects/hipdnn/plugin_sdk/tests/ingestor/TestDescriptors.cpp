@@ -424,16 +424,22 @@ EngineDescriptor populatedEngine()
     engine.heuristicId = testId(0x52);
     engine.sortKernelCatalog = {{"gfx942", {testId(0x53)}}};
     engine.predictEngine = {{"gfx942", {testId(0x54)}}};
-    engine.predictApplicableKernels = {{"gfx942", testId(0x55)}};
+    engine.predictApplicableKernels = {{"gfx942", {testId(0x55)}}};
     engine.metadataSchemaId = testId(0x56);
     engine.knobs = {"tile"};
     engine.behaviorNotes = {3};
     engine.sdkVersion = POPULATED_VERSION;
-    engine.numericalNotes = {"fast-math"};
+    engine.numericalNotes = std::vector<int32_t>{4};
     engine.graphMatchNativeSymbol = "graph.match";
     engine.revision = POPULATED_VERSION;
     engine.slots = {populatedSlot()};
     engine.sharedWorkspaceToken = "ws.bytes";
+    return engine;
+}
+
+EngineDescriptor withoutNumericalNotes(EngineDescriptor engine)
+{
+    engine.numericalNotes.reset();
     return engine;
 }
 
@@ -611,7 +617,7 @@ std::vector<EqualityCase> allEqualityCases()
                      "PredictApplicableKernels",
                      true,
                      baseline,
-                     [](auto& v) { v.predictApplicableKernels["gfx950"] = testId(0x5E); }),
+                     [](auto& v) { v.predictApplicableKernels["gfx950"] = {testId(0x5E)}; }),
             fieldRow(type,
                      "MetadataSchemaId",
                      true,
@@ -629,7 +635,18 @@ std::vector<EqualityCase> allEqualityCases()
                      "NumericalNotes",
                      true,
                      baseline,
-                     [](auto& v) { v.numericalNotes.push_back("extra"); }),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{}; }),
+            // Absent (a descriptor that makes no claim) is distinct from an empty claim.
+            fieldRow(type,
+                     "NumericalNotesAbsentVsEmpty",
+                     true,
+                     withoutNumericalNotes(baseline),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{}; }),
+            fieldRow(type,
+                     "NumericalNotesAbsentVsPopulated",
+                     true,
+                     withoutNumericalNotes(baseline),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{4}; }),
             fieldRow(type,
                      "GraphMatchNativeSymbol",
                      true,

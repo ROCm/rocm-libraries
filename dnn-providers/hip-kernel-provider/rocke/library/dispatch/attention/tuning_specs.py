@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
+from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
     _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
@@ -179,6 +180,7 @@ _SEMANTIC_FIELDS = frozenset(
         "causal_top_left",
         "right_bound",
         "emit_lse",
+        "lse_layout",
     }
 )
 
@@ -350,17 +352,11 @@ def make_explicit_attention_3d_specs(
     )
     if not ok:
         raise ValueError(f"unsupported explicit 3D attention config: {why}")
-    reduce = reduce_type(
-        head_size=problem.head_size,
-        num_query_heads=problem.num_query_heads,
-        num_kv_heads=problem.num_kv_heads,
-        dtype=problem.dtype,
-        num_segments=num_segments,
-        waves_per_eu=config.waves_per_eu,
-        # The output the caller asked for, never a tuning knob (see
-        # _SEMANTIC_FIELDS): every swept geometry keeps it.
-        emit_lse=problem.emit_lse,
-    )
+    # The kernels' one segment -> reduce derivation (the gfx950 module export's
+    # ``reduce_spec_for`` is the same), so the launched pair and the packed module agree.
+    # ``emit_lse`` is the output the caller asked for, never a tuning knob (see
+    # _SEMANTIC_FIELDS): every swept geometry keeps it.
+    reduce = split_kv_reduce_spec(reduce_type, segment, emit_lse=problem.emit_lse)
     return segment, reduce
 
 

@@ -329,6 +329,22 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->has_softcap = false;
         s->kv_storage_dtype = NULL;
         break;
+    case 20:
+        /* Segment AND reduce with emit_lse (see make_reduce_spec): the real
+         * catalog pairing, where the segment's own kernel name also gains the
+         * trailing "lse". Same fields as case 1. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 16;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }
@@ -337,7 +353,8 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
  * (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
- * waves_per_eu; configs 18-19 also set emit_lse, as _REDUCE_LSE does). */
+ * waves_per_eu; configs 18-20 also set emit_lse, as _REDUCE_LSE does; 20
+ * additionally sets it on the segment, in make_spec). */
 static void make_reduce_spec(int idx,
                              const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
@@ -350,7 +367,7 @@ static void make_reduce_spec(int idx,
     r->num_segments = s->num_segments;
     r->has_waves_per_eu = s->has_waves_per_eu;
     r->waves_per_eu = s->waves_per_eu;
-    r->emit_lse = (idx == 18 || idx == 19);
+    r->emit_lse = (idx == 18 || idx == 19 || idx == 20);
 }
 
 /* Build kernel via `which` (0=segment, 1=reduce), lower to .ll, print to stdout.

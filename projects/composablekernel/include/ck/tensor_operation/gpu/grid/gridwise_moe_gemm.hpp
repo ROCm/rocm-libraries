@@ -167,7 +167,8 @@ template <typename ALayout,
           typename ComputeTypeA                       = CDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ADataType,
-          typename LDSTypeB                           = BDataType>
+          typename LDSTypeB                           = BDataType,
+          bool RuntimeSwigluLimit                     = false>
 struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                              ALayout,
                              BLayout,
@@ -298,10 +299,17 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         return gate * up;
     }
 
-    // Clamp limit for swiglu_oai_and_mul (gpt-oss / OAI form): gate clamped to <= L,
-    // up clamped to [-L, L]; L hardcoded to 7.0. alpha = 1.702 per gpt-oss default.
+    // Clamp bound for the gated activations: gate <= L, up in [-L, L], per gpt-oss.
+    // RuntimeSwigluLimit swaps these constants for Problem::SwigluLimit; when it is
+    // false the epilogue is byte-for-byte what it was before the bound existed.
     static constexpr float kSwiGluOaiLimit = 7.0f;
     static constexpr float kSwiGluOaiAlpha = 1.702f;
+
+    __host__ __device__ static void clamp_gate_up(float& gate, float& up, float limit)
+    {
+        gate = math::min(gate, limit);
+        up   = math::min(math::max(up, -limit), limit);
+    }
 
     // Helper: apply OAI SwiGLU activation gate*sigmoid(alpha*gate)*(up+1) with pre-activation
     // clamp (gate upper-bounded, up symmetric). Same math as ck_tile::moe::Swiglu in
@@ -309,11 +317,12 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     // division (not __builtin_amdgcn_rcpf), so results match to ~1e-6 rather than bit-exact.
     // Distinct from swiglustep (no +1, no alpha).
     // Used by all four swiglu_oai_and_mul epilogue paths (quant/non-quant x pipeline-A/B).
-    __host__ __device__ static constexpr float apply_swiglu_oai_activation(float gate, float up)
+    __host__ __device__ static constexpr float
+    apply_swiglu_oai_activation(float gate, float up, float limit)
     {
         // Delegate to the shared ck::swiglu_oai (defined in gridwise_gemm_xdl_cshuffle_common.hpp)
         // so the kernel epilogue and the host unit test exercise a single implementation.
-        return ck::swiglu_oai(gate, up, kSwiGluOaiLimit, kSwiGluOaiAlpha);
+        return ck::swiglu_oai(gate, up, limit, kSwiGluOaiAlpha);
     }
 
     using mfma_selector =
@@ -354,6 +363,20 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     static constexpr index_t NWave = NPerBlock / NPerXdl / NXdlPerWave;
     // static constexpr index_t NumTokens = 1;
     static constexpr index_t SortedTileSize = MPerBlock;
+
+    // When GemmSpec pads N and/or K, each expert's B only needs zero-padding to whole preshuffle
+    // tiles (N to NLane, K to KLane * KPack / KGroup), so the same weights work with any block
+    // tile. A and E keep their logical K and N.
+    static constexpr bool PadN =
+        GemmSpec == tensor_operation::device::GemmSpecialization::NPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::NKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNKPadding;
+    static constexpr bool PadK =
+        GemmSpec == tensor_operation::device::GemmSpecialization::KPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::NKPadding ||
+        GemmSpec == tensor_operation::device::GemmSpecialization::MNKPadding;
 
     static constexpr auto MakeDsGridPointer()
     {
@@ -409,6 +432,24 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     __host__ __device__ static auto CalculateBK0Shuffled(index_t K)
     {
         return math::integer_divide_ceil(K, KLane * KPack / KGroup);
+    }
+
+    // Elements of one expert's preshuffled B with N0 x K0 tiles. With padding, N0 need not be a
+    // multiple of NWave, which the element space of MakeBGridDescriptor_Preshuffled assumes.
+    template <typename BGridDesc>
+    __host__ __device__ static auto
+    GetBPreshuffledSize(const BGridDesc& b_grid_desc, index_t N0, index_t K0)
+    {
+        if constexpr(PadN || PadK)
+        {
+            constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
+            constexpr index_t WaveSize = BlockSize / (MWave * NWave);
+            return N0 * K0 * (WaveSize * KPack / KGroup);
+        }
+        else
+        {
+            return b_grid_desc.GetElementSpaceSize();
+        }
     }
 
     __host__ __device__ static auto CalculateKPadded(index_t K)
@@ -740,7 +781,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     index_t StrideB_,
                                     std::array<index_t, NumDTensor> StrideDs_,
                                     index_t StrideC_,
-                                    index_t KBatch_)
+                                    index_t KBatch_,
+                                    float SwigluLimit_ = kSwiGluOaiLimit)
             : NumTokens{NumTokens_},
               TopK{TopK_},
               M{M_},
@@ -758,7 +800,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
               AK0{CalculateAK0Padded(K_, KBatch_)},
               BK0{CalculateBK0Padded(K_, KBatch_)},
               MBlock{CalculateMBlock(M_)},
-              NBlock{CalculateNBlock(N_)}
+              NBlock{CalculateNBlock(N_)},
+              SwigluLimit{SwigluLimit_}
         {
         }
 
@@ -791,6 +834,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         index_t BK0;
         index_t MBlock;
         index_t NBlock;
+        float SwigluLimit; // only read when RuntimeSwigluLimit
     };
 
     // Argument
@@ -815,7 +859,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                           index_t k_batch_,
                           AElementwiseOperation a_element_op_,
                           BElementwiseOperation b_element_op_,
-                          CElementwiseOperation c_element_op_)
+                          CElementwiseOperation c_element_op_,
+                          float swiglu_limit_ = kSwiGluOaiLimit)
             : Problem{NumTokens_,
                       TopK_,
                       M_,
@@ -825,7 +870,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                       StrideB_,
                       StrideDs_,
                       StrideC_,
-                      k_batch_},
+                      k_batch_,
+                      swiglu_limit_},
               p_sorted_token_ids{p_sorted_token_ids_},
               p_sorted_expert_ids{p_sorted_expert_ids_},
               p_max_token_id{p_max_token_id_},
@@ -1237,8 +1283,13 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             }
             gather_offsets(m0) = static_cast<IndexType>(token_offset) * problem.K;
         });
+        // With padding, B reads past its N0 tiles are out of bounds, and reads past K within a
+        // tile row (into the next row) only meet masked A.
         const long_index_t expert_stride = __builtin_amdgcn_readfirstlane(
-            static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+            (PadN || PadK ? static_cast<long_index_t>(GetBPreshuffledSize(
+                                b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled))
+                          : static_cast<long_index_t>(problem.N) * problem.K) *
+            (IsInputGemm ? 2 : 1));
         const long_index_t expert_offset =
             static_cast<long_index_t>(expert_id) * expert_stride / BPackedSize;
         // N0, K0, Blocksize*KPack
@@ -1248,7 +1299,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid + expert_offset, b_grid_desc_bpreshuffled.GetElementSpaceSize());
+            p_b_grid + expert_offset,
+            GetBPreshuffledSize(b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled));
         // A matrix in LDS memory, dst of blockwise copy
         constexpr auto a_block_desc_ak0_m_ak1 =
             GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(get_device_arch());
@@ -1281,13 +1333,14 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             true,
             IndexType,
             1,
-            BlockwiseGemmPipe::GlobalBufferNum>(a_grid_desc_ak0_m_ak1,
-                                                make_multi_index(0, 0, 0),
-                                                a_element_op,
-                                                a_block_desc_ak0_m_ak1,
-                                                make_multi_index(0, 0, 0),
-                                                ck::tensor_operation::element_wise::PassThrough{},
-                                                gather_offsets);
+            BlockwiseGemmPipe::GlobalBufferNum,
+            PadK>(a_grid_desc_ak0_m_ak1,
+                  make_multi_index(0, 0, 0),
+                  a_element_op,
+                  a_block_desc_ak0_m_ak1,
+                  make_multi_index(0, 0, 0),
+                  ck::tensor_operation::element_wise::PassThrough{},
+                  gather_offsets);
 
         // Thread-wise copy
         // K0 -> N0/NWave -> NWave -> KLane -> NLane -> KPack
@@ -1338,7 +1391,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         {
             const BDataType* p_b_grid_up = p_b_grid + expert_stride / 2 / BPackedSize;
             const auto b_grid_buf_up     = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_grid_up + expert_offset, b_grid_desc_bpreshuffled.GetElementSpaceSize());
+                p_b_grid_up + expert_offset,
+                GetBPreshuffledSize(b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled));
             auto b_blockwise_copy_up = ThreadwiseTensorSliceTransfer_v2<
                 BDataType,
                 BDataType,
@@ -1489,6 +1543,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
+                                    if constexpr(RuntimeSwigluLimit)
+                                        clamp_gate_up(gate, up, problem.SwigluLimit);
                                     tensor_operation::element_wise::Silu{}(gate, gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
@@ -1570,7 +1626,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
-                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(
+                                        gate,
+                                        up,
+                                        RuntimeSwigluLimit ? problem.SwigluLimit : kSwiGluOaiLimit);
                                 }
                             }
                             else
@@ -1618,6 +1677,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
+                                    if constexpr(RuntimeSwigluLimit)
+                                        clamp_gate_up(gate, up, problem.SwigluLimit);
                                     tensor_operation::element_wise::Silu{}(gate, gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
@@ -1667,7 +1728,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
-                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(
+                                        gate,
+                                        up,
+                                        RuntimeSwigluLimit ? problem.SwigluLimit : kSwiGluOaiLimit);
                                 }
                             }
                             else
@@ -1692,20 +1756,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      IndexType,
+                                      PadN>(blockwise_gemm_pipeline,
+                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            c_thread_buf_fp32,
+                                            block_m_id,
+                                            block_n_id,
+                                            p_shared,
+                                            p_sorted_token_ids,
+                                            p_c_grid,
+                                            p_ds_grid,
+                                            c_element_op,
+                                            problem.TopK,
+                                            problem.N);
     }
 
     template <bool HasMainKBlockLoop,
@@ -1806,8 +1873,13 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             }
             gather_offsets(m0) = static_cast<IndexType>(token_offset) * problem.K;
         });
+        // With padding, B reads past its N0 tiles are out of bounds, and reads past K within a
+        // tile row (into the next row) only meet masked A.
         const long_index_t expert_stride = __builtin_amdgcn_readfirstlane(
-            static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+            (PadN || PadK ? static_cast<long_index_t>(GetBPreshuffledSize(
+                                b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled))
+                          : static_cast<long_index_t>(problem.N) * problem.K) *
+            (IsInputGemm ? 2 : 1));
         const long_index_t expert_offset =
             static_cast<long_index_t>(expert_id) * expert_stride / BPackedSize;
         // N0, K0, Blocksize*KPack
@@ -1817,7 +1889,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_b_grid + expert_offset, b_grid_desc_bpreshuffled.GetElementSpaceSize());
+            p_b_grid + expert_offset,
+            GetBPreshuffledSize(b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled));
 
         // A matrix in LDS memory, dst of blockwise copy
         constexpr auto a_block_desc_ak0_m_ak1 =
@@ -1851,13 +1924,14 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             true,
             IndexType,
             1,
-            2>(a_grid_desc_ak0_m_ak1,
-               make_multi_index(0, 0, 0),
-               a_element_op,
-               a_block_desc_ak0_m_ak1,
-               make_multi_index(0, 0, 0),
-               ck::tensor_operation::element_wise::PassThrough{},
-               gather_offsets);
+            2,
+            PadK>(a_grid_desc_ak0_m_ak1,
+                  make_multi_index(0, 0, 0),
+                  a_element_op,
+                  a_block_desc_ak0_m_ak1,
+                  make_multi_index(0, 0, 0),
+                  ck::tensor_operation::element_wise::PassThrough{},
+                  gather_offsets);
 
         // Thread-wise copy
         // K0 -> N0/NWave -> NWave -> KLane -> NLane -> KPack
@@ -1915,7 +1989,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         {
             const BDataType* p_b_grid_up = p_b_grid + expert_stride / 2 / BPackedSize;
             const auto b_grid_buf_up     = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                p_b_grid_up + expert_offset, b_grid_desc_bpreshuffled.GetElementSpaceSize());
+                p_b_grid_up + expert_offset,
+                GetBPreshuffledSize(b_grid_desc_bpreshuffled, BN0Shuffled, BK0Shuffled));
             auto b_blockwise_copy_up = ThreadwiseTensorSliceTransfer_v2<
                 BDataType,
                 BDataType,
@@ -2065,6 +2140,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
+                                    if constexpr(RuntimeSwigluLimit)
+                                        clamp_gate_up(gate, up, problem.SwigluLimit);
                                     tensor_operation::element_wise::Silu{}(gate, gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
@@ -2146,7 +2223,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
-                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(
+                                        gate,
+                                        up,
+                                        RuntimeSwigluLimit ? problem.SwigluLimit : kSwiGluOaiLimit);
                                 }
                             }
                             else
@@ -2194,6 +2274,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
+                                    if constexpr(RuntimeSwigluLimit)
+                                        clamp_gate_up(gate, up, problem.SwigluLimit);
                                     tensor_operation::element_wise::Silu{}(gate, gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
@@ -2243,7 +2325,10 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
-                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(
+                                        gate,
+                                        up,
+                                        RuntimeSwigluLimit ? problem.SwigluLimit : kSwiGluOaiLimit);
                                 }
                             }
                             else
@@ -2269,20 +2354,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      IndexType,
+                                      PadN>(blockwise_gemm_pipeline,
+                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            c_thread_buf_fp32,
+                                            block_m_id,
+                                            block_n_id,
+                                            p_shared,
+                                            p_sorted_token_ids,
+                                            p_c_grid,
+                                            p_ds_grid,
+                                            c_element_op,
+                                            problem.TopK,
+                                            problem.N);
     }
 };
 

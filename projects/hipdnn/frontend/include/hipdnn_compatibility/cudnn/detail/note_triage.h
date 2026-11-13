@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <string>
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
@@ -22,7 +22,7 @@ enum class NoteAction
 {
     NO_OP, // silently accepted
     WARN, // logged and otherwise ignored
-    MAP, // honored by filtering engines (behavior metadata or determinism allowlist)
+    MAP, // honored by filtering engines on their reported notes
     RECORD_ERROR, // recorded; returned by the next validating graph call
 };
 
@@ -36,12 +36,13 @@ inline NoteAction triageSelect(NumericalNote_t note)
     case NumericalNote_t::DOWN_CONVERT_INPUTS:
     case NumericalNote_t::REDUCED_PRECISION_REDUCTION:
     case NumericalNote_t::FFT:
-    case NumericalNote_t::NONDETERMINISTIC:
     case NumericalNote_t::WINOGRAD:
     case NumericalNote_t::WINOGRAD_TILE_4x4:
     case NumericalNote_t::WINOGRAD_TILE_6x6:
     case NumericalNote_t::WINOGRAD_TILE_13x13:
         return NoteAction::WARN;
+    case NumericalNote_t::NONDETERMINISTIC:
+        return NoteAction::MAP;
     // hipDNN cannot prove a NaN-propagation guarantee for any engine.
     case NumericalNote_t::STRICT_NAN_PROP:
     // Out-of-range values fail closed.
@@ -112,9 +113,9 @@ inline std::string noteMessage(const char* method, NumericalNote_t note, NoteAct
     switch(action)
     {
     case NoteAction::WARN:
-        return "Ignoring " + call + "; hipDNN exposes no per-plan numerical-note metadata.";
+        return "Ignoring " + call + "; this shim filters engines only on NONDETERMINISTIC.";
     case NoteAction::MAP:
-        return call + " restricts plans to hipDNN engines that guarantee deterministic results.";
+        return call + " will filter hipDNN engines by numerical-note metadata.";
     case NoteAction::RECORD_ERROR:
         return call + " cannot be honored by this shim; refusing to run rather than ignore it";
     case NoteAction::NO_OP:

@@ -10,10 +10,10 @@ tests are CPU-only and check that both engines agree.
 
 import os
 import re
+from importlib.resources import files
 
 import numpy as np
 import pytest
-from rocke.assets import dsl_docs_dir, platform_root
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.backend import universal_gemm_spec_to_dict
 from rocke.instances.common.gemm_universal import (
@@ -26,6 +26,7 @@ from rocke.instances.common.gemm_universal import (
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import available_engines
 from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.source_tree import require_dsl_docs
 from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_gemm
 
 
@@ -227,29 +228,45 @@ def test_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
                     np.testing.assert_array_equal(c[z, rows], expected[z, rows])
 
 
+# Refusals that follow the target: the warp-tile message and the LDS cap differ.
+_F64_GEMM_REFUSALS = {
+    "gfx942": {
+        "warp_tile": "fp64 GEMM supports only warp_tile (16, 16, 4)",
+        "lds_k_pad": (64, "LDS budget 81920 > 65536 cap"),
+    },
+    "gfx950": {
+        "warp_tile": "unsupported fp64 warp_tile (4, 4, 4) on gfx950",
+        "lds_k_pad": (160, "LDS budget 180224 > 163840 cap"),
+    },
+}
+
+
+@pytest.mark.parametrize("arch", sorted(_F64_GEMM_REFUSALS))
 @pytest.mark.parametrize(
-    "spec, reason",
-    [
-        (
+    "case", ["warp_tile", "acc", "direct_to_lds_pad_k", "lds_k_pad"]
+)
+def test_f64_gemm_rejects_unsupported(arch, case):
+    expected = _F64_GEMM_REFUSALS[arch]
+    pad, pad_reason = expected["lds_k_pad"]
+    spec, reason = {
+        "warp_tile": (
             _spec((64, 64, 16, 2, 2), "mem", "default", warp_tile=(4, 4, 4)),
-            "fp64 GEMM supports only warp_tile (16, 16, 4)",
+            expected["warp_tile"],
         ),
-        (
+        "acc": (
             _spec((64, 64, 16, 2, 2), "mem", "default", acc="fp32"),
             "only supports fp64 accumulation for fp64",
         ),
-        (
+        "direct_to_lds_pad_k": (
             _spec((64, 64, 16, 2, 2), "compv3", "default", True, direct_to_lds=True),
             "fp64 GEMM does not support direct_to_lds with pad_k",
         ),
-        (
-            _spec((64, 64, 16, 2, 2), "compv4", "default", lds_k_pad=64),
-            "LDS budget 81920 > 65536 cap",
+        "lds_k_pad": (
+            _spec((64, 64, 16, 2, 2), "compv4", "default", lds_k_pad=pad),
+            pad_reason,
         ),
-    ],
-)
-def test_f64_gemm_rejects_unsupported(spec, reason):
-    _assert_both_engines_refuse(spec, "gfx942", reason)
+    }[case]
+    _assert_both_engines_refuse(spec, arch, reason)
 
 
 def test_f64_gemm_targets_are_the_documented_ones():
@@ -271,15 +288,7 @@ def _doc_sentences(text):
         yield from re.split(r"(?<=[.;])\s+|(?<=\.\*\*)\s+", " ".join(block.split()))
 
 
-@pytest.mark.parametrize(
-    "doc",
-    [
-        dsl_docs_dir() / "reference" / "dtype_support.md",
-        platform_root() / "python" / "rocke" / "instances" / "SUPPORT_MATRIX.md",
-    ],
-    ids=lambda path: path.name,
-)
-def test_f64_gemm_doc_sentences_name_every_admitted_target(doc):
+def _assert_names_every_admitted_target(doc):
     """A sentence that places fp64 universal GEMM on named targets names all of
     them, so no summary line describes it as narrower than the validator."""
     narrower = []
@@ -292,6 +301,18 @@ def test_f64_gemm_doc_sentences_name_every_admitted_target(doc):
     assert not narrower, f"{doc.name} names only some fp64 GEMM targets in: {narrower}"
 
 
+def test_dtype_support_doc_names_every_f64_gemm_target():
+    _assert_names_every_admitted_target(
+        require_dsl_docs() / "reference" / "dtype_support.md"
+    )
+
+
+def test_support_matrix_names_every_f64_gemm_target():
+    # Read through the package, so the CMake-installed test payload, which
+    # installs the package directory whole, checks its copy too.
+    _assert_names_every_admitted_target(files("rocke.instances") / "SUPPORT_MATRIX.md")
+
+
 @pytest.mark.parametrize("arch", _F64_GEMM_ARCHS_WITHOUT_DMA)
 def test_f64_gemm_direct_to_lds_refused_without_dma(arch):
     spec = _spec((64, 64, 16, 2, 2), "compv3", "cshuffle", direct_to_lds=True)
@@ -300,6 +321,10 @@ def test_f64_gemm_direct_to_lds_refused_without_dma(arch):
     )
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the single-buffer fallback sizes follow the gfx942 64 KiB LDS cap; gfx950 has 160 KiB",
+)
 @pytest.mark.parametrize(
     "lds_k_pad, smem_bytes", [(16, 32768), (32, 49152), (48, 65536)]
 )

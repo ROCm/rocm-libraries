@@ -40,7 +40,7 @@
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
 #define __gfx120__
 #endif
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
 #define __gfx125__
 #endif
 #if defined(__gfx120__) || defined(__gfx125__)
@@ -77,6 +77,17 @@
 #endif
 #ifndef CK_TILE_USE_CUSTOM_DATA_TYPE
 #define CK_TILE_USE_CUSTOM_DATA_TYPE 0 // custom data type will generate extra move/bfi code
+#endif
+
+// Whether the compiler exposes the asyncmark / wait_asyncmark builtins, which represent
+// asynchronous global->LDS DMA to the LLVM memory model (so no manual fence is needed around the
+// wait). Present on ROCm 7.13+ (absent on 7.2). When absent, CK falls back to manual vmcnt /
+// s_wait_asynccnt waits plus memory-model fences.
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_asyncmark) && \
+    __has_builtin(__builtin_amdgcn_wait_asyncmark)
+#define CK_TILE_HAS_ASYNCMARK 1
+#else
+#define CK_TILE_HAS_ASYNCMARK 0
 #endif
 
 #define CK_TILE_FLOAT_TO_TF32_TRUNC 0
@@ -370,7 +381,7 @@
 
 #ifndef CK_TILE_USE_OCP_FP8
 #if defined(__HIP_DEVICE_COMPILE__)
-#if defined(__gfx950__) || defined(__gfx12__)
+#if defined(__gfx950__) || defined(__gfx12__) || defined(__gfx117__)
 #define CK_TILE_USE_OCP_FP8 1
 #else
 #define CK_TILE_USE_OCP_FP8 0
@@ -439,7 +450,9 @@ namespace ck_tile::core {
  * @var CK_TILE_ARCH_GFX1200 Indicates if the compiler target architecture is GFX1200.
  * @var CK_TILE_ARCH_GFX1201 Indicates if the compiler target architecture is GFX1201.
  * @var CK_TILE_ARCH_GFX12_GENERIC Indicates if the compiler target architecture is GFX12 generic.
- * @var CK_TILE_ARCH_GFX1250 Indicates if the compiler target architecture is GFX1250.
+ * @var CK_TILE_ARCH_GFX1250 Indicates if the compiler target architecture is GFX1250 or
+ * gfx1250-strict.
+ * @var CK_TILE_ARCH_GFX1251 Indicates if the compiler target architecture is GFX1251.
  */
 struct amdgcn_compiler_target_state
 {
@@ -646,11 +659,17 @@ struct amdgcn_compiler_target_state
 #endif // __gfx12_generic__
 
     // GFX12.5
-#if defined(__gfx125__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
     static constexpr bool CK_TILE_ARCH_GFX1250 = true;
 #else
     static constexpr bool CK_TILE_ARCH_GFX1250 = false;
-#endif // __gfx125__
+#endif // __gfx1250__ || __gfx1250_strict__
+
+#if defined(__gfx1251__)
+    static constexpr bool CK_TILE_ARCH_GFX1251 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1251 = false;
+#endif // __gfx1251__
 
     // SPIR-V (target-agnostic, JIT-compiled at runtime)
     // Guard with __HIP_DEVICE_COMPILE__ because __SPIRV__ is defined during
@@ -715,7 +734,8 @@ CK_TILE_HOST_DEVICE static constexpr std::uint32_t count_values_of(T search, Ts.
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1200,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1201,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX12_GENERIC,   \
-        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1250
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1250,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1251
 
 // Sanity check: make sure only one target architecture is defined during device compile
 // SPIR-V is target-agnostic, so none of the specific arch flags will be set

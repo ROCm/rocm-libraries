@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_bufferSize computes the user-allocated buffer size required when computing the
@@ -46,13 +47,13 @@ extern "C" {
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA                sparse matrix descriptor.
 *  @param[in]
 *  vecX                dense vector descriptor.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY                dense vector descriptor.
 *  @param[in]
@@ -61,6 +62,7 @@ extern "C" {
 *  alg                 SpMV algorithm for the SpMV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -69,7 +71,6 @@ extern "C" {
 *          or vector dimensions are incompatible.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -95,6 +96,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_preprocess performs analysis on the sparse matrix \f$op(A)\f$ when computing the
@@ -114,13 +116,13 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
@@ -136,7 +138,6 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -162,6 +163,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute the sparse matrix multiplication with a dense vector.
 *
@@ -280,13 +282,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
@@ -302,7 +304,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                 hipsparseOperation_t        opA,

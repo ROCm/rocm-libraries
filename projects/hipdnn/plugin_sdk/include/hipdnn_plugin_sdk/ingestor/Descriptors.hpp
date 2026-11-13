@@ -237,6 +237,7 @@ enum class UhdAdapter
     TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
+    LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
@@ -353,9 +354,9 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path the adapter opens. The loader
-    /// stores it resolved and absolute; a descriptor built in memory may give it relative to
-    /// @ref baseDir. Derived from the file's location; not part of operator==.
+    /// TREE_DATA / TABLE / LINEAR_DATA / CUSTOM_LIBRARY: the artifact path the adapter opens.
+    /// The loader stores it resolved and absolute; a descriptor built in memory may give it
+    /// relative to @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
     /// The authored `artifact` (or `library`) value, relative to the declaring `.uhd.json`.
     /// Compared by operator== in place of @ref modelArtifactPath.
@@ -473,11 +474,12 @@ struct EngineDescriptor
     std::optional<DescriptorId> heuristicId;
 
     /// RFC 0019 §3.1 role-scoped UHDs, each optional, keyed by `gcnArchName` with an optional
-    /// `default`. The scoring roles list UHDs per arch; the loader indexes them by each UHD's
-    /// own `score.metric` rather than restating the metric here.
+    /// `default`. Every role lists UHDs per arch; the loader indexes the scoring roles by each
+    /// UHD's own `score.metric` rather than restating the metric here. The candidate generators
+    /// (`predict_applicable_kernels`) are a list too, for the JIT spaces that will consume them.
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
-    std::map<std::string, DescriptorId> predictApplicableKernels;
+    std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
@@ -485,9 +487,10 @@ struct EngineDescriptor
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
-    /// yet, so nothing consumes the strings.
-    std::vector<std::string> numericalNotes;
+    /// `hipdnnBackendNumericalNote_t` values. nullopt means the descriptor authors no
+    /// claim (the backend then reports the engine as nondeterministic); a present
+    /// vector, even an empty one, is the provider's explicit claim.
+    std::optional<std::vector<int32_t>> numericalNotes;
     /// Resolved through GraphMatchRegistry; empty means this engine declares no
     /// graph-topology match.
     std::string graphMatchNativeSymbol;

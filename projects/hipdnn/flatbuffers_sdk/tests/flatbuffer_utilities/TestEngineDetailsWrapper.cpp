@@ -32,6 +32,18 @@ flatbuffers::FlatBufferBuilder
 }
 
 flatbuffers::FlatBufferBuilder
+    buildEngineDetailsWithNumericalNotes(int64_t engineId, const std::vector<int32_t>& notes)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    // Built through the table API: an empty vector offset is written, unlike the object API.
+    auto notesVector = builder.CreateVector(notes);
+    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, 0, 0, 0, 0, notesVector);
+    builder.Finish(details);
+    return builder;
+}
+
+flatbuffers::FlatBufferBuilder
     buildEngineDetailsWithKnobs(int64_t engineId, const std::vector<std::string>& knobNames)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -183,6 +195,39 @@ TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
     EXPECT_EQ(notes[0], 0);
     EXPECT_EQ(notes[1], 3);
     EXPECT_EQ(notes[2], 4);
+}
+
+TEST(TestEngineDetailsWrapper, NumericalNotesMissingFieldIsNullopt)
+{
+    auto builder = buildValidEngineDetailsBuffer(42);
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(wrapper.numericalNotes().has_value());
+}
+
+TEST(TestEngineDetailsWrapper, NumericalNotesExplicitEmptyIsEmptyVector)
+{
+    auto builder = buildEngineDetailsWithNumericalNotes(42, {});
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto notes = wrapper.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_TRUE(notes->empty());
+}
+
+TEST(TestEngineDetailsWrapper, NumericalNotesPopulated)
+{
+    auto builder = buildEngineDetailsWithNumericalNotes(42, {4, 0, 77});
+    const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto notes = wrapper.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_EQ(*notes, (std::vector<int32_t>{4, 0, 77}));
+}
+
+TEST(TestEngineDetailsWrapper, NumericalNotesOnInvalidWrapperThrows)
+{
+    const EngineDetailsWrapper wrapper(nullptr, 0);
+    EXPECT_THROW(wrapper.numericalNotes(), std::invalid_argument);
 }
 
 TEST(TestEngineDetailsWrapper, NamePopulated)

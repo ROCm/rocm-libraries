@@ -376,19 +376,20 @@ satellite bundle installs only its KDP (see [extend.md](extend.md)'s *Sibling bu
 
 **A new packaged engine shipped from `descriptors/`** with its own device tests needs
 further sites that no generator fragment emits. `hipkernel:Gfx950AttentionDense`
-(PR #12311) added each one; mirror its lines with your engine's names, and gate every
-registration on the same availability predicate so a build that does not ship the
-engine for an arch registers nothing for it, rather than a target whose engine never
-appears:
+(PR #12311) added each one; mirror its lines with your engine's names. Every per-arch
+registration (the census and the engine-pinned integration targets, which install into
+the arch's census shard) is gated on `hkp_product_ships_engine_for_arch()`, so a build
+that does not ship the engine for an arch registers nothing for it rather than a target
+whose engine never appears. Host-side test sources are gated on the arch-agnostic
+`hkp_product_offers_engine()`. Both are in
+`$PROVIDER/descriptor-packaging/cmake/HkpPackaging.cmake`.
 
 | Site | Consumer (the gfx950 instance) | Purpose |
 |---|---|---|
 | `<engine>KpackModuleCache()` declaration | `$PROVIDER/src/engines/kernel_ingestor_engine/IngestorKernelCode.hpp` (`gfx950AttentionDenseKpackModuleCache`) | The per-pack kpack module cache the native file defines and its `reset<Engine>ModuleCache` clears; one cache per pack |
-| Availability predicate `hkp_<engine>_available(<out>)` | `$PROVIDER/descriptor-packaging/cmake/HkpPackaging.cmake` (`hkp_gfx950_attention_dense_available`) | TRUE only when the `product` pack is wired, the arch is in its list and its root declares the engine for that arch |
-| Census call gated on the predicate, `PACK_NAME product ARCHES <arch>` | `$PROVIDER/src/tests/CMakeLists.txt` | The census row above, for a shipped bundle |
-| Device test source in `hip_kernel_provider_integration_tests` | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5 |
-| `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
-| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard; the same TOML also goes to `hkp_reserve_census_shard(... FILES <toml>)` | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites. Without `FILES`, configuration fails; the `hkp_reserve_census_shard` header in `HkpPackaging.cmake` says why |
+| A row in `HKP_PINNED_ATTENTION_ENGINES`: `<arch> <snake slug> <engine local name> <bundle filter variable> <TOML> <categories YAML variable>` | `$PROVIDER/src/CMakeLists.txt` (`gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER …`) | For a single-arch rocKE attention engine pinned against the `SdpaFwd` bundles, the row replaces per-engine registration calls; a row holds one arch. It drives the `hip-kernel-provider-<arch>-attention-<dashed slug>-external-integration-check` tiered suites (the loop reserves its TOML with the shard), the `hip_kernel_provider_<arch>_attention_<slug>_gpu_ref_integration_tests` engine-pinned bundle run stage 5 executes (`src/integration_tests/CMakeLists.txt`) and the generated `Test<Engine>Packs` census (`src/tests/CMakeLists.txt`), so do not also splice the fragment's census call: a suite registered twice fails configuration. `descriptor-packaging/tests/test_attention_bundle_filters.py` checks the filter against the categories YAML, and the row's arch, TOML and `Packs` suite. Any other engine, `ASM_SDPA_ENGINE` and the FlyDSL SDPA engines included, registers its targets with its own calls, as the loops do |
+| `_hkp_<stem>_cases_<arch>_<snake slug>` | `$PROVIDER/src/tests/CMakeLists.txt` | Only with a hand-written companion census suite (`Test<Engine>CatalogTiles` or `Test<Engine>ModelBinding`; `_hkp_companion_suites` pairs each suite with its `<stem>`): its case names, which the census loop registers beside the generated suite |
+| A knob-suite row: the device test source and the engines it pins | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp Gfx950AttentionDense`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5. Compiled into `hip_kernel_provider_integration_tests` when the product root offers every engine the row lists |
 | Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
 | New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
 | Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
@@ -973,6 +974,13 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      --sweep-output "$SWEEP_OUTPUT" --out "$SCRATCH/reduced.yaml" \
      --report "$EVIDENCE/variant_reduce.md"
    ```
+
+   A slotted engine reduces per slot and passes `--kdp` once per pack (each slot's KDPs under
+   `$FINAL_DESCRIPTOR_ROOT`). `--budget` and `reduction.aot_budget_per_arch` bound each pack
+   per arch. A timing phase with no records for a slot is exit 3. Rule ids are per slot, and
+   the loss they report bounds each slot with the other slots at their reference picks, not
+   the whole program; stage 7's full-corpus run is the program-level check. See the
+   IngestorGenerator README, *Reducing a slotted engine*.
 
 5. **Apply what the user picks.** Set `RULES` to the comma-separated rule ids the user
    chose from the report's rule table (`R` and six hex digits, derived from the rule

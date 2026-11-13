@@ -87,6 +87,9 @@ class Descriptor:
     doc: dict
     rel_dir: Path = Path(".")
     sidecars: list = field(default_factory=list)
+    #: The `<model>.dvc` pointer of a model file that is not pulled, when the UHD is
+    #: to be left out of the build (set by _resolve_sidecar).
+    unpulled_pointer: object = None
 
     @property
     def type(self):
@@ -101,6 +104,9 @@ class Descriptor:
 class FlatInput:
     descriptors: list = field(default_factory=list)
     generic_targets: object = None
+    #: One `{"uhd_id", "uhd", "pointer"}` entry per UHD left out of the build for an
+    #: un-pulled model (set by _drop_unpulled_models; paths are source-root relative).
+    unpulled_models: list = field(default_factory=list)
 
     def by_type(self, dtype):
         return [d for d in self.descriptors if d.type == dtype]
@@ -683,6 +689,12 @@ def _validate_ued(desc):
                 f"{where}.behavior_notes has unknown note '{note}' "
                 f"(expected one of {', '.join(_BEHAVIOR_NOTES)})"
             )
+    for note in doc.get("numerical_notes", []):
+        if note not in _NUMERICAL_NOTES:
+            raise HkpPackError(
+                f"{where}.numerical_notes has unknown note '{note}' "
+                f"(expected one of {', '.join(_NUMERICAL_NOTES)})"
+            )
     if "sdk_version" in doc:
         version = doc["sdk_version"]
         if not isinstance(version, str) or not _sdk_version_fits(version):
@@ -720,17 +732,16 @@ def _validate_unique_strings(values, key, where):
 
 
 def _validate_role_map(entries, role, where):
-    """An arch-to-UUID map; a scoring role may list one UHD per metric."""
+    """An arch-to-UUID map; every role may list one UHD per metric (RFC 0019 §3.1)."""
     if not isinstance(entries, dict) or not entries:
         raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
     for arch, value in entries.items():
         if arch != "default":
             _reject_nonbare_arch([arch], where)
         entry_where = f"{where}.{role}.{arch}"
-        if isinstance(value, str) or role not in _METRIC_ROLES:
+        if isinstance(value, str):
             _validate_uuid(value, entry_where)
             continue
-        # RFC 0019 §3.1: a scoring role may list one UHD per metric.
         if not isinstance(value, list) or not value:
             raise HkpPackError(
                 f"{entry_where} must be a UUID or a nonempty list of UUIDs"
@@ -807,15 +818,27 @@ _UHD_ADAPTERS = (
     "native",
     "tree_data",
     "table",
+    "linear_data",
     "custom_library",
 )
-_BEHAVIOR_NOTES = ("runtime_compilation",)
+_BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
+# DescriptorLoader.hpp numericalNoteFromString: the ten cuDNN numerical-note names, in
+# NumericalNote.h enum order.
+_NUMERICAL_NOTES = (
+    "tensor_core",
+    "down_convert_inputs",
+    "reduced_precision_reduction",
+    "fft",
+    "nondeterministic",
+    "winograd",
+    "winograd_tile_4x4",
+    "winograd_tile_6x6",
+    "winograd_tile_13x13",
+    "strict_nan_prop",
+)
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
-# Roles mapping an arch to one UHD per ranking metric. A candidate generator has no
-# metric, so predict_applicable_kernels stays single.
-_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
 _UED_KEYS = (
     "version",
     "revision",
@@ -986,10 +1009,11 @@ def _validate_kmds(kmds, where):
         _validate_version(entry["revision"], f"{entry_where} revision")
 
 
-def _validate_uhd(desc, source_root):
+def _validate_uhd(desc, source_root, require_dvc=False):
     """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
 
-    Packaging requires artifacts to exist; runtime may retain an unavailable model binding.
+    Packaging requires artifacts to exist, except a DVC-tracked model that was not
+    pulled (see _resolve_sidecar); runtime may retain an unavailable model binding.
     """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
@@ -1029,7 +1053,7 @@ def _validate_uhd(desc, source_root):
     if adapter != "static_order" or "objective" in doc:
         _require(doc, ("objective",), where)
         _require_enum(doc, "objective", ("max", "min"), where)
-    if adapter in ("tree_data", "table"):
+    if adapter in ("tree_data", "table", "linear_data"):
         _require(doc, ("features_signature", "features_hash", "trained_against"), where)
     if "features_signature" in doc:
         signature = doc["features_signature"]
@@ -1101,6 +1125,20 @@ def _validate_uhd(desc, source_root):
                     f"{where}: score.metric '{score['metric']}' requires objective "
                     f"'{expected}', got {doc.get('objective')!r}"
                 )
+    if adapter == "linear_data":
+        # A log slowdown against the catalog's best (RFC 0019 §7.5): lower is better and in
+        # no registered unit, as UhdParser requires.
+        score = doc.get("score", {})
+        if (
+            doc["objective"] != "min"
+            or "metric" in score
+            or score.get("calibrated")
+            or score.get("transform", "identity") != "identity"
+        ):
+            raise HkpPackError(
+                f"{where}: linear_data requires objective 'min' and no score.metric, "
+                "calibration or transform"
+            )
     body = doc[adapter]
     if adapter == "static_order":
         # static_order ranks by UKD priority, then descriptor id. Declared criteria are
@@ -1139,7 +1177,9 @@ def _validate_uhd(desc, source_root):
         # The runtime supports no library configuration; only `{}` loads.
         if "config" in body and body["config"] != {}:
             raise HkpPackError(f"{where}.custom_library.config must be an empty object")
-    desc.sidecars.append(_resolve_sidecar(desc, source_root, body[key]))
+    sidecar = _resolve_sidecar(desc, source_root, body[key], require_dvc)
+    if sidecar is not None:
+        desc.sidecars.append(sidecar)
 
 
 def _validate_contained_path(payload, where):
@@ -1157,7 +1197,7 @@ def _validate_contained_path(payload, where):
         )
 
 
-def _resolve_sidecar(desc, source_root, payload):
+def _resolve_sidecar(desc, source_root, payload, require_dvc=False):
     """Resolve a descriptor-relative payload path to a carriable Sidecar.
 
     No root-relative fallback (matching compile_hip_variant): a typo must not bind
@@ -1194,9 +1234,21 @@ def _resolve_sidecar(desc, source_root, payload):
             "folder, where the per-arch archive is written"
         )
     if not found:
+        # A model tracked by a DVC pointer that was never pulled is not a bug in
+        # the descriptor. Strict builds (release) still refuse it.
+        pointer = (Path(source_root) / dest).with_name(dest.name + ".dvc")
+        if not require_dvc and pointer.is_file():
+            desc.unpulled_pointer = pointer
+            return None
         raise HkpPackError(
             f"{where} payload source not found: {payload} (looked for {resolved}, "
             f"resolved relative to descriptor folder {Path(desc.rel_dir).as_posix()})"
+            + (
+                f"; its DVC pointer {pointer} exists, so run: dvc pull -r ingestor "
+                f"{pointer}"
+                if pointer.is_file()
+                else ""
+            )
         )
     return Sidecar(source=resolved, rel_dir=dest.parent, name=dest.name)
 
@@ -1222,7 +1274,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, source_root, log=print):
+def _validate_shape(desc, source_root, log=print, *, require_dvc=False):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -1251,13 +1303,55 @@ def _validate_shape(desc, source_root, log=print):
     if dtype == "udd":
         _validate_udd(desc)
     if dtype == "uhd":
-        _validate_uhd(desc, source_root)
+        _validate_uhd(desc, source_root, require_dvc)
     if dtype == "kmd":
         _validate_kmd(desc)
 
 
+def _excluded_prefixes(exclude_folders):
+    """Each `exclude_folders` entry as a tuple of lower-cased path segments."""
+    prefixes = set()
+    for name in exclude_folders:
+        parts = tuple(
+            part.lower() for part in name.replace("\\", "/").split("/") if part
+        )
+        if parts:
+            prefixes.add(parts)
+    return prefixes
+
+
+def _under_excluded(rel_path, excluded):
+    """Whether a file at `rel_path` (relative to the root) is inside an excluded folder."""
+    parts = tuple(part.lower() for part in rel_path.parts)
+    return any(
+        len(parts) > len(prefix) and parts[: len(prefix)] == prefix
+        for prefix in excluded
+    )
+
+
+def _find_folder(root, prefix):
+    """The folder of `root` whose segments match `prefix` case-insensitively, or None."""
+    folder = root
+    for segment in prefix:
+        matches = sorted(
+            child
+            for child in folder.iterdir()
+            if child.is_dir() and child.name.lower() == segment
+        )
+        if not matches:
+            return None
+        folder = matches[0]
+    return folder
+
+
 def load_flat_input(
-    root, generic_targets, log=print, *, exclude_folders=(), disabled_kinds=()
+    root,
+    generic_targets,
+    log=print,
+    *,
+    exclude_folders=(),
+    disabled_kinds=(),
+    require_dvc=False,
 ):
     """Load and structurally validate every *.json descriptor under a root.
 
@@ -1274,13 +1368,22 @@ def load_flat_input(
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged.
 
-    `exclude_folders` names top-level child folders of the root that are not
-    content in this build: nothing under one is read, validated or shipped.
-    A name matches case-insensitively, as the reserved `kpack/` folder does,
-    and one naming no folder is ignored (a root need not carry every family).
+    `exclude_folders` names folders of the root that are not content in this
+    build: nothing under one is read, validated or shipped. An entry is a
+    top-level child (a disabled family, `rocKE`) or a `/`-separated path under
+    the root (a bundle whose large files were not fetched,
+    `rocKE/<bundle>`). It matches case-insensitively, as the reserved `kpack/`
+    folder does, and one naming no folder is ignored (a root need not carry
+    every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.
+    A UHD whose model file is absent while a `<model>.dvc` pointer sits beside it
+    (a `dvc pull` that was not run) is validated, then left out with a warning: the
+    UHD and its model do not ship, and a UED naming it keeps a dangling UHD id, which
+    the loader treats as that role being off. `require_dvc` makes it an error
+    instead, as a release build wants. A missing model with no pointer is always an
+    error.
 
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
@@ -1301,17 +1404,19 @@ def load_flat_input(
 
     # Case-insensitive for the same reason as the `kpack/` guard below: the packed
     # tree is also consumed on Windows, where `rocKE` and `rocke` are one directory.
-    excluded = {name.lower() for name in exclude_folders}
-    for name in sorted(p.name for p in root.iterdir() if p.is_dir()):
-        if name.lower() in excluded:
-            log(f"excluding disabled family folder {name}/")
+    excluded = _excluded_prefixes(exclude_folders)
+    for prefix in sorted(excluded):
+        folder = _find_folder(root, prefix)
+        if folder is not None:
+            log(f"excluding folder {folder.relative_to(root).as_posix()}/")
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
-        # A disabled family folder is not content in this build: its files are never
-        # read, so they can neither ship nor fail validation.
-        if len(rel_path.parts) > 1 and rel_path.parts[0].lower() in excluded:
+        # An excluded folder (a disabled family, or a bundle whose DVC files were not
+        # pulled) is not content in this build: its files are never read, so they can
+        # neither ship nor fail validation.
+        if _under_excluded(rel_path, excluded):
             continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,
@@ -1349,7 +1454,7 @@ def load_flat_input(
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, root, log)
+        _validate_shape(desc, root, log, require_dvc=require_dvc)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors, generic_targets=generic_targets)
@@ -1360,6 +1465,7 @@ def load_flat_input(
     _warn_orphan_standalone_ukds(flat, log)
     if disabled_kinds:
         _drop_disabled_kinds(flat, frozenset(disabled_kinds), log)
+    _drop_unpulled_models(flat, log, root)
     return flat
 
 
@@ -1471,6 +1577,37 @@ def validate_generic_arch(flat):
                     "a generic KDP must list every generic of the KDP and only "
                     "entries the KDP lists"
                 )
+
+
+def _drop_unpulled_models(flat, log, root):
+    """Drop every UHD whose model file is absent but tracked by a DVC pointer.
+
+    Runs after validation, so the dropped UHD is still checked and the UEDs naming
+    it still resolve against it. Nothing of it ships: not the UHD, not its model.
+    A UED left naming it is a dangling UHD id, which the loader treats as a role
+    that is off for the architecture, not as an error (RFC 0020 §13.2); the engine
+    stays available. Each one is noted on `flat.unpulled_models`, which the packer
+    writes beside the packed tree (see pipeline.UNPULLED_RECORD) so a census can tell
+    a model left out on purpose from a UHD the packer lost.
+    """
+    kept = []
+    for desc in flat.descriptors:
+        if desc.unpulled_pointer is not None:
+            log(
+                f"warning: not shipping UHD {desc.path.name} (id '{desc.id}'): its "
+                f"model file is not pulled; run: dvc pull -r ingestor "
+                f"{desc.unpulled_pointer}"
+            )
+            flat.unpulled_models.append(
+                {
+                    "uhd_id": canonical_id(desc.id),
+                    "uhd": (Path(desc.rel_dir) / desc.path.name).as_posix(),
+                    "pointer": Path(desc.unpulled_pointer).relative_to(root).as_posix(),
+                }
+            )
+            continue
+        kept.append(desc)
+    flat.descriptors = kept
 
 
 def _drop_disabled_kinds(flat, disabled_kinds, log):
@@ -1698,13 +1835,13 @@ def _validate_slot_packs(flat):
 
 
 def _validate_role_metrics(ued, uhd_by_id):
-    """At most one model per metric for each architecture a scoring role names.
+    """At most one model per metric for each architecture a role names.
 
     RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
     model must declare a metric. A slot ranker must not (RFC 0021 §7): a slot has
     no time of its own, so the loader rejects an engine whose slot ranker names one.
     """
-    scopes = [(f"UED {ued.path.name}", ued.doc, _METRIC_ROLES, False)]
+    scopes = [(f"UED {ued.path.name}", ued.doc, _UHD_ROLES, False)]
     scopes += [
         (who, slot, ("sort_kernel_catalog",), True)
         for who, slot in _selection_scopes(ued)

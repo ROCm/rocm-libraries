@@ -11,7 +11,7 @@ subtrees:
     - file: install/rocALUTION-install.rst
       title: Install rocALUTION
     - file: install/rocALUTION-build-from-source.rst
-      title: Build rocALUTION from source
+      title: Build from source
 
   - caption: Conceptual
     entries:
