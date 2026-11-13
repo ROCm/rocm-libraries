@@ -2507,48 +2507,16 @@ __device__ void k1ConvFma(const K1Args& a)
         for(int kk = 0; kk < BK; ++kk)
         {
             float av[TM], bv[TN];
-            if constexpr(sizeof(T) == 2)
-            {
-                // 16-bit runs of 4: one 8-byte read each (the leading dimensions are multiples
-                // of 8 elements), not four 2-byte reads.
-                typedef unsigned K1U2w __attribute__((ext_vector_type(2)));
-                const auto unpack = [](const K1U2w d, int e) {
-                    const unsigned w = d[e / 2];
-                    return __builtin_bit_cast(
-                        T, static_cast<unsigned short>(e % 2 == 0 ? (w & 0xffffu) : (w >> 16)));
-                };
 #pragma unroll
-                for(int q = 0; q < TM / 4; ++q)
-                {
-                    const K1U2w v
-                        = *reinterpret_cast<const K1U2w*>(As + kk * LDA + (q * TY + ty) * 4);
+            for(int q = 0; q < TM / 4; ++q)
 #pragma unroll
-                    for(int e = 0; e < 4; ++e)
-                        av[q * 4 + e] = K1Elem<T>::load(unpack(v, e));
-                }
+                for(int e = 0; e < 4; ++e)
+                    av[q * 4 + e] = K1Elem<T>::load(As[kk * LDA + (q * TY + ty) * 4 + e]);
 #pragma unroll
-                for(int q = 0; q < TN / 4; ++q)
-                {
-                    const K1U2w v
-                        = *reinterpret_cast<const K1U2w*>(Bs + kk * LDB + (q * TX + tx) * 4);
+            for(int q = 0; q < TN / 4; ++q)
 #pragma unroll
-                    for(int e = 0; e < 4; ++e)
-                        bv[q * 4 + e] = K1Elem<T>::load(unpack(v, e));
-                }
-            }
-            else
-            {
-#pragma unroll
-                for(int q = 0; q < TM / 4; ++q)
-#pragma unroll
-                    for(int e = 0; e < 4; ++e)
-                        av[q * 4 + e] = K1Elem<T>::load(As[kk * LDA + (q * TY + ty) * 4 + e]);
-#pragma unroll
-                for(int q = 0; q < TN / 4; ++q)
-#pragma unroll
-                    for(int e = 0; e < 4; ++e)
-                        bv[q * 4 + e] = K1Elem<T>::load(Bs[kk * LDB + (q * TX + tx) * 4 + e]);
-            }
+                for(int e = 0; e < 4; ++e)
+                    bv[q * 4 + e] = K1Elem<T>::load(Bs[kk * LDB + (q * TX + tx) * 4 + e]);
 #pragma unroll
             for(int i = 0; i < TM; ++i)
 #pragma unroll
