@@ -1435,6 +1435,10 @@ def build_unified_attention_reduce_tiled(
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
+    # Direct code-object compiler lever (``rocke.helpers.compile.DIRECT_LEVERS_ATTR``; not IR): the
+    # reduce launch is too small for other waves to hide its 64 loads per lane, so the scheduler
+    # keeps more of them in flight (``widewin``).
+    b.kernel.attrs["direct_levers"] = "widewin"
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 

@@ -39,6 +39,36 @@ _SPECS = [
 ]
 
 
+def test_attention_builders_request_their_direct_levers() -> None:
+    """``attrs["direct_levers"]`` (not IR) names the direct-compiler levers each gfx950 unified-attention
+    kernel wants: the 2D kernel's K/V tile loads ahead of its QK MFMAs and its block-table selects together,
+    the reduce kernel's wider scheduling window."""
+    from kernels import (
+        UnifiedAttentionReduceTiledSpec,
+        build_unified_attention_reduce_tiled,
+    )
+
+    spec2d = UnifiedAttention2DTiledSpec(
+        use_sinks=False,
+        has_softcap=False,
+        sliding_window=0,
+        **_SPECS[0],
+    )
+    assert (
+        build_unified_attention_2d_tiled(spec2d, arch="gfx950").attrs["direct_levers"]
+        == "dmafree,smemsink"
+    )
+    reduce_spec = UnifiedAttentionReduceTiledSpec(
+        head_size=128, num_query_heads=16, num_kv_heads=2, dtype="fp16", num_segments=64
+    )
+    assert (
+        build_unified_attention_reduce_tiled(reduce_spec, arch="gfx950").attrs[
+            "direct_levers"
+        ]
+        == "widewin"
+    )
+
+
 @pytest.mark.parametrize(
     "fields",
     _SPECS,
