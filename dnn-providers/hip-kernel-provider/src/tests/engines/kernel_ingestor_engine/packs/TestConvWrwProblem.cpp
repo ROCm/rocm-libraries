@@ -3202,11 +3202,11 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     auto aligned = ring;
     aligned.align = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 72) * 2);
-    // Channels-last: the window's 34 positions (words of 2), ceil(36 / 8) + 1 = 6 units bumped
-    // to 7 (LDB 56).
+    // Channels-last: the window's 34 positions (words of 2), ceil(36 / 8) + 1 = 6 units (LDB
+    // 48; channels-last tiles keep even counts).
     auto channelsLast = ring;
     channelsLast.layout = 1;
-    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 56) * 2);
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 48) * 2);
     // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48 (6
     // units: strided tiles keep even counts); x tile 3 rows x 2 phases x 64 channels.
     auto rows = ring;
