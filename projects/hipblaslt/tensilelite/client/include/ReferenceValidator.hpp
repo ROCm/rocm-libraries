@@ -43,6 +43,8 @@ namespace TensileLite
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class ReferenceValidator : public RunListener
         {
         public:
@@ -126,8 +128,16 @@ namespace TensileLite
                 return m_referenceInputs[card];
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         private:
             void allocateResultBuffer(size_t bytes);
+
+            // The problem device `card` runs: its slice under --split-m-devices, else m_problem.
+            ContractionProblem* deviceProblem(size_t card) const;
 
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
@@ -140,6 +150,8 @@ namespace TensileLite
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
             ContractionProblem* m_problem;
+
+            ClientProblemFactory const* m_split = nullptr;
 
             bool m_enabled;
             bool m_fusedA2A = false;

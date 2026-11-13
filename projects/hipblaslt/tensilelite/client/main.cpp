@@ -232,7 +232,7 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
-                ("split-m-devices",          po::value<int>()->default_value(1), "Split M of each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the M/N slices concurrently. Reported time is the slowest device; reported GFlops are for the full problem. For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-m-devices",          po::value<int>()->default_value(1), "Split M of each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get M/N rows, the last device gets the rest. Each device allocates and validates its own slice (strides that were tight for the full M become tight for the slice). Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -819,6 +819,10 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("--split-m-devices does not support --use-user-args");
         if(splitM > 1 && args["grouped-gemm"].as<bool>())
             throw std::runtime_error("--split-m-devices does not support --grouped-gemm");
+        if(splitM > 1 && args["best-solution"].as<bool>())
+            throw std::runtime_error(
+                "--split-m-devices needs the all-solutions run (not --best-solution): a "
+                "library-selected solution is not checked against each slice");
         int    world     = fusedA2A ? FusedA2ARunner::worldSize(args) : splitM;
         size_t flagBytes = fusedA2A ? FusedA2ARunner::kFlagAllocBytes : 0;
 
@@ -941,8 +945,12 @@ int main(int argc, const char* argv[])
         // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
         srand(seed);
         ScopedTimer timer("data_init_setup");
-        forEachDevice(devices, [&](DeviceContext& ctx) {
-            ctx.dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+        forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
+            // Each device sizes its buffers for its own slice of M (the full problem when the
+            // split is off).
+            ctx.dataInit
+                = std::make_shared<DataInitialization>(args, problemFactory.sliceFactory(d));
+            ctx.dataInit->setSlice(&problemFactory, d);
         });
     }
 
@@ -960,6 +968,7 @@ int main(int argc, const char* argv[])
         ScopedTimer timer("listener_setup");
         for(auto const& ctx : devices)
             listeners.addListener(ctx->dataInit);
+        solutionIterator->setSplit(&problemFactory);
         listeners.addListener(solutionIterator);
         listeners.addListener(std::make_shared<ProgressListener>(args));
 
@@ -972,10 +981,15 @@ int main(int argc, const char* argv[])
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
-            listeners.addListener(std::make_shared<SynchronizerValidator>(args, devices));
-            listeners.addListener(std::make_shared<ReferenceValidator>(args, devices));
+            auto synchronizerValidator = std::make_shared<SynchronizerValidator>(args, devices);
+            auto referenceValidator    = std::make_shared<ReferenceValidator>(args, devices);
+            synchronizerValidator->setSplit(&problemFactory);
+            referenceValidator->setSplit(&problemFactory);
+            listeners.addListener(synchronizerValidator);
+            listeners.addListener(referenceValidator);
             benchmarkTimer
                 = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000, devices);
+            benchmarkTimer->setSplit(&problemFactory);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -1060,8 +1074,9 @@ int main(int argc, const char* argv[])
                 }
                 {
                     ScopedTimer timer("gpu_input_preparation");
-                    forEachDevice(devices, [&](DeviceContext& ctx) {
-                        ctx.inputs = ctx.dataInit->prepareGPUInputs(problem);
+                    forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
+                        ctx.inputs = ctx.dataInit->prepareGPUInputs(
+                            problemFactory.sliceProblem(problem, d));
                     });
                 }
 
@@ -1072,9 +1087,12 @@ int main(int argc, const char* argv[])
 
                 {
                     ScopedTimer timer("rotating_buffer_preparation");
-                    forEachDevice(devices, [&](DeviceContext& ctx) {
+                    forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
                         ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
-                            maxRotatingBufferNum, problem, ctx.inputs, ctx.stream);
+                            maxRotatingBufferNum,
+                            problemFactory.sliceProblem(problem, d),
+                            ctx.inputs,
+                            ctx.stream);
                         static_cast<void>(hipDeviceSynchronize());
                     });
                 }
@@ -1203,9 +1221,11 @@ int main(int argc, const char* argv[])
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    forEachDevice(devices, [&](DeviceContext& ctx) {
-                                        ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(problem);
-                                    });
+                                    forEachDeviceIndexed(
+                                        devices, [&](DeviceContext& ctx, size_t d) {
+                                            ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(
+                                                problemFactory.sliceProblem(problem, d));
+                                        });
                                 }
                                 resetInput = true;
 
@@ -1223,12 +1243,16 @@ int main(int argc, const char* argv[])
                                             // One launch per device (split-m-devices > 1),
                                             // each on its own inputs and stream.
                                             std::vector<std::vector<KernelInvocation>> perDevice;
-                                            for(auto const& ctx : devices)
+                                            for(size_t d = 0; d < devices.size(); d++)
                                             {
+                                                auto const& ctx = devices[d];
+                                                auto const& deviceProblem
+                                                    = *dynamic_cast<ContractionProblemGemm*>(
+                                                        problemFactory.sliceProblem(problem, d));
                                                 perDevice.push_back(
                                                     useUserArgs
                                                         ? solution->solveTensileGPU(
-                                                              (*problem),
+                                                              deviceProblem,
                                                               *ctx->inputArr[r],
                                                               *hardware,
                                                               &dUA,
@@ -1236,7 +1260,7 @@ int main(int argc, const char* argv[])
                                                               nullptr,
                                                               0,
                                                               ctx->stream)
-                                                        : solution->solve((*problem),
+                                                        : solution->solve(deviceProblem,
                                                                           *ctx->inputArr[r],
                                                                           *hardware,
                                                                           nullptr,

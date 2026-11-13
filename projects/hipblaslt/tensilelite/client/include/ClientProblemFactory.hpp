@@ -34,6 +34,7 @@
 #include "ProgramOptions.hpp"
 
 #include <cstddef>
+#include <memory>
 
 namespace TensileLite
 {
@@ -46,9 +47,19 @@ namespace TensileLite
         {
         public:
             ClientProblemFactory(po::variables_map const& args);
+            // One slice of --split-m-devices: device `sliceIdx` of `sliceCount` gets its share of M.
+            ClientProblemFactory(po::variables_map const& args, size_t sliceIdx, size_t sliceCount);
             ~ClientProblemFactory();
 
             std::vector<std::shared_ptr<ContractionProblem>> const& problems() const;
+
+            // --split-m-devices: the problem device `device` runs for `full` (a pointer from
+            // problems()), and the factory holding that device's problems. Both return the
+            // full problem / this factory when the split is off.
+            size_t                      numSlices() const;
+            ContractionProblem*         sliceProblem(ContractionProblem const* full,
+                                                     size_t                    device) const;
+            ClientProblemFactory const& sliceFactory(size_t device) const;
 
             size_t workspaceSize() const
             {
@@ -111,6 +122,11 @@ namespace TensileLite
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
+            std::vector<std::vector<size_t>> m_fullProblemSizes;
+            ContractionProblemGemm::FreeIndex m_splitFree{};
+            size_t                            m_sliceIdx   = 0;
+            size_t                            m_sliceCount = 1;
+            std::vector<std::unique_ptr<ClientProblemFactory>> m_slices;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;

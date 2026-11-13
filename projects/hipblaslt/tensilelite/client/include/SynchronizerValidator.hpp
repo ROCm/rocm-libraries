@@ -49,6 +49,8 @@ namespace TensileLite
         /// leaving *out* untouched; otherwise fills *out* and returns true.
         bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out);
 
+        class ClientProblemFactory;
+
         class SynchronizerValidator : public RunListener
         {
         public:
@@ -129,7 +131,14 @@ namespace TensileLite
                 return m_errorsReported;
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         private:
+            ContractionProblem* deviceProblem(int deviceId) const;
+
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
             void
@@ -156,6 +165,7 @@ namespace TensileLite
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
+            ClientProblemFactory const* m_split = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
 

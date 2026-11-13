@@ -76,5 +76,17 @@ namespace TensileLite
                 f(*ctx);
             }
         }
+
+        // Same as forEachDevice, also passing the device's index in `devices`.
+        template <typename F>
+        void forEachDeviceIndexed(std::vector<std::shared_ptr<DeviceContext>> const& devices,
+                                  F&&                                                f)
+        {
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                ScopedDevice guard(devices[d]->deviceId);
+                f(*devices[d], d);
+            }
+        }
     } // namespace Client
 } // namespace TensileLite

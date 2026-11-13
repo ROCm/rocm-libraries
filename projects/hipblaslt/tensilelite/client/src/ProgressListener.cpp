@@ -38,7 +38,6 @@ namespace TensileLite
     {
         ProgressListener::ProgressListener(po::variables_map const& args)
             : m_runOnce(args["selection-only"].as<bool>())
-            , m_flopScale(args["split-m-devices"].as<int>())
         {
         }
 
@@ -62,7 +61,7 @@ namespace TensileLite
         {
             m_reporter->report(ResultKey::OperationIdentifier, problem.operationIdentifier());
 
-            m_reporter->report(ResultKey::TotalFlops, problem.flopCount() * m_flopScale);
+            m_reporter->report(ResultKey::TotalFlops, problem.flopCount());
 
             m_reporter->report(ResultKey::ASizes, problem.a().sizes());
             m_reporter->report(ResultKey::BSizes, problem.b().sizes());

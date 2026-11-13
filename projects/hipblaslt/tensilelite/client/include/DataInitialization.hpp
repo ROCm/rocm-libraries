@@ -898,10 +898,21 @@ namespace TensileLite
             }
             virtual void preBenchmarkRun() override {}
             virtual void postBenchmarkRun() override {}
+            // --split-m-devices: this instance serves one device, which runs its slice of the
+            // problem the listeners are given.
+            void setSlice(ClientProblemFactory const* fullFactory, size_t device)
+            {
+                m_sliceFactory = fullFactory;
+                m_sliceDevice  = device;
+            }
+
             virtual void preProblem(ContractionProblem* const problem) override
             {
+                ContractionProblem* current = problem;
+                if(m_sliceFactory)
+                    current = m_sliceFactory->sliceProblem(problem, m_sliceDevice);
                 m_currentGemmProblem
-                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                    = dynamic_cast<ContractionProblemGemm const*>(current);
                 m_currentSolution = nullptr;
             }
             virtual void postProblem() override {}
@@ -1184,6 +1195,9 @@ namespace TensileLite
             int32_t                         m_rotatingMode = 0;
 
             int m_deviceId = 0;
+
+            ClientProblemFactory const* m_sliceFactory = nullptr;
+            size_t                      m_sliceDevice  = 0;
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;

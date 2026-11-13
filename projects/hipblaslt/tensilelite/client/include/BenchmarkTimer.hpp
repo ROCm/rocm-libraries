@@ -43,6 +43,8 @@ namespace TensileLite
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class BenchmarkTimer : public RunListener
         {
         public:
@@ -95,10 +97,19 @@ namespace TensileLite
                 m_flushTimeUs = timeUs;
             }
 
+            // --split-m-devices: m_problem is the full problem; each device runs a slice.
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         protected:
             virtual double takeBatchTimeMs();
 
         private:
+            ContractionProblem* deviceProblem() const;
+            ClientProblemFactory const* m_split = nullptr;
+
             const int    m_numWarmups;
             const int    m_numBenchmarks;
             const int    m_numEnqueuesPerSync;
@@ -106,7 +117,6 @@ namespace TensileLite
             const int    m_numSyncsPerBenchmark;
             const int    m_numEnqueuesPerSolution;
             const size_t m_minFlopsPerSync = 0;
-            const int    m_flopScale       = 1;
 
             const bool m_useGPUTimer;
             const bool m_syncAfterWarmups = true;

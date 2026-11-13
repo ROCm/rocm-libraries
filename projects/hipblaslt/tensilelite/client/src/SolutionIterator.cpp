@@ -26,6 +26,8 @@
 
 #include "SolutionIterator.hpp"
 
+#include "ClientProblemFactory.hpp"
+
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 #include <Tensile/Debug.hpp>
@@ -163,6 +165,16 @@ namespace TensileLite
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
+                if(m_split != nullptr && m_split->numSlices() > 1)
+                {
+                    for(size_t d = 0; d < m_split->numSlices(); d++)
+                        if(!checkSolution(
+                               solution,
+                               *dynamic_cast<ContractionProblemGemm*>(
+                                   m_split->sliceProblem(m_problem, d))))
+                            return false;
+                    return true;
+                }
                 return checkSolution(solution, *problem);
             }
             else

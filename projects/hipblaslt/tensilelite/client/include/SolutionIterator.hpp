@@ -46,9 +46,17 @@ namespace TensileLite
  * Not an iterator by the traditional definition but I can't think of a better
  * name
  */
+        class ClientProblemFactory;
+
         class SolutionIterator : public RunListener
         {
         public:
+            // --split-m-devices: a solution must be valid for every device's slice.
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
             static std::shared_ptr<SolutionIterator>
                 Default(std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                         std::shared_ptr<Hardware>                                      hardware,
@@ -128,6 +136,8 @@ namespace TensileLite
                                        ContractionProblemGemm& problem,
                                        bool                    isReportValid=true);
             virtual bool checkSolution(ContractionSolution& solution);
+
+            ClientProblemFactory const* m_split = nullptr;
 
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> m_library;
             std::shared_ptr<Hardware>                                      m_hardware;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "SynchronizerValidator.hpp"
+#include "ClientProblemFactory.hpp"
 
 #include "ResultReporter.hpp"
 
@@ -156,6 +157,15 @@ namespace TensileLite
             }
         }
 
+        ContractionProblem* SynchronizerValidator::deviceProblem(int deviceId) const
+        {
+            if(m_split != nullptr)
+                for(size_t d = 0; d < m_devices.size(); d++)
+                    if(m_devices[d]->deviceId == deviceId)
+                        return m_split->sliceProblem(m_problem, d);
+            return m_problem;
+        }
+
         void SynchronizerValidator::checkInputs(int                            deviceId,
                                                 std::shared_ptr<ProblemInputs> inputs,
                                                 char const*                    stage)
@@ -173,7 +183,7 @@ namespace TensileLite
                         m_failedInSolution = true;
                 }
             }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem(deviceId)))
             {
                 auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
                 if(!checkBuffer(deviceId, *problem, result.Synchronizer, stage, 0))

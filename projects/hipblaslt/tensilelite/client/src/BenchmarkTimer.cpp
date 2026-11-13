@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "BenchmarkTimer.hpp"
+#include "ClientProblemFactory.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
@@ -132,7 +133,6 @@ namespace TensileLite
             , m_numEnqueuesPerSync(args["num-enqueues-per-sync"].as<int>())
             , m_maxEnqueuesPerSync(args["max-enqueues-per-sync"].as<int>())
             , m_minFlopsPerSync(args["min-flops-per-sync"].as<size_t>())
-            , m_flopScale(args["split-m-devices"].as<int>())
             , m_numSyncsPerBenchmark(args["num-syncs-per-benchmark"].as<int>())
             , m_hardware(hardware)
             , m_numEnqueuesPerSolution(m_numEnqueuesPerSync * m_numSyncsPerBenchmark)
@@ -199,6 +199,11 @@ namespace TensileLite
             }
         }
 
+        ContractionProblem* BenchmarkTimer::deviceProblem() const
+        {
+            return m_split ? m_split->sliceProblem(m_problem, 0) : m_problem;
+        }
+
         void BenchmarkTimer::preSolution(ContractionSolution* const solution)
         {
             m_numEnqueuesInSolution = 0;
@@ -217,7 +222,7 @@ namespace TensileLite
             {
                 pp = solution->projectedPerformance(problem->gemms[0], m_hardware);
             }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem()))
             {
                 pp = solution->projectedPerformance(*problem, m_hardware);
             }
@@ -265,7 +270,10 @@ namespace TensileLite
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    pp        = m_solution->projectedPerformance(*problem, m_hardware);
+                    // m_problem is the full problem under --split-m-devices; the slice
+                    // gives the per-device projection.
+                    pp = m_solution->projectedPerformance(
+                        *dynamic_cast<ContractionProblemGemm*>(deviceProblem()), m_hardware);
                     flopCount = problem->flopCount();
                 }
                 else
@@ -274,12 +282,12 @@ namespace TensileLite
                         "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                 }
 
-                // split-m-devices: the devices ran M/N slices concurrently, so the time is
-                // the slowest slice and the work is the full problem.
-                gflops      = !sol_is_skipped ? flopCount * m_flopScale / (timePerEnqueue_us) / 1000.0 : 0;
+                // split-m-devices: the slices ran concurrently, so the time is the slowest
+                // device and the work is the full problem.
+                gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
                 int    usedCus     = std::min(tiles, perf.CUs);
-                gflopsPerCu = gflops / m_flopScale / usedCus;
+                gflopsPerCu = gflops / (m_split ? m_split->numSlices() : 1) / usedCus;
 
                 if(!sol_is_skipped)
                 {
@@ -422,8 +430,9 @@ namespace TensileLite
                     for(int i = 0; i < problem->gemms.size(); i++)
                         flopCount += problem->gemms[i].flopCount();
                 }
-                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem()))
                 {
+                    // One launch is one device's slice.
                     flopCount = problem->flopCount();
                 }
                 else
