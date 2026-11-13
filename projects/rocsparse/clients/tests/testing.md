@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-27
+**Last Updated:** 2026-11-13
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -388,23 +388,37 @@ coverage.
 ./install.sh -kc --codecoverage -a gfx942
 cd build/release-debug
 make coverage_cleanup coverage GTEST_FILTER='*quick*:*pre_checkin*-*known_bug*'
-# targets: coverage_analysis -> coverage (llvm-profdata merge -> llvm-cov export lcov -> filter -> genhtml)
+# targets: coverage_analysis -> coverage (llvm-profdata merge -> llvm-cov export lcov -> filter -> normalize SF paths -> genhtml)
 ```
 
 The report is generated under `coverage-report/`, with exclusions applied by
 `scripts/filter_lcov_exclusions.py`. The `coverage_analysis` target also runs
 `rocsparse-unit-test` and `rocsparse-unit-test-device` on a best-effort basis; test failures are ignored (`|| true`) so they
-do not abort the coverage upload. Both binaries are passed as extra `llvm-cov` `-object`s, to
-attribute coverage to library translation units compiled into the test executables. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
-with flag `rocSPARSE`.
+do not abort the coverage run. Both binaries are passed as extra `llvm-cov` `-object`s, to
+attribute coverage to library translation units compiled into the test executables. `make coverage`
+also writes `coverage-report/coverage-upload.info`. It has the same records as `coverage.info`,
+with each `SF:` path rewritten by `scripts/merge_coverage_info.py` so it starts at
+`projects/rocsparse/`. Summaries are recomputed from those records, and `TN:` lines are dropped.
+`coverage.info` keeps absolute paths so `genhtml` can still open the sources.
 
 `make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
 profiles (`rocsparse-unit-test` and `rocsparse-unit-test-device`) and the `rocsparse-test` profiles
 separately and writes `coverage-report/coverage-unit.info` and
-`coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
-flag `rocSPARSE-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
-local look and is not uploaded. The combined `rocSPARSE` flag is `coverage.info`, which includes
-both runs. `make coverage_cleanup` deletes the profiles of a previous run.
+`coverage-report/coverage-integration.info`, plus path-normalized
+`coverage-unit-upload.info` and `coverage-integration-upload.info`.
+`coverage-integration.info` keeps absolute paths for a local look and is not uploaded.
+`coverage-integration-upload.info` is the path-normalized copy.
+`make coverage_cleanup` deletes the profiles of a previous run.
+
+Each coverage node archives `coverage-upload.info` and `coverage-unit-upload.info` and does not
+upload them. The rocJenkins postprocess stage runs `merge_coverage_info.py` on the archived copies
+and uploads one report per flag. The `rocSPARSE` flag is the union of the full reports. The
+`rocSPARSE-unit` flag is the union of the unit reports, and it is sent only when every node
+produced one. The stage fails when fewer full reports arrive than nodes were scheduled, so one
+arch cannot stand in for the union. `codecov.groovy` pins `@Library('rocJenkins@pong')`, and the
+upload requires that library's `rocProject.postprocess`. Which arches run is set in rocJenkins
+(PR 122 schedules gfx950 and gfx1201), not in this repository. If that stage does not upload,
+the carried-forward number stays.
 
 The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocSPARSE` and
 `rocSPARSE-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
@@ -421,12 +435,31 @@ failure when either flag is under 80%. TheRock does not run these statuses. Bran
   (not every kernel is unit-tested) and a coverage run still sees only one wavefront size (see
   below).
 
-**Wavefront-size gap:** the reported coverage percentage is currently computed on either 32-wavefront
-hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
-into a single report. This is a major gap because many rocSPARSE routines dispatch to different kernels
-at runtime based on the wavefront size (32 vs. 64), so in any given coverage run the alternate branch
-(the `if` or the `else`) is never hit. The 80% targets on `rocSPARSE` and `rocSPARSE-unit` apply to
-whichever wavefront the coverage job ran.
+**Wavefront-size gap:** host code that branches on the wavefront size (32 or 64) only records the
+side that machine executed, and many routines dispatch to different kernels on that branch.
+`llvm-cov export` needs the binaries from the machine that produced the profiles, so the exported
+lcov is what can be combined. The CI upload is that union. From `projects/rocsparse/`, the same
+merge can be run locally, with `wave64/` and `wave32/` standing for two `coverage-report/`
+directories:
+
+```bash
+python3 scripts/merge_coverage_info.py \
+  -o coverage-merged.info \
+  wave64/coverage-upload.info wave32/coverage-upload.info
+```
+
+A line counts as hit when any input report hit it. `BRDA` ids are positional. They match when both
+reports come from the same sources and the same build configuration; when the ids on a line differ,
+that line's branch records are dropped and the script warns. Line records are kept. The drop
+applies to later inputs in that same run. The written file does not record it, so running the
+merge again on the output can add branch records for that line. `--strict` exits non-zero when any
+line was dropped, and the Jenkins upload uses it, so a mismatch fails the job instead of counting
+the line as a full hit. Use the same command on `coverage-unit-upload.info` for the
+`rocSPARSE-unit` flag. `python3 -m unittest discover -s projects/rocsparse/scripts -p test_merge_coverage_info.py`
+runs the script tests, and pre-commit runs them when the script changes. Two Codecov uploads of the same flag are not this merge. Codecov would pair `BRDA` ids
+across uploads, and those ids are positions, not stable branch names. The rewritten `SF:` paths
+are what the union keys on, and they give the upload a repo-relative path. The 80% targets on
+`rocSPARSE` and `rocSPARSE-unit` apply to the uploaded union.
 
 **Scope:** measured on Linux; Windows coverage is not tracked separately.
 
@@ -514,7 +547,7 @@ device configurations are not ASAN-covered.
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
-| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `rocsparse-test` host instrumentation does not; reports are single-wavefront |
+| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | host-only profiles; kernel bodies are not instrumented. The coverage job unions the archived lcov reports across the arches rocJenkins schedules |
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
