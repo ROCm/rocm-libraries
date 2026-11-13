@@ -380,7 +380,7 @@ struct K3Tiles
     // TR: rows are positions of BK (dy) or BC (x) channels, pitch padded by 16 bytes; the x
     // tile holds PH rows per phase. Else rows are channels of positions.
     static constexpr int LDA = TR ? k3TrPitch(BK) : BQ + SKEW;
-    static constexpr int LDB = TR ? k3TrPitch(BC) : (PH + 2 + SKEW - 1) / SKEW * SKEW + SKEW;
+    static constexpr int LDB = TR ? k3TrPitch(BC) : k3CfPitch(PH, SKEW, SW);
     // ALIGN: a guard of VEC elements ahead of the x tile takes the first row's shifted spill.
     static constexpr int A_ELEMS = (TR ? BQ : BK) * LDA + (ALIGN == 1 ? VEC : 0);
     static constexpr int B_ELEMS = FR * SW * (TR ? PH : BC) * LDB;

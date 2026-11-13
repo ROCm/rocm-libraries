@@ -247,7 +247,8 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     ph = du(ph_raw, kv) * kv
     skew = 16 // e
     lda = tr_pitch(bk) if tr else bq + skew
-    ldb = tr_pitch(bc) if tr else du(ph + 2, skew) * skew + skew
+    units = du(ph + 2, skew) + 1  # k3CfPitch: odd at unit width stride
+    ldb = tr_pitch(bc) if tr else (units | 1 if sw == 1 else units) * skew
     a = (bq if tr else bk) * lda + (vec if align else 0)
     b = rows * sw * (ph if tr else bc) * ldb
     return 2 * (a + b) * e

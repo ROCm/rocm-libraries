@@ -21,6 +21,17 @@ constexpr int k3DivUp(int a, int b)
     return (a + b - 1) / b;
 }
 
+/// Channels-first tile row pitch (elements) for rows of ph positions plus two of slack: whole
+/// 16-byte units (skew elements); at unit width stride an odd number of them, so the rows a
+/// fragment read takes (one per lane) start in different bank groups. An even count put every
+/// other row (12 units: dilation 24 at 32 positions) or every row (16 units) on the same
+/// banks. (Strided tiles keep the even counts: the bump would push some past the LDS.)
+constexpr int k3CfPitch(int ph, int skew, int sw)
+{
+    const int units = k3DivUp(ph + 2, skew) + 1;
+    return (sw == 1 ? units | 1 : units) * skew;
+}
+
 /// The generic loop's window row pitch (elements of eb bytes) for wpos positions (a whole number
 /// of 16-byte units): at least wpos + 16 bytes, an odd number of 16-byte units (a row stride of
 /// 4 mod 8 dwords keeps the fragment reads of consecutive rows off each other's banks).
@@ -210,7 +221,7 @@ constexpr long long k3LdsBytes(int loop,
     const int ph = k3DivUp(phRaw, kv) * kv;
     const int skew = 16 / eb;
     const int lda = tr ? k3TrPitch(bk) : bq + skew;
-    const int ldb = tr ? k3TrPitch(bc) : k3DivUp(ph + 2, skew) * skew + skew;
+    const int ldb = tr ? k3TrPitch(bc) : k3CfPitch(ph, skew, sw);
     const long long aElems = static_cast<long long>(tr ? bq : bk) * lda + (align == 1 ? vec : 0);
     const long long bElems = static_cast<long long>(rows) * sw * (tr ? ph : bc) * ldb;
     return 2 * (aElems + bElems) * eb;

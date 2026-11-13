@@ -3151,19 +3151,22 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     wide.dw = 16; // 48 + 8 = 56: already odd
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(wide), 2), 2 * (64 * 40 + 64 * 56) * 2);
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
-    // LDB ceil(42 / 8) x 8 + 8 = 56; two buffers of 64 x 40 + 64 x 56.
+    // LDB ceil(42 / 8) + 1 = 7 16-byte units (odd: k3CfPitch) = 56; two buffers of 64 x 40 +
+    // 64 x 56.
     auto ring = configOf(ConfigFields{});
     EXPECT_EQ(conv_wrw::ldsBytesOf(ring, 2), 2 * (64 * 40 + 64 * 56) * 2);
-    // Aligned units: one more vector of window (6), LDB 64, and an 8-element guard.
+    // Aligned units: one more vector of window (6), ceil(50 / 8) + 1 = 8 units bumped to 9
+    // (LDB 72), and an 8-element guard.
     auto aligned = ring;
     aligned.align = 1;
-    EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 64) * 2);
-    // Channels-last: the window's 34 positions (words of 2), LDB 48.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 72) * 2);
+    // Channels-last: the window's 34 positions (words of 2), ceil(36 / 8) + 1 = 6 units bumped
+    // to 7 (LDB 56).
     auto channelsLast = ring;
     channelsLast.layout = 1;
-    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 48) * 2);
-    // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48;
-    // x tile 3 rows x 2 phases x 64 channels.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 56) * 2);
+    // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48 (6
+    // units: strided tiles keep even counts); x tile 3 rows x 2 phases x 64 channels.
     auto rows = ring;
     rows.loop = 0;
     rows.sw = 2;
@@ -3175,7 +3178,7 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     packed.fr = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(packed, 2), 2 * (64 * 40 + 2 * 64 * 48) * 2);
     // fp32, 64 x 64 x 16, 4-element vectors: window 18 = 5 vectors (20), LDA 20, LDB
-    // ceil(22 / 4) x 4 + 4 = 28.
+    // ceil(22 / 4) + 1 = 7 units (odd) = 28.
     auto fp32 = configOf(floatFields());
     EXPECT_EQ(conv_wrw::ldsBytesOf(fp32, 4), 2 * (64 * 20 + 64 * 28) * 4);
     // DMA ring, 2 stages, 4 waves: dy 64 rows of 5 units (5 groups of 64, 2 passes a wave),
