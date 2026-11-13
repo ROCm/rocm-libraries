@@ -3,15 +3,36 @@
 """Tuned tables of the attention backward on gfx1151 (selection policy).
 
 The gfx1151 entries of the tuned tables the backward routing reads
-(:func:`~.routing.routed_policy`), in the layout of :mod:`.gfx942_tuning`
-(its docstring states the entry rule and the regeneration steps; they apply
-here unchanged):
+(:func:`~.routing.routed_policy`), in the layout of :mod:`.gfx942_tuning`.
 
 * :data:`GENERAL_TUNED_TABLE`: ``{tuning key: knobs}`` of the general family,
-  keyed by :func:`kernels.common.attention_bwd_plan.attn_bwd_tuning_key`. An
-  entry is the confirmed winner of the sweep
-  (``benchmarks/common/attention_bwd_sweep.py --arch gfx1151``) on every
-  measured cell of its key, run on a gfx1151 device.
+  keyed by :func:`kernels.common.attention_bwd_plan.attn_bwd_tuning_key` (with
+  the device's ``num_cus``).
+
+**Entry rule (RDNA).** On the RDNA targets the rocKE backward is slower than
+PyTorch's own backward on every measured cell, so the CDNA rule (an entry wins
+the bench's confirm stage against the competitor on every cell of its key)
+admits no entry. Here rocKE is the only hipDNN backward, so an entry is the
+best rocKE configuration instead: a finalist of the sweep's ``runtime`` stage
+(``benchmarks/common/attention_bwd_sweep.py --arch gfx1151``, primary general
+slices) that, timed with the bench on every dense census cell of its key
+together with the shipped plan (``--rocke-configs`` holding ``shipped`` and the
+finalists, ``--aa-control all``, the pruning-set gate on), on every such cell
+
+1. is correct (its arm completes and passes the pruning-set gate),
+2. has a clean A/A control (its twin is not judged different from it either
+   way), and
+3. is not slower than the shipped plan (the paired verdict against it is
+   ``pass``, or ``ambiguous`` with a time ratio within ``TIE_EPS``).
+
+Of the finalists that pass every cell of a key, the one with the lowest
+geometric-mean time ratio against the shipped plan is the entry, and only when
+that ratio is below 1. Keys whose cells disagree or have no qualifying
+finalist are left out (they keep the defaults). The same timing records the
+gap to PyTorch's default backward (information only; no claim is made). Head
+size 32 is not swept (the census has no d = 32 cell), so it keeps the defaults
+as on CDNA.
+
 * :data:`DENSE_TUNED`: always empty. The dense family is not built on RDNA
   (the sweep's ``FAMILY_ARCHS["dense"]``), so no request routes dense here.
 * :data:`GENERAL_PERF_STATUS` / :data:`DENSE_PERF_STATUS`: always empty. An
