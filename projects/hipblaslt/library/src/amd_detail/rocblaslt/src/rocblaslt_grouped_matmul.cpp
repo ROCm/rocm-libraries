@@ -170,7 +170,8 @@ namespace
         return l->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED;
     }
 
-    // Host problem shapes: group 0 is rows0 x cols0, every other group rows x cols.
+    // Host problem shapes: group 0 is rows0 x cols0, every other group rows x cols, except
+    // that with used > 0 the groups from used on are rows x 0 and have no tiles.
     struct Placeholders
     {
         int64_t rows0 = 0;
@@ -178,11 +179,12 @@ namespace
         int64_t rows  = 0;
         int64_t cols  = 0;
         int64_t k     = 0;
+        int64_t used  = 0;
 
         bool operator==(const Placeholders& o) const
         {
             return rows0 == o.rows0 && cols0 == o.cols0 && rows == o.rows && cols == o.cols
-                   && k == o.k;
+                   && k == o.k && used == o.used;
         }
     };
 
@@ -311,8 +313,9 @@ namespace
 
     // Placeholders whose total tile count bounds the real problems for any tile size, so
     // the grid computed from them covers every launch within the hints. With per-group
-    // columns summing to at most S, Mmax x S plus G - 1 groups of Mmax x 1 is such a bound,
-    // and usually far tighter than G x Mmax x Nmax.
+    // columns summing to at most S, at most min(G, S) groups have columns, and each adds at
+    // most one partial column tile; so Mmax x S plus min(G, S) - 1 groups of Mmax x 1 (the
+    // other groups empty) is such a bound, and usually far tighter than G x Mmax x Nmax.
     rocblaslt_status boundPlaceholders(rocblaslt_matmul_desc          desc,
                                        rocblaslt_matrix_layout        matA,
                                        rocblaslt_matrix_layout        matD,
@@ -339,22 +342,26 @@ namespace
         double best = double(groups) * double(maxRows) * double(maxCols);
         if(totalCols > 0)
         {
-            double cost = double(maxRows) * double(totalCols + groups - 1);
+            const int64_t used = std::min(groups, totalCols);
+            double        cost = double(maxRows) * double(totalCols + used - 1);
             if(cost < best)
             {
                 best      = cost;
                 out.cols0 = totalCols;
                 out.cols  = 1;
+                out.used  = used;
             }
         }
         if(totalRows > 0)
         {
-            double cost = double(maxCols) * double(totalRows + groups - 1);
+            const int64_t used = std::min(groups, totalRows);
+            double        cost = double(maxCols) * double(totalRows + used - 1);
             if(cost < best)
             {
                 out.rows0 = totalRows;
                 out.rows  = 1;
                 out.cols0 = out.cols = maxCols;
+                out.used             = used;
             }
         }
         return rocblaslt_status_success;
@@ -436,7 +443,7 @@ namespace
         for(int g = 0; g < groups; g++)
         {
             int64_t m = g == 0 ? p.rows0 : p.rows;
-            int64_t n = g == 0 ? p.cols0 : p.cols;
+            int64_t n = g == 0 ? p.cols0 : (p.used == 0 || g < p.used) ? p.cols : 0;
             auto*   l = &layouts[4 * static_cast<size_t>(g)];
             if(desc->op_A == HIPBLAS_OP_N)
                 setLayout(l[0], matA->type, m, p.k);
