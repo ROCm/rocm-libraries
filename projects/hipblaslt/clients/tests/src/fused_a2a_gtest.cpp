@@ -710,6 +710,29 @@ namespace
         void* ptr = nullptr;
     };
 
+    using MatmulDesc = std::unique_ptr<std::remove_pointer_t<hipblasLtMatmulDesc_t>,
+                                       decltype(&hipblasLtMatmulDescDestroy)>;
+    using Layout     = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
+                                       decltype(&hipblasLtMatrixLayoutDestroy)>;
+
+    Layout groupedLayout(hipDataType type, uint64_t rows, uint64_t cols)
+    {
+        hipblasLtMatrixLayout_t layout = nullptr;
+        EXPECT_EQ(hipblasLtGroupedMatrixLayoutCreate(&layout, type, 1, nullptr, nullptr, nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        const int64_t ld = int64_t(rows);
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      layout, HIPBLASLT_MATRIX_LAYOUT_ROWS, &rows, sizeof(rows)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      layout, HIPBLASLT_MATRIX_LAYOUT_COLS, &cols, sizeof(cols)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(
+            hipblasLtMatrixLayoutSetAttribute(layout, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
+            HIPBLAS_STATUS_SUCCESS);
+        return Layout(layout, &hipblasLtMatrixLayoutDestroy);
+    }
+
     /************************************************************************
      * Dispatch: the shape and layout requirements, checked where both the
      * communicator and D's layout are in hand.
@@ -808,30 +831,6 @@ namespace
             ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                           matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &none, sizeof(none)),
                       HIPBLAS_STATUS_SUCCESS);
-        }
-
-        using MatmulDesc = std::unique_ptr<std::remove_pointer_t<hipblasLtMatmulDesc_t>,
-                                           decltype(&hipblasLtMatmulDescDestroy)>;
-        using Layout     = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
-                                           decltype(&hipblasLtMatrixLayoutDestroy)>;
-
-        static Layout groupedLayout(hipDataType type, uint64_t rows, uint64_t cols)
-        {
-            hipblasLtMatrixLayout_t layout = nullptr;
-            EXPECT_EQ(
-                hipblasLtGroupedMatrixLayoutCreate(&layout, type, 1, nullptr, nullptr, nullptr),
-                HIPBLAS_STATUS_SUCCESS);
-            const int64_t ld = int64_t(rows);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_ROWS, &rows, sizeof(rows)),
-                      HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_COLS, &cols, sizeof(cols)),
-                      HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
-                      HIPBLAS_STATUS_SUCCESS);
-            return Layout(layout, &hipblasLtMatrixLayoutDestroy);
         }
 
         hipblasStatus_t heuristic(hipblasLtMatmulHeuristicResult_t* result   = nullptr,
@@ -1874,6 +1873,47 @@ namespace
         ASSERT_EQ(setGatherBuffer(gather.ptr), HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, DetachRestoresThePlainHeuristic)
+    {
+        hipblasLtMatmulAlgo_t plain;
+        if(!firstAlgo(plain))
+            GTEST_SKIP() << "no plain BF16 TN solution in the loaded library";
+
+        registerOneRank();
+        completeAndAttach();
+        hipblasLtMatmulAlgo_t fused;
+        if(!firstAlgo(fused))
+            GTEST_SKIP() << "no A2AGemm solution in the loaded library";
+        ASSERT_NE(memcmp(fused.data, plain.data, sizeof(plain.data)), 0);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, nullptr), HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtMatmulAlgo_t afterDetach;
+        ASSERT_TRUE(firstAlgo(afterDetach));
+        EXPECT_EQ(memcmp(afterDetach.data, plain.data, sizeof(plain.data)), 0);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, GroupedHeuristicRejectsAPrologueDescriptor)
+    {
+        Layout layA = groupedLayout(HIP_R_16BF, kK, kM), layB = groupedLayout(HIP_R_16BF, kK, kN),
+               layD = groupedLayout(HIP_R_16BF, kM, kN);
+        registerOneRank();
+        completeAndAttach();
+
+        hipblasLtMatmulHeuristicResult_t result   = {};
+        int                              returned = 0;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  matmulDesc,
+                                                  layA.get(),
+                                                  layB.get(),
+                                                  layD.get(),
+                                                  layD.get(),
+                                                  pref,
+                                                  1,
+                                                  &result,
+                                                  &returned),
+                  HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2APrologueDispatch_pre_checkin, ExtGemmRejectsAPrologueDescriptor)
