@@ -861,6 +861,13 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT tests
     )
+    # Runs hipblaslt-test's solution-index cases under rocjitsu; TheRock's
+    # test artifact takes bin/hipblaslt/**.
+    rocm_install(
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/run_solution_indices.py"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblaslt/rocjitsu"
+        COMPONENT tests
+    )
     rocm_package_setup_client_component(tests
         DEPENDS
         COMPONENT clients-common

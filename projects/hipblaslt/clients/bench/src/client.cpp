@@ -98,76 +98,9 @@ int run_bench_test(Arguments&         arg,
             return 0;
     }
 
-    // adjust dimension for GEMM routines
-    size_t gemmNum = arg.grouped_gemm == 0 ? 1 : arg.grouped_gemm;
-    for(size_t i = 0; i < gemmNum; i++)
-    {
-        int64_t min_lda = arg.transA == 'N' ? arg.M[i] : arg.K[i];
-        int64_t min_ldb = arg.transB == 'N' ? arg.K[i] : arg.N[i];
-        int64_t min_ldc = arg.M[i];
-        int64_t min_ldd = arg.M[i];
-        int64_t min_lde = arg.M[i];
-        if(arg.lda[i] < min_lda)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: lda < min_lda, set lda = " << min_lda << std::endl;
-            arg.lda[i] = min_lda;
-        }
-        if(arg.ldb[i] < min_ldb)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: ldb < min_ldb, set ldb = " << min_ldb << std::endl;
-            arg.ldb[i] = min_ldb;
-        }
-        if(arg.ldc[i] < min_ldc)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: ldc < min_ldc, set ldc = " << min_ldc << std::endl;
-            arg.ldc[i] = min_ldc;
-        }
-        if(arg.ldd[i] < min_ldd)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: ldd < min_ldd, set ldd = " << min_ldc << std::endl;
-            arg.ldd[i] = min_ldd;
-        }
-        if(arg.lde[i] < min_lde)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: lde < min_lde, set lde = " << min_lde << std::endl;
-            arg.lde[i] = min_lde;
-        }
-        int64_t min_stride_a = arg.lda[i] * (arg.transA == 'N' ? arg.K[i] : arg.M[i]);
-        int64_t min_stride_b = arg.ldb[i] * (arg.transB == 'N' ? arg.N[i] : arg.K[i]);
-        int64_t min_stride_c = arg.ldc[i] * arg.N[i];
-        int64_t min_stride_d = arg.ldd[i] * arg.N[i];
-        int64_t min_stride_e = arg.lde[i] * arg.N[i];
-        if(!any_stride && arg.stride_a[i] < min_stride_a)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: stride_a < min_stride_a, set stride_a = "
-            //               << min_stride_a << std::endl;
-            arg.stride_a[i] = min_stride_a;
-        }
-        if(!any_stride && arg.stride_b[i] < min_stride_b)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: stride_b < min_stride_b, set stride_b = "
-            //               << min_stride_b << std::endl;
-            arg.stride_b[i] = min_stride_b;
-        }
-        if(!any_stride && arg.stride_c[i] < min_stride_c)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: stride_c < min_stride_c, set stride_c = "
-            //               << min_stride_c << std::endl;
-            arg.stride_c[i] = min_stride_c;
-        }
-        if(!any_stride && arg.stride_d[i] < min_stride_d)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: stride_d < min_stride_d, set stride_d = "
-            //               << min_stride_d << std::endl;
-            arg.stride_d[i] = min_stride_d;
-        }
-        if(!any_stride && arg.stride_e[i] < min_stride_e)
-        {
-            //hipblaslt_cout << "hipblaslt-bench INFO: stride_e < min_stride_e, set stride_e = "
-            //               << min_stride_e << std::endl;
-            arg.stride_e[i] = min_stride_e;
-        }
-    }
+    // Leading dimensions and strides below packed storage are raised;
+    // --any_stride keeps the given strides.
+    arg.raise_to_packed_layout(!any_stride);
 
     // Check for F8 OCP data types and convert to NANOO
     {
