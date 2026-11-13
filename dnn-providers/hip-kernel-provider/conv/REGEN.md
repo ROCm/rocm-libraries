@@ -14,7 +14,7 @@ family's complete descriptor set into
 |---|---|---|
 | `*.ued.json`, `*.udd.json`, `*.kmd.json`, `*.umd.json` | git | small, read in review |
 | `kernels/` | git | the HIP sources, embedded into the plugin at build time |
-| `*.kdp.json` (instance catalogs) | DVC, remote `ingestor`; git holds `<catalog>.kdp.json.dvc` | generated, 684K lines across the families |
+| `*.kdp.json` (instance catalogs) | DVC, remote `ingestor`; git holds `<catalog>.kdp.json.dvc` | generated, about 680K lines and 16 MB across the families |
 | `naive/*.kdp.json` | git | three small catalogs written by hand, no generator |
 
 Each catalog is its own DVC output, beside the descriptors that name it, rather than one

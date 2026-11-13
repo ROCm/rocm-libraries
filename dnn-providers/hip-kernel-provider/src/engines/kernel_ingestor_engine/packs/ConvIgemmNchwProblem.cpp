@@ -279,7 +279,7 @@ std::optional<NchwProblem> threeBf16ProblemOf(const NchwProblem& problem)
 
 bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName)
 {
-    // Timed against the best exact config on 12 top fp32 K7 shapes (PLAN.md): 0.05-0.74x on
+    // Timed against the best exact config on 12 top fp32 K7 shapes: 0.05-0.74x on
     // gfx950, gfx942 and gfx90a; on gfx1201 (exact on FMA) 1.07x and 1.46x for 3-D 3x3x3 at
     // stride 2 and 0.15-0.79x elsewhere. Admitted only there.
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);

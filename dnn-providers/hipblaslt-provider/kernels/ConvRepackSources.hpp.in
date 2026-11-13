@@ -11,8 +11,10 @@ namespace hipblaslt_plugin::kernels
 
 inline constexpr const char* CONV_REPACK_SOURCE = R"repack_src(@CONV_REPACK_SOURCE@)repack_src";
 
-inline constexpr const char* CONV_REPACK_ARGS_SOURCE = R"repack_src(@CONV_REPACK_ARGS_SOURCE@)repack_src";
+inline constexpr const char* CONV_REPACK_ARGS_SOURCE
+    = R"repack_src(@CONV_REPACK_ARGS_SOURCE@)repack_src";
 
-inline constexpr const char* CONV_REPACK_DISJOINT_SOURCE = R"repack_src(@CONV_REPACK_DISJOINT_SOURCE@)repack_src";
+inline constexpr const char* CONV_REPACK_DISJOINT_SOURCE
+    = R"repack_src(@CONV_REPACK_DISJOINT_SOURCE@)repack_src";
 
 } // namespace hipblaslt_plugin::kernels

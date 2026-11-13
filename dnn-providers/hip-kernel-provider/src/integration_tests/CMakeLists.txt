@@ -142,6 +142,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         if(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp)
+            # It reads the naive pack's budget constants (header only, nothing linked).
+            target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/..)
         else()
             message(STATUS "conv: coverage census not built -- not every conv family is "
                            "served (${HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES})")
