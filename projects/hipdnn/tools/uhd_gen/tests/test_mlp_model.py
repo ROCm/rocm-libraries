@@ -1367,6 +1367,32 @@ def test_a_catalog_trained_mlp_data_model_ranks_and_is_evaluated_as_a_catalog_ra
     assert metrics["top1_regret"]["mean"] < 0.1
 
 
+def test_a_catalog_measured_on_two_devices_holds_out_each_shape_on_both(
+    tmp_path, evaluator
+):
+    from uhd_gen.tests.test_promote import _tree
+    from uhd_gen.provenance import snapshot_provenance
+
+    provenance = snapshot_provenance(_tree(tmp_path / "tree"), arch="gfx942")
+    one = _catalog_frame()
+    frame = pd.concat(
+        [one.assign(device="board_a"), one.assign(device="board_b")],
+        ignore_index=True,
+    )
+    code, output = _train_catalog(tmp_path, evaluator, provenance, frame=frame)
+    assert code == 0
+    # A shape measured on two boards is one problem: both boards' candidates fall on
+    # the same side of the early-stopping split, so validation never sees a shape the
+    # network trained on through the other board.
+    fit = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))[
+        "mlp_fit"
+    ]
+    assert fit["validation_split"] == "group" and fit["validation_groups"] == 30
+    for member in fit["member_fits"]:
+        assert member["validation_rows"] % 8 == 0
+        assert member["train_rows"] + member["validation_rows"] == 240
+
+
 def test_a_catalog_trained_mlp_data_model_installs_into_the_catalog_slot(
     tmp_path, evaluator
 ):
