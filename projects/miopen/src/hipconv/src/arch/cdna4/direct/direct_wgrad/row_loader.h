@@ -17,6 +17,13 @@
 
 #include <array>
 
+// clang targeting the MSVC ABI ignores the standard attribute; it needs the msvc:: spelling.
+#if defined(_MSC_VER)
+#define HIPCONV_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define HIPCONV_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+
 namespace hipconv::cdna4::direct_wgrad
 {
 
@@ -542,7 +549,7 @@ private:
     struct NoTileState
     {
     };
-    [[no_unique_address]] std::conditional_t<Tiled, TileState, NoTileState> tile_;
+    HIPCONV_NO_UNIQUE_ADDRESS std::conditional_t<Tiled, TileState, NoTileState> tile_;
 };
 
 } // namespace hipconv::cdna4::direct_wgrad
