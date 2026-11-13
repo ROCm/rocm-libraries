@@ -1027,6 +1027,15 @@ class PageTileFactoryGfx125:
     # FmhaBatchPrefillPageTilePolicyFor). P64 D64 M64 keeps a residual stale-fragment race on some
     # gfx1250 boards (see kDrainLdsBeforeTdmIssue).
     SMALL_GRID = CppConstraint("a.num_splits == 1 && get_num_blocks(128) <= num_cus")
+    # D64 M64 tiles of 64-token pages also take grids of up to 1.5 num_cus M128 workgroups: there
+    # the M128 tile's longest query tile sets the time (one or two workgroups per CU), and the
+    # M64 tile took 0.85-0.99 of its time from 257 to 384 workgroups on gfx1250 with 256 CUs
+    # (BF16 vectorized, 16 query heads: prompts, chunks after 4K-16K prefixes, SWA 2048); at 512
+    # workgroups the M128 tile leads by 3-7 % with long KV. P128 keeps SMALL_GRID (not measured).
+    SMALL_GRID_D64 = CppConstraint(
+        "a.num_splits == 1 && (get_num_blocks(128) <= num_cus || "
+        "(t.page_size == 64 && 2 * get_num_blocks(128) <= 3 * num_cus))"
+    )
 
     # KV split (kKvSplits 2: partial kernel + merge). The caller decides whether to split, as for
     # fmha_fwd_splitkv: num_splits 2 with the workspace. The dispatch picks the split kernel by the
@@ -1070,7 +1079,7 @@ class PageTileFactoryGfx125:
             return {
                 64  : [FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D64, GFX125_ARCH, 2),
                        FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64, GFX125_ARCH, 2),
-                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
+                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SMALL_GRID_D64, GFX125_ARCH),
                        FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.UNSPLIT, GFX125_ARCH)],
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D128, GFX125_ARCH, 2),
                        FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.TAIL_D128, GFX125_ARCH, 2, 128, m128_d128),
