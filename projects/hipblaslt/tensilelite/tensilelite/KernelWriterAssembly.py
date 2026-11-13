@@ -3498,10 +3498,13 @@ class KernelWriterAssembly(KernelWriter):
       hdr = vHdr + 4 * u
       module.addComment0("chunk %u" % u)
       gemmIndex(u)
-      module.add(VAddU32(dst=vgpr(vTiles), src0=kernel["MacroTile0"] - 1, src1=vgpr(hdr + 0)))
-      module.add(VLShiftRightB32(dst=vgpr(vTiles), shiftHex=log2(kernel["MacroTile0"]), src=vgpr(vTiles), comment="ceil(M / MT0)"))
-      module.add(VAddU32(dst=vgpr(vRow), src0=kernel["MacroTile1"] - 1, src1=vgpr(hdr + 1)))
-      module.add(VLShiftRightB32(dst=vgpr(vRow), shiftHex=log2(kernel["MacroTile1"]), src=vgpr(vRow), comment="ceil(N / MT1)"))
+      # Divide before rounding up: adding MT - 1 to a uint32 dimension can wrap.
+      for dst, remainder, size, tile in ((vTiles, vRow, hdr, kernel["MacroTile0"]),
+                                         (vRow, vOff, hdr + 1, kernel["MacroTile1"])):
+        module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=log2(tile), src=vgpr(size)))
+        module.add(VAndB32(dst=vgpr(remainder), src0=tile - 1, src1=vgpr(size)))
+        module.add(VCmpLtU32(dst=VCC(), src0=0, src1=vgpr(remainder)))
+        module.add(VAddCCOU32(dst=vgpr(dst), dst1=VCC(), src0=vgpr(dst), src1=0, src2=VCC(), comment="ceil(size / MT)"))
       module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(vRow)))
       module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(hdr + 2), comment="* batch"))
       if kernel["GlobalSplitU"] != 0:
