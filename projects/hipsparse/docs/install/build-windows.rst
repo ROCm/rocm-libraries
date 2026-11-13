@@ -45,15 +45,15 @@ Building hipSPARSE from source also requires the following components and depend
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
 
-The tests need 19 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+The tests require 19 SuiteSparse matrices, which are retrieved using `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/hipsparse/clients/matrices`` from the root of the rocm-libraries repository.
-Reading from the DVC storage doesn't require credentials.
+Accessing the DVC storage doesn't require credentials.
 In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
 ``git sparse-checkout add .dvc`` first.
 Alternatively, configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
-When building hipSPARSE from source, select a supported version of the :doc:`rocSPARSE <rocsparse:index>` library
-dependency. Given a specific version of hipSPARSE,
+When building hipSPARSE from source, select a supported version of the :doc:`rocSPARSE <rocsparse:index>`.
+For a given version of hipSPARSE,
 it's best to use the same version of rocSPARSE.
 
 Downloading hipSPARSE
