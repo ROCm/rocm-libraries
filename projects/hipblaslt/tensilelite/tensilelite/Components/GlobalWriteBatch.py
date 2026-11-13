@@ -653,12 +653,21 @@ class GlobalWriteBatchWriter:
 
       clsLabel = getattr(self.ss, "_clsLoopLabel", None)
       if clsLabel is not None and (self._computeBatchesPerCLSBody() - 1 == self.batchIdx) and self.ss.elementAddr:
+        if self.tdmStoreLdsBase is not None and self._computeCLSIterCount() > 1:
+          # The staged offsets are the first iteration's; the next iteration starts at the last element's row plus
+          # the look-ahead's row advance.
+          rows = self.ss.elementAddr[len(self.batchElements) - 1].coordOffset1 + self.direct_next_rowInc
+          module.add(VAddU32(dst=vgpr(self.tdmStoreLdsBase), src1=vgpr(self.tdmStoreLdsBase),
+                             src0=rows * self.kernel["MacroTile0"] * self.parentWriter.states.bpeCexternalGSU1,
+                             comment="next iteration's rows of the staged tile"))
         module.add(SSubI32(dst=sgpr("CLSLoopCounter"), src0=sgpr("CLSLoopCounter"), src1=1))
         module.add(SCmpEQU32(src0=sgpr("CLSLoopCounter"), src1=0))
         # 32-bit-offset backward branch: the replay hazard protection 7bfd03f
         # can overflow simm16 ("branch size exceeds simm16"). longBranchScc0 emits a
         # getpc/setpc sequence that handles the full 32-bit distance.
         module.add(self.parentWriter.longBranchScc0(clsLabel, posNeg=-1, comment="loop while counter != 0"))
+        if self.tdmStoreLdsBase is not None:
+          module.add(emitTDMStoreFlush(self))
         # if not hasStaticAssignment(self.kernel):
         #   module.add(SEndpgm(comment="stop here after CLS loop"))
         self.ss._clsLoopLabel = None
@@ -1185,6 +1194,10 @@ class GlobalWriteBatchWriter:
     #when factorDim = 1 the bias's gwvw is alwasy be 1.
     factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
 
+    if self.tdmStoreLdsBase is not None and self.batchIdx == 0:
+      module.add(emitTDMStoreSetup(self))
+      if self.tdmStoreLoadC:
+        module.add(emitTDMStoreLoadC(self))
     # CompactLoopStore CLS header (batch 0 only): preamble + sgpr setup + CLS
     # label + M0 assignment + M0 step. Wrapped in `if CompactLoopStore` as a
     # unit so non-CLS .s emits ONLY the original module.addComment2(commentStr)
@@ -1220,10 +1233,6 @@ class GlobalWriteBatchWriter:
     else:
       module.addComment2(commentStr)
 
-    if self.tdmStoreLdsBase is not None and self.batchIdx == 0:
-      module.add(emitTDMStoreSetup(self))
-      if self.tdmStoreLoadC:
-        module.add(emitTDMStoreLoadC(self))
     module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
     if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
@@ -2890,7 +2899,7 @@ class GlobalWriteBatchWriter:
 
     if tdmStore:
       module.add(emitTDMStoreStaging(self, tdmStagedElements))
-      if self.batchIdx == self.numBatches - 1:
+      if self.batchIdx == self.numBatches - 1 and getattr(self.ss, "_clsLoopLabel", None) is None:
         module.add(emitTDMStoreFlush(self))
 
     if self.parentWriter.db["CheckStoreC"]>=0:
