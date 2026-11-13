@@ -2264,6 +2264,48 @@ TEST(TestConvWrwLaunch, TheRingRunsADilatedHeightAsTracksPerClass)
     EXPECT_EQ(launch->args.steps, 2 * 1 * 1 * (2 * 8 + 7));
 }
 
+TEST(TestConvWrwLaunch, PointwisePlanesRunAsOneRow)
+{
+    // 1x1, unit stride, no padding, packed channels-first: each 14 x 16 plane is one row of 224
+    // positions (7 chunks of 32, none partial), for the ring and the output rows alike.
+    auto shape = baseShape();
+    shape.input = {14, 16};
+    shape.filter = {1, 1};
+    shape.prePadding = shape.postPadding = {0, 0};
+    auto ring = ConfigFields{};
+    ring.s = 1;
+    ring.fr = 1;
+    for(const auto& f : {ring, [&] {
+                             auto rows = ring;
+                             rows.loop = 0;
+                             return rows;
+                         }()})
+    {
+        const auto launch = launchOf(f, shape);
+        ASSERT_TRUE(launch.has_value());
+        EXPECT_EQ(launch->args.hi, 1);
+        EXPECT_EQ(launch->args.ho, 1);
+        EXPECT_EQ(launch->args.wi, 224);
+        EXPECT_EQ(launch->args.wo, 224);
+        EXPECT_EQ(launch->args.chunks, 7);
+        EXPECT_EQ(launch->args.xs[3], 224);
+        EXPECT_EQ(launch->args.xs[4], 1);
+    }
+    // Padding, a stride or channels-last keeps the rows.
+    auto padded = shape;
+    padded.prePadding = padded.postPadding = {1, 1};
+    const auto paddedLaunch = launchOf(ring, padded);
+    ASSERT_TRUE(paddedLaunch.has_value());
+    EXPECT_EQ(paddedLaunch->args.ho, 16);
+    auto nhwc = shape;
+    nhwc.channelsLast = true;
+    auto cl = ring;
+    cl.layout = 1;
+    const auto clLaunch = launchOf(cl, nhwc);
+    ASSERT_TRUE(clLaunch.has_value());
+    EXPECT_EQ(clLaunch->args.ho, 14);
+}
+
 TEST(TestConvWrwLaunch, RingTracksEndAtTheirLastXRow)
 {
     // Same padding (ph = dh) on 128 rows: class rho has ceil((128 - rho) / dh) dy rows, a
