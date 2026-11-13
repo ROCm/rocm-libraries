@@ -392,7 +392,7 @@ namespace hipblaslt_ext
         // Epilogue inputs
         void* scaleA; //!< The scaleA input pointer.
         void* scaleB; //!< The scaleB input pointer.
-        void* scaleC; //!< The scaleC input pointer.
+        void* scaleC; //!< The scaleC input pointer. For int4 A with zero-points (*_ZP_EXT scale modes), the zero-point pointer.
         void* scaleD; //!< The scaleD input pointer.
         void* scaleAlphaVec; //!< The scaleAlpha vector input pointer.
         void* bias; //!< The bias input pointer.

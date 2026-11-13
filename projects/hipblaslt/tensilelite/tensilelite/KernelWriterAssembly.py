@@ -3513,7 +3513,8 @@ class KernelWriterAssembly(KernelWriter):
             # Even when not using Beta, we need to skip over the Beta argument space
             offset = self.externalArgLoader.getOffset() + self.states.bpr * self.states.userArgsInfo.betaMaxRegisterSize
           if kernel["ProblemType"]["UseScaleAB"] in ("Scalar", "Block"):
-            sgprOffset = self.externalArgLoader.getOffset()
+            # scaleA follows the fixed-size beta slot, not the beta value just loaded.
+            sgprOffset = offset
             for preloadScale, name in zip([self.states.preloadScaleA, self.states.preloadScaleB], ['A','B']):
               if preloadScale and ("AddressScale%s"%name) in self.sgprs:
                 moduleExternalArgs.add(self.externalArgLoader.loadKernArg("AddressScale%s"%name, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=2))

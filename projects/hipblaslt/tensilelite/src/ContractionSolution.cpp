@@ -759,7 +759,11 @@ namespace TensileLite
                 inputs.grouped[i].beta, arg.beta, sizeof(arg.beta), problems[i].betaType());
             arg.scaleA        = const_cast<void*>(inputs.grouped[i].scaleA);
             arg.scaleB        = const_cast<void*>(inputs.grouped[i].scaleB);
-            arg.scaleC        = const_cast<void*>(inputs.grouped[i].scaleC);
+            // W4A16 with zero-points: the kernel reads the zero-point pointer from
+            // the scaleC slot (C carries no scale on this path).
+            arg.scaleC        = const_cast<void*>(problems[i].scaleZeroPointA()
+                                                      ? inputs.grouped[i].scaleZeroA
+                                                      : inputs.grouped[i].scaleC);
             arg.scaleD        = const_cast<void*>(inputs.grouped[i].scaleD);
             arg.bias          = const_cast<void*>(inputs.grouped[i].bias);
             arg.scaleAlphaVec = const_cast<void*>(inputs.grouped[i].scaleAlphaVec);

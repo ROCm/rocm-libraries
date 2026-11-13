@@ -3357,6 +3357,13 @@ namespace TensileLite
                         offsets[ContractionProblemGemm::TENSOR::SCALEA][idx],
                         problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA].elementBytes());
                 }
+                if(u8Ptr[ContractionProblemGemm::TENSOR::SCALEZEROA] != nullptr)
+                {
+                    u8Ptr[ContractionProblemGemm::TENSOR::SCALEZEROA] += multiplyElementSize(
+                        offsets[ContractionProblemGemm::TENSOR::SCALEZEROA][idx],
+                        problem.tensors()[ContractionProblemGemm::TENSOR::SCALEZEROA]
+                            .elementBytes());
+                }
                 if(u8Ptr[ContractionProblemGemm::TENSOR::SCALEB] != nullptr)
                 {
                     u8Ptr[ContractionProblemGemm::TENSOR::SCALEB] += multiplyElementSize(

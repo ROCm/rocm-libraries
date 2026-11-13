@@ -1,0 +1,97 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Grouped w4a16 TN (MoE experts): int4 A with group-32 bf16 scales and
+# unsigned int4 zero-points per group, bf16 B. Each group has its own A, scale
+# and zero-point pointers; with UseUserArgs the kernel reads them, and the sizes,
+# from the device-side UserArguments (the zero-point pointer in the scaleC slot).
+# Groups differ in m, n and k. These are the tiles the gfx1151 grouped logic uses.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeScaleA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitSeed: 24681
+  PrintLevel: 1
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  CpuThreads: -1
+  UseUserArgs: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DataTypeA: i4
+      MacDataTypeA: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [32]
+      ScaleZeroPointA: True
+      Int4EncodingA: UnsignedBias8
+      GroupedGemm: True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+          - [16, 16, 16, 1, 1, 2, 1, 2, 2]
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [0]
+        - PrefetchGlobalRead: [2]
+        - WorkGroupMapping: [8]
+        - SourceSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - LdsBlockSizePerPadA: [128]
+        - LdsBlockSizePerPadB: [128]
+        - LocalReadVectorWidth: [16]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [1]
+        - ClusterLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - PrefetchLocalRead: [0]
+        - ConvertAfterDS: [False]
+        - AssertSummationElementMultiple: [64]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1, 1, 2048]
+          - Exact: [2048, 1, 1, 512]
+          - Exact: [1024, 8, 1, 2048]
+          - Exact: [2048, 17, 1, 512]
+          - Exact: [1024, 64, 1, 2048]
+          - Exact: [128, 320, 1, 256]
