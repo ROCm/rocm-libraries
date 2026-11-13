@@ -204,6 +204,14 @@ class MFMATileRange:
         return f"[{self.tileId_start}-{self.tileId_end - 1}]"
 
 
+class HalfDisjointPlanRefused(RuntimeError):
+    """A halfDisjointLds schedule has no half-disjoint load plan.
+
+    Kernel.mainLoop skips the partition candidate, and rejects the kernel when
+    no candidate is left.
+    """
+
+
 BALANCE_MIN_LEAD_MFMAS = 6
 BALANCE_MIN_HALF_MFMAS = 28
 
@@ -331,9 +339,9 @@ class SchedulerConfig:
     uniformEpochVmemCohortSize: int = 5
     # Split each uniform-epoch K iteration into two halves of the partition
     # sequence.  A tile's direct-to-LDS load goes in the half that does not
-    # read it, and one VMEM wait and barrier open each half.  Applied only
-    # when every A/B tile is read in a single half; any other schedule keeps
-    # the uniform epoch cohorts.
+    # read it, and one VMEM wait and barrier open each half.  Every A/B tile
+    # must be read in a single half: place_LRs raises HalfDisjointPlanRefused
+    # for any other schedule.  Off, the body keeps the uniform epoch cohorts.
     halfDisjointLds: bool = False
     # Buffer loads one GR atom issues, per tensor.  A tensor missing here
     # issues one load per atom.
@@ -1255,12 +1263,34 @@ class LogicalScheduler:
         self._balance_half_disjoint_reads(partitions)
         self._halfLoadHalf = self._plan_half_disjoint_loads(partitions)
         if self._halfLoadHalf is None:
+            if cfg.halfDisjointLds:
+                failures = self._half_disjoint_gate_failures()
+                raise HalfDisjointPlanRefused(
+                    "half-disjoint plan refused: "
+                    + ("config lacks " + ", ".join(failures) if failures else
+                       f"partitions {cfg.partitionSizesM}x{cfg.partitionSizesN} "
+                       f"({cfg.partitionOrder}) read an A/B tile outside one half"))
             self._unbalance_half_disjoint_reads(partitions)
         if cfg.uniformPgrEpoch and self._halfLoadHalf is None:
             self._move_uniform_epoch_p0_overwrite_reads(partitions)
 
         self._partitions = partitions
         return partitions
+
+    def _half_disjoint_gate_failures(self) -> List[str]:
+        """The config terms that rule the half-disjoint plan out before any layout check."""
+        cfg = self.config
+        numP = cfg.numPartitions
+        terms = (
+            ("halfDisjointLds", cfg.halfDisjointLds),
+            ("uniformPgrEpoch", cfg.uniformPgrEpoch),
+            ("dualPeriodScale", cfg.dualPeriodScale),
+            (f"numSubIterK == 1 (got {cfg.numSubIterK})", cfg.numSubIterK == 1),
+            (f"an even partition count >= 2 (got {numP})", numP >= 2 and numP % 2 == 0),
+            ("SPREAD GR placement", cfg.grPlacement == GRPlacementStrategy.SPREAD),
+            ("single-DU data", not self._is_multi_du()),
+        )
+        return [name for name, ok in terms if not ok]
 
     def _balance_half_disjoint_reads(self, partitions):
         """Read late partition-0 A tiles in their own first half instead of the wrap prefetch.
@@ -1280,10 +1310,7 @@ class LogicalScheduler:
         """
         cfg = self.config
         numP = cfg.numPartitions
-        if not (cfg.halfDisjointLds and cfg.uniformPgrEpoch and cfg.dualPeriodScale
-                and cfg.numSubIterK == 1 and numP >= 2 and numP % 2 == 0
-                and cfg.grPlacement == GRPlacementStrategy.SPREAD
-                and not self._is_multi_du()):
+        if self._half_disjoint_gate_failures():
             return
         half = numP // 2
         ranges = [self._partition_tile_range(pi) for pi in range(numP)]
@@ -1357,11 +1384,7 @@ class LogicalScheduler:
         """
         cfg = self.config
         numP = cfg.numPartitions
-        if not (cfg.halfDisjointLds and cfg.uniformPgrEpoch
-                and cfg.dualPeriodScale and cfg.numSubIterK == 1
-                and numP >= 2 and numP % 2 == 0
-                and cfg.grPlacement == GRPlacementStrategy.SPREAD
-                and not self._is_multi_du()):
+        if self._half_disjoint_gate_failures():
             return None
         half = numP // 2
         readHalf = {}

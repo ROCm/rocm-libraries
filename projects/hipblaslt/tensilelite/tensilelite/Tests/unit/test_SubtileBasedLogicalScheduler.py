@@ -20,6 +20,7 @@ from tensilelite.Components.Subtile.Kernel import (
 )
 from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
+    HalfDisjointPlanRefused,
     LogicalScheduler,
     MFMATileRange,
     Pass,
@@ -5147,11 +5148,39 @@ class TestHalfDisjointLds:
         assert not s.halfDisjoint
         assert any(lr.mustPrecedeP0Overwrite for lr in parts[0][0].lrs)
 
-    def test_read_in_second_half_falls_back(self):
+    def test_read_in_second_half_is_refused(self):
         # Four partitions along N: partition 2 reads partition 3's B in the
         # second half of its own iteration, so no load half exists for it.
         s = LogicalScheduler(self._cfg(2, 8, grB=1, grSA=2, size_m=2, size_n=2))
+        with pytest.raises(HalfDisjointPlanRefused, match="outside one half"):
+            s.build(stop_after=Pass.LR)
+
+    def test_refused_gate_names_the_missing_terms(self):
+        cfg = self._cfg(8, 8, grB=1, grSA=8)
+        cfg.uniformPgrEpoch = False
+        with pytest.raises(HalfDisjointPlanRefused, match="config lacks uniformPgrEpoch$"):
+            LogicalScheduler(cfg).build(stop_after=Pass.LR)
+
+    def test_flag_off_keeps_a_refused_layout_on_the_uniform_epoch(self):
+        s = LogicalScheduler(self._cfg(2, 8, grB=1, grSA=2, size_m=2, size_n=2,
+                                       half_disjoint=False))
         s.build(stop_after=Pass.LR)
+        assert not s.halfDisjoint
+
+    def test_non_dual_period_schedule_is_not_gated(self):
+        # Same geometry with a single scale period and no partition prefetch:
+        # halfDisjointLds stays off, as Kernel.mainLoop leaves it for every
+        # kernel that is not dual-period MXFP8.
+        cfg = SchedulerConfig(
+            numMFMATilesM=2, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(2, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=2, partitionSizeN=2, pgr=2)
+        s = LogicalScheduler(cfg)
+        assert not cfg.halfDisjointLds
+        assert s.build() is not None
         assert not s.halfDisjoint
 
 
@@ -5249,26 +5278,25 @@ class TestHalfDisjointBalance:
         s.build_nll()
 
     @staticmethod
-    def _unbalanced_8x10(monkeypatch, balance):
-        """8x10 LR layout when the half-disjoint plan is refused, with or without balancing."""
+    def _unbalanced_8x10(monkeypatch):
+        """8x10 LR layout before balancing, with the load plan stubbed out."""
         monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                            lambda self, parts: {})
+        monkeypatch.setattr(LogicalScheduler, "_balance_half_disjoint_reads",
                             lambda self, parts: None)
-        if not balance:
-            monkeypatch.setattr(LogicalScheduler, "_balance_half_disjoint_reads",
-                                lambda self, parts: None)
         s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
         return s, s.build(stop_after=Pass.LR)
 
-    def test_refused_plan_restores_the_wrap_prefetch(self, monkeypatch):
-        _, plain = self._unbalanced_8x10(monkeypatch, balance=False)
-        monkeypatch.undo()
-        s, undone = self._unbalanced_8x10(monkeypatch, balance=True)
-        assert not s.halfDisjoint
-        assert s._balancedRead is None
-        assert self._lrs(undone) == self._lrs(plain)
+    def test_refused_plan_after_balancing_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                            lambda self, parts: None)
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        with pytest.raises(HalfDisjointPlanRefused, match="outside one half"):
+            s.build(stop_after=Pass.LR)
+        assert s._balancedRead is not None
 
     def test_unbalance_restores_a_wrap_read_outside_the_last_partition(self, monkeypatch):
-        s, parts = self._unbalanced_8x10(monkeypatch, balance=False)
+        s, parts = self._unbalanced_8x10(monkeypatch)
         monkeypatch.undo()
         wrap = next(lr for slot in parts[-1] for lr in slot.lrs
                     if lr.tensor == "A" and lr.mtIteration == 1)

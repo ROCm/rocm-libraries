@@ -35,6 +35,16 @@ def _emit_dual_period_kernel(plr=1):
     parameters -- no environment knobs are required.  ``plr`` only reaches the
     solution; the schedule pins its own base, so it cannot change the assembly.
     """
+    res = _codegen_kernel(plr=plr)
+    assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
+    src = res.src
+    if isinstance(src, (bytes, bytearray)):
+        src = src.decode(errors="replace")
+    return src
+
+
+def _codegen_kernel(plr=1, mx=True, mi=(16, 16, 128, 1, 1, 8, 4, 2, 4)):
+    """Run codegen on the dual-period geometry, or a plain-FP8 kernel when not mx."""
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.Common.Capabilities import makeIsaInfoMap
     from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
@@ -55,11 +65,13 @@ def _emit_dual_period_kernel(plr=1):
     asm = makeAssemblyToolchain(cxx, bundler, "default").assembler
     assignGlobalParameters({}, iim)
 
-    mi = [16, 16, 128, 1, 1, 8, 4, 2, 4]
+    mi = list(mi)
     pt = {"OperationType": "GEMM", "DataType": "F8", "DestDataType": "b",
           "ComputeDataType": "s", "HighPrecisionAccumulate": True,
           "TransposeA": True, "TransposeB": False, "UseBeta": True,
-          "Batched": True, "StridedBatched": True, "MXBlockA": 32, "MXBlockB": 32}
+          "Batched": True, "StridedBatched": True}
+    if mx:
+        pt.update({"MXBlockA": 32, "MXBlockB": 32})
     params = {"ProblemType": pt, "ISA": isa, "MatrixInstruction": mi,
         "WorkGroup": [16, 16, 1], "WavefrontSize": 64, "DepthU": 128,
         "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
@@ -76,8 +88,8 @@ def _emit_dual_period_kernel(plr=1):
     params.update(matrixInstructionToMIParameters(
         mi, isa, 64, pt, params["WorkGroup"], iim))
     sol = Solution(params, False, True, False, asm, iim)
-    assert sol.get("Valid"), "dual-period MXFP8 solution did not validate"
-    assert sol.get("_DualPeriodMXFP8"), "solution did not take the dual-period path"
+    assert sol.get("Valid"), "solution did not validate"
+    assert bool(sol.get("_DualPeriodMXFP8")) == mx, "unexpected dual-period selection"
 
     from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions, processKernelSource)
@@ -96,14 +108,28 @@ def _emit_dual_period_kernel(plr=1):
             kernel.duplicate = False
         except Exception:
             pass
-        res = processKernelSource(
+        return processKernelSource(
             kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-        assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
-        src = res.src
-        if isinstance(src, (bytes, bytearray)):
-            src = src.decode(errors="replace")
-        return src
     pytest.skip("no kernel object generated")
+
+
+def _refuse_half_disjoint_plans(monkeypatch):
+    from tensilelite.Components.Subtile.LogicalScheduler import LogicalScheduler
+    monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                        lambda self, partitions: None)
+
+
+def test_refused_half_disjoint_plan_rejects_the_kernel(monkeypatch, capsys):
+    _refuse_half_disjoint_plans(monkeypatch)
+    res = _codegen_kernel()
+    assert res.err != 0
+    assert "no dual-period MXFP8 partition candidate has a half-disjoint schedule" \
+        in capsys.readouterr().out
+
+
+def test_plain_fp8_kernel_ignores_the_half_disjoint_plan(monkeypatch):
+    _refuse_half_disjoint_plans(monkeypatch)
+    assert _codegen_kernel(mx=False, mi=(16, 16, 128, 1, 1, 4, 4, 2, 2)).err == 0
 
 
 def _mainloop_lines(src):

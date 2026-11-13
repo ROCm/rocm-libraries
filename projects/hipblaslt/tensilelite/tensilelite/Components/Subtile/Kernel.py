@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from .LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy)
+      ReadGranularity, GRPlacementStrategy, HalfDisjointPlanRefused)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
@@ -1540,6 +1540,8 @@ def mainLoop(writer, kernel):
       tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
       candidates = wider
+  scheduler = None
+  refusals = []
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1578,12 +1580,23 @@ def mainLoop(writer, kernel):
           tailPartitionSizeM=tailPartitionSizeM,
       )
 
-      scheduler = LogicalScheduler(cfg)
-      scheduler.build()
+      candidate = LogicalScheduler(cfg)
+      try:
+          candidate.build()
+      except HalfDisjointPlanRefused as refusal:
+          refusals.append(f"partition {partSizeM}x{partSizeN}: {refusal}")
+          continue
+      scheduler = candidate
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
+  # The dual-period main loop is only built half-disjoint.  Raising rejects the
+  # kernel: getSourceFileString turns a RuntimeError into a codegen failure.
+  if scheduler is None:
+      raise RuntimeError(
+          "%s: no dual-period MXFP8 partition candidate has a half-disjoint schedule (%s)"
+          % (writer.states.kernelName, "; ".join(refusals)))
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
