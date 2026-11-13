@@ -2626,17 +2626,18 @@ def _slideOverwriteBarriersToVmem(module) -> None:
         module.setItems(items)
 
 
+def _lgkmCount(wait):
+    """The LDS/scalar-load count an s_waitcnt waits for, or None when it does not wait on it."""
+    if getattr(wait, "waitAll", False):
+        return 0
+    if wait.dscnt < 0 and wait.kmcnt < 0:
+        return None
+    return (0 if wait.dscnt < 0 else wait.dscnt) + (0 if wait.kmcnt < 0 else wait.kmcnt)
+
+
 def _isFullLgkmDrain(inst) -> bool:
     """Whether inst waits until no ds_read or scalar load is outstanding."""
-    if not isinstance(inst, SWaitCnt):
-        return False
-    if getattr(inst, "waitAll", False):
-        return True
-    if inst.dscnt < 0 and inst.kmcnt < 0:
-        return False
-    lgkm = ((0 if inst.dscnt < 0 else inst.dscnt)
-            + (0 if inst.kmcnt < 0 else inst.kmcnt))
-    return lgkm == 0
+    return isinstance(inst, SWaitCnt) and _lgkmCount(inst) == 0
 
 
 def _incrementsLgkm(inst) -> bool:
@@ -5025,17 +5026,10 @@ def relaxWaitGrForOutstandingStores(module):
 
 
 
-_BALANCED_READ_LEAD_MFMAS = 4
-
-
 def _lgkmCovers(wait, issuedAfter) -> bool:
     """Whether wait retires an LDS op with issuedAfter LDS/scalar ops behind it."""
-    if getattr(wait, "waitAll", False):
-        return True
-    if wait.dscnt < 0 and wait.kmcnt < 0:
-        return False
-    count = (0 if wait.dscnt < 0 else wait.dscnt) + (0 if wait.kmcnt < 0 else wait.kmcnt)
-    return issuedAfter >= count
+    count = _lgkmCount(wait)
+    return count is not None and issuedAfter >= count
 
 
 def _blocksBalancedRead(inst, read) -> bool:
@@ -5054,15 +5048,20 @@ def _blocksBalancedRead(inst, read) -> bool:
 
 
 def _gapOpenForRead(gap) -> bool:
-    """Whether a gap may take one more ds_read: no load, barrier or wait, at most one
-    ds_read and three instructions already."""
+    """Whether a gap may take one more ds_read: it holds no load, barrier or wait, and
+    with the read it stays within the per-gap ds_read budget and keeps one of its
+    follower slots free."""
     work = [x for x in gap if not isinstance(x, TextBlock)]
     if any(_isBufferLoad(x) or _isBarrier(x) or _isWaitCnt(x) for x in work):
         return False
-    return sum(1 for x in work if _isDsRead(x)) <= 1 and len(work) <= 3
+    reads = sum(1 for x in work if _isDsRead(x))
+    return (reads + 1 <= _MXFP8_DATA_DS_READS
+            and len(work) + 1 <= _MXFP8_FOLLOWER_SLOTS - 1)
 
 
-def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
+def deferBalancedCurrentCellWait(
+        module, balancedReads,
+        minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT) -> bool:
     """Spread balanced current-cell reads behind the first MFMA and drain them at their consumer.
 
     balancedReads are the ds_reads emitted for LRPlacements with balancedCurrentCell set,
@@ -5073,10 +5072,10 @@ def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
     followed by an lgkmcnt(0). The balanced reads (planHalfDisjointBalance) feed a later
     MFMA of partition 0, so they leave that prefix. When nothing else needs the
     drain, it goes, and the top vmcnt wait and barrier return behind the first MFMA. Each
-    read then takes the earliest gap past the barrier gap and the gap after it that has no
-    load, barrier or wait, at most one other ds_read and three instructions, while staying
-    ahead of any write to its registers, of the next barrier, and _BALANCED_READ_LEAD_MFMAS
-    MFMAs ahead of its consumer (else the first slot behind the barrier). One lgkm wait goes
+    read then takes the earliest gap past the barrier gap and the gap after it that is open
+    for a read (_gapOpenForRead), while staying ahead of any write to its registers, of the
+    next barrier, and minGapDsReadToWait MFMAs ahead of its consumer (else the first slot
+    behind the barrier). One lgkm wait goes
     right before the first MFMA reading their destinations, unless an earlier wait retires
     them. Returns False, leaving the module alone, when the body does not have that shape,
     or when the barrier would move behind a buffer_load or m0 write that then issues
@@ -5138,7 +5137,7 @@ def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
     slots = {}
     for read in readInsts:
         at = bodyStart
-        for n in range(firstGap + 1, consumer - _BALANCED_READ_LEAD_MFMAS + 1):
+        for n in range(firstGap + 1, consumer - minGapDsReadToWait + 1):
             lo = max(mfmas[n - 1] + 1, bodyStart)
             if lo > limit:
                 break

@@ -194,8 +194,8 @@ def balanced_8x10():
     defer = InstructionScheduler.deferBalancedCurrentCellWait
     calls = []
 
-    def record(module, balancedReads):
-        applied = defer(module, balancedReads)
+    def record(module, balancedReads, *args):
+        applied = defer(module, balancedReads, *args)
         calls.append((module, list(balancedReads), applied))
         return applied
 

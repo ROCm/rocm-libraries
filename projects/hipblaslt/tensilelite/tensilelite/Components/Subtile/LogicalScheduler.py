@@ -5831,9 +5831,15 @@ class LogicalScheduler:
         # before dropDominatedLgkmWaits proves drops against the final order.
         if self.halfDisjoint and label.startswith("MAINLOOP"):
             balanced_reads = lr_reads(lambda lr: lr.balancedCurrentCell)
+            # The deferral skips the barrier gap and the gap after it, then keeps
+            # each read minGapDsReadToWait MFMAs ahead of its consumer. Dual-period
+            # is gfx950-only, where the gap is 4.
+            assert not balanced_reads or BALANCE_MIN_LEAD_MFMAS >= minGapDsReadToWait + 2, \
+                "BALANCE_MIN_LEAD_MFMAS leaves no gap for a balanced read"
             # planHalfDisjointBalance only pays off once the reads leave the
             # partition-0 prefix; kept there they are slower than no balance.
-            if balanced_reads and not deferBalancedCurrentCellWait(module, balanced_reads):
+            if balanced_reads and not deferBalancedCurrentCellWait(
+                    module, balanced_reads, minGapDsReadToWait):
                 raise RuntimeError(
                     f"{label}: the balanced current-cell reads could not leave "
                     "partition 0's prefix (deferBalancedCurrentCellWait refused)")
