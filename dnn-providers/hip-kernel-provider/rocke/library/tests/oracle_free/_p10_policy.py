@@ -109,10 +109,12 @@ def path_exact_admissible(case: UniformCase) -> AdmissibleBits:
     """The correctly rounded target at every coordinate, and both zero signs at
     the one coordinate whose target is zero.
 
-    This is what the kernel stores when the exponential of zero is one and its
-    sums round to nearest. It is the strictest admissible set: the enclosure
-    derived from the kernel's arithmetic contains it, and may add the adjacent
-    value at coordinates whose target is not a value of the dtype."""
+    This is the verdict's admissible set. With the exponential of zero equal to
+    one, round-to-nearest FP32 arithmetic and an accumulation that is exact on
+    the codeword's lane grids, the kernel stores exactly the target: the value
+    before the output conversion is within about ``2**-23`` of it, relatively,
+    and every target is further than that from the edge of its rounding cell.
+    The zero output is a sum of signed zeros whose sign nothing fixes."""
     first = codeword_target_bits(case)
     second = first.copy()
     second[first == 0] = _SIGN_BIT

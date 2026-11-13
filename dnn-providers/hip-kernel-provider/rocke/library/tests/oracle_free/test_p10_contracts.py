@@ -818,6 +818,18 @@ def test_every_target_keeps_its_rounding_cell_under_the_path_exact_error(
         assert odd % 2 == 1 and (odd * value / quantum).denominator == 1
         assert _cell_margin(value, case.dtype) >= quantum / (4 * odd)
 
+    # The thinnest margin of the pairing, relative to the target, and its row.
+    # It is still dozens of times the error.
+    relative = {
+        query: _cell_margin(parity[query], case.dtype) / parity[query]
+        for query in unrepresentable
+    }
+    thinnest = min(relative, key=relative.get)
+    row, margin = {"fp16": (56, 5.728e-6), "bf16": (64, 4.017e-5)}[case.dtype]
+    assert thinnest == row
+    assert float(relative[thinnest]) == pytest.approx(margin, rel=1e-3)
+    assert relative[thinnest] > 48 * error
+
 
 def test_guard_patterns_are_a_finite_canary_and_a_nan_sentinel() -> None:
     for dtype in ("fp16", "bf16"):
