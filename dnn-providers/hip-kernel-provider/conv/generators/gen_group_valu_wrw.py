@@ -63,7 +63,7 @@ TILES = {
     },
     F3S2: {"pass": [(4, 4, 4, 2), (2, 4, 4, 2), (1, 4, 4, 2), (1, 4, 2, 2)]},
     F1: {"pass": [(4, 4, 8, 2), (8, 8, 8, 2), (8, 8, 4, 2), (8, 16, 4, 2)]},
-    F5: {"pass": [(2, 4, 4, 2), (1, 4, 4, 2), (2, 2, 8, 2)], "ring": [(2, 2, 4, 2)]},
+    F5: {"pass": [(1, 4, 4, 2), (2, 2, 8, 2)], "ring": [(2, 2, 4, 2)]},
 }
 
 # The matrix-core architectures take a small pack: there the matrix-core engines serve most
@@ -84,7 +84,7 @@ TILES_MMA = {
     },
     F3S2: {"pass": [(2, 4, 4, 2), (1, 4, 4, 2)]},
     F1: {"pass": [(4, 4, 8, 2), (8, 8, 4, 2), (8, 8, 8, 2), (8, 16, 4, 2)]},
-    F5: {"pass": [(2, 4, 4, 2)]},
+    F5: {"pass": [(1, 4, 4, 2)]},
 }
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
 RDNA += ["gfx1200", "gfx1201"]
@@ -140,6 +140,13 @@ write(
 
 DTYPES = (("FLOAT", "f32"), ("HALF", "f16"), ("BFLOAT16", "bf16"))
 total = 0
+# The kernels hold cb kb fr fs fp32 sums a lane (ConvGroupValuWrwProblem.hpp: at most 160).
+for tiles_of in (TILES, TILES_MMA):
+    for (fr, fs, _, _, _), forms in tiles_of.items():
+        for tiles in forms.values():
+            for cb, kb, _, _ in tiles:
+                assert cb * kb * fr * fs <= 160, (fr, fs, cb, kb)
+
 for group, (archs, tiles_of, layouts) in PACKS.items():
     kernels = []
     for fil, forms in tiles_of.items():
