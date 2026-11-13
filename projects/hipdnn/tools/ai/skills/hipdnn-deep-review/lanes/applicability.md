@@ -6,7 +6,8 @@ Applicability means `isApplicable`, a matcher or `graph_match`, and a plan build
 
 ## Reachability first
 
-A property counts only if it reaches the changed engine. All three layers must pass:
+A property counts only if it reaches the changed engine. Every layer that exists for that engine must pass (layer 1 always,
+layer 2 in hip-kernel-provider, layer 3 for ingestor engines):
 
 1. **Plugin version.** The plugin's advertised `HIPDNN_PLUGIN_API_VERSION` must clear the graph's floor
    (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`, `computeMinimumEnginePluginApiVersion`;
@@ -28,8 +29,11 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
 3. Compare sibling builders, arches and forward/backward paths for divergent gates.
 4. Check every path that builds, sizes or restores a plan without the gate: `buildPlan`, `getMaxWorkspaceSize`, planless
    execution contexts, deserialized plans.
-5. Review any raise of an advertised or declared version (plugin version macro, UED `sdk_version`, provider schema opt-in) over
-   every newly reachable property.
+5. Review every version change over each newly reachable property. That covers a raise of an advertised or declared version
+   (plugin version macro, UED `sdk_version`, provider schema opt-in), and a schema or floor change with no engine touched. For a
+   new or changed field an engine can receive, check that `computeMinimumEnginePluginApiVersion` gives its non-default values a
+   floor above every engine that does not read it; otherwise those engines receive it unread (`version-mismatch`). When no engine
+   changes, list the engines that receive the changed table and work steps 2 and 3 over them.
 6. Decline tests: one per property value with boundary rows (below, at, above the limit), each a legal graph, failing when the
    guard is removed. Offer the guard removal to `VER` as the mutation.
 7. State, for every claimed hazard, the smallest legal graph mutation the engine accepts.
@@ -52,7 +56,7 @@ Closed set; name each finding's class in `Actual`.
 | `loose-check` | Read, but admits values the kernel cannot serve (divisibility, limits, 32-bit narrowing) |
 | `sibling-drift` | One builder, arch or direction checks it; a sibling does not |
 | `accept-then-fail` | Applicability passes; plan build or launch fails |
-| `version-mismatch` | A version raised before every engine declines or reads the new fields |
+| `version-mismatch` | A version raised, or a field added without a floor, before every engine that receives it declines or reads it |
 | `bypass-path` | A plan built or run, or a tensor handled, outside the gate |
 | `blackbox-delegation` | A library trusted to reject that does not, or is unproven |
 | `over-decline` | Reverse: a servable graph refused |
@@ -91,10 +95,11 @@ Per [../policy.md](../policy.md) tiers; kind `defect` unless noted.
 | Situation | Tier |
 |---|---|
 | Reachable hazard giving UB, a memory fault, wrong results or a crash | `BLOCKING` |
-| Reachable `accept-then-fail`, `over-decline`, or a version raise whose newly reachable properties are not all handled | `IMPORTANT` (`BLOCKING` when the raise exposes UB or wrong results) |
+| Reachable `accept-then-fail`, `over-decline`, or a version change (step 5) whose newly reachable properties are not all handled | `IMPORTANT` (`BLOCKING` when it exposes UB or wrong results) |
 | `N/A-version` latent hazard, or one in code the change does not touch | `FUTURE WORK`, kind `source-claim` |
 
-A reachable claim at `IMPORTANT` or above carries its graph mutation and the three-layer reachability argument in **Proof**.
+A reachable claim at `IMPORTANT` or above carries its graph mutation and the reachability argument over the layers that exist for
+the engine in **Proof**.
 
 ## Hazard knowledge directory
 
