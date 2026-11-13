@@ -9,9 +9,15 @@
  * flags; GSU MultipleBufferSingleKernel and output-amax use it for
  * synchronization. Each consumer must leave the buffer at zero on exit.
  * Residue is silent -- it corrupts a later launch, not the one that left it --
- * so this listener reads the buffer back, fails the run on any nonzero int,
- * and clears it so it is reported once. Buffers declared too narrow to scan
- * in full produce a warning and are skipped.
+ * so this listener checks the buffer, fails the run on any nonzero int, and
+ * clears it so it is reported once. Buffers declared too narrow to scan in
+ * full produce a warning and are skipped.
+ *
+ * The check OR-reduces the buffer on the GPU, on the client's stream, and
+ * reads back the 4-byte result; only a nonzero result reads the whole buffer
+ * back to build the diagnostic. Under the FFM emulator (HSA_MODEL_MEMFILE),
+ * and when the reduction kernel has no code object for the device, the whole
+ * buffer is read back and reduced on the host instead.
  *
  * The check covers every launch of a solution: main calls beginRunIteration()
  * (which takes each device's current inputs) before each run iteration's
@@ -38,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -167,30 +174,35 @@ namespace TensileLite
             struct CheckTimers
             {
                 char const* check;
+                char const* reduce;
                 char const* readback;
                 char const* scan;
                 char const* inactive;
                 char const* noBuffer;
             };
             inline static constexpr CheckTimers runIterationTimers{"synchronizer_check",
+                                                                   "synchronizer_reduce",
                                                                    "synchronizer_readback",
                                                                    "synchronizer_scan",
                                                                    "synchronizer_inactive",
                                                                    "synchronizer_no_buffer"};
             inline static constexpr CheckTimers afterEnqueuesTimers{
                 "synchronizer_check_after_enqueues",
+                "synchronizer_reduce_after_enqueues",
                 "synchronizer_readback_after_enqueues",
                 "synchronizer_scan_after_enqueues",
                 "synchronizer_inactive_after_enqueues",
                 "synchronizer_no_buffer_after_enqueues"};
             inline static constexpr CheckTimers postSolutionTimers{
                 "synchronizer_check_post_solution",
+                "synchronizer_reduce_post_solution",
                 "synchronizer_readback_post_solution",
                 "synchronizer_scan_post_solution",
                 "synchronizer_inactive_post_solution",
                 "synchronizer_no_buffer_post_solution"};
             inline static constexpr CheckTimers flagBlockTimers{
                 "synchronizer_flag_check_post_solution",
+                "synchronizer_flag_reduce_post_solution",
                 "synchronizer_flag_readback_post_solution",
                 "synchronizer_flag_scan_post_solution",
                 nullptr,
@@ -228,12 +240,19 @@ namespace TensileLite
                              std::string const& what,
                              CheckTimers const& timers);
 
+            /// The stream of the device the validator was given for *deviceId*
+            /// (nullptr if it has none).
+            hipStream_t streamOf(int deviceId) const;
+
             /// Pinned host staging buffer of at least *bytes*, grown on demand
             /// and reused across launches.
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
             bool                m_validateAfterEnqueues = false;
+            // Reduce on the host: under the FFM emulator, or once the reduction
+            // kernel turned out to have no code object for a device.
+            bool m_hostReduction = false;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
@@ -247,6 +266,9 @@ namespace TensileLite
                 std::vector<std::shared_ptr<ProblemInputs>> inputs;
             };
             std::vector<DeviceInputs> m_iterationInputs;
+            // The GPU reduction's result word per device, and its pinned readback target.
+            std::map<int, uint32_t*> m_deviceAny;
+            uint32_t*                m_hostAny = nullptr;
             // Set by the pre-launch hooks, cleared by a check.
             bool m_launchedSinceCheck = false;
 
@@ -254,6 +276,12 @@ namespace TensileLite
             // Keep device transfers overridable for host-only lifecycle tests.
             virtual uint8_t* readBuffer(int deviceId, void* device, size_t bytes);
             virtual void     clearBuffer(int deviceId, void* device, size_t bytes);
+            /// ORs the buffer's 32-bit words into a result word on the device and
+            /// reads it back. Returns false, leaving *any* untouched and launching
+            /// nothing, when the kernel has no code object for the device; throws on
+            /// any HIP error.
+            virtual bool
+                reduceBuffer(int deviceId, void const* device, size_t bytes, uint32_t& any);
 
             /// Whether the check should do anything right now: switched on, and
             /// the solution in hand may use the Synchronizer.

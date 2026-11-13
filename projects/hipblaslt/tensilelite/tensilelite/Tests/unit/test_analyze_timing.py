@@ -475,27 +475,27 @@ class TestClientStamps:
         assert timings["process_exit"] == [10.0]
 
 
-@pytest.mark.parametrize("parent_path, check, readback, scan", [
-    (("synchronizer_check",), "synchronizer_check", "synchronizer_readback", "synchronizer_scan"),
+@pytest.mark.parametrize("parent_path, check, readback, scan, reduce", [
+    (("synchronizer_check",), "synchronizer_check", "synchronizer_readback", "synchronizer_scan", "synchronizer_reduce"),
     (("benchmark_runs", "benchmark_validate_enqueues", "validate_enqueues_listener.SynchronizerValidator", "synchronizer_check_after_enqueues"),
-     "synchronizer_check_after_enqueues", "synchronizer_readback_after_enqueues", "synchronizer_scan_after_enqueues"),
+     "synchronizer_check_after_enqueues", "synchronizer_readback_after_enqueues", "synchronizer_scan_after_enqueues", "synchronizer_reduce_after_enqueues"),
     (("post_solution", "synchronizer_check_post_solution"),
-     "synchronizer_check_post_solution", "synchronizer_readback_post_solution", "synchronizer_scan_post_solution"),
+     "synchronizer_check_post_solution", "synchronizer_readback_post_solution", "synchronizer_scan_post_solution", "synchronizer_reduce_post_solution"),
     (("post_solution", "synchronizer_flag_check_post_solution"),
-     "synchronizer_flag_check_post_solution", "synchronizer_flag_readback_post_solution", "synchronizer_flag_scan_post_solution"),
+     "synchronizer_flag_check_post_solution", "synchronizer_flag_readback_post_solution", "synchronizer_flag_scan_post_solution", "synchronizer_flag_reduce_post_solution"),
 ])
 def test_synchronizer_contexts_have_one_parent_and_valid_reports(
-    parent_path, check, readback, scan, capsys
+    parent_path, check, readback, scan, reduce, capsys
 ):
     hierarchy = TIMING_HIERARCHY["python_benchmark_problems"]["python_client_execution"]
     for category in parent_path:
         assert category in hierarchy
         hierarchy = hierarchy[category]
-    assert readback in hierarchy and scan in hierarchy
+    assert readback in hierarchy and scan in hierarchy and reduce in hierarchy
 
     timings = {"python_benchmark_problems": [10.0], "python_client_execution": [10.0]}
     timings.update({category: [10.0] for category in parent_path[:-1]})
-    timings.update({check: [6.0], readback: [5.0], scan: [1.0]})
+    timings.update({check: [8.0], reduce: [2.0], readback: [5.0], scan: [1.0]})
     print_summary(timings, [])
     report = capsys.readouterr().out
     assert "HIERARCHY VALIDATION: OK" in report

@@ -193,11 +193,14 @@ TIMING_HIERARCHY = {
             # 1..N-1 with SyncsPerBenchmark: 0) at the end of the iteration.
             "warmup_first_sync": {},
             "run_iteration_sync": {},
-            # Per run iteration that launched: read the Synchronizer buffer back and scan it for
-            # residue. Checks inside other phases have distinct timer families below. Only solutions
-            # that may use the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) do the
-            # readback and scan; the rest are "inactive".
+            # Per run iteration that launched: check the Synchronizer buffer for residue. Checks
+            # inside other phases have distinct timer families below. Only solutions that may use
+            # the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) are checked; the rest
+            # are "inactive". The check OR-reduces the buffer on the GPU (reduce: kernel + 4-byte
+            # readback); readback + scan run only when it is dirty, or for every check on the host
+            # path (FFM emulator, no code object for the device; older logs: always).
             "synchronizer_check": {
+                "synchronizer_reduce": {},
                 "synchronizer_readback": {},
                 "synchronizer_scan": {},
                 "synchronizer_inactive": {},
@@ -219,6 +222,7 @@ TIMING_HIERARCHY = {
                     "validate_enqueues_listener.ProgressListener": {},
                     "validate_enqueues_listener.SynchronizerValidator": {
                         "synchronizer_check_after_enqueues": {
+                            "synchronizer_reduce_after_enqueues": {},
                             "synchronizer_readback_after_enqueues": {},
                             "synchronizer_scan_after_enqueues": {},
                             "synchronizer_inactive_after_enqueues": {},
@@ -236,12 +240,14 @@ TIMING_HIERARCHY = {
             },
             "post_solution": {
                 "synchronizer_check_post_solution": {
+                    "synchronizer_reduce_post_solution": {},
                     "synchronizer_readback_post_solution": {},
                     "synchronizer_scan_post_solution": {},
                     "synchronizer_inactive_post_solution": {},
                     "synchronizer_no_buffer_post_solution": {},
                 },
                 "synchronizer_flag_check_post_solution": {
+                    "synchronizer_flag_reduce_post_solution": {},
                     "synchronizer_flag_readback_post_solution": {},
                     "synchronizer_flag_scan_post_solution": {},
                 },
