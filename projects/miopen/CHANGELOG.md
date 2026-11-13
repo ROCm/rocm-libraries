@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [DB] Fixed a SQLite kernel-cache shutdown use-after-free and network-filesystem detection
+  for missing relative cache and database paths.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
@@ -63,6 +65,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   replay a captured graph.
 
 ### Added
+* [DB] Added warnings for user kernel caches and find/performance databases on network filesystems.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

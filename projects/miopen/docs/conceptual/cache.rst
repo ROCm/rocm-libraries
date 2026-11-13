@@ -9,6 +9,31 @@ Kernel cache
 MIOpen caches binary kernels to disk so they don't need to be compiled the next time you run the
 application. This cache is stored in ``$HOME/.cache/miopen`` by default, but you can change this at
 build time by setting the ``MIOPEN_CACHE_DIR`` CMake variable.
+At runtime, ``MIOPEN_CUSTOM_CACHE_DIR`` overrides this location.
+
+.. _cache-storage:
+
+Choosing cache and database storage
+====================================================
+
+Prefer node-local storage for the kernel cache and user find/performance databases. Network
+filesystems can cause slow finds, lock waits, and timeouts.
+
+.. code:: bash
+
+   export MIOPEN_CUSTOM_CACHE_DIR="/local/scratch/$USER/miopen/cache"
+   export MIOPEN_USER_DB_PATH="/local/scratch/$USER/miopen/db"
+
+Replace ``/local/scratch`` with node-local storage; ``/tmp`` is not necessarily local.
+
+MIOpen warns when these paths are on a recognized network filesystem. Explicit overrides are used
+as given. Relative overrides are interpreted against the process working directory, including when
+the cache or database directories do not exist yet.
+
+Non-development builds redirect network-backed default paths to the temporary directory,
+so cached kernels and tuning results may not persist. SQLite also
+`does not support WAL mode over network filesystems <https://www.sqlite.org/wal.html>`_.
+
 
 Clear the cache
 ====================================================

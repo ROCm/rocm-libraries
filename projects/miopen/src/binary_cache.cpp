@@ -32,6 +32,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/filesystem_checker.hpp>
+#include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/version.h>
 #if MIOPEN_ENABLE_SQLITE
@@ -44,6 +45,8 @@
 #include <miopen/filesystem.hpp>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DISABLE_CACHE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CUSTOM_CACHE_DIR)
@@ -72,14 +75,30 @@ static fs::path ComputeUserCachePath()
                                 + "." + std::to_string(MIOPEN_VERSION_PATCH) //
                                 + "." + MIOPEN_STRINGIZE(MIOPEN_VERSION_TWEAK);
     p = miopen::ExpandUser(cache_dir) / version;
-#if !MIOPEN_BUILD_DEV
-    /// \ref nfs-detection
-    if(GetFilesystemChecker().IsNetworkedFilesystem(p) &&
-       custom.empty()) // Only if env variable isn't set
+    if(GetFilesystemChecker().IsNetworkedFilesystem(p))
     {
-        p = fs::temp_directory_path() / ".cache" / "miopen" / version;
-    }
+#if !MIOPEN_BUILD_DEV
+        if(custom.empty())
+        {
+            const auto fallback = fs::temp_directory_path() / ".cache" / "miopen" / version;
+            MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
+                           "Kernel cache path '"
+                               << p.string() << "' is on a network filesystem. "
+                               << "Redirecting to '" << fallback.string()
+                               << "'; cached kernels may not persist. "
+                               << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
+            p = fallback;
+        }
+        else
 #endif
+        {
+            MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
+                           "Kernel cache path '"
+                               << p.string() << "' is on a network filesystem. "
+                               << "This may cause slow algorithm finds or timeouts. "
+                               << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
+        }
+    }
 
     if(!fs::exists(p) && !MIOPEN_DISABLE_USERDB)
         fs::create_directories(p);
@@ -90,33 +109,37 @@ static fs::path ComputeUserCachePath()
 }
 
 namespace {
-// Use static local variables to avoid non-const globals while allowing reset for testing
-const fs::path*& UserCachePathPtrRef()
+struct CachedPath
 {
-    static const fs::path* ptr = nullptr;
-    return ptr;
+    std::once_flag initialized;
+    fs::path value;
+};
+
+// Retain path state through process teardown: exit handlers may still query it.
+CachedPath& UserCachePathRef()
+{
+    static auto* const path = new CachedPath;
+    return *path;
 }
 
-const fs::path*& SysCachePathPtrRef()
+CachedPath& SysCachePathRef()
 {
-    static const fs::path* ptr = nullptr;
-    return ptr;
+    static auto* const path = new CachedPath;
+    return *path;
 }
 
 const fs::path& GetUserCachePathInternal()
 {
-    auto& ptr = UserCachePathPtrRef();
-    if(ptr == nullptr)
-        ptr = new fs::path(ComputeUserCachePath());
-    return *ptr;
+    auto& path = UserCachePathRef();
+    std::call_once(path.initialized, [&path] { path.value = ComputeUserCachePath(); });
+    return path.value;
 }
 
 const fs::path& GetSysCachePathInternal()
 {
-    auto& ptr = SysCachePathPtrRef();
-    if(ptr == nullptr)
-        ptr = new fs::path(ComputeSysCachePath());
-    return *ptr;
+    auto& path = SysCachePathRef();
+    std::call_once(path.initialized, [&path] { path.value = ComputeSysCachePath(); });
+    return path.value;
 }
 } // namespace
 
@@ -142,10 +165,12 @@ fs::path GetCachePath(bool is_system)
 namespace testing {
 void ResetCachedPaths()
 {
-    delete UserCachePathPtrRef();
-    delete SysCachePathPtrRef();
-    UserCachePathPtrRef() = nullptr;
-    SysCachePathPtrRef()  = nullptr;
+    auto* user   = &UserCachePathRef();
+    auto* system = &SysCachePathRef();
+    std::destroy_at(user);
+    std::construct_at(user);
+    std::destroy_at(system);
+    std::construct_at(system);
 }
 } // namespace testing
 #endif
@@ -166,10 +191,10 @@ bool IsCacheDisabled()
 using KDb = DbTimer<MultiFileDb<KernDb, KernDb, false>>;
 KDb GetDb(const TargetProperties& target, size_t num_cu)
 {
-    static const auto user_dir = ComputeUserCachePath();
-    static const auto sys_dir  = ComputeSysCachePath();
-    fs::path user_path         = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
-    fs::path sys_path          = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
+    const auto& user_dir = GetUserCachePathInternal();
+    const auto& sys_dir  = GetSysCachePathInternal();
+    fs::path user_path   = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
+    fs::path sys_path    = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
     if(user_dir.empty())
         user_path = user_dir;
     if(!fs::exists(sys_path))
