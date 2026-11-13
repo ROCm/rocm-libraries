@@ -495,7 +495,6 @@ namespace
         expect_null_args(rocsparse_spmat_get_nnz, csr.get(), &out);
     }
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
     TEST_F(ConvDescr, DnvecScalar)
     {
         float      alpha = 2.5f, other = 1.0f;
@@ -540,7 +539,6 @@ namespace
         EXPECT_REJECTED(mk(handle, &bad, host, f32, &alpha, &other));
         EXPECT_EQ(bad.get(), nullptr);
     }
-#endif
 
     TEST_F(ConvDescr, ConstDnmatRowOrderLd)
     {
@@ -577,9 +575,8 @@ namespace
 
 // rocsparse_dnmat_copy_data (only declared with ROCSPARSE_WITH_TRSM_REFACTORING):
 // contiguous, padded and batched layouts, scaled copies through the kernel path in both
-// pointer modes (only with ROCSPARSE_WITH_SPMAT_SCALE, which provides
-// rocsparse_dnvec_descr_create_scalar) and argument validation. Every logical and
-// padding element of the target is checked.
+// pointer modes, using rocsparse_dnvec_descr_create_scalar, and argument validation.
+// Every logical and padding element of the target is checked.
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 namespace
 {
@@ -651,11 +648,7 @@ namespace
     void run_copy(rocsparse_handle handle, const CopyCase& c)
     {
         const Layout &src = c.src, &dst = c.dst;
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-        const Alpha kind = c.alpha;
-#else
-        const Alpha kind = Alpha::none;
-#endif
+        const Alpha   kind = c.alpha;
         // Source values depend on the logical position only.
         std::vector<T> hsrc(layout_size(src), make_val<T>(-7, -3));
         for(int b = 0; b < src.batch; ++b)
@@ -678,7 +671,6 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dm_dst, dst.batch, dst.stride), st_ok);
 
         Dnvec alpha;
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         if(kind != Alpha::none)
         {
             const bool  host = kind == Alpha::host;
@@ -698,7 +690,6 @@ namespace
                 ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, dst.batch, 1), st_ok);
             }
         }
-#endif
         ASSERT_EQ(rocsparse_dnmat_copy_data(handle, alpha, dm_src, dm_dst, nullptr), st_ok);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -773,7 +764,6 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
             ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
                           handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
@@ -790,7 +780,6 @@ namespace
         scalar(alpha, f32, alpha_f);
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
         EXPECT_EQ(copy(alpha, src, dst), st_val);
-#endif
     }
 } // namespace
 #endif // ROCSPARSE_WITH_TRSM_REFACTORING

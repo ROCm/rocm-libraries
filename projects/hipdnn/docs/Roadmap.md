@@ -244,6 +244,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
+  - Stream capture of hipDNN execution landed for engines that report the `SUPPORTS_GRAPH_CAPTURE` behavior note; see [Capture hipDNN graphs in a hipGraph](./user-guides/how-to/capture-hipgraph.rst). A native graph API (the equivalent of cuDNN's `populate_cuda_graph`) and MIOpen capture without workarounds are tracked here
 - Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
   - Save/Load Execution plans (binary serialize/deserialize of graph + execution plan landed in Q2; full save/load across dynamic linking tracked here)
 - Non-standard tensor support (non-packed, vectorized)

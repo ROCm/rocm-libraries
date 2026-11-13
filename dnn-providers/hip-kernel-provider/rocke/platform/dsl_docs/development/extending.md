@@ -445,7 +445,8 @@ One fact, one home. Work through the list in order; a step that does not apply
 6. **Conversions** -- explicit `cvt_<src>_to_<dst>` primitives, each one
    instruction; no existing cast widens to the new type implicitly.
 7. **MMA** -- catalog rows in `core/arch/data/arch_specs.json` if an instruction
-   takes the type as an operand or accumulator.
+   takes the type as an operand or accumulator, and the tiling MMA catalog's
+   (section 5.5).
 8. **Manifest** -- `helpers/spec.py::ptr_type_str` canonicalization.
 9. **C++ engine** -- mirror the change in the same change (`cpp/core/dtypes.cpp`,
    `cpp/core/ir/core_types.cpp`, `cpp/core/lower_llvm/`, `cpp/core/lower_hip/`):
@@ -457,6 +458,27 @@ One fact, one home. Work through the list in order; a step that does not apply
     `lower_kernel_to_llvm`, so a `ROCKE_BACKEND=both ROCKE_CPP_STRICT=1` run
     compares the engines, and state a refusal with
     `rocke.tests.engines.assert_both_engines_reject`.
+
+### 5.5 The tiling MMA catalog and its backend coverage record
+
+The tiling package keeps its own MMA catalog
+(`helpers/tiling/traits/data/mma_traits.json`) and a record of which catalog
+instructions the backend issues on each target
+(`helpers/tiling/traits/data/backend_coverage.json`).
+`tests/helpers/tiling/traits/test_mma_backend_coverage.py` re-measures the record
+from `ArchTarget.mma.ops` and requires it to equal the committed file, so adding,
+removing or rewiring an MMA op in `core.arch` fails that test -- even for an op no
+catalog row uses, which the record lists under `backend_ops_without_row` -- until
+the record is regenerated in the same change. From `platform/`:
+
+```bash
+python -m rocke.tests.helpers.tiling.traits.test_mma_backend_coverage --write
+```
+
+It needs a clang that targets every catalog target (`ROCKE_LLVM_BIN=<llvm>/bin`
+picks one), and runs from a source checkout only. An instruction the catalog
+does not list yet gets a row first (`helpers/tiling/traits/README.md`, Editing
+the catalog).
 
 ## 6. Adding A New Optimization Lever To The Autotuner
 

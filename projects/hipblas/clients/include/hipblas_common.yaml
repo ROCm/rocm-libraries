@@ -508,7 +508,6 @@ Arguments:
   - initialization: hipblas_initialization
   - bad_arg_all: c_bool
   # - known_bug_platforms: c_char*64
-  # - c_noalias_d: c_bool
 
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
@@ -598,4 +597,3 @@ Defaults:
   compute_type_gemm: 2
 #workspace_size: 0
 #  known_bug_platforms: ''
-#c_noalias_d: false

@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileLibLogicToYaml
+# Characterization tests for tensilelite.lib_logic_to_yaml
 #
 # ADD-ONLY: pins the library-logic -> benchmark-config YAML transformers and the
 # TensileLibLogicToYaml orchestrator (LibraryIO read/parse stubbed).
@@ -11,7 +11,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileLibLogicToYaml")
+M = importlib.import_module("tensilelite.lib_logic_to_yaml")
 
 
 # ---------------------------------------------------------------------------

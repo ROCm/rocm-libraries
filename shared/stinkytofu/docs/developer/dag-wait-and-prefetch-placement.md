@@ -65,8 +65,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 | `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | spread the region's ds_loads evenly over its WMMAs |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
-| `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time (queue model off). > 1 also merges the waits of back-to-back WMMAs onto the first one |
-| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
+| `WmmaQueueCoverCycles` | -1 = automatic, (queue depth - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Forced picks (a promoted barrier) are not held. Not 0 also merges the waits of back-to-back WMMAs onto the first one. 0 = queue model off (one WMMA at a time). The queue depth comes from each matrix opcode's `HwInstDesc`, generated from the architecture `.def`: 5 for `v_wmma_scale*`, 8 otherwise |
 
 ## Measured effect
 

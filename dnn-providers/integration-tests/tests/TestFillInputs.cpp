@@ -5,8 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -14,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -21,9 +25,14 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <nlohmann/json.hpp>
 
+#include "BundleFixtureFiles.hpp"
+#include "SdpaFwdGraphTestUtils.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
@@ -41,6 +50,11 @@ static void PrintTo(const FillRecipe& f, std::ostream* os)
     if(f.kind == FillRecipe::Kind::FIXED)
     {
         *os << "FIXED(" << f.value << ")";
+        return;
+    }
+    if(f.kind == FillRecipe::Kind::VALUES)
+    {
+        *os << "VALUES(" << (f.repeat ? "repeat" : "exact") << ")";
         return;
     }
     *os << "FREE[" << f.lo << ", " << f.hi << "]";
@@ -1337,6 +1351,700 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
+// ── VALUES fill ─────────────────────────────────────────────────────────────
+
+namespace
+{
+
+// uids: x=1 (the tensor under test), y=2 (output). No nodes, so only the recipe
+// decides x's contents.
+GraphResult buildValuesGraph(DataType xType,
+                             const std::vector<int64_t>& dims,
+                             const std::vector<int64_t>& strides)
+{
+    GraphResult r;
+    auto& b = r.builder;
+    const std::vector<int64_t> outDims = {1};
+    const std::vector<int64_t> outStrides = {1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", xType, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "y", DataType::FLOAT, &outStrides, &outDims));
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    auto graph = CreateGraphDirect(
+        b, "values", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+GraphResult buildValuesGraph(DataType xType)
+{
+    return buildValuesGraph(xType, {4, 1, 1, 1}, {1, 1, 1, 1});
+}
+
+struct ValuesFill
+{
+    FillResult result;
+    InputTensorMap inputs;
+};
+
+ValuesFill fillX(const GraphResult& gr, const FillRecipe& recipe)
+{
+    const std::vector<int64_t> leafUids = {1};
+    ValuesFill out{FillResult{}, makeTensorsFromGraph(gr, leafUids)};
+    InputFillRecipes recipes;
+    recipes.set(1, recipe);
+    out.result = fillInputs(*gr.graph, out.inputs, leafUids, recipes, nullptr);
+    return out;
+}
+
+template <class T>
+std::vector<T> logicalElements(InputTensorMap& inputs, int64_t uid)
+{
+    std::vector<T> elements;
+    for(auto* element : *inputs.at(uid))
+    {
+        elements.push_back(*static_cast<T*>(element));
+    }
+    return elements;
+}
+
+FillRecipe ints(std::vector<int64_t> numbers, bool repeat = true)
+{
+    return FillRecipe::values(std::move(numbers), repeat);
+}
+
+FillRecipe doubles(std::vector<double> numbers, bool repeat = true)
+{
+    return FillRecipe::values(std::move(numbers), repeat);
+}
+
+void expectInvalid(const ValuesFill& fill, const std::string& reasonPart)
+{
+    EXPECT_FALSE(fill.result.filled);
+    EXPECT_EQ(fill.result.status, FillResult::Status::INVALID) << fill.result.reason;
+    EXPECT_NE(fill.result.reason.find("uid 1: "), std::string::npos) << fill.result.reason;
+    EXPECT_NE(fill.result.reason.find(reasonPart), std::string::npos) << fill.result.reason;
+}
+
+// uids: x=1 (float), z=3 (gdn output). The GDN node has no input fills registered.
+GraphResult buildUnsupportedOpGraph()
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "z", DataType::FLOAT, &kStrides, &kDims));
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "gdn", DataType::FLOAT, NodeAttributes::GdnAttributes, flatbuffers::Offset<void>()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+} // namespace
+
+TEST(TestFillInputs, ValuesFillInt32RepeatsTheList)
+{
+    auto fill = fillX(buildValuesGraph(DataType::INT32), ints({64, 32}));
+
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+    EXPECT_EQ(fill.result.status, FillResult::Status::OK);
+    EXPECT_EQ(logicalElements<int32_t>(fill.inputs, 1), (std::vector<int32_t>{64, 32, 64, 32}));
+}
+
+TEST(TestFillInputs, ValuesFillInt64IsExact)
+{
+    constexpr int64_t K_TWO_TO_53_PLUS_ONE = (int64_t{1} << 53) + 1;
+    auto fill = fillX(buildValuesGraph(DataType::INT64),
+                      ints({K_TWO_TO_53_PLUS_ONE,
+                            -5,
+                            std::numeric_limits<int64_t>::max(),
+                            std::numeric_limits<int64_t>::min()},
+                           false));
+
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+    EXPECT_EQ(logicalElements<int64_t>(fill.inputs, 1),
+              (std::vector<int64_t>{K_TWO_TO_53_PLUS_ONE,
+                                    -5,
+                                    std::numeric_limits<int64_t>::max(),
+                                    std::numeric_limits<int64_t>::min()}));
+}
+
+TEST(TestFillInputs, ValuesFillUint8Int8AndBoolean)
+{
+    auto uint8Fill = fillX(buildValuesGraph(DataType::UINT8), ints({0, 255}));
+    ASSERT_TRUE(uint8Fill.result.filled) << uint8Fill.result.reason;
+    EXPECT_EQ(logicalElements<uint8_t>(uint8Fill.inputs, 1),
+              (std::vector<uint8_t>{0, 255, 0, 255}));
+
+    auto int8Fill = fillX(buildValuesGraph(DataType::INT8), ints({-128, 127}));
+    ASSERT_TRUE(int8Fill.result.filled) << int8Fill.result.reason;
+    EXPECT_EQ(logicalElements<int8_t>(int8Fill.inputs, 1),
+              (std::vector<int8_t>{-128, 127, -128, 127}));
+
+    auto boolFill = fillX(buildValuesGraph(DataType::BOOLEAN), ints({1, 0, 0, 1}, false));
+    ASSERT_TRUE(boolFill.result.filled) << boolFill.result.reason;
+    EXPECT_EQ(logicalElements<bool>(boolFill.inputs, 1),
+              (std::vector<bool>{true, false, false, true}));
+}
+
+TEST(TestFillInputs, ValuesFillFloatingPointTypes)
+{
+    namespace types = hipdnn_data_sdk::types;
+
+    auto floatFill = fillX(buildValuesGraph(DataType::FLOAT), doubles({0.5, -2.25}));
+    ASSERT_TRUE(floatFill.result.filled) << floatFill.result.reason;
+    EXPECT_EQ(logicalElements<float>(floatFill.inputs, 1),
+              (std::vector<float>{0.5f, -2.25f, 0.5f, -2.25f}));
+
+    auto halfFill = fillX(buildValuesGraph(DataType::HALF), doubles({0.5, -2.25}));
+    ASSERT_TRUE(halfFill.result.filled) << halfFill.result.reason;
+    const auto halves = logicalElements<types::half>(halfFill.inputs, 1);
+    ASSERT_EQ(halves.size(), 4u);
+    EXPECT_EQ(static_cast<float>(halves[0]), 0.5f);
+    EXPECT_EQ(static_cast<float>(halves[1]), -2.25f);
+
+    auto bf16Fill = fillX(buildValuesGraph(DataType::BFLOAT16), ints({3, -4}));
+    ASSERT_TRUE(bf16Fill.result.filled) << bf16Fill.result.reason;
+    const auto bf16s = logicalElements<types::bfloat16>(bf16Fill.inputs, 1);
+    ASSERT_EQ(bf16s.size(), 4u);
+    EXPECT_EQ(static_cast<float>(bf16s[2]), 3.0f);
+    EXPECT_EQ(static_cast<float>(bf16s[3]), -4.0f);
+}
+
+TEST(TestFillInputs, ValuesFillDoubleAndFp8)
+{
+    namespace types = hipdnn_data_sdk::types;
+    constexpr int64_t K_TWO_TO_53 = int64_t{1} << 53;
+
+    auto doubleInts = fillX(buildValuesGraph(DataType::DOUBLE), ints({K_TWO_TO_53, -3}));
+    ASSERT_TRUE(doubleInts.result.filled) << doubleInts.result.reason;
+    EXPECT_EQ(logicalElements<double>(doubleInts.inputs, 1),
+              (std::vector<double>{9007199254740992.0, -3.0, 9007199254740992.0, -3.0}));
+
+    auto doubleFractions = fillX(buildValuesGraph(DataType::DOUBLE), doubles({0.1}));
+    ASSERT_TRUE(doubleFractions.result.filled) << doubleFractions.result.reason;
+    EXPECT_EQ(logicalElements<double>(doubleFractions.inputs, 1), std::vector<double>(4, 0.1));
+
+    auto fp8Fill = fillX(buildValuesGraph(DataType::FP8_E4M3), doubles({0.5, -2.0}));
+    ASSERT_TRUE(fp8Fill.result.filled) << fp8Fill.result.reason;
+    const auto fp8s = logicalElements<types::fp8_e4m3>(fp8Fill.inputs, 1);
+    ASSERT_EQ(fp8s.size(), 4u);
+    EXPECT_EQ(static_cast<float>(fp8s[0]), 0.5f);
+    EXPECT_EQ(static_cast<float>(fp8s[1]), -2.0f);
+    EXPECT_EQ(static_cast<float>(fp8s[2]), 0.5f);
+}
+
+// With repeat true, a list longer than the tensor would leave values unused.
+TEST(TestFillInputs, ValuesFillRejectsAListLongerThanTheTensor)
+{
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4, 5})),
+                  "5 values for 4 elements");
+
+    auto exact = fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4}));
+    ASSERT_TRUE(exact.result.filled) << exact.result.reason;
+}
+
+// The block-scale default for the scale normalizes against the largest magnitude in
+// the operand's VALUES list: 12 gives e = 3, so the scale range is [0.5, 2] * 2^-3.
+TEST(TestFillInputs, ValuesOperandRenormalizesBlockScale)
+{
+    InputFillRecipes overrides;
+    overrides.set(1, ints({-12, 3}));
+
+    const auto recipes = fillBlockScaleDequantizeMatmul(DataType::FP8_E4M3, overrides);
+
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(0.0625f, 0.25f));
+}
+
+TEST(TestFillInputs, ValuesFillWithoutRepeatNeedsOneValuePerElement)
+{
+    const auto graph = buildValuesGraph(DataType::FLOAT, kDims, kStrides);
+
+    auto exact = fillX(graph, doubles({0, 1, 2, 3, 4, 5}, false));
+    ASSERT_TRUE(exact.result.filled) << exact.result.reason;
+    EXPECT_EQ(logicalElements<float>(exact.inputs, 1), (std::vector<float>{0, 1, 2, 3, 4, 5}));
+
+    expectInvalid(fillX(graph, doubles({0, 1, 2, 3, 4}, false)), "5 values for 6 elements");
+    expectInvalid(fillX(graph, doubles({0, 1, 2, 3, 4, 5, 6}, false)), "7 values for 6 elements");
+}
+
+// Element i of the list goes to logical element i, whatever the strides, so a
+// column-major x gets the same logical contents as a row-major one.
+TEST(TestFillInputs, ValuesFillFollowsLogicalOrderOnPermutedStrides)
+{
+    const std::vector<int64_t> columnMajor = {1, 2};
+    auto fill = fillX(buildValuesGraph(DataType::INT32, kDims, columnMajor),
+                      ints({0, 1, 2, 3, 4, 5}, false));
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+
+    auto& x = typedTensor<int32_t>(fill.inputs, 1);
+    for(int64_t row = 0; row < kDims[0]; ++row)
+    {
+        for(int64_t col = 0; col < kDims[1]; ++col)
+        {
+            EXPECT_EQ(x.getHostValue(row, col), (row * kDims[1]) + col)
+                << "at (" << row << ", " << col << ")";
+        }
+    }
+}
+
+TEST(TestFillInputs, ValuesFillRejectsWhatTheTensorCannotHold)
+{
+    expectInvalid(fillX(buildValuesGraph(DataType::INT8), ints({128})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::UINT8), ints({-1})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), ints({int64_t{1} << 31})),
+                  "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::BOOLEAN), ints({2})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), doubles({2.5})), "non-integer");
+}
+
+// A list that holds any non-integer number is stored as doubles, so even its integers
+// are refused by an integer tensor.
+TEST(TestFillInputs, ValuesFillRejectsAMixedListOnAnIntegerTensor)
+{
+    const auto spec
+        = parseInputFillSpec(nlohmann::json::parse(R"({"kind": "values", "values": [1, 2.5]})"));
+    ASSERT_TRUE(spec.recipe.has_value());
+
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), *spec.recipe), "non-integer");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), doubles({1.0, 2.0})), "non-integer");
+}
+
+TEST(TestFillInputs, ValuesFillRejectsSubByteTypes)
+{
+    for(const auto dataType :
+        {DataType::FP4_E2M1, DataType::FP6_E2M3, DataType::FP6_E3M2, DataType::INT4})
+    {
+        expectInvalid(fillX(buildValuesGraph(dataType), ints({1})), EnumNameDataType(dataType));
+    }
+}
+
+TEST(TestFillInputs, InvalidAndUnsupportedFillsStayDistinct)
+{
+    const auto invalid = fillX(buildValuesGraph(DataType::INT8), ints({1000}));
+    EXPECT_EQ(invalid.result.status, FillResult::Status::INVALID);
+
+    const auto gr = buildUnsupportedOpGraph();
+    const auto unsupported = runFill(gr, {3});
+    EXPECT_FALSE(unsupported.filled);
+    EXPECT_EQ(unsupported.status, FillResult::Status::UNSUPPORTED) << unsupported.reason;
+    EXPECT_NE(unsupported.reason.find("no input fill registered"), std::string::npos)
+        << unsupported.reason;
+}
+
+// Every tensor draws its seed in uid order whatever its recipe, so a VALUES tensor
+// leaves the random contents of every other tensor unchanged.
+TEST(TestFillInputs, ValuesFillLeavesOtherTensorsRandomContentsUnchanged)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    ASSERT_EQ(leafUids.size(), 3u);
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    auto valuesInputs = makeTensors(leafUids);
+    InputFillRecipes valuesRecipes;
+    valuesRecipes.set(2, doubles({7.0}));
+    const auto result = fillInputs(*gr.graph, valuesInputs, leafUids, valuesRecipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    EXPECT_EQ(logicalElements<float>(valuesInputs, 2),
+              std::vector<float>(static_cast<std::size_t>(kDims[0] * kDims[1]), 7.0f));
+    for(const int64_t uid : {1, 4})
+    {
+        auto& expected = *plainInputs.at(uid);
+        auto& actual = *valuesInputs.at(uid);
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
+
+// ── Aliases ─────────────────────────────────────────────────────────────────
+
+namespace
+{
+
+// One SDPA backward node: q=1, k=2, v=3, o=4, do=5, stats=6 in; dq=7, dk=8, dv=9 out.
+nlohmann::json sdpaBackwardGraphJson()
+{
+    const auto tensor = [](int64_t uid, bool stats) {
+        return nlohmann::json{
+            {"name", ""},
+            {"uid", uid},
+            {"dims", stats ? std::vector<int64_t>{1, 1, 2, 1} : std::vector<int64_t>{1, 1, 2, 4}},
+            {"strides",
+             stats ? std::vector<int64_t>{2, 2, 1, 1} : std::vector<int64_t>{8, 8, 4, 1}},
+            {"data_type", "float"},
+            {"virtual", false}};
+    };
+    auto tensors = nlohmann::json::array();
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(tensor(uid, uid == 6));
+    }
+    auto graph = nlohmann::json::parse(R"({
+        "name": "sdpa_backward", "compute_data_type": "float", "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "nodes": [{
+            "name": "sdpa_backward", "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3, "o_tensor_uid": 4,
+                "do_tensor_uid": 5, "stats_tensor_uid": 6, "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null, "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null, "seed_tensor_uid": null,
+                "offset_tensor_uid": null, "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null, "dropout_scale_inv_tensor_uid": null},
+            "outputs": {
+                "dq_tensor_uid": 7, "dk_tensor_uid": 8, "dv_tensor_uid": 9,
+                "dbias_tensor_uid": null},
+            "parameters": {
+                "alibi_mask": false, "padding_mask": false, "causal_mask": false,
+                "causal_mask_bottom_right": false, "dropout_probability": null,
+                "attn_scale_value": null, "left_bound": null, "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"}}]
+    })");
+    graph["tensors"] = std::move(tensors);
+    return graph;
+}
+
+bool sameHostBytes(hipdnn_data_sdk::utilities::ITensor& a, hipdnn_data_sdk::utilities::ITensor& b)
+{
+    return a.elementSpace() == b.elementSpace() && a.elementSize() == b.elementSize()
+           && std::memcmp(a.rawHostData(), b.rawHostData(), a.elementSpace() * a.elementSize())
+                  == 0;
+}
+
+// w (uid 2) of buildConvBiasGraph() as a view of x (uid 1).
+const std::vector<TensorAlias> kWViewOfX = {{2, 1, 0}};
+
+} // namespace
+
+TEST(TestFillInputs, AliasViewIsNotFilledAndNeedsNoTensor)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(inputs.count(2), 0u);
+    EXPECT_EQ(inputs.size(), 2u);
+}
+
+// The view keeps its place in the seed sequence, so the owner and every other input
+// hold what they hold without the alias.
+TEST(TestFillInputs, AliasLeavesEveryOtherTensorsContentsUnchanged)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    ASSERT_EQ(leafUids.size(), 3u);
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    auto aliasedInputs = makeTensors({1, 4});
+    InputFillRecipes aliasedRecipes;
+    const auto result
+        = fillInputs(*gr.graph, aliasedInputs, leafUids, aliasedRecipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    for(const int64_t uid : {1, 4})
+    {
+        EXPECT_TRUE(sameHostBytes(*plainInputs.at(uid), *aliasedInputs.at(uid))) << "uid " << uid;
+    }
+}
+
+// Two views of one owner: the owner is filled once, as without the aliases, whatever the
+// order of the alias entries.
+TEST(TestFillInputs, AliasOwnerWithTwoViewsIsFilledOnce)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    for(const auto& aliases : {std::vector<TensorAlias>{{2, 1, 0}, {4, 1, 0}},
+                               std::vector<TensorAlias>{{4, 1, 0}, {2, 1, 0}}})
+    {
+        SCOPED_TRACE("first view " + std::to_string(aliases.front().uid));
+        auto inputs = makeTensors({1});
+        InputFillRecipes recipes;
+        const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, aliases);
+        ASSERT_TRUE(result.filled) << result.reason;
+        EXPECT_EQ(inputs.size(), 1u);
+        EXPECT_TRUE(sameHostBytes(*plainInputs.at(1), *inputs.at(1)));
+    }
+}
+
+// A seed-only metadata entry for a view sets no recipe, so the fill stays valid, and the
+// view's seed changes no other tensor.
+TEST(TestFillInputs, AliasViewWithASeedOnlyEntryChangesNothing)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+
+    auto expectedInputs = makeTensors({1, 4});
+    InputFillRecipes expectedRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, expectedInputs, leafUids, expectedRecipes, nullptr, kWViewOfX)
+                    .filled);
+
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    recipes.loadFromJson({{2, nlohmann::json{{"seed", 7u}}}});
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    for(const int64_t uid : {1, 4})
+    {
+        EXPECT_TRUE(sameHostBytes(*expectedInputs.at(uid), *inputs.at(uid))) << "uid " << uid;
+    }
+}
+
+// Strides {4, 1} on dims {2, 3} leave element 3 of the allocation outside the tensor.
+TEST(TestFillInputs, AliasOwnerGapsHoldZeros)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    const std::vector<int64_t> gapStrides = {4, 1};
+
+    InputTensorMap inputs = makeTensors({4});
+    inputs[1] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(kDims, gapStrides);
+    auto& owner = *inputs.at(1);
+    ASSERT_EQ(owner.elementSpace(), 7u);
+    std::memset(owner.rawHostData(), 0xFF, owner.elementSpace() * owner.elementSize());
+
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    const auto* data = static_cast<const float*>(owner.rawHostData());
+    EXPECT_EQ(data[3], 0.0f);
+    for(const std::size_t i : {0u, 1u, 2u, 4u, 5u, 6u})
+    {
+        EXPECT_GE(data[i], -1.0f) << "element " << i;
+        EXPECT_LE(data[i], 1.0f) << "element " << i;
+    }
+}
+
+// x is large enough for the device fill, and is an owner, so it is filled on the host;
+// w is not an owner and still goes to the device.
+TEST(TestFillInputs, AliasOwnerIsFilledOnTheHostWithADeviceFiller)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!DeviceInputFiller::isSupported())
+    {
+        GTEST_SKIP() << "rocRAND not available. Skipping test.";
+    }
+
+    const auto graph = buildMixedSizeConvBiasGraph();
+    const std::vector<int64_t> leafUids = {1, 2, 4};
+    const std::vector<TensorAlias> biasViewOfX = {{4, 1, 0}};
+
+    auto hostInputs = makeTensorsFromGraph(graph, {1, 2});
+    InputFillRecipes hostRecipes;
+    ASSERT_TRUE(
+        fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, nullptr, biasViewOfX).filled);
+
+    auto deviceInputs = makeTensorsFromGraph(graph, {1, 2});
+    InputFillRecipes deviceRecipes;
+    DeviceInputFiller device;
+    const auto result
+        = fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, &device, biasViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(result.deviceFilled, 1u);
+
+    const auto& x = typedTensor<float>(deviceInputs, 1);
+    EXPECT_NE(x.memory().location(), hipdnn_data_sdk::utilities::MemoryLocation::DEVICE);
+    EXPECT_TRUE(sameHostBytes(*hostInputs.at(1), *deviceInputs.at(1)));
+}
+
+TEST(TestFillInputs, AliasViewWithASetRecipeIsInvalid)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    recipes.set(2, FillRecipe::fixed(1.0f));
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    EXPECT_FALSE(result.filled);
+    EXPECT_EQ(result.status, FillResult::Status::INVALID);
+    EXPECT_NE(result.reason.find("uid 2"), std::string::npos) << result.reason;
+}
+
+TEST(TestFillInputs, AliasOwnerWithoutATensorThrows)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    const std::vector<TensorAlias> ownerIsAnOutput = {{2, 5, 0}};
+
+    EXPECT_THROW(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, ownerIsAnOutput),
+                 std::invalid_argument);
+}
+
+TEST(TestFillInputs, FillDerivesInputsOnlyForAGraphWhoseFillReplacesInputs)
+{
+    flatbuffers::DetachedBuffer buffer;
+    ASSERT_TRUE(bundle::detail::buildGraphBuffer(sdpaBackwardGraphJson(), buffer));
+    const auto& sdpaBackward = *GetGraph(buffer.data());
+    EXPECT_TRUE(fillDerivesInputs(sdpaBackward));
+
+    const auto convBias = buildConvBiasGraph();
+    EXPECT_FALSE(fillDerivesInputs(*convBias.graph));
+
+    InputTensorMap inputs;
+    InputFillRecipes recipes;
+    EXPECT_THROW(fillInputs(sdpaBackward, inputs, {1, 2, 3}, recipes, nullptr, {{3, 2, 0}}),
+                 std::invalid_argument);
+}
+
+// ── Absent tensors ──────────────────────────────────────────────────────────
+
+namespace
+{
+
+namespace fx = hipdnn_integration_tests::bundle::fixtures;
+namespace sdpa_utils = hipdnn_integration_tests::test_utils;
+
+// The loaded case `caseId` under `root`; nullopt, with a test failure, when it does not load.
+std::optional<bundle::IntegrationTestBundle> loadSweepCase(const std::filesystem::path& root,
+                                                           const std::string& caseId,
+                                                           bundle::SweepManifestCache& sweeps)
+{
+    for(const auto& discovered : bundle::discoverBundles(root))
+    {
+        if(discovered.testName != caseId)
+        {
+            continue;
+        }
+        auto result = bundle::loadIntegrationTestBundle(discovered, sweeps);
+        if(auto* loaded = std::get_if<bundle::IntegrationTestBundle>(&result))
+        {
+            return std::move(*loaded);
+        }
+        ADD_FAILURE() << caseId << " did not load";
+        return std::nullopt;
+    }
+    ADD_FAILURE() << "no case " << caseId << " under " << root;
+    return std::nullopt;
+}
+
+// Fills the inputs of `loaded` as the harness does on the host: every tensor that is not
+// virtual and not an output, with the metadata `seed` and the recipes and seeds of the
+// metadata `inputs`.
+InputTensorMap fillLoadedInputs(const bundle::IntegrationTestBundle& loaded)
+{
+    const auto wrapper = loaded.graphWrapper();
+    const std::set<int64_t> outputUids(loaded.outputTensorUids.begin(),
+                                       loaded.outputTensorUids.end());
+    InputTensorMap inputs;
+    std::vector<int64_t> leafUids;
+    for(const auto& [uid, attributes] : wrapper.getTensorMap())
+    {
+        if(attributes->virtual_() || outputUids.count(uid) != 0)
+        {
+            continue;
+        }
+        leafUids.push_back(uid);
+        inputs.emplace(uid, hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes));
+    }
+    InputFillRecipes recipes;
+    if(loaded.metadata.seed.has_value())
+    {
+        recipes.setGlobalSeed(static_cast<unsigned int>(*loaded.metadata.seed));
+    }
+    if(loaded.metadata.inputs.has_value())
+    {
+        recipes.loadFromJson(*loaded.metadata.inputs);
+    }
+    const auto result = fillInputs(wrapper.getGraph(), inputs, leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return inputs;
+}
+
+} // namespace
+
+// With a seed for each input, removing the sink (the lowest uid) leaves the contents of
+// Q, K and V unchanged. Without the seeds, the stream moves and Q changes.
+TEST(TestFillInputs, AbsentTensorLeavesTheOtherSeededInputsUnchanged)
+{
+    const auto scratch = hipdnn_test_sdk::utilities::claimScratchDirectory("fill_absent_tensors");
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/true);
+    const std::vector<int64_t> sinkAbsent = {sdpa_utils::K_OPTIONAL_SDPA_SINK_UID};
+    const nlohmann::json seeds
+        = {{"1", {{"seed", 11}}}, {"2", {{"seed", 12}}}, {"3", {{"seed", 13}}}};
+
+    auto seededAll = fx::optionalTensorSweepCase("seeded_all", graph);
+    seededAll["metadata"]["inputs"] = seeds;
+    seededAll["metadata"]["inputs"]["0"] = nlohmann::json{{"seed", 10}};
+    auto seededSinkAbsent = fx::optionalTensorSweepCase("seeded_sink_absent", graph, sinkAbsent);
+    seededSinkAbsent["metadata"]["inputs"] = seeds;
+    fx::writeTemplateSweep(
+        scratch.path() / "quick" / "SdpaFwd" / "Optional",
+        fx::templateOfGraph(graph),
+        nlohmann::json::array(
+            {seededAll,
+             seededSinkAbsent,
+             fx::optionalTensorSweepCase("unseeded_all", graph),
+             fx::optionalTensorSweepCase("unseeded_sink_absent", graph, sinkAbsent)}));
+
+    bundle::SweepManifestCache sweeps;
+    const auto all = loadSweepCase(scratch.path(), "seeded_all", sweeps);
+    const auto absent = loadSweepCase(scratch.path(), "seeded_sink_absent", sweeps);
+    const auto unseededAll = loadSweepCase(scratch.path(), "unseeded_all", sweeps);
+    const auto unseededAbsent = loadSweepCase(scratch.path(), "unseeded_sink_absent", sweeps);
+    ASSERT_TRUE(all.has_value() && absent.has_value() && unseededAll.has_value()
+                && unseededAbsent.has_value());
+
+    const auto allInputs = fillLoadedInputs(*all);
+    const auto absentInputs = fillLoadedInputs(*absent);
+    ASSERT_EQ(allInputs.count(sdpa_utils::K_OPTIONAL_SDPA_SINK_UID), 1u);
+    EXPECT_EQ(absentInputs.count(sdpa_utils::K_OPTIONAL_SDPA_SINK_UID), 0u);
+    for(const int64_t uid : {sdpa_utils::K_OPTIONAL_SDPA_Q_UID,
+                             sdpa_utils::K_OPTIONAL_SDPA_K_UID,
+                             sdpa_utils::K_OPTIONAL_SDPA_V_UID})
+    {
+        ASSERT_EQ(absentInputs.count(uid), 1u) << "uid " << uid;
+        EXPECT_TRUE(sameHostBytes(*allInputs.at(uid), *absentInputs.at(uid))) << "uid " << uid;
+    }
+
+    EXPECT_EQ(fx::hostVariantPackUids(*absent),
+              (std::set<int64_t>{sdpa_utils::K_OPTIONAL_SDPA_Q_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_K_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_V_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_O_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_STATS_UID}));
+
+    const auto unseededAllInputs = fillLoadedInputs(*unseededAll);
+    const auto unseededAbsentInputs = fillLoadedInputs(*unseededAbsent);
+    EXPECT_FALSE(sameHostBytes(*unseededAllInputs.at(sdpa_utils::K_OPTIONAL_SDPA_Q_UID),
+                               *unseededAbsentInputs.at(sdpa_utils::K_OPTIONAL_SDPA_Q_UID)));
+}
+
 // ── Resample backward: the max-pooling index is the forward's argmax ─────────
 // uids: dy=1, index=2, dx=3. The scratch x the derivation pools is filled
 // uniformly in [-1, 1] from the index's seed, so with the seed pinned the test
@@ -1358,17 +2066,36 @@ struct ResampleBwdOptions
     ResampleMode mode = ResampleMode::MAXPOOL;
     PaddingMode paddingMode = PaddingMode::ZERO_PAD;
     DataType indexType = DataType::INT32;
+    // Bundles may lay dy, index and dx out NHWC/NDHWC rather than packed in dims
+    // order. Keep in sync between buildResampleBwdGraph() and
+    // expectIndexIsForwardArgmax(), which must build its own scratch x with the
+    // same strides the derivation builds dx's scratch x with.
+    bool nhwcStrides = false;
 };
+
+// Packed-in-dims-order strides when nhwcStrides is false, matching every test
+// below until this field is set; channel-last strides (NHWC for 4D, NDHWC for 5D)
+// when it is true.
+std::vector<int64_t> resampleBwdStrides(const std::vector<int64_t>& dims, bool nhwcStrides)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_data_sdk::utilities::TensorLayout;
+
+    if(!nhwcStrides)
+    {
+        return generateStrides(dims);
+    }
+    return generateStrides(
+        dims, dims.size() == 5 ? TensorLayout::NDHWC.strideOrder : TensorLayout::NHWC.strideOrder);
+}
 
 GraphResult buildResampleBwdGraph(const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
     GraphResult r;
     auto& b = r.builder;
 
-    const auto dyStrides = generateStrides(opts.dyDims);
-    const auto dxStrides = generateStrides(opts.dxDims);
+    const auto dyStrides = resampleBwdStrides(opts.dyDims, opts.nhwcStrides);
+    const auto dxStrides = resampleBwdStrides(opts.dxDims, opts.nhwcStrides);
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
     tensors.push_back(
@@ -1428,9 +2155,8 @@ InputTensorMap fillResampleBwdInputs(const GraphResult& gr)
 // NEG_INF_PAD only in-bounds elements competing.
 void expectIndexIsForwardArgmax(InputTensorMap& inputs, const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
-    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims, generateStrides(opts.dxDims));
+    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims,
+                                                resampleBwdStrides(opts.dxDims, opts.nhwcStrides));
     x.fillWithRandomValues(-1.0f, 1.0f, kResampleIndexSeed);
     auto& index = typedTensor<int32_t>(inputs, 2);
 
@@ -1530,6 +2256,77 @@ TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3d)
     opts.postPadding = {0, 0, 0};
     opts.stride = {1, 2, 2};
     opts.window = {2, 2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+// Unlike the default shape above, dy(0, 0)'s window has exactly one in-bounds
+// element (x(0, 0, 0, 0)), and with the pinned seed that element's fill is
+// negative. Zero-padding's implicit 0 outranks it, so the derived index is -1
+// there; a hard-coded NEG_INF_PAD would instead pick the lone in-bounds element
+// (index 0) and fail expectIndexIsForwardArgmax's per-element check.
+TEST(TestFillInputs, ResampleBwdZeroPadIndexIsMinusOneWhenPaddingOutranksSoleValidElement)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), -1);
+}
+
+// Same shape and seed as above, under NEG_INF_PAD: the sole in-bounds element at
+// dy(0, 0) is the only candidate, so its index wins regardless of its sign. A
+// hard-coded ZERO_PAD would instead yield -1 there and fail the same check.
+TEST(TestFillInputs, ResampleBwdNegInfPadPicksSoleValidElementOverPadding)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    opts.paddingMode = PaddingMode::NEG_INF_PAD;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), 0);
+}
+
+// 15 of the 39 shipped Default bundle cases lay dy, index and dx out NHWC/NDHWC.
+// The derivation's indexView must be built from the index tensor's own strides;
+// a mutant that rebuilt it from dims-only (packed) strides instead would pass
+// every test above, which stays packed throughout.
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax2dNhwc)
+{
+    ResampleBwdOptions opts;
+    opts.nhwcStrides = true;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3dNdhwc)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 2, 3, 4, 4};
+    opts.dyDims = {1, 2, 2, 2, 2};
+    opts.prePadding = {0, 0, 0};
+    opts.postPadding = {0, 0, 0};
+    opts.stride = {1, 2, 2};
+    opts.window = {2, 2, 2};
+    opts.nhwcStrides = true;
     const auto gr = buildResampleBwdGraph(opts);
     auto inputs = fillResampleBwdInputs(gr);
     expectIndexIsForwardArgmax(inputs, opts);

@@ -11,6 +11,7 @@
 #include "direct_conv_kernel.h"
 #include "grouped/mfma_dispatch.h"
 #include "detail.h"
+#include "lds_layout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,7 @@
 #include "launch_params.h"
 #include "magic_division.h"
 #include "memory.h"
+#include "packed_ops.h"
 #include "persistent_grid.h"
 #include "types.h"
 #include "hipconv/conv_params.hpp"
@@ -31,10 +33,12 @@
 namespace hipconv::cdna4::patch_embed
 {
 
-// The bunnies format tag for this family's two 16-bit operand types.
+// The bunnies format tag the MFMA computes in: a 16-bit operand type as it is, tf32 as the bf16
+// big/small split it computes as.
 template <DataType DT>
-constexpr bunnies::fpfmt operand_fmt =
-    DT == DataType::bf16 ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10;
+constexpr bunnies::fpfmt operand_fmt = DT == DataType::tf32   ? bunnies::fpfmt::e8m10_e8m7x2split
+                                       : DT == DataType::bf16 ? bunnies::fpfmt::e8m7
+                                                              : bunnies::fpfmt::e5m10;
 
 
 // The layer geometry the kernel indexes with, flattened to what the loops need.
@@ -42,6 +46,7 @@ struct LayerPars
 {
     int h, w, c;
     int kh, kw;
+    int sh, sw; // stride, at least the filter: the patches never overlap
     int p, q;
     int k;               // output channels
     int kgemm;           // kh * kw * c, the GEMM's reduction depth
@@ -55,15 +60,14 @@ struct LayerPars
     int tiles_n; // fprop/dgrad: N tiles per M tile in the flattened grid
 };
 
-// Whether a 16-byte piece of the A matrix stays inside one filter row.
+// Whether a staged granule of the A matrix stays inside one filter row.
 //
 // Not an alignment test: filter rows are w*c apart, so a piece may not straddle two.
 inline bool addressing_fits(const Config& cfg, const ConvParams& par)
 {
-    if(!cfg.row_pad)
-        return (par.kw * par.c) % GRANULE == 0;
-    // The padding config pulls a row's last granule back by a granule, so the row needs one.
-    return par.kw * par.c >= GRANULE;
+    // The padding config pulls a row's last granule back to end on the row's last element, so
+    // it fits any row; one shorter than a granule starts before it, see SHORT_ROW.
+    return cfg.row_pad || (par.kw * par.c) % GRANULE == 0;
 }
 
 // Wgrad reduces over the spatial rows and leaves only the small dW to tile, which cannot
@@ -91,14 +95,14 @@ inline int wgrad_slots(const Config& cfg)
 // dY -- has to fit the 32-bit offsets; a range starting mid-image reaches into one more.
 inline int64_t span_rows(const ConvParams& par)
 {
-    const int64_t limit = INT32_MAX / 2; // elements of a 16-bit type
+    const int64_t limit = INT32_MAX / static_cast<int64_t>(sizeof_data_type(par.input_type));
     const int64_t image = static_cast<int64_t>(par.h) * par.w * par.c;
     const int64_t by_x  = (limit / image - 2) * par.p * par.q;
     const int64_t by_r  = limit / std::max(par.k, par.kh * par.kw * par.c);
     return std::min(by_x, by_r);
 }
 
-inline int wgrad_split_rows(const Config& cfg, const ConvParams& par)
+inline int wgrad_split_rows(const Config& cfg, const ConvParams& par, int cu_count)
 {
     const int pair = 2 * cfg.k_chunk;
     const int rows = par.n * par.p * par.q;
@@ -110,18 +114,18 @@ inline int wgrad_split_rows(const Config& cfg, const ConvParams& par)
     // Never so few that a split's rows outgrow what one rebased descriptor reaches.
     const int most = static_cast<int>(std::max<int64_t>(1, span_rows(par) / pair));
     const int splits =
-        std::clamp(cu_count() * wgrad_slots(cfg) / tiles, (pairs + most - 1) / most, pairs);
+        std::clamp(cu_count * wgrad_slots(cfg) / tiles, (pairs + most - 1) / most, pairs);
     return (pairs + splits - 1) / splits * pair;
 }
 
-inline int wgrad_splits(const Config& cfg, const ConvParams& par)
+inline int wgrad_splits(const Config& cfg, const ConvParams& par, int cu_count)
 {
     const int rows = par.n * par.p * par.q;
-    const int per  = wgrad_split_rows(cfg, par);
+    const int per  = wgrad_split_rows(cfg, par, cu_count);
     return (rows + per - 1) / per;
 }
 
-inline LayerPars layer_pars(const Config& cfg, const ConvParams& par)
+inline LayerPars layer_pars(const Config& cfg, const ConvParams& par, int cu_count)
 {
     return LayerPars{
         par.h,
@@ -129,6 +133,8 @@ inline LayerPars layer_pars(const Config& cfg, const ConvParams& par)
         par.c,
         par.kh,
         par.kw,
+        par.stride_h,
+        par.stride_w,
         par.p,
         par.q,
         par.k,
@@ -137,7 +143,7 @@ inline LayerPars layer_pars(const Config& cfg, const ConvParams& par)
         par.kw * par.c,
         cfg.padded_row(par.kw * par.c),
         static_cast<int64_t>(par.n) * par.h * par.w * par.c,
-        par.direction == Direction::Wgrad ? wgrad_split_rows(cfg, par) : 0,
+        par.direction == Direction::Wgrad ? wgrad_split_rows(cfg, par, cu_count) : 0,
         MagicDiv(static_cast<uint32_t>(par.q)),
         MagicDiv(static_cast<uint32_t>(par.p)),
         ((par.direction == Direction::Dgrad ? par.kh * par.kw * par.c : par.k) + cfg.n_tile() - 1) /
@@ -147,12 +153,12 @@ inline LayerPars layer_pars(const Config& cfg, const ConvParams& par)
 namespace detail
 {
 
-// The granule a row stores at slot g, XOR-swizzled so a 16-lane MFMA read spreads over
-// every granule of the tile instead of hitting one bank column.
+// The slot a row stores granule g at, XOR-swizzled so a 16-lane MFMA read spreads over
+// every granule of the tile instead of hitting one bank column; see GranuleTile.
 template <Config cfg>
 __device__ inline int swizzled(int row, int g)
 {
-    return g ^ (row & (cfg.granules() - 1));
+    return GranuleTile<cfg.granules()>::slot(row, g);
 }
 
 // The element offset of a (row, granule) piece in either LDS tile.
@@ -174,7 +180,7 @@ __device__ inline int row_origin(const LayerPars& pars, int m, int oob, int img0
     const int rest = m / pars.q;
     const int p_i  = rest % pars.p;
     const int n_i  = rest / pars.p - img0;
-    return ((n_i * pars.h + p_i * pars.kh) * pars.w + q_i * pars.kw) * pars.c;
+    return ((n_i * pars.h + p_i * pars.sh) * pars.w + q_i * pars.sw) * pars.c;
 }
 
 // row_origin for a row known to be in range, with the two divides magic.
@@ -184,110 +190,17 @@ __device__ inline int row_origin_magic(const LayerPars& pars, int m, int img0)
     const int q_i = m - mq * pars.q;
     const int n_i = static_cast<int>(pars.p_div.div(static_cast<uint32_t>(mq)));
     const int p_i = mq - n_i * pars.p;
-    return (((n_i - img0) * pars.h + p_i * pars.kh) * pars.w + q_i * pars.kw) * pars.c;
+    return (((n_i - img0) * pars.h + p_i * pars.sh) * pars.w + q_i * pars.sw) * pars.c;
 }
 
-// The logical granule a staging slot fetches, since a DTL load's LDS slot is lane order
-// and not the loader's to pick -- so the swizzle has to move to the global address.
+// The logical granule a staging slot fetches, since a DTL load's LDS slot is lane order and not
+// the loader's to pick -- so the swizzle has to move to the global address. The register split
+// fills each plane at the slot the copy would have, so tf32 shares it.
 template <Config cfg>
 __device__ inline int granule_for_slot(int row, int slot_g)
 {
-    return slot_g ^ (row & (cfg.granules() - 1));
+    return GranuleTile<cfg.granules()>::slot(row, slot_g);
 }
-
-// LDS layout for a tile ds_read_b64_tr_b16 reads transposed: dgrad's B, and both of wgrad's.
-//
-// The tile sits reduction-major with its output axis contiguous, which is the tensor's own layout
-// in each case, so the stage stays a plain DTL copy and the transpose costs nothing but the read. A
-// read phase would then name four banks, so a rotation keyed on the row spreads it. The candidate
-// rotations and the conflict test are direct_wgrad's, specialised to a tile with no halo and no
-// unfold; see docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md for the derivation.
-template <int WIDTH>
-struct TransposeTile
-{
-    using arch      = bunnies::arch_cdna4;
-    using read_inst = arch::ds_read_b64_tr_b16;
-    // Both 16-bit formats share one lane map, so the operand's own format does not matter here.
-    using read_mat = arch::matrix<bunnies::fpfmt::e5m10, MFMA_N, MFMA_K, bunnies::use::A>;
-
-    static constexpr int NG = WIDTH / 4; // four-element groups in a row
-    static constexpr int G  = NG / 4;    // distinct rotations
-
-    static constexpr int bpi    = bunnies::bits_per_item(read_mat::fmt);
-    static constexpr int per_rd = read_inst::bits_per_load / bpi;
-    static constexpr int rounds = read_mat::num_items / per_rd;
-
-    // The reduction index each lane names, from the instruction's map and the operand's composed.
-    static constexpr auto cols = [] {
-        std::array<std::array<int, rounds>, arch::wave_size> t{};
-        for(int lane = 0; lane < arch::wave_size; ++lane)
-            for(int rnd = 0; rnd < rounds; ++rnd)
-                t[lane][rnd] = read_mat::map(read_inst::map(lane, rnd * per_rd, bpi))[1];
-        return t;
-    }();
-
-    static constexpr int candidates[3][3] = {{3, 1, 0}, {1, 3, 0}, {0, 1, 3}};
-
-    static constexpr int rot_of(const int (&bits)[3], int p_)
-    {
-        unsigned p = p_;
-        return static_cast<int>(((p >> bits[0]) & 1u) | (((p >> bits[1]) & 1u) << 1) |
-                                (((p >> bits[2]) & 1u) << 2)) &
-               (G - 1);
-    }
-
-    // Whether every phase of the read hits 32 distinct slots.
-    static constexpr bool conflict_free(const int (&bits)[3])
-    {
-        for(int base = 0; base < NG; base += 4)
-            for(int phase = 0; phase < 2; ++phase)
-                for(int rnd = 0; rnd < rounds; ++rnd)
-                {
-                    unsigned seen = 0;
-                    for(int lane = phase * 32; lane < phase * 32 + 32; ++lane)
-                    {
-                        const int col = cols[lane][rnd];
-                        const int off =
-                            (col * NG + ((lane % 4 + base) ^ (4 * rot_of(bits, col)))) % 32;
-                        if(seen & (1u << off))
-                            return false;
-                        seen |= 1u << off;
-                    }
-                }
-        return true;
-    }
-
-    static constexpr int pick()
-    {
-        for(int i = 0; i < 3; ++i)
-            if(conflict_free(candidates[i]))
-                return i;
-        return -1;
-    }
-    static constexpr int rotation = pick();
-    static_assert(rotation >= 0,
-                  "no candidate rotation keeps the transposed read conflict-free; the read "
-                  "pattern has moved and the candidate list has to grow with it");
-
-    // Hoisted out of the table so the shifts lower to immediates on the address path.
-    static constexpr int bit_lo  = candidates[rotation][0];
-    static constexpr int bit_mid = candidates[rotation][1];
-    static constexpr int bit_hi  = candidates[rotation][2];
-
-    static constexpr int rot(int p_)
-    {
-        unsigned p = p_;
-        return static_cast<int>(((p >> bit_lo) & 1u) | (((p >> bit_mid) & 1u) << 1) |
-                                (((p >> bit_hi) & 1u) << 2)) &
-               (G - 1);
-    }
-
-    // (reduction row, four-element group) -> element offset in the tile.
-    static constexpr int elem(int n, int grp) { return (n * NG + (grp ^ (4 * rot(n)))) * 4; }
-
-    // The group a staging slot owns, the inverse of elem()'s permutation.
-    static constexpr int group_at(int n, int slot_grp) { return slot_grp ^ (4 * rot(n)); }
-};
 
 template <Config cfg>
 using TransposeB = TransposeTile<cfg.n_tile()>;
@@ -318,8 +231,11 @@ __device__ inline int patch_offset(const LayerPars& pars, int m, int j)
 //
 // NARROW_K names a k the granule does not divide. It is a template parameter rather than a branch
 // so the kernel that serves every other k compiles exactly as if it were not there: as a runtime
-// test it cost the Fremont dgrad stem 13%.
-template <Config cfg, DataType DT, Direction DIR, bool NARROW_K>
+// test it cost the 16x16 stem's dgrad 13%.
+//
+// SHORT names a filter row shorter than a granule, on the same terms: compiled into every padded
+// kernel, its walk cost the 8x8 and 14x14 stems 2-5%.
+template <Config cfg, DataType DT, Direction DIR, bool NARROW_K, bool SHORT>
 __device__ void patch_embed_impl(LayerPars pars,
                                  const ToType<DT>* __restrict__ in_all,
                                  const ToType<DT>* __restrict__ wei_all,
@@ -330,6 +246,8 @@ __device__ void patch_embed_impl(LayerPars pars,
 
     constexpr bool is_dgrad = DIR == Direction::Dgrad;
     constexpr bool is_wgrad = DIR == Direction::Wgrad;
+    constexpr bool is_tf32  = DT == DataType::tf32;
+    static_assert(is_tf32 == cfg.is_tf32(), "a config is compiled for one element width");
 
     using arch = bunnies::arch_cdna4;
     using dtl  = arch::buffer_load_lds<16>;
@@ -345,18 +263,28 @@ __device__ void patch_embed_impl(LayerPars pars,
     using mat_out  = arch::matrix<operand_fmt<DT>, MFMA_N, MFMA_M, bunnies::use::Acc>;
     using rt_out   = bunnies::reg_tile<mat_out, cfg.wave_n16(), cfg.wave_m16()>;
 
+    // A tf32 plane is read as the bf16 matrix it is, into one half of the split.
+    using plane_filt = arch::matrix<bunnies::fpfmt::e8m7, MFMA_N, MFMA_K, bunnies::use::A>;
+    using plane_spat = arch::matrix<bunnies::fpfmt::e8m7, MFMA_K, MFMA_M, bunnies::use::B>;
+
     constexpr int granules   = cfg.granules();
     constexpr int elem_bytes = sizeof(dtype);
 
+    // What a tile holds: the operand as staged, or tf32's two bf16 planes back to back.
+    using lds_t          = std::conditional_t<is_tf32, bf16_t, dtype>;
+    constexpr int PLANES = is_tf32 ? 2 : 1;
+    constexpr int A_TILE = cfg.m_tile() * cfg.k_chunk;
+    constexpr int B_TILE = cfg.n_tile() * cfg.k_chunk;
+
     // Four declarations, not two arrays of two: a partial vmcnt needs the waitcnt pass to
     // tell a read's object from the in-flight DMA's, and one indexed array is one object.
-    __shared__ dtype a_lds0[cfg.m_tile() * cfg.k_chunk];
-    __shared__ dtype a_lds1[cfg.m_tile() * cfg.k_chunk];
-    __shared__ dtype b_lds0[cfg.n_tile() * cfg.k_chunk];
-    __shared__ dtype b_lds1[cfg.n_tile() * cfg.k_chunk];
+    __shared__ lds_t a_lds0[PLANES * A_TILE];
+    __shared__ lds_t a_lds1[PLANES * A_TILE];
+    __shared__ lds_t b_lds0[PLANES * B_TILE];
+    __shared__ lds_t b_lds1[PLANES * B_TILE];
 
-    auto a_buf = [&]<int B>() -> dtype* { return B ? a_lds1 : a_lds0; };
-    auto b_buf = [&]<int B>() -> dtype* { return B ? b_lds1 : b_lds0; };
+    auto a_buf = [&]<int B>() -> lds_t* { return B ? a_lds1 : a_lds0; };
+    auto b_buf = [&]<int B>() -> lds_t* { return B ? b_lds1 : b_lds0; };
 
     // Fprop and dgrad walk the grid with N fastest, so the N tiles of one M tile run together
     // and the M-side operand they share -- X, or dY -- leaves HBM once instead of once per N
@@ -412,12 +340,14 @@ __device__ void patch_embed_impl(LayerPars pars,
     const int b_oob   = b_elems;
 
     // A thread keeps one slot column and walks rows a workgroup apart. rows_per_pass is a
-    // multiple of granules, so a slot's row moves but `row & (granules-1)` does not.
+    // whole number of swizzle periods, so a slot's row moves but the granule it fetches does not.
     constexpr int rows_per_pass = cfg.threads() / granules;
-    const int stage_slot_g      = tid % granules;
-    const int stage_row0        = tid / granules;
-    const int stage_g           = detail::granule_for_slot<cfg>(stage_row0, stage_slot_g);
-    const int wave_slot0        = tid - (tid % WAVE_SIZE);
+    static_assert(rows_per_pass % detail::GranuleTile<granules>::period == 0,
+                  "a staging slot would change granule columns between passes");
+    const int stage_slot_g = tid % granules;
+    const int stage_row0   = tid / granules;
+    const int stage_g      = detail::granule_for_slot<cfg>(stage_row0, stage_slot_g);
+    const int wave_slot0   = tid - (tid % WAVE_SIZE);
 
     // Dgrad's A side is dY, which is already row-major over its reduction, so its row base
     // is the plain stride; fprop's is where the row's patch starts in X.
@@ -426,6 +356,8 @@ __device__ void patch_embed_impl(LayerPars pars,
     // stays put is a slot's filter column, whose share of the address is kept here instead,
     // -1 past the filter. On a padding config a row's last granule is pulled back to end on
     // the row's last element, as fprop's is; the epilogue drops the columns that repeats.
+    // A short row's pulled-back origin is negative, so the past-the-filter mark cannot be -1.
+    constexpr int NO_COL = INT32_MIN;
     int a_origin[cfg.a_rounds()];
     if constexpr(is_wgrad)
     {
@@ -440,7 +372,7 @@ __device__ void patch_embed_impl(LayerPars pars,
             int s          = col - r * pars.kpad_row;
             if constexpr(cfg.row_pad)
                 s = std::min(s, pars.patch_row - GRANULE);
-            a_origin[i] = r < pars.kh ? r * pars.w * pars.c + s : -1;
+            a_origin[i] = r < pars.kh ? r * pars.w * pars.c + s : NO_COL;
         }
     }
     else
@@ -479,6 +411,48 @@ __device__ void patch_embed_impl(LayerPars pars,
 
     constexpr int W_TAIL  = 1;
     constexpr int DY_TAIL = 2;
+    // A filter row shorter than a granule pulls its granule back past the row's start, and for
+    // the first patches past the start of X or W, where the descriptor nulls the whole load.
+    // 16-bit refills such a granule in LDS; tf32 loads it element by element instead.
+    constexpr int SHORT_ROW = 4;
+
+    // tf32's granules in flight: eight fp32 each, from the load that issues with the refill to the
+    // split that follows the compute. A dead slot for 16-bit, which compiles away.
+    constexpr int STAGED = is_tf32 ? cfg.a_rounds() + cfg.b_rounds() : 1;
+    bunnies::uint32x4 staged[STAGED][2];
+
+    // A granule from global element `off`: a DTL copy to the wave's slots, or tf32's two loads
+    // into registers, which the buffer range check nulls per element past its end.
+    //
+    // __device__ keeps the host compile from mangling copy_in: the Microsoft C++ ABI has no
+    // encoding for buffer_t.
+    auto copy_in = [&] __device__<int I>(const arch::buffer_t& rsrc, void* wave_slots, int off) {
+        if constexpr(is_tf32)
+        {
+            // The range check nulls a load that starts before the tensor whole, so a short row's
+            // granule there loads element by element; the elements before the start meet a zeroed
+            // B element or a dropped wgrad column. Those take the out-of-range offset rather than
+            // their own, since loads a constant offset apart merge back into the whole load.
+            if constexpr(SHORT)
+                if(off < 0)
+                {
+                    const int oob = I < cfg.a_rounds() ? a_oob : b_oob;
+#pragma unroll
+                    for(int e = 0; e < GRANULE; ++e)
+                    {
+                        uint32_t v;
+                        const int at = off + e >= 0 ? off + e : oob;
+                        arch::buffer_load<4>::load(rsrc, &v, at * elem_bytes, 0);
+                        staged[I][e / 4][e % 4] = v;
+                    }
+                    return;
+                }
+            arch::buffer_load<16>::load(rsrc, &staged[I][0], off * elem_bytes, 0);
+            arch::buffer_load<16>::load(rsrc, &staged[I][1], (off + 4) * elem_bytes, 0);
+        }
+        else
+            dtl::load(rsrc, wave_slots, off * elem_bytes, 0);
+    };
 
     // Whether a dY granule starting at channel c can go straight to LDS: it has to end inside
     // its row, and an odd k leaves rows off the four-byte alignment the copy needs.
@@ -494,7 +468,7 @@ __device__ void patch_embed_impl(LayerPars pars,
     };
 
     // One staged piece, global straight to LDS. Fprop's A permutes on the way in: element k
-    // of row m is at x[n_i][p_i*kh + r][q_i*kw + s][ch] for r = k / (kw*c).
+    // of row m is at x[n_i][p_i*sh + r][q_i*sw + s][ch] for r = k / (kw*c).
     //
     // TAIL is a mask of the staging forms a walk needs. W_TAIL names dgrad's last filter tile,
     // which reaches past W: see the staging below. DY_TAIL is NARROW_K on the dY side, where a
@@ -520,27 +494,26 @@ __device__ void patch_embed_impl(LayerPars pars,
 
             if constexpr(is_a)
             {
-                const int a_off = m < pars.rows && a_origin[i] >= 0
+                const int a_off = m < pars.rows && a_origin[i] != NO_COL
                                       ? detail::row_origin_magic(pars, m, img0) + a_origin[i]
                                       : a_oob;
-                dtl::load(a_rsrc,
-                          &a_buf.template operator()<BUF>()[slot0 * GRANULE],
-                          a_off * elem_bytes,
-                          0);
+                copy_in.template operator()<I>(
+                    a_rsrc, &a_buf.template operator()<BUF>()[slot0 * GRANULE], a_off);
             }
             else
             {
+                // A tf32 granule past k reads the next row's channels, which land in the
+                // accumulator rows the epilogue drops: an element is its own four-byte unit, so
+                // nothing live is lost and no form of its own is needed.
                 const int kk = n0 + TT::group_at(r_local, (slot % per_row) * 2) * 4;
-                if(!(TAIL & DY_TAIL) || dy_whole(kk))
+                if(is_tf32 || !(TAIL & DY_TAIL) || dy_whole(kk))
                 {
                     const int b_off =
                         m < pars.rows && kk < pars.k ? (m - kbase) * pars.k + kk : b_oob;
-                    dtl::load(b_rsrc,
-                              &b_buf.template operator()<BUF>()[slot0 * GRANULE],
-                              b_off * elem_bytes,
-                              0);
+                    copy_in.template operator()<I>(
+                        b_rsrc, &b_buf.template operator()<BUF>()[slot0 * GRANULE], b_off);
                 }
-                else
+                else if constexpr(!is_tf32)
                 {
                     // The tile is channel-contiguous, so this is a plain write, not a transpose.
                     stage_dy(&b_buf.template operator()<BUF>()[slot * GRANULE],
@@ -563,17 +536,20 @@ __device__ void patch_embed_impl(LayerPars pars,
             const int group       = TB::group_at(n_local, (slot % per_row) * 2);
             const int n           = k0 + n_local;
             const int j0          = n0 + group * 4;
-            dtype* b              = b_buf.template operator()<BUF>();
+            lds_t* b              = b_buf.template operator()<BUF>();
 
+            // tf32 never takes the tail form: its range check nulls per element, so a load
+            // running past W loses nothing live.
+            static_assert(!(is_tf32 && (TAIL & W_TAIL)), "tf32 stages W's last tile as any other");
             if constexpr(!(TAIL & W_TAIL))
             {
                 // Columns past the filter read the next row and land in accumulator entries the
                 // epilogue drops; only the rounded-up reduction has to null, and so it does.
                 const int slot0  = __builtin_amdgcn_readfirstlane(wave_slot0 + i * cfg.threads());
                 const int b_step = n < pars.k ? n * pars.kgemm + j0 : b_oob;
-                dtl::load(b_rsrc, &b[slot0 * GRANULE], b_step * elem_bytes, 0);
+                copy_in.template operator()<I>(b_rsrc, &b[slot0 * GRANULE], b_step);
             }
-            else
+            else if constexpr(!is_tf32)
             {
                 // A partly out-of-range DTL load drops the four-byte unit holding its last live
                 // element, which every odd kh*kw*c ends on, so this tile stages through registers.
@@ -602,16 +578,17 @@ __device__ void patch_embed_impl(LayerPars pars,
             if constexpr(is_dgrad)
             {
                 // dY is row-major over the reduction, so this side is a plain copy; the
-                // chunks the reduction was rounded up to null through the descriptor.
-                if(!(TAIL & DY_TAIL) || dy_whole(k))
+                // chunks the reduction was rounded up to null through the descriptor. tf32
+                // copies a granule past k whole and zeroes its tail at the split.
+                if(is_tf32 || !(TAIL & DY_TAIL) || dy_whole(k))
                 {
                     const int a_step = k < pars.k ? k : a_oob;
-                    dtl::load(a_rsrc,
-                              &a_buf.template operator()<BUF>()[slot0 * GRANULE],
-                              (a_origin[i] + a_step) * elem_bytes,
-                              0);
+                    copy_in.template operator()<I>(
+                        a_rsrc,
+                        &a_buf.template operator()<BUF>()[slot0 * GRANULE],
+                        a_origin[i] + a_step);
                 }
-                else
+                else if constexpr(!is_tf32)
                 {
                     stage_dy(&a_buf.template operator()<BUF>()[(tid + i * cfg.threads()) * GRANULE],
                              in,
@@ -635,30 +612,86 @@ __device__ void patch_embed_impl(LayerPars pars,
                 if constexpr(is_a)
                 {
                     const int a_step = live ? r * pars.w * pars.c + rest : a_oob;
-                    dtl::load(a_rsrc,
-                              &a_buf.template operator()<BUF>()[slot0 * GRANULE],
-                              (a_origin[i] + a_step) * elem_bytes,
-                              0);
+                    copy_in.template operator()<I>(
+                        a_rsrc,
+                        &a_buf.template operator()<BUF>()[slot0 * GRANULE],
+                        a_origin[i] + a_step);
                 }
                 else
                 {
                     // B needs no permutation: KRSC is row-major over exactly this K order.
                     const int b_step = live ? r * pars.patch_row + rest : b_oob;
-                    dtl::load(b_rsrc,
-                              &b_buf.template operator()<BUF>()[slot0 * GRANULE],
-                              (b_origin[i] + b_step) * elem_bytes,
-                              0);
+                    copy_in.template operator()<I>(
+                        b_rsrc,
+                        &b_buf.template operator()<BUF>()[slot0 * GRANULE],
+                        b_origin[i] + b_step);
                 }
             }
         }
     };
 
+    // tf32's second half: a granule's eight fp32 split into the bf16 pair, each half stored to
+    // its plane at the slot a DTL copy would have filled, so every layout and read above serves
+    // the planes unchanged. What the DTL forms fix in LDS is fixed here instead, in registers: a
+    // dY granule past k zeroes its tail, and a pulled-back W granule the repeat zero_b_pad would
+    // take out.
+    auto split_one = [&]<int BUF, int I, int TAIL>(int k0) {
+        constexpr bool is_a = I < cfg.a_rounds();
+        constexpr int i     = is_a ? I : I - cfg.a_rounds();
+        fp32x8_t v          = __builtin_shufflevector(__builtin_bit_cast(fp32x4_t, staged[I][0]),
+                                             __builtin_bit_cast(fp32x4_t, staged[I][1]),
+                                             0,
+                                             1,
+                                             2,
+                                             3,
+                                             4,
+                                             5,
+                                             6,
+                                             7);
+        if constexpr(is_dgrad && is_a && (TAIL & DY_TAIL))
+        {
+            const int row = stage_row0 + i * rows_per_pass;
+            const int k   = k0 + detail::granule_for_slot<cfg>(row, stage_slot_g) * GRANULE;
+#pragma unroll
+            for(int e = 0; e < GRANULE; ++e)
+                v[e] = k + e < pars.k ? v[e] : 0.f;
+        }
+        if constexpr(!is_dgrad && !is_wgrad && !is_a && cfg.row_pad)
+        {
+            const int k   = k0 + stage_g * GRANULE;
+            const int r   = k / pars.kpad_row;
+            const int raw = k - r * pars.kpad_row;
+            const int dup = r < pars.kh ? raw - std::min(raw, pars.patch_row - GRANULE) : 0;
+#pragma unroll
+            for(int e = 0; e < GRANULE; ++e)
+                v[e] = e < dup ? 0.f : v[e];
+        }
+        const auto pair = fp32xN_to_bf16_pair<GRANULE>(v);
+        lds_t* tile = is_a ? a_buf.template operator()<BUF>() : b_buf.template operator()<BUF>();
+        constexpr int PLANE                             = is_a ? A_TILE : B_TILE;
+        const int at                                    = (tid + i * cfg.threads()) * GRANULE;
+        *reinterpret_cast<bf16x8_t*>(&tile[at])         = pair.big;
+        *reinterpret_cast<bf16x8_t*>(&tile[PLANE + at]) = pair.small;
+    };
+
+    // A fragment tile out of LDS: as staged, or tf32's big plane and then its small one through
+    // the same map, each into its half of the split.
+    auto read = [&]<typename Inst, typename Plane, int PLANE>(auto& rt, lds_t* src, auto&& at) {
+        if constexpr(is_tf32)
+        {
+            bunnies::load_tile<Inst, Plane, false>(rt, src, at);
+            bunnies::load_tile<Inst, Plane, true>(rt, src + PLANE, at);
+        }
+        else
+            bunnies::load_tile<Inst>(rt, src, at);
+    };
+
     // One MFMA K step over a named buffer. Templated on the parity so the LDS objects it
     // reads are the ones the waitcnt pass can tell apart from the fetch in flight.
     auto compute_step = [&]<int BUF, int STEP, bool ZeroAcc>() {
-        const dtype* a_src = a_buf.template operator()<BUF>();
         // Not const: ds_read_b64_tr_b16 takes a mutable LDS pointer where ds_load_b128 does not.
-        dtype* b_src = b_buf.template operator()<BUF>();
+        lds_t* a_src = a_buf.template operator()<BUF>();
+        lds_t* b_src = b_buf.template operator()<BUF>();
 
         // These functors only say where a (row, col) of the tile lives in LDS; load_tile
         // drives the lane and round mapping off each operand's own layout.
@@ -668,14 +701,15 @@ __device__ void patch_embed_impl(LayerPars pars,
             // row is the lane's filter element, 4-aligned so the group divide is exact; col is
             // the reduction index, which the transposed tile carries as its LDS row.
             using TB = detail::TransposeB<cfg>;
-            bunnies::load_tile<arch::ds_read_b64_tr_b16>(
+            read.template operator()<arch::ds_read_b64_tr_b16, plane_filt, B_TILE>(
                 filt, b_src, [&](int nb, int, int row, int col) {
                 return TB::elem(STEP * MFMA_K + col, (wave_n + nb * MFMA_N + row) / 4);
             });
         }
         else
         {
-            bunnies::load_tile<arch::ds_load_b128>(filt, b_src, [&](int nb, int, int row, int col) {
+            read.template operator()<arch::ds_load_b128, plane_filt, B_TILE>(
+                filt, b_src, [&](int nb, int, int row, int col) {
                 return detail::lds_offset<cfg>(wave_n + nb * MFMA_N + row,
                                                (STEP * MFMA_K + col) / GRANULE);
             });
@@ -686,14 +720,15 @@ __device__ void patch_embed_impl(LayerPars pars,
         {
             // row is the reduction index; col is the lane's filter element, 4-aligned.
             using TA = detail::TransposeTile<cfg.m_tile()>;
-            bunnies::load_tile<arch::ds_read_b64_tr_b16>(
-                spat, a_buf.template operator()<BUF>(), [&](int, int mb, int row, int col) {
+            read.template operator()<arch::ds_read_b64_tr_b16, plane_spat, A_TILE>(
+                spat, a_src, [&](int, int mb, int row, int col) {
                 return TA::elem(STEP * MFMA_K + row, (wave_m + mb * MFMA_M + col) / 4);
             });
         }
         else
         {
-            bunnies::load_tile<arch::ds_load_b128>(spat, a_src, [&](int, int mb, int row, int col) {
+            read.template operator()<arch::ds_load_b128, plane_spat, A_TILE>(
+                spat, a_src, [&](int, int mb, int row, int col) {
                 return detail::lds_offset<cfg>(wave_m + mb * MFMA_M + col,
                                                (STEP * MFMA_K + row) / GRANULE);
             });
@@ -725,11 +760,12 @@ __device__ void patch_embed_impl(LayerPars pars,
     }();
     const int chunks = kwalk / cfg.k_chunk;
 
-    // The overlap a pulled-back B granule repeats, zeroed so it is not counted twice.
+    // The overlap a pulled-back B granule repeats, zeroed so it is not counted twice. tf32 zeroes
+    // it at the split instead.
     //
     // A thread zeroes only granules it filled, so its own vmcnt is the whole ordering.
     auto zero_b_pad = [&]<int BUF>(int k0) {
-        if constexpr(!is_dgrad && !is_wgrad && cfg.row_pad)
+        if constexpr(!is_dgrad && !is_wgrad && cfg.row_pad && !is_tf32)
         {
             const int k   = k0 + stage_g * GRANULE;
             const int r   = k / pars.kpad_row;
@@ -749,10 +785,72 @@ __device__ void patch_embed_impl(LayerPars pars,
         }
     };
 
+    // Refill from registers a SHORT_ROW granule the descriptor nulled for starting before its
+    // tensor. Like zero_b_pad, a thread touches only slots it filled, so its vmcnt orders it.
+    auto fix_short_rows = [&]<int BUF>(int k0) {
+        // `first` is the index of src[0] in its tensor: elements before the tensor read zero,
+        // and meet a zeroed B element or a dropped wgrad column.
+        auto refill = [&](dtype* dst, const dtype* src, int64_t first, int off) {
+            vec_t value{};
+            for(int e = 0; e < GRANULE; ++e)
+                value[e] = first + off + e >= 0 ? src[off + e] : dtype(0);
+            *reinterpret_cast<vec_t*>(dst) = value;
+        };
+        dtype* a = a_buf.template operator()<BUF>();
+        if constexpr(is_wgrad)
+        {
+            constexpr int per_row = cfg.m_tile() / GRANULE;
+#pragma unroll
+            for(int i = 0; i < cfg.a_rounds(); ++i)
+            {
+                const int slot = tid + i * cfg.threads();
+                const int m    = kbase + k0 + slot / per_row;
+                if(m < pars.rows && a_origin[i] != NO_COL)
+                {
+                    const int off = detail::row_origin_magic(pars, m, img0) + a_origin[i];
+                    if(off < 0)
+                        refill(&a[slot * GRANULE], in, x_base, off);
+                }
+            }
+        }
+        else if constexpr(!is_dgrad)
+        {
+            const int k = k0 + stage_g * GRANULE;
+            const int r = k / pars.kpad_row;
+            if(r < pars.kh)
+            {
+                const int rest = pars.patch_row - GRANULE;
+                dtype* b       = b_buf.template operator()<BUF>();
+#pragma unroll
+                for(int i = 0; i < cfg.a_rounds(); ++i)
+                {
+                    // A row past the problem never reaches Y, and its sentinel is no address.
+                    const int off = a_origin[i] + r * pars.w * pars.c + rest;
+                    if(a_origin[i] != a_oob && off < 0)
+                        refill(&a[(tid + i * cfg.threads()) * GRANULE], in, x_base, off);
+                }
+#pragma unroll
+                for(int i = 0; i < cfg.b_rounds(); ++i)
+                {
+                    const int off = b_origin[i] + r * pars.patch_row + rest;
+                    if(b_origin[i] != b_oob && off < 0)
+                        refill(&b[(tid + i * cfg.threads()) * GRANULE], wei, 0, off);
+                }
+            }
+        }
+    };
+
     // One phase: retire this stage's chunk, refill the stage its predecessor freed, compute.
     // The barrier is what makes the last wave's read of that stage happen-before the refill.
+    //
+    // tf32 refills in two halves around the compute: its loads go out with the refill, as a DTL
+    // copy would, and their split lands after the compute has issued, when the loads have had the
+    // whole of it to arrive. The next phase's barrier publishes the stores.
     auto phase = [&]<int J, bool Refill, bool ZeroAcc, int TAIL>(int base) {
-        wait_vmcnt_all();
+        if constexpr(!is_tf32)
+            wait_vmcnt_all();
+        if constexpr(!is_tf32 && (TAIL & SHORT_ROW))
+            fix_short_rows.template operator()<J>((base + J) * cfg.k_chunk);
         zero_b_pad.template operator()<J>((base + J) * cfg.k_chunk);
         __syncthreads();
 
@@ -769,6 +867,13 @@ __device__ void patch_embed_impl(LayerPars pars,
         __builtin_amdgcn_sched_barrier(0);
         static_for<STEPS>(
             [&]<int S>() { compute_step.template operator()<J, S, ZeroAcc && S == 0>(); });
+        if constexpr(is_tf32 && Refill)
+        {
+            __builtin_amdgcn_sched_barrier(0);
+            static_for<LOADS>([&]<int I>() {
+                split_one.template operator()<(J + BUFS - 1) % BUFS, I, TAIL>(k0_next);
+            });
+        }
     };
 
     // The whole K walk, with the staging form fixed.
@@ -782,6 +887,9 @@ __device__ void patch_embed_impl(LayerPars pars,
         static_for<BUFS - 1>([&]<int J>() {
             static_for<cfg.a_rounds() + cfg.b_rounds()>(
                 [&]<int I>() { fetch_one.template operator()<J, I, TAIL>(J * cfg.k_chunk); });
+            if constexpr(is_tf32)
+                static_for<cfg.a_rounds() + cfg.b_rounds()>(
+                    [&]<int I>() { split_one.template operator()<J, I, TAIL>(J * cfg.k_chunk); });
         });
 
         // The opening pair is peeled to name the zeroing form and the last to drop the refill;
@@ -801,8 +909,11 @@ __device__ void patch_embed_impl(LayerPars pars,
         }
     };
 
-    constexpr int DY = NARROW_K && (is_dgrad || is_wgrad) ? DY_TAIL : 0;
-    if constexpr(is_dgrad)
+    // tf32 needs neither of wgrad's dY form nor dgrad's W one: with an element per four-byte
+    // unit, a load past either tensor's live range loses nothing, and wgrad's dY tail lands in
+    // channels the epilogue drops. Only dgrad's dY tail is a reduction, which must read zero.
+    constexpr int DY = NARROW_K && (is_dgrad || (is_wgrad && !is_tf32)) ? DY_TAIL : 0;
+    if constexpr(is_dgrad && !is_tf32)
     {
         if(n0 + cfg.n_tile() > pars.kgemm)
             walk.template operator()<W_TAIL | DY>();
@@ -811,7 +922,7 @@ __device__ void patch_embed_impl(LayerPars pars,
     }
     else
     {
-        walk.template operator()<DY>();
+        walk.template operator()<(SHORT ? SHORT_ROW : 0) | DY>();
     }
 
     // Wgrad adds its split into dW, which the launch zeroed. The accumulator's columns are the
@@ -849,15 +960,34 @@ __device__ void patch_embed_impl(LayerPars pars,
     constexpr int DRAINS  = cfg.drains();
     constexpr int MB_PER  = cfg.wave_m16() / DRAINS; // row blocks a wave drains per part
     constexpr int ROWS    = cfg.m_tile() / DRAINS;   // tile rows a part carries
+    constexpr int RUN     = 16 / elem_bytes;         // elements in a lane's 16-byte store
 
     dtype* out_lds;
     if constexpr(cfg.n_tile() > cfg.m_tile())
-        out_lds = b_lds0;
+        out_lds = reinterpret_cast<dtype*>(b_lds0);
     else
-        out_lds = a_lds0;
+        out_lds = reinterpret_cast<dtype*>(a_lds0);
 
+    // Where output (row, col) sits in the stage: a 16-bit row padded off the banks, an fp32 one
+    // swizzled; see OutStage.
+    auto out_at = [](int r, int c) {
+        if constexpr(is_tf32)
+            return detail::OutStage<OUT_ROW>::elem(r, c);
+        else
+            return r * OUT_ROW + c;
+    };
+
+    // The 16-bit types narrow before the stage; tf32's result is the fp32 accumulator itself.
+    using rt_staged = std::conditional_t<is_tf32, rt_acc, rt_out>;
     rt_out narrowed;
-    bunnies::tile_cast(narrowed, acc);
+    if constexpr(!is_tf32)
+        bunnies::tile_cast(narrowed, acc);
+    rt_staged& result = [&]() -> rt_staged& {
+        if constexpr(is_tf32)
+            return acc;
+        else
+            return narrowed;
+    }();
 
     const auto out_rsrc =
         arch::make_buffer(out, span(is_dgrad ? pars.input_elems - x_base : r_total - r_base));
@@ -879,9 +1009,15 @@ __device__ void patch_embed_impl(LayerPars pars,
         const int gap = (pars.w - pars.kw) * pars.c;
         for(int i = tid; i < cfg.m_tile(); i += cfg.threads())
             row_base[i] = detail::row_origin(pars, m0 + i, 0, img0);
-        for(int i = tid; i < cfg.n_tile(); i += cfg.threads())
+        // tf32's whole runs read one column entry a lane run, so only runs are tabulated and they
+        // are read densely: an entry a run apart would put a phase's 32 lanes on 32 / RUN banks.
+        // 16-bit keeps an entry a column: its dense read would add scratch to M256xN256, already
+        // at 256 VGPRs, and run slower.
+        const bool dense  = is_tf32 && pars.patch_row % RUN == 0;
+        const int entries = dense ? cfg.n_tile() / RUN : cfg.n_tile();
+        for(int i = tid; i < entries; i += cfg.threads())
         {
-            const int j = n0 + i;
+            const int j = n0 + (dense ? i * RUN : i);
             col_base[i] = j / pars.patch_row * gap + j;
         }
         // The drain loop opens on a barrier, which is what publishes these.
@@ -892,20 +1028,20 @@ __device__ void patch_embed_impl(LayerPars pars,
 
         // A part takes MB_PER row blocks from every wave, so its waves are strided in the
         // tile and packed in LDS; the store below undoes that.
-        auto part = narrowed.template sub<cfg.wave_n16(), MB_PER>(0, D * MB_PER);
-        bunnies::store_tile<arch::ds_store_b64>(
-            part, out_lds, [&](int nb, int mb, int chan, int row) {
+        using store_inst = std::conditional_t<is_tf32, arch::ds_store_b128, arch::ds_store_b64>;
+        auto part        = result.template sub<cfg.wave_n16(), MB_PER>(0, D * MB_PER);
+        bunnies::store_tile<store_inst>(part, out_lds, [&](int nb, int mb, int chan, int row) {
             const int lds_row = (wave_mi * MB_PER + mb) * MFMA_M + row;
-            return lds_row * OUT_ROW + wave_n + nb * MFMA_N + chan;
+            return out_at(lds_row, wave_n + nb * MFMA_N + chan);
         });
 
         __syncthreads();
 
         if constexpr(is_dgrad)
         {
-            // An eight-wide store is only whole when a filter row is a multiple of the
-            // granule, since that is what keeps a lane run inside one row of dX.
-            if(pars.patch_row % GRANULE == 0)
+            // A lane's run is only whole when a filter row is a multiple of it, since that is
+            // what keeps the run inside one row of dX.
+            if(pars.patch_row % RUN == 0)
             {
                 bunnies::buffer_store_from_lds<arch,
                                                {.rows           = ROWS,
@@ -917,11 +1053,12 @@ __device__ void patch_embed_impl(LayerPars pars,
                     const int rem = r % (MB_PER * MFMA_M);
                     const int mi  = wv * cfg.wave_m16() * MFMA_M + D * MB_PER * MFMA_M + rem;
                     const int voffset =
-                        (m0 + mi < pars.rows && n0 + c + GRANULE <= pars.kgemm)
-                            ? static_cast<int>((row_base[mi] + col_base[c]) * sizeof(dtype))
+                        (m0 + mi < pars.rows && n0 + c + RUN <= pars.kgemm)
+                            ? static_cast<int>((row_base[mi] + col_base[is_tf32 ? c / RUN : c]) *
+                                               sizeof(dtype))
                             : -1;
                     return {voffset, 0};
-                }, out_lds, [](int r, int c) { return r * OUT_ROW + c; });
+                }, out_lds, out_at);
             }
             else
             {
@@ -933,13 +1070,13 @@ __device__ void patch_embed_impl(LayerPars pars,
                     const int rem = r % (MB_PER * MFMA_M);
                     const int mi  = wv * cfg.wave_m16() * MFMA_M + D * MB_PER * MFMA_M + rem;
                     if(m0 + mi < pars.rows && n0 + c < pars.kgemm)
-                        out[row_base[mi] + col_base[c]] = out_lds[r * OUT_ROW + c];
+                        out[row_base[mi] + col_base[c]] = out_lds[out_at(r, c)];
                 }
             }
         }
         else if constexpr(NARROW_K)
         {
-            // An eight-wide run would cross into the next row of Y, so this goes element-wise.
+            // A whole run would cross into the next row of Y, so this goes element-wise.
             for(int idx = tid; idx < ROWS * cfg.n_tile(); idx += cfg.threads())
             {
                 const int r   = idx / cfg.n_tile();
@@ -948,7 +1085,7 @@ __device__ void patch_embed_impl(LayerPars pars,
                 const int rem = r % (MB_PER * MFMA_M);
                 const int m   = m0 + wv * cfg.wave_m16() * MFMA_M + D * MB_PER * MFMA_M + rem;
                 if(m < pars.rows && n0 + c < pars.k)
-                    out[(m - m0) * pars.k + n0 + c] = out_lds[r * OUT_ROW + c];
+                    out[(m - m0) * pars.k + n0 + c] = out_lds[out_at(r, c)];
             }
         }
         else
@@ -964,12 +1101,12 @@ __device__ void patch_embed_impl(LayerPars pars,
                 const int m   = m0 + wv * cfg.wave_m16() * MFMA_M + D * MB_PER * MFMA_M + rem;
                 const int n   = n0 + c;
                 // buffer addressing nulls the row past the problem; the column cannot straddle
-                // because both tile origins, k and the lane run are multiples of eight.
+                // because both tile origins, k and the lane run are multiples of the run.
                 const int voffset = (m < pars.rows && n < pars.k)
                                         ? static_cast<int>(((m - m0) * pars.k + n) * sizeof(dtype))
                                         : -1;
                 return {voffset, 0};
-            }, out_lds, [](int r, int c) { return r * OUT_ROW + c; });
+            }, out_lds, out_at);
         }
     });
 }
@@ -979,7 +1116,7 @@ __device__ void patch_embed_impl(LayerPars pars,
 //
 // The registry compiles this header for every target it serves, so gate on the builtins:
 // that leaves a well-formed empty kernel off gfx950 rather than a build error.
-template <Config cfg, DataType DT, Direction DIR, bool NARROW_K>
+template <Config cfg, DataType DT, Direction DIR, bool NARROW_K, bool SHORT>
 __global__
 __launch_bounds__(cfg.threads()) void patch_embed_cdna4(LayerPars pars,
                                                         const ToType<DT>* __restrict__ in,
@@ -996,7 +1133,7 @@ __launch_bounds__(cfg.threads()) void patch_embed_cdna4(LayerPars pars,
         if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
            __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16))
         {
-            patch_embed_impl<cfg, DT, DIR, NARROW_K>(pars, in, w, out);
+            patch_embed_impl<cfg, DT, DIR, NARROW_K, SHORT>(pars, in, w, out);
         }
     }
 }
@@ -1015,14 +1152,14 @@ inline int n_tiles(const Config& cfg, const ConvParams& par)
     return (n + cfg.n_tile() - 1) / cfg.n_tile();
 }
 
-inline LaunchParams get_launch_params(const Config& cfg, const ConvParams& par)
+inline LaunchParams get_launch_params(const Config& cfg, const ConvParams& par, int cu_count)
 {
     LaunchParams launch;
-    const int splits            = par.direction == Direction::Wgrad ? wgrad_splits(cfg, par) : 1;
-    launch.grid                 = par.direction == Direction::Wgrad
-                                      ? dim3(m_tiles(cfg, par), n_tiles(cfg, par), splits)
-                                      : dim3(m_tiles(cfg, par) * n_tiles(cfg, par), 1, 1);
-    launch.block_size           = dim3(cfg.threads(), 1, 1);
+    const int splits  = par.direction == Direction::Wgrad ? wgrad_splits(cfg, par, cu_count) : 1;
+    launch.grid       = par.direction == Direction::Wgrad
+                            ? dim3(m_tiles(cfg, par), n_tiles(cfg, par), splits)
+                            : dim3(m_tiles(cfg, par) * n_tiles(cfg, par), 1, 1);
+    launch.block_size = dim3(cfg.threads(), 1, 1);
     launch.dynamic_shared_bytes = 0;
     return launch;
 }
@@ -1081,31 +1218,35 @@ inline bool chunks_evenly(const Config& cfg, const ConvParams& par)
 // five stems over n 1..1024 under the occupancy split (min of three runs each): the pick lands
 // 1.03x off the per-shape best on average, 1.25x at worst. Refit rather than reason about the
 // constants.
-inline double wgrad_tile_cost(const Config& cfg, const ConvParams& par)
+//
+// tf32's are its own; see the TF32 section of patch-embed-cdna4.md.
+inline double wgrad_tile_cost(const Config& cfg, const ConvParams& par, int cu_count)
 {
-    const double BYTES_PER_S     = 2e11;
-    const double FLOPS_PER_S     = 8e14;
-    const double LDS_BYTES_PER_S = 2e13;
-    const double ATOMICS_PER_S   = 2.5e9;
-    const double HIDE_WAVES      = 2.0;
+    const bool tf32              = cfg.is_tf32();
+    const double BYTES_PER_S     = tf32 ? 1e13 : 2e11;
+    const double FLOPS_PER_S     = tf32 ? 1e16 : 8e14;
+    const double LDS_BYTES_PER_S = tf32 ? 2.6e14 : 2e13;
+    const double ATOMICS_PER_S   = tf32 ? 1.3e11 : 2.5e9;
+    const double HIDE_WAVES      = tf32 ? 2.2 : 2.0;
 
-    const int splits  = wgrad_splits(cfg, par);
+    const int splits  = wgrad_splits(cfg, par, cu_count);
     const int64_t wgs = static_cast<int64_t>(m_tiles(cfg, par)) * n_tiles(cfg, par) * splits;
-    const int kwalk   = wgrad_split_rows(cfg, par);
+    const int kwalk   = wgrad_split_rows(cfg, par, cu_count);
     const int cap     = wgrad_slots(cfg);
 
     // A round is every CU holding its full cap, so a split that fits in one costs no tail.
-    const int64_t slots  = static_cast<int64_t>(cap) * cu_count();
+    const int64_t slots  = static_cast<int64_t>(cap) * cu_count;
     const int64_t rounds = (wgs + slots - 1) / slots;
     const double tail    = rounds > 1 ? static_cast<double>(rounds) * slots / wgs : 1.0;
-    const int64_t per_cu = (wgs + cu_count() - 1) / cu_count();
+    const int64_t per_cu = (wgs + cu_count - 1) / cu_count;
     const double waves   = std::min<int64_t>(cap, per_cu) * (cfg.threads() / 64.0) / 4.0;
     const double hide    = std::min(1.0, waves / HIDE_WAVES);
 
-    const double walked  = static_cast<double>(wgs) * kwalk;
-    const double bytes   = walked * (cfg.m_tile() + cfg.n_tile()) * 2;
-    const double flops   = 2.0 * walked * cfg.m_tile() * cfg.n_tile();
-    const double lds     = walked * (cfg.waves_m * cfg.n_tile() + cfg.waves_n * cfg.m_tile()) * 2;
+    const double walked = static_cast<double>(wgs) * kwalk;
+    const double bytes  = walked * (cfg.m_tile() + cfg.n_tile()) * cfg.elem_bytes;
+    const double flops  = 2.0 * walked * cfg.m_tile() * cfg.n_tile();
+    const double lds =
+        walked * (cfg.waves_m * cfg.n_tile() + cfg.waves_n * cfg.m_tile()) * cfg.elem_bytes;
     const double atomics = static_cast<double>(splits) * par.k * par.kh * par.kw * par.c;
 
     return (bytes / BYTES_PER_S + flops / FLOPS_PER_S + lds / LDS_BYTES_PER_S) * tail / hide +
@@ -1116,10 +1257,10 @@ inline double wgrad_tile_cost(const Config& cfg, const ConvParams& par)
 //
 // Traffic is what a workgroup reads, not what the shape needs, and occupancy splits into
 // the tail and latency hiding; folding those two together measured worse. See the doc.
-inline double tile_cost(const Config& cfg, const ConvParams& par)
+inline double tile_cost(const Config& cfg, const ConvParams& par, int cu_count)
 {
     if(par.direction == Direction::Wgrad)
-        return wgrad_tile_cost(cfg, par);
+        return wgrad_tile_cost(cfg, par, cu_count);
     const bool dgrad = par.direction == Direction::Dgrad;
 
     // Fitted, not the hardware's peaks: they absorb the kernel's own efficiency, which is why
@@ -1127,17 +1268,25 @@ inline double tile_cost(const Config& cfg, const ConvParams& par)
     // an aligned ds_read_b128 does, and it wants a deeper grid before more waves stop paying.
     // Dgrad's were refit under the N-fastest XCD-grouped grid, over five stems at n 16..1024.
     // Refit rather than reason about them.
-    const double BYTES_PER_S = dgrad ? 6e11 : 6e12;
-    const double FLOPS_PER_S = dgrad ? 5e13 : 3e14;
-    const double HIDE_WAVES  = dgrad ? 3.0 : 1.5; // waves per SIMD past which more stops helping
+    //
+    // tf32 has its own (the TF32 section of patch-embed-cdna4.md). Its fprop also pays a fixed
+    // latency per phase a CU walks: below a workgroup per CU the walk is latency-bound, which the
+    // byte and MFMA terms do not see.
+    const bool tf32          = cfg.is_tf32();
+    const double BYTES_PER_S = tf32 ? (dgrad ? 1.2e13 : 1.8e13) : (dgrad ? 6e11 : 6e12);
+    const double FLOPS_PER_S = tf32 ? (dgrad ? 7e14 : 4.5e14) : (dgrad ? 5e13 : 3e14);
+    const double HIDE_WAVES =
+        dgrad && !tf32 ? 3.0 : 1.5; // waves per SIMD past which more stops helping
+    const double PHASE_S = tf32 && !dgrad ? 2.8e-7 : 0.0;
 
     const int64_t wgs = static_cast<int64_t>(m_tiles(cfg, par)) * n_tiles(cfg, par);
     const int kwalk   = dgrad ? walked_k_dgrad(cfg, par) : walked_k(cfg, par.kh, par.kw * par.c);
     const int cap     = std::max(1, 160 * 1024 / cfg.lds_bytes());
 
-    const int64_t per_cu = (wgs + cu_count() - 1) / cu_count();
-    const double tail    = static_cast<double>(per_cu) * cu_count() / wgs;
-    double waves         = std::min<int64_t>(cap, per_cu) * (cfg.threads() / 64.0) / 4.0;
+    const int64_t per_cu   = (wgs + cu_count - 1) / cu_count;
+    const double tail      = static_cast<double>(per_cu) * cu_count / wgs;
+    const int64_t resident = std::min<int64_t>(cap, per_cu);
+    double waves           = resident * (cfg.threads() / 64.0) / 4.0;
     // Registers cap the waves a SIMD holds as much as LDS does, and the accumulator is what moves
     // with the tile: a wave owns wave_m16 * wave_n16 * 4 of them before its operands and addresses,
     // which the constant stands in for. Fitted on dgrad alone, so fprop keeps the LDS bound it was
@@ -1150,20 +1299,25 @@ inline double tile_cost(const Config& cfg, const ConvParams& par)
     const double rows = static_cast<double>(par.n) * par.p * par.q;
     const double out  = dgrad ? static_cast<double>(par.kh) * par.kw * par.c : par.k;
     const double bytes =
-        static_cast<double>(wgs) * (cfg.m_tile() + cfg.n_tile()) * kwalk * 2 + rows * out * 2;
+        (static_cast<double>(wgs) * (cfg.m_tile() + cfg.n_tile()) * kwalk + rows * out) *
+        cfg.elem_bytes;
     const double flops = 2.0 * wgs * cfg.m_tile() * cfg.n_tile() * kwalk;
+    // A CU walks its resident workgroups' phases side by side, and its rounds one after another.
+    const double phases =
+        static_cast<double>((per_cu + resident - 1) / resident) * kwalk / cfg.k_chunk;
 
-    return (bytes / BYTES_PER_S + flops / FLOPS_PER_S) * tail / hide;
+    return (bytes / BYTES_PER_S + flops / FLOPS_PER_S) * tail / hide + phases * PHASE_S;
 }
 
-// Whether any aligned tile can chunk this K.
-inline bool aligned_ladder_serves(const ConvParams& par)
+// Whether any aligned tile of `like`'s element width can chunk this K.
+//
+// The ladders are per width because their chunks are: tf32 halves the 16-bit ones, so a K
+// the 16-bit aligned ladder misses can still pair up on tf32's.
+inline bool aligned_ladder_serves(const Config& like, const ConvParams& par)
 {
-    if(!addressing_fits(NARROW_TILE, par))
-        return false;
-    for(const Config& tile :
-        {NARROW_TILE, MID_TILE, WIDE_TILE, HUGE_TILE, NARROW_ALT, TALL_TILE, SQ_TILE})
-        if(chunks_evenly(tile, par))
+    for(const Config& tile : configs)
+        if(tile.elem_bytes == like.elem_bytes && !tile.row_pad && addressing_fits(tile, par) &&
+           chunks_evenly(tile, par))
             return true;
     return false;
 }
@@ -1173,6 +1327,10 @@ inline bool aligned_ladder_serves(const ConvParams& par)
 // A whole ladder, since tile_cost ranks it; the padded one only where the aligned cannot.
 inline bool is_valid_config(const ConvParams& par, const Config& cfg)
 {
+    // A config is compiled for one element width, which alone partitions tf32's from the
+    // 16-bit ones.
+    if(static_cast<int>(sizeof_data_type(par.input_type)) != cfg.elem_bytes)
+        return false;
     const bool dgrad = par.direction == Direction::Dgrad;
     const bool wgrad = par.direction == Direction::Wgrad;
     // Sweep hatch: HIPCONV_PE_SWEEP=<index> pins the run to configs[index].
@@ -1201,11 +1359,12 @@ inline bool is_valid_config(const ConvParams& par, const Config& cfg)
         return false;
     // The padding ladder is the family's floor, not a fallback: explicit-GEMM is off in a
     // default build, so a shape neither ladder takes has no kernel at all.
-    return cfg.row_pad != aligned_ladder_serves(par);
+    return cfg.row_pad != aligned_ladder_serves(cfg, par);
 }
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device& dev,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -1216,18 +1375,29 @@ void launch_impl(const LaunchParams& lp,
     auto typed_launch = [&]<DataType DT>() {
         using dtype   = ToType<DT>;
         auto dispatch = [&]<Direction DIR>() {
-            auto go = [&]<bool NARROW_K>() {
-                patch_embed_cdna4<cfg, DT, DIR, NARROW_K>
+            auto go = [&]<bool NARROW_K, bool SHORT>() {
+                patch_embed_cdna4<cfg, DT, DIR, NARROW_K, SHORT>
                     <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
-                        layer_pars(cfg, par),
+                        layer_pars(cfg, par, dev.cu_count),
                         static_cast<const dtype*>(in),
                         static_cast<const dtype*>(wei),
                         out);
             };
-            if(par.k % GRANULE != 0)
-                go.template operator()<true>();
-            else
-                go.template operator()<false>();
+            // A k the granule does not divide narrows fprop's store and dgrad's dY staging; tf32's
+            // wgrad has no narrow form, so it is not built twice.
+            auto narrow = [&]<bool SHORT>() {
+                if constexpr(cfg.is_tf32() && DIR == Direction::Wgrad)
+                    go.template operator()<false, SHORT>();
+                else if(par.k % GRANULE != 0)
+                    go.template operator()<true, SHORT>();
+                else
+                    go.template operator()<false, SHORT>();
+            };
+            // Only a padded fprop or wgrad stages a short row; dgrad's reduction is k.
+            if constexpr(cfg.row_pad && DIR != Direction::Dgrad)
+                if(par.kw * par.c < GRANULE)
+                    return narrow.template operator()<true>();
+            narrow.template operator()<false>();
         };
         if(par.direction == Direction::Wgrad)
         {
@@ -1237,15 +1407,18 @@ void launch_impl(const LaunchParams& lp,
         }
         else if(par.direction == Direction::Dgrad)
         {
-            // The scatter writes only pixels a patch covers; the strip past the last one is zero.
-            if(par.h % par.kh != 0 || par.w % par.kw != 0)
+            // The scatter writes only pixels a patch covers; the strips and gaps it skips are zero.
+            if(par.p * par.kh != par.h || par.q * par.kw != par.w)
                 HIP_CHECK(hipMemsetAsync(out, 0, ConvSize(par).input_grad_bytes(), stream));
             dispatch.template operator()<Direction::Dgrad>();
         }
         else
             dispatch.template operator()<Direction::Fprop>();
     };
-    if(par.input_type == DataType::bf16)
+    // A config is built for one element width; is_valid_config never pairs it with another.
+    if constexpr(cfg.is_tf32())
+        typed_launch.template operator()<DataType::tf32>();
+    else if(par.input_type == DataType::bf16)
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
@@ -1265,12 +1438,17 @@ public:
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     // Does not chain to DirectConvKernel::is_applicable, which rejects any stride but one.
-    // A patch embedding is exactly the case where the stride equals the filter.
-    bool is_applicable(const ConvParams& par) const override
+    // A patch embedding is exactly the case where the stride equals the filter; a stride past
+    // it only skips pixels, and a 1x1 is the one-pixel patch.
+    bool is_applicable(const Device& /*dev*/, const ConvParams& par) const override
     {
-        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
-            return false;
-        if(par.input_type != par.weight_type || par.input_type != par.output_type)
+        // The 16-bit types are same-type; tf32 takes tf32 operands and an fp32 result.
+        const bool ok_16bit =
+            (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
+            par.input_type == par.weight_type && par.input_type == par.output_type;
+        const bool ok_tf32 = par.input_type == DataType::tf32 &&
+                             par.weight_type == DataType::tf32 && par.output_type == DataType::fp32;
+        if(!ok_16bit && !ok_tf32)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
@@ -1282,7 +1460,7 @@ public:
         if(par.dilation_h != 1 || par.dilation_w != 1)
             return false;
         // The patch geometry: filters that tile the image without overlap or padding.
-        if(par.kh != par.stride_h || par.kw != par.stride_w)
+        if(par.kh > par.stride_h || par.kw > par.stride_w)
             return false;
         if(par.pad_h != 0 || par.pad_w != 0)
             return false;
@@ -1293,43 +1471,82 @@ public:
             par.direction == Direction::Wgrad ? sz.weight_grad_bytes() : sz.weight_bytes();
         if(w_bytes > INT32_MAX || static_cast<int64_t>(par.n) * par.p * par.q > INT32_MAX)
             return false;
-        if(span_rows(par) < 256)
-            return false;
-        // 1x1 is a GEMM already. A cfg_-dependent test does not belong here: the framework
-        // calls is_applicable on the family's first kernel alone.
-        return !(par.kh == 1 && par.kw == 1);
+        return span_rows(par) >= 256;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& /*dev*/, const ConvParams& par) const override
     {
         return patch_embed::is_valid_config(par, cfg_);
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override
     {
-        return patch_embed::get_launch_params(cfg_, par);
+        return patch_embed::get_launch_params(cfg_, par, dev.cu_count);
     }
 
-    // Ranks the ladder in every direction, and places the family against explicit-GEMM's flat
-    // 0.5: fprop and wgrad fold into (1, 2) and outrun it, dgrad into (0, 0.5) and yields to it.
-    float get_weighted_throughput_index(const ConvParams& par) const override
+    // Wgrad with more than one row split adds into dW atomically.
+    bool is_deterministic(const Device& dev, const ConvParams& par) const override
+    {
+        return par.direction != Direction::Wgrad || wgrad_splits(cfg_, par, dev.cu_count) == 1;
+    }
+
+    // Ranks the ladder in every direction, and places the family against explicit-GEMM: where it
+    // outruns that path the rank folds into (1, 2), and where it yields into (0, 0.5). 16-bit
+    // outruns it in fprop and wgrad and yields in dgrad; tf32 swaps fprop and dgrad (see the TF32
+    // section of patch-embed-cdna4.md).
+    //
+    // An unstrided 1x1 also yields to hipBLASLt's pointwise with its 128 MiB workspace (#289),
+    // except where that loses. Over 824 workload 1x1s: fprop wins c < 256 with n*h*w <= 64K (1.23x
+    // geomean) and loses elsewhere, most on small n*h*w over c >= 1024, which hipBLASLt splits
+    // along K. On ROCm 10.1 wgrad wins c <= 8 past n*h*w = 8M (1.44x over 18 layers) and loses
+    // elsewhere. ROCm 7.x hipBLASLt, which past n*h*w ~3.3M offers only workspace-less
+    // algorithms 3-600x slower, is not what this is fit to.
+    //
+    // tf32 has its own fit, over 749 workload 1x1s on ROCm 10.2. Fprop yields throughout: it wins
+    // only c <= 128 under n*h*w = 2K, by 1.10x. Dgrad wins k <= 128 with n*h*w <= 8K (1.29x over
+    // 126 layers). Wgrad wins c <= 1024 past n*h*w = 2K, and every c past 1M (3.33x over 416
+    // layers): past 8M hipBLASLt's tf32 wgrad runs 4-144x behind.
+    float get_weighted_throughput_index(const Device& dev, const ConvParams& par) const override
     {
         constexpr double UNIT = 1e-5; // seconds, about where these shapes land
-        const double rank     = 1.0 / (1.0 + tile_cost(cfg_, par) / UNIT);
-        if(par.direction == Direction::Dgrad)
+        const double rank     = 1.0 / (1.0 + tile_cost(cfg_, par, dev.cu_count) / UNIT);
+        const bool yields =
+            cfg_.is_tf32() ? par.direction == Direction::Fprop : par.direction == Direction::Dgrad;
+        if(yields || yields_to_pointwise(par, cfg_.is_tf32()))
             return static_cast<float>(0.5 * rank);
         return static_cast<float>(1.0 + rank);
     }
 
-    void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
+    void
+    get_tolerance(const Device& dev, const ConvParams& par, float& atol, float& rtol) const override
     {
         if(par.direction == Direction::Dgrad)
             get_mixed_precision_tolerance(par, static_cast<size_t>(par.k), atol, rtol);
         else
-            DirectConvKernel::get_tolerance(par, atol, rtol);
+            DirectConvKernel::get_tolerance(dev, par, atol, rtol);
     }
 
 private:
+    static bool yields_to_pointwise(const ConvParams& par, bool tf32)
+    {
+        const bool unstrided_1x1 =
+            par.kh == 1 && par.kw == 1 && par.stride_h == 1 && par.stride_w == 1;
+        if(!unstrided_1x1)
+            return false;
+        const int64_t rows = static_cast<int64_t>(par.n) * par.p * par.q;
+        if(tf32)
+        {
+            if(par.direction == Direction::Dgrad)
+                return !(par.k <= 128 && rows <= 8192);
+            if(par.direction == Direction::Wgrad)
+                return !((par.c <= 1024 && rows > 2048) || rows > 1048576);
+            return true;
+        }
+        if(par.direction == Direction::Fprop)
+            return !(par.c < 256 && rows <= 65536);
+        return par.direction == Direction::Wgrad && !(par.c <= 8 && rows > 8388608);
+    }
+
     const Config& cfg_;
 };
 

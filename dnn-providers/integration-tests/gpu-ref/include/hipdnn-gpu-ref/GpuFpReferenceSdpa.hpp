@@ -408,9 +408,33 @@ public:
         {
             const auto batch = q.dims()[0];
             const auto headsPerK = q.dims()[1] / k.dims()[1];
-            auto qd = dequantize(q, options.descaleQ, batch, k.dims()[1], headsPerK, false, "Q");
-            auto kd = dequantize(k, options.descaleK, batch, k.dims()[1], 1, pagedK, "K");
-            auto vd = dequantize(v, options.descaleV, batch, v.dims()[1], 1, pagedV, "V");
+            auto qd = dequantize(q,
+                                 options.descaleQ,
+                                 batch,
+                                 k.dims()[1],
+                                 headsPerK,
+                                 options.seqLenQ,
+                                 nullptr,
+                                 0,
+                                 "Q");
+            auto kd = dequantize(k,
+                                 options.descaleK,
+                                 batch,
+                                 k.dims()[1],
+                                 1,
+                                 options.seqLenKv,
+                                 options.pageTableK,
+                                 options.pagedMaxSeqKv,
+                                 "K");
+            auto vd = dequantize(v,
+                                 options.descaleV,
+                                 batch,
+                                 v.dims()[1],
+                                 1,
+                                 options.seqLenKv,
+                                 options.pageTableV,
+                                 options.pagedMaxSeqKv,
+                                 "V");
             auto plain = options;
             plain.descaleQ = nullptr;
             plain.descaleK = nullptr;
@@ -800,11 +824,18 @@ private:
                                   int64_t descaleBatchStride,
                                   int64_t descaleHeadStride,
                                   int64_t headsPerKv,
+                                  const int32_t* seqLen,
+                                  int64_t seqLenStride,
+                                  const SdpaPagedSide& paged,
                                   const char* inType);
 
     // fp8 dequantization on the device: a packed float copy of x * descale, with a FLOAT scalar
     // or [B, H_kv, 1, 1] descale; head h of x uses KV head h / headsPerKv. A per-head descale is
     // undefined on a paged container (its blocks are not batches), so paging needs a scalar.
+    // Padding is never read (SEM-008): with seqLen, rows past each batch's length are skipped,
+    // and a paged x (pageTable set; pagedMaxSeq is the logical key extent) is read only at the
+    // live rows its table maps, the slots the forward reads. Skipped elements of the copy are
+    // zero; the forward never reads them.
     template <class T>
     static hipdnn_data_sdk::utilities::Tensor<float>
         dequantize(hipdnn_data_sdk::utilities::TensorBase<T>& x,
@@ -812,9 +843,12 @@ private:
                    int64_t batch,
                    int64_t numHeadsKv,
                    int64_t headsPerKv,
-                   bool paged,
+                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLen,
+                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTable,
+                   int64_t pagedMaxSeq,
                    const char* name)
     {
+        const bool paged = pageTable != nullptr;
         const float* descalePtr = nullptr;
         int64_t batchStride = 0;
         int64_t headStride = 0;
@@ -835,15 +869,42 @@ private:
                 headStride = descale->strides()[1];
             }
         }
+        const int32_t* seqLenPtr = nullptr;
+        int64_t seqLenStride = 0;
+        if(seqLen != nullptr)
+        {
+            if(static_cast<int64_t>(seqLen->elementCount()) != batch || seqLen->dims().empty()
+               || seqLen->dims()[0] != batch)
+            {
+                throw std::invalid_argument(
+                    "GpuFpReferenceSdpa: seq_len tensors must hold one value per batch");
+            }
+            seqLenPtr = static_cast<const int32_t*>(seqLen->memory().deviceData());
+            seqLenStride = seqLen->strides()[0];
+        }
+        // The logical [B, H, S, D] the forward addresses: x itself, or a paged container's
+        // batches through its table.
+        auto logicalDims = x.dims();
+        SdpaPagedSide pagedSideArgs;
+        if(paged)
+        {
+            pagedSideArgs = pagedSide(*pageTable, x.dims(), batch, pagedMaxSeq);
+            logicalDims = {batch, x.dims()[1], pagedMaxSeq, x.dims()[3]};
+        }
         hipdnn_data_sdk::utilities::Tensor<float> out(x.dims());
+        out.fillWithValue(0.0F);
+        auto* outPtr = static_cast<float*>(out.memory().deviceData());
         launchSdpaDequant(x.memory().deviceData(),
-                          x.dims(),
+                          logicalDims,
                           x.strides(),
-                          static_cast<float*>(out.memory().deviceData()),
+                          outPtr,
                           descalePtr,
                           batchStride,
                           headStride,
                           headsPerKv,
+                          seqLenPtr,
+                          seqLenStride,
+                          pagedSideArgs,
                           detail::HipRtcTypeName<T>::VALUE);
         out.memory().markDeviceModified();
         return out;

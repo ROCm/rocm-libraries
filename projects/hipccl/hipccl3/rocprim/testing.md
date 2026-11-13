@@ -125,10 +125,10 @@ Because the type × block-size × items-per-thread × algorithm matrix is huge, 
 ### Flaky Test Policy
 * Flaky tests should be tagged clearly (e.g. `UNSTABLE`) and excluded from blocking runs until fixed.
 * Every flaky test should have an owner and a tracking bug.
-* A flaky test is not an accepted final state. rocPRIM does not currently maintain a tagged flaky list — establishing one is a gap. 
+* A flaky test is not an accepted final state. rocPRIM does not currently maintain a tagged flaky list — establishing one is a gap.
 
 ## Coverage
-* **Tooling:** `BUILD_CODE_COVERAGE=ON` (clang) compiles with `-fprofile-instr-generate -fcoverage-mapping`; `llvm-profdata` + `llvm-cov` (from `${ROCM_PATH}/llvm/bin`) produce HTML/LCOV reports via the `coverage_analysis` and `coverage` build targets. Test files are excluded (`--ignore-filename-regex="test_*"`). Codecov config lives at the `rocm-libraries` monorepo level.
+* **Tooling:** `ROCPRIM_ENABLE_COVERAGE=ON` (clang) compiles with `-fprofile-instr-generate -fcoverage-mapping`; `llvm-profdata` + `llvm-cov` (from `${ROCM_PATH}/llvm/bin`) produce HTML/LCOV reports via the `coverage_analysis` and `coverage` build targets. Test files are excluded (`--ignore-filename-regex="test_*"`). Codecov config lives at the `rocm-libraries` monorepo level.
 * **Target:** long-term > 95%.
 * **Scope / limitations:** instrumentation is host-side and clang-only; device-code coverage is not measured. Windows coverage is not tracked separately.
 

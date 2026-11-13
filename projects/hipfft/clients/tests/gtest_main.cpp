@@ -374,7 +374,10 @@ int main(int argc, char* argv[])
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
-                   "default to alleviate redundancy with rocfft-test)")
+                   "default to alleviate redundancy with rocfft-test). "
+                   "2D or 3D emulation test probabilities are scaled relative to test_prob: "
+                   "emulation_prob is used directly when test_prob is 1 and scaled down by the "
+                   "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(0.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",

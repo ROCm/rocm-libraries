@@ -498,6 +498,10 @@ typedef enum rocke_opcode
     /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
     ROCKE_OP_TILE_GLOBAL_ADDR_OF,
 
+    /* tile.buffer_atomic_fadd_f32 (raw_ptr_buffer_atomic_fadd with a cache
+     * policy). Appended so no existing opcode index shifts. */
+    ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1759,6 +1763,22 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate
+ * for a device-scope cascade add, th = TH_ATOMIC_CASCADE (4), scope =
+ * SCOPE_DEV (2) in bits [4:3]. gfx11 and gfx9 read the same bits as
+ * glc/slc/dlc, so only gfx12 targets may carry it. */
+#define ROCKE_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
+/* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
+ * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]).
+ * Callers must guard invalid offsets (e.g. with scf_if) instead of steering
+ * them out of range: unlike a buffer load, which reads 0 there, a buffer
+ * atomic at the out-of-range sentinel offset faults on gfx1250. */
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy);
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1930,10 +1950,10 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 /* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
- * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
- * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
- * returns from the launch on Windows, and stops the wave under a debugger, so
- * it is a last resort. */
+ * as s_trap 2 or, on some processors, as its simulated trap. Which processors,
+ * and what a taken trap does on each host, is stated in the tile.trap section
+ * of dsl_docs/reference/op_vocabulary.md. A taken trap does not let the process
+ * carry on, so it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

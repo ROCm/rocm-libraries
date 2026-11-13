@@ -1,0 +1,32 @@
+# Fortran binding of rocsolver: see fortran-bindings.yml.
+name: Fortran bindings (rocsolver)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rocsolver/library/include/**.h'
+      - 'projects/rocblas/library/include/**.h'
+      - 'bindings/fortran/rocsolver/metadata/**'
+      - '.github/workflows/fortran-bindings-rocsolver.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: rocsolver
+      libs: rocsolver
+      deps: rocblas
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

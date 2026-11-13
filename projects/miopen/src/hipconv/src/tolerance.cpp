@@ -129,7 +129,8 @@ void get_mixed_precision_tolerance(const ConvParams& par, size_t depth, float& a
         const double nu = static_cast<double>(n) * u;
         return nu < 1.0 ? nu / (1.0 - nu) : std::numeric_limits<double>::infinity();
     };
-    atol = 0.0f;
+    // fp16 rounding below 2^-14 errs by up to 2^-25, half the subnormal spacing; no rtol bounds it.
+    atol = par.result_type() == DataType::fp16 ? 0x1p-25f : 0.0f;
 
     if(par.input_type == DataType::tf32)
     {
@@ -151,7 +152,7 @@ void get_mixed_precision_tolerance(const ConvParams& par, size_t depth, float& a
     // Past the hypothesis there is no bound to report.
     //
     // A bound that survives it can still be too loose to check anything against, which is the
-    // caller's judgement to make; see docs/algorithms/direct/direct-wgrad-tolerance.md.
+    // caller's judgement to make; see docs/algorithms/details/direct/direct-wgrad-tolerance.md.
     if(!std::isfinite(rtol))
     {
         rtol = TOLERANCE_UNAVAILABLE;

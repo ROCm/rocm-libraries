@@ -36,7 +36,10 @@ ConvParams ConvParams::unfolded() const
         return out;
     }
     if(dims != 3)
-        return *this;
+    {
+        out.compute_output_size();
+        return out;
+    }
 
     // Case A: depth is not convolved, so each depth plane is an independent
     // image and folds into the batch. Preferred when case B also applies, since
@@ -69,7 +72,8 @@ ConvParams ConvParams::unfolded() const
         return out;
     }
 
-    return *this;
+    out.compute_output_size();
+    return out;
 }
 
 size_t sizeof_data_type(DataType dtype)

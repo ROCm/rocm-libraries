@@ -41,9 +41,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     fmha_fwd_v3_args args = buildFwdKernelArgs(_params, uidToPtrMap);
 
     // Attention scale — resolved at execute for runtime pass-by-value support.
-    args.scalar
-        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
-            _params.attnScale, deviceBuffers, numDeviceBuffers)));
+    // Throws BAD_PARAM before the launch for a scale the kernel mishandles.
+    args.scalar = plan_utils::resolveSupportedAttnScale(
+        _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaFwdPlan::execute");
     const auto launchParams = computeFwdLaunchParams(_params);
 
     if(!launchKernel("fwd",

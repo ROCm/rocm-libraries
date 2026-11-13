@@ -154,6 +154,78 @@ static int test_wmma_attention_accumulator_source_width()
     return 0;
 }
 
+static int test_wmma_scatter_uses_destination_layout()
+{
+    const auto* target = rocke_arch_target_from_gfx("gfx1250");
+    for(const char* id : {"wmma_gfx1250_f32_16x16x32_f16", "wmma_gfx1250_f32_16x16x32_bf16"})
+    {
+        const auto* original = rocke_mma_catalog_by_op_id(&target->mma, id);
+        CHECK(original != NULL);
+        const auto* storage
+            = strcmp(original->srcs[0].dtype, "bf16") == 0 ? rocke_bf16() : rocke_f16();
+        // Keep the physical ABI unchanged; only map availability differs.
+        for(int missing = 0; missing < 3; ++missing)
+        {
+            auto atom = *original;
+            if(missing == 1)
+                atom.srcs[2].layout = NULL;
+            if(missing == 2)
+                atom.dst.layout = NULL;
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "wmma_result_scatter") == ROCKE_OK);
+            rocke_gemm_universal_spec_t spec = {};
+            spec.tile.tile_m = spec.tile.warp_tile_m = atom.m;
+            spec.tile.tile_n = spec.tile.warp_tile_n = atom.n;
+            spec.tile.warp_m = spec.tile.warp_n = 1;
+            auto* lane = rocke_b_param(&b, "lane", rocke_i32(), NULL);
+            auto* zero = rocke_b_const_i32(&b, 0);
+            rocke_value_t* accs[] = {rocke_b_zero_vec_f32(&b, atom.dst.frag_len)};
+            int visits = 0;
+            bool rejected = false;
+            try
+            {
+                rocke_gemm_emit_wmma_acc_scatter(
+                    &b,
+                    &spec,
+                    &atom,
+                    lane,
+                    accs,
+                    1,
+                    zero,
+                    zero,
+                    atom.dst.frag_len,
+                    storage,
+                    [](rocke_ir_builder_t*,
+                       rocke_value_t*,
+                       rocke_value_t*,
+                       rocke_value_t*,
+                       int,
+                       void* user) { ++*static_cast<int*>(user); },
+                    &visits);
+            }
+            catch(const ckc::Error& e)
+            {
+                CHECK(missing == 2);
+                CHECK(e.code() == ROCKE_ERR_NOTIMPL);
+                CHECK(strstr(e.what(), "no verified 'dst' layout map") != NULL);
+                CHECK(strstr(e.what(), id) != NULL);
+                rejected = true;
+            }
+            if(missing == 2)
+            {
+                CHECK(rejected && visits == 0);
+            }
+            else
+            {
+                CHECK(!rejected && rocke_ir_builder_ok(&b));
+                CHECK(visits == atom.dst.frag_len);
+            }
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
 /* Independent native sequences pinned before integration. Native gfx950/
  * gfx1250 ordering differs from Python; preserve each contract. */
 static const char* const order_gfx90a[] = {
@@ -1754,7 +1826,8 @@ int main()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
        || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
        || test_rdna_integer_wmma_rows_name_i8_and_i4() || test_catalog_keeps_established_order()
-       || test_wmma_attention_accumulator_source_width())
+       || test_wmma_attention_accumulator_source_width()
+       || test_wmma_scatter_uses_destination_layout())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

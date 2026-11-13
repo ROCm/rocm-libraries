@@ -90,7 +90,10 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
-          shared/tensile/.*
+          shared/tensile/.*|
+          # Vendored AOTriton test sources, kept byte-identical to their pin
+          # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
+          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned
       - id: check-yaml
@@ -202,13 +205,14 @@ repos:
       # directories a PR touches, so an always_run hook here would fail every
       # PR outside dnn-providers/integration-tests.
       # The script reads the tree through support_matrix_units.py, which uses
-      # bundle_discovery.py and support_claim_schema.py, so all of them count.
+      # bundle_discovery.py, support_claim_schema.py and
+      # migration-scripts/bundle_utils.py, so all of them count.
       - id: render-support-matrix
         name: Support matrix renders without errors (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
       # SUPPORT_MATRIX_OVERVIEW.md is committed but refreshed on its own, not
       # with each claim change: every claim PR regenerating it made concurrent
@@ -221,7 +225,7 @@ repos:
         entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
@@ -383,6 +387,20 @@ repos:
         entry: python -m unittest discover -s projects/rocsparse/scripts -p test_merge_coverage_info.py
         language: python
         files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
+        pass_filenames: false
+
+      # rocKE layering ratchet: platform's imports of the library packages
+      # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
+      # the source tree, so the installed rocke_pytest CTest skips it; this
+      # hook is what enforces it. AST-only: no GPU, no rocke import, no engine
+      # build. --noconftest skips the rocKE conftest; no:cacheprovider keeps
+      # .pytest_cache out of the tree.
+      - id: rocke-library-reach
+        name: rocKE platform -> library imports only shrink
+        entry: python -m pytest -p no:cacheprovider --noconftest -q dnn-providers/hip-kernel-provider/rocke/platform/tests/test_library_reach.py
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(python|tests|tools|dsl_docs|cpp)/.*\.py$
         pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit

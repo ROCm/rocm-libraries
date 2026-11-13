@@ -2,7 +2,7 @@
 
 // Global-to-LDS loader for one tensor row of the direct_wgrad main loop.
 //
-// One class serves both operands: S rows (W x C, NHWC) and delta rows (Q x K, NPQK). The tile
+// One class serves both operands: S rows (W × C, NHWC) and delta rows (Q × K, NPQK). The tile
 // shape is the only difference between them, and Layout carries it.
 
 #include <type_traits>
@@ -63,6 +63,15 @@ struct RowTensorPars
 // template parameter rather than a runtime origin of zero so the untiled path keeps the
 // addressing it already had, byte for byte. See RowSchedule's row-tile section.
 //
+// Segmented counts rows from the first row of the item's row segment. That row, less the halo
+// rows a loader reaches above it, folds into the 64-bit base, so the main loop's row arguments
+// stay iter + c with c a compile-time constant. See
+// docs/algorithms/details/direct/direct-wgrad-row-segments.md.
+//
+// Exchanged addresses the tensor's H/W-exchanged view: a row is a source column and a column a
+// source row, so the row stride is chans and the column stride rows * chans. See
+// docs/algorithms/details/direct/direct-wgrad-exchange-hw.md.
+//
 // Tf32 selects the second of the two transports this class carries:
 //
 //   16-bit (Tf32 false): buffer_load_lds DMAs straight into LDS. Lane L lands at slot L, so the
@@ -79,14 +88,14 @@ struct RowTensorPars
 template <typename Layout,
           typename datatype_t,
           int NumWaves,
-          int Items     = 1,
-          int LaneBytes = 16,
-          bool Tiled    = false,
-          bool Tf32     = false>
+          int Items      = 1,
+          int LaneBytes  = 16,
+          bool Tiled     = false,
+          bool Tf32      = false,
+          bool Segmented = false,
+          bool Exchanged = false>
 class RowLoader
 {
-    static constexpr int rsrc_data_format = 1 << 15;
-
 public:
     // datatype_t is the LDS element, which stays 16-bit for tf32: what it holds is one plane of
     // the split pair.
@@ -94,6 +103,9 @@ public:
     static_assert(sizeof(datatype_t) == 2);
     static_assert(Layout::planes == (is_tf32 ? 2 : 1),
                   "the row layout's plane count has to follow the transport: tf32 writes two");
+    static_assert(!Exchanged || !Tiled,
+                  "the exchanged view scatters a tile's run of rows across the image, so it needs "
+                  "a window that reaches the end of the image");
 
     using Swizzle = typename Layout::Swizzle;
 
@@ -185,6 +197,10 @@ public:
     //
     // `valid` is false for a partition whose item ran past the end of the segment; `image` is
     // the first of the Layout::n_unfold images the item packs.
+    //
+    // When Segmented, `seg_origin` is the first row of the item's row segment and `seg_lead` the
+    // most rows above it a load may reach. The base sits seg_lead rows above seg_origin, so every
+    // row offset is non-negative.
     __device__ RowLoader(const RowTensorPars& pars,
                          const src_t* tensor,
                          int item,
@@ -193,7 +209,9 @@ public:
                          int col0,
                          int chan0,
                          int row_origin  = 0,
-                         int window_rows = 0)
+                         int window_rows = 0,
+                         int seg_origin  = 0,
+                         int seg_lead    = 0)
         : pars_(pars)
         // An idle partition aims its columns at the end of the image.
         //
@@ -219,10 +237,9 @@ public:
             const src_t* image_base = tensor + static_cast<size_t>(valid ? image : 0) * img_elems64;
             tile_                   = {row_origin, image_base, valid};
             const src_t* base       = image_base + static_cast<size_t>(row_origin) * row_elems;
-            const int window_bytes  = valid ? tile_window_bytes(pars, row_origin, window_rows) : 0;
-            rsrc_                   = __builtin_amdgcn_make_buffer_rsrc(
-                const_cast<src_t*>(base), 0, window_bytes, rsrc_data_format);
-            oob_bytes_        = window_bytes;
+            const int rows          = valid ? tile_window_rows(pars, row_origin, window_rows) : 0;
+            rsrc_             = arch::make_buffer(base, static_cast<int64_t>(rows) * row_elems);
+            oob_bytes_        = rows * row_stride_bytes_;
             img_stride_bytes_ = 0;
             return;
         }
@@ -249,14 +266,48 @@ public:
             window_images  = left < Layout::n_unfold ? left : Layout::n_unfold;
         }
 
-        const src_t* base      = tensor + static_cast<size_t>(valid ? image : 0) * img_elems;
-        const int window_bytes = window_images * img_elems * src_elem_bytes;
-        rsrc_                  = __builtin_amdgcn_make_buffer_rsrc(
-            const_cast<src_t*>(base), 0, window_bytes, rsrc_data_format);
-        oob_bytes_ = window_bytes;
+        if constexpr(Segmented)
+        {
+            // The exchanged view's rows are chans apart; the window still ends at the image's end.
+            int row_elems = pars.cols * pars.chans;
+            if constexpr(Exchanged)
+            {
+                row_elems            = pars.chans;
+                exchange_.col_stride = pars.rows * pars.chans;
+            }
+            img_stride_bytes_ = img_elems * src_elem_bytes;
+            row_stride_bytes_ = row_elems * src_elem_bytes;
+
+            // The base may sit up to seg_lead rows above the image. The row test keeps every
+            // load off those rows, and the window includes them.
+            //
+            // Clamped at zero: with Kh above 3 and no padding, the last segment can start past
+            // the last delta row.
+            const int base_row = seg_origin - seg_lead;
+            const src_t* base  = tensor + static_cast<size_t>(valid ? image : 0) * img_elems +
+                                static_cast<ptrdiff_t>(base_row) * row_elems;
+            const int window_elems = maximum(0, window_images * img_elems - base_row * row_elems);
+            rsrc_                  = arch::make_buffer(base, window_elems);
+            oob_bytes_             = window_elems * src_elem_bytes;
+            seg_                   = {-seg_origin, seg_lead};
+            pars_.rows             = pars.rows - seg_origin;
+            return;
+        }
+
+        const src_t* base = tensor + static_cast<size_t>(valid ? image : 0) * img_elems;
+        rsrc_             = arch::make_buffer(base, window_images * img_elems);
+        oob_bytes_        = window_images * img_elems * src_elem_bytes;
 
         img_stride_bytes_ = img_elems * src_elem_bytes;
-        row_stride_bytes_ = pars.cols * pars.chans * src_elem_bytes;
+        if constexpr(Exchanged)
+        {
+            row_stride_bytes_    = pars.chans * src_elem_bytes;
+            exchange_.col_stride = pars.rows * pars.chans;
+        }
+        else
+        {
+            row_stride_bytes_ = pars.cols * pars.chans * src_elem_bytes;
+        }
     }
 
     // The same loader with its origin moved to `row_origin`, for the next row tile.
@@ -270,25 +321,23 @@ public:
         next.tile_.row_origin  = row_origin;
         const size_t row_elems = static_cast<size_t>(pars_.cols) * pars_.chans;
         const src_t* base      = tile_.image_base + static_cast<size_t>(row_origin) * row_elems;
-        const int window_bytes =
-            tile_.valid ? tile_window_bytes(pars_, row_origin, window_rows) : 0;
-        next.rsrc_ = __builtin_amdgcn_make_buffer_rsrc(
-            const_cast<src_t*>(base), 0, window_bytes, rsrc_data_format);
-        next.oob_bytes_ = window_bytes;
+        const int rows         = tile_.valid ? tile_window_rows(pars_, row_origin, window_rows) : 0;
+        next.rsrc_             = arch::make_buffer(base, static_cast<int64_t>(rows) * row_elems);
+        next.oob_bytes_        = rows * row_stride_bytes_;
         return next;
     }
 
-    // Bytes a tile's window spans, stopping at the end of the image.
+    // Rows a tile's window spans, stopping at the end of the image.
     //
     // The clamp is not tidiness. The window is the only thing bounding the over-read a wave
     // makes past a row when its channel origin runs past the tensor's channel count, which a
     // padded block does on every layer. Untiled, the window is the image and catches it; a
     // tile window reaching past the last row would let that read touch unmapped memory, which
     // faults rather than returning zero.
-    __device__ int tile_window_bytes(const RowTensorPars& pars, int row_origin, int rows) const
+    __device__ static int tile_window_rows(const RowTensorPars& pars, int row_origin, int rows)
     {
         const int left = pars.rows - row_origin;
-        return (rows < left ? rows : left) * row_stride_bytes_;
+        return rows < left ? rows : left;
     }
 
     // The row index this loader's base measures from: the tensor row when untiled, its offset
@@ -303,9 +352,9 @@ public:
 
     // Issue tensor row `row` of this loader's item.
     //
-    // `row` is a global row index and may fall outside the image, in which case the whole
-    // buffer reads zero. `load_wave` is the wave's index within this item's NumWaves waves.
-    // Every wave must call this, and each issues loads_per_row buffer loads.
+    // `row` is a tensor row index, or, when Segmented, an offset from the row segment's first
+    // row. A row outside the image reads zero. `load_wave` is the wave's index within this item's
+    // NumWaves waves. Every wave must call this, and each issues loads_per_row buffer loads.
     //
     // 16-bit: the loads land directly in the LDS row buffer `dest`, which is a whole LDS object;
     //         the caller selects the ring slot by passing a different one. `stage` is the dead
@@ -314,28 +363,45 @@ public:
     //         `dest` goes untouched.
     __device__ void load(int load_wave, int row, datatype_t* dest, Stage& stage) const
     {
-        const bool row_in_image = (0 <= row) && (row < pars_.rows);
+        bool row_in_image = (0 <= row) && (row < pars_.rows);
+        int lead          = 0;
+        if constexpr(Segmented)
+        {
+            // seg_.row_lo is never positive, so the first test is redundant; it lets the
+            // compiler drop the lower bound for the rows it proves non-negative.
+            row_in_image = (0 <= row || seg_.row_lo <= row) && (row < pars_.rows);
+            lead         = seg_.lead;
+        }
 
-        // soffset bypasses the buffer range check, so an out-of-image row zeroes it and leans
-        // on the out-of-bounds voffset.
+        // Zeroing soffset is redundant but keeps per-element lane masks out of the row loop.
+        //
+        // oob_bytes_ in voffset reads zero for any soffset. The ternary compiles to a uniform
+        // branch, under which each source element's voffset is loop-invariant. Without the
+        // zeroing, each source element ANDs row_in_image into a lane mask held across the loop.
+        // Configs near 256 VGPRs then spill.
         const int soffset =
-            row_in_image ? __builtin_amdgcn_readfirstlane(rebase_row(row) * row_stride_bytes_) : 0;
+            row_in_image
+                ? __builtin_amdgcn_readfirstlane(rebase_row(row + lead) * row_stride_bytes_)
+                : 0;
 
         const auto vsoffset = [&](const SourceElem& src) -> std::array<int, 2> {
             const int col = col0_ + src.col;
             // A slot past the row's live columns is padding, forced out of bounds to read zero.
             const bool in_bounds = row_in_image && src.live && (0 <= col) && (col < pars_.cols);
-            const int voffset    = in_bounds
-                                       ? src.image * img_stride_bytes_ +
-                                          (col * pars_.chans + chan0_ + src.chan) * src_elem_bytes
-                                       : oob_bytes_;
+            int col_stride       = pars_.chans;
+            if constexpr(Exchanged)
+                col_stride = exchange_.col_stride;
+            const int voffset = in_bounds
+                                    ? src.image * img_stride_bytes_ +
+                                          (col * col_stride + chan0_ + src.chan) * src_elem_bytes
+                                    : oob_bytes_;
             return {voffset, soffset};
         };
 
         // Each wave takes a contiguous block of its item's rounds.
         //
         // `load_wave` is wave-uniform already, and a redundant readfirstlane on it measured
-        // 1.07x slower on n128_c512_k512_h32_w32_kh3_kw3: it lands a v_readfirstlane the
+        // 1.07× slower on n128_c512_k512_h32_w32_kh3_kw3: it lands a v_readfirstlane the
         // scheduler cannot move off the chain the loads issue from, mid memory phase.
         const int lane  = bunnies::lane_id();
         const int first = loads_per_row * load_wave;
@@ -364,7 +430,7 @@ public:
                 // destination is clamped. Clamping keeps every load naming one LDS object. A
                 // drain buffer of its own takes a branch, and merging the two paths' counts
                 // tightened the waits ahead of the transpose reads from vmcnt(2) to vmcnt(1), a
-                // row of prefetch, and measured 1.10x slower.
+                // row of prefetch, and measured 1.10× slower.
                 const int slot =
                     has_drain && round >= item_rounds ? total_rounds : item_base_ + round;
 
@@ -373,7 +439,7 @@ public:
                 // The rotation XORs only bits at or above 2 of the channel group, so the pair
                 // always decodes to eight contiguous channels starting on an eight-channel
                 // boundary, and a narrower lane stays inside one of those groups. See
-                // docs/algorithms/direct/direct-wgrad-cdna4-lds-swizzle.md.
+                // docs/algorithms/details/direct/direct-wgrad-cdna4-lds-swizzle.md.
                 const auto [v_off, s_off] =
                     vsoffset(decode(round * round_elems + lane * lane_elems));
                 load_inst::load(rsrc_, dest + slot * round_elems, v_off, s_off);
@@ -532,7 +598,7 @@ private:
     // rebased() needs to build the next tile's descriptor.
     //
     // Empty and zero-sized when untiled: carrying it there grew the object enough to move the
-    // register allocation of 4x4's C(128) x K(32) tile, which already spills.
+    // register allocation of 4×4's C(128) × K(32) tile, which already spills.
     struct TileState
     {
         int row_origin          = 0;
@@ -543,6 +609,27 @@ private:
     {
     };
     [[no_unique_address]] std::conditional_t<Tiled, TileState, NoTileState> tile_;
+
+    // The segment's first row, negated, and the rows the base sits above it.
+    struct SegState
+    {
+        int row_lo = 0;
+        int lead   = 0;
+    };
+    struct NoSegState
+    {
+    };
+    [[no_unique_address]] std::conditional_t<Segmented, SegState, NoSegState> seg_;
+
+    // In elements, unlike the byte strides.
+    struct ExchangeState
+    {
+        int col_stride = 0;
+    };
+    struct NoExchangeState
+    {
+    };
+    [[no_unique_address]] std::conditional_t<Exchanged, ExchangeState, NoExchangeState> exchange_;
 };
 
 } // namespace hipconv::cdna4::direct_wgrad
