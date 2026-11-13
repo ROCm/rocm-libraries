@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // Host-only tests of the integer_exact MX data the clients generate for fp6 (E2M3, E3M2)
-// elements, and of the bound that keeps it exact against the fp32 host reference.
+// elements, and for fp8 where the two share code, and of the bound that keeps it exact against
+// the fp32 host reference.
 
 #include "mxDataGen.hpp"
 
@@ -66,6 +67,39 @@ namespace
         return 0.f;
     }
 
+    float decodeFp8(hipDataType type, uint8_t code)
+    {
+        bool const e5m2 = type == HIP_R_8F_E5M2;
+        switch(code)
+        {
+        case 0xC0:
+            return -2.f;
+        case 0x00:
+            return 0.f;
+        case 0x40:
+            return 2.f;
+        case 0xB8:
+            if(!e5m2)
+                return -1.f;
+            break;
+        case 0x38:
+            if(!e5m2)
+                return 1.f;
+            break;
+        case 0xBC:
+            if(e5m2)
+                return -1.f;
+            break;
+        case 0x3C:
+            if(e5m2)
+                return 1.f;
+            break;
+        }
+        ADD_FAILURE() << "unexpected fp8 code 0x" << std::hex << int(code) << std::dec << " for "
+                      << (e5m2 ? "E5M2" : "E4M3");
+        return 0.f;
+    }
+
     size_t fp6Bytes(size_t elements)
     {
         return (elements * 6 + 7) / 8;
@@ -124,6 +158,46 @@ TEST(HostUnitMXIntegerExact, smoke_Fp6ValuesAreExactWithVariedScales)
                                                   << " transpose=" << transpose;
                 }
             }
+}
+
+// With K = 33 along the stored rows, each column holds a whole block and a one-element block,
+// each with its own scale. The reference must not carry a column's tail scale into the next one.
+TEST(HostUnitMXIntegerExact, smoke_PartialKBlockKeepsItsColumnScale)
+{
+    const size_t rows = 33, cols = 4, blocksPerCol = 2;
+    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2, HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+        for(bool isMatrixA : {true, false})
+        {
+            const bool           fp6 = type == HIP_R_6F_E2M3 || type == HIP_R_6F_E3M2;
+            std::vector<uint8_t> data(fp6 ? fp6Bytes(rows * cols) : rows * cols);
+            std::vector<uint8_t> scale(cols * blocksPerCol + 64);
+            // Transposed A and non-transposed B, both K-contiguous.
+            std::vector<float> ref = generateMXInput(type,
+                                                     HIP_R_8U,
+                                                     data.data(),
+                                                     scale.data(),
+                                                     rows,
+                                                     cols,
+                                                     rows,
+                                                     /*isTranspose=*/isMatrixA,
+                                                     isMatrixA ? 32 : 1,
+                                                     isMatrixA ? 1 : 32,
+                                                     isMatrixA,
+                                                     MXScaleLayout::None,
+                                                     "integer_exact");
+            ASSERT_EQ(ref.size(), rows * cols);
+            for(size_t idx = 0; idx < ref.size(); idx++)
+            {
+                const size_t k = idx % rows, col = idx / rows;
+                const size_t s = col * blocksPerCol + k / 32;
+                const float  element
+                    = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
+                const float expected = element * std::ldexp(1.f, int(scale[s]) - 127);
+                ASSERT_EQ(ref[idx], expected) << "element " << idx << " (k " << k << ", column "
+                                              << col << ") type " << int(type)
+                                              << " isMatrixA=" << isMatrixA;
+            }
+        }
 }
 
 // The 128x4 scale shuffle the MXFP6 kernels read: the reference must match the shuffled scales.

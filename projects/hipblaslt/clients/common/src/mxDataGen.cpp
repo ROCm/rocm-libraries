@@ -540,13 +540,14 @@ std::vector<float> generateData(T                           dgen,
         if(!integerExact)
             return dgen.getReferenceFloat();
         // The generator's reference floats describe its own values, which integerExact replaced;
-        // recompute them from the bytes, where each run of elementsPerMXBlock shares a scale.
+        // recompute them from the bytes with the generator's scale mapping, in which each stored
+        // row starts a new block, so a partial block at the end of a row keeps its own scale.
         size_t const       count = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
         for(size_t idx = 0; idx < count; idx++)
         {
-            auto const scaleIndex = static_cast<DGen::index_t>(idx / elementsPerMXBlock);
             auto const dataIndex  = static_cast<DGen::index_t>(idx);
+            auto const scaleIndex = dgen.scaleIndexForData(dataIndex);
             if constexpr(isMXFp6<DT>)
                 ref[idx] = DGen::toFloatPacked<DT>(
                     scaleBytes.data(), dataBytes.data(), scaleIndex, dataIndex);
