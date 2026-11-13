@@ -548,6 +548,10 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Make sure FFT buffers fit in device memory
     check_problem_fits_device_memory(params, verbose);
 
+    // checks rocFFT's choice of execution device, independently of the results below
+    if constexpr(requires { params.validate_work_memory_devices(); })
+        params.validate_work_memory_devices();
+
     auto ibuffer_sizes = params.ibuffer_sizes();
     auto obuffer_sizes = params.obuffer_sizes();
     // Allocate device input buffer(s)

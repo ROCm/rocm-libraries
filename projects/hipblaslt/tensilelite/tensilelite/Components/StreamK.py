@@ -1159,6 +1159,21 @@ class StreamK(TileProcessingStrategy):
         module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(sTmp+0), comment="accum GsuOffset term to tilestart"))
         module.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(sTmp+1), comment="accum GsuOffset term to tilestart"))
 
+        # The offset just folded into tileStart advances the SRD base, so the
+        # dual-period scale windows must shrink by the same amount, or
+        # base+num_records no longer ends at the scale allocation. computeLoadSrd
+        # sizes them as (numLine+1)*span measured from the *tile* start, so for a
+        # work item that begins mid-tile the window hangs over the end by exactly
+        # this offset. MXSB's allocation is small enough to end on a mapping
+        # boundary, so the first prefetch then reads unmapped memory and faults.
+        # emitScaleGRPtrUpdate already maintains this invariant for the per-epoch
+        # advances; this is the pre-loop advance it cannot see. A and B are left
+        # alone: their Srd+2 is a tile-boundary window with its own slack, and
+        # shrinking it clips legitimate top-group reads.
+        if kernel.get("_DualPeriodMXFP8") and tc in ("MXSA", "MXSB"):
+            module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=sgpr(sTmp+0),
+                               comment="shrink num_records by the SK K-start base advance"))
+
         return module
 
     @abc.abstractmethod

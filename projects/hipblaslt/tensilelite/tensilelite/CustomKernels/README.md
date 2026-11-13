@@ -24,6 +24,7 @@ external manifest.
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |
+| `rocke/`      | External: rocKE GEMM kernels.                     |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.

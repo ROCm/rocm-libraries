@@ -69,7 +69,7 @@ namespace
         arg.allclose_check                       = 0;
         hipblaslt_bench_options::verify_strict() = true;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 1);
@@ -84,7 +84,7 @@ namespace
         arg.norm_check_assert                    = true;
         hipblaslt_bench_options::verify_strict() = true;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 1);
@@ -100,7 +100,7 @@ namespace
         arg.norm_check_assert                    = true;
         hipblaslt_bench_options::verify_strict() = false;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 0);

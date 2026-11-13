@@ -38,7 +38,7 @@ constexpr Config configs[] = {
 
     // 3x3 K256 arbitrary-K fallback (k_divisible=false).
     //
-    // Serves the K256 window for K not a multiple of 256 (padded, straddling stores
+    // Supports the K256 window for K not a multiple of 256 (padded, straddling stores
     // guarded).
     {
         .waves_k     = 4,
@@ -52,10 +52,10 @@ constexpr Config configs[] = {
 
     // 3x3 batch-unfold K128 (K32/wave): P(8) x N(4) x W(8) x K(128).
     //
-    // Serves low-resolution maps (output width <= 8) by packing 4 batch images along
+    // Supports low-resolution maps (output width <= 8) by packing 4 batch images along
     // the columns. The 4-way K split halves per-wave weight traffic for more input
     // LDS reads, the right trade when the tiny input tile makes weights dominate.
-    // Cedes K % 256 == 0 to the K256 unfold sibling below.
+    // Ranks below the K256 unfold sibling below on K % 256 == 0.
     {
         .waves_k  = 4,
         .wave_k16 = 2,
@@ -71,7 +71,7 @@ constexpr Config configs[] = {
     //
     // Same P(8) x N(4) x W(8) low-res tile, but block_k = 256. Deepening K doubles
     // input-tile reuse at the same LDS traffic; per-wave geometry matches the K256
-    // tile (proven spill-free). Serves K % 256 == 0; the rest stay on K128.
+    // tile (proven spill-free). Supports K % 256 == 0; the rest stay on K128.
     {
         .waves_k  = 4,
         .wave_k16 = 4,
@@ -93,12 +93,13 @@ constexpr Config configs[] = {
     //   - wave_k16 = 2, so the writer takes its narrow register store: the LDS-staged
     //     wide store is 16-bit only, and skipping it frees the staging pad the doubled
     //     tile needs.
-    //   - wave_p is the largest keeping block_h * block_w <= 319, per filter.
+    //   - wave_p is the largest keeping block_h * block_w <= 319, per filter, except
+    //     for 3x1, which runs out of registers first (see its tiles).
     //
     // Per (filter, direction) there are four entries: the divisible tile and the three
     // fallback corners (output count not a multiple of 128; a reduction of one C(64)
     // iteration; both). There is no unfold, K256, or K96 sibling, so the standard tile
-    // serves every output width and the padded K128 covers those counts.
+    // supports every output width and the padded K128 covers those counts.
 
     // ---- 3x3 tf32: P(14) x Q(16) x K(128), block_h 16 x block_w 18 = 288 ----
     {
@@ -447,12 +448,103 @@ constexpr Config configs[] = {
         .single_c    = true,
         .elem_bytes  = 4,
     },
+
+    // ---- 3x1 tf32: P(12) x Q(16) x K(128), block_h 14 x block_w 16 = 224 ----
+    //
+    // The one tile sized by registers, not LDS. With no W halo, LDS would afford
+    // wave_p = 8, but kw = 1 leaves only kw * 2 = 2 load steps, so each one stages half
+    // the tile's rows in VGPRs before the bf16 split: 2 x 9 rows x 4 = 72 registers at
+    // wave_p = 8. wave_p = 7 still spills; wave_p = 6 stages 56 and fits.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 1,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 1,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
     // ---- tf32 K(64) divisible tiles (wave_k16 = 1) ----
     //
     // Same tile as the K128 entry of each filter, split 4 ways over K(16) instead of
-    // K(32). It serves output == 64, the one count where halving block_k costs nothing:
+    // K(32). It supports output == 64, the one count where halving block_k costs nothing:
     // the K128 tile runs a single block there anyway and just pads. Above
-    // wide_k128_min_output the shared threshold in is_valid_config cedes back to K128.
+    // wide_k128_min_output the shared threshold in relative_throughput_conv2d ranks K128 first.
     {
         .waves_k    = 4,
         .wave_k16   = 1,
@@ -528,6 +620,75 @@ constexpr Config configs[] = {
         .kw         = 5,
         .direction  = hipconv::Direction::Dgrad,
         .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 1,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+
+    // ---- 3x1 tf32 large-tensor tiles (large_tensor): K128 / K64, wave_p = 6 ----
+    //
+    // The 3x1 tf32 K128 and K64 divisible tiles with the 16-bit 3x1 large_tensor tiles'
+    // row-origin fold, for a single image whose span overflows int32 -- which at 4
+    // bytes takes half the elements a 16-bit image does. The size gate in
+    // is_valid_config makes them claim only shapes the baseline cannot. Like the
+    // 16-bit trio they support divisible outputs only.
+    {
+        .waves_k      = 4,
+        .wave_k16     = 2,
+        .wave_p       = 6,
+        .waves_q      = 1,
+        .kh           = 3,
+        .kw           = 1,
+        .elem_bytes   = 4,
+        .large_tensor = true,
+    },
+    {
+        .waves_k      = 4,
+        .wave_k16     = 1,
+        .wave_p       = 6,
+        .waves_q      = 1,
+        .kh           = 3,
+        .kw           = 1,
+        .elem_bytes   = 4,
+        .large_tensor = true,
+    },
+    {
+        .waves_k      = 4,
+        .wave_k16     = 2,
+        .wave_p       = 6,
+        .waves_q      = 1,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .elem_bytes   = 4,
+        .large_tensor = true,
+    },
+    {
+        .waves_k      = 4,
+        .wave_k16     = 1,
+        .wave_p       = 6,
+        .waves_q      = 1,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .elem_bytes   = 4,
+        .large_tensor = true,
     },
     // ===================== end of the tf32 tiles =====================
 
@@ -588,7 +749,7 @@ constexpr Config configs[] = {
     //
     // The only K128 5x5 fprop tile; replaced the wide P(12) x Q(32) tile it
     // outperforms (narrow Q(16) also shrinks the halo; measured ~16% faster on
-    // H32xW32). 5x5 has no K256 tile, so this serves every 5x5 fprop count.
+    // H32xW32). 5x5 has no K256 tile, so this supports every 5x5 fprop count.
     {
         .waves_k  = 4,
         .wave_k16 = 2,
@@ -629,11 +790,11 @@ constexpr Config configs[] = {
 
     // Batch-unfold arbitrary-output fallback (K128 unfold, k_divisible=false).
     //
-    // Serves the W<=8 unfold window when the output channel count is not a multiple of
+    // Supports the W<=8 unfold window when the output channel count is not a multiple of
     // 128 (e.g. 96, 160, 224); the divisible unfold tiles above require output %
     // block_k == 0. The writer pads output to 128 and guards the straddling wave.
-    // One per filter; 3x3 needs no K256 variant (%256 is a subset of %128, ceded to
-    // the K256 divisible unfold).
+    // One per filter; 3x3 needs no K256 variant (%256 is a subset of %128, which the
+    // K256 divisible unfold takes).
     // 3x3
     {
         .waves_k     = 4,
@@ -717,40 +878,44 @@ constexpr Config configs[] = {
         .kw       = 5,
     },
     // K(64) divisible tiles (wave_k16=2). Same per-filter wave_p as above.
-    // 3x3
+    // 3x3, in 3 steps of C(64)
     {
         .wave_k16 = 2,
         .wave_p   = 8,
         .kh       = 3,
         .kw       = 3,
+        .c64_step = true,
     },
-    // 2x2
+    // 2x2, in 2 steps of C(64)
     {
         .wave_k16 = 2,
         .wave_p   = 8,
         .kh       = 2,
         .kw       = 2,
+        .c64_step = true,
     },
-    // 4x4
+    // 4x4, in 4 steps of C(64)
     {
         .wave_k16 = 2,
         .wave_p   = 7,
         .kh       = 4,
         .kw       = 4,
+        .c64_step = true,
     },
-    // 5x5
+    // 5x5, in 5 steps of C(64)
     {
         .wave_k16 = 2,
         .wave_p   = 6,
         .kh       = 5,
         .kw       = 5,
+        .c64_step = true,
     },
 
     // 3x1 divisible tiles (asymmetric filter): K128/K96/K64, wave_p=8.
     //
     // The one-wide filter has no W halo (block_w == block_q), so its input tile is
     // strictly smaller than 3x3's and wave_p=8 is safe. num_load_steps = kw*2 = 2.
-    // All the specialist cedes in is_valid_config (unfold, K256) gate on kw == kh, so
+    // The specialist comparisons in relative_throughput_conv2d (unfold, K256) gate on kw == kh, so
     // a 3x1 config falls through to the generic divisible family with no ties. K128
     {
         .wave_k16 = 4,
@@ -779,10 +944,11 @@ constexpr Config configs[] = {
     // fold that lets a single image exceed 2 GiB (see kernel.h is_valid_config size
     // gate and input_loader/output_writer). Motivating case: an NFHWC 3D tensor folded
     // to NF(HW)C and convolved with the 3-tap F axis, where one image is > 10 GiB. The
-    // size gate makes these claim only shapes whose per-image span overflows int32, so
+    // size gate makes these valid only on shapes whose per-image span overflows int32, so
     // they never shadow the baseline tiles. The K256 tiles need no large_tensor variant:
-    // is_valid_config exempts large_tensor from the K256 cede, so these keep serving the
-    // shape even when the K256 overcompute comparison would otherwise prefer K256.
+    // relative_throughput_conv2d exempts large_tensor from the K256 comparison, so these rank first
+    // on
+    // the shape even when the K256 overcompute comparison would otherwise prefer K256.
     // K128
     {
         .wave_k16     = 4,
@@ -823,8 +989,8 @@ constexpr Config configs[] = {
     },
     // 3x1 K256 arbitrary-K fallback (k_divisible=false).
     //
-    // When the K256 selection claims the shape, a K not a multiple of 256 would have no
-    // configuration without this padded tile (the divisible K256 sibling takes only
+    // When the K256 selection ranks first, a K not a multiple of 256 would have no
+    // K256 configuration without this padded tile (the divisible K256 sibling takes only
     // % 256 == 0).
     {
         .waves_k     = 4,
@@ -878,7 +1044,7 @@ constexpr Config configs[] = {
     // 3x1
     //
     // The 3x1 K256 arbitrary-K sibling covers only the counts the K256 selection
-    // claims, which at a wide output map it never does, so K=32 had no tile.
+    // ranks first, which at a wide output map it never does, so K=32 had no tile.
     {
         .wave_k16    = 4,
         .wave_p      = 8,
@@ -886,7 +1052,7 @@ constexpr Config configs[] = {
         .kw          = 1,
         .k_divisible = false,
     },
-    // Small-C fallback (K64, single_c): serves C in [2, 64].
+    // Small-C fallback (K64, single_c): supports C in [2, 64].
     //
     // The single lone C(64) peel iteration over-computes to C_padded=64 against zero
     // weights; for completeness, not speed. One entry per filter size.
@@ -897,6 +1063,7 @@ constexpr Config configs[] = {
         .kh       = 3,
         .kw       = 3,
         .single_c = true,
+        .c64_step = true,
     },
     // 2x2
     {
@@ -905,6 +1072,7 @@ constexpr Config configs[] = {
         .kh       = 2,
         .kw       = 2,
         .single_c = true,
+        .c64_step = true,
     },
     // 4x4
     {
@@ -913,6 +1081,7 @@ constexpr Config configs[] = {
         .kh       = 4,
         .kw       = 4,
         .single_c = true,
+        .c64_step = true,
     },
     // 5x5
     {
@@ -921,6 +1090,7 @@ constexpr Config configs[] = {
         .kh       = 5,
         .kw       = 5,
         .single_c = true,
+        .c64_step = true,
     },
     // 3x1
     {
@@ -932,7 +1102,7 @@ constexpr Config configs[] = {
     },
     // Small-C arbitrary-output fallback (K64, single_c, k_divisible=false).
     //
-    // Serves C in [2, 64] combined with an output count not a multiple of 64 (e.g.
+    // Supports C in [2, 64] combined with an output count not a multiple of 64 (e.g.
     // 96, 160, 224), which the divisible single_c tile above rejects. The writer
     // guards the padded output tail. For completeness, not speed. One per filter.
     // 3x3
@@ -943,6 +1113,7 @@ constexpr Config configs[] = {
         .kw          = 3,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 2x2
     {
@@ -952,6 +1123,7 @@ constexpr Config configs[] = {
         .kw          = 2,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 4x4
     {
@@ -961,6 +1133,7 @@ constexpr Config configs[] = {
         .kw          = 4,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 5x5
     {
@@ -970,6 +1143,7 @@ constexpr Config configs[] = {
         .kw          = 5,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 3x1
     //
@@ -1022,7 +1196,7 @@ constexpr Config configs[] = {
 
     // 3x3 dgrad batch-unfold K128 (K32/wave): the 3x3 dgrad unfold tile.
     //
-    // Cedes din % 256 == 0 to the K256 unfold sibling below (same split as fprop).
+    // Ranks below the K256 unfold sibling below on din % 256 == 0 (same split as fprop).
     {
         .waves_k   = 4,
         .wave_k16  = 2,
@@ -1037,9 +1211,9 @@ constexpr Config configs[] = {
 
     // 3x3 dgrad batch-unfold K256 (K64/wave): mirrors the fprop K256 unfold for dgrad.
     //
-    // The deeper-K sibling of the K128 unfold above; serves din % 256 == 0 that the
-    // K128 unfold cedes. Without it those counts fell through the direction-agnostic
-    // cede in is_valid_config and no tile served the W<=8 dgrad window.
+    // The deeper-K sibling of the K128 unfold above; ranks first on din % 256 == 0.
+    // Before it existed the K128 unfold ceded those counts and no tile supported the W<=8
+    // dgrad window.
     {
         .waves_k   = 4,
         .wave_k16  = 4,
@@ -1144,7 +1318,7 @@ constexpr Config configs[] = {
 
     // Dgrad batch-unfold arbitrary-output fallback (K128 unfold, k_divisible=false).
     //
-    // Mirrors the fprop arbitrary unfold for backward-data: serves the W<=8 window
+    // Mirrors the fprop arbitrary unfold for backward-data: supports the W<=8 window
     // when the dgrad output (din, = C) is not a multiple of 128. One per filter.
     // 3x3
     {
@@ -1201,7 +1375,7 @@ constexpr Config configs[] = {
 
     // Dgrad K(96) divisible tiles (wave_k16=3): mirror the fprop K96 configs.
     //
-    // Serve a dgrad output channel count (din) that is a multiple of 96 with exact
+    // Supports a dgrad output channel count (din) that is a multiple of 96 with exact
     // work instead of the padded K128 fallback.
     // 3x3
     {
@@ -1237,37 +1411,41 @@ constexpr Config configs[] = {
     },
 
     // Dgrad K(64) divisible tiles (wave_k16=2): mirror the fprop K64 configs.
-    // 3x3
+    // 3x3, in 3 steps of C(64)
     {
         .wave_k16  = 2,
         .wave_p    = 8,
         .kh        = 3,
         .kw        = 3,
         .direction = hipconv::Direction::Dgrad,
+        .c64_step  = true,
     },
-    // 2x2
+    // 2x2, in 2 steps of C(64)
     {
         .wave_k16  = 2,
         .wave_p    = 8,
         .kh        = 2,
         .kw        = 2,
         .direction = hipconv::Direction::Dgrad,
+        .c64_step  = true,
     },
-    // 4x4
+    // 4x4, in 4 steps of C(64)
     {
         .wave_k16  = 2,
         .wave_p    = 7,
         .kh        = 4,
         .kw        = 4,
         .direction = hipconv::Direction::Dgrad,
+        .c64_step  = true,
     },
-    // 5x5
+    // 5x5, in 5 steps of C(64)
     {
         .wave_k16  = 2,
         .wave_p    = 6,
         .kh        = 5,
         .kw        = 5,
         .direction = hipconv::Direction::Dgrad,
+        .c64_step  = true,
     },
 
     // Dgrad 3x1 divisible tiles (asymmetric filter): mirror the fprop 3x1 trio.
@@ -1402,7 +1580,7 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
     },
-    // Dgrad small-dout fallback (single_c): serves dout in [2, 64].
+    // Dgrad small-dout fallback (single_c): supports dout in [2, 64].
     //
     // The dgrad analog of the fprop small-C config (dout is the reduction). dout
     // over-computed to 64 against zero weights; for completeness, not speed.
@@ -1414,6 +1592,7 @@ constexpr Config configs[] = {
         .kw        = 3,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
+        .c64_step  = true,
     },
     // 2x2
     {
@@ -1423,6 +1602,7 @@ constexpr Config configs[] = {
         .kw        = 2,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
+        .c64_step  = true,
     },
     // 4x4
     {
@@ -1432,6 +1612,7 @@ constexpr Config configs[] = {
         .kw        = 4,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
+        .c64_step  = true,
     },
     // 5x5
     {
@@ -1441,6 +1622,7 @@ constexpr Config configs[] = {
         .kw        = 5,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
+        .c64_step  = true,
     },
     // 3x1
     {
@@ -1464,6 +1646,7 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 2x2
     {
@@ -1474,6 +1657,7 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 4x4
     {
@@ -1484,6 +1668,7 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 5x5
     {
@@ -1494,6 +1679,7 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,
+        .c64_step    = true,
     },
     // 3x1
     {
@@ -1504,6 +1690,873 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,
+    },
+
+    // ---- conv3d (kd > 1) ----
+    //
+    // Appended, not interleaved: the autoshard assigns config i to shard
+    // i % num_shards, so appending leaves every 2D config's shard where it was.
+    //
+    // relative_throughput_conv3d ranks these separately from the 2D family. Every tile its
+    // comparisons favour must exist here, or nothing ranks first on the shape. It has
+    // no unfold comparison: an unfold tile packs consecutive images along its columns,
+    // which under the depth fold are depth planes needing different tap offsets.
+
+    // 3x3x3 K128: P(16) x Q(32) x K(128). Supports the c384/k384 VAE layers.
+    {
+        .wave_k16 = 4,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+    },
+
+    // 3x3x3 K256 tile (waves_k=4): P(16) x Q(16) x K(256).
+    {
+        .waves_k  = 4,
+        .wave_k16 = 4,
+        .wave_p   = 8,
+        .waves_q  = 1,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+    },
+
+    // 3x3x3 K256 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+    },
+
+    // 3x3x3 K96.
+    {
+        .wave_k16 = 3,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+    },
+
+    // 3x3x3 K64, in 3 steps of C(64).
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+        .c64_step = true,
+    },
+
+    // 3x3x3 K128 arbitrary-K fallback. Supports the c384/k32 VAE layer.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+    },
+
+    // 3x3x3 single_c K64: one C(64) iteration. Supports the c16/k384 VAE layer.
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+        .single_c = true,
+        .c64_step = true,
+    },
+
+    // 3x3x3 single_c K64 arbitrary-K fallback.
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+        .single_c    = true,
+        .c64_step    = true,
+    },
+
+    // 3x3x3 K64 narrow: P(16) x Q(16) x K(64).
+    //
+    // The tile that keeps the machine busy when depth contributes no tiles. At
+    // E == 1 the wider tiles can decompose a layer into far fewer tiles than
+    // there are CUs; this one quarters the work each tile does. Its Q(16) also
+    // divides output widths that are odd multiples of 16, which Q(32) does not.
+    {
+        .waves_k  = 4,
+        .wave_k16 = 1,
+        .wave_p   = 8,
+        .waves_q  = 1,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+    },
+
+    // 3x3x3 K128 split-K: each tile's reduction shared by workgroups.
+    //
+    // Supports the K128 shapes whose unsplit tiles leave the machine in one underfilled
+    // round. See docs/algorithms/direct/direct-3d.md.
+    {
+        .wave_k16 = 4,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+        .split_k  = true,
+    },
+
+    // ---- conv3d dgrad, stride 1 ----
+    //
+    // The fprop tiles above, run over dy with the dgrad-formatted weights (C<->K swap
+    // and the tap flip in all three axes), as the 2D dgrad tiles are. Appended so every
+    // earlier config keeps its shard.
+
+    // 3x3x3 dgrad K128: P(16) x Q(32) x K(128). Supports the c384/k384 VAE layers.
+    {
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+    },
+
+    // 3x3x3 dgrad K256 tile (waves_k=4): P(16) x Q(16) x K(256).
+    {
+        .waves_k   = 4,
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .waves_q   = 1,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+    },
+
+    // 3x3x3 dgrad K256 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+    },
+
+    // 3x3x3 dgrad K96.
+    {
+        .wave_k16  = 3,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+    },
+
+    // 3x3x3 dgrad K64, in 3 steps of C(64).
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .c64_step  = true,
+    },
+
+    // 3x3x3 dgrad K128 arbitrary-K fallback. Supports the c384/k32 VAE layer.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+    },
+
+    // 3x3x3 dgrad single_c K64: one C(64) iteration. Supports the c16/k384 VAE layer.
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .single_c  = true,
+        .c64_step  = true,
+    },
+
+    // 3x3x3 dgrad single_c K64 arbitrary-K fallback.
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .c64_step    = true,
+    },
+
+    // 3x3x3 dgrad K64 narrow: P(16) x Q(16) x K(64).
+    {
+        .waves_k   = 4,
+        .wave_k16  = 1,
+        .wave_p    = 8,
+        .waves_q   = 1,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+    },
+
+    // 3x3x3 dgrad K128 split-K: each tile's reduction shared by workgroups.
+    {
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .split_k   = true,
+    },
+
+    // ---- conv2d, appended after conv3d for the same shard reason ----
+
+    // 3x3 K64 narrow: P(16) x Q(16) x K(64), the conv2d copy of the 3x3x3 one.
+    //
+    // Supports the K128 shapes it runs in one round of the persistent grid, which K128
+    // tiles leave underfilled: 101 us against K128's 159 at n1 c1152 k384 64x112.
+    {
+        .waves_k  = 4,
+        .wave_k16 = 1,
+        .wave_p   = 8,
+        .waves_q  = 1,
+        .kh       = 3,
+        .kw       = 3,
+    },
+
+    // 3x3 K128 split-K: each tile's C/64 divided among workgroups.
+    //
+    // Supports the K128 shapes whose unsplit tiles leave the machine in one underfilled
+    // round, as the 3x3x3 one does. See
+    // docs/algorithms/direct/direct-l1-direct-flex-techniques.md.
+    {
+        .wave_k16 = 4,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .split_k  = true,
+    },
+
+    // 3x3 dgrad K128 split-K.
+    {
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .split_k   = true,
+    },
+
+    // 3x3 K64 split-K, in 3 steps of C(64).
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .split_k  = true,
+        .c64_step = true,
+    },
+
+    // 3x3 dgrad K64 split-K, in 3 steps of C(64).
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .split_k   = true,
+        .c64_step  = true,
+    },
+
+    // 3x3x3 K64 split-K, in 3 steps of C(64).
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 3,
+        .kd       = 3,
+        .split_k  = true,
+        .c64_step = true,
+    },
+
+    // 3x3x3 dgrad K64 split-K, in 3 steps of C(64).
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 3,
+        .kd        = 3,
+        .direction = hipconv::Direction::Dgrad,
+        .split_k   = true,
+        .c64_step  = true,
+    },
+
+    // 3x3 chunked unfold K256: P(8) x 4 slots x W(8) x K(256), a slot an 8-column chunk.
+    //
+    // See docs/algorithms/direct/direct-l1-chunked-unfold.md.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 4,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 chunked unfold K128 (K32/wave).
+    {
+        .waves_k       = 4,
+        .wave_k16      = 2,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 chunked unfold K192 (K48/wave): 960 and 1920 output channels in whole blocks.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 3,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 dgrad chunked unfold K256.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 4,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .direction     = hipconv::Direction::Dgrad,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 dgrad chunked unfold K128.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 2,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .direction     = hipconv::Direction::Dgrad,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 dgrad chunked unfold K192.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 3,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .direction     = hipconv::Direction::Dgrad,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 chunked unfold K256 split-K.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 4,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .split_k       = true,
+        .unfold_chunks = true,
+    },
+
+    // 3x3 dgrad chunked unfold K256 split-K.
+    {
+        .waves_k       = 4,
+        .wave_k16      = 4,
+        .wave_p        = 8,
+        .waves_p       = 1,
+        .waves_q       = 2,
+        .unfold_n      = 4,
+        .kh            = 3,
+        .kw            = 3,
+        .direction     = hipconv::Direction::Dgrad,
+        .split_k       = true,
+        .unfold_chunks = true,
+    },
+    // Width-1 unfold tiles, which run 1×kw layers as kw×1 layers over an N·H × W × 1 × C input.
+    //
+    // Each of the unfold_n columns holds one image. See
+    // docs/algorithms/details/direct/direct-l1-fold.md.
+
+    // 3×1 fprop: K128 and K256, 16 and 32 images, and one C(64) step at K64.
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 2,
+        .waves_q   = 1,
+        .unfold_n  = 16,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Fprop,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Fprop,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .waves_p   = 2,
+        .waves_q   = 1,
+        .unfold_n  = 16,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Fprop,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Fprop,
+    },
+    {
+        .waves_k     = 2,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_p     = 2,
+        .waves_q     = 2,
+        .unfold_n    = 32,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Fprop,
+        .k_divisible = false,
+        .single_c    = true,
+    },
+
+    // 5×1 fprop: K128, 32 images. K256 spills.
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 5,
+        .kw        = 1,
+        .direction = hipconv::Direction::Fprop,
+    },
+
+    // 3×1 dgrad: K128 and K256, 16 and 32 images, and one C(64) step at K64.
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 2,
+        .waves_q   = 1,
+        .unfold_n  = 16,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Dgrad,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Dgrad,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .waves_p   = 2,
+        .waves_q   = 1,
+        .unfold_n  = 16,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Dgrad,
+    },
+    {
+        .waves_k   = 4,
+        .wave_k16  = 4,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 3,
+        .kw        = 1,
+        .direction = hipconv::Direction::Dgrad,
+    },
+    {
+        .waves_k     = 2,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_p     = 2,
+        .waves_q     = 2,
+        .unfold_n    = 32,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+    },
+
+    // 5×1 dgrad: K128, 32 images. K256 spills.
+    {
+        .waves_k   = 4,
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .waves_p   = 1,
+        .waves_q   = 2,
+        .unfold_n  = 32,
+        .kh        = 5,
+        .kw        = 1,
+        .direction = hipconv::Direction::Dgrad,
+    },
+
+    // ---- conv3d tf32, appended after the conv2d tiles for the same shard reason ----
+    //
+    // The 3x3 tf32 tile over the depth fold, P(14) x Q(16): K128 in its four corners
+    // (divisible or arbitrary output, single_c or not), K64 divisible and single_c in both
+    // output corners, and split-K over K128 (divisible output) and K64 (divisible or arbitrary
+    // output), each for fprop and dgrad. Each (tap, C(64)) step stages one input plane, so the
+    // doubled LDS tile is the 2D one, block_h 16 x block_w 18 = 288.
+    // relative_throughput_conv3d_tf32 ranks these. See docs/algorithms/direct/direct-3d.md.
+
+    // 3x3x3 tf32 K128: P(14) x Q(16) x K(128).
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 K128 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+
+    // 3x3x3 tf32 single_c K128: one C(64) iteration.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 single_c K128 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // 3x3x3 tf32 K64: P(14) x Q(16) x K(64).
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 dgrad K128: P(14) x Q(16) x K(128).
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 dgrad K128 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+
+    // 3x3x3 tf32 dgrad single_c K128.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 dgrad single_c K128 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // 3x3x3 tf32 dgrad K64.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 K128 split-K: each tile's reduction shared by workgroups.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .elem_bytes = 4,
+        .split_k    = true,
+    },
+
+    // 3x3x3 tf32 dgrad K128 split-K.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+        .split_k    = true,
+    },
+
+    // 3x3x3 tf32 K64 split-K.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .elem_bytes = 4,
+        .split_k    = true,
+    },
+
+    // 3x3x3 tf32 dgrad K64 split-K.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+        .split_k    = true,
+    },
+
+    // 3x3x3 tf32 K64 split-K arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 1,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+        .split_k     = true,
+    },
+
+    // 3x3x3 tf32 dgrad K64 split-K arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 1,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+        .split_k     = true,
+    },
+
+    // 3x3x3 tf32 single_c K64: one C(64) iteration.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 single_c K64 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 1,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // 3x3x3 tf32 dgrad single_c K64.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .kd         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+
+    // 3x3x3 tf32 dgrad single_c K64 arbitrary-K fallback.
+    {
+        .waves_k     = 4,
+        .wave_k16    = 1,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .kd          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
     },
 };
 
@@ -1522,7 +2575,11 @@ constexpr int config_index(int wave_k16,
                            int unfold_n                 = 1,
                            int waves_k                  = 2,
                            bool large_tensor            = false,
-                           int elem_bytes               = 2)
+                           int elem_bytes               = 2,
+                           int kd                       = 1,
+                           bool split_k                 = false,
+                           bool unfold_chunks           = false,
+                           bool c64_step                = false)
 {
     for(int i = 0; i < num_configs; ++i)
     {
@@ -1530,12 +2587,42 @@ constexpr int config_index(int wave_k16,
            configs[i].k_divisible == k_divisible && configs[i].single_c == single_c &&
            configs[i].direction == direction && configs[i].unfold_n == unfold_n &&
            configs[i].waves_k == waves_k && configs[i].large_tensor == large_tensor &&
-           configs[i].elem_bytes == elem_bytes)
+           configs[i].elem_bytes == elem_bytes && configs[i].kd == kd &&
+           configs[i].split_k == split_k && configs[i].unfold_chunks == unfold_chunks &&
+           configs[i].c64_step == c64_step)
         {
             return i;
         }
     }
     return -1;
 }
+
+constexpr bool config_index_keys_are_unique()
+{
+    for(int i = 0; i < num_configs; ++i)
+    {
+        const Config& c = configs[i];
+        if(config_index(c.wave_k16,
+                        c.kh,
+                        c.kw,
+                        c.k_divisible,
+                        c.single_c,
+                        c.direction,
+                        c.unfold_n,
+                        c.waves_k,
+                        c.large_tensor,
+                        c.elem_bytes,
+                        c.kd,
+                        c.split_k,
+                        c.unfold_chunks,
+                        c.c64_step) != i)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert(config_index_keys_are_unique(),
+              "two configs share a config_index key; add the distinguishing field to it");
 
 } // namespace hipconv::cdna4::direct_l1
