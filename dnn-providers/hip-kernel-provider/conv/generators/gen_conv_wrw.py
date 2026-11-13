@@ -562,6 +562,24 @@ EXTRA_TILES = {
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
     ("wmma", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
 }
+# Channels-first ring tiles (loop 1, layout CF only) for dilated 3x3 rows on maps whose width
+# a 32- or 64-position chunk splits badly (deeplab ASPP 65^2: 65 = 64 + 1): one chunk of 72 / 80
+# positions a row. Measured (fp16 n16, best config against the next): gfx90a 65^2 d12 7.74 against
+# 8.70 ms, d36 9.44 / 9.50, c512 d2 4.16 / 4.47; gfx942 MI325X 65^2 d12 1.60 / 1.68, c512 d4
+# 0.84 / 0.91; gfx950 65^2 d12 0.96 / 1.24, d24 1.03 / 1.63, c512 d4 0.44 / 0.58.
+RING_CF_TILES = {
+    ("mfma32_f16", ("3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36")): [
+        (64, 64, 2, 2, 72)
+    ],
+    ("mfma32_bf16", ("3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36")): [
+        (64, 64, 2, 2, 72)
+    ],
+    ("mfma32x16", ("3x3d4", "3x3d12", "3x3d24")): [(128, 64, 4, 2, 80)],
+}
+# Dilated 3x3 ring rows on the 16-bit 32 x 32 atoms of gfx908 to gfx942 (xcd 0) also at 4 blocks per
+# dispatch unit: gfx942 MI325X 128^2 d24 4.01 against 5.56 ms at 2, d36 4.58 / 4.73, 65^2 d12
+# 1.60 / 1.70; gfx90a 65^2 d36 9.44 / 9.50 (bpu only sets the split count: no new program).
+BPU4_RING_ROWS = {"3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36"}
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
 # of 32 outputs spans 264 inputs): 8 positions per step.
@@ -1239,6 +1257,14 @@ def build():
                             cands.append(
                                 C(atom, 2, lay, t, s, sw, dw, fr, vec, 1, 0, LOOP2_NS)
                             )
+                if loop == 1 and CF in layouts and (lays is None or CF in lays):
+                    for (prefix, tags), extra in RING_CF_TILES.items():
+                        if atom.startswith(prefix) and tag in tags:
+                            for t in extra:
+                                if t not in picked:
+                                    cands.append(
+                                        C(atom, 1, CF, t, s, sw, dw, fr, vec, xcd, 0, 0)
+                                    )
                 if tag == "1x1" and TR in layouts:
                     for t in BIG1x1:
                         cands.append(C(atom, 1, TR, t, s, sw, dw, fr, vec, xcd, 0, 0))
@@ -1247,7 +1273,16 @@ def build():
                         )
                 for c in cands:
                     if valid(c, dtype):
-                        CATALOG[dtype].extend(with_bpu(c))
+                        variants = with_bpu(c)
+                        if (
+                            tag in BPU4_RING_ROWS
+                            and c["loop"] == 1
+                            and c["layout"] == CF
+                            and c["atom"] in ("mfma32_f16", "mfma32_bf16")
+                            and not any(v["bpu"] == 4 for v in variants)
+                        ):
+                            variants = variants + [dict(c, bpu=4)]
+                        CATALOG[dtype].extend(variants)
                     else:
                         dropped += 1
     # The generic tier last: the specialized configs keep their priorities.
