@@ -763,7 +763,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 200]
           - Exact: [128, 128, 1, 40]
-          - Exact: [100, 192, 1, 136]
+          - Exact: [100, 200, 1, 136]
   -
     - # ProblemType, TN, F8 swizzle-B, multi-wave, tail K (K % DepthU != 0), K % 32 != 0, K < DepthU, M/N edges.
       OperationType: GEMM

@@ -6759,6 +6759,13 @@ class Solution(collections.abc.Mapping):
     for tc, freeIdx in (("A", 0), ("B", 1)):
       if state["UseSubtileImpl"] or not state.get("_TDMIterateMode%s" % tc, False):
         continue
+      # A swizzled-TDM operand iterates one MI-row tile at a time (see _emitSwizzleTdmIterateInit),
+      # not tile_dim1 DepthU rows, and the host pads its free dimension to whole MI rows, so this
+      # free-size multiple does not apply.
+      if (state["ProblemType"]["SwizzleTensor%s" % tc]
+          and bool(state["TDMInst"] & (0x01 if tc == "A" else 0x02))
+          and isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+        continue
       # tile_dim1 as the descriptor carries it: rows of DepthU input elements.
       bytesPerRow = int(round(state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()))
       lbspp = state["LdsBlockSizePerPad%s" % tc]
