@@ -1654,6 +1654,16 @@ in fp32.
   that `pick_swizzle` picks at build time so the `ds_read_b64_tr_b16` fragment
   reads are bank-conflict free. `unfold_n` packs several images into one strip;
   `q_groups=2` (+`pingpong`) runs two wave groups half a row apart.
+- **Tiled launch.** Blocks walk (image group, strip, row segment) units with
+  a stride of `n_splits` per channel tile. A fixed `rows_per_seg` gives
+  `ceil(target_blocks / channel_tiles)` splits. `rows_per_seg = 0` derives
+  the launch from the runtime shape instead: one segment is a whole strip
+  (all `H` rows, the row loop's trip count rounded up to the unroll), and the
+  grid is `max(1, floor(target_blocks / channel_tiles))` splits per tile, so it
+  runs in one round when `target_blocks` is the number of blocks the device
+  holds (`rpsH` in the kernel name). The row loop pins each row's MFMAs with a
+  scheduling barrier, which a runtime trip count would otherwise let the
+  scheduler sink into the last unrolled rows.
 - **Partial slots + fold.** Same-address fp32 atomics serialize, and a
   depthwise `dW` has only a few thousand addresses, so the depthwise and gather
   kernels store one partial slot per partition with plain stores and
@@ -1692,8 +1702,9 @@ also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
 (`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
 (`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
-`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+), Python IR
-golden `conv_direct_wgrad/*` in `library/tests/test_conv_ir_golden.py`.
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+; auto
+launch 359+), Python IR golden `conv_direct_wgrad/*` in
+`library/tests/test_conv_ir_golden.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:

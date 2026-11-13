@@ -4254,6 +4254,19 @@ def cases():
             dict(N=4, H=15, W=40, dtype="fp16"),
             dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
         ),
+        (
+            "tiled_auto_launch",
+            "tiled",
+            dict(H=30),
+            dict(
+                waves_k=2,
+                wave_c16=1,
+                prefetch=3,
+                row_unroll=4,
+                rows_per_seg=0,
+                target_blocks=512,
+            ),
+        ),
         ("fold_t9", "fold", {}, dict(taps=9)),
         (
             "dw_cols_c3_7x7_s2",

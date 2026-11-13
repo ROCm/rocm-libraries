@@ -288,13 +288,19 @@ extern "C" int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad
 extern "C" int rocke_direct_wgrad_tiled_n_segments(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return cdiv(p->N, s->unfold_n) * cdiv(problem_wo(p), strip_w(s)) * cdiv(p->H, s->rows_per_seg);
+    int n_hb = s->rows_per_seg ? cdiv(p->H, s->rows_per_seg) : 1;
+    return cdiv(p->N, s->unfold_n) * cdiv(problem_wo(p), strip_w(s)) * n_hb;
 }
 
 extern "C" int rocke_direct_wgrad_tiled_n_splits(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     int a = cdiv(rocke_direct_wgrad_tiled_n_segments(s), s->q_groups);
-    int c = cdiv(s->target_blocks, rocke_direct_wgrad_tiled_n_channel_tiles(s));
+    int tiles = rocke_direct_wgrad_tiled_n_channel_tiles(s);
+    int c = s->rows_per_seg ? cdiv(s->target_blocks, tiles) : s->target_blocks / tiles;
+    if(c < 1)
+    {
+        c = 1;
+    }
     return a < c ? a : c;
 }
 
@@ -323,7 +329,14 @@ extern "C" rocke_status_t rocke_direct_wgrad_tiled_kernel_name(
     snprintf(f_buf, sizeof f_buf, "f%dx%dp%d", p->KH, p->KW, p->PAD);
     snprintf(wt_buf, sizeof wt_buf, "wt%dx%d", wave_k(s), wave_c(s));
     snprintf(w_buf, sizeof w_buf, "w%dx%d", s->waves_k, s->waves_c);
-    snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
+    if(s->rows_per_seg)
+    {
+        snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
+    }
+    else
+    {
+        snprintf(rps_buf, sizeof rps_buf, "rpsH");
+    }
     snprintf(pf_buf, sizeof pf_buf, "pf%d", s->prefetch);
     snprintf(tb_buf, sizeof tb_buf, "tb%d", s->target_blocks);
     snprintf(u_buf, sizeof u_buf, "u%d", s->row_unroll);
@@ -459,10 +472,10 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     }
     {
         int u = rocke_direct_wgrad_tiled_unroll(s);
-        if(s->rows_per_seg <= 0 || u <= 0 || s->rows_per_seg % u)
+        if(s->rows_per_seg < 0 || u <= 0 || s->rows_per_seg % u)
         {
             ROCKE_SPEC_FAIL(
-                reason, reason_cap, "rows_per_seg must be a positive multiple of %d", u);
+                reason, reason_cap, "rows_per_seg must be 0 or a positive multiple of %d", u);
         }
     }
     if(p->KH > 8 || p->KW > 8)
@@ -503,6 +516,7 @@ struct Ctx
     bool bf16;
 
     int KH, KW, PAD, NW, WK16, WC16, BK, BC, CHK, CHC, UN, WU, SEG, STRIP, D, NB, HPB, U, T_PRO;
+    bool AUTO; /* rows_per_seg == 0: whole strips, one-round grid */
     int IK, IC, N_INSTR, QG, GDY_ELEMS, GX_ELEMS;
     std::vector<int> swz_k, swz_c;
 
@@ -518,6 +532,7 @@ struct Ctx
     std::vector<std::vector<V>> dy_idx; /* [mi][rd] */
     std::vector<std::vector<std::vector<V>>> x_idx; /* [s][ni][rd] */
     V zero_frag;
+    V n_rb = NULL; /* AUTO: row-loop trip count, ceil(H / U) */
     int n_acc;
 };
 
@@ -699,6 +714,11 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     {
         rocke_b_s_setprio(e.b, 0);
     }
+    else if(c.AUTO)
+    {
+        /* Keep each row's MFMAs in its row (runtime trip count). */
+        rocke_b_sched_barrier(e.b, 0);
+    }
 }
 
 /* segment(accs, n0, q, h0, h_end, valid=None) */
@@ -709,7 +729,8 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     sg.h0 = h0;
     sg.h_end = h_end;
     seg_lane_offsets(c, n0, e.muli(q, c.WU), sg.dy, sg.xs);
-    sg.t_end = e.ci(c.T_PRO + c.HPB);
+    /* A whole strip needs no tail cut (see the Python builder). */
+    sg.t_end = e.ci(c.AUTO ? (1 << 30) : c.T_PRO + c.HPB);
     if(valid != NULL)
     {
         sg.t_end = e.select(valid, sg.t_end, c.c0);
@@ -733,7 +754,7 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
             inits.push_back(ring[j][mi]);
         }
     }
-    V hi_bound = e.ci(c.HPB / c.U);
+    V hi_bound = c.AUTO ? c.n_rb : e.ci(c.HPB / c.U);
     std::vector<V> res
         = e.for_iter(c.c0, hi_bound, c.c1, names, inits, "rb", [&](V rb, std::vector<V> rc) {
               std::vector<V> accs_i(rc.begin(), rc.begin() + c.n_acc);
@@ -832,6 +853,7 @@ rocke_kernel_def_t*
     c.D = spec->prefetch;
     c.NB = spec->prefetch + 1;
     c.HPB = spec->rows_per_seg;
+    c.AUTO = c.HPB == 0;
     c.U = rocke_direct_wgrad_tiled_unroll(spec);
     c.T_PRO = c.KH - 1;
     c.IK = dma_instrs_dy(spec);
@@ -917,13 +939,32 @@ rocke_kernel_def_t*
     V n_ch_tiles = e.mul(e.mul(p_groups, n_k_tiles), n_c_tiles);
     V n_q = e.cdivi(p_Wo, c.WU);
     V n_ng = e.cdivi(p_N, c.UN);
-    V n_hb = e.cdivi(p_H, c.HPB);
-    V total_segs = e.mul(e.mul(n_ng, n_q), n_hb);
+    V n_hb = NULL;
+    V total_segs;
+    if(c.AUTO)
+    {
+        /* One segment per strip: all H rows, the trip count rounded up. */
+        c.n_rb = e.cdivi(p_H, c.U);
+        total_segs = e.mul(n_ng, n_q);
+    }
+    else
+    {
+        n_hb = e.cdivi(p_H, c.HPB);
+        total_segs = e.mul(e.mul(n_ng, n_q), n_hb);
+    }
     /* Same formula as DirectWgradTiledSpec.n_splits, which sizes the grid. */
     V sa = e.cdivi(total_segs, spec->q_groups);
     V tb = e.ci(spec->target_blocks);
-    V sb = e.add(tb, e.sub(n_ch_tiles, c.c1));
-    sb = e.div(sb, n_ch_tiles);
+    V sb;
+    if(c.AUTO)
+    {
+        sb = e.smax(e.div(tb, n_ch_tiles), c.c1);
+    }
+    else
+    {
+        sb = e.add(tb, e.sub(n_ch_tiles, c.c1));
+        sb = e.div(sb, n_ch_tiles);
+    }
     V n_splits = e.smin(sa, sb);
 
     /* Renumber block ids so each XCD gets a contiguous run. */
@@ -1048,12 +1089,16 @@ rocke_kernel_def_t*
                           zero_accs,
                           "seg",
                           [&](V seg, std::vector<V> carried) {
-                              V hb = e.mod(seg, n_hb);
-                              V rest = e.div(seg, n_hb);
-                              V h0 = e.muli(hb, c.HPB);
+                              V rest = seg, h0 = c.c0;
+                              if(!c.AUTO)
+                              {
+                                  V hb = e.mod(seg, n_hb);
+                                  rest = e.div(seg, n_hb);
+                                  h0 = e.muli(hb, c.HPB);
+                              }
                               V n0 = e.muli(e.div(rest, n_q), c.UN);
                               V q = e.mod(rest, n_q);
-                              V h_end = e.smin(e.addi(h0, c.HPB), p_H);
+                              V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
                               return segment(c, carried, n0, q, h0, h_end, NULL);
                           });
     }
@@ -1069,12 +1114,16 @@ rocke_kernel_def_t*
             c.c0, n_iter, c.c1, acc_names, zero_accs, "segi", [&](V segi, std::vector<V> carried) {
                 V a = e.add(vsplit0, c.qg);
                 V seg = e.add(a, e.mul(segi, n_vsplits));
-                V hb = e.mod(seg, n_hb);
-                V rest = e.div(seg, n_hb);
-                V h0 = e.muli(hb, c.HPB);
+                V rest = seg, h0 = c.c0;
+                if(!c.AUTO)
+                {
+                    V hb = e.mod(seg, n_hb);
+                    rest = e.div(seg, n_hb);
+                    h0 = e.muli(hb, c.HPB);
+                }
                 V n0 = e.muli(e.div(rest, n_q), c.UN);
                 V q = e.mod(rest, n_q);
-                V h_end = e.smin(e.addi(h0, c.HPB), p_H);
+                V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
                 V valid = e.lt(seg, total_segs);
                 return segment(c, carried, n0, q, h0, h_end, valid);
             });

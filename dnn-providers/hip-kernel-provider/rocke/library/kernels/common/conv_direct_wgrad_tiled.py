@@ -26,6 +26,10 @@ What sets it apart from :func:`build_direct_conv_wgrad` (16x16 per wave):
 * A persistent grid: ``ceil(target_blocks / channel_tiles)`` blocks walk the
   (image, column strip, row segment) list with a stride, accumulate in
   registers across segments, and atomically add once at the end.
+* ``rows_per_seg = 0`` picks the launch from the runtime shape: a segment is
+  a whole strip (all H rows, rounded up to the unroll), and the grid is at
+  most ``target_blocks`` blocks (``floor``, not ``ceil``), so it runs in one
+  round when ``target_blocks`` is the number of blocks the device holds.
 
 dW is fp32; the caller zero-initialises it.
 """
@@ -68,6 +72,8 @@ class DirectWgradTiledSpec:
     wave_c16: int = 2
     waves_k: int = 4
     waves_c: int = 2
+    # Input rows per segment (a multiple of the unroll); 0 = the whole strip
+    # with a one-round grid, both derived from the runtime shape.
     rows_per_seg: int = 30
     prefetch: int = 2
     target_blocks: int = 256
@@ -168,7 +174,7 @@ class DirectWgradTiledSpec:
             f"f{p.KH}x{p.KW}p{p.PAD}",
             f"wt{self.wave_k}x{self.wave_c}",
             f"w{self.waves_k}x{self.waves_c}",
-            f"rps{self.rows_per_seg}",
+            f"rps{self.rows_per_seg}" if self.rows_per_seg else "rpsH",
             f"pf{self.prefetch}",
             f"tb{self.target_blocks}",
             flags=flags,
@@ -184,14 +190,16 @@ class DirectWgradTiledSpec:
         return (
             ceil_div(p.N, self.unfold_n)
             * ceil_div(p.Wo, self.strip_w)
-            * ceil_div(p.H, self.rows_per_seg)
+            * (ceil_div(p.H, self.rows_per_seg) if self.rows_per_seg else 1)
         )
 
     def n_splits(self) -> int:
-        return min(
-            ceil_div(self.n_segments(), self.q_groups),
-            ceil_div(self.target_blocks, self.n_channel_tiles()),
-        )
+        tiles = self.n_channel_tiles()
+        if self.rows_per_seg:
+            per_tile = ceil_div(self.target_blocks, tiles)
+        else:
+            per_tile = max(1, self.target_blocks // tiles)
+        return min(ceil_div(self.n_segments(), self.q_groups), per_tile)
 
     def launch_geometry(self):
         return (self.n_channel_tiles() * self.n_splits(), 1, 1), (
@@ -252,8 +260,8 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "row_unroll must be a multiple of prefetch + 1"
     if spec.prefetch < 1:
         return False, "prefetch must be >= 1"
-    if spec.rows_per_seg <= 0 or spec.rows_per_seg % spec.unroll:
-        return False, f"rows_per_seg must be a positive multiple of {spec.unroll}"
+    if spec.rows_per_seg < 0 or spec.rows_per_seg % spec.unroll:
+        return False, f"rows_per_seg must be 0 or a positive multiple of {spec.unroll}"
     if p.KH > 8 or p.KW > 8:
         return False, "filter extent above 8"
     if spec.lds_bytes() > 160 * 1024:
@@ -369,6 +377,7 @@ def build_direct_wgrad_tiled(
     D = spec.prefetch
     NB = spec.n_buffers
     HPB = spec.rows_per_seg
+    AUTO = HPB == 0
     U = spec.unroll
     T_PRO = KH - 1
 
@@ -434,13 +443,23 @@ def build_direct_wgrad_tiled(
     n_ch_tiles = b.mul(b.mul(p_groups, n_k_tiles), n_c_tiles)
     n_q = b.div(b.add(p_Wo, ci(WU - 1)), ci(WU))
     n_ng = b.div(b.add(p_N, ci(UN - 1)), ci(UN))
-    n_hb = b.div(b.add(p_H, ci(HPB - 1)), ci(HPB))
-    total_segs = b.mul(b.mul(n_ng, n_q), n_hb)
+    if AUTO:
+        # One segment per strip: all H rows, the row loop's trip count
+        # rounded up to the unroll.
+        n_rb = b.div(b.add(p_H, ci(U - 1)), ci(U))
+        total_segs = b.mul(n_ng, n_q)
+    else:
+        n_hb = b.div(b.add(p_H, ci(HPB - 1)), ci(HPB))
+        total_segs = b.mul(b.mul(n_ng, n_q), n_hb)
     # Same formula as DirectWgradTiledSpec.n_splits, which sizes the grid.
-    n_splits = b.smin(
-        b.div(b.add(total_segs, ci(spec.q_groups - 1)), ci(spec.q_groups)),
-        b.div(b.add(ci(spec.target_blocks), b.sub(n_ch_tiles, c1)), n_ch_tiles),
-    )
+    seg_splits = b.div(b.add(total_segs, ci(spec.q_groups - 1)), ci(spec.q_groups))
+    if AUTO:
+        per_tile = b.smax(b.div(ci(spec.target_blocks), n_ch_tiles), c1)
+    else:
+        per_tile = b.div(
+            b.add(ci(spec.target_blocks), b.sub(n_ch_tiles, c1)), n_ch_tiles
+        )
+    n_splits = b.smin(seg_splits, per_tile)
 
     # Dispatch deals block ids round-robin over 8 XCDs; renumber so each XCD
     # gets a contiguous run, i.e. the channel tiles of the same segments,
@@ -659,6 +678,10 @@ def build_direct_wgrad_tiled(
                         )
         if spec.pingpong:
             b.s_setprio(0)
+        elif AUTO:
+            # A runtime trip count lets the scheduler sink the MFMAs into the
+            # last rows of the unrolled body; keep each row's MFMAs in its row.
+            b.sched_barrier(0)
         return ring, accs
 
     # ---- persistent segment loop -------------------------------------------
@@ -669,7 +692,10 @@ def build_direct_wgrad_tiled(
         segment left keeps step with the other).
         """
         lane_offs = seg_lane_offsets(n0, b.mul(q, ci(WU)))
-        t_end = ci(T_PRO + HPB)
+        # A whole strip needs no tail cut: the DMAs past the last row are
+        # masked by the row bounds or never read. A constant keeps the
+        # row-loop schedule close to the fixed-rows one.
+        t_end = ci(1 << 30) if AUTO else ci(T_PRO + HPB)
         if valid is not None:
             t_end = b.select(valid, t_end, c0)
 
@@ -689,7 +715,7 @@ def build_direct_wgrad_tiled(
         ]
         row_loop = b.scf_for_iter(
             c0,
-            ci(HPB // U),
+            n_rb if AUTO else ci(HPB // U),
             c1,
             n_iter_args,
             iv_name="rb",
@@ -729,15 +755,18 @@ def build_direct_wgrad_tiled(
             elide_trailing_barrier=False,
         )
         with seg_loop as (seg, carried):
-            hb = b.mod(seg, n_hb)
-            rest = b.div(seg, n_hb)
-            h0 = b.mul(hb, ci(HPB))
+            if AUTO:
+                rest, h0 = seg, c0
+            else:
+                hb = b.mod(seg, n_hb)
+                rest = b.div(seg, n_hb)
+                h0 = b.mul(hb, ci(HPB))
             accs_out = segment(
                 list(carried),
                 b.mul(b.div(rest, n_q), ci(UN)),
                 b.mod(rest, n_q),
                 h0,
-                b.smin(b.add(h0, ci(HPB)), p_H),
+                p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H),
             )
             b.scf_yield(*accs_out)
     else:
@@ -753,15 +782,18 @@ def build_direct_wgrad_tiled(
         )
         with seg_loop as (segi, carried):
             seg = b.add(b.add(vsplit0, qg), b.mul(segi, n_vsplits))
-            hb = b.mod(seg, n_hb)
-            rest = b.div(seg, n_hb)
-            h0 = b.mul(hb, ci(HPB))
+            if AUTO:
+                rest, h0 = seg, c0
+            else:
+                hb = b.mod(seg, n_hb)
+                rest = b.div(seg, n_hb)
+                h0 = b.mul(hb, ci(HPB))
             accs_out = segment(
                 list(carried),
                 b.mul(b.div(rest, n_q), ci(UN)),
                 b.mod(rest, n_q),
                 h0,
-                b.smin(b.add(h0, ci(HPB)), p_H),
+                p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H),
                 valid=b.cmp_lt(seg, total_segs),
             )
             b.scf_yield(*accs_out)

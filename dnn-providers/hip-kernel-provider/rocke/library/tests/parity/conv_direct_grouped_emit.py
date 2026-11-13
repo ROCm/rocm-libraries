@@ -2424,8 +2424,60 @@ def _wgrad_stem_spec(idx: int):
     return ("wgrad", sel, "gfx1250")
 
 
+# ---------------------------------------------------------------------------
+# Auto-launch tiled wgrad (rows_per_seg 0: whole strips, one-round grid),
+# indices 359..362: H not a multiple of the unroll, a grid budget below the
+# channel tiles (clamped to one block per tile) with packed images, the
+# ping-pong wave groups, and a negative rows_per_seg both engines must reject.
+# ---------------------------------------------------------------------------
+_WGRAD_AUTO_CFG_BASE = 359
+
+
+def _wgrad_auto_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_AUTO_CFG_BASE + idx``, or None."""
+    ts = DirectWgradTiledSpec
+    table = {
+        0: ts(
+            problem=_wp(cpg=128, kpg=128, H=30),
+            waves_k=2,
+            wave_c16=1,
+            prefetch=3,
+            row_unroll=4,
+            rows_per_seg=0,
+            target_blocks=512,
+        ),
+        1: ts(
+            problem=_wp(N=4, H=15, W=40, dtype="fp16"),
+            waves_k=2,
+            unfold_n=4,
+            rows_per_seg=0,
+            target_blocks=3,
+        ),
+        2: ts(
+            problem=_wp(),
+            q_groups=2,
+            pingpong=True,
+            waves_k=2,
+            wave_k16=1,
+            prefetch=3,
+            rows_per_seg=0,
+            target_blocks=64,
+        ),
+        3: ts(problem=_wp(), rows_per_seg=-3),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad_tiled", sel, "gfx950")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_AUTO_CFG_BASE:
+        sel = _wgrad_auto_spec(idx - _WGRAD_AUTO_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_STEM_CFG_BASE:
         sel = _wgrad_stem_spec(idx - _WGRAD_STEM_CFG_BASE)
         if sel is not None:

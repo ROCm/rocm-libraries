@@ -1027,6 +1027,21 @@ WGRAD_TILED_UNFOLD = (1, 4)
 # Eight-wave blocks of two ping-ponged wave groups, on
 # the plain two-row prefetch of four-wave 32x32 tiles.
 WGRAD_TILED_PINGPONG = ((2, 2, 2, 2), (2, 0), (30,), (256,), (1,))
+# Auto launch (rows_per_seg 0: whole strips, one-round grid) at
+# target_blocks 512 (two blocks per CU of a 256-CU part): wave tile,
+# (prefetch, row_unroll), unfold_n. Only the points that win a dense 3x3 row.
+WGRAD_TILED_AUTO_BLOCKS = 512
+WGRAD_TILED_AUTO = (
+    ((2, 1, 2, 2), (2, 0), 1),
+    ((2, 1, 2, 2), (2, 0), 4),
+    ((2, 1, 2, 2), (3, 0), 1),
+    ((2, 1, 2, 2), (3, 0), 4),
+    ((2, 1, 2, 2), (3, 4), 4),
+    ((2, 1, 2, 2), (5, 6), 1),
+    ((2, 1, 2, 2), (5, 6), 4),
+    ((2, 2, 2, 2), (3, 4), 1),
+    ((2, 2, 2, 2), (3, 4), 4),
+)
 # Depthwise LDS-ring wgrad (DwWgradLdsSpec): lanes along columns, prefetch,
 # output rows per segment, workgroups.
 WGRAD_DW_LANES_W = (8, 16, 32)
@@ -2300,6 +2315,18 @@ def _knob_grid(
                 unfold_n=un,
                 q_groups=2,
                 pingpong=True,
+            )
+        for (wk16, wc16, wk, wc), (pf, ru), un in WGRAD_TILED_AUTO:
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=0,
+                target_blocks=WGRAD_TILED_AUTO_BLOCKS,
+                unfold_n=un,
             )
     elif variant == "direct_wgrad_dw":
         for lw, pf, rps, tb in itertools.product(

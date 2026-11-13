@@ -99,6 +99,14 @@
           "sha256": "0ed2fe34f4ab088705940ca12bc4ae4b5030e6912bfafdc4b9baecdb01a7bf8d",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 134971,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "3f6c17638b040ee96661404d12ac20f200e25b6c4cf5e4cadf1ea38b05dc4112",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 193857,
@@ -227,6 +235,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_grouped_mfma_c8_fp16_f3x3p1s1c8_wq4_q42_rpc56_pf3_tb1024",
           "sha256": "3a831e710e5914181aa2cf7b571c948aedd79485e3ce7130c8562bb0cd26b801",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135070,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "3fc173e3c3b0af8ca6a4289fa48cf00032ca8ff814cb5993a77fe4ddccd6a119",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
@@ -367,6 +383,14 @@
           "sha256": "b7f365f4cfe09352e15c8a614a4448cfb890fec9bfe2e859547de90d2c97bf4a",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135134,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "4cc229a339f64b8f2a34f5d37a95ea94f9669162e41e02762b1a63cbef92393c",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 194017,
@@ -498,6 +522,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_grouped_mfma_c8_fp16_f3x3p1s1c8_wq4_q42_rpc56_pf3_tb1024",
           "sha256": "b7f365f4cfe09352e15c8a614a4448cfb890fec9bfe2e859547de90d2c97bf4a",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135134,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "4cc229a339f64b8f2a34f5d37a95ea94f9669162e41e02762b1a63cbef92393c",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
