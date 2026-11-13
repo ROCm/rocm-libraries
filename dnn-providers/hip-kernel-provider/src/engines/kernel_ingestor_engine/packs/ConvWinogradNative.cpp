@@ -1124,6 +1124,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         plan.mainThreads
             = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
+        // The kernel counts items in 32 bits (and steps past the last by the grid size).
+        if(items > (INT_LIMIT >> 1))
+        {
+            return std::nullopt;
+        }
         // RDNA: tile blocks fastest where a group's transformed filter is past cache size (4 MiB
         // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
         // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
@@ -1142,6 +1147,24 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
             const bool largeFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
                                    || arch == "gfx1200" || arch == "gfx1201";
             perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
+        }
+        else if(config.arch == "gfx9")
+        {
+            // CDNA: the blocks a CU holds, by registers (the kernel's k5CoopCdnaWpe waves per
+            // SIMD; gfx908 keeps 2 and the 1024-thread grid) and by LDS (160 KiB a CU on gfx950,
+            // 64 KiB before). A grid past that ran a second, partly empty round of persistent
+            // blocks: gfx950 hrnet c32 k32 56² n128 and yolo c32 160² 15-20% slower.
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const int kw = std::max(1, config.waves / 4);
+            const int mt = std::max(1, config.bk / (16 * kw));
+            const int nt = std::max(1, config.bt / 16);
+            const long long ldsPerUnit = arch == "gfx950" ? 160LL << 10 : 64LL << 10;
+            const long long byLds = ldsPerUnit / k5CoopLdsBytes(nt, kw, config.m, true);
+            const bool half = problem.base.dataType == data_objects::DataType::HALF;
+            const long long byRegs
+                = arch == "gfx908" ? perUnit
+                                   : k5CoopCdnaWpe(mt, nt, kw, half, config.m == 3 && forward) / kw;
+            perUnit = std::max<long long>(1, std::min(byLds, byRegs));
         }
         plan.mainBlocks
             = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));

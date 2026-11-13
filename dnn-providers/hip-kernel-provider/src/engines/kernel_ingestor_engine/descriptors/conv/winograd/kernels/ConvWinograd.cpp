@@ -190,7 +190,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
               CONV_WINO_NT,        \
               CONV_WINO_KW,        \
               CONV_WINO_M,         \
-              CONV_WINO_TW>
+              CONV_WINO_TW,        \
+              CONV_WINO_DIR>
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
