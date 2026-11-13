@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -2013,14 +2014,23 @@ TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     SdpaFwdTensorBundle<float> bundle(dims, dims, dims, getGlobalTestSeed());
 
+    // The frontend rejects the pair, so the second flag is set on the serialized graph, as a
+    // graph that bypasses the frontend would carry it.
     auto graphTuple = buildSdpaFwdGraph(bundle,
                                         DataType::FLOAT,
                                         /*causalMask=*/true,
-                                        /*causalMaskBottomRight=*/true);
+                                        /*causalMaskBottomRight=*/false);
     auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
-    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
+    auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
+    ASSERT_NE(attrs, nullptr);
+    attrs->causal_mask_bottom_right = true;
+    flatbuffers::FlatBufferBuilder bothFlags;
+    bothFlags.Finish(CreateGraph(bothFlags, graphT.get()));
+    const GraphWrapper wrapper(bothFlags.GetBufferPointer(), bothFlags.GetSize());
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
