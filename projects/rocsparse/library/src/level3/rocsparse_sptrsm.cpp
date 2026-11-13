@@ -36,7 +36,7 @@
 #include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_sptrsm_descr.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)

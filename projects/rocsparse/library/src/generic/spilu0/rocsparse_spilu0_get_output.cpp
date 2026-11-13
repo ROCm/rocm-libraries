@@ -86,9 +86,9 @@ try
                                rocsparse_status_invalid_value);
         }
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         const auto format = spilu0_descr->get_format();
         switch(format)
@@ -98,7 +98,7 @@ try
             auto csrilu0_info = spilu0_descr->get_csrilu0_info();
             if(csrilu0_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrilu0_info);
+                symbolic_pivot = csrilu0_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csrilu0_info->get_singularity_numeric_exact();
                 near_pivot     = csrilu0_info->get_singularity_numeric_near();
             }
@@ -109,7 +109,7 @@ try
             auto bsrilu0_info = spilu0_descr->get_bsrilu0_info();
             if(bsrilu0_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(bsrilu0_info);
+                symbolic_pivot = bsrilu0_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = bsrilu0_info->get_singularity_numeric_exact();
             }
             break;

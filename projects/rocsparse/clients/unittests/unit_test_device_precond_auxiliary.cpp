@@ -722,8 +722,8 @@ namespace
 {
     struct trackers
     {
-        rocsparse::singular_info_t near4, near3, exact4, exact3;
-        rocsparse::singular_info_t exact4_wide, near4_wide;
+        rocsparse::pivot_numeric_info_t near4, near3, exact4, exact3;
+        rocsparse::pivot_numeric_info_t exact4_wide, near4_wide;
 
         explicit trackers(hipStream_t stream)
         {
@@ -755,7 +755,7 @@ namespace
         }
 
         template <typename I>
-        static void set(rocsparse::singular_info_t& t, const std::vector<I>& markers)
+        static void set(rocsparse::pivot_numeric_info_t& t, const std::vector<I>& markers)
         {
             EXPECT_EQ(hipMemcpy(t.get_position(),
                                 markers.data(),
@@ -771,10 +771,10 @@ TEST_F(PrecondAuxiliary, position_read_back_checks_the_trackers)
     trackers t(handle->stream);
     int32_t  host_position[4]   = {-5, -5, -5, -5};
     int64_t  host_position64[4] = {-5, -5, -5, -5};
-    auto     read               = [&](int64_t                           batch,
-                    const rocsparse::singular_info_t* exact,
-                    const rocsparse::singular_info_t* near,
-                    bool                              wide) {
+    auto     read               = [&](int64_t                                batch,
+                    const rocsparse::pivot_numeric_info_t* exact,
+                    const rocsparse::pivot_numeric_info_t* near,
+                    bool                                   wide) {
         return rocsparse::singularity_get_position_async(
             handle,
             batch,
@@ -818,9 +818,9 @@ TEST_F(PrecondAuxiliary, singularity_read_back_checks_the_trackers)
     trackers              t(handle->stream);
     const auto            sentinel            = static_cast<rocsparse_singularity>(-123);
     rocsparse_singularity host_singularity[4] = {sentinel, sentinel, sentinel, sentinel};
-    auto                  read                = [&](int64_t                           batch,
-                    const rocsparse::singular_info_t* exact,
-                    const rocsparse::singular_info_t* near) {
+    auto                  read                = [&](int64_t                                batch,
+                    const rocsparse::pivot_numeric_info_t* exact,
+                    const rocsparse::pivot_numeric_info_t* near) {
         return rocsparse::singularity_get_async(
             handle, batch, nullptr, exact, near, rocsparse_pointer_mode_host, host_singularity);
     };
@@ -831,8 +831,8 @@ TEST_F(PrecondAuxiliary, singularity_read_back_checks_the_trackers)
     EXPECT_NE(read(4, &t.exact4_wide, &t.near4), rocsparse_status_success);
     EXPECT_NE(read(4, &t.exact4, &t.near4_wide), rocsparse_status_success);
 
-    const auto check = [&](const rocsparse::singular_info_t&         exact,
-                           const rocsparse::singular_info_t&         near,
+    const auto check = [&](const rocsparse::pivot_numeric_info_t&    exact,
+                           const rocsparse::pivot_numeric_info_t&    near,
                            const std::vector<rocsparse_singularity>& want) {
         std::fill(std::begin(host_singularity), std::end(host_singularity), sentinel);
         ASSERT_EQ(read(4, &exact, &near), rocsparse_status_success);

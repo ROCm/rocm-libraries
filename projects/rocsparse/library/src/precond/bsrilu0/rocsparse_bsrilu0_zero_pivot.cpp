@@ -40,7 +40,7 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
         handle,
         1,
-        bsrilu0_info,
+        (bsrilu0_info != nullptr) ? bsrilu0_info->get_triangular_data()->get_pivot_info() : nullptr,
         (bsrilu0_info != nullptr) ? bsrilu0_info->get_singularity_numeric_exact() : nullptr,
         nullptr,
         handle->pointer_mode,

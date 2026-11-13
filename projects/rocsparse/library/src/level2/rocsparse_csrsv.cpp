@@ -39,14 +39,15 @@ namespace rocsparse
 
         auto numeric_exact_position = (info) ? info->get_singularity_numeric_exact() : nullptr;
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(handle,
-                                                                            1,
-                                                                            info,
-                                                                            numeric_exact_position,
-                                                                            nullptr,
-                                                                            handle->pointer_mode,
-                                                                            indextype,
-                                                                            position));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+            handle,
+            1,
+            (info != nullptr) ? info->get_triangular_data()->get_pivot_info() : nullptr,
+            numeric_exact_position,
+            nullptr,
+            handle->pointer_mode,
+            indextype,
+            position));
 
         switch(indextype)
         {

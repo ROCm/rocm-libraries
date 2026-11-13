@@ -23,13 +23,4 @@
 
 #include "rocsparse_csrilu0_info.hpp"
 
-void _rocsparse_csrilu0_info::copy(const _rocsparse_csrilu0_info* that, hipStream_t stream)
-{
-    this->rocsparse::trm_data_t::copy(that, stream);
-    this->m_singularity_numeric_exact.copy_singular_info_async(&that->m_singularity_numeric_exact,
-                                                               stream);
-    this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,
-                                                              stream);
-    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
-}
 _rocsparse_csrilu0_info::~_rocsparse_csrilu0_info() {}

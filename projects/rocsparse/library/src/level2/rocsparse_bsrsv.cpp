@@ -55,7 +55,14 @@ try
     const auto indextype  = rocsparse::get_indextype<rocsparse_int>();
     auto       bsrsv_info = info->get_bsrsv_info();
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
-        handle, 1, bsrsv_info, nullptr, nullptr, handle->pointer_mode, indextype, position));
+        handle,
+        1,
+        (bsrsv_info != nullptr) ? bsrsv_info->get_triangular_data()->get_pivot_info() : nullptr,
+        nullptr,
+        nullptr,
+        handle->pointer_mode,
+        indextype,
+        position));
     switch(indextype)
     {
     case rocsparse_indextype_i32:

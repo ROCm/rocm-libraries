@@ -25,43 +25,54 @@
 #pragma once
 
 #include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 
-struct _rocsparse_csrilu0_info : rocsparse::trm_data_t
+struct _rocsparse_csrilu0_info
 {
 protected:
-    rocsparse::singular_info_t m_singularity_numeric_exact{};
-    rocsparse::singular_info_t m_singularity_numeric_near{};
+    const rocsparse::triangular_data_t* m_trm_data{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_exact{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_near{};
 
 public:
-    _rocsparse_csrilu0_info() = default;
+    _rocsparse_csrilu0_info(const rocsparse::triangular_data_t* trm_data,
+                            rocsparse::pivot_numeric_info_t*    singularity_numeric_exact,
+                            rocsparse::pivot_numeric_info_t*    singularity_numeric_near)
+        : m_trm_data(trm_data)
+        , m_singularity_numeric_exact(singularity_numeric_exact)
+        , m_singularity_numeric_near(singularity_numeric_near)
+    {
+    }
     ~_rocsparse_csrilu0_info();
 
-    void copy(const _rocsparse_csrilu0_info* that, hipStream_t stream);
-
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
+    const rocsparse::triangular_data_t* get_triangular_data() const
     {
-        return &this->m_singularity_numeric_exact;
+        return this->m_trm_data;
+    }
+
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_exact()
+    {
+        return this->m_singularity_numeric_exact;
+    }
+
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_near()
+    {
+        return this->m_singularity_numeric_near;
     }
 
     void create_singularity_numeric_exact(int64_t             batch_count,
                                           rocsparse_indextype indextype,
                                           hipStream_t         stream)
     {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
+        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact->create_singular_pivot_async(
             batch_count, indextype, stream));
-    }
-
-    rocsparse::singular_info_t* get_singularity_numeric_near()
-    {
-        return &this->m_singularity_numeric_near;
     }
 
     void create_singularity_numeric_near(int64_t             batch_count,
                                          rocsparse_indextype indextype,
                                          hipStream_t         stream)
     {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_near.create_singular_pivot_async(
+        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_near->create_singular_pivot_async(
             batch_count, indextype, stream));
     }
 };

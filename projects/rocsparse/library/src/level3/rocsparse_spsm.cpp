@@ -982,7 +982,8 @@ namespace rocsparse
                 // when the same sparse matrix descriptor is reused with a
                 // different operation or fill mode).
                 rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_A, matA->descr->fill_mode)
+                   == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsm_analysis(handle,
@@ -1018,7 +1019,8 @@ namespace rocsparse
                 // that have not been analysed yet, instead of relying on the
                 // descriptor-wide matA->analysed flag.
                 rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_A, matA->descr->fill_mode)
+                   == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosm_analysis(handle,
@@ -1061,7 +1063,8 @@ namespace rocsparse
                 // descriptor-wide matA->analysed flag. The CSC analysis is cached
                 // under the CSR-mapped operation and fill mode.
                 rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_csr, descr_csr.fill_mode) == nullptr)
+                if(csrsm_info->get_triangular_data()->get(trans_csr, descr_csr.fill_mode)
+                   == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsm_analysis(handle,

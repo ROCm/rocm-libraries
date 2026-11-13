@@ -29,7 +29,7 @@
 
 namespace rocsparse
 {
-    struct singular_info_t : rocsparse::position_t
+    struct pivot_numeric_info_t : rocsparse::position_t
     {
     protected:
         double                 m_singular_tol_host_value[1]{};
@@ -38,8 +38,8 @@ namespace rocsparse
         rocsparse_datatype     m_singular_tol_datatype{rocsparse_datatype_f64_r};
 
     public:
-        singular_info_t() = default;
-        ~singular_info_t();
+        pivot_numeric_info_t() = default;
+        ~pivot_numeric_info_t();
 
         double get_tolerance_legacy() const;
         void   set_tolerance_legacy(double);
@@ -56,6 +56,7 @@ namespace rocsparse
                                                      rocsparse_indextype indextype,
                                                      hipStream_t         stream);
 
-        rocsparse_status copy_singular_info_async(const singular_info_t* that, hipStream_t stream);
+        rocsparse_status copy_singular_info_async(const pivot_numeric_info_t* that,
+                                                  hipStream_t                 stream);
     };
 }

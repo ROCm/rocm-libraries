@@ -89,9 +89,9 @@ try
         const size_t sizeelm
             = (determine_singularity) ? sizeof(rocsparse_singularity) : sizeof(int64_t);
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         const auto format = spic0_descr->get_format();
         switch(format)
@@ -101,7 +101,7 @@ try
             auto csric0_info = spic0_descr->get_csric0_info();
             if(csric0_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csric0_info);
+                symbolic_pivot = csric0_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csric0_info->get_singularity_numeric_exact();
                 near_pivot     = csric0_info->get_singularity_numeric_near();
             }
@@ -112,7 +112,7 @@ try
             auto bsric0_info = spic0_descr->get_bsric0_info();
             if(bsric0_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(bsric0_info);
+                symbolic_pivot = bsric0_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = bsric0_info->get_singularity_numeric_exact();
             }
             break;

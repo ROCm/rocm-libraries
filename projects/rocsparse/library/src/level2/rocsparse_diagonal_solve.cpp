@@ -37,7 +37,7 @@
 #include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv_info.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 namespace rocsparse
 {
@@ -74,7 +74,7 @@ namespace rocsparse
         auto           alpha = reinterpret_cast<const T*>(alpha_);
         const uint32_t gy    = static_cast<uint32_t>(
             (nrhs < static_cast<int64_t>(DIAGONAL_SOLVE_GRID_CAP)) ? nrhs
-                                                                      : DIAGONAL_SOLVE_GRID_CAP);
+                                                                   : DIAGONAL_SOLVE_GRID_CAP);
         dim3 blocks((m - 1) / DIAGONAL_SOLVE_BLOCKSIZE + 1, gy, batch_count);
         dim3 threads(DIAGONAL_SOLVE_BLOCKSIZE);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -304,12 +304,12 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
         (info == nullptr) ? rocsparse_status_invalid_pointer : rocsparse_status_success,
         "the analysis stage must be executed before a diagonal solve");
 
-    const rocsparse::trm_info_t* trm = nullptr;
+    const rocsparse::triangular_info_t* trm = nullptr;
     switch(A->format)
     {
     case rocsparse_format_csr:
     {
-        trm = info->get(trans, A->descr->fill_mode);
+        trm = info->get_triangular_data()->get(trans, A->descr->fill_mode);
         break;
     }
     case rocsparse_format_csc:
@@ -317,7 +317,8 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
         _rocsparse_mat_descr   descr_csr;
         _rocsparse_spmat_descr mat_csr;
         rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
-        trm = info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode);
+        trm = info->get_triangular_data()->get(rocsparse::cscsv_operation_to_csr(trans),
+                                               descr_csr.fill_mode);
         break;
     }
     default:
@@ -329,13 +330,15 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
     }
 
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-        (trm == nullptr || trm->get_diag_ind() == nullptr) ? rocsparse_status_invalid_pointer
-                                                           : rocsparse_status_success,
+        (trm == nullptr || trm->get_diag_ind()->get_values() == nullptr)
+            ? rocsparse_status_invalid_pointer
+            : rocsparse_status_success,
         "the analysis stage did not provide the diagonal offsets required by the diagonal solve");
 
-    view->offset_type     = trm->get_offset_indextype();
-    view->diag_ind        = trm->get_diag_ind();
-    view->transposed_perm = trm->get_transposed_perm();
+    view->offset_type = trm->get_diag_ind()->get_indextype();
+    view->diag_ind    = trm->get_diag_ind()->get_values();
+    // diag_ind already holds positions in the original matrix.
+    view->transposed_perm = nullptr;
     return rocsparse_status_success;
 }
 
@@ -374,19 +377,19 @@ namespace rocsparse
         auto numeric_exact = info->get_singularity_numeric_exact();
         if(pivot_indextype == rocsparse_indextype_i32)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_device_async<int32_t>(batch_count,
-                                                        (int32_t*)numeric_exact->get_position(),
-                                                        (const int32_t*)info->get_position(),
-                                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+                batch_count,
+                (int32_t*)numeric_exact->get_position(),
+                (const int32_t*)info->get_triangular_data()->get_pivot_info()->get_position(),
+                stream));
         }
         else
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_device_async<int64_t>(batch_count,
-                                                        (int64_t*)numeric_exact->get_position(),
-                                                        (const int64_t*)info->get_position(),
-                                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                batch_count,
+                (int64_t*)numeric_exact->get_position(),
+                (const int64_t*)info->get_triangular_data()->get_pivot_info()->get_position(),
+                stream));
         }
 
         RETURN_IF_ROCSPARSE_ERROR(

@@ -42,7 +42,7 @@
 #include "rocsparse_spgeam_descr.hpp"
 #include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_spvec_descr.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 #include <fstream>
 #include <hip/hip_runtime_api.h>

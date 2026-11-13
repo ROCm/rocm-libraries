@@ -451,7 +451,8 @@ namespace rocsparse
                                          : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
-        auto trm_info = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = bsrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
@@ -473,11 +474,11 @@ namespace rocsparse
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
             static_cast<J>(A->block_dim),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()->get_values()),
             reinterpret_cast<J*>(numeric_exact->get_position()),
             numeric_exact->get_stride(),
             A->descr->base,

@@ -123,7 +123,8 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
-        const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
+        const rocsparse::triangular_info_t* trm_info
+            = csrsm_info->get_triangular_data()->get(trans_A, descr->fill_mode);
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
@@ -160,13 +161,13 @@ namespace rocsparse
             T* csrt_val = At;
 
             // Gather values
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::gthr_template<I, T>(handle,
-                                                nnz,
-                                                csr_val,
-                                                csrt_val,
-                                                (const I*)trm_info->get_transposed_perm(),
-                                                rocsparse_index_base_zero)));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_template<I, T>(
+                handle,
+                nnz,
+                csr_val,
+                csrt_val,
+                (const I*)trm_info->get_transposed()->get_perm()->get_values(),
+                rocsparse_index_base_zero)));
 
             if(trans_A == rocsparse_operation_conjugate_transpose)
             {
@@ -174,8 +175,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, csrt_val));
             }
 
-            local_csr_row_ptr = (const I*)trm_info->get_transposed_row_ptr();
-            local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
+            local_csr_row_ptr = (const I*)trm_info->get_transposed()->get_row_ptr()->get_values();
+            local_csr_col_ind = (const J*)trm_info->get_transposed()->get_col_ind()->get_values();
             local_csr_val     = (const T*)csrt_val;
 
             switch(fill_mode)
@@ -241,7 +242,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -266,7 +267,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -294,7 +295,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -319,7 +320,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -347,7 +348,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -372,7 +373,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -400,7 +401,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -425,7 +426,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -453,7 +454,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -478,7 +479,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map()->get_values(),
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,

@@ -67,10 +67,11 @@ rocsparse_status rocsparse::bsrilu0_analysis(rocsparse_handle          handle,
     {
     case rocsparse_analysis_policy_reuse:
     {
-        auto trm = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
-        trm      = (trm != nullptr)
-                       ? trm
-                       : info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm
+            = info->get_triangular_data()->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        trm = (trm != nullptr)
+                  ? trm
+                  : info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         trm = (trm != nullptr)
                   ? trm
@@ -78,7 +79,8 @@ rocsparse_status rocsparse::bsrilu0_analysis(rocsparse_handle          handle,
 
         if(trm != nullptr)
         {
-            bsrilu0_info->set(rocsparse_operation_none, rocsparse_fill_mode_lower, trm);
+            info->get_triangular_data()->set(
+                rocsparse_operation_none, rocsparse_fill_mode_lower, trm);
             return rocsparse_status_success;
         }
         break;
@@ -91,25 +93,14 @@ rocsparse_status rocsparse::bsrilu0_analysis(rocsparse_handle          handle,
 
     if(bsrilu0_info == nullptr)
     {
-        bsrilu0_info      = new _rocsparse_bsrilu0_info();
+        bsrilu0_info      = new _rocsparse_bsrilu0_info(info->get_triangular_data(),
+                                                   info->get_singularity_numeric_exact());
         p_bsrilu0_info[0] = bsrilu0_info;
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(bsrilu0_info->recreate(rocsparse_operation_none,
-                                                     rocsparse_fill_mode_lower,
-                                                     handle,
-                                                     rocsparse_operation_none,
-                                                     A->rows,
-                                                     A->nnz,
-                                                     A->descr,
-                                                     A->data_type,
-                                                     A->const_val_data,
-                                                     A->row_type,
-                                                     A->const_row_data,
-                                                     A->col_type,
-                                                     A->const_col_data,
-                                                     temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
+        handle, rocsparse_operation_none, rocsparse_fill_mode_lower, A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

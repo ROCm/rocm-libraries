@@ -88,14 +88,14 @@ try
         const size_t sizeelm
             = (determine_singularity) ? sizeof(rocsparse_singularity) : sizeof(int64_t);
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         auto csrildlt0_info = spildlt0_descr->get_csrildlt0_info();
         if(csrildlt0_info != nullptr)
         {
-            symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrildlt0_info);
+            symbolic_pivot = csrildlt0_info->get_triangular_data()->get_pivot_info();
             exact_pivot    = csrildlt0_info->get_singularity_numeric_exact();
             near_pivot     = csrildlt0_info->get_singularity_numeric_near();
         }

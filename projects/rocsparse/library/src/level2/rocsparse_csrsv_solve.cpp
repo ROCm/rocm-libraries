@@ -86,7 +86,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // Initialize buffers
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
 
-    const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
+    const rocsparse::triangular_info_t* csrsv
+        = csrsv_info->get_triangular_data()->get(trans, descr->fill_mode);
     if(csrsv == nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
@@ -100,14 +101,17 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     {
     case rocsparse_diag_type_unit:
     {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::assign_max_async(1, A->col_type, csrsv_info->get_position(), stream));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+            1,
+            A->col_type,
+            A->info->get_triangular_data()->get_pivot_info()->get_position(),
+            stream));
         if(A->col_type == rocsparse_indextype_i32)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 batch_count,
                 (int32_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
-                (const int32_t*)csrsv_info->get_position(),
+                (const int32_t*)csrsv_info->get_triangular_data()->get_pivot_info()->get_position(),
                 handle->stream));
         }
         else
@@ -115,7 +119,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                 batch_count,
                 (int64_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
-                (const int64_t*)csrsv_info->get_position(),
+                (const int64_t*)csrsv_info->get_triangular_data()->get_pivot_info()->get_position(),
                 handle->stream));
         }
 
@@ -128,7 +132,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                 batch_count,
                 (int32_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
-                (const int32_t*)csrsv_info->get_position(),
+                (const int32_t*)csrsv_info->get_triangular_data()->get_pivot_info()->get_position(),
                 handle->stream));
         }
         else
@@ -136,7 +140,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                 batch_count,
                 (int64_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
-                (const int64_t*)csrsv_info->get_position(),
+                (const int64_t*)csrsv_info->get_triangular_data()->get_pivot_info()->get_position(),
                 handle->stream));
         }
         break;
@@ -164,18 +168,19 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         const int64_t            csrt_val_stride   = A->nnz;
         const rocsparse_datatype csrt_val_datatype = A->data_type;
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_strided_batched(handle,
-                                                                   A->batch_count,
-                                                                   A->nnz,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->batch_stride,
-                                                                   csrt_val_datatype,
-                                                                   csrt_val,
-                                                                   csrt_val_stride,
-                                                                   A->row_type,
-                                                                   csrsv->get_transposed_perm(),
-                                                                   rocsparse_index_base_zero)));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::gthr_strided_batched(handle,
+                                             A->batch_count,
+                                             A->nnz,
+                                             A->data_type,
+                                             A->const_val_data,
+                                             A->batch_stride,
+                                             csrt_val_datatype,
+                                             csrt_val,
+                                             csrt_val_stride,
+                                             A->row_type,
+                                             csrsv->get_transposed()->get_perm()->get_values(),
+                                             rocsparse_index_base_zero)));
 
 #ifndef ROCSPARSE_WITH_TRSM_REFACTORING
         if(trans == rocsparse_operation_conjugate_transpose)
@@ -185,8 +190,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         }
 
 #endif
-        local_row_data        = csrsv->get_transposed_row_ptr();
-        local_col_data        = csrsv->get_transposed_col_ind();
+        local_row_data        = csrsv->get_transposed()->get_row_ptr()->get_values();
+        local_col_data        = csrsv->get_transposed()->get_col_ind()->get_values();
         local_val_data        = csrt_val;
         local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
         switch(fill_mode)
@@ -263,7 +268,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                             y->inc,
                             y->batch_stride,
                             done_array,
-                            csrsv->get_row_map(),
+                            csrsv->get_row_map()->get_values(),
                             0,
                             numeric_exact_position->get_position(),
                             1,

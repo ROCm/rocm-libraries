@@ -36,7 +36,7 @@
 #include "rocsparse_diagonal_solve.hpp"
 #include "rocsparse_ellsv.hpp"
 #include "rocsparse_sptrsv_descr.hpp"
-#include "rocsparse_trm_info.hpp"
+#include "rocsparse_triangular_info_t.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_stage value)
@@ -291,9 +291,9 @@ try
                                rocsparse_status_invalid_value);
         }
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         const auto format = sptrsv_descr->get_format();
         switch(format)
@@ -303,7 +303,7 @@ try
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
             if(csrsv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsv_info);
+                symbolic_pivot = csrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -313,7 +313,7 @@ try
             auto coosv_info = sptrsv_descr->get_csrsv_info();
             if(coosv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(coosv_info);
+                symbolic_pivot = coosv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = coosv_info->get_singularity_numeric_exact();
             }
             break;
@@ -323,7 +323,7 @@ try
             auto bsrsv_info = sptrsv_descr->get_csrsv_info();
             if(bsrsv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(bsrsv_info);
+                symbolic_pivot = bsrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = bsrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -334,7 +334,7 @@ try
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
             if(csrsv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsv_info);
+                symbolic_pivot = csrsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = csrsv_info->get_singularity_numeric_exact();
             }
             break;
@@ -344,7 +344,7 @@ try
             auto ellsv_info = sptrsv_descr->get_ellsv_info();
             if(ellsv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(ellsv_info);
+                symbolic_pivot = ellsv_info->get_triangular_data()->get_pivot_info();
                 exact_pivot    = ellsv_info->get_singularity_numeric_exact();
             }
             break;

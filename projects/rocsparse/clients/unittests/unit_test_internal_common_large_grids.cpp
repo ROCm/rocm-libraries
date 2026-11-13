@@ -231,9 +231,9 @@ namespace
 
     // Build an `exact` marker set over the full batch: even entries carry a
     // singular position, odd entries carry none.
-    void make_exact_markers(rocsparse::singular_info_t& exact,
-                            rocsparse_handle            handle,
-                            int32_t                     marker)
+    void make_exact_markers(rocsparse::pivot_numeric_info_t& exact,
+                            rocsparse_handle                 handle,
+                            int32_t                          marker)
     {
         ASSERT_EQ(exact.create_singular_pivot_async(
                       singularity_batch_count, rocsparse_indextype_i32, handle->stream),
@@ -257,7 +257,7 @@ TEST_F(LargeGrids, singularity_get_async_grid_stride)
 {
     constexpr int32_t marker = 7;
 
-    rocsparse::singular_info_t exact;
+    rocsparse::pivot_numeric_info_t exact;
     ASSERT_NO_FATAL_FAILURE(make_exact_markers(exact, handle, marker));
 
     device_vector<rocsparse_singularity> d_out(std::vector<rocsparse_singularity>(
@@ -293,7 +293,7 @@ TEST_F(LargeGrids, singularity_get_position_async_grid_stride)
 {
     constexpr int32_t marker = 11;
 
-    rocsparse::singular_info_t exact;
+    rocsparse::pivot_numeric_info_t exact;
     ASSERT_NO_FATAL_FAILURE(make_exact_markers(exact, handle, marker));
 
     device_vector<int64_t> d_out(std::vector<int64_t>(singularity_batch_count, -99));

@@ -65,7 +65,7 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
             A->batch_count,
             (int32_t*)csrilu0_info->get_singularity_numeric_exact()->get_position(),
-            (const int32_t*)csrilu0_info->get_position(),
+            (const int32_t*)csrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
     else
@@ -73,7 +73,7 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
             A->batch_count,
             (int64_t*)csrilu0_info->get_singularity_numeric_exact()->get_position(),
-            (const int64_t*)csrilu0_info->get_position(),
+            (const int64_t*)csrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
 
@@ -84,7 +84,7 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
             A->batch_count,
             (int32_t*)csrilu0_info->get_singularity_numeric_near()->get_position(),
-            (const int32_t*)csrilu0_info->get_position(),
+            (const int32_t*)csrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
     else
@@ -92,7 +92,7 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
             A->batch_count,
             (int64_t*)csrilu0_info->get_singularity_numeric_near()->get_position(),
-            (const int64_t*)csrilu0_info->get_position(),
+            (const int64_t*)csrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
 

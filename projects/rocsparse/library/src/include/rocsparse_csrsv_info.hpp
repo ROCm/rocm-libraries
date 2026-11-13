@@ -25,33 +25,38 @@
 #pragma once
 
 #include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_triangular_data_t.hpp"
 
-struct _rocsparse_csrsv_info : rocsparse::trm_data_t
+struct _rocsparse_csrsv_info
 {
 protected:
-    rocsparse::singular_info_t m_singularity_numeric_exact;
+    const rocsparse::triangular_data_t* m_trm_data{};
+    rocsparse::pivot_numeric_info_t*    m_singularity_numeric_exact{};
 
 public:
-    ~_rocsparse_csrsv_info() = default;
-    void copy(const _rocsparse_csrsv_info* that, hipStream_t stream)
+    _rocsparse_csrsv_info(const rocsparse::triangular_data_t* trm_data,
+                          rocsparse::pivot_numeric_info_t*    singularity_numeric_exact)
+        : m_trm_data(trm_data)
+        , m_singularity_numeric_exact(singularity_numeric_exact)
     {
-        this->rocsparse::trm_data_t::copy(that, stream);
-        this->m_singularity_numeric_exact.copy_singular_info_async(
-            &that->m_singularity_numeric_exact, stream);
-        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+    }
+    ~_rocsparse_csrsv_info() = default;
+
+    const rocsparse::triangular_data_t* get_triangular_data() const
+    {
+        return this->m_trm_data;
     }
 
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
+    rocsparse::pivot_numeric_info_t* get_singularity_numeric_exact()
     {
-        return &this->m_singularity_numeric_exact;
+        return this->m_singularity_numeric_exact;
     }
 
     void create_singularity_numeric_exact(int64_t             batch_count,
                                           rocsparse_indextype indextype,
                                           hipStream_t         stream)
     {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
+        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact->create_singular_pivot_async(
             batch_count, indextype, stream));
     }
 };

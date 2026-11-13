@@ -61,7 +61,8 @@ rocsparse_status rocsparse::csrilu0_analysis(rocsparse_handle          handle,
 
     if(analysis == rocsparse_analysis_policy_reuse)
     {
-        auto trm = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm
+            = info->get_triangular_data()->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
         if(trm == nullptr)
         {
             trm = (trm != nullptr)
@@ -94,25 +95,15 @@ rocsparse_status rocsparse::csrilu0_analysis(rocsparse_handle          handle,
 
     if(csrilu0_info == nullptr)
     {
-        csrilu0_info      = new _rocsparse_csrilu0_info();
+        csrilu0_info      = new _rocsparse_csrilu0_info(info->get_triangular_data(),
+                                                   info->get_singularity_numeric_exact(),
+                                                   info->get_singularity_numeric_near());
         p_csrilu0_info[0] = csrilu0_info;
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(csrilu0_info->recreate(rocsparse_operation_none,
-                                                     rocsparse_fill_mode_lower,
-                                                     handle,
-                                                     rocsparse_operation_none,
-                                                     A->rows,
-                                                     A->nnz,
-                                                     A->descr,
-                                                     A->data_type,
-                                                     A->const_val_data,
-                                                     A->row_type,
-                                                     A->const_row_data,
-                                                     A->col_type,
-                                                     A->const_col_data,
-                                                     temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(info->recreate_triangular_info(
+        handle, rocsparse_operation_none, rocsparse_fill_mode_lower, A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

@@ -30,20 +30,20 @@
 
 namespace rocsparse
 {
-    rocsparse_status singularity_get_position_async(rocsparse_handle                  handle,
-                                                    int64_t                           batch_count,
-                                                    const rocsparse::pivot_info_t*    symbolic,
-                                                    const rocsparse::singular_info_t* exact,
-                                                    const rocsparse::singular_info_t* near,
+    rocsparse_status
+                     singularity_get_position_async(rocsparse_handle                        handle,
+                                                    int64_t                                 batch_count,
+                                                    const rocsparse::pivot_symbolic_info_t* symbolic,
+                                                    const rocsparse::pivot_numeric_info_t*  exact,
+                                                    const rocsparse::pivot_numeric_info_t*  near,
                                                     rocsparse_pointer_mode position_pointer_mode,
                                                     rocsparse_indextype    position_indextype,
                                                     void*                  position);
-    rocsparse_status singularity_get_async(rocsparse_handle                  handle,
-                                           int64_t                           batch_count,
-                                           const rocsparse::pivot_info_t*    symbolic,
-                                           const rocsparse::singular_info_t* exact,
-                                           const rocsparse::singular_info_t* near,
+    rocsparse_status singularity_get_async(rocsparse_handle                        handle,
+                                           int64_t                                 batch_count,
+                                           const rocsparse::pivot_symbolic_info_t* symbolic,
+                                           const rocsparse::pivot_numeric_info_t*  exact,
+                                           const rocsparse::pivot_numeric_info_t*  near,
                                            rocsparse_pointer_mode singularity_pointer_mode,
                                            void*                  singularities);
-
 }

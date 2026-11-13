@@ -25,7 +25,7 @@
 //
 // Host-path unit tests for the internal *_info.hpp struct helpers that live in
 // library/src/include. These are LIVE library methods (deep-copy helpers,
-// singularity accessors, csrmv/bsrmv clear/destroy paths, trm_data_t
+// singularity accessors, csrmv/bsrmv clear/destroy paths, triangular_data_t
 // create/recreate/storage_index) that were never exercised by the existing
 // test corpus. Every method here is reached purely through the public C API:
 //
@@ -35,7 +35,7 @@
 //     library/src/auxiliary/rocsparse_auxiliary.cpp). So each test populates a
 //     sub-info via the matching X_analysis / compute routine, then copies the
 //     mat_info into a freshly created dest.
-//   * The singularity accessors + trm_data_t create/recreate run inside the
+//   * The singularity accessors + triangular_data_t create/recreate run inside the
 //     X_analysis / X_solve / compute routines.
 //   * csrmv_info::clear()/dtor + copy_csrmv_info and the bsrmv_info
 //     ctor/dtor/get/set run through the ADAPTIVE csrmv/bsrmv analysis path and
@@ -67,9 +67,9 @@ class Info : public HandleTest
 //
 // Covers _rocsparse_csrsv_info::copy (via rocsparse_copy_mat_info),
 // get_singularity_numeric_exact (via zero_pivot),
-// create_singularity_numeric_exact (via solve), the pivot_info_t::
+// create_singularity_numeric_exact (via solve), the pivot_symbolic_info_t::
 // create_zero_pivot_async(indextype,stream) inline overload (via analysis),
-// and rocsparse::trm_data_t storage_index/create/recreate (via analysis).
+// and rocsparse::triangular_data_t storage_index/create/recreate (via analysis).
 // ======================================================================
 TEST_F(Info, csrsv_copy_and_singularity)
 {
@@ -265,7 +265,7 @@ TEST_F(Info, csric0_copy_and_singularity)
 // ======================================================================
 // bsrsv (block_dim = 1) : buffer_size -> analysis -> copy_mat_info.
 //
-// Covers _rocsparse_bsrsv_info::copy (trm_data_t::copy + singularity copy)
+// Covers _rocsparse_bsrsv_info::copy (triangular_data_t::copy + singularity copy)
 // via rocsparse_copy_mat_info.
 // ======================================================================
 TEST_F(Info, bsrsv_copy)

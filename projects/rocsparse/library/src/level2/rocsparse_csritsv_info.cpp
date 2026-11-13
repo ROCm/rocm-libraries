@@ -79,7 +79,7 @@ void _rocsparse_csritsv_info::copy(const _rocsparse_csritsv_info* that, hipStrea
         this->ptr_end = that->ptr_end;
     }
 
-    this->rocsparse::pivot_info_t::copy_pivot_info_async(that, stream);
+    this->rocsparse::pivot_symbolic_info_t::copy_pivot_info_async(that, stream);
     THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 

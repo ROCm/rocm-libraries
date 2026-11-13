@@ -362,7 +362,8 @@ namespace rocsparse
                                                        size_t                    buffer_size,
                                                        void*                     buffer)
     {
-        auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = csrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
 
         // done array
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
@@ -409,10 +410,10 @@ namespace rocsparse
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
             stride,
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()->get_values()),
             reinterpret_cast<J*>(numeric_exact->get_position()),
             numeric_exact->get_stride(),
             reinterpret_cast<J*>(numeric_near->get_position()),
@@ -485,7 +486,7 @@ namespace rocsparse
                                                           rocsparse_double_complex>(p...) //
                             : (i == rocsparse_datatype_f64_r) //
                                   ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, HASH, double>(
-                                      p...) //
+                                        p...) //
                                   : nullptr;
     }
 
@@ -524,7 +525,8 @@ namespace rocsparse
 rocsparse::csrilu0_kernel_launch_t rocsparse::find_csrilu0_kernel_hash_launch(
     rocsparse_handle handle, rocsparse_csrilu0_info csrilu0_info, rocsparse_const_spmat_descr A)
 {
-    auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    auto trm_info = csrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                             rocsparse_fill_mode_lower);
 
     return rocsparse::transform_wf<256>(
         handle->wavefront_size, trm_info->get_max_nnz(), A->data_type, A->row_type, A->col_type);

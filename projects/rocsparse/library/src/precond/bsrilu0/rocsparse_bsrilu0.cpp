@@ -38,8 +38,8 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    rocsparse::trm_info_t* trm_info
-        = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    const rocsparse::triangular_info_t* trm_info = bsrilu0_info->get_triangular_data()->get(
+        rocsparse_operation_none, rocsparse_fill_mode_lower);
 
     ROCSPARSE_CHECKARG(1,
                        bsrilu0_info,
@@ -53,7 +53,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
             A->batch_count,
             (int32_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
-            (const int32_t*)bsrilu0_info->get_position(),
+            (const int32_t*)bsrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
     else
@@ -61,7 +61,7 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
             A->batch_count,
             (int64_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
-            (const int64_t*)bsrilu0_info->get_position(),
+            (const int64_t*)bsrilu0_info->get_triangular_data()->get_pivot_info()->get_position(),
             handle->stream));
     }
 

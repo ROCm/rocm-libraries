@@ -292,7 +292,8 @@ namespace rocsparse
                                                      void*  buffer)
     {
 
-        auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        auto trm_info = csrilu0_info->get_triangular_data()->get(rocsparse_operation_none,
+                                                                 rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
@@ -341,10 +342,10 @@ namespace rocsparse
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()->get_values()),
             done_array,
             done_array_stride,
-            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<const J*>(trm_info->get_row_map()->get_values()),
 
             reinterpret_cast<J*>(numeric_exact->get_position()),
             numeric_exact->get_stride(),
@@ -376,11 +377,13 @@ namespace rocsparse
               typename... P>
     static csrilu0_kernel_launch_t transform_j_type(rocsparse_indextype j, P... p)
     {
-        return (j == rocsparse_indextype_i32) ? rocsparse::
-                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
-               : (j == rocsparse_indextype_i64) ? rocsparse::
-                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
-                                                : nullptr;
+        return (j == rocsparse_indextype_i32)
+                   ? rocsparse::
+                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
+               : (j == rocsparse_indextype_i64)
+                   ? rocsparse::
+                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
+                   : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename T, typename... P>
@@ -398,10 +401,12 @@ namespace rocsparse
     {
         return (i == rocsparse_datatype_f32_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, float>(p...)
-               : (i == rocsparse_datatype_f32_c) ? rocsparse::
-                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
-               : (i == rocsparse_datatype_f64_c) ? rocsparse::
-                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
+               : (i == rocsparse_datatype_f32_c)
+                   ? rocsparse::
+                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
+               : (i == rocsparse_datatype_f64_c)
+                   ? rocsparse::
+                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
                : (i == rocsparse_datatype_f64_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, double>(p...)
                    : nullptr;

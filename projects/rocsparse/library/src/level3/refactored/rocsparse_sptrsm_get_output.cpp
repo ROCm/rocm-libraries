@@ -89,14 +89,14 @@ try
                                rocsparse_status_invalid_value);
         }
 
-        rocsparse::pivot_info_t*    symbolic_pivot{};
-        rocsparse::singular_info_t* exact_pivot{};
-        rocsparse::singular_info_t* near_pivot{};
+        const rocsparse::pivot_symbolic_info_t* symbolic_pivot{};
+        rocsparse::pivot_numeric_info_t*        exact_pivot{};
+        rocsparse::pivot_numeric_info_t*        near_pivot{};
 
         auto csrsm_info = sptrsm_descr->get_csrsm_info();
         if(csrsm_info != nullptr)
         {
-            symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsm_info);
+            symbolic_pivot = csrsm_info->get_triangular_data()->get_pivot_info();
             exact_pivot    = csrsm_info->get_singularity_numeric_exact();
         }
 

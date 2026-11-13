@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "internal/level3/rocsparse_bsrsm.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "../level2/rocsparse_csrsv.hpp"
@@ -169,9 +170,31 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
         }
     }
 
-    auto bsrsm_info = info->get_bsrsm_info();
-    RETURN_IF_ROCSPARSE_ERROR(bsrsm_info->recreate(
-        handle, trans_A, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
+    info->get_bsrsm_info();
+    _rocsparse_spmat_descr A(rocsparse_format_bsr,
+                             1,
+                             mb,
+                             mb,
+                             nnzb,
+                             dir,
+                             block_dim,
+                             rocsparse::get_datatype<T>(),
+                             bsr_val,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<rocsparse_int>(),
+                             bsr_row_ptr,
+                             nullptr,
+                             0,
+                             rocsparse::get_indextype<rocsparse_int>(),
+                             bsr_col_ind,
+                             nullptr,
+                             0,
+                             descr->base,
+                             descr,
+                             info);
+    RETURN_IF_ROCSPARSE_ERROR(
+        info->recreate_triangular_info(handle, trans_A, descr->fill_mode, &A, 0, temp_buffer));
 
     return rocsparse_status_success;
 }

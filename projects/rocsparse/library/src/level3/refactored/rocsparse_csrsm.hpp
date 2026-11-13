@@ -29,10 +29,10 @@
 
 namespace rocsparse
 {
-    rocsparse_status spmat_transpose_update_values(rocsparse_handle            handle,
-                                                   rocsparse_spmat_descr       target,
-                                                   rocsparse_const_spmat_descr source,
-                                                   rocsparse::trm_info_t*      trm_info);
+    rocsparse_status spmat_transpose_update_values(rocsparse_handle              handle,
+                                                   rocsparse_spmat_descr         target,
+                                                   rocsparse_const_spmat_descr   source,
+                                                   rocsparse::triangular_info_t* trm_info);
 
     rocsparse_status csrsm_zero_pivot(rocsparse_handle     handle,
                                       rocsparse_csrsm_info info,
