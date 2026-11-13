@@ -1339,7 +1339,7 @@ Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname3_gfx942:
 .long 0x2AD2D2FF, 0x00004000
 .long 0xD3CD8070, 0x05C2012E
 .long 0xE0501000, 0x510D5468
-.long 0xBF8CC97F
+.long 0xBF8CC17F // s_waitcnt lgkmcnt(1): complete operand reads; one LDS write may remain.
 .long 0xD3CD8000, 0x04021132
 .long 0xBF8C4F70
 .long 0xD81A0440, 0x00005666

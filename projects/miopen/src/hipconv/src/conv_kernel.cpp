@@ -2,11 +2,18 @@
 
 #include "hip_util.h"
 #include "launch_params.h"
+#include "hash.hpp"
 
 namespace hipconv
 {
 
+RepresentationHashPair::RepresentationHashPair(std::string_view repr) : repr_{std::move(repr)}
+{
+    hash_ = murmur3_32(repr_);
+}
+
 void ConvKernel::launch(const LaunchParams& lp,
+                        const hipconv::Device& dev,
                         const hipconv::ConvParams& par,
                         const void* in,
                         const void* wei,
@@ -14,7 +21,7 @@ void ConvKernel::launch(const LaunchParams& lp,
                         void* workspace,
                         hipStream_t stream) const
 {
-    launch_fn_(lp, par, in, wei, out, workspace, stream);
+    launch_fn_(lp, dev, par, in, wei, out, workspace, stream);
     // Kernel launches have no return value.
     // Read the launch-time status right after the launch and throw on failure.
     HIP_CHECK(hipGetLastError());

@@ -67,6 +67,14 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     return &node.attributesAs<data_objects::SdpaAttributes>();
 }
 
+/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
+/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
+/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
+inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
+{
+    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
+}
+
 /// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
 /// checked before anything indexes an axis.
 inline bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)

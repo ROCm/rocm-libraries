@@ -412,10 +412,9 @@ replay, so the runtime refuses to queue a checked kernel on a stream that is bei
 nothing reads the word for it and its failure is silent. That is why `hkp_pack`,
 `write_artifact` and both engines' recipe launch plans refuse a kernel that holds a check.
 
-The check does not trap. A trapped wave is parked by the trap handler (and on gfx11 `llvm.trap`
-ends in an `s_sethalt` loop); the launch ends only when the driver turns the trap's interrupt into a
-queue error. ROCm on Linux does and aborts the process; the Windows runtime does not, and its wait
-for the launch never returns.
+The check does not trap. A taken trap does not let the process carry on (what it does on each
+platform, and on which processors it is the simulated trap: `tile.trap` in
+[op_vocabulary.md](../reference/op_vocabulary.md)).
 
 So the check is a last line of defence for a value the host cannot see, not a way to reject input;
 make bad input impossible upstream.

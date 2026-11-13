@@ -395,10 +395,16 @@ jobs:
           LARGE_GROUPS=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow_hpa*'
             '*stress_matmul_size_t_index_overflow_*-*stress_matmul_size_t_index_overflow_hpa*'
             '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
-          # gtest filter syntax is POSITIVE[-NEGATIVE]; the shards add LARGE to the negatives.
+          # ConcurrentStreamsDoNotDeadlock skips at this GPU's default Stream-K grid (grid ==
+          # tiles, no remainder path). TENSILE_PERSISTENT_FIXED_GRID applies to every Stream-K
+          # GEMM in a process, so the test runs in its own process after the shards.
+          SK_DEADLOCK=StreamKMultiStream.ConcurrentStreamsDoNotDeadlock
+          EXCLUDED=("$SK_DEADLOCK")
+          # gtest filter syntax is POSITIVE[-NEGATIVE]; the shards add LARGE and EXCLUDED to
+          # the negatives.
           POS="${GTEST_FILTER_ARG%%-*}" NEG=""
           [[ "$GTEST_FILTER_ARG" == *-* ]] && NEG="${GTEST_FILTER_ARG#*-}:"
-          FILTER=(--gtest_filter="${POS:-*}-${NEG}$(IFS=:; echo "${LARGE[*]}")")
+          FILTER=(--gtest_filter="${POS:-*}-${NEG}$(IFS=:; echo "${LARGE[*]}:${EXCLUDED[*]}")")
           # True if test name $1 matches gtest filter $2 (* and ? wildcards).
           in_filter() {
             local p pos="${2%%-*}" neg="" hit=1
@@ -428,6 +434,19 @@ jobs:
           done
           rc=0
           for p in "${pids[@]}"; do wait "$p" || rc=1; done
+          # 360 = 2 x the test's 180 tiles: uniform summation order (on by default) keeps it
+          # (a grid below the tile count snaps up to 180), and every tile is split across two
+          # workgroups that hand off through a flag.
+          if [ -z "$GTEST_FILTER_ARG" ] || in_filter "$SK_DEADLOCK" "$GTEST_FILTER_ARG"; then
+            L="$OUT/hipblaslt_test_shard_streamk.log"
+            ( export TENSILE_PERSISTENT_FIXED_GRID=360
+              run_tests "$(basename "$L")" --gtest_filter="$SK_DEADLOCK" ) || rc=1
+            if grep -q '^\[==========\] Running 0 tests' "$L"; then
+              echo "::error::$SK_DEADLOCK matches no test; update SK_DEADLOCK"; rc=1
+            elif grep -q "^\[  SKIPPED \] $SK_DEADLOCK" "$L"; then
+              echo "::warning::$SK_DEADLOCK skipped at TENSILE_PERSISTENT_FIXED_GRID=360: $(grep -m1 'remainder path' "$L")"
+            fi
+          fi
           # The large tests this run selects, by group: the names gtest lists for the run's
           # filter (suite lines end in "."; test lines are indented), matched to each group.
           LIST=(--gtest_list_tests)
