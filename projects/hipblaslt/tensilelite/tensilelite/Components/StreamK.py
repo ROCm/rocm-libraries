@@ -206,20 +206,20 @@ class StreamKMemoryOrdering(Component):
     StreamK uses a producer/consumer protocol: one workgroup writes a partial
     tile to a workspace and signals completion via a flag, and other
     workgroups poll the flag and read the partials. The required cross-CU
-    memory ordering depends on the target ISA:
+    memory ordering depends on the target's capabilities:
 
     - Most arches: `s_waitcnt vscnt(0)` before the flag store and an SMEM
       flag load with `glc/dlc/scope:SCOPE_DEV` are sufficient because
       ordering between L1/L2 and the device-scope coherence point is
       implicit.
 
-    - gfx1250: the L2 has independent partitions and SMEM is not coherent
-      with the VMEM flag store, so an explicit `global_wb scope:SCOPE_DEV`
-      is required on the release side and a `global_inv scope:SCOPE_DEV`
-      on the acquire side. Additionally, XNACK-replay can reorder a
-      volatile/atomic VMEM op past in-flight VMEM, so `s_wait_xcnt 0` must
-      precede such ops. The flag itself must be read via VMEM (not SMEM)
-      to observe the producer's release-side fence.
+    - gfx1250: flag reads use VMEM because SMEM is not coherent with the
+      VMEM flag store. When MTypeNC is True (e.g. gfx1250-strict), release
+      needs DEV writeback and acquire needs DEV invalidation. Non-strict
+      gfx1250 excludes NC mappings: hardware keeps L2 coherent, so release
+      retains only completion waits and acquire uses SE invalidation.
+      XNACK-replay can still reorder volatile/atomic VMEM past in-flight
+      VMEM, so the separate `s_wait_xcnt 0` drains remain necessary.
 
     - gfx950: L2 is split across XCDs. Workspace partials already
       store with glc+slc, but SMEM flag traffic and workspace loads without
@@ -376,31 +376,33 @@ class StreamKMemoryOrderingGfx9Xcd(StreamKMemoryOrdering):
 
 
 class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
-    """Explicit cross-L2 release/acquire fences via global_wb/global_inv
-    scope:SCOPE_DEV plus a VMEM-coherent flag read.
+    """Target-dependent cache fences plus a VMEM-coherent flag read.
 
-    Selected on arches whose L2 is partitioned across CUs/XCDs and whose
-    SMEM is not coherent with the VMEM flag write (e.g. gfx1250).
+    MTYPE NC mappings need DEV writeback/invalidation. Without NC, completed
+    stores need no software L2 writeback. Release still drains loads/stores;
+    acquire invalidates stale copies below SE scope. VMEM flags remain necessary.
     """
     archCaps = {"HasInvWbDevFences": True}
 
     def releaseFence(self, writer) -> Module:
         module = Module("StreamK release fence (dev-scope)")
         module.add(SWaitCnt(vlcnt=0,
-            comment="release: drain in-flight loads before global_wb"))
+            comment="release: drain in-flight loads"))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
-            comment="release: writeback partials to L2-coherent point"))
-        module.add(SWaitCnt(vlcnt=0, vscnt=0,
-            comment="release: wait for global_wb"))
+        if writer.states.archCaps.get("MTypeNC", True):
+            module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
+                comment="release: writeback partials to L2-coherent point"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0,
+                comment="release: wait for global_wb"))
         return module
 
     def acquireFence(self, writer) -> Module:
-        # Drop stale dev-scope cache lines so the next dependent read (the flag
-        # word in getFlagValue, or the partials after the flag is observed) is
-        # re-fetched from the L2-coherent point.
+        # Invalidate before the flag poll and again before consuming partials.
+        # The memory accesses stay DEV-scoped even when L2 coherence permits
+        # the narrower invalidation; missing capability data stays conservative.
         module = Module("StreamK acquire fence (dev-scope)")
-        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
+        scope = CacheScope.SCOPE_DEV if writer.states.archCaps.get("MTypeNC", True) else CacheScope.SCOPE_SE
+        module.add(GlobalInv(scope=scope,
             comment="acquire: invalidate before dependent dev-scope read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
@@ -2233,9 +2235,8 @@ class StreamK(TileProcessingStrategy):
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
         module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
                                   mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        # Release the flag store: drain the store and (on dev-scope arches) global_wb
-        # the flag word to the L2-coherent point so a peer's acquire can observe it.
-        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
+        # Release the flag store: drain it and, when NC mappings are possible,
+        # write it back to the L2-coherent point so a peer's acquire can observe it.
         module.add(memOrder.releaseFence(writer))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
