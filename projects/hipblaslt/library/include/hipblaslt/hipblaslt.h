@@ -252,13 +252,14 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
+   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
-   * Swizzled orders apply to A and B only: the same APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED``
-   * when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
-   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
-   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   * ``HIPBLASLT_ORDER_ROW``. Swizzled orders apply to A and B only: those APIs,
+   * ``hipblasLtMatmul``, and ``hipblasLtMatmulAlgoGetHeuristic`` return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
@@ -491,13 +492,21 @@ typedef enum {
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
-   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
-   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
-   * matrix as its column-major transpose. The column-major result is ``(A * B)^T``, which is
-   * ``A * B`` in row-major order, so the output needs no transpose. Anything applied per row of D,
-   * such as a bias or an alpha vector, then applies per column of ``A * B``, and the scale for A
-   * becomes the scale for the second operand.
+   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. For the supported combinations, the library
+   * rewrites internal copies of the layouts and transpose operations into an equivalent
+   * column-major problem. This rewrite does not copy or reorder matrix data and does not launch
+   * a separate transpose kernel. The heuristic and matmul use the same rewritten problem.
+   *
+   * Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or D, and for a row-major
+   * A or B combined with an operation other than ``HIPBLAS_OP_N`` or
+   * ``HIPBLAS_OP_T``, a block or vector scale mode, or an ``HIP_R_4I`` matrix. With a fused
+   * all-to-all epilogue, a row-major D returns ``HIPBLAS_STATUS_INVALID_VALUE`` instead, because
+   * the epilogue's own check runs first.
+   *
+   * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
+   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
