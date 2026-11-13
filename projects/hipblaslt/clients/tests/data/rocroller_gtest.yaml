@@ -100,6 +100,7 @@ Tests:
   transB: N
   use_ext: [0, 1]
   requires_streamk: 1
+  expected_kernel: RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_32x32x128_UR_2
   alpha: 1
   beta: 0
   initialization: hpl

@@ -134,7 +134,7 @@ axes:
 
   kernel_source:
     description: "Where the executed kernel came from"
-    fields: []
+    fields: [expected_kernel]
     classes:
       tensilelite_generated: {likelihood: M, impact: H}
       rocroller: {examples: "HIPBLASLT_ENABLE_ROCROLLER kernels", likelihood: M, impact: M}
