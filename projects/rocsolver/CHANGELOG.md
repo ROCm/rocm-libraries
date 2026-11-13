@@ -7,6 +7,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER 3.39
 
 ### Added
+
+* Matrix copy: LACPY and LACPY_64
+
 ### Changed
 ### Removed
 ### Optimized
