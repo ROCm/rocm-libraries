@@ -1,9 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
+#include <set>
+#include <string>
+
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -15,6 +21,140 @@ using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
+
+namespace
+{
+
+using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+// Re-serializes a test-helper matmul graph with the virtual layout a frontend emits:
+// every fused intermediate (the matmul output when bias or activation follows, the
+// bias output when activation follows) is virtual and every other tensor is not.
+// Each tensor named in `flipped` then has its virtual flag inverted. The test graph
+// helper names the tensors A, B, bias, C_matmul, C_bias and C.
+flatbuffers::FlatBufferBuilder frontendVirtualLayout(const flatbuffers::FlatBufferBuilder& source,
+                                                     const std::set<std::string>& flipped = {})
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    const size_t nodeCount = graph->nodes.size();
+    for(auto& tensor : graph->tensors)
+    {
+        const bool intermediate = (tensor->name == "C_matmul" && nodeCount > 1)
+                                  || (tensor->name == "C_bias" && nodeCount > 2);
+        tensor->virtual_ = intermediate != (flipped.count(tensor->name) != 0);
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
+flatbuffers::FlatBufferBuilder createFusedGraph(bool doBias,
+                                                PointwiseMode activMode,
+                                                const std::set<std::string>& flipped = {})
+{
+    return frontendVirtualLayout(
+        createValidMatmulBiasActivGraph(
+            {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, doBias, activMode),
+        flipped);
+}
+
+} // namespace
+
+// Host-only fixture: the default handle is never used because the virtual checks
+// run before plan construction. Without a GPU handle every graph is eventually
+// rejected, so the decline cause is asserted from the plugin log.
+class TestHipblasltMatmulPlanBuilderVirtual : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        // Other suites install their own plugin logging callback; route plugin logs to
+        // the shared recorder so tests can assert decline causes.
+        hipdnn_plugin_sdk::logging::initializeCallbackLogging(
+            "hipblaslt_plugin_tests",
+            hipdnn_test_sdk::utilities::initializeTestLogRecordingShared());
+    }
+
+    HipblasltMatmulPlanBuilder _planBuilder;
+    HipdnnEnginePluginHandle _handle{};
+};
+
+// One fusion shape and the tensors whose virtual flag is flipped, one per case,
+// with the role the decline message names.
+struct VirtualCase
+{
+    const char* shape;
+    bool doBias;
+    PointwiseMode activMode;
+    const char* tensorName;
+    const char* role;
+};
+
+class TestHipblasltMatmulPlanBuilderVirtualRoles : public TestHipblasltMatmulPlanBuilderVirtual,
+                                                   public ::testing::WithParamInterface<VirtualCase>
+{
+};
+
+TEST_P(TestHipblasltMatmulPlanBuilderVirtualRoles, IsApplicableDeclinesFlippedVirtualFlag)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto& param = GetParam();
+    auto builder = createFusedGraph(param.doBias, param.activMode, {param.tensorName});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                          std::string("Matmul: ") + param.role + " tensor must be"))
+        << recorder.getRecordedLogsAsString();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Roles,
+    TestHipblasltMatmulPlanBuilderVirtualRoles,
+    ::testing::Values(
+        VirtualCase{"matmul", false, PointwiseMode::UNSET, "A", "A"},
+        VirtualCase{"matmul", false, PointwiseMode::UNSET, "B", "B"},
+        VirtualCase{"matmul", false, PointwiseMode::UNSET, "C_matmul", "matmul output"},
+        VirtualCase{"matmul_bias", true, PointwiseMode::UNSET, "A", "A"},
+        VirtualCase{"matmul_bias", true, PointwiseMode::UNSET, "B", "B"},
+        VirtualCase{"matmul_bias", true, PointwiseMode::UNSET, "bias", "bias input"},
+        VirtualCase{"matmul_bias", true, PointwiseMode::UNSET, "C_matmul", "matmul output"},
+        VirtualCase{"matmul_bias", true, PointwiseMode::UNSET, "C_bias", "bias output"},
+        VirtualCase{"matmul_act", false, PointwiseMode::RELU_FWD, "A", "A"},
+        VirtualCase{"matmul_act", false, PointwiseMode::RELU_FWD, "B", "B"},
+        VirtualCase{"matmul_act", false, PointwiseMode::RELU_FWD, "C_matmul", "matmul output"},
+        VirtualCase{"matmul_act", false, PointwiseMode::RELU_FWD, "C", "activation output"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "A", "A"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "B", "B"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "bias", "bias input"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "C_matmul", "matmul output"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "C_bias", "bias output"},
+        VirtualCase{"matmul_bias_act", true, PointwiseMode::RELU_FWD, "C", "activation output"}),
+    [](const ::testing::TestParamInfo<VirtualCase>& info) {
+        return std::string(info.param.shape) + "_" + info.param.tensorName;
+    });
+
+// The virtual layout a frontend emits for each fusion shape is not declined for
+// virtuality.
+TEST_F(TestHipblasltMatmulPlanBuilderVirtual, IsApplicableDoesNotDeclineFrontendVirtualLayout)
+{
+    const std::array<std::pair<bool, PointwiseMode>, 4> shapes{{{false, PointwiseMode::UNSET},
+                                                                {true, PointwiseMode::UNSET},
+                                                                {false, PointwiseMode::RELU_FWD},
+                                                                {true, PointwiseMode::RELU_FWD}}};
+    for(const auto& [doBias, activMode] : shapes)
+    {
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        auto builder = createFusedGraph(doBias, activMode);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        (void)_planBuilder.isApplicable(_handle, graph);
+        EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "tensor must be"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
 
 class TestHipblasltMatmulPlanBuilder : public ::testing::Test
 {
@@ -146,7 +286,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias only (no activation)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -154,7 +294,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -162,7 +302,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (GELU)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -170,7 +310,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             true,
-            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -178,7 +318,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation only (no bias, standard ReLU)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -187,7 +327,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {5, 1},
             false,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
-            0.0f);
+            0.0f));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -195,7 +335,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (Swish)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -206,7 +346,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD,
             std::nullopt,
             std::nullopt,
-            1.0f);
+            1.0f));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -214,7 +354,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (clamp)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -224,7 +364,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             true,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             0.f,
-            6.f);
+            6.f));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -232,7 +372,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation (ReLU with no clip or slope set)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -240,7 +380,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             {4, 5},
             {5, 1},
             false,
-            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -248,7 +388,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (ReLU6: upper clip only)
     {
-        auto builder = createValidMatmulBiasActivGraph(
+        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -258,7 +398,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
             true,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             std::nullopt,
-            6.f);
+            6.f));
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));

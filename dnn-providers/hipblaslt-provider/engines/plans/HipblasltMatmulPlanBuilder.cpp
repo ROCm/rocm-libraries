@@ -283,6 +283,70 @@ void checkComputeTypes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGrap
     }
 }
 
+// Validate the virtual/non-virtual contract of the fused graph. The plan resolves
+// A, B, the bias input and the final output to device buffers at execute time, so
+// they must be non-virtual. The plan writes only the final output: every earlier
+// output (matmul output when bias or activation follows, bias output when
+// activation follows) is a fused intermediate it never materializes, so it must be
+// virtual.
+void checkVirtualTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& matmulAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto requireNonVirtual = [&tensorMap](int64_t uid, const char* name) {
+        if(hipblaslt_utils::findTensorAttributes(tensorMap, uid).isVirtual())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Matmul: ") + name
+                    + " tensor must be non-virtual (it needs a device buffer)");
+        }
+    };
+    const auto requireVirtual = [&tensorMap](int64_t uid, const char* name) {
+        if(!hipblaslt_utils::findTensorAttributes(tensorMap, uid).isVirtual())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Matmul: ") + name
+                    + " tensor must be virtual (the plan does not write it)");
+        }
+    };
+
+    requireNonVirtual(matmulAttr.a_tensor_uid(), "A");
+    requireNonVirtual(matmulAttr.b_tensor_uid(), "B");
+
+    if(biasAttr != nullptr)
+    {
+        const auto biasUid = biasAttr->in_0_tensor_uid() == matmulAttr.c_tensor_uid()
+                                 ? biasAttr->in_1_tensor_uid().value()
+                                 : biasAttr->in_0_tensor_uid();
+        requireNonVirtual(biasUid, "bias input");
+        requireVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+        if(activAttr != nullptr)
+        {
+            requireVirtual(biasAttr->out_0_tensor_uid(), "bias output");
+            requireNonVirtual(activAttr->out_0_tensor_uid(), "activation output");
+        }
+        else
+        {
+            requireNonVirtual(biasAttr->out_0_tensor_uid(), "bias output");
+        }
+    }
+    else if(activAttr != nullptr)
+    {
+        requireVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+        requireNonVirtual(activAttr->out_0_tensor_uid(), "activation output");
+    }
+    else
+    {
+        requireNonVirtual(matmulAttr.c_tensor_uid(), "matmul output");
+    }
+}
+
 } // namespace
 
 bool HipblasltMatmulPlanBuilder::isApplicable(
@@ -297,6 +361,11 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                               std::get<1>(nodeAttrs),
                               std::get<2>(nodeAttrs),
                               opGraph.getTensorMap());
+
+        checkVirtualTensors(std::get<0>(nodeAttrs),
+                            std::get<1>(nodeAttrs),
+                            std::get<2>(nodeAttrs),
+                            opGraph.getTensorMap());
 
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 
