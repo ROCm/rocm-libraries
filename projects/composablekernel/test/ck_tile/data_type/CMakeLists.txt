@@ -52,11 +52,13 @@ if(GPU_TARGETS MATCHES "gfx125")
 endif()
 if(CK_USE_OCP_FP8 OR CK_USE_FNUZ_FP8)
     add_gtest_executable(test_ck_tile_fp8 test_fp8.cpp)
-    target_compile_options(test_ck_tile_fp8 PRIVATE -Wno-float-equal)
-    target_compile_definitions(test_ck_tile_fp8 PUBLIC GTEST_HAS_RTTI=0)
-    # conditionally specify the use of OCP_FP8
-    if(CK_USE_OCP_FP8)
-        target_compile_options(test_ck_tile_fp8 PRIVATE -DCK_TILE_USE_OCP_FP8)
+    if(result EQUAL 0)
+        target_compile_options(test_ck_tile_fp8 PRIVATE -Wno-float-equal)
+        target_compile_definitions(test_ck_tile_fp8 PUBLIC GTEST_HAS_RTTI=0)
+        # conditionally specify the use of OCP_FP8
+        if(CK_USE_OCP_FP8)
+            target_compile_options(test_ck_tile_fp8 PRIVATE -DCK_TILE_USE_OCP_FP8)
+        endif()
     endif()
 endif()
 
@@ -64,43 +66,45 @@ endif()
 if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     # Consolidated BF16 tests (all tests in one file for consistency with other data type tests)
     add_gtest_executable(test_ck_tile_bf16 test_bf16.cpp)
-    target_compile_options(test_ck_tile_bf16 PRIVATE -Wno-float-equal)
+    if(result EQUAL 0)
+        target_compile_options(test_ck_tile_bf16 PRIVATE -Wno-float-equal)
 
-    # Apply common compile definitions based on build configuration
-    set(BF16_TEST_TARGETS
-        test_ck_tile_bf16
-    )
-    
-    foreach(test_target ${BF16_TEST_TARGETS})
+        # Apply common compile definitions based on build configuration
+        set(BF16_TEST_TARGETS
+            test_ck_tile_bf16
+        )
 
-        # Apply LLVM builtin BF16 flag if explicitly set as a CMake variable.
-        # If not set here, config.hpp will automatically define CK_TILE_USE_LLVM_BUILTIN_BF16 based on HIP version (ROCm 6.5.50421+ or ROCm 7.0+)
-        # This allows the user to explicitly set the flag at CMake configure time (e.g., via -DCK_TILE_USE_LLVM_BUILTIN_BF16=ON/OFF as a CMake variable),
-        # which is then converted to 0/1 for the C++ preprocessor, allowing them to override the header's default.
-        if(DEFINED CK_TILE_USE_LLVM_BUILTIN_BF16)
-            # Convert ON/OFF to 0/1 for C++ preprocessor
-            if(CK_TILE_USE_LLVM_BUILTIN_BF16)
-                target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_LLVM_BUILTIN_BF16=1)
-            else()
-                target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_LLVM_BUILTIN_BF16=0)
+        foreach(test_target ${BF16_TEST_TARGETS})
+
+            # Apply LLVM builtin BF16 flag if explicitly set as a CMake variable.
+            # If not set here, config.hpp will automatically define CK_TILE_USE_LLVM_BUILTIN_BF16 based on HIP version (ROCm 6.5.50421+ or ROCm 7.0+)
+            # This allows the user to explicitly set the flag at CMake configure time (e.g., via -DCK_TILE_USE_LLVM_BUILTIN_BF16=ON/OFF as a CMake variable),
+            # which is then converted to 0/1 for the C++ preprocessor, allowing them to override the header's default.
+            if(DEFINED CK_TILE_USE_LLVM_BUILTIN_BF16)
+                # Convert ON/OFF to 0/1 for C++ preprocessor
+                if(CK_TILE_USE_LLVM_BUILTIN_BF16)
+                    target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_LLVM_BUILTIN_BF16=1)
+                else()
+                    target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_LLVM_BUILTIN_BF16=0)
+                endif()
             endif()
-        endif()
 
-        # Define macro to indicate hardware/software saturation behavior for bf16 overflow
-        # - gfx9 (gfx90a, gfx908, gfx942): Hardware saturates to bf16::max
-        # - gfx11: Software truncate mode saturates to bf16::max
-        # - gfx12: Hardware builtin saturates to bf16::max
-        # - gfx950: Hardware builtin rounds to infinity (IEEE-754 RTN)
-        if(GPU_TARGETS MATCHES "gfx90a|gfx908|gfx94[02]|gfx11")
-            target_compile_definitions(${test_target} PRIVATE CK_TILE_BF16_OVERFLOW_SATURATES=1)
-        endif()
+            # Define macro to indicate hardware/software saturation behavior for bf16 overflow
+            # - gfx9 (gfx90a, gfx908, gfx942): Hardware saturates to bf16::max
+            # - gfx11: Software truncate mode saturates to bf16::max
+            # - gfx12: Hardware builtin saturates to bf16::max
+            # - gfx950: Hardware builtin rounds to infinity (IEEE-754 RTN)
+            if(GPU_TARGETS MATCHES "gfx90a|gfx908|gfx94[02]|gfx11")
+                target_compile_definitions(${test_target} PRIVATE CK_TILE_BF16_OVERFLOW_SATURATES=1)
+            endif()
 
-        # Apply custom data type flag if enabled (except for arithmetic which already has it)
-        if(CK_TILE_USE_CUSTOM_DATA_TYPE AND NOT "${test_target}" STREQUAL "test_ck_tile_bf16_arithmetic")
-            target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_CUSTOM_DATA_TYPE=1)
-        endif()
+            # Apply custom data type flag if enabled (except for arithmetic which already has it)
+            if(CK_TILE_USE_CUSTOM_DATA_TYPE AND NOT "${test_target}" STREQUAL "test_ck_tile_bf16_arithmetic")
+                target_compile_definitions(${test_target} PRIVATE CK_TILE_USE_CUSTOM_DATA_TYPE=1)
+            endif()
 
-        # Ensure GTEST_HAS_RTTI is consistent
-        target_compile_definitions(${test_target} PUBLIC GTEST_HAS_RTTI=0)
-    endforeach()
+            # Ensure GTEST_HAS_RTTI is consistent
+            target_compile_definitions(${test_target} PUBLIC GTEST_HAS_RTTI=0)
+        endforeach()
+    endif()
 endif()
