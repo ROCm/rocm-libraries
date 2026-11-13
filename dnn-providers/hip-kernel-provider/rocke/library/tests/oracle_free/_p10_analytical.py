@@ -17,6 +17,7 @@ which the codeword is exact, the codeword, and the targets.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from functools import cache
@@ -25,6 +26,7 @@ import numpy as np
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
 from ._analytical import (
+    _FORMAT,
     UNIFORM_QUICK_CASES,
     UniformCase,
     legal_interval,
@@ -423,3 +425,129 @@ def emulate_path_exact(
 
     kv_head = np.arange(case.nhead_q) // (case.nhead_q // case.nhead_k)
     return np.ascontiguousarray(np.moveaxis(stored[:, kv_head], 1, 2))
+
+
+# Guard patterns. The canary is a finite value no output can equal, so a changed
+# guard element is a write outside the logical tensor. The sentinel is a NaN, so
+# a logical element the kernel never stores is told apart from every value it
+# could store. A store of exactly the sentinel bits looks the same as no store.
+CANARY_BITS = 0xA5A5
+SENTINEL_BITS = 0xFFFF
+# Eight 16-bit elements are the 16-byte alignment the subject adapter checks on
+# every device pointer, the interior output pointer included.
+_GUARD_ALIGNMENT = 8
+
+
+@dataclass(frozen=True)
+class GuardLayout:
+    """Element counts of a guarded output: ``guard | logical | guard``."""
+
+    guard: int
+    logical: int
+
+    def __post_init__(self) -> None:
+        if self.logical <= 0:
+            raise ValueError(
+                f"GuardLayout failed - logical={self.logical}, expected a positive "
+                "element count"
+            )
+        if self.guard <= 0 or self.guard % _GUARD_ALIGNMENT:
+            raise ValueError(
+                f"GuardLayout failed - guard={self.guard}, expected a positive "
+                f"multiple of {_GUARD_ALIGNMENT} elements"
+            )
+
+    @property
+    def total(self) -> int:
+        """Elements of the whole allocation."""
+        return 2 * self.guard + self.logical
+
+    def new_buffer(self) -> np.ndarray:
+        """A host image of the allocation before the launch, as raw bits."""
+        buffer = np.full(self.total, CANARY_BITS, dtype=np.uint16)
+        buffer[self.guard : self.guard + self.logical] = SENTINEL_BITS
+        return buffer
+
+
+def guard_layout(case: UniformCase, schedule: TileSchedule) -> GuardLayout:
+    """Guards that hold one query tile of output on each side of the tensor.
+
+    The kernel stores without a row bound, and its unit of work is a query tile,
+    so the overrun a missing bound produces is up to one tile of rows. A guard of
+    that size shows such an overrun in full. It is no bound on a write to an
+    arbitrary bad address. The tile comes from the schedule the kernel resolved
+    to, so a retune to a larger query tile grows the guard with it."""
+    tile = schedule.block_m * case.nhead_q * case.head_dim
+    guard = -(-tile // _GUARD_ALIGNMENT) * _GUARD_ALIGNMENT
+    return GuardLayout(guard=guard, logical=math.prod(case.output_shape))
+
+
+@dataclass(frozen=True)
+class StoreSafety:
+    """Exact element counts of the four ways a launch can leave the guarded buffer.
+
+    The classes are disjoint: ``unwritten`` counts logical elements that still
+    hold the sentinel bits, ``nonfinite`` the other logical elements that are a
+    NaN or an infinity. Every count must be zero."""
+
+    prefix: int
+    suffix: int
+    unwritten: int
+    nonfinite: int
+
+    @property
+    def violations(self) -> tuple[str, ...]:
+        """The nonzero counts, named."""
+        counts = (
+            ("guard elements changed before the tensor", self.prefix),
+            ("guard elements changed after the tensor", self.suffix),
+            ("sentinel pattern, presumed missing store", self.unwritten),
+            ("computed non-finite values", self.nonfinite),
+        )
+        return tuple(f"{name}: {count}" for name, count in counts if count)
+
+
+@dataclass(frozen=True, eq=False)
+class GuardedOutput:
+    """The whole guarded allocation read back after a launch, as raw bits."""
+
+    layout: GuardLayout
+    raw: np.ndarray
+
+    def __post_init__(self) -> None:
+        raw = np.asarray(self.raw)
+        if raw.dtype != np.uint16 or raw.shape != (self.layout.total,):
+            raise ValueError(
+                f"GuardedOutput failed - raw has dtype {raw.dtype} and shape "
+                f"{raw.shape}, expected uint16 and ({self.layout.total},)"
+            )
+        copy = np.ascontiguousarray(raw).copy()
+        copy.setflags(write=False)
+        object.__setattr__(self, "raw", copy)
+
+    def bits(self, case: UniformCase) -> np.ndarray:
+        """The logical tensor's raw bits in the ``[B, Sq, Hq, D]`` layout."""
+        if math.prod(case.output_shape) != self.layout.logical:
+            raise ValueError(
+                f"GuardedOutput.bits failed - case {case.case_id} has "
+                f"{math.prod(case.output_shape)} elements, expected "
+                f"{self.layout.logical}"
+            )
+        start = self.layout.guard
+        logical = self.raw[start : start + self.layout.logical]
+        return logical.reshape(case.output_shape).copy()
+
+    def safety(self, dtype: str) -> StoreSafety:
+        """Count changed guard elements and unwritten or non-finite outputs."""
+        fraction_bits, exponent_bits, _ = _FORMAT[dtype]
+        start, stop = self.layout.guard, self.layout.guard + self.layout.logical
+        logical = self.raw[start:stop]
+        unwritten = logical == SENTINEL_BITS
+        exponent_field = ((1 << exponent_bits) - 1) << fraction_bits
+        nonfinite = ((logical & exponent_field) == exponent_field) & ~unwritten
+        return StoreSafety(
+            prefix=int(np.count_nonzero(self.raw[:start] != CANARY_BITS)),
+            suffix=int(np.count_nonzero(self.raw[stop:] != CANARY_BITS)),
+            unwritten=int(np.count_nonzero(unwritten)),
+            nonfinite=int(np.count_nonzero(nonfinite)),
+        )
