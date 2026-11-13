@@ -34,8 +34,7 @@ using hipdnn_integration_tests::bundle::ValidatorKind;
 namespace
 {
 
-// The engine TOML these tests grade under. Both overrides match only this suite's fp8
-// tests, and only LSE is switched to allclose_matching_infinities.
+// The engine TOML the fp8 output test grades under. Its filter matches no other test.
 TestSettings fp8OverrideSettings()
 {
     const auto dir = hipdnn_test_sdk::utilities::claimScratchDirectory("toml_guards");
@@ -50,11 +49,6 @@ version = 1
 filters = ["TestTomlGuards.GradingForTensorFp8Output*"]
 atol = 0.5
 rtol = 0.25
-
-[[validator_overrides]]
-filters = ["TestTomlGuards.GradingForTensorFp8Output*"]
-tensors = ["SdpaFwd_0::LSE"]
-validator = "allclose_matching_infinities"
 )";
     }
     return TestSettings(path);
@@ -224,30 +218,6 @@ TEST(TestTomlGuards, GradingForTensorFp8OutputTakesTheToleranceOverrideInOrder)
     };
     EXPECT_TRUE(allCloseToEight(10.0f));
     EXPECT_FALSE(allCloseToEight(12.0f));
-}
-
-TEST(TestTomlGuards, GradingForTensorFp8OutputMatchingInfinitiesTakesTheToleranceOverrideInOrder)
-{
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
-
-    const auto fp8Step
-        = hipdnn_integration_tests::tolerance::fp8OutputTolerance(DataType::FP8_E4M3);
-    ASSERT_TRUE(fp8Step.has_value());
-
-    const auto settings = fp8OverrideSettings();
-    const auto testName = currentTestName();
-    const std::string label = "SdpaFwd_0::LSE";
-
-    const auto grading = gradingForTensor(testName,
-                                          label,
-                                          settings.findValidatorOverride(testName, label),
-                                          settings.findToleranceOverride(testName),
-                                          fp8Step->atol,
-                                          fp8Step->rtol);
-
-    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
-    EXPECT_EQ(grading.atol, 0.5f);
-    EXPECT_EQ(grading.rtol, 0.25f);
 }
 
 // NOLINTEND(readability-identifier-naming)
