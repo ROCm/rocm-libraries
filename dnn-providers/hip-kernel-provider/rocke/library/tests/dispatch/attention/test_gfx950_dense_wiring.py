@@ -18,7 +18,6 @@ Covers:
 
 from __future__ import annotations
 
-import re
 import unittest
 from dataclasses import replace
 from itertools import islice
@@ -620,32 +619,48 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
-        """A partial-tile length plus sliding_window is rejected by the spec
-        validator, so no dense variant admits the request. The graph is not
-        ragged, so the reason names the length, the tile and the window."""
-        req = _gfx950_dense_req(seqlen_q=500, seqlen_k=500, sliding_window=128)
-        with self.assertRaises(ValueError) as cm:
-            _spec(req)
-        err_msg = str(cm.exception)
-        # The spec never gets built, so read the tile out of the refusal. The
-        # sliding-window tile can be 128 rows, so assert it is a registered tile
-        # that really leaves a partial block rather than naming one value.
-        tile = re.search(
-            r"seqlen_q 500 is not a multiple of block_m (\d+); "
-            r"seqlen_kv 500 is not a multiple of block_n (\d+)",
-            err_msg,
+    def test_partial_tile_refusal_names_the_refused_specs_tile(self):
+        """The refusal names the lengths and the tile of the spec it rejects, so
+        a helper that always names one registered pair fails here: the expected
+        text differs per spec in the tile and in which length is partial."""
+        cases = (
+            # The sliding-window default is the 128-row tile and both lengths miss it.
+            (
+                dict(seqlen_q=500, seqlen_k=500),
+                {},
+                "seqlen_q 500 is not a multiple of block_m 128; "
+                "seqlen_kv 500 is not a multiple of block_n 64",
+            ),
+            # Only the key length is partial.
+            (
+                dict(seqlen_q=640, seqlen_k=672),
+                {},
+                "seqlen_kv 672 is not a multiple of block_n 64",
+            ),
+            # 640 is whole at 128 rows, so the 256-row knob is what is refused.
+            (
+                dict(seqlen_q=640, seqlen_k=640),
+                {"block_m": 256},
+                "seqlen_q 640 is not a multiple of block_m 256",
+            ),
+            # 576 is whole at 64 columns, so the 128-column knob is what is refused.
+            (
+                dict(seqlen_q=640, seqlen_k=576),
+                {"block_n": 128},
+                "seqlen_kv 576 is not a multiple of block_n 128",
+            ),
         )
-        self.assertIsNotNone(tile, err_msg)
-        block_m, block_n = int(tile.group(1)), int(tile.group(2))
-        self.assertIn(
-            (block_m, block_n),
-            {(g["block_m"], g["block_n"]) for g in DENSE_TILE_GEOMETRIES.values()},
-        )
-        self.assertNotEqual(500 % block_m, 0)
-        self.assertNotEqual(500 % block_n, 0)
-        self.assertIn("sliding_window", err_msg)
-        self.assertNotIn("ragged", err_msg)
+        for spec_id in (_GRID, _PERSIST):
+            for lengths, knobs, reason in cases:
+                with self.subTest(spec_id=spec_id, lengths=lengths, knobs=knobs):
+                    req = _gfx950_dense_req(sliding_window=128, **lengths)
+                    with self.assertRaises(ValueError) as cm:
+                        _spec(req, spec_id, **knobs)
+                    self.assertIn(
+                        f"sliding_window needs whole tiles: {reason} (the partial-tile",
+                        str(cm.exception),
+                    )
+                    self.assertNotIn("ragged", str(cm.exception))
 
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(
