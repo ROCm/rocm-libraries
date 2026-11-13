@@ -999,7 +999,7 @@ def cmake_build(Map conf=[:]){
                         export ARCH_NAME=${arch_name}
                         export PROCESS_NINJA_TRACE=false
                         export NINJA_FTIME_TRACE=false
-                        bash ../script/dependency-parser/smart_build_and_test.sh
+                        bash ../script/dependency-parser/smart_build_and_smoke_test.sh
                     """
                     }
                 }
