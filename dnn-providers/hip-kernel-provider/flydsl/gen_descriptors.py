@@ -351,7 +351,7 @@ TUNING_FIELDS = {
 #   bias_stage  a staged and a direct bias row
 # `tests/test_sdpa_bwd_enumeration.py` checks both directions over the shipped catalogue.
 ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
-    "sdpa_bwd_prep": frozenset({"padded"}),
+    "sdpa_bwd_prep": frozenset({"head_dim", "padded", "floor"}),
     "sdpa_bwd_dkdv": frozenset({"head_dim", "padded", "floor", "dform", "gqa_pack"}),
     "sdpa_bwd_dq": frozenset(
         {"head_dim", "padded", "floor", "dform", "bias_stage", "store_db"}

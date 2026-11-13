@@ -208,10 +208,10 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
 def test_a_slots_knobs_are_its_own_tuning_fields() -> None:
     folders = _split()
     by_slot = {slot["name"]: slot["knobs"] for slot in _ued(folders)["slots"]}
-    # head_dim is a graph fact but also an alternative of dkdv and dq, whose tiles overlap;
-    # prep has no tile knob, and every slot's schedule fields are knobs.
+    # head_dim is a graph fact but also an alternative of every slot, whose tiles overlap,
+    # and every slot's schedule fields are knobs.
     assert by_slot == {
-        "prep": ["block_m", "waves_per_eu"],
+        "prep": ["head_dim", "block_m", "waves_per_eu"],
         "dkdv": ["head_dim", "block_m", "waves_per_eu"],
         "dq": ["head_dim", "block_m", "waves_per_eu"],
     }

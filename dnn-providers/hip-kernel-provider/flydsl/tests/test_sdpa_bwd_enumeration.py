@@ -211,10 +211,13 @@ def synthetic() -> dict[str, list[dict]]:
     catalogue = {}
     for op in ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq", "sdpa_bwd_merged"):
         rows = [_row(op, "exact64"), _row(op, "padded64", padded=1)]
-        if op in ("sdpa_bwd_dkdv", "sdpa_bwd_dq"):
+        if op != "sdpa_bwd_merged":
             rows += [
                 _row(op, "padded128", head_dim=128, padded=1),
                 _row(op, "g1_128", head_dim=128, padded=1, floor="g1"),
+            ]
+        if op in ("sdpa_bwd_dkdv", "sdpa_bwd_dq"):
+            rows += [
                 _row(op, "rt64", dform="rt", has_dropout=1),
                 _row(op, "bk64d", has_dropout=1),
             ]
@@ -608,6 +611,30 @@ def test_an_unaligned_bias_ranks_the_exact_tile_row_first_on_gfx11(
     top = ranked[0]["knobs"]
     assert (top["head_dim"], top["bias_f32"], top["u2_role"]) == (head_dim, 0, "none")
     assert ranked[0]["priority"] > ranked[1]["priority"]
+
+
+@pytest.mark.parametrize("dtype", ["f16", "bf16"])
+def test_a_16_bit_prep_head_dim_above_the_tail_floor_of_tile_512_rides_the_g1_row_and_smaller_dims_keep_their_tile(
+    dtype: str,
+) -> None:
+    """A 16-bit t512 prep row with floor ``g1`` serves V 1..512 ranked below every smaller tile, so V 257..384 has a prep row and V 200 keeps its tile row."""
+
+    def top(v: int) -> dict:
+        graph = _graph(dtype=dtype, qk=v, v=v)
+        rows = [
+            r
+            for r in _table_rows("sdpa_bwd_prep", ARCH)
+            if serves("sdpa_bwd_prep", r, graph) and r["knobs"]["sink"] == -1
+        ]
+        ranked = sorted(rows, key=lambda r: (-r["priority"], r["hash"]))
+        assert len(ranked) == 1 or ranked[0]["priority"] > ranked[1]["priority"]
+        return ranked[0]["knobs"]
+
+    for v in (257, 300, 384):
+        knobs = top(v)
+        assert (knobs["head_dim"], knobs["padded"], knobs["floor"]) == (512, 1, "g1")
+    assert (top(200)["head_dim"], top(200)["floor"]) == (224, "tail")
+    assert (top(512)["head_dim"], top(512)["padded"]) == (512, 0)
 
 
 @pytest.mark.parametrize("dbias", [False, True])
