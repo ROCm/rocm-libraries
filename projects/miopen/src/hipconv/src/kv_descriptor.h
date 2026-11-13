@@ -23,6 +23,8 @@
 // value that does not parse; false (no error) on a known field whose value the
 // spec does not satisfy; true only if every token matches. An empty spec matches.
 
+#include "internal_api.h"
+
 #include <functional>
 #include <string>
 #include <string_view>
@@ -31,7 +33,7 @@
 namespace hipconv
 {
 
-class KVDescriptor
+class HIPCONV_INTERNAL_API KVDescriptor
 {
 public:
     virtual ~KVDescriptor() = default;

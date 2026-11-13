@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -45,6 +46,22 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
+
+#ifdef __linux__
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 /**
  * @file TestDescriptorLoader.cpp
  * @brief The descriptor loader against real files on disk.
@@ -7328,5 +7345,288 @@ INSTANTIATE_TEST_SUITE_P(
             "trained_against names a single slot, but a slotted engine's predict_engine model must "
             "name every slot's KMD in kmds"}),
     [](const ::testing::TestParamInfo<SlottedEstimateRefusal>& info) { return info.param.name; });
+
+#ifdef __linux__
+
+namespace
+{
+
+constexpr int WALK_DEPTH = 100;
+
+std::string levelFilename(int level)
+{
+    return "level_" + std::to_string(level) + ".ued.json";
+}
+
+/// Creates WALK_DEPTH nested levels under @p root. Each level holds the subdirectory `d`
+/// and an empty descriptor file; collectDescriptorFiles matches by suffix and never opens
+/// it. Each level adds two path characters, so the tree stays well inside PATH_MAX.
+void buildNestedLevels(const std::filesystem::path& root)
+{
+    std::filesystem::path level = root;
+    for(int i = 0; i < WALK_DEPTH; ++i)
+    {
+        const std::filesystem::path next = level / "d";
+        std::filesystem::create_directory(next);
+        std::ofstream(level / levelFilename(i)).close();
+        level = next;
+    }
+}
+
+/// Runs in the death-test child. Lowers the descriptor limit to the handles open now plus
+/// 30, walks @p root, and exits 0 only if every level's file was found: 1 when some were
+/// found but not all of them, 2 when the walk stopped short of WALK_DEPTH files.
+[[noreturn]] void walkWithTightHandleLimit(const std::filesystem::path& root)
+{
+    // Counting /proc/self/fd opens a handle of its own, which is gone by the time the limit
+    // is set, hence the subtraction.
+    rlim_t openHandles = 0;
+    {
+        std::error_code error;
+        for(std::filesystem::directory_iterator it("/proc/self/fd", error);
+            !error && it != std::filesystem::directory_iterator();
+            it.increment(error))
+        {
+            ++openHandles;
+        }
+        --openHandles;
+    }
+    const rlimit limit{openHandles + 30, openHandles + 30};
+    if(setrlimit(RLIMIT_NOFILE, &limit) != 0)
+    {
+        std::exit(3);
+    }
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(root, files);
+
+    std::set<std::string> names;
+    for(const auto& file : files)
+    {
+        names.insert(file.first.filename().string());
+    }
+    std::set<std::string> expected;
+    for(int i = 0; i < WALK_DEPTH; ++i)
+    {
+        expected.insert(levelFilename(i));
+    }
+    if(names == expected && files.size() == expected.size())
+    {
+        std::exit(0);
+    }
+    std::exit(files.size() < expected.size() ? 2 : 1);
+}
+
+/// Makes a directory readable again on scope exit so ScopedDirectory can delete it.
+class ScopedPermissions
+{
+    std::filesystem::path _path;
+
+public:
+    explicit ScopedPermissions(std::filesystem::path path)
+        : _path(std::move(path))
+    {
+    }
+    ~ScopedPermissions()
+    {
+        std::error_code error;
+        std::filesystem::permissions(_path, std::filesystem::perms::owner_all, error);
+    }
+    ScopedPermissions(const ScopedPermissions&) = delete;
+    ScopedPermissions& operator=(const ScopedPermissions&) = delete;
+};
+
+} // namespace
+
+// The suite name ends in Death rather than DeathTest because hipDNN's test-name validator
+// reserves "Test" for the leading keyword.
+// A walk that keeps one directory handle open per level runs out of descriptors a few
+// dozen levels down. The limit is the handles open at the start of the child plus 30, and
+// the tree is 100 levels deep: that walk is cut short, while one that holds a single
+// handle at a time needs base + 1. Descriptors inherited above base + 30 raise the
+// effective limit, so the depth leaves room for dozens of them.
+TEST(TestDescriptorLoaderDeath, WalkIsNotBoundedByOpenDirectoryHandles)
+{
+    GTEST_FLAG_SET(death_test_style, "fast");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("deep_walk"));
+    buildNestedLevels(dir.path());
+
+    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
+    // diagnostic is attributed to this expansion site rather than to the GoogleTest
+    // header, so -isystem does not suppress it and -Werror makes it fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(walkWithTightHandleLimit(dir.path()), ::testing::ExitedWithCode(0), "");
+#pragma clang diagnostic pop
+}
+
+// A directory that cannot be opened costs its own subtree and nothing beside it.
+TEST(TestDescriptorLoader, UnreadableDirectoryCostsOnlyItsSubtree)
+{
+    if(geteuid() == 0)
+    {
+        GTEST_SKIP() << "root reads a mode 0000 directory";
+    }
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unreadable"));
+    for(const auto& [folder, level] :
+        {std::pair<const char*, int>{"a", 0}, {"blocked", 1}, {"c", 2}})
+    {
+        std::filesystem::create_directory(dir.path() / folder);
+        std::ofstream(dir.path() / folder / levelFilename(level)).close();
+    }
+    const ScopedPermissions restore(dir.path() / "blocked");
+    std::filesystem::permissions(dir.path() / "blocked", std::filesystem::perms::none);
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(dir.path(), files);
+
+    std::vector<std::string> names;
+    names.reserve(files.size());
+    for(const auto& file : files)
+    {
+        names.push_back(file.first.filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{levelFilename(0), levelFilename(2)}));
+    EXPECT_EQ(countLogsContaining(recorder, "cannot read"), 1u);
+}
+
+// Directory links are not followed: a link back up the tree and a link to a sibling
+// tree each leave every descriptor listed exactly once.
+TEST(TestDescriptorLoader, DirectoryLinksAreNotFollowed)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("links"));
+    std::filesystem::create_directories(dir.path() / "a" / "b");
+    std::filesystem::create_directories(dir.path() / "sib");
+    std::ofstream(dir.path() / "a" / levelFilename(0)).close();
+    std::ofstream(dir.path() / "a" / "b" / levelFilename(1)).close();
+    std::ofstream(dir.path() / "sib" / levelFilename(2)).close();
+    std::filesystem::create_directory_symlink("..", dir.path() / "a" / "b" / "up");
+    std::filesystem::create_directory_symlink(std::filesystem::path("..") / "sib",
+                                              dir.path() / "a" / "sib");
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(dir.path(), files);
+
+    std::vector<std::string> names;
+    names.reserve(files.size());
+    for(const auto& file : files)
+    {
+        names.push_back(file.first.filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names,
+              (std::vector<std::string>{levelFilename(0), levelFilename(1), levelFilename(2)}));
+}
+
+#endif // __linux__
+
+#ifdef _WIN32
+
+namespace
+{
+
+/// Removes the \\?\ tree on scope exit; the error_code overload keeps cleanup from throwing.
+struct RemoveTreeOnExit
+{
+    std::filesystem::path path;
+
+    ~RemoveTreeOnExit()
+    {
+        std::error_code failed;
+        std::filesystem::remove_all(path, failed);
+    }
+};
+
+std::string levelFilename(int level)
+{
+    return "level_" + std::to_string(level) + ".ued.json";
+}
+
+} // namespace
+
+// The test executable gets its manifest from the build's long-path manifest post-pass.
+TEST(TestDescriptorLoader, ExecutableIsLongPathAware)
+{
+    // 24 is RT_MANIFEST; the RT_MANIFEST macro is narrow or wide by the UNICODE setting.
+    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(24));
+    ASSERT_NE(resource, nullptr);
+    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    ASSERT_NE(loaded, nullptr);
+    const void* bytes = LockResource(loaded);
+    ASSERT_NE(bytes, nullptr);
+    const DWORD size = SizeofResource(nullptr, resource);
+    ASSERT_GT(size, 0u);
+
+    const std::string manifest(static_cast<const char*>(bytes), size);
+    EXPECT_TRUE(std::regex_search(manifest, std::regex(R"(longPathAware[^>]*>\s*true\s*<)")))
+        << manifest;
+}
+
+// Unlike the data SDK test (data_sdk/tests/utilities/TestPlatformUtils.cpp), which uses
+// \\?\ paths and needs no policy, this test exercises the plain-path policy on purpose:
+// the walk is handed an ordinary root and must reach descriptors beyond MAX_PATH.
+TEST(TestDescriptorLoader, WalkReachesDescriptorsBeyondMaxPath)
+{
+    DWORD longPathsEnabled = 0;
+    DWORD valueSize = sizeof(longPathsEnabled);
+    const LONG status = RegGetValueW(HKEY_LOCAL_MACHINE,
+                                     L"SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                                     L"LongPathsEnabled",
+                                     RRF_RT_REG_DWORD,
+                                     nullptr,
+                                     &longPathsEnabled,
+                                     &valueSize);
+    if(status != ERROR_SUCCESS || longPathsEnabled != 1)
+    {
+        GTEST_SKIP() << "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem "
+                        "LongPathsEnabled is not 1; plain paths beyond MAX_PATH are unavailable";
+    }
+
+    std::filesystem::path plainRoot = std::filesystem::temp_directory_path();
+    plainRoot /= L"hipdnn_walk_" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring verbatimPrefix = L"\\\\?\\";
+    const RemoveTreeOnExit cleanup{std::filesystem::path(verbatimPrefix + plainRoot.wstring())};
+
+    // The \\?\ prefix builds the tree regardless of policy; the walk below gets the plain root.
+    std::wstring directory = cleanup.path.wstring();
+    const std::wstring segment(120, L'p');
+    std::error_code failed;
+    std::filesystem::create_directories(std::filesystem::path(directory), failed);
+    ASSERT_FALSE(failed) << failed.message();
+    int levels = 0;
+    do
+    {
+        std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+        ++levels;
+        directory += L'\\';
+        directory += segment;
+        std::filesystem::create_directory(std::filesystem::path(directory), failed);
+        ASSERT_FALSE(failed) << failed.message();
+    } while(directory.size() - verbatimPrefix.size() < static_cast<size_t>(MAX_PATH) + 64);
+    std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+    ++levels;
+    ASSERT_GT(directory.size() - verbatimPrefix.size(), static_cast<size_t>(MAX_PATH));
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(plainRoot, files);
+
+    std::set<std::string> names;
+    for(const auto& file : files)
+    {
+        names.insert(file.first.filename().string());
+    }
+    std::set<std::string> expected;
+    for(int i = 0; i < levels; ++i)
+    {
+        expected.insert(levelFilename(i));
+    }
+    EXPECT_EQ(files.size(), static_cast<size_t>(levels));
+    EXPECT_EQ(names, expected);
+}
+
+#endif // _WIN32
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -2227,6 +2227,20 @@ inline const FileType* findFileType(std::string_view filename)
     return nullptr;
 }
 
+/// @p p as text for a log line; a name not representable in the native encoding (e.g. an
+/// unpaired UTF-16 surrogate on Windows) yields a placeholder instead of throwing.
+inline std::string pathText(const std::filesystem::path& p) noexcept
+{
+    try
+    {
+        return p.string();
+    }
+    catch(...)
+    {
+        return "<unprintable path>";
+    }
+}
+
 /// @brief Appends every descriptor file under @p root to @p files, sorted by path.
 ///
 /// Sorted per root rather than across all of them, so an earlier root's files stay ahead
@@ -2243,99 +2257,101 @@ inline void
     {
         // INFO, not WARN: a root that does not exist is the normal state of an optional
         // drop-in tree, and only the caller knows whether ending with nothing is a fault.
-        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at " << root);
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at " << pathText(root));
         return;
     }
 
     // `arch` prunes at match time only, not here -- the calling device is unknown at
     // load. It is still read at load, as part of a pack's and a standalone kernel's
     // catalog key; what stays irrelevant is the file's folder (the walk is recursive; a
-    // file's directory means nothing to the loader). skip_permission_denied keeps one
-    // unreadable subdirectory from turning the whole iterator into end() and silently
-    // losing every engine after it; iterated with error_code overloads throughout since
-    // this loader promises never to throw.
-    auto walk = std::filesystem::recursive_directory_iterator(
-        root, std::filesystem::directory_options::skip_permission_denied, error);
-    if(error)
+    // file's directory means nothing to the loader). Every directory is opened
+    // separately, so a directory that fails to open or read costs only its own subtree.
+    // The error_code overloads are used throughout since this loader promises never to
+    // throw.
+    std::vector<std::filesystem::path> pending{root};
+    while(!pending.empty())
     {
-        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: cannot read " << root << ": "
-                                                                  << error.message());
-    }
-    // A failed increment is recovered from rather than ending the walk, so one bad entry
-    // does not cost every file sorting after it. Bounded because recovery assumes the
-    // increment still advanced: libstdc++ moves past the offending entry, but an
-    // implementation that reports an error without advancing would spin here forever.
-    // Consecutive failures only -- any successful step resets the budget.
-    constexpr int MAX_CONSECUTIVE_WALK_ERRORS = 64;
-    int consecutiveErrors = 0;
-    for(; walk != std::filesystem::recursive_directory_iterator(); walk.increment(error))
-    {
+        const std::filesystem::path dir = std::move(pending.back());
+        pending.pop_back();
+        std::filesystem::directory_iterator it(dir, error);
         if(error)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: could not continue walking "
-                                    << root << ": " << error.message());
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: cannot read " << pathText(dir) << ": "
+                                                                      << error.message());
             error.clear();
-            if(++consecutiveErrors >= MAX_CONSECUTIVE_WALK_ERRORS)
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: giving up on "
-                                        << root << " after " << MAX_CONSECUTIVE_WALK_ERRORS
-                                        << " consecutive errors; the walk is not advancing");
-                break;
-            }
             continue;
         }
-        consecutiveErrors = 0;
-        try
+        while(it != std::filesystem::directory_iterator())
         {
-            std::error_code entryError;
-            if(walk->is_regular_file(entryError))
+            try
             {
-                // filename()/extension() can throw std::system_error on a name not
-                // representable in the native encoding (e.g. an unpaired UTF-16
-                // surrogate on Windows) -- from a function that promises never to throw,
-                // hence the try around this whole entry rather than an error_code
-                // overload that does not exist for these two calls.
-                const std::string entryName = walk->path().filename().string();
-                if(const auto* fileType = detail::findFileType(entryName))
+                // Valid until the increment below, which runs after the last use.
+                const std::filesystem::directory_entry& entry = *it;
+                std::error_code dirError;
+                // Links (symlinks and Windows junctions) are not followed, so a link cycle
+                // cannot repeat descriptors, matching recursive_directory_iterator's default.
+                if(entry.symlink_status(dirError).type() == std::filesystem::file_type::directory)
                 {
-                    found.emplace_back(walk->path(), fileType);
+                    pending.push_back(entry.path());
                 }
-                else
+                std::error_code entryError;
+                if(entry.is_regular_file(entryError))
                 {
-                    // Lowercased so `pointwise.KDP.JSON` still warns instead of vanishing
-                    // in silence: findFileType() stays case-sensitive on purpose, only
-                    // this "did the author mean a descriptor" check widens. `.jsonc`
-                    // warns too -- it is never a loadable extension, so it always lands
-                    // here.
-                    std::string extension = walk->path().extension().string();
-                    std::transform(extension.begin(),
-                                   extension.end(),
-                                   extension.begin(),
-                                   [](unsigned char c) { return std::tolower(c); });
-                    if(extension == ".json" || extension == ".jsonc")
+                    // filename()/extension() can throw std::system_error on a name not
+                    // representable in the native encoding (e.g. an unpaired UTF-16
+                    // surrogate on Windows) -- from a function that promises never to throw,
+                    // hence the try around this whole entry rather than an error_code
+                    // overload that does not exist for these two calls.
+                    const std::string entryName = entry.path().filename().string();
+                    if(const auto* fileType = detail::findFileType(entryName))
                     {
-                        // A .json naming no descriptor type is skipped before it is
-                        // opened. WARN, not ERROR: an unrelated JSON file under the root
-                        // is legitimate, but a misspelled suffix silently costs an
-                        // engine, and this is the only place that can say so.
-                        HIPDNN_PLUGIN_LOG_WARN(
-                            "descriptor loader: "
-                            << walk->path()
-                            << " is not a descriptor filename (expected "
-                               "<name>.{kmd,uhd,ued,umd,udd,kdp,ukd}.json); skipping");
+                        found.emplace_back(entry.path(), fileType);
+                    }
+                    else
+                    {
+                        // Lowercased so `pointwise.KDP.JSON` still warns instead of vanishing
+                        // in silence: findFileType() stays case-sensitive on purpose, only
+                        // this "did the author mean a descriptor" check widens. `.jsonc`
+                        // warns too -- it is never a loadable extension, so it always lands
+                        // here.
+                        std::string extension = entry.path().extension().string();
+                        std::transform(extension.begin(),
+                                       extension.end(),
+                                       extension.begin(),
+                                       [](unsigned char c) { return std::tolower(c); });
+                        if(extension == ".json" || extension == ".jsonc")
+                        {
+                            // A .json naming no descriptor type is skipped before it is
+                            // opened. WARN, not ERROR: an unrelated JSON file under the root
+                            // is legitimate, but a misspelled suffix silently costs an
+                            // engine, and this is the only place that can say so.
+                            HIPDNN_PLUGIN_LOG_WARN(
+                                "descriptor loader: "
+                                << entry.path()
+                                << " is not a descriptor filename (expected "
+                                   "<name>.{kmd,uhd,ued,umd,udd,kdp,ukd}.json); skipping");
+                        }
                     }
                 }
+                else if(entryError)
+                {
+                    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: skipping " << entry.path() << ": "
+                                                                           << entryError.message());
+                }
             }
-            else if(entryError)
+            catch(const std::exception& filenameError)
             {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: skipping " << walk->path() << ": "
-                                                                       << entryError.message());
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: skipping an entry under "
+                                        << pathText(dir) << ": " << filenameError.what());
             }
-        }
-        catch(const std::exception& filenameError)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: skipping an entry under "
-                                    << root << ": " << filenameError.what());
+            it.increment(error);
+            if(error)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: could not continue walking "
+                                        << pathText(dir) << ": " << error.message());
+                error.clear();
+                break;
+            }
         }
     }
     // Sorted before parsing so which file of a conflicting pair is reported as the
