@@ -24,6 +24,15 @@ from analyze_timing import (
     parse_context_line,
     analyze_timing_file,
     build_hierarchy,
+    print_summary,
+    build_purpose_hierarchy,
+    build_staged_hierarchy,
+    ROOT_NAME,
+    TIMING_HIERARCHY,
+    PURPOSE_OF,
+    G_REFERENCE,
+    G_INPUT,
+    G_LAUNCH,
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
@@ -339,3 +348,119 @@ TIMING:python_benchmark_problems:5000.0
         child_names = {c.name for c in bp.children}
         for phase in BENCH_POSTPROCESS_PHASES:
             assert phase in child_names, f"{phase} not in benchpost children"
+
+
+class TestPurposeHierarchy:
+    """The default tree is grouped by what the time is spent on, not by where the timer is called."""
+
+    TIMINGS = {
+        "python_benchmark_problems": [1000.0],
+        "python_client_execution": [900.0],
+        "hip_initialization": [50.0],
+        "pre_problem": [300.0],
+        "cpu_data_init": [100.0],
+        "cpu_reference_gemm": [150.0],
+        "solve_cpu_fast": [140.0],
+        "pre_solution": [200.0],
+        "validate_warmups": [180.0],
+        "validate_gpu_sync": [15.0],
+    }
+
+    def _groups(self):
+        return {g.name: g for g in build_purpose_hierarchy(dict(self.TIMINGS))}
+
+    @staticmethod
+    def _names(node):
+        out = set()
+        for child in node.children:
+            out.add(child.name)
+            out |= TestPurposeHierarchy._names(child)
+        return out
+
+    def test_categories_move_to_their_purpose_group(self):
+        groups = self._groups()
+
+        assert "cpu_data_init" in self._names(groups[G_INPUT])
+        assert "hip_initialization" in self._names(groups[G_LAUNCH])
+
+    def test_groups_add_up_to_the_nesting_tree(self):
+        nesting_total = sum(n.total_ms for n in build_hierarchy(dict(self.TIMINGS)))
+        purpose_total = sum(g.total_ms for g in self._groups().values())
+        assert purpose_total == pytest.approx(nesting_total, abs=0.05)
+
+    def test_every_direct_child_of_a_phase_has_an_explicit_purpose(self):
+        # A new timer under these must be given a purpose on purpose, not by inheriting.
+        top = TIMING_HIERARCHY["python_benchmark_problems"]["python_client_execution"]
+        for name in list(TIMING_HIERARCHY) + list(top):
+            assert name in PURPOSE_OF, f"{name} has no purpose group"
+
+    def test_report_has_the_root_row_then_purpose_then_nesting_table(self, capsys):
+        print_summary(dict(self.TIMINGS), [])
+        out = capsys.readouterr().out
+        lines = out.split("\n")
+
+        # The first row of the first table is the total runtime, at 100% of the wall clock.
+        purpose_start = next(i for i, l in enumerate(lines) if l.startswith("TIMING BY PURPOSE"))
+        root = next(l for l in lines[purpose_start:] if l.strip().startswith(ROOT_NAME))
+        assert root.rstrip().endswith("100.0%")
+        # The purpose table comes first and the old (timer-nested) table below it.
+        assert out.index("TIMING BY PURPOSE") < out.index("TIMING BY TIMER NESTING")
+        assert out.index(G_REFERENCE) < out.index("Data Preparation")
+        # The columns of the two tables line up.
+        headers = [l for l in lines if l.strip().startswith("Category")]
+        assert len(headers) == 2 and headers[0] == headers[1]
+
+
+class TestStagedHierarchy:
+    """One root (the total runtime) over RUN / BUILD stages, for build-only, run-only and both."""
+
+    BUILD = {
+        "python_benchmark_problems": [1000.0],
+        "python_cache_check": [2.0],
+        "python_kernel_compilation": [900.0],
+        "python_write_cache": [3.0],
+    }
+    RUN = {
+        "python_benchmark_problems": [500.0],
+        "python_cache_check": [1.0],
+        "python_client_execution": [450.0],
+        "cpu_reference_gemm": [300.0],
+        "pre_problem": [320.0],
+        "hip_initialization": [100.0],
+    }
+
+    @staticmethod
+    def _tree(timings):
+        (root,) = build_staged_hierarchy(timings)
+        return root, {c.name: c for c in root.children}
+
+    def test_build_only_log_has_only_the_build_stage(self):
+        root, top = self._tree(dict(self.BUILD))
+        assert "BUILD: solution generation & compile" in top
+        assert "RUN: benchmark client" not in top
+
+    def test_run_only_log_has_only_the_run_stage(self):
+        root, top = self._tree(dict(self.RUN))
+        assert "RUN: benchmark client" in top
+        assert "BUILD: solution generation & compile" not in top
+
+    def test_combined_logs_have_both_stages_and_sum_their_processes(self):
+        # A combined run is two processes, so their records are concatenated (summed).
+        combined = {k: list(self.BUILD.get(k, [])) + list(self.RUN.get(k, []))
+                    for k in set(self.BUILD) | set(self.RUN)}
+        root, top = self._tree(combined)
+        assert "RUN: benchmark client" in top
+        assert "BUILD: solution generation & compile" in top
+        assert root.total_ms == pytest.approx(1500.0)       # both python_benchmark_problems
+
+    def test_root_is_the_wall_clock_and_equals_its_children(self):
+        for timings in (self.BUILD, self.RUN):
+            root, _ = self._tree(dict(timings))
+            assert root.total_ms == pytest.approx(sum(timings["python_benchmark_problems"]), abs=0.05)
+            assert sum(c.total_ms for c in root.children) == pytest.approx(root.total_ms)
+
+    def test_stage_rows_gather_their_groups(self):
+        _, top = self._tree(dict(self.RUN))
+        assert {c.name for c in top["RUN: benchmark client"].children} >= {G_REFERENCE, G_LAUNCH}
+        assert G_REFERENCE not in top        # nested under the stage, not next to it
+
