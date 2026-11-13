@@ -6,7 +6,10 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/tdm_page_tracker.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 
 #include <string>
 #include <type_traits>
@@ -20,6 +23,28 @@
 // O[seqlen_q, hdim_v] = P[seqlen_q, seqlen_k] @ V^T[hdim_v, seqlen_k]
 
 namespace ck_tile {
+
+namespace detail {
+
+// kUsesTdmAffineDramPath is detected with the shared uses_tdm_affine_dram_path_v
+// (fmha_fwd_kernel_path_markers.hpp). The fixed segmented LDS arena marker has no
+// shared detector; this one is kept in its own sub-namespace.
+namespace pagedkv_kernel {
+
+template <typename T>
+using has_fixed_segmented_lds_arena = decltype(T::kUsesFixedSegmentedLdsArena);
+
+template <typename T>
+static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
+    if constexpr(is_detected<has_fixed_segmented_lds_arena, T>::value)
+        return static_cast<bool>(T::kUsesFixedSegmentedLdsArena);
+    else
+        return false;
+}();
+
+} // namespace pagedkv_kernel
+
+} // namespace detail
 
 // TODO: This class is a variant of the existing FmhaFwdSplitKVKernel pipeline.
 //       Refactoring to extract shared logic is recommended as future work.
@@ -56,6 +81,15 @@ struct FmhaFwdPagedKVKernel
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
+    static constexpr bool kUsesTdmAffineDramPath =
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
+    static constexpr bool kUsesFixedSegmentedLdsArena =
+        detail::pagedkv_kernel::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
+    // O is staged in the K0 LDS slot and copied out with async LDS-to-global stores when the
+    // O layout allows it (see operator()); other layouts use EpiloguePipeline.
+    static constexpr bool kUseAsyncLdsOStore =
+        kUsesTdmAffineDramPath && kUsesFixedSegmentedLdsArena && sizeof(ODataType) == 2;
+    static constexpr index_t kAsyncOStoreBytes = 16;
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -897,13 +931,22 @@ struct FmhaFwdPagedKVKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
+        if constexpr(kUsesFixedSegmentedLdsArena)
+        {
+            using Policy = typename FmhaPipeline::Policy;
+            static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
+            return ck_tile::max(Policy::GetLdsArenaSize(), EpiloguePipeline::GetSmemSize());
+        }
+        else
+        {
+            return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
+        }
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
-        // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        // allocate LDS; 16-byte aligned for the async O store
+        alignas(16) __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -1335,7 +1378,142 @@ struct FmhaFwdPagedKVKernel
         BlockIndices block_indices{i_batch, i_nhead, i_nhead / kargs.nhead_ratio_qk};
 
         auto o_acc_tile = [&]() {
-            if constexpr(kDoFp8StaticQuant)
+            if constexpr(kUsesTdmAffineDramPath)
+            {
+                static_assert(kIsPagedKV,
+                              "qr_pagedkv_tdm_sched is only reachable with paged kv kargs");
+
+                // Two ways to apply kv_l2p_offset (gappy group mode; 0 otherwise):
+                // - default variant: the trackers fold it into the base pointer and the
+                //   windows stay in logical rows. A tile must not straddle a page, so the
+                //   offset must be a multiple of kN0;
+                // - gappy variant: the windows use physical rows and the pipeline masks
+                //   the gap, so any offset works.
+                // The host gate sends gappy mode to the gappy variant; this traps a direct
+                // launch of the default one with a misaligned offset (assert() is compiled
+                // out in Release).
+                constexpr bool kPhysicalRows = FmhaPipeline::kSupportsGappy;
+                if constexpr(kIsGroupMode && !kPhysicalRows)
+                {
+                    // is_gappy only exists on the group-mode kargs; batch mode
+                    // never sets kv_l2p_offset away from 0.
+                    if(kargs.is_gappy && (kv_l2p_offset % FmhaPipeline::kN0) != 0)
+                    {
+                        printf(
+                            "%s:%d: error: kv_l2p_offset (%d) must be a multiple of kN0 (%d) for "
+                            "qr_pagedkv_tdm_sched group mode; see TdmPageTracker\n",
+                            __FILE__,
+                            __LINE__,
+                            kv_l2p_offset,
+                            static_cast<int>(FmhaPipeline::kN0));
+                        __builtin_trap();
+                    }
+                }
+
+                // TdmPageTracker::refresh() folds paging into the base pointer, so K/V
+                // are plain affine views over the batch's key rows rather than
+                // page-bounded navigator windows. The view height ends at the last key,
+                // so the TDM zero clamp covers the final partial tile: seqlen_k for
+                // logical rows, kv_l2p_offset + seqlen_k for physical rows. kv_global_len
+                // is also the page count's extent (num_pages_tdm below).
+                const index_t kv_global_len = kv_l2p_offset + kargs.seqlen_k;
+                const index_t kv_view_len   = kPhysicalRows ? kv_global_len : kargs.seqlen_k;
+
+                const auto k_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const KDataType*>(nullptr),
+                    make_tuple(kv_view_len, kargs.hdim_q),
+                    make_tuple(kargs.stride_k, 1),
+                    number<FmhaPipeline::kAlignmentK>{},
+                    number<1>{});
+
+                // V stays row-major (seqlen_k, hdim_v), untransposed -- the
+                // caller contract documented on the pipeline's run() requires
+                // window lengths (kN0, kN1), not the (kN1, kK1) the dense
+                // (non-tdm_sched) kernel path uses a few branches below. That
+                // (kN1, kK1) construction is a known pre-existing bug which
+                // happens to be harmless there only because that path never
+                // reads the window lengths; do not copy it here.
+                const auto v_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const VDataType*>(nullptr),
+                    make_tuple(kv_view_len, kargs.hdim_v),
+                    make_tuple(kargs.stride_v, 1),
+                    number<FmhaPipeline::kAlignmentV>{},
+                    number<1>{});
+
+                auto k_dram_window_tdm = make_tile_window(
+                    k_dram_tdm,
+                    make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
+                    {0, 0});
+                auto v_dram_window_tdm = make_tile_window(
+                    v_dram_tdm,
+                    make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kN1>{}),
+                    {0, 0});
+
+                const index_t i_kv_nhead = i_nhead / kargs.nhead_ratio_qk;
+                const long_index_t k_fixed_offset =
+                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_k;
+                const long_index_t v_fixed_offset =
+                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_v;
+
+                const int32_t* block_indices_tdm =
+                    kargs.block_table_ptr +
+                    static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_table;
+                const index_t num_pages_tdm =
+                    integer_divide_ceil(kv_global_len, kargs.page_block_size);
+
+                // Constructed with global_seq_start = 0: the kernel cannot see
+                // kv_load_start (the mask computes it inside the pipeline), so
+                // the pipeline's prologue seek(kv_load_start) is what actually
+                // positions these trackers. Do not try to compute it here.
+                auto k_page_tracker = TdmPageTracker<KDataType, FmhaPipeline::kN0>(
+                    reinterpret_cast<const KDataType*>(kargs.k_ptr),
+                    kargs.batch_stride_k,
+                    k_fixed_offset,
+                    block_indices_tdm,
+                    kargs.page_block_size,
+                    kargs.stride_k,
+                    num_pages_tdm,
+                    0,
+                    kPhysicalRows ? 0 : kv_l2p_offset);
+                auto v_page_tracker = TdmPageTracker<VDataType, FmhaPipeline::kN0>(
+                    reinterpret_cast<const VDataType*>(kargs.v_ptr),
+                    kargs.batch_stride_v,
+                    v_fixed_offset,
+                    block_indices_tdm,
+                    kargs.page_block_size,
+                    kargs.stride_v,
+                    num_pages_tdm,
+                    0,
+                    kPhysicalRows ? 0 : kv_l2p_offset);
+
+                using Policy = typename FmhaPipeline::Policy;
+                static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
+                // smem_ptr above is already sized to Policy::GetLdsArenaSize()
+                // for this path (see GetSmemSize()); reuse it as the fixed
+                // segmented arena instead of declaring a second __shared__
+                // buffer. Four independent __shared__ arrays (one per
+                // smem_ptrk0/k1/v0/v1) would work too, but would double-count
+                // shared memory against this already-sized allocation and
+                // diverge from the layout fmha_fwd_kernel.hpp's identically
+                // flagged (kUsesFixedSegmentedLdsArena) dense sibling uses.
+                return FmhaPipeline{}(q_dram_window,
+                                      k_dram_window_tdm,
+                                      v_dram_window_tdm,
+                                      k_page_tracker,
+                                      v_page_tracker,
+                                      bias_dram_window,
+                                      lse_dram_window,
+                                      mask,
+                                      position_encoding,
+                                      kargs.scale_s,
+                                      sink_value,
+                                      smem_ptr + Policy::GetLdsOffsetK0(),
+                                      smem_ptr + Policy::GetLdsOffsetK1(),
+                                      smem_ptr + Policy::GetLdsOffsetV0(),
+                                      smem_ptr + Policy::GetLdsOffsetV1(),
+                                      kv_l2p_offset);
+            }
+            else if constexpr(kDoFp8StaticQuant)
             {
                 return FmhaPipeline{}(q_dram_window,
                                       identity{}, // q_element_func
@@ -1404,6 +1582,34 @@ struct FmhaFwdPagedKVKernel
             make_tile_window(o_dram,
                              make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                              {i_m0, i_n1});
+
+        if constexpr(kUseAsyncLdsOStore)
+        {
+            // The async store has no bounds check and uses 32-bit offsets from the tile base:
+            // it needs hdim_v == kN1, a 16-byte aligned tile, rows in whole 16-byte chunks and
+            // a tile span within 4 GiB. Other layouts keep the epilogue. Uniform per workgroup.
+            // Writes what Default2DEpilogue would (cast to ODataType, no scale); mirror any
+            // epilogue change here.
+            constexpr index_t kAsyncOStoreVec = kAsyncOStoreBytes / sizeof(ODataType);
+            ODataType* o_tile_ptr = o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o + i_n1;
+            const uint64_t tile_span_bytes = (FmhaPipeline::kM0 - 1) *
+                                                 static_cast<uint64_t>(kargs.stride_o) *
+                                                 sizeof(ODataType) +
+                                             FmhaPipeline::kN1 * sizeof(ODataType);
+            if(kargs.hdim_v == FmhaPipeline::kN1 &&
+               reinterpret_cast<uintptr_t>(o_tile_ptr) % kAsyncOStoreBytes == 0 &&
+               kargs.stride_o >= 0 && kargs.stride_o % kAsyncOStoreVec == 0 &&
+               tile_span_bytes <= (uint64_t{1} << 32))
+            {
+                fmha_tdm_sched_store_o_tile_async_from_lds<FmhaPipeline, kAsyncOStoreBytes>(
+                    smem_ptr + FmhaPipeline::Policy::GetLdsOffsetK0(),
+                    o_tile_ptr,
+                    kargs.stride_o,
+                    kargs.seqlen_q - i_m0,
+                    o_acc_tile);
+                return;
+            }
+        }
 
         EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
     }

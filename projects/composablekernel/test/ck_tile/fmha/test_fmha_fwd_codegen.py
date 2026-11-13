@@ -33,6 +33,9 @@ from codegen.ops.fmha_fwd import (  # noqa: E402
     get_fwd_blobs,
     write_fwd_api,
 )
+from codegen.ops.fmha_pagedkv_prefill import (  # noqa: E402
+    get_fwd_blobs as get_pagedkv_fwd_blobs,
+)
 
 
 def _is_plain_fp8_sched(k):
@@ -2239,6 +2242,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
         helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
         d128 = "fmha_fwd_d128_bf16_batch_b128_qr_tdm_sched_vr_nmask_nlse_gfx125.cpp"
         d192 = "fmha_fwd_d192_bf16_batch_b128_qr_tdm_sched_vr_nmask_nlse_gfx125.cpp"
+        pk128 = "fmha_fwd_pagedkv_d128_bf16_batch_b128_qr_pagedkv_tdm_sched_vr_nmask_nlse_gfx125.cpp"
         sources = [
             d128,
             d128.replace("batch", "group"),
@@ -2255,6 +2259,12 @@ class TestGfx125V128Codegen(unittest.TestCase):
             # All supported scheduled head dimensions use expert scheduling mode.
             d128.replace("d128", "d64"),
             d128.replace("d128", "d64").replace("bf16", "fp16"),
+            # Paged-KV counterpart: qr_pagedkv_tdm_sched currently only ships
+            # hdim=128.
+            pk128,
+            # Near-miss: the generic (non-tdm_sched) paged pipeline must not
+            # pick up the scheduling flag.
+            pk128.replace("qr_pagedkv_tdm_sched", "qr_pagedkv"),
             # qr_tdm_pingpong without LSE too, while plain qr_tdm (4) and the
             # qr_tdm_pingpong LSE instances keep the default
             d128.replace("qr_tdm_sched", "qr_tdm_pingpong"),
@@ -2283,9 +2293,46 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertTrue(line.startswith(f"{i}:"))
                 self.assertEqual(
                     "-amdgpu-expert-scheduling-mode" in line,
-                    i in (0, 1, 2, 3, 5, 12, 13, 14),
+                    i in (0, 1, 2, 3, 5, 12, 13, 14, 16),
                 )
                 self.assertNotIn("-wwm-regalloc=fast", line)
+
+
+class TestGfx125PagedKVTdmSchedGateCodegen(unittest.TestCase):
+    """Baseline tripwire for the paged-KV counterpart of qr_tdm_sched.
+
+    fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, a.is_gappy,
+    gappy_variant, bn0) (see tdm_sched_gate in fmha_pagedkv_prefill.py) is the
+    only place that enforces page_block_size % kN0 == 0 and routes gappy group
+    mode to the gappy variant for the generated qr_pagedkv_tdm_sched dispatch
+    branches. This asserts, by literal substring count only (no
+    re-derivation of the gating predicate), that every rendered
+    QRKSVS_TDM_SCHED branch carries exactly one such gate call -- same style
+    as test_cmake_family_esm2_exact_scope above, which tripwires the ESM
+    compile flag by literal filename string instead of re-deriving the cmake
+    predicate.
+    """
+
+    def test_every_tdm_sched_branch_has_applicable_gate(self):
+        api_pool, kernels = get_pagedkv_fwd_blobs(
+            targets=["gfx1250"],
+            kernel_filter="",
+            receipt=0,
+            optdim_list=[-1],
+            mask_impl="simplified",
+        )
+        sched_kernels = [
+            kernel
+            for kernel in kernels
+            if kernel.F_pipeline.tag == "qr_pagedkv_tdm_sched"
+        ]
+        self.assertTrue(sched_kernels)
+
+        api = api_pool.api
+        branch_count = api.count("ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED")
+        gate_count = api.count("fmha_fwd_pagedkv_tdm_sched_applicable(")
+        self.assertEqual(branch_count, len(sched_kernels))
+        self.assertEqual(gate_count, branch_count)
 
 
 @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
