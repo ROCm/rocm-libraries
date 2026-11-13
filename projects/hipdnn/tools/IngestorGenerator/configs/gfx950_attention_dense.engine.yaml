@@ -17,6 +17,8 @@ engine:
   name: hipkernel:Gfx950AttentionDense
   census_name_symbol: GFX950_ATTENTION_DENSE_ENGINE_NAME
   sdk_version: 1.0.0
+  behavior_notes:
+  - supports_graph_capture
   knobs:
   - block_m
   - block_n
@@ -234,7 +236,7 @@ launch_surface:
       gfx950AttentionDenseGeometry() throws HipdnnPluginException for
       non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
       Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   - name: block
     python_source: kernels/gfx950/attention_dense.py:attention_dense_block
@@ -243,12 +245,14 @@ launch_surface:
     guard: >
       block_m / GFX950_ROWS_PER_WAVE(32) * GFX950_WAVE_LANES(64) threads:
       256 for block_m=128, 512 for block_m=256.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   # The tile-legality and static-LDS rules are restated by hand from the rocKE Python.
+  # Matching and dispatch are shared with gfx942 (AttentionDenseNative.cpp);
+  # Gfx950AttentionDenseNative.cpp binds them to the gfx950 tile and geometry hooks.
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
     kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size,
@@ -257,18 +261,32 @@ launch_surface:
       (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
       inputs of a shape-generic kernel and are never compared; the graph's
       shape enters only through seqlen_q % block_m == 0 and
-      seqlen_kv % block_n == 0 per candidate. score() ranks an applicable
-      256/64 baseline first, then ascending (block_m, block_n).
+      seqlen_kv % block_n == 0 per candidate.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 
   - name: kernargs
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
     kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
     guard: >
-      attentionDenseKernelSignature() always returns the 8-arg form
-      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). Every variant is
-      non-persistent, which enumerate.pin keeps true. use_sinks=False;
-      no sink_ptr slot. Validated at prepare() time by
-      buildIngestorKernelCode(..., expectedSignature).
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp
+      kernelSignature(RUNTIME_HEAD_COUNTS), the catalog's dispatch.v2 contract,
+      returns the 10-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
+      the runtime-shape grid body reads the shape and both head counts as
+      kernargs. kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, is used only
+      to restore plans saved under dispatch.v1. Every variant is non-persistent
+      and on the runtime-shape path, which enumerate.pin and the aligned catalog
+      keep true. use_sinks=False; no sink_ptr slot. Validated at prepare() time
+      by buildIngestorKernelCode(..., expectedSignature).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
+
+  # The cold ranking reads only the tile, through the shared candidateTile().
+  - name: score
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [head_size, block_m, block_n]
+    guard: >
+      scoreKernel() returns 0 for a record without a launchable tile; otherwise
+      an applicable 256/64 baseline first, then ascending (block_m, block_n),
+      a distinct positive score per tile.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp

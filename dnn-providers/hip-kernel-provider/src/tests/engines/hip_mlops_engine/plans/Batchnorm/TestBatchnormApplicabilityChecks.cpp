@@ -390,6 +390,33 @@ TEST(TestBatchnormValidator, InvalidActivation)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestBatchnormValidator, InvalidMixedTypes)
+{
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    // Mixed precision is only allowed if x and y are the same type or one of them is fp32
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 namespace
 {
 

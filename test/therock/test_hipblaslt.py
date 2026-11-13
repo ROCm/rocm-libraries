@@ -36,6 +36,8 @@ if is_asan():
     # Only device ASAN requires XNACK; host ASAN preserves the caller's setting.
     if "host-asan" not in os.getenv("ARTIFACT_GROUP", ""):
         environ_vars["HSA_XNACK"] = "1"
+    # Disable OpenMP parallelism: it provides limited speedups and introduces
+    # high overhead in ASAN builds.
     environ_vars["OMP_NUM_THREADS"] = "1"
 
 # ---------------------------------------------------------------------------
@@ -94,8 +96,8 @@ if AMDGPU_FAMILIES == "gfx1151" and platform == "windows":
 test_filter = []
 if test_type == "quick":
     test_filter.append("--gtest_filter=*smoke*")
-elif test_type == "quick":
-    test_filter.append("--gtest_filter=*quick*")
+elif test_type == "standard":
+    test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
 
 # The tuning store's tests are a separate binary. They need no GPU and take well
 # under a second, so the first shard runs all of them, without gtest sharding.

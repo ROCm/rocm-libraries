@@ -34,30 +34,40 @@ template <typename T, typename I, typename U>
 rocblas_status rocsolver_potrf_batched_impl(rocblas_handle handle,
                                             const rocblas_fill uplo,
                                             const I n,
-                                            U A,
+                                            U A_arg,
                                             const I lda,
-                                            I* info,
-                                            const I batch_count)
+                                            I* info_arg,
+                                            const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("potrf_batched", "--uplo", uplo, "-n", n, "--lda", lda, "--batch_count",
-                        batch_count);
+                        batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const batch_count = batch_count_arg;
+        auto const A = A_arg;
+        auto const info = info_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_potf2_potrf_argCheck(handle, uplo, n, lda, A, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st
+            = rocsolver_potf2_potrf_argCheck(handle, uplo, n, lda, A, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
     rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
+
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -69,9 +79,13 @@ try
     size_t size_pivots;
     // size to store info about positiveness of each subblock
     size_t size_iinfo;
-    rocsolver_potrf_getMemorySize<true, false, T>(n, uplo, batch_count, &size_scalars, &size_work1,
-                                                  &size_work2, &size_work3, &size_work4,
-                                                  &size_pivots, &size_iinfo, &optim_mem);
+
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_potrf_getMemorySize<true, false, T>(
+            n, uplo, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3, &size_work4,
+            &size_pivots, &size_iinfo, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
@@ -96,10 +110,26 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_potrf_template<true, false, T, I, I, S>(
-        handle, uplo, n, A, shiftA, lda, strideA, info, batch_count, (T*)scalars, work1, work2,
-        work3, work4, (T*)pivots, (I*)iinfo, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const batch_count = std::min(batch_count_arg - bid, bid_inc);
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto const istat = rocsolver_potrf_template<true, false, T, I, I, S>(
+            handle, uplo, n, A, shiftA, lda, strideA, info, batch_count, (T*)scalars, work1, work2,
+            work3, work4, (T*)pivots, (I*)iinfo, optim_mem);
+
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for isweep
+
+    return (rocblas_status_success);
 }
 catch(...)
 {

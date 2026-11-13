@@ -52,8 +52,9 @@ ScorePickForTest(const std::string& solver_name,
                  const std::vector<std::string>& cand_descs,
                  const std::vector<std::vector<double>>& cand_args);
 
-// True when `solver_name` has a shipped model for (gfx_id, direction) that the picker does not
-// use yet. PickConfig then abstains and the solver runs its default config.
+// True when the picker must not use `solver_name`'s model for (gfx_id, direction), whether or not
+// lgbm_pcfg.bin has buckets for it. PickConfig then abstains and the solver runs its default
+// config.
 MIOPEN_INTERNALS_EXPORT bool HeldOutOfPicker(const std::string& solver_name,
                                              const std::string& gfx_id,
                                              conv::Direction direction);

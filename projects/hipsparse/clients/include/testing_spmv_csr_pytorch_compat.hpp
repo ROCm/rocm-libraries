@@ -42,11 +42,11 @@
 
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 
-#include "hipsparse-float16.h"
 #include <float.h>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
@@ -199,14 +199,14 @@ inline float to_float<hipsparseFloat16>(hipsparseFloat16 val)
  * @brief Generate a random sparse CSR matrix similar to PyTorch's genSparseCSRTensor
  * @tparam T The value type (e.g., float, double, hipsparseBfloat16, hipsparseFloat16)
  */
-template <typename T>
-inline int generate_random_csr_pytorch(int               m,
-                                       int               n,
-                                       int               target_nnz,
-                                       std::vector<int>& crow_indices,
-                                       std::vector<int>& col_indices,
-                                       std::vector<T>&   values,
-                                       unsigned int      seed = 12345)
+template <typename T, typename I>
+inline I generate_random_csr_pytorch(int             m,
+                                     int             n,
+                                     int             target_nnz,
+                                     std::vector<I>& crow_indices,
+                                     std::vector<I>& col_indices,
+                                     std::vector<T>& values,
+                                     unsigned int    seed = 12345)
 {
     std::mt19937                          gen(seed);
     std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
@@ -256,36 +256,36 @@ inline int generate_random_csr_pytorch(int               m,
         // Add sorted column indices
         for(int col : row_cols)
         {
-            col_indices.push_back(col);
+            col_indices.push_back(static_cast<I>(col));
             values.push_back(from_float<T>(val_dist(gen)));
         }
 
-        crow_indices[i + 1] = static_cast<int>(col_indices.size());
+        crow_indices[i + 1] = static_cast<I>(col_indices.size());
     }
 
-    return static_cast<int>(col_indices.size());
+    return static_cast<I>(col_indices.size());
 }
 
 // ============================================================================
 // Convert sparse CSR to dense matrix
 // ============================================================================
 
-template <typename T>
-inline void csr_to_dense_pytorch(int                     m,
-                                 int                     n,
-                                 const std::vector<int>& crow_indices,
-                                 const std::vector<int>& col_indices,
-                                 const std::vector<T>&   values,
-                                 std::vector<T>&         dense)
+template <typename T, typename I>
+inline void csr_to_dense_pytorch(int                   m,
+                                 int                   n,
+                                 const std::vector<I>& crow_indices,
+                                 const std::vector<I>& col_indices,
+                                 const std::vector<T>& values,
+                                 std::vector<T>&       dense)
 {
     dense.assign(m * n, static_cast<T>(0));
 
     for(int i = 0; i < m; i++)
     {
-        for(int j = crow_indices[i]; j < crow_indices[i + 1]; j++)
+        for(I j = crow_indices[i]; j < crow_indices[i + 1]; ++j)
         {
-            int col            = col_indices[j];
-            dense[i * n + col] = values[j];
+            dense[i * n + static_cast<int>(col_indices[static_cast<size_t>(j)])]
+                = values[static_cast<size_t>(j)];
         }
     }
 }
@@ -362,16 +362,16 @@ inline bool compare_results_pytorch(const std::vector<T>& expected,
 // Templated Test CSR SpMV
 // ============================================================================
 
-template <typename T>
-inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool use_int64)
+template <typename T, typename I>
+inline void testing_spmv_csr_pytorch_compat_indexed(int m, int n, int target_nnz)
 {
     // Generate random CSR matrix on host directly in type T
-    std::vector<int> h_crow_indices;
-    std::vector<int> h_col_indices;
-    std::vector<T>   h_values;
+    std::vector<I> h_crow_indices;
+    std::vector<I> h_col_indices;
+    std::vector<T> h_values;
 
-    int actual_nnz
-        = generate_random_csr_pytorch<T>(m, n, target_nnz, h_crow_indices, h_col_indices, h_values);
+    const I actual_nnz = generate_random_csr_pytorch<T, I>(
+        m, n, target_nnz, h_crow_indices, h_col_indices, h_values);
 
     // Generate random input vector x directly in type T
     std::vector<T>                        h_x(n);
@@ -384,32 +384,34 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
 
     // Compute reference result using dense matmul (converts to float internally)
     std::vector<T> h_dense;
-    csr_to_dense_pytorch(m, n, h_crow_indices, h_col_indices, h_values, h_dense);
+    csr_to_dense_pytorch<T, I>(m, n, h_crow_indices, h_col_indices, h_values, h_dense);
 
     std::vector<T> h_y_ref;
     dense_matvec_pytorch(m, n, h_dense, h_x, h_y_ref);
 
+    const hipsparseIndexType_t idxType = getIndexType<I>();
+
     // Allocate device memory
     auto d_crow_indices_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(I) * (m + 1)), device_free};
     auto d_col_indices_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(int) * actual_nnz), device_free};
+        = hipsparse_unique_ptr{device_malloc(sizeof(I) * actual_nnz), device_free};
     auto d_values_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(T) * actual_nnz), device_free};
     auto d_x_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * n), device_free};
     auto d_y_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
 
-    int* d_crow_indices = (int*)d_crow_indices_managed.get();
-    int* d_col_indices  = (int*)d_col_indices_managed.get();
-    T*   d_values       = (T*)d_values_managed.get();
-    T*   d_x            = (T*)d_x_managed.get();
-    T*   d_y            = (T*)d_y_managed.get();
+    void* d_crow_indices = d_crow_indices_managed.get();
+    void* d_col_indices  = d_col_indices_managed.get();
+    T*    d_values       = (T*)d_values_managed.get();
+    T*    d_x            = (T*)d_x_managed.get();
+    T*    d_y            = (T*)d_y_managed.get();
 
     // Copy data to device
     CHECK_HIP_ERROR(hipMemcpy(
-        d_crow_indices, h_crow_indices.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+        d_crow_indices, h_crow_indices.data(), sizeof(I) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(
-        d_col_indices, h_col_indices.data(), sizeof(int) * actual_nnz, hipMemcpyHostToDevice));
+        d_col_indices, h_col_indices.data(), sizeof(I) * actual_nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(
         hipMemcpy(d_values, h_values.data(), sizeof(T) * actual_nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_x, h_x.data(), sizeof(T) * n, hipMemcpyHostToDevice));
@@ -419,18 +421,16 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     hipsparseLocalHandle_t handle;
 
     // Create sparse matrix descriptor
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&matA,
-                                             m,
-                                             n,
-                                             actual_nnz,
-                                             d_crow_indices,
-                                             d_col_indices,
-                                             d_values,
-                                             HIPSPARSE_INDEX_32I,
-                                             HIPSPARSE_INDEX_32I,
-                                             HIPSPARSE_INDEX_BASE_ZERO,
-                                             hip_datatype<T>::value));
+    hipsparseLocalCsr matA(m,
+                           n,
+                           actual_nnz,
+                           d_crow_indices,
+                           d_col_indices,
+                           d_values,
+                           idxType,
+                           idxType,
+                           HIPSPARSE_INDEX_BASE_ZERO,
+                           hip_datatype<T>::value);
 
     // Create dense vector descriptors
     hipsparseLocalDnVec vecX(n, d_x, hip_datatype<T>::value);
@@ -505,9 +505,19 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     ASSERT_TRUE(passed) << tolerance_traits<T>::name << " SpMV mismatch: " << num_errors
                         << " errors, max_abs=" << max_abs_error << ", max_rel=" << max_rel_error;
 #endif
+}
 
-    // Cleanup
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
+template <typename T>
+inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool use_int64)
+{
+    if(use_int64)
+    {
+        testing_spmv_csr_pytorch_compat_indexed<T, int64_t>(m, n, target_nnz);
+    }
+    else
+    {
+        testing_spmv_csr_pytorch_compat_indexed<T, int32_t>(m, n, target_nnz);
+    }
 }
 
 // ============================================================================

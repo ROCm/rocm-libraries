@@ -210,16 +210,18 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
 
 } // namespace
 
-// ConvHipConv on gfx1250, every direction: on held-out gfx1250 data the model retrained on
-// hipconv v0.4 configs gains 0.3% over the solver's default config (geomean, mean of 5 training
-// seeds, 4 of them within noise), and it has not been checked on gfx1250 hardware.
+// ConvHipConv on gfx1250, every direction: the model retrained on hipconv v0.5 configs was trained
+// on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
+// hardware.
 //
-// ConvHipConv on gfx950, backward weights: on MI355X the 46 picks that differ from the default
-// config ran slower than the default (geomean 0.9749, worst 0.48x), and offline the model loses
-// to the default there (0.9927). Forward and backward data gain on both and stay enabled.
+// ConvHipConv on gfx950, backward weights: on MI355X, 300 sampled picks that differ from the
+// default config gave default time / picked time 1.0078 (geomean, 95% CI 0.9868 to 1.0283), but
+// their summed time grew 1.21x, 69 ran more than 3% slower and the worst ran 0.30x. Offline the
+// model gains 0.15% there with a worse worst case than the default. Forward and backward data
+// gain on both and stay enabled.
 //
-// Gated here, rather than by dropping buckets from lgbm_pcfg.bin, so enabling either is a
-// one-line change.
+// Gated here, rather than by dropping the gfx950 backward-weights buckets from lgbm_pcfg.bin, so
+// enabling them is a one-line change.
 bool HeldOutOfPicker(const std::string& solver_name,
                      const std::string& gfx_id,
                      conv::Direction direction)

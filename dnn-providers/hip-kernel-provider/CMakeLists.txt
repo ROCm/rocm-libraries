@@ -286,6 +286,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR
@@ -332,20 +333,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
     )
 
-    # Two test descriptor roots, one per test binary. The unit root holds two packed
-    # subtrees and the integration root holds three. Two more packed subtrees stage beside
-    # the two roots and not inside either: the unit binary's copy of archive_fixture, so the
-    # unit engine does not discover it, and multi_launch, which no Container loads. All seven
-    # are wired in descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
+    # Two test descriptor roots, one per test binary, plus sibling slotted fixture roots
+    # (`slotted`, `slotted_hsaco`, and with rocKE on `slotted_multi_launch`). The unit root
+    # holds two packed subtrees, the integration root three and each slotted root one. Two
+    # more packed subtrees stage beside the roots and not inside any of them: the unit
+    # binary's copy of archive_fixture, so the unit engine does not discover it, and
+    # multi_launch, which no Container loads. All are wired in
+    # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
     # binary and JIT-compiled at load; for one of those the packer stamps the shard
     # architecture and records the authored values in the descriptor's provenance sidecar,
-    # and the subtree gets descriptors and no archive. Both roots stage into the build tree
+    # and the subtree gets descriptors and no archive. Every root stages into the build tree
     # rather than being read from the source tree, so the build tree matches the install
     # tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
+    set(HIPKERNELPROVIDER_TEST_SET_SLOTTED "slotted")
+    set(HIPKERNELPROVIDER_TEST_SET_SLOTTED_HSACO "slotted_hsaco")
+    set(HIPKERNELPROVIDER_TEST_SET_SLOTTED_MULTI_LAUNCH "slotted_multi_launch")
     set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
     set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
@@ -353,8 +359,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # Not a test root: the production tree's provenance sidecars install here. It shares
     # the folder with the test sets, so it must not reuse unit, integration,
-    # unit_archive_fixture, multi_launch, test_kpack_binary (src/tests/CMakeLists.txt) or the
-    # census folder HkpPackaging.cmake installs.
+    # unit_archive_fixture, multi_launch, slotted, slotted_hsaco, slotted_multi_launch,
+    # test_kpack_binary (src/tests/CMakeLists.txt) or the census folder HkpPackaging.cmake
+    # installs.
     set(HIPKERNELPROVIDER_TEST_SET_PROVENANCE "provenance")
 
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
@@ -372,6 +379,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # file count) so the shipped bundle is not silently left out; tests still configure
     # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
     # Only the root this build packs from is checked.
+    #
+    # A rocKE bundle with any such output is left out of the product pack whole
+    # (HKP_PRODUCT_EXCLUDED_BUNDLES): its git-tracked descriptors may name one that lives
+    # in the missing output (a UED naming a trained UHD under heuristics/), and the packer
+    # refuses a dangling reference. FlyDSL's per-target directories are handled by
+    # flydsl/CMakeLists.txt, which ships the targets that were pulled.
+    set(HKP_PRODUCT_EXCLUDED_BUNDLES "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
         set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
     else()
@@ -409,14 +423,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 else()
                     set(_level WARNING)
                 endif()
+                set(_skipped "What it holds will NOT be packed.")
+                if(_producer STREQUAL "rocKE")
+                    # <producer>/<bundle>: a bundle sits one level under its producer.
+                    file(RELATIVE_PATH _rel "${_dvc_root}" "${_output}")
+                    string(REGEX MATCH "^[^/]+/[^/]+" _bundle "${_rel}")
+                    list(APPEND HKP_PRODUCT_EXCLUDED_BUNDLES "${_bundle}")
+                    set(_skipped "The bundle ${_bundle} will NOT be packed.")
+                endif()
                 message(${_level}
                     "hip-kernel-provider: ${_producer} DVC output ${_output} is missing or "
                     "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
-                    "file, file count for a folder). What it holds will NOT be packed. "
+                    "file, file count for a folder). ${_skipped} "
                     "Run: dvc pull -r ingestor ${_pointer}")
             endif()
         endforeach()
     endforeach()
+    list(REMOVE_DUPLICATES HKP_PRODUCT_EXCLUDED_BUNDLES)
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
@@ -475,7 +498,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
-    set(HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950AttentionDense_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950Attention_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionDense_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/GRAPH_CAPTURE_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
     set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
@@ -484,7 +510,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
@@ -493,7 +522,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
             "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
         )
@@ -722,3 +754,4 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
+hipdnn_apply_long_path_manifest()

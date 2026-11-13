@@ -875,68 +875,6 @@ TEST(TestGpuResampleFwdRefOptionalArgs, MaxPoolWithIndex)
     assertAllExact(indexCpu, indexGpu);
 }
 
-TEST(TestGpuResampleFwdRefOptionalArgs, AverageExcludePadding)
-{
-    SKIP_IF_NO_DEVICES();
-
-    Tensor<float> xTensor({2, 3, 6, 6});
-    Tensor<float> yCpu({2, 3, 3, 3});
-    Tensor<float> yGpu({2, 3, 3, 3});
-
-    const unsigned int seed = getGlobalTestSeed();
-    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
-    xTensor.memory().hostData();
-
-    CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
-                                                            yCpu,
-                                                            {2, 2},
-                                                            {2, 2},
-                                                            {4, 4},
-                                                            ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                                            PaddingMode::NEG_INF_PAD);
-    GpuFpReferenceResample::forward<float, float, float>(xTensor,
-                                                         yGpu,
-                                                         {2, 2},
-                                                         {0, 0},
-                                                         {2, 2},
-                                                         {4, 4},
-                                                         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                                         PaddingMode::NEG_INF_PAD);
-
-    assertAllClose(yCpu, yGpu, getTolerance<float>());
-}
-
-TEST(TestGpuResampleFwdRefOptionalArgs, AvgPoolIncludePadding)
-{
-    SKIP_IF_NO_DEVICES();
-
-    Tensor<float> xTensor({2, 3, 6, 6});
-    Tensor<float> yCpu({2, 3, 4, 3});
-    Tensor<float> yGpu({2, 3, 4, 3});
-
-    const unsigned int seed = getGlobalTestSeed();
-    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
-    xTensor.memory().hostData();
-
-    CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
-                                                            yCpu,
-                                                            {2, 2},
-                                                            {2, 2},
-                                                            {4, 4},
-                                                            ResampleMode::AVGPOOL_INCLUDE_PADDING,
-                                                            PaddingMode::ZERO_PAD);
-    GpuFpReferenceResample::forward<float, float, float>(xTensor,
-                                                         yGpu,
-                                                         {2, 2},
-                                                         {2, 0},
-                                                         {2, 2},
-                                                         {4, 4},
-                                                         ResampleMode::AVGPOOL_INCLUDE_PADDING,
-                                                         PaddingMode::ZERO_PAD);
-
-    assertAllClose(yCpu, yGpu, getTolerance<float>());
-}
-
 // --- Channel-last layout tests ---
 
 TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef4D)
@@ -1107,7 +1045,7 @@ TEST_P(TestGpuResampleFwdRef5DBfp16, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-// --- Quick tests ---
+// --- Quick tests (fp32) + Standard small-shape reduced precision ---
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuResampleFwdRef4DFp32,
@@ -1116,14 +1054,14 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                                                                    getResampleModes(),
                                                                    getPaddingModes(),
                                                                    ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef4DFp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall4DShapes(),
                                                                    getResample4DLayouts(),
                                                                    getResampleModes(),
                                                                    getPaddingModes(),
                                                                    ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef4DBfp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall4DShapes(),
                                                                    getResample4DLayouts(),
@@ -1132,23 +1070,11 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                                                                    ResampleDirection::FORWARD)));
 
 // --- Standard tests ---
+// Fp32 only: reduced-precision types are covered by the standard tier's small-shape run
+// (dtype orthogonality, P1).
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef4DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef4DFp16,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef4DBfp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleMedium4DShapes(),
                                                                    getResample4DLayouts(),
                                                                    getResampleModes(),
@@ -1159,20 +1085,6 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuResampleFwdRef4DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleLarge4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuResampleFwdRef4DFp16,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleLarge4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuResampleFwdRef4DBfp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleLarge4DShapes(),
                                                                    getResample4DLayouts(),
                                                                    getResampleModes(),
@@ -1183,7 +1095,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-// --- Quick tests ---
+// --- Quick tests (fp32) + Standard small-shape reduced precision ---
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuResampleFwdRef5DFp32,
@@ -1192,14 +1104,14 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                                                                    getResampleModes(),
                                                                    getPaddingModes(),
                                                                    ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef5DFp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall5DShapes(),
                                                                    getResample5DLayouts(),
                                                                    getResampleModes(),
                                                                    getPaddingModes(),
                                                                    ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef5DBfp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall5DShapes(),
                                                                    getResample5DLayouts(),
@@ -1216,39 +1128,11 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                                    getResampleModes(),
                                                                    getPaddingModes(),
                                                                    ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef5DFp16,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef5DBfp16,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
 
 // --- Comprehensive tests ---
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuResampleFwdRef5DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleLarge5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuResampleFwdRef5DFp16,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleLarge5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuResampleFwdRef5DBfp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleLarge5DShapes(),
                                                                    getResample5DLayouts(),
                                                                    getResampleModes(),

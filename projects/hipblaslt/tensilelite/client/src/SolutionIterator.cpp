@@ -139,11 +139,7 @@ namespace TensileLite
                 return false;
             }
 
-            if(solution.requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-            {
-                solution.requiredHostWorkspaceSizePerProblem
-                    = solution.requiredHostSizeGroupedGemmSingle(problem, *m_hardware);
-            }
+            solution.ensureRequiredHostWorkspaceSize(problem, *m_hardware);
             return true;
         }
 

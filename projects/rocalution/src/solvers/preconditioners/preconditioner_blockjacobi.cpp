@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,10 @@
 
 #include <complex>
 #include <math.h>
+
+#ifndef SUPPORT_MULTINODE
+// COVERAGE_EXCL_NO_MPI_START
+#endif
 
 namespace rocalution
 {
@@ -181,3 +185,7 @@ namespace rocalution
 #endif
 
 } // namespace rocalution
+
+#ifndef SUPPORT_MULTINODE
+// COVERAGE_EXCL_NO_MPI_STOP
+#endif

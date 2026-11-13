@@ -5,7 +5,7 @@
 // binds variant-pack buffers and graph attributes to CpuFpReferenceSdpaRagged, so each execute
 // test compares it bit for bit with a direct reference call on the same host buffers. The direct
 // call always uses element-unit offset tables, so a plan that mishandles token offsets, a
-// separate V/O table or a packed LSE table addresses different tokens and the outputs differ.
+// separate V/O table or a ragged LSE table addresses different tokens and the outputs differ.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +19,7 @@
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,6 +33,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
 #include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLayoutTestSupport.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -66,6 +68,8 @@ constexpr int64_t SCALE_UID = 20;
 constexpr int64_t DESCALE_Q_UID = 21;
 constexpr int64_t DESCALE_K_UID = 22;
 constexpr int64_t DESCALE_V_UID = 23;
+constexpr int64_t SEQ_LEN_Q_UID = 30;
+constexpr int64_t SEQ_LEN_KV_UID = 31;
 
 // Not in the tensor map. Setting an unsupported-mode uid to it is enough to reject the node.
 constexpr int64_t UNUSED_UID = 99;
@@ -241,6 +245,38 @@ flatbuffers::DetachedBuffer withoutRaggedOffsets(const flatbuffers::FlatBufferBu
             tensor.ragged_offset_multiplier = 1;
         }
     });
+}
+
+// Adds INT32 [batch, 1, 1, 1] seq_len_q / seq_len_kv tensors and binds the node to them. `type`
+// is the data type of the added tensors.
+flatbuffers::DetachedBuffer withSeqLens(const flatbuffers::FlatBufferBuilder& graph,
+                                        int64_t batch,
+                                        bool seqLenQ = true,
+                                        bool seqLenKv = true,
+                                        DataType type = DataType::INT32)
+{
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
+    auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
+    for(const auto& [uid, enabled, slot] :
+        {std::tuple{SEQ_LEN_Q_UID, seqLenQ, &attrs->seq_len_q_tensor_uid},
+         std::tuple{SEQ_LEN_KV_UID, seqLenKv, &attrs->seq_len_kv_tensor_uid}})
+    {
+        if(!enabled)
+        {
+            continue;
+        }
+        auto tensor = std::make_unique<TensorAttributesT>();
+        tensor->uid = uid;
+        tensor->name = "seq_len";
+        tensor->data_type = type;
+        tensor->dims = {batch, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        graphT->tensors.push_back(std::move(tensor));
+        *slot = uid;
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder.Release();
 }
 
 template <typename Builder>
@@ -588,7 +624,79 @@ TEST(TestSdpaRaggedFwdPlan, ExecutePackedLseMatchesDirectCall)
         SMALL_SHAPE, DataType::BFLOAT16, lseOptions(RaggedStatsLayout::PACKED)));
 }
 
-// The packed LSE's token table is scaled by its own multiplier (H).
+// Every batch owns a block of 4 tokens, but seq_len_q = {2, 3} and seq_len_kv = {3, 2} bound the
+// lengths. The plan binds both tensors from the variant pack (Q, O and the ragged LSE take
+// seq_len_q; K and V take seq_len_kv), so it matches a direct call with those lengths, writes only
+// the live rows, and differs from the run without seq_len.
+TEST(TestSdpaRaggedFwdPlan, ExecuteBindsSeqLenFromTheVariantPack)
+{
+    const RaggedShape shape{{4, 4}, {4, 4}, 2, 2, 8, 8};
+    const auto qDims = shape.qDims();
+    const auto lseDims = shape.lseDims();
+    const int64_t tokenWidth = raggedSeqStride(raggedStrides(qDims)); // H * D = 16
+    const auto graph = withSeqLens(
+        makeGraph(shape, DataType::FLOAT, lseOptions(RaggedStatsLayout::PACKED)), shape.batch());
+
+    auto q = makeFilledBuffer<float>(volume(qDims), 11);
+    auto k = makeFilledBuffer<float>(volume(shape.kDims()), 22);
+    auto v = makeFilledBuffer<float>(volume(shape.vDims()), 33);
+    std::vector<float> o(volume(shape.oDims()), O_SENTINEL);
+    std::vector<float> lse(volume(lseDims), LSE_SENTINEL);
+    std::vector<int32_t> offsets
+        = {0, static_cast<int32_t>(4 * tokenWidth), static_cast<int32_t>(8 * tokenWidth)};
+    std::vector<int32_t> lseOffsets = {0, 4 * 2, 8 * 2};
+    std::vector<int32_t> seqLenQ = {2, 3};
+    std::vector<int32_t> seqLenKv = {3, 2};
+
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.data()},
+        {K_UID, k.data()},
+        {V_UID, v.data()},
+        {O_UID, o.data()},
+        {STATS_UID, lse.data()},
+        {RAGGED_OFFSET_Q_UID, offsets.data()},
+        {RAGGED_OFFSET_KV_UID, offsets.data()},
+        {RAGGED_OFFSET_STATS_UID, lseOffsets.data()},
+        {SEQ_LEN_Q_UID, seqLenQ.data()},
+        {SEQ_LEN_KV_UID, seqLenKv.data()}};
+    const GraphWrapper graphWrapper(graph.data(), graph.size());
+    const Fp32Builder builder;
+    ASSERT_TRUE(builder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+    builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0))->execute(variantPack);
+
+    const auto view = [](float* data,
+                         const std::vector<int64_t>& dims,
+                         const std::vector<int32_t>& offsetTable,
+                         const std::vector<int32_t>& lengths) -> ShallowRaggedTensor<float> {
+        return {data,
+                dims,
+                raggedStrides(dims),
+                SDPA_SEQ_AXIS,
+                ragged_layout_test::makeInt32Aux(offsetTable),
+                std::nullopt,
+                1,
+                ragged_layout_test::makeInt32Aux(lengths)};
+    };
+    std::vector<float> oDirect(o.size(), O_SENTINEL);
+    std::vector<float> lseDirect(lse.size(), LSE_SENTINEL);
+    auto qView = view(q.data(), qDims, offsets, seqLenQ);
+    auto kView = view(k.data(), shape.kDims(), offsets, seqLenKv);
+    auto vView = view(v.data(), shape.vDims(), offsets, seqLenKv);
+    auto oView = view(oDirect.data(), shape.oDims(), offsets, seqLenQ);
+    auto lseView = view(lseDirect.data(), lseDims, lseOffsets, seqLenQ);
+    CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(
+        qView, kView, vView, oView, 1.0F, -1, -1, true, &lseView);
+
+    expectIdentical(o, oDirect, "O");
+    expectIdentical(lse, lseDirect, "LSE");
+    EXPECT_EQ(std::count_if(o.begin(), o.end(), [](float x) { return x != O_SENTINEL; }),
+              (2 + 3) * tokenWidth)
+        << "only the live rows of each block are written";
+    EXPECT_EQ(std::count_if(lse.begin(), lse.end(), [](float x) { return x != LSE_SENTINEL; }),
+              (2 + 3) * 2);
+}
+
+// The ragged LSE's token table is scaled by its own multiplier (H).
 TEST(TestSdpaRaggedFwdPlan, ExecutePackedLseWithTokenOffsetsMatchesDirectCall)
 {
     expectPlanMatchesDirect(runPlanAndDirect<Bf16Builder>(
@@ -725,6 +833,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedAttributes)
 {
     using Edit = void (*)(SdpaAttributesT&);
     const std::vector<std::pair<const char*, Edit>> cases = {
+        // One seq_len alone, a missing tensor and padding_mask without the pair are declined.
         {"seq_len_q", [](SdpaAttributesT& a) { a.seq_len_q_tensor_uid = UNUSED_UID; }},
         {"seq_len_kv", [](SdpaAttributesT& a) { a.seq_len_kv_tensor_uid = UNUSED_UID; }},
         {"alibi_mask", [](SdpaAttributesT& a) { a.alibi_mask = true; }},
@@ -779,8 +888,8 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
     EXPECT_FALSE(accepts<Bf16Builder>(graph));
 }
 
-// Contiguous [B, H, S, D] strides are not token-major, so tokens cannot be packed by offset.
-TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonTokenMajorLayout)
+// Contiguous [B, H, S, D] strides are the head-major layout (L6): a ragged tensor can address it.
+TEST(TestSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorLayout)
 {
     auto graph = rewriteTensors(makeBf16GateGraph(), [](TensorAttributesT& tensor) {
         if(tensor.uid == Q_UID)
@@ -788,7 +897,30 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonTokenMajorLayout)
             tensor.strides = generateStrides(tensor.dims);
         }
     });
-    EXPECT_FALSE(accepts<Bf16Builder>(graph));
+    EXPECT_TRUE(accepts<Bf16Builder>(graph));
+}
+
+// A head stride below one head's feature span makes the heads alias each other's features.
+TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForAliasingStrides)
+{
+    for(const auto uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        auto aliasingHeads = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
+            if(tensor.uid == uid)
+            {
+                tensor.strides = {64, 4, 16, 1}; // [B, H, S, D] = [1, 2, 4, 8]: H stride 4 < 8
+            }
+        });
+        EXPECT_FALSE(accepts<Bf16Builder>(aliasingHeads)) << "aliasing heads on uid " << uid;
+
+        auto negativeStride = rewriteTensors(makeBf16GateGraph(), [uid](TensorAttributesT& tensor) {
+            if(tensor.uid == uid)
+            {
+                tensor.strides = {64, 8, -16, 1};
+            }
+        });
+        EXPECT_FALSE(accepts<Bf16Builder>(negativeStride)) << "negative stride on uid " << uid;
+    }
 }
 
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonScalarHostDescale)
@@ -814,7 +946,7 @@ TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonFloatStats)
     EXPECT_FALSE(accepts<Bf16Builder>(graph));
 }
 
-// A packed LSE needs the same INT32 aux and ragged_offset_multiplier >= 1 as the primaries.
+// A ragged LSE needs the same INT32 aux and ragged_offset_multiplier >= 1 as the primaries.
 TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForMalformedPackedStats)
 {
     const auto packed = makeBf16GateGraph(lseOptions(RaggedStatsLayout::PACKED));
@@ -921,19 +1053,55 @@ TEST(TestSdpaRaggedFwdPlanBuilder, BuildNodePlanRejectsBothCausalFlags)
                  std::invalid_argument);
 }
 
-// A packed LSE keeps its INT32 aux and multiplier 1 but gets contiguous [B, H, Sq, 1] strides.
-// Its seq stride is then 1, too small to hold one token's H entries, so it is not token-major.
-TEST(TestSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonTokenMajorPackedStats)
+// A ragged LSE with contiguous [B, H, Sq, 1] strides is the [H, T] layout (L7a): applicable. A
+// zero sequence stride would put every token of a head on one element, so it is not.
+TEST(TestSdpaRaggedFwdPlanBuilder, PackedStatsLayouts)
 {
     const auto packed = makeBf16GateGraph(lseOptions(RaggedStatsLayout::PACKED));
     ASSERT_TRUE(accepts<Bf16Builder>(packed));
 
-    EXPECT_FALSE(accepts<Bf16Builder>(rewriteTensors(packed, [](TensorAttributesT& tensor) {
+    EXPECT_TRUE(accepts<Bf16Builder>(rewriteTensors(packed, [](TensorAttributesT& tensor) {
         if(tensor.uid == STATS_UID)
         {
             tensor.strides = generateStrides(tensor.dims);
         }
     })));
+    EXPECT_FALSE(accepts<Bf16Builder>(rewriteTensors(packed, [](TensorAttributesT& tensor) {
+        if(tensor.uid == STATS_UID)
+        {
+            tensor.strides = {8, 4, 0, 1};
+        }
+    })));
+}
+
+// seq_len_q and seq_len_kv together (INT32, one value per batch) are accepted, with or without
+// padding_mask; one alone, a wrong data type, or padding_mask without them is declined.
+TEST(TestSdpaRaggedFwdPlanBuilder, SeqLenPairIsAccepted)
+{
+    const auto graph = makeBf16GateGraph();
+    EXPECT_TRUE(accepts<Bf16Builder>(withSeqLens(graph, 1)));
+
+    SdpaAttributesT padded;
+    padded.padding_mask = true;
+    EXPECT_TRUE(accepts<Bf16Builder>(withSeqLens(makeBf16GateGraph(withAttrs(padded)), 1)));
+
+    EXPECT_FALSE(accepts<Bf16Builder>(withSeqLens(graph, 1, true, false)));
+    EXPECT_FALSE(accepts<Bf16Builder>(withSeqLens(graph, 1, false, true)));
+    EXPECT_FALSE(accepts<Bf16Builder>(withSeqLens(graph, 1, true, true, DataType::INT64)));
+    EXPECT_FALSE(accepts<Bf16Builder>(makeBf16GateGraph(withAttrs(padded))));
+}
+
+// The native plan still declines ragged Max and Sum_exp even with seq_len: the executor serves
+// them through the dense rewrite.
+TEST(TestSdpaRaggedFwdPlanBuilder, MaxAndSumExpStayDeclinedWithSeqLen)
+{
+    for(const auto edit : {+[](SdpaAttributesT& a) { a.max_tensor_uid = UNUSED_UID; },
+                           +[](SdpaAttributesT& a) { a.sum_exp_tensor_uid = UNUSED_UID; }})
+    {
+        SdpaAttributesT attrs;
+        edit(attrs);
+        EXPECT_FALSE(accepts<Bf16Builder>(withSeqLens(makeBf16GateGraph(withAttrs(attrs)), 1)));
+    }
 }
 
 // The gate never throws on a malformed graph: every tensor it looks up, when missing from the

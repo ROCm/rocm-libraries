@@ -551,8 +551,7 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -563,8 +562,7 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading,
-               archRenames,
+               lazyLibraryLoading
            )
 
 
@@ -681,14 +679,9 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
-    """Parses the data of a library logic file.
-
-    ``archRenames`` maps a declared ArchitectureName to the name the library is
-    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
-    """
+    """Parses the data of a library logic file."""
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -698,8 +691,6 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
-    if archRenames:
-        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     normalizeLogicProblemType(data["ProblemType"])

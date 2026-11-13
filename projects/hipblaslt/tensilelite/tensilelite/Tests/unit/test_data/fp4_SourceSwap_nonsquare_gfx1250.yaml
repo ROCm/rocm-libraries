@@ -4,7 +4,7 @@
 # GPU-less (--cpu-only) guard for SourceSwap on a non-square F4 MatrixInstruction.
 # Modeled on test_data/cpu_only.yaml: no ISA/Architecture pinned here (the target
 # arch is supplied at the command line via --gpu-targets gfx1250, which is the
-# only revision that has the fp4 32x16 WMMA opcode -- gfx1250v0 lacks it).
+# only revision that has the fp4 32x16 WMMA opcode -- gfx1250-strict lacks it).
 # Deliberately NO LibraryLogic section: the contract under test is solution
 # generation + MI validation, which fails (or not) inside BenchmarkProblems long
 # before any logic yaml would be analyzed, so running LibraryLogic would only add

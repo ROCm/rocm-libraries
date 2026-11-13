@@ -36,7 +36,7 @@ Shared CLI options and fixtures: [tests/conftest.py](../conftest.py).
 |--------|---------|
 | `cg_integration` | CLI / `run` + artifact checks (needs `--config` + `--hipblaslt-path`) |
 | `cg_cli_guard` | `main()` path errors only (hermetic) |
-| `cg_components` | MI / opt / fork pipeline (needs `--hipblaslt-path` for Tensile) |
+| `cg_components` | MI / opt / fork pipeline (needs `--hipblaslt-path` for TensileLite) |
 
 Examples:
 

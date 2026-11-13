@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -13,118 +14,96 @@
 namespace hipdnn_test_sdk::detail
 {
 
-// RFC-0014 packs a ragged tensor token by token: logical rank-4 [B, H, S, D] ragged along
-// SDPA_SEQ_AXIS, physically BSHD so the sequence is the outermost axis after batch. The seq
-// stride (strides[2]) must therefore cover one token's whole H x D block, so tokens never
-// overlap. A contiguous BHSD tensor fails this, because its seq stride is D.
-inline bool isTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
-                                     const std::vector<int64_t>& strides)
+// The part of the ragged container's layout rule that depends on the tensor attributes alone,
+// not on the per-batch origins and lengths: a rank-4 [B, H, S, D] tensor ragged along
+// SDPA_SEQ_AXIS with non-negative strides, a positive sequence stride, and non-aliasing head and
+// feature axes (sorted-stride rule on H and D; zero-stride axes are exempt). The sequence axis
+// against the other axes depends on the dense view's row count, which only the origins and
+// lengths give, so the container checks it when the tensor is built.
+inline bool hasValidRaggedStrides(const std::vector<int64_t>& dims,
+                                  const std::vector<int64_t>& strides)
 {
     constexpr auto SEQ_AXIS = static_cast<size_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
     if(dims.size() != 4 || strides.size() != 4)
     {
         return false;
     }
-    int64_t tokenSpan = 1; // elements from a token's first to last element, inclusive
-    for(size_t i = 1; i < dims.size(); ++i)
+    if(std::any_of(strides.begin() + 1, strides.end(), [](int64_t stride) { return stride < 0; })
+       || strides[SEQ_AXIS] <= 0)
     {
-        if(i != SEQ_AXIS && dims[i] > 0)
-        {
-            tokenSpan += (dims[i] - 1) * strides[i];
-        }
+        return false;
     }
-    return strides[SEQ_AXIS] >= tokenSpan;
-}
 
-inline void requireTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
-                                          const std::vector<int64_t>& strides,
-                                          const std::string& who,
-                                          const char* name)
-{
-    if(!isTokenMajorRaggedLayout(dims, strides))
+    constexpr size_t HEAD_AXIS = 1;
+    constexpr size_t FEATURE_AXIS = 3;
+    const bool headCounts = dims[HEAD_AXIS] > 1 && strides[HEAD_AXIS] != 0;
+    const bool featureCounts = dims[FEATURE_AXIS] > 1 && strides[FEATURE_AXIS] != 0;
+    if(!headCounts || !featureCounts)
     {
-        throw std::invalid_argument(who + ": " + name
-                                    + " must be [B, H, S, D] packed token by token (RFC-0014): "
-                                      "strides[2] must cover one token's H x D block");
+        return true;
     }
-}
 
-// Converts an RFC-0014 ragged_offset table (B + 1 element offsets) to token boundaries,
-// offset[b] / seqStride. Tensors with different token widths share a packing but not element
-// offsets, so cross-tensor checks compare tokens.
-// Throws std::invalid_argument unless seqStride > 0, offset[0] == 0, each offset is a whole
-// number of tokens, offsets never decrease, and no batch is longer than sMax (dims()[2]).
-inline std::vector<int64_t> raggedTokenBoundaries(const std::vector<int64_t>& elementOffsets,
-                                                  int64_t seqStride,
-                                                  int64_t sMax,
-                                                  const std::string& who,
-                                                  const char* name)
-{
-    if(seqStride <= 0)
-    {
-        throw std::invalid_argument(who + ": " + name + " sequence stride must be positive");
-    }
-    if(!elementOffsets.empty() && elementOffsets.front() != 0)
-    {
-        throw std::invalid_argument(who + ": " + name + " ragged_offset[0] must be 0 (got "
-                                    + std::to_string(elementOffsets.front()) + ")");
-    }
-    std::vector<int64_t> tokens;
-    tokens.reserve(elementOffsets.size());
-    for(size_t b = 0; b < elementOffsets.size(); ++b)
-    {
-        const auto offset = elementOffsets[b];
-        if(offset % seqStride != 0)
-        {
-            throw std::invalid_argument(who + ": " + name + " ragged_offset[" + std::to_string(b)
-                                        + "] = " + std::to_string(offset)
-                                        + " is not a whole number of tokens (seq stride "
-                                        + std::to_string(seqStride) + ")");
-        }
-        tokens.push_back(offset / seqStride);
-        if(b == 0)
-        {
-            continue;
-        }
-        const auto length = tokens[b] - tokens[b - 1];
-        if(length < 0)
-        {
-            throw std::invalid_argument(who + ": " + name
-                                        + " ragged_offset must be non-decreasing");
-        }
-        if(length > sMax)
-        {
-            throw std::invalid_argument(who + ": " + name + " batch " + std::to_string(b - 1)
-                                        + " has " + std::to_string(length)
-                                        + " tokens, more than S_max = " + std::to_string(sMax));
-        }
-    }
-    return tokens;
+    const size_t outer = strides[HEAD_AXIS] >= strides[FEATURE_AXIS] ? HEAD_AXIS : FEATURE_AXIS;
+    const size_t inner = outer == HEAD_AXIS ? FEATURE_AXIS : HEAD_AXIS;
+    return strides[outer] >= (dims[inner] - 1) * strides[inner] + 1;
 }
 
 // Throws std::invalid_argument unless two tensors that share a packing (Q/O, K/V, Q/LSE) have the
-// same token boundaries.
-inline void requireMatchingTokenBoundaries(const std::vector<int64_t>& a,
-                                           const char* aName,
-                                           const std::vector<int64_t>& b,
-                                           const char* bName,
-                                           const std::string& who)
+// same per-batch sequence lengths. Their origins are independent: token widths and layouts
+// differ between tensors.
+inline void requireMatchingRaggedLengths(const std::vector<int64_t>& a,
+                                         const char* aName,
+                                         const std::vector<int64_t>& b,
+                                         const char* bName,
+                                         const std::string& who)
 {
     if(a.size() != b.size())
     {
         throw std::invalid_argument(who + ": " + aName + " and " + bName
-                                    + " ragged_offset tables differ in length");
+                                    + " have different batch counts (" + std::to_string(a.size())
+                                    + " vs " + std::to_string(b.size()) + ")");
     }
     for(size_t i = 0; i < a.size(); ++i)
     {
         if(a[i] != b[i])
         {
             throw std::invalid_argument(who + ": " + aName + " and " + bName
-                                        + " per-batch sequence lengths differ (token boundary "
+                                        + " per-batch sequence lengths differ (batch "
                                         + std::to_string(i) + ": " + std::to_string(a[i]) + " vs "
                                         + std::to_string(b[i]) + ")");
         }
     }
+}
+
+// Elements an INT32 aux tensor (ragged_offset or seq_len) of `count` values spans from its base
+// pointer, value b at b * `stride`. A stride is only meaningful, and so only validated, with more
+// than one value: std::invalid_argument naming `name` for a stride below 1.
+inline size_t stridedAuxSpan(int64_t count, int64_t stride, const std::string& name)
+{
+    if(count <= 0)
+    {
+        return 0;
+    }
+    if(count > 1 && stride < 1)
+    {
+        throw std::invalid_argument(name + " batch stride must be >= 1 (got "
+                                    + std::to_string(stride) + ")");
+    }
+    return count > 1 ? static_cast<size_t>((count - 1) * stride + 1) : 1;
+}
+
+// The `count` values of an INT32 aux tensor read from a host copy of its stridedAuxSpan elements.
+inline std::vector<int64_t>
+    gatherStridedAux(const int32_t* raw, int64_t count, int64_t stride, const std::string& name)
+{
+    (void)stridedAuxSpan(count, stride, name);
+    std::vector<int64_t> values;
+    values.reserve(static_cast<size_t>(std::max<int64_t>(count, 0)));
+    for(int64_t b = 0; b < count; ++b)
+    {
+        values.push_back(raw[b * stride]);
+    }
+    return values;
 }
 
 } // namespace hipdnn_test_sdk::detail

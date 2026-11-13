@@ -13,6 +13,7 @@ from rocke.core.codegen_policy import (
     SchedulerStrategy,
     apply_codegen_policy,
     codegen_policy_for_kernel,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import IRBuilder
 from rocke.core.ir_serialize import parse, serialize
@@ -57,10 +58,21 @@ class TestCodegenPolicy(unittest.TestCase):
                 )
 
     def test_invalid_scheduler_strategies_are_rejected(self):
-        for value in ("", "default", "ITERATIVE-ILP", 1, True, object()):
+        """The ValueError text, word for word: the C++ engine's
+        rocke_scheduler_strategy_reason writes the same text, so a change
+        here must be made there too."""
+        for value in ("", "default", "ITERATIVE-ILP", "it's", 1, True, object()):
             with self.subTest(value=value):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as ctx:
                     CodegenPolicy(scheduler_strategy=value)
+                self.assertEqual(
+                    str(ctx.exception),
+                    f"unsupported scheduler_strategy {value!r}; expected one of: "
+                    "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
+                    "max-memory-clause, or None",
+                )
+                self.assertEqual(scheduler_strategy_reason(value), str(ctx.exception))
+        self.assertIsNone(scheduler_strategy_reason(None))
 
     def test_apply_and_remove_policy(self):
         kernel = _kernel()

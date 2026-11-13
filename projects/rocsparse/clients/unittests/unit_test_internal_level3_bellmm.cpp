@@ -164,7 +164,8 @@ namespace
         ~SpMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_spmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(d));
         }
     };
 
@@ -174,7 +175,8 @@ namespace
         ~DnMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_dnmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(d));
         }
     };
 }

@@ -49,6 +49,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
+from rocke.tests.arch_marks import COVERED_ARCHES  # noqa: E402
 from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
 _DRIVER = "rocke.portable_ir.drivers.roll_hsaco_parity"
@@ -58,7 +59,17 @@ _PLATFORM = _HERE.parents[1]
 # roller that merely replays its samples fails on them.
 _GEMM_SAMPLES = (32, 64)
 _GEMM_HOLDOUTS = (128, 256)
-_ARCH = "gfx950"
+ARCHS = COVERED_ARCHES
+
+
+@pytest.fixture
+def roll_arch(arch, monkeypatch):
+    """Point the roll drivers at `arch`, in child processes and in this one."""
+    monkeypatch.setenv("ROCKE_ROLL_ARCH", arch)
+    from rocke.portable_ir.drivers import roll_hsaco_parity
+
+    monkeypatch.setattr(roll_hsaco_parity, "ARCH", arch)
+    return arch
 
 
 def _source_matched_lib():
@@ -86,7 +97,8 @@ def _run_driver(*extra):
 
 
 @pytest.mark.integration
-def test_roll_sha_parity():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_roll_sha_parity(arch, roll_arch):
     """Rolled .ll digest == Python .ll digest, sampled and held-out.
 
     The primary rolled-path gate: four families, seven axes, 22 points. Stops at
@@ -103,7 +115,8 @@ def test_roll_sha_parity():
 
 
 @pytest.mark.integration
-def test_roll_hsaco_parity():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_roll_hsaco_parity(arch, roll_arch):
     """The rolled recipe compiles to a byte-identical HSACO.
 
     The digest lane above compares IR text; this compares the object code the
@@ -117,7 +130,8 @@ def test_roll_hsaco_parity():
     assert r.returncode == 0, r.stdout[-8000:] + r.stderr[-4000:]
 
 
-def test_standalone_cli_replays_rolled_recipe(tmp_path):
+@pytest.mark.parametrize("arch", ARCHS)
+def test_standalone_cli_replays_rolled_recipe(tmp_path, arch, roll_arch):
     """A binary with no Python in it replays the PARAMETRIC recipe to Python's .ll.
 
     test_portable_ir.py runs a concrete recipe through this CLI. A parametric one
@@ -145,7 +159,7 @@ if not r.ok:
 open(out + "/gemm.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
 shas = {{}}
 for v in {list(_GEMM_SAMPLES + _GEMM_HOLDOUTS)}:
-    ll = lower_kernel_to_llvm(_gemm(tile_n=v), llvm_flavor=flavor, arch="{_ARCH}")
+    ll = lower_kernel_to_llvm(_gemm(tile_n=v), llvm_flavor=flavor, arch="{arch}")
     open(out + "/py_%d.ll" % v, "w").write(ll)
     shas[v] = __import__("hashlib").sha256(ll.encode()).hexdigest()
 json.dump(shas, open(out + "/shas.json", "w"))
@@ -167,7 +181,7 @@ json.dump(shas, open(out + "/shas.json", "w"))
                 "--int",
                 f"tile_n={v}",
                 "--arch",
-                _ARCH,
+                arch,
                 "--flavor",
                 flavor,
             ],
@@ -232,7 +246,8 @@ def _magic(D):
 """
 
 
-def test_roll_nd_cross_product():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_roll_nd_cross_product(arch, roll_arch):
     """One recipe covers a family's whole non-reduction axis cross product.
 
     The lanes above roll ONE axis per recipe with the others pinned, so k axes
@@ -259,7 +274,8 @@ def test_roll_nd_cross_product():
     assert "NOW ROLLS" not in r.stdout, r.stdout[-4000:]
 
 
-def test_standalone_cli_replays_multi_axis_recipe(tmp_path):
+@pytest.mark.parametrize("arch", ARCHS)
+def test_standalone_cli_replays_multi_axis_recipe(tmp_path, arch, roll_arch):
     """A binary with no Python replays a TWO-AXIS recipe to Python's exact .ll.
 
     This is the claim that matters for the C stack: multi-axis rolling needed no
@@ -284,7 +300,7 @@ if not r.ok:
 open(out + "/conv.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
 shas = {{}}
 for pt in {points}:
-    ll = lower_kernel_to_llvm(_conv(**pt), llvm_flavor=flavor, arch="{_ARCH}")
+    ll = lower_kernel_to_llvm(_conv(**pt), llvm_flavor=flavor, arch="{arch}")
     shas[json.dumps(pt, sort_keys=True)] = __import__("hashlib").sha256(
         ll.encode()).hexdigest()
 json.dump(shas, open(out + "/shas.json", "w"))
@@ -304,7 +320,7 @@ json.dump(shas, open(out + "/shas.json", "w"))
             str(recipe),
             "--cbor",
             "--arch",
-            _ARCH,
+            arch,
             "--flavor",
             flavor,
         ]
@@ -322,7 +338,8 @@ json.dump(shas, open(out + "/shas.json", "w"))
         )
 
 
-def test_standalone_cli_regenerates_magic_division_constants(tmp_path):
+@pytest.mark.parametrize("arch", ARCHS)
+def test_standalone_cli_regenerates_magic_division_constants(tmp_path, arch, roll_arch):
     """The C VM regenerates magic-division constants it never recorded.
 
     A build-time divisor `D` is the axis that no curve fits: the kernel
@@ -353,7 +370,7 @@ for fn in ("magic_multiplier", "magic_shift"):
 open(out + "/magic.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(r.recipe))
 shas = {{}}
 for c in {points}:
-    ll = lower_kernel_to_llvm(_magic(D=c), llvm_flavor=flavor, arch="{_ARCH}")
+    ll = lower_kernel_to_llvm(_magic(D=c), llvm_flavor=flavor, arch="{arch}")
     shas[str(c)] = __import__("hashlib").sha256(ll.encode()).hexdigest()
 json.dump(shas, open(out + "/shas.json", "w"))
 """
@@ -374,7 +391,7 @@ json.dump(shas, open(out + "/shas.json", "w"))
                 str(recipe),
                 "--cbor",
                 "--arch",
-                _ARCH,
+                arch,
                 "--flavor",
                 flavor,
                 "--int",
@@ -396,7 +413,8 @@ json.dump(shas, open(out + "/shas.json", "w"))
     assert len(seen) == len(points), "expected a distinct .ll per D value"
 
 
-def test_regimes_do_not_oversplit_a_uniform_real_axis():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_regimes_do_not_oversplit_a_uniform_real_axis(arch, roll_arch):
     """Specializing must stay a last resort, not a default.
 
     `roll_regimes` splits an axis wherever a recipe stops verifying, which is the
@@ -415,7 +433,8 @@ def test_regimes_do_not_oversplit_a_uniform_real_axis():
     assert r.regimes[0].sampled == vals[:2]
 
 
-def test_axis_domains_come_from_the_kernels_own_validation():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_axis_domains_come_from_the_kernels_own_validation(arch):
     """What an axis is worth is a property of the kernel, not of a driver table.
 
     Rolling an axis saves one concrete recipe per value the axis legally takes, so
@@ -423,7 +442,11 @@ def test_axis_domains_come_from_the_kernels_own_validation():
     order of magnitude, not an exact set) because the point is the ranking: the
     axes already rolled have large domains, while `block_n` is capped by having to
     divide `seqlen_kv` and `head_size` accepts two values in total."""
-    from kernels.gfx950.attention_dense import AttentionDenseSpec
+    import importlib
+
+    AttentionDenseSpec = importlib.import_module(
+        f"kernels.{arch}.attention_dense"
+    ).AttentionDenseSpec
 
     from rocke.portable_ir.src.roll_regimes import legal_values
 

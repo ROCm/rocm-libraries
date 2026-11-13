@@ -440,11 +440,11 @@ try
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.")
 
         ("compute_input_typeB",
          value<std::string>(&compute_input_typeB), "Precision of computation input B. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
@@ -643,6 +643,10 @@ try
         ("scaleAlpha_vector",
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
+
+        ("device_scalar_alpha",
+         bool_switch(&arg.device_scalar_alpha)->default_value(false),
+         "Read alpha as one scalar from device memory")
 
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),

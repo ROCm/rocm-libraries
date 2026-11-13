@@ -30,7 +30,8 @@ namespace hipdnn_test_sdk::detail
 {
 
 // Runs CpuFpReferenceSdpaRagged on the variant-pack host buffers. Every ragged operand is a
-// ShallowRaggedTensor view, so the reference addresses the packed data through its offset table.
+// ShallowRaggedTensor view, so the reference addresses the data through its offset table and, when
+// the node has seq_len_q/kv, through those per-batch lengths.
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
 class SdpaRaggedFwdPlan : public IGraphNodePlanExecutor
 {
@@ -52,16 +53,20 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto qTensor
-            = bindRagged<QDataType>(_params.qTensor, _params.raggedOffsetQTensor, variantPack);
-        auto kTensor
-            = bindRagged<KDataType>(_params.kTensor, _params.raggedOffsetKTensor, variantPack);
-        auto vTensor
-            = bindRagged<VDataType>(_params.vTensor, _params.raggedOffsetVTensor, variantPack);
-        auto oTensor
-            = bindRagged<ODataType>(_params.oTensor, _params.raggedOffsetOTensor, variantPack);
+        const auto seqLenQ = bindLengths(_params.seqLenQTensor, variantPack);
+        const auto seqLenKv = bindLengths(_params.seqLenKvTensor, variantPack);
 
-        // A packed LSE is ragged on its own offset table. A dense LSE is a plain view.
+        auto qTensor = bindRagged<QDataType>(
+            _params.qTensor, _params.raggedOffsetQTensor, seqLenQ, variantPack);
+        auto kTensor = bindRagged<KDataType>(
+            _params.kTensor, _params.raggedOffsetKTensor, seqLenKv, variantPack);
+        auto vTensor = bindRagged<VDataType>(
+            _params.vTensor, _params.raggedOffsetVTensor, seqLenKv, variantPack);
+        auto oTensor = bindRagged<ODataType>(
+            _params.oTensor, _params.raggedOffsetOTensor, seqLenQ, variantPack);
+
+        // A ragged LSE is ragged on its own offset table, with Q's lengths. A dense LSE is a
+        // plain view.
         std::optional<hipdnn_data_sdk::utilities::ShallowRaggedTensor<float>> raggedLseTensor;
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> denseLseTensor;
         hipdnn_data_sdk::utilities::TensorBase<float>* lseTensor = nullptr;
@@ -77,7 +82,8 @@ public:
                     hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
                     bindOffsets(*_params.raggedOffsetLseTensor, variantPack),
                     std::nullopt,
-                    lse.ragged_offset_multiplier);
+                    lse.ragged_offset_multiplier,
+                    seqLenQ);
             }
             else
             {
@@ -126,12 +132,26 @@ private:
             variantPack.at(raggedOffset.uid), raggedOffset.dims, raggedOffset.strides);
     }
 
-    // Views a packed primary through its ragged_offset aux, scaled by the primary's
-    // ragged_offset_multiplier.
+    // The INT32 seq_len aux viewed in place; null when the node has none.
+    static std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> bindLengths(
+        const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& seqLen,
+        const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        if(!seqLen.has_value())
+        {
+            return nullptr;
+        }
+        return std::make_shared<hipdnn_data_sdk::utilities::ShallowTensor<int32_t>>(
+            variantPack.at(seqLen->uid), seqLen->dims, seqLen->strides);
+    }
+
+    // Views a ragged primary through its ragged_offset aux, scaled by the primary's
+    // ragged_offset_multiplier, and bounded by its per-batch lengths (null: from the offsets).
     template <typename T>
     static hipdnn_data_sdk::utilities::ShallowRaggedTensor<T>
         bindRagged(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensor,
                    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& raggedOffset,
+                   const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths,
                    const std::unordered_map<int64_t, void*>& variantPack)
     {
         return hipdnn_data_sdk::utilities::ShallowRaggedTensor<T>(
@@ -141,7 +161,8 @@ private:
             hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
             bindOffsets(raggedOffset, variantPack),
             std::nullopt,
-            tensor.ragged_offset_multiplier);
+            tensor.ragged_offset_multiplier,
+            lengths);
     }
 
     RaggedSdpaFwdParams _params;
@@ -182,7 +203,7 @@ public:
         return true;
     }
 
-    // The reference checks that O (and a packed LSE) has Q's per-batch lengths and V has K's.
+    // The reference checks that O (and a ragged LSE) has Q's per-batch lengths and V has K's.
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                       const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override

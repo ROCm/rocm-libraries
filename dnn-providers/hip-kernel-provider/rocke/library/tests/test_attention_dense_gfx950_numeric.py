@@ -62,6 +62,30 @@ _COHORT = [
 ]
 
 
+# (dtype, persist_decode, interleave, sliding_window, configs, tile): one
+# persistent binary per row serves every (B, S, Hq, Hkv). GQA rows mix ratios 4
+# and 5 and a non-pow2 Hq; hq_minor_swz needs MHA. The window-free causal D128
+# rows run the wide-DMA candidate.
+#
+# The tile is pinned rather than left to the tuner. ``block_m`` is baked, so two
+# configs on different tiles are two binaries and can never share a cache key,
+# and the tuner halves the query tile for a launch too small to fill the device
+# -- which is exactly the W < NP config every row opens with. Each row names the
+# tile its work counts were sized against: at the 256 tile they straddle NP = 256
+# (W < NP, NP < W < 2*NP, W > 2*NP, W % NP != 0), while the windowed row runs
+# NP = 512, where only the 128 tile reaches past 2*NP.
+_PERSIST_GQA = ((1, 512, 16, 4), (2, 1024, 40, 8), (3, 2048, 28, 4))
+_PERSIST_MHA = ((1, 512, 16, 16), (2, 1024, 48, 48), (3, 2048, 32, 32))
+_PERSIST_ONE_BINARY = [
+    ("bf16", "qb_major", False, 0, _PERSIST_GQA, "default"),
+    ("fp16", "qb_major", True, 0, _PERSIST_GQA, "default"),
+    ("bf16", "hkv_major", False, 0, _PERSIST_GQA, "default"),
+    ("fp16", "bt_hkv_minor", False, 0, _PERSIST_GQA, "default"),
+    ("bf16", "hq_minor_swz", False, 0, _PERSIST_MHA, "default"),
+    ("bf16", "qb_major", False, 128, _PERSIST_GQA, "bm128"),
+]
+
+
 def _spec(
     dtype,
     d,
@@ -362,7 +386,8 @@ class TestDenseNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
-    def test_one_binary_serves_every_shape(self):
+    @pytest.mark.parametrize("sliding_window", (0, 128))
+    def test_one_binary_serves_every_shape(self, sliding_window):
         """One compiled artifact, two shapes, correct numerics at both.
 
         The cohort above runs many shapes, but it stopped discriminating the
@@ -392,7 +417,12 @@ class TestDenseNumeric:
         scale = 1.0 / math.sqrt(d)
 
         shapes = ((1, 512), (4, 1024))
-        specs = [_spec(dtype, d, hq, hkv, False, batch=b, sq=s) for b, s in shapes]
+        specs = [
+            _spec(
+                dtype, d, hq, hkv, False, batch=b, sq=s, sliding_window=sliding_window
+            )
+            for b, s in shapes
+        ]
 
         # Preconditions: genuinely different shapes, on the runtime path, and
         # sharing one key -- otherwise the reuse assertion is vacuous.
@@ -421,7 +451,7 @@ class TestDenseNumeric:
             torch.cuda.synchronize()
             launchers.append(_launcher_for(spec))
 
-            ref = _standard_reference(q, k, v, scale)
+            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
             max_abs = (ref - out.float()).abs().max().item()
             assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
 
@@ -436,6 +466,165 @@ class TestDenseNumeric:
         )
         assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
             "two shapes on the runtime path added more than one cache entry: "
+            f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_one_binary_serves_every_head_config(self):
+        """One compiled artifact, four head configs, correct numerics at each.
+
+        The head-count twin of :func:`test_one_binary_serves_every_shape`: on the
+        runtime-shape path num_query_heads / num_kv_heads are kernel params, so the
+        GQA ratio and the token strides are computed at run time. A body that still
+        baked one of them would compute wrong strides for every config but the first
+        one compiled -- caught here by the numeric check, while the ``is`` /
+        single-entry assertions catch a key or lookup regression that recompiles per
+        head config. Covers GQA 16, non-pow2 GQA 5 and 7, and MHA.
+        """
+        import torch
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        dtype, d, B, S = "bf16", 128, 1, 512  # flagship default, non-persistent
+        tol = _tolerance(dtype)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+
+        heads = ((128, 8), (40, 8), (28, 4), (32, 32))
+        specs = [_spec(dtype, d, hq, hkv, False, batch=B, sq=S) for hq, hkv in heads]
+
+        # Preconditions: all on the runtime path and sharing one key -- otherwise the
+        # reuse assertion below is vacuous.
+        assert all(
+            s.runtime_shape for s in specs
+        ), "a head config left the runtime path"
+        keys = [attention_dense_cache_key(s, arch="gfx950") for s in specs]
+        assert len(set(keys)) == 1, f"head configs {heads} did not share a cache key"
+
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        before = set(_DENSE_LAUNCHER_CACHE)
+
+        launchers = []
+        for (hq, hkv), spec in zip(heads, specs):
+            torch.manual_seed(0)
+            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            torch.cuda.synchronize()
+            launchers.append(_launcher_for(spec))
+
+            ref = _standard_reference(q, k, v, scale)
+            max_abs = (ref - out.float()).abs().max().item()
+            assert max_abs < tol, f"Hq={hq} Hkv={hkv}: max_abs={max_abs:.3e} >= {tol}"
+
+        assert launchers[0] is not None, (
+            "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+            "longer keyed by attention_dense_cache_key and this test is blind"
+        )
+        assert all(lau is launchers[0] for lau in launchers), (
+            f"head configs {heads} share a cache key but were served by DIFFERENT "
+            "launcher objects -- the runtime-heads kernel recompiled per head config"
+        )
+        assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+            "four head configs on the runtime path added more than one cache entry: "
+            f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,persist_decode,interleave,window,configs,tile", _PERSIST_ONE_BINARY
+    )
+    def test_one_persistent_binary_serves_every_shape_and_head_config(
+        self, dtype, persist_decode, interleave, window, configs, tile
+    ):
+        """The persistent twin of the one-binary tests above.
+
+        The persistent body takes batch, both seqlens and both head counts as kernel
+        params; only D, dtype, mask, window, the tile geometry, ``num_persistent``
+        and the decode order stay baked. Its work count is derived in the prologue
+        and the grid-stride decode divides by runtime B / Hq / gqa / NQB through
+        host-computed fast-division magics. A decode that kept a baked shape term,
+        or a magic for the wrong divisor, would map work items to the wrong
+        (qb, hq, bt) for every config but the first compiled: duplicated or skipped
+        tiles only the numeric check sees. The configs straddle NP (W < NP,
+        NP < W < 2*NP, W > 2*NP, W % NP != 0), so idle CTAs, partial last rounds
+        and multiple trips all run.
+        """
+        import torch
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        d = 128
+        tol = _tolerance(dtype)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+
+        geometry = DENSE_TILE_GEOMETRIES[tile]
+        specs = [
+            replace(
+                _spec(dtype, d, hq, hkv, True, batch=b, sq=s, sliding_window=window),
+                persist_decode=persist_decode,
+                interleave=interleave,
+                block_m=int(geometry["block_m"]),
+                block_n=int(geometry["block_n"]),
+            )
+            for b, s, hq, hkv in configs
+        ]
+
+        # Preconditions: persistent, on the runtime path, the pinned order, one key,
+        # and the configs really straddle NP, or the grid-stride claims are vacuous.
+        assert all(
+            s.persistent and s.runtime_shape for s in specs
+        ), "a config left the persistent runtime-shape path"
+        assert {s.resolved_persist_decode for s in specs} == {persist_decode}
+        assert all(
+            s.fastdiv_divisors for s in specs
+        ), "persistent decode has no fastdiv"
+        np_ = specs[0].num_persistent
+        work = [(s.seqlen_q // s.block_m) * s.num_query_heads * s.batch for s in specs]
+        assert min(work) < np_ and max(work) > 2 * np_, (work, np_)
+        assert any(w % np_ for w in work), (work, np_)
+        keys = [attention_dense_cache_key(s, arch="gfx950") for s in specs]
+        assert (
+            len(set(keys)) == 1
+        ), f"persistent configs {configs} did not share a cache key"
+
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        before = set(_DENSE_LAUNCHER_CACHE)
+
+        launchers = []
+        for (B, S, hq, hkv), spec in zip(configs, specs):
+            torch.manual_seed(0)
+            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            torch.cuda.synchronize()
+            launchers.append(_launcher_for(spec))
+
+            ref = _standard_reference(q, k, v, scale, sliding_window=window)
+            max_abs = (ref - out.float()).abs().max().item()
+            assert max_abs < tol, (
+                f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}: "
+                f"max_abs={max_abs:.3e} >= {tol}"
+            )
+
+        assert launchers[0] is not None, "no launcher cached; this test is blind"
+        assert all(lau is launchers[0] for lau in launchers), (
+            f"persistent configs {configs} share a cache key but were served by "
+            "DIFFERENT launchers -- the runtime-shape kernel recompiled per config"
+        )
+        assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+            "persistent configs on the runtime path added more than one cache entry: "
             f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
         )
 
@@ -1182,6 +1371,59 @@ class TestDenseLseNumeric:
         assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
         assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
 
+    @pytest.mark.parametrize("right", [0, -1], ids=["causal", "left-only"])
+    def test_runtime_shape_keyless_rows_match_with_and_without_lse(self, right):
+        """On the runtime-shape grid both paths zero keyless rows through the O
+        store's integer bit mask -- the LSE path via its row_has_key, the LSE-off
+        path via the pre-loop runtime predicate -- so O must be bit-identical with
+        and without LSE, keyless rows included. Sq > Skv + W - 1, batch 2 so a
+        keyless q-block cannot borrow the next batch's keys unnoticed."""
+        window, sq, skv = 128, 1024, 512
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=_BAND_BATCH,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=right >= 0,
+            right_bound=max(right, 0),
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            sliding_window=window,
+            emit_lse=True,
+        )
+        assert spec.runtime_shape, "test setup error: not on the runtime-shape path"
+        torch.manual_seed(23)
+        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(_BAND_BATCH, skv, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        scale = 1.0 / math.sqrt(128)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (_BAND_BATCH, 4, sq, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+        )
+        off_out = torch.full_like(q, float("nan"))
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+        ref, empty = _band_reference(q, k, v, scale, window, right)
+        assert empty.any(), "test setup error: the shape has no keyless rows"
+        _check_band(out, ref, empty)
+        _check_band(off_out, ref, empty)
+        assert torch.equal(out, off_out)
+
     @pytest.mark.parametrize(
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
@@ -1533,6 +1775,104 @@ class TestDenseLseNumeric:
         )
         torch.cuda.synchronize()
         assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
+
+    @pytest.mark.parametrize(
+        "shape",
+        [("fp16", 128, 2), ("bf16", 64, 1)],
+        ids=["fp16-d128-kv2", "bf16-d64-kv1"],
+    )
+    @pytest.mark.parametrize(
+        "window,q_lens,kv_lens,emit_lse,keyless",
+        [
+            (0, (256, 256), (192, 64), False, False),
+            (0, (256, 256), (192, 64), True, False),
+            (256, (512, 256), (512, 64), False, False),
+            (256, (512, 256), (512, 64), True, False),
+            (64, (256, 512), (256, 64), True, True),
+        ],
+        ids=["plain", "plain-lse", "window", "window-lse", "window-keyless-lse"],
+    )
+    def test_packed_dense_short_last_sequence(
+        self, shape, window, q_lens, kv_lens, emit_lse, keyless
+    ):
+        """Packed varlen whose last sequence has far fewer keys than ``seqlen_kv``.
+
+        The kernel bounds each workgroup's K/V buffers by the end of its own
+        sequence, so the loads past it (the last sequence's one-tile-ahead prefetch,
+        and a sliding-window start tile past the sequence's keys) are dropped by the
+        hardware instead of reading past the allocation. Every row that has keys must
+        still match the fp32 reference: a bound too tight by a row or a tile zeroes
+        consumed K/V and fails, while the over-read itself is not observable in the
+        output (a too-loose bound passes unless the read faults). In
+        ``window-keyless-lse`` the last sequence has a q-block whose window starts
+        past its keys; its rows are 0 with LSE -inf. Without LSE the launcher rejects
+        keyless rows, so only the LSE case has them.
+        """
+        dtype, head_size, kv_heads = shape
+        q_offsets = [0, q_lens[0], q_lens[0] + q_lens[1]]
+        k_offsets = [0, kv_lens[0], kv_lens[0] + kv_lens[1]]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=4,
+            num_kv_heads=kv_heads,
+            head_size=head_size,
+            dtype=dtype,
+            varlen=True,
+            emit_lse=emit_lse,
+            sliding_window=window,
+        )
+        torch.manual_seed(31)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(q_offsets[-1], 4, head_size, device="cuda", dtype=tdt)
+        k = torch.randn(k_offsets[-1], kv_heads, head_size, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse_out = torch.full(
+            (q_offsets[-1], 4, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        scale = 0.5
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse_out if emit_lse else None,
+            scale=scale,
+            cu_seqlens_q=torch.tensor(q_offsets, device=q.device, dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(k_offsets, device=q.device, dtype=torch.int32),
+        )
+        torch.cuda.synchronize()
+        expected_out = torch.empty_like(out, dtype=torch.float32)
+        expected_lse = torch.empty_like(lse_out)
+        for seq in range(2):
+            q0, q1 = q_offsets[seq : seq + 2]
+            k0, k1 = k_offsets[seq : seq + 2]
+            ref, lse_ref = _lse_reference(
+                q[q0:q1].unsqueeze(0),
+                k[k0:k1].unsqueeze(0),
+                v[k0:k1].unsqueeze(0),
+                scale,
+                causal=True,
+                window=window,
+            )
+            expected_out[q0:q1] = ref[0]
+            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
+        has_key = torch.isfinite(expected_lse)
+        # The case must have the rows it claims: the launcher rejects keyless rows
+        # without LSE, and the keyless case is only worth running with some.
+        assert bool((~has_key).any()) == keyless
+        tol = _tolerance(dtype)
+        # NaN anywhere in ``out`` (a row never stored) fails the comparison.
+        assert (out.float() - expected_out).abs().max().item() < tol
+        if emit_lse:
+            assert torch.equal(torch.isfinite(lse_out), has_key)
+            assert (lse_out[has_key] - expected_lse[has_key]).abs().max().item() < tol
+            assert bool((lse_out[~has_key] == float("-inf")).all())
+            keyless_out = out[~has_key.squeeze(-1)]
+            assert torch.equal(keyless_out, torch.zeros_like(keyless_out))
 
     @pytest.mark.parametrize(
         "failure",

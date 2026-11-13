@@ -46,6 +46,11 @@ namespace hipsparse_test
         hipError_t status  = hipMalloc(&pointer, byte_size);
         if(status != hipSuccess)
         {
+            if(pointer != nullptr)
+            {
+                log_hip_error("hipFree", hipFree(pointer));
+            }
+
             // Surface enough context to tell an out-of-memory condition apart
             // from a lost/faulted device on CI runners.
             size_t     free_mem   = 0;

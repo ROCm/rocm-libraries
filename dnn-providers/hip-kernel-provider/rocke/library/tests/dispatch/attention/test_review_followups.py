@@ -13,13 +13,17 @@ from benchmarks.common.attention_flops import attended_pairs
 from dispatch.attention import (
     ATTENTION_EXECUTION_REGISTRY,
     ATTENTION_ROUTE_REGISTRY,
+    DENSE_ALGORITHMS,
+    UNIFIED_ALGORITHMS,
     AttentionRequest,
     attention_dispatch_result,
     attention_tuning_spec,
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
-from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.common import AttentionTuningSpec, attention_problem
+from dispatch.attention.gfx1151 import DECODE_ALGORITHM, PREFILL_ALGORITHM
 from dispatch.attention.unified_rules import (
+    TUNING_ALGORITHM,
     AttentionGeometryVariant,
     _explicit_configs,
 )
@@ -64,7 +68,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(attended_pairs(4, 8, causal=True, sliding_window=3), 12)
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
-        problem = _problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
+        problem = attention_problem(_req(arch="gfx950", seqlen_q=1, seqlen_k=4096))
         with mock.patch.dict("os.environ", {}, clear=False):
             import os
 
@@ -101,9 +105,9 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(calls, ["fence", ("pipe", 7)])
 
     def test_4warp_grid_matches_the_launch_helper(self):
-        fold = _problem(_req(sliding_window=16, dtype="bf16"))
+        fold = attention_problem(_req(sliding_window=16, dtype="bf16"))
         self.assertEqual(au.gfx942_4warp_launch_grid(fold), (8, 5, 1))
-        plain = _problem(_req(dtype="fp16", sliding_window=0))
+        plain = attention_problem(_req(dtype="fp16", sliding_window=0))
         self.assertEqual(au.gfx942_4warp_launch_grid(plain), (32, 2, 1))
 
         candidate = next(
@@ -117,7 +121,7 @@ class TestReviewFollowups(unittest.TestCase):
         spec = candidate.select_spec(pinned)
         self.assertEqual(
             candidate.grid(spec, pinned),
-            au.gfx942_4warp_launch_grid(_problem(pinned)),
+            au.gfx942_4warp_launch_grid(attention_problem(pinned)),
         )
 
     def test_pinned_gfx950_dense_spec_is_its_candidate_default(self):
@@ -180,7 +184,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual(auto.algorithm, "auto")
 
     def test_unknown_arch_tuning_profiles_raise(self):
-        problem = _problem(_req(arch="gfx950"))
+        problem = attention_problem(_req(arch="gfx950"))
         variant = AttentionGeometryVariant(
             arch="gfx1250",
             path="2d",
@@ -194,7 +198,7 @@ class TestReviewFollowups(unittest.TestCase):
             list(_explicit_configs(problem, replace(variant, path="3d")))
 
     def test_explicit_path_support_is_not_skipped(self):
-        problem = _problem(_req(hdim_q=7, hdim_v=7, arch="gfx950"))
+        problem = attention_problem(_req(hdim_q=7, hdim_v=7, arch="gfx950"))
         ok, _why = au._explicit_path_supported(problem, None, "2d", "gfx950")
         self.assertFalse(ok)
         ok, _why = au._explicit_path_supported(
@@ -217,7 +221,7 @@ class TestReviewFollowups(unittest.TestCase):
             au._RESOLVED_ATTENTION_ARCH = "gfx950"
             with self.assertRaisesRegex(ValueError, "conflicts"):
                 au.run_unified_attention_torch(
-                    problem=_problem(_req(arch="gfx950")),
+                    problem=attention_problem(_req(arch="gfx950")),
                     q=None,
                     k=None,
                     v=None,
@@ -232,3 +236,46 @@ class TestReviewFollowups(unittest.TestCase):
                 )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
+
+
+class TestRouteAlgorithmCoverage(unittest.TestCase):
+    """Every ``ATTENTION_ROUTE_REGISTRY`` candidate's algorithm is accounted
+    for by one of: ``UNIFIED_ALGORITHMS`` (SDPA's unified gate routes among
+    these, see ``dispatch.sdpa.bind_unified._UNIFIED_ALGORITHMS``), a dense
+    algorithm (SDPA's dense gate), ``TUNING_ALGORITHM`` (reachable only
+    through an explicit pin, not either gate's auto-admission check), or this
+    test's own named not-served-by-SDPA set (RDNA WMMA, gfx1250 WMMA, strided
+    KV decode). A new route candidate whose algorithm lands in none of these
+    is a family no SDPA request can ever reach -- the gap this test exists to
+    catch, per KERNEL_AUTHORING.md Appendix A step 4."""
+
+    # Not reachable through SDPA today; named here, not inferred, so a
+    # genuinely new "nothing can reach this" algorithm fails loudly instead
+    # of quietly joining this set.
+    _NOT_SERVED_BY_SDPA = frozenset({PREFILL_ALGORITHM, DECODE_ALGORITHM}) | {
+        "wmma_attention_fwd",  # gfx1250.py
+        "strided_decode",  # strided_decode.py
+    }
+
+    def test_every_route_algorithm_is_accounted_for(self):
+        accounted = (
+            UNIFIED_ALGORITHMS
+            | DENSE_ALGORITHMS
+            | {TUNING_ALGORITHM}
+            | self._NOT_SERVED_BY_SDPA
+        )
+        algorithms = {c.algorithm for c in ATTENTION_ROUTE_REGISTRY.candidates()}
+        unaccounted = algorithms - accounted
+        self.assertEqual(
+            unaccounted,
+            set(),
+            f"{unaccounted} routes through no known SDPA path and is not on "
+            "the explicit not-served list -- a new route candidate stays "
+            "unreachable through SDPA until it is added to one of them",
+        )
+        self.assertEqual(
+            self._NOT_SERVED_BY_SDPA - algorithms,
+            set(),
+            "a not-served algorithm named here no longer exists on any "
+            "registered candidate; trim it",
+        )

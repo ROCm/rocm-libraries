@@ -3,6 +3,7 @@
 
 """Data models for generic-kernel-ingestor descriptor generation."""
 
+import dataclasses
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -92,9 +93,23 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
 )
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
-BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
+BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
+
+#: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
+#: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.
+SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+RESERVED_SLOT_NAME = "global"
+
+#: RFC 0021 §6: the shared-workspace size is a bound token under the ``ws``
+#: root, which a slotted engine's native graph match publishes.
+SHARED_WORKSPACE_TOKEN_PREFIX = "ws."
 
 ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
+
+#: A dotted native-symbol namespace as an engine registers it
+#: (``hipkernel.gfx950_attention_unified_2d``): the engine namespace, a ``.``,
+#: and the snake_case slug. ``engine.native_symbols_from`` must take this shape.
+NATIVE_SYMBOL_NAMESPACE_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+\.[A-Za-z0-9_]+$")
 
 #: ``native.cpp.j2`` builds ``<NAME>_FIELD`` from each kmd field name and
 #: ``<NAME>_MATCHER_SYMBOL``/``<name>OperationMatches`` from each pack
@@ -184,6 +199,13 @@ class KmdField:
     #: ``None`` means the field is mandatory on every kernel; that is the KMD's
     #: own semantics.
     default_value: object = None
+    #: Generator-only (never emitted): the builder's spec dataclass defaults this
+    #: field to ``default_value`` too, so a kernel may state it in neither its
+    #: metadata nor its ``kernel_source.spec``. This is how a field added to an
+    #: existing engine leaves the shipped descriptors' bytes unchanged. The
+    #: packer still proves the two defaults agree: it compares the completed
+    #: metadata with the hydrated spec's attribute for every bound field.
+    builder_default: bool = False
 
     @property
     def is_mandatory(self) -> bool:
@@ -359,6 +381,9 @@ class KernelSpec:
     arch: list[str] = field(default_factory=list)
     #: The cell's declared default variant; never emitted into a descriptor.
     default: bool = False
+    #: Informational ``provenance`` keys (string values) emitted verbatim on the
+    #: kernel descriptor, e.g. ``rocke_spec_id``. Nothing selects on them.
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -372,8 +397,12 @@ class PackSpec:
     #: scope a kernel's arch narrows.
     arch: list[str] = field(default_factory=list)
     #: Native symbol suffix for this pack's operation-matcher, e.g. "add" ->
-    #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack.
+    #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack
+    #: (for a slotted engine: when the pack's slot has >1 pack).
     discriminator: str = ""
+    #: RFC 0021 §4: the slot this pack's kernels serve. Required of every pack
+    #: of a slotted engine and forbidden otherwise.
+    slot: str = ""
 
     @property
     def pascal_name(self) -> str:
@@ -405,11 +434,36 @@ class EngineSpec:
     behavior_notes: list[str] = field(default_factory=list)
     knobs: list[str] = field(default_factory=list)
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
-    #: legal for an engine with no ranking model.
+    #: legal for an engine with no ranking model. A slotted engine's rankers
+    #: are per slot (`SlotSpec.ranker`), so its engine-level value is "none".
     heuristic: str = "native"
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
+    #: The dotted native-symbol namespace of another engine whose registered code
+    #: this engine's descriptors name (``hipkernel.gfx950_attention_unified_2d``),
+    #: e.g. a test-only engine serving a subset of a shipped engine's catalog
+    #: through the shipped engine's code. Stated verbatim, never derived: this
+    #: config cannot see the other engine's ``slug_override``. Empty names this
+    #: engine's own symbols (`own_native_symbol_namespace`).
+    native_symbols_from: str = ""
+    #: RFC 0021 §6: the bound token holding the shared workspace region's size;
+    #: only a slotted engine has one. Empty omits ``shared_workspace``.
+    shared_workspace: str = ""
+    #: Optional descriptor directory / file stem / native-symbol namespace. The derived
+    #: slug splits before every capital, so a local name ending in a digit-capital pair
+    #: (``Unified2D``) would come out as ``unified2_d``.
+    slug_override: str | None = None
+    #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
+    #: arch (or `default`) -> UHD ids, in config order: a list per key for every role, as
+    #: promote writes it. Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    #: ``engine.trained_catalog_sha256``: arch -> `tools/catalog_fingerprint.py`'s hash of the
+    #: catalog the ``heuristics.sort_kernel_catalog`` models bound under that arch were
+    #: trained on. The loader ties a model to the UED/KMD/UMD ids only, so a catalog edit
+    #: that keeps them would leave a stale model ranking silently; the regeneration gates
+    #: (tests/test_trained_rankers.py) fail instead.
+    trained_catalog_sha256: dict[str, str] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:
@@ -421,9 +475,21 @@ class EngineSpec:
 
     @property
     def slug(self) -> str:
-        """The bundle's directory name: snake_case of the local name."""
+        """The bundle's directory name: ``slug_override`` if set, else snake_case of
+        the local name."""
+        if self.slug_override is not None:
+            return self.slug_override
         s = re.sub(r"(?<!^)(?=[A-Z])", "_", self.local_name)
         return s.lower()
+
+    @property
+    def own_native_symbol_namespace(self) -> str:
+        """The dotted namespace this engine registers its own native symbols under:
+        ``hipkernel:ConvFwd`` becomes ``hipkernel.conv_fwd``. A ``slug_override``
+        names it, with any ``-`` folded to ``_``; else the local name's snake_case."""
+        if self.slug_override is None:
+            return f"{self.namespace}.{self.slug}"
+        return f"{self.namespace}.{self.slug_override.replace('-', '_')}"
 
     @property
     def pascal_name(self) -> str:
@@ -440,6 +506,23 @@ class EngineSpec:
     @property
     def has_heuristic(self) -> bool:
         return self.heuristic != "none"
+
+
+@dataclass
+class SlotSpec:
+    """One ``slots[]`` entry (RFC 0021): everything an engine uses to select a
+    kernel, for one position in its launch order.
+    """
+
+    name: str
+    kmd_fields: list[KmdField] = field(default_factory=list)
+    knobs: list[str] = field(default_factory=list)
+    #: Emits a metric-less UHD scoring on `IngestorConfig.slot_score_symbol`;
+    #: a slot with no ranker orders its catalog by priority, then id.
+    ranker: bool = False
+    #: The slot's own ``specialization`` block: it partitions this slot's
+    #: ``kmd_fields``.
+    specialization: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -467,6 +550,10 @@ class IngestorConfig:
     specialization: dict = field(default_factory=dict)
     #: The ``reduction`` block, for selection tooling; never emitted.
     reduction: dict = field(default_factory=dict)
+    #: RFC 0021: the engine's slots in launch order. Empty for an unslotted
+    #: engine, whose ``kmd_fields``, ``engine.knobs`` and ``specialization``
+    #: sit on the config; a slotted engine keeps them on its slots instead.
+    slots: list[SlotSpec] = field(default_factory=list)
 
     @property
     def is_packaged(self) -> bool:
@@ -493,6 +580,46 @@ class IngestorConfig:
         return len(self.packs) > 1
 
     @property
+    def has_operation_matchers(self) -> bool:
+        """Each pack narrows the engine's graph_match with its own operation-scoped
+        matcher, named by its ``discriminator``. A multi-pack engine whose packs
+        declare none is one catalog sharded across KDP files: every pack is
+        admitted by the engine's graph_match alone, like a single pack."""
+        return self.is_multi_pack and any(p.discriminator for p in self.packs)
+
+    @property
+    def is_slotted(self) -> bool:
+        return bool(self.slots)
+
+    def slot_of(self, pack: PackSpec) -> Optional[SlotSpec]:
+        """The slot `pack` serves; None for an unslotted engine's pack."""
+        return next((s for s in self.slots if s.name == pack.slot), None)
+
+    def slot_view(self, slot: SlotSpec) -> "IngestorConfig":
+        """This config as the unslotted engine one slot would be: that slot's
+        KMD fields, knobs, specialization and packs. Lets every per-KMD check
+        and builder run on a slot unchanged."""
+        return dataclasses.replace(
+            self,
+            engine=dataclasses.replace(self.engine, knobs=list(slot.knobs)),
+            kmd_fields=slot.kmd_fields,
+            packs=[p for p in self.packs if p.slot == slot.name],
+            specialization=slot.specialization,
+            slots=[],
+        )
+
+    def has_operation_umd(self, pack: PackSpec) -> bool:
+        """Whether `pack` narrows by an operation-scoped UMD: for an unslotted
+        engine, only when its packs actually declare discriminators
+        (``has_operation_matchers`` -- a sharded catalog with none gets no
+        UMD); for a slotted engine, when the pack's slot has more than one
+        pack (slots serve one graph, so a lone pack of a slot needs no
+        narrowing, and a multi-pack slot always declares discriminators)."""
+        if not self.is_slotted:
+            return self.has_operation_matchers
+        return sum(1 for p in self.packs if p.slot == pack.slot) > 1
+
+    @property
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir:
         ``direct_load`` under the authored set in ``test_descriptors/``,
@@ -507,10 +634,11 @@ class IngestorConfig:
     def kdp_stem(self, pack: PackSpec) -> str:
         """The KDP file's stem (no ``.kdp.json``): the engine slug for a
         single-pack engine (``conv_fwd.kdp.json``), slug plus pack name for a
-        multi-pack engine (``pointwise_add.kdp.json``)."""
+        multi-pack engine (``pointwise_add.kdp.json``); a slotted engine always names the pack.
+        """
         return (
             self.engine.slug
-            if not self.is_multi_pack
+            if not (self.is_multi_pack or self.is_slotted)
             else f"{self.engine.slug}_{pack.name}"
         )
 
@@ -542,10 +670,13 @@ class IngestorConfig:
 
     @property
     def native_symbol_namespace(self) -> str:
-        """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
-        becomes ``hipkernel.conv_fwd``."""
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
-        return f"{self.engine.namespace}.{local_snake}"
+        """Dotted namespace the descriptors' native symbols live under: the one
+        ``native_symbols_from`` states verbatim, else this engine's own
+        (`EngineSpec.own_native_symbol_namespace`). Only an engine's own namespace
+        is derived."""
+        return (
+            self.engine.native_symbols_from or self.engine.own_native_symbol_namespace
+        )
 
     @property
     def graph_match_symbol(self) -> str:
@@ -555,9 +686,17 @@ class IngestorConfig:
     def score_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.score"
 
+    def slot_score_symbol(self, slot: SlotSpec) -> str:
+        """The native ranker symbol of one slot: ``<namespace>.<slot>_score``."""
+        return f"{self.native_symbol_namespace}.{slot.name}_score"
+
     @property
     def dispatch_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.dispatch"
+
+    def slot_dispatch_symbol(self, slot: SlotSpec) -> str:
+        """The dispatch symbol of one slot: ``<namespace>.<slot>_dispatch``."""
+        return f"{self.native_symbol_namespace}.{slot.name}_dispatch"
 
     @property
     def kernel_match_symbol(self) -> str:
@@ -566,7 +705,7 @@ class IngestorConfig:
 
     def operation_match_symbol(self, pack: PackSpec) -> str:
         """Per-pack operation-scoped matcher symbol, meaningful only when
-        ``is_multi_pack``; a single-pack engine emits none."""
+        ``has_operation_matchers``; any other engine emits none."""
         return f"{self.native_symbol_namespace}.{pack.discriminator}_match"
 
     @property

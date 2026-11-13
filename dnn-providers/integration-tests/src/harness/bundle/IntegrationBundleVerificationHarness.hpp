@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <iosfwd>
 #include <memory>
@@ -26,6 +27,8 @@
 
 #include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
+#include "harness/Capture.hpp"
+#include "harness/CaptureReport.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/GraphSession.hpp"
@@ -36,6 +39,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -108,6 +112,7 @@ public:
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
         _claimLocator = std::move(claimLocator);
+        _raggedLengthUidsCache.reset();
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -191,13 +196,22 @@ public:
             }
             catch(...)
             {
-                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE, {});
                 throw;
             }
         }();
 
-        if(TestConfig::get().writeSupportClaims())
+        if(_deps.policy.writeSupportClaims)
         {
+            // An expected-rejection bundle carries no claim, so there is nothing to
+            // refresh. Counted as skipped before observation, like the SetUp() skips,
+            // so the run's graphsFound still reconciles against what was observed.
+            if(excludedFromClaims())
+            {
+                noteSkipBeforeObservation();
+                GTEST_SKIP() << "expected_rejection bundle: carries no support claim, so the "
+                                "authoring run (--write-support-claims) leaves it out";
+            }
             observeAndRecordSupport(session);
             GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
         }
@@ -209,12 +223,21 @@ public:
         VerificationOutcome outcome;
         try
         {
-            // Inside the try because a hand-edited sidecar that does not parse
-            // throws, and that is the class of fault the catch exists for.
-            claims = observeClaims(session);
+            if(isExpectedRejection())
+            {
+                // Never queried for claims, filled, executed or compared: the whole
+                // verdict is the engine's refusal.
+                outcome = expectedRejectionOutcome(session);
+            }
+            else
+            {
+                // Inside the try because a hand-edited sidecar that does not parse
+                // throws, and that is the class of fault the catch exists for.
+                claims = observeClaims(session);
 
-            auto claimOutcome = enforcedClaimFailure(claims.observation);
-            outcome = claimOutcome ? *claimOutcome : runComparison(session);
+                auto claimOutcome = enforcedClaimFailure(claims.observation);
+                outcome = claimOutcome ? *claimOutcome : runComparison(session);
+            }
         }
         catch(const std::exception& e)
         {
@@ -233,14 +256,37 @@ public:
                          shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
         // Before the disposition, which returns: a pass must say what it was compared
         // against, or "auto" landing on a reference is indistinguishable from a skip.
-        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
+        _deps.reporter->recordVerifier(
+            _bundlePath.string(), outcome.verifier, outcome.verifierDetail);
         // A benchmark exists only for a verified pass. Its failure fails the test but
         // leaves the claim verdict above alone: the claim is about correctness.
         if(_benchmark.has_value())
         {
             reportBenchmark(*_benchmark);
         }
+        if(_capture.has_value())
+        {
+            reportCapture(*_capture);
+        }
+        // An attempt still pending here ended in a throw that skipped the code that
+        // settles it, and reporting it as pending would read as "still running".
+        for(auto& result : _referenceBenchmarks)
+        {
+            if(result.status == ReferenceBenchmarkStatus::PENDING)
+            {
+                result.status = ReferenceBenchmarkStatus::ERRORED;
+            }
+            reportReferenceBenchmark(result);
+        }
         reportOutcome(outcome);
+        // After the verdict is committed and reported: an engine that does not claim
+        // graph-capture safety is out of this lane, not broken, and the verified pass
+        // above is still true for it.
+        if(_capture.has_value() && _capture->status == CaptureResult::Status::DECLINED
+           && !HasFailure())
+        {
+            GTEST_SKIP() << "--graph-capture: " << _capture->message;
+        }
     }
 
     /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
@@ -262,6 +308,11 @@ public:
     const TensorMap& inputs() const
     {
         return _inputs;
+    }
+
+    const std::vector<ReferenceBenchmarkResult>& referenceBenchmarks() const
+    {
+        return _referenceBenchmarks;
     }
 
     /// Mode B/C support observation: which engines take this graph?
@@ -335,7 +386,8 @@ private:
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
     // The single definition of "this graph's claims are this run's business": an engine
-    // was named to check against, this is not an authoring run, and a sidecar exists.
+    // was named to check against, this is not an authoring run, the bundle is not kept
+    // out of claims (excludedFromClaims()), and a sidecar exists.
     // Deliberately free of the claim mode -- what a broken claim costs is
     // enforcedClaimFailure()'s question, and reading it here too would make a run that
     // cannot fail also unable to report.
@@ -343,13 +395,29 @@ private:
     // An authoring run skips every body before the claim check, so counting it would
     // leave bodies reached with none queried -- the shape the summary calls a harness
     // defect. Excluded here rather than at each counter, so the counters cannot drift.
+    // So is an expected-rejection bundle, which is never queried either; a sweep case
+    // shares its sidecar with claimed siblings, so the sidecar alone cannot tell.
+    // Registration's graphsWithClaims applies the same exclusion.
     //
     // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
     // call, a few times per test, and a run that named no engine must not pay.
     bool shouldObserveClaims() const
     {
-        return _engineUnderTest.has_value() && !TestConfig::get().writeSupportClaims()
-               && carriesSidecar();
+        return _engineUnderTest.has_value() && !excludedFromClaims()
+               && !_deps.policy.writeSupportClaims && carriesSidecar();
+    }
+
+    // Null-guarded because SetUp() reaches shouldObserveClaims() before it checks for
+    // a bundle.
+    bool excludedFromClaims() const
+    {
+        return _bundle != nullptr && excludedFromSupportClaims(_bundle->metadata);
+    }
+
+    // This bundle must be refused by the engine under test rather than run.
+    bool isExpectedRejection() const
+    {
+        return _bundle != nullptr && _bundle->metadata.expectedRejection;
     }
 
     // "There is a sidecar here", and nothing more -- no engine.
@@ -373,6 +441,12 @@ private:
     // accepted, not publish support nothing verified.
     VerificationDepth depthOwedByPass() const
     {
+        // An expected rejection is complete when the engine refuses the graph: it never
+        // runs, so owing it any depth would make every correct pass a shallow one.
+        if(isExpectedRejection())
+        {
+            return VerificationDepth::NOT_REACHED;
+        }
         return _deps.policy.skipGraphValidation ? VerificationDepth::APPLICABLE
                                                 : bundleRequiredDepth();
     }
@@ -414,6 +488,20 @@ private:
     // Verifies the bundle at the depth its enforcement_level asks for. Only
     // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
     VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
+
+    // The whole verdict for an expected_rejection bundle (see BundleMetadata): pinned
+    // to --test-engine, the engine must refuse the graph at ranked-list or plan-build
+    // time. Nothing is filled, executed or compared. A PASS says where the engine
+    // refused (VerificationOutcome::verifierDetail); a bundle that never reached an
+    // engine, or an engine that took it, FAILs.
+    VerificationOutcome expectedRejectionOutcome(GraphSession& session);
+
+    // A claim in this bundle's sidecar that names it, when the bundle is an expected
+    // rejection: an authoring error, because no engine may claim a graph every engine
+    // must reject. The sidecar of a sweep case is shared with its siblings, so only a
+    // claim naming this case counts, not the file's mere presence. Throws if the
+    // sidecar does not parse.
+    std::optional<std::string> expectedRejectionClaimError() const;
 
     /// A reference executor whose isApplicable() said it can take this graph.
     struct ResolvedReference
@@ -460,6 +548,14 @@ private:
     };
 
     static OracleChain resolveOracles(VerificationMode mode);
+    // Takes the references this bundle disables out of `chain`, noting each as
+    // declined so a failure message still says why it was not tried.
+    void dropDisabledReferences(OracleChain& chain) const;
+    // The disabled-reference outcomes decided before inputs are filled or the engine
+    // runs: an explicit --verification-mode naming a reference the bundle disables,
+    // and a bundle that disables both whose golden data is not on disk. nullopt when
+    // neither applies.
+    std::optional<VerificationOutcome> disabledReferenceSkip() const;
     // Creates `type`'s executor and asks isApplicable(). If it cannot be used, notes
     // why in the chain and returns nothing.
     std::optional<ResolvedReference> probeReference(OracleChain& chain, ReferenceExecutorType type);
@@ -489,9 +585,26 @@ private:
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
+    // Fails the test when a ragged tensor has no valid layout or reaches past its
+    // filled input buffer. Runs before any engine or reference reads the inputs.
+    std::optional<VerificationOutcome>
+        checkRaggedLayouts(const std::unordered_map<int64_t, int64_t>& lengthUids) const;
+    // raggedLengthUids(), computed once per bundle and reused by every later call site
+    // (the graph does not change once the bundle is set). Propagates the same exception
+    // raggedLengthUids() would throw; nothing is cached on a throwing call.
+    const std::unordered_map<int64_t, int64_t>& cachedRaggedLengthUids() const;
+    mutable std::optional<std::unordered_map<int64_t, int64_t>> _raggedLengthUidsCache;
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
+    // The input set that a variant pack reads: the packed set for a device pack of a
+    // sub-byte graph, otherwise the unpacked set.
+    TensorMap& variantPackInputs(bool useDevice);
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
+    // Moves the engine's pointers of the bundle's start_offsets tensors. Errors name the
+    // bundle.
+    detail::StartOffsetStaging stageStartOffsets(std::unordered_map<int64_t, void*>& variantPack,
+                                                 OutputTensors& outputs,
+                                                 bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
@@ -499,6 +612,15 @@ private:
                                               const OutputTensors& engineOutputs,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
+    void measureReference(double ReferenceBenchmarkResult::*phase,
+                          const std::function<void()>& work);
+
+    // Under --graph-capture, captures the engine on the outputs `outcome` just verified,
+    // replays it and verifies every replay with _replayVerifier. Keeps the result for
+    // TestBody() to report. Does nothing for any other outcome.
+    void captureIfVerified(GraphSession& session,
+                           OutputTensors& engineOutputs,
+                           const VerificationOutcome& outcome);
 
     // Under --benchmark, times the engine on the outputs `outcome` just verified and
     // keeps the result for TestBody() to report. Does nothing for any other outcome.
@@ -561,6 +683,13 @@ private:
     TensorMap _inputs;
     // Set by benchmarkIfVerified(); reported at the end of TestBody().
     std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
+    // Set by captureIfVerified(); reported at the end of TestBody().
+    std::optional<CaptureResult> _capture;
+    // Re-runs the comparison that verified the eager outputs, on `outputs`. Set with
+    // every verified comparison; _oracleOutputs backs it for a reference oracle.
+    std::function<VerificationOutcome(OutputTensors&)> _replayVerifier;
+    OutputTensors _oracleOutputs;
+    std::vector<ReferenceBenchmarkResult> _referenceBenchmarks;
 };
 
 } // namespace hipdnn_integration_tests::bundle

@@ -167,6 +167,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
 
+"shared: mosaic":
+- changed-files:
+  - any-glob-to-any-file: 'shared/mosaic/**/*'
+
 "project: rocwmma":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocwmma/**/*'
@@ -188,11 +192,6 @@ documentation:
 - changed-files:
   - any-glob-to-all-files:
     - '{**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml}'
-
-External CI:
-- changed-files:
-  - any-glob-to-any-file:
-    - .azuredevops/**/*
 
 github actions:
 - changed-files:

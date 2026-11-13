@@ -34,6 +34,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -463,6 +464,33 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return inst;
     }
 
+    struct TwoSccChains {
+        StinkyInstruction* pinnedDef = nullptr;
+        StinkyInstruction* pinnedReader = nullptr;
+        StinkyInstruction* secondDef = nullptr;
+        StinkyInstruction* secondReader = nullptr;
+    };
+
+    // Two SCC chains back to back across a barrier. Chain 1's reader overwrites s40, which the
+    // barrier's tensor_load reads, so it reaches the barrier by that anti-dependency and the
+    // rule pins chain 1 after the wait. Chain 2 is the next SCC writer, so the SCC
+    // anti-dependency on chain 1's reader carries it below the barrier as well.
+    TwoSccChains buildPinPropagatingSccChains(BasicBlock* body) {
+        TwoSccChains out;
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 6; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+        createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+        createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+        out.pinnedDef = createSSubWritingSgprAndScc(body, /*sgpr=*/90);
+        out.pinnedReader = createSCselectReadingScc(body, /*destSgpr=*/40, /*srcSgpr=*/92);
+        out.secondDef = createSCmpWritingScc(body, /*srcSgpr=*/91);
+        out.secondReader = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/90);
+        return out;
+    }
+
     // The invariant the cluster-barrier SCC rule enforces: no workgroup barrier
     // may sit between the first and last scheduled member of an SCC def-use
     // chain. Which side of the barrier the chain ends up on is deliberately not
@@ -866,6 +894,49 @@ TEST_F(DAGSchedulerPassTest, BarrierAfterUsesParentWmmaWhenItExceedsDrainThresho
     EXPECT_LT(positionOf(*bb, afterParentWmma), positionOf(*bb, lateSignal)) << scheduleOrder(*bb);
 }
 
+// The matching ds_load's address is a v_add of WMMA 12's dest, so that WMMA is an
+// ancestor and the ds_load's direct parent is the v_add. One matching ds_load among
+// 22 ds_loads and 22 WMMAs needs one window, so the overlap after is 1 + 56/8 + 1
+// = 9. The ancestor index plus that same budget is 12 + 8 = 20, and the barrier
+// keeps 20. DsSpread is off, so the drain is the instruction latency. The trailing
+// compare keeps the loop tail from being a WMMA.
+TEST_F(DAGSchedulerPassTest, BarrierAfterUsesAncestorWmmaThroughValu) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* producerWmma = nullptr;
+    const int producerDest = 1100 + 11 * 16;
+    for (int i = 0; i < 12; ++i) {
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16,
+                                                              /*src0Start=*/3000 + i * 16);
+        if (i == 11) producerWmma = wmma;
+    }
+    createVAddInBlock(bb, arch, /*destReg=*/200, /*src0Reg=*/producerDest,
+                      /*src1Reg=*/producerDest);
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/3);
+    for (int i = 0; i < 10; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + i * 16, /*src0Start=*/5000 + i * 16);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)wait;
+    createUnrelatedDsLoads(21);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    int wmmasBeforeBarrier = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == signal) break;
+        if (isMatrixInstruction(*inst)) ++wmmasBeforeBarrier;
+    }
+
+    ASSERT_NE(producerWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, producerWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, preBarrierDs), positionOf(*bb, signal)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBeforeBarrier, 20) << scheduleOrder(*bb);
+}
+
 // One stage barrier with ds_loads on both sides is in both threshold maps.
 // The pre-barrier ds_load overwrites a VGPR read by WMMA 16, so the after
 // threshold is that parent plus the single-load drain budget
@@ -1019,6 +1090,103 @@ TEST_F(DAGSchedulerPassTest, OverlapGapStopsAfterAtParentWmmaAndPushesBefore) {
     EXPECT_LT(wmmasBefore(afterSignal), 24) << scheduleOrder(*bb);
     EXPECT_GE(wmmasBefore(beforeSignal), 26) << scheduleOrder(*bb);
     EXPECT_LT(wmmasBefore(beforeSignal), 33) << scheduleOrder(*bb);
+}
+
+// Same overlap as above, with DsSpread on. The after barrier lands on the parent WMMA, so the
+// stage anchor must not put the dropped drain back. A restored drain would be the 24th WMMA.
+TEST_F(DAGSchedulerPassTest, StageAnchorLeavesOverlapParentFloorInPlace) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* parentWmma = nullptr;
+    for (int i = 0; i < 16; ++i) {
+        const int src = (i == 15) ? 0 : 3000 + i * 16;
+        StinkyInstruction* wmma =
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+        if (i == 15) parentWmma = wmma;
+    }
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/0);
+    createUnrelatedDsLoads(7);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    (void)afterWait;
+    (void)beforeWait;
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/820, /*ldsToken=*/1);
+    for (int i = 1; i < 8; ++i)
+        createMovableDsLoad(/*destReg=*/8000 + i * 4, /*addrReg=*/830 + i, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    for (int i = 0; i < 16; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + i * 16, /*src0Start=*/5000 + i * 16);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/true);
+
+    auto wmmasBefore = [&](const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) break;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return count;
+    };
+
+    ASSERT_NE(parentWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, parentWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+    // The parent floor is the 16th WMMA. The full drain would push the after barrier to 24.
+    EXPECT_GE(wmmasBefore(afterSignal), 16) << scheduleOrder(*bb);
+    EXPECT_LT(wmmasBefore(afterSignal), 24) << scheduleOrder(*bb);
+    EXPECT_LT(wmmasBefore(beforeSignal), 24) << scheduleOrder(*bb);
+}
+
+// Hardware WMMA queue depth 8, and one ds_load every 8 cycles so Step 4's window is the load
+// rate, not the even spread of one load across the region. The ds_load overwrites WMMA 12's
+// source, so Step 4b's base is 12 and the single-load drain makes 20. earliestAt also waits out
+// the queue, 12 + 8, and the stage anchor keeps that drain: 20 + 8 = 28. The trailing compare
+// keeps head balance off.
+TEST_F(DAGSchedulerPassTest, StageAnchorAddsWmmaQueueDelayToTheDrain) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* parentWmma = nullptr;
+    for (int i = 0; i < 12; ++i) {
+        const int src = (i == 11) ? 0 : 3000 + i * 16;
+        StinkyInstruction* wmma =
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+        if (i == 11) parentWmma = wmma;
+    }
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/3);
+    for (int i = 0; i < 20; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + i * 16, /*src0Start=*/5000 + i * 16);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)wait;
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = true;
+    pfc.dagFeatures.dsReadCyclesPerLoad = 8;
+    // Cover must be non-zero or effectiveWmmaQueueDepth() stays 1 and the queue delay is 0.
+    pfc.dagFeatures.wmmaQueueCoverCycles = 1;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    int wmmasBeforeBarrier = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == signal) break;
+        if (isMatrixInstruction(*inst)) ++wmmasBeforeBarrier;
+    }
+
+    ASSERT_NE(parentWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, parentWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, preBarrierDs), positionOf(*bb, signal)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBeforeBarrier, 28) << scheduleOrder(*bb);
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
@@ -2311,6 +2479,49 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DeadSccCarryOutStaysFree) {
         << "the decrement's SCC is dead, so nothing stops it from being hoisted";
 }
 
+// Pinning chain 1 after the wait carries chain 2 past the barrier with it: chain 2's def is
+// the next SCC writer, so the SCC anti-dependency on chain 1's reader keeps it below. Both
+// chains end up whole and below the barrier.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinCarriesTheNextChainPastTheBarrier) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    const TwoSccChains ir = buildPinPropagatingSccChains(body);
+    const int before = countStinkyInstructions(*body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    ASSERT_EQ(countStinkyInstructions(*body), before);
+    const int waitPos = lastBarrierWaitPosition(*body);
+    ASSERT_GE(waitPos, 0);
+    EXPECT_GT(positionOf(*body, ir.pinnedDef), waitPos)
+        << "chain 1's reader reaches the barrier through the tensor_load's operand, so the rule "
+           "pins its def after the wait rather than locking the chain"
+        << scheduleOrder(*body);
+    EXPECT_GT(positionOf(*body, ir.secondDef), waitPos) << scheduleOrder(*body);
+    EXPECT_FALSE(barrierSplitsChain(*body, {ir.pinnedDef, ir.pinnedReader}))
+        << scheduleOrder(*body);
+    EXPECT_FALSE(barrierSplitsChain(*body, {ir.secondDef, ir.secondReader}))
+        << scheduleOrder(*body);
+}
+
+// Control for the test above, and the reason the pin is what holds chain 1 together: with the
+// rule off the def is free to hoist, while its reader stays below the barrier either way --
+// the reader overwrites the tensor_load's operand, so it cannot precede that load. The barrier
+// then lands inside the chain.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitTheFirstChain) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    const TwoSccChains ir = buildPinPropagatingSccChains(body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+
+    const int signalPos = firstBarrierSignalPosition(*body);
+    ASSERT_GE(signalPos, 0);
+    EXPECT_LT(positionOf(*body, ir.pinnedDef), signalPos) << scheduleOrder(*body);
+    EXPECT_TRUE(barrierSplitsChain(*body, {ir.pinnedDef, ir.pinnedReader}))
+        << "without the rule nothing keeps the handshake out of the chain" << scheduleOrder(*body);
+}
+
 // The same pin with no tensor_load in the region: the live-out def belongs
 // below the barrier either way, since what it has to stay clear of is the
 // handshake, not the load.
@@ -2420,32 +2631,22 @@ std::string wdShape(const std::vector<std::string>& seq) {
 }
 }  // namespace
 
-// The queue model needs depth > 1 and a cover > 0. With either one off the schedule is the
-// original single-window one, whatever the other queue field says.
+// The queue model needs a cover other than 0. With cover 0 the schedule is the original
+// single-window one: while ds_loads are ready each WMMA window is filled, so the first two WMMAs
+// are not adjacent.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_OffIsTheOriginalSchedule) {
-    struct Variant {
-        int depth, cover;
-    };
-    const Variant variants[] = {{0, 0}, {8, 0}, {1, 32}, {1, 0}};
-    std::string shapes[4];
-    for (int v = 0; v < 4; ++v) {
-        SetUp();
-        for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
-        for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
-        PassContext ctx;
-        ctx.setGemmTileConfig(config);
-        PassFeatureConfig pfc;
-        pfc.loopConfig.unrollGemm = true;
-        pfc.dagFeatures.dsReadQueueDepth = 16;
-        pfc.dagFeatures.wmmaQueueDepth = variants[v].depth;
-        pfc.dagFeatures.wmmaQueueCoverCycles = variants[v].cover;
-        ctx.setPassFeatureConfig(pfc);
-        pass->run(*func, ctx, am);
-        shapes[v] = wdShape(mnemonicSequence(*bb));
-    }
-    for (int v = 1; v < 4; ++v) EXPECT_EQ(shapes[0], shapes[v]) << "variant " << v;
-    // While ds_loads are ready each WMMA window is filled, so the first two are not adjacent.
-    EXPECT_NE(shapes[0].substr(0, 2), "WW") << shapes[0];
+    for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 0;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_NE(shape.substr(0, 2), "WW") << shape;
 }
 
 // A long queue run (more than 64 cycles of pipe window) keeps every instruction and
@@ -2458,7 +2659,6 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
@@ -2468,24 +2668,28 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
 }
 
 // An automatic refill line (cover < 0) is one WMMA short of a full queue: the same schedule as
-// asking for (depth - 1) x the next WMMA's latency by hand.
+// asking for (depth - 1) x the next WMMA's latency by hand. The WMMAs are not scale pairs, so
+// their instruction metadata supplies the regular queue depth.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_AutomaticCoverIsOneWmmaShortOfFull) {
-    constexpr int kDepth = 4;
     std::string shapes[2];
     for (int v = 0; v < 2; ++v) {
         SetUp();
         for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
         int latency = 0;
-        for (int i = 0; i < 8; i++)
-            latency = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i)->latencyCycles;
+        int depth = 0;
+        for (int i = 0; i < 8; i++) {
+            StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+            latency = wmma->latencyCycles;
+            depth = wmma->getHwInstDesc()->wmmaQueueDepth;
+        }
+        ASSERT_GT(depth, 0);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsSpread = false;
         pfc.dagFeatures.dsReadQueueDepth = 2;
-        pfc.dagFeatures.wmmaQueueDepth = kDepth;
-        pfc.dagFeatures.wmmaQueueCoverCycles = v == 0 ? -1 : (kDepth - 1) * latency;
+        pfc.dagFeatures.wmmaQueueCoverCycles = v == 0 ? -1 : (depth - 1) * latency;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
         shapes[v] = wdShape(mnemonicSequence(*bb));
@@ -2504,7 +2708,6 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
-    pfc.dagFeatures.wmmaQueueDepth = 4;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
@@ -2523,13 +2726,248 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQu
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.wmmaQueueDepth = 4;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
     const std::string shape = wdShape(mnemonicSequence(*bb));
     EXPECT_EQ(shape.substr(0, 2), "Wd") << shape;
     EXPECT_EQ(shape, "WdddddddWdWWWWWW");
+}
+
+// The loop header's first WMMA region starts with an empty queue: the WMMAs go ahead of the
+// ready ds_loads until the queue depth (8, not scale pairs) are outstanding. The first WMMA has
+// ended as the 9th issues, so 9 go first.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 17; i++)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/8 * i,
+                                    /*src0Start=*/1000 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape.substr(0, 10), "WWWWWWWWWd") << shape;
+}
+
+// A ds_load needed by an early WMMA leaves too little distance after the predicted queue-fill
+// burst. Method 1 disables this reset's fill, so the ready ds_load issues after one WMMA.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrdering) {
+    bb->addSuccessor(bb);
+    createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i) {
+        const int src = i == 4 ? 200 : 1000 + 16 * i;
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i, src);
+    }
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape, "WdWWWWWWWWWWW");
+}
+
+// A close consumer rejects the loop-header fill. The barrier reset reuses that loop policy even
+// though its own DS is unrelated, so both segments retain baseline ordering. Explicit register
+// edges keep the two WMMA groups on their barrier sides.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_BarrierResetReusesLoopHeadDecision) {
+    bb->addSuccessor(bb);
+    StinkyInstruction* firstDs =
+        createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    std::vector<StinkyInstruction*> firstWmmas;
+    for (int i = 0; i < 12; ++i) {
+        const int src = i == 4 ? 200 : 1000 + 16 * i;
+        firstWmmas.push_back(createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i, src));
+    }
+
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    for (int i = 0; i < 12; ++i)
+        signal->addSrcReg(StinkyRegister("v", /*index=*/3000 + 16 * i, /*size=*/8));
+    wait->addDestReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+
+    StinkyInstruction* secondDs =
+        createMovableDsLoad(/*destReg=*/800, /*addrReg=*/84, /*ldsToken=*/3);
+    secondDs->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    for (int i = 0; i < 17; ++i) {
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(
+            /*destStart=*/4000 + 16 * i, /*src0Start=*/5000 + 16 * i);
+        wmma->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    }
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    int firstResetWmmas = 0;
+    int secondResetWmmas = 0;
+    bool afterWait = false;
+    bool sawFirstDs = false;
+    bool sawSecondDs = false;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) {
+            afterWait = true;
+            continue;
+        }
+        if (inst == firstDs) {
+            sawFirstDs = true;
+            EXPECT_EQ(firstResetWmmas, 1);
+            continue;
+        }
+        if (inst == secondDs) {
+            sawSecondDs = true;
+            EXPECT_TRUE(afterWait);
+            EXPECT_EQ(secondResetWmmas, 4);
+            break;
+        }
+        if (!isMatrixInstruction(*inst)) continue;
+        if (afterWait)
+            ++secondResetWmmas;
+        else
+            ++firstResetWmmas;
+    }
+    EXPECT_TRUE(sawFirstDs);
+    EXPECT_TRUE(sawSecondDs);
+}
+
+// The loop head has no DS consumer, so it admits queue fill. A later barrier reset has a close DS
+// consumer and a deliberately unreachable safety margin, so a new gate calculation would reject
+// it; instead, the reset reuses the admitted loop policy and keeps its filler behind the fill.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_BarrierResetReusesEnabledLoopHeadDecision) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 17; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i,
+                                    /*src0Start=*/1000 + 16 * i);
+
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    for (int i = 0; i < 17; ++i)
+        signal->addSrcReg(StinkyRegister("v", /*index=*/3000 + 16 * i, /*size=*/8));
+    wait->addDestReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+
+    std::vector<StinkyInstruction*> secondDsLoads;
+    for (int i = 0; i < 4; ++i) {
+        StinkyInstruction* ds =
+            createMovableDsLoad(/*destReg=*/800 + 4 * i, /*addrReg=*/84, /*ldsToken=*/3 + i);
+        ds->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+        secondDsLoads.push_back(ds);
+    }
+    StinkyInstruction* filler =
+        createVAddInBlock(bb, arch, /*destReg=*/900, /*src0Reg=*/904, /*src1Reg=*/908);
+    filler->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    for (int i = 0; i < 17; ++i) {
+        const int src = i == 12 ? 800 : 5000 + 16 * i;
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + 16 * i, src);
+        wmma->addSrcReg(StinkyRegister("s", /*index=*/300, /*size=*/1));
+    }
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 1000;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    int secondResetWmmas = 0;
+    int wmmasBeforeFiller = 0;
+    bool afterWait = false;
+    bool sawSecondStage = false;
+    bool sawFiller = false;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) {
+            afterWait = true;
+            continue;
+        }
+        if (std::find(secondDsLoads.begin(), secondDsLoads.end(), inst) != secondDsLoads.end()) {
+            if (!sawSecondStage) {
+                sawSecondStage = true;
+                EXPECT_TRUE(afterWait);
+                EXPECT_EQ(secondResetWmmas, 1);
+            }
+            continue;
+        }
+        if (inst == filler) {
+            sawFiller = true;
+            EXPECT_EQ(wmmasBeforeFiller, 7);
+            continue;
+        }
+        if (afterWait && isMatrixInstruction(*inst)) {
+            ++secondResetWmmas;
+            ++wmmasBeforeFiller;
+        }
+    }
+    EXPECT_TRUE(sawSecondStage);
+    EXPECT_TRUE(sawFiller);
+}
+
+// Tail size does not override an admitted loop-head policy: the queue fills before the unrelated
+// DS even though only three WMMAs remain after the predicted nine-WMMA burst.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_AdmittedShortTailFillsTheQueue) {
+    bb->addSuccessor(bb);
+    createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i,
+                                    /*src0Start=*/1000 + 16 * i);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.queueFillSafetyMarginCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape, "WWWWWWWWWdWWW");
+}
+
+// A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
+// behind the fill's WMMAs.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
+    bb->addSuccessor(bb);
+    createMovableTensorLoad(bb, /*s0=*/0, /*s1=*/4, /*ldsToken=*/9);
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 17; i++)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/8 * i,
+                                    /*src0Start=*/1000 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.distributeGlobalRead = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::vector<std::string> seq = mnemonicSequence(*bb);
+    const std::string shape = wdShape(seq);
+    const auto tensor = std::find(seq.begin(), seq.end(), "tensor_load_to_lds") - seq.begin();
+    EXPECT_LT(static_cast<size_t>(tensor), shape.find('d')) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.begin() + shape.find('d'), 'W'), 9) << shape;
 }
 
 // Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
@@ -2544,7 +2982,6 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill)
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
-    pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Fixed;
     pfc.dagFeatures.wmmaBatchSize = 4;
@@ -2564,7 +3001,6 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
-    pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Dynamic;
     pfc.dagFeatures.wmmaRefillToCycles = 32;
@@ -2589,7 +3025,6 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsReadQueueDepth = 16;
-        pfc.dagFeatures.wmmaQueueDepth = 8;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
         pfc.dagFeatures.dsSpread = v == 1;
         ctx.setPassFeatureConfig(pfc);
@@ -2626,7 +3061,6 @@ TEST_F(DAGSchedulerPassTest, DsSpread_KeepsTheWmmasInProgramOrder) {
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     pfc.dagFeatures.dsSpread = true;
     ctx.setPassFeatureConfig(pfc);
@@ -2654,7 +3088,6 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
         pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
-        pfc.dagFeatures.wmmaQueueDepth = 4;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
         if (v == 1) pfc.dagFeatures.wmmaBatchSize = 1;
         ctx.setPassFeatureConfig(pfc);
@@ -2785,7 +3218,7 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
 }
 
 // MX128 splat v_perm per WMMA: each parent issues no earlier than the WMMA two
-// before its consumer (kSplatLeadWmmas): one window of lead still delays the
+// before its consumer (kWmmaParentValuLeadWindows): one window of lead still delays the
 // consumer; two hide that without holding the splat VGPR longer.
 TEST_F(DAGSchedulerPassTest, ParentValuWaitsForWmmaTwoBeforeConsumer) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);

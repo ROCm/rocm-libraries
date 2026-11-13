@@ -9,8 +9,9 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 
 namespace
 {
@@ -125,7 +126,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
 
     // Execute forward CPU reference.
     auto fwdVariantPack = fwdBundle.toHostVariantPack();
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         fwdBuilder.GetBufferPointer(), fwdBuilder.GetSize(), fwdVariantPack);
 
     // Validate forward outputs are finite.
@@ -174,7 +175,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
 
     // Execute backward CPU reference.
     auto bwdVariantPack = bwdBundle.toHostVariantPack();
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         bwdBuilder.GetBufferPointer(), bwdBuilder.GetSize(), bwdVariantPack);
 
     // Validate backward outputs are finite and non-zero.

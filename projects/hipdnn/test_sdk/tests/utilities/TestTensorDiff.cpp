@@ -328,6 +328,25 @@ TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatch)
     EXPECT_NE(oss.str().find("ragged layout mismatch"), std::string::npos) << oss.str();
 }
 
+// Same lengths at a different origin is a layout mismatch, and the report names origins and
+// lengths.
+TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsOriginsAndLengths)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f, {1, 3, 6});
+    ASSERT_EQ(ref.raggedIterationInfo()->lengths, impl.raggedIterationInfo()->lengths);
+    const CpuFpReferenceValidation<TypeParam> validator;
+
+    std::ostringstream oss;
+    const bool result = validateAndReport<TypeParam>(oss, "o", validator, ref, impl, 0.0f, 0.0f);
+
+    EXPECT_FALSE(result);
+    const std::string output = oss.str();
+    EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
+    EXPECT_NE(output.find("origins"), std::string::npos) << output;
+    EXPECT_NE(output.find("lengths"), std::string::npos) << output;
+}
+
 TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatchAgainstDense)
 {
     auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);

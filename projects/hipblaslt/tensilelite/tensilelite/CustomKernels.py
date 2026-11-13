@@ -573,6 +573,15 @@ def getCustomKernelConfig(
     if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
 
+    # A handwritten kernel skips the derivation that resolves "Auto", and the
+    # runtime picks which scale modes it serves from this field.
+    problemType = kernelConfig.get("ProblemType", {})
+    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"):
+        raise RuntimeError(
+            f"Custom kernel {kernelName} has MX scales, so its config must set 'MXScaleFormat' to "
+            "the scale layout it reads: NoSwizzle, HostPreSwizzle or InMemorySwizzle")
+
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
     # consuming solution was regenerated with DataParallel argument layout v1.
@@ -721,6 +730,8 @@ def validateCustomKernelMetadata(name, directory=None):
         else:
             ck_missing = _requiredFieldsMissing(custom_kernel, ["args", "macrotile", "threads", "grid"])
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
+            if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
+                missing.append("CustomKernel.uniformSummationOrder (true or false)")
 
     if missing:
         kind = "External" if is_external else "TensileLite"

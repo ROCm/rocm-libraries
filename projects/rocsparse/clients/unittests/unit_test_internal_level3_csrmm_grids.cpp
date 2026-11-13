@@ -296,15 +296,18 @@ namespace
         {
             if(mat_a != nullptr)
             {
-                (void)rocsparse_destroy_spmat_descr(mat_a);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(mat_a));
             }
             if(mat_b != nullptr)
             {
-                (void)rocsparse_destroy_dnmat_descr(mat_b);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(mat_b));
             }
             if(mat_c != nullptr)
             {
-                (void)rocsparse_destroy_dnmat_descr(mat_c);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(mat_c));
             }
         }
     };
@@ -415,15 +418,12 @@ namespace
                                                      &buffer_size,
                                                      nullptr);
 
-            void* d_buffer = nullptr;
+            std::unique_ptr<device_vector<char>> d_buffer_owner;
             if(status == rocsparse_status_success && buffer_size > 0)
             {
-                if(hipMalloc(&d_buffer, buffer_size) != hipSuccess)
-                {
-                    ADD_FAILURE() << "temp buffer allocation of " << buffer_size << " bytes failed";
-                    status = rocsparse_status_memory_error;
-                }
+                d_buffer_owner.reset(new device_vector<char>(buffer_size));
             }
+            void* d_buffer = d_buffer_owner ? d_buffer_owner->ptr : nullptr;
 
             if(status == rocsparse_status_success)
             {
@@ -475,11 +475,6 @@ namespace
             else
             {
                 ADD_FAILURE() << "rocsparse_spmm returned status " << status;
-            }
-
-            if(d_buffer != nullptr)
-            {
-                (void)hipFree(d_buffer);
             }
         }
 

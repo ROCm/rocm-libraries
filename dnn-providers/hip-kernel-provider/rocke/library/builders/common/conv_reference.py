@@ -21,6 +21,9 @@ Five forward/backward implementations are provided:
 
 from __future__ import annotations
 
+import contextlib
+import functools
+
 import torch
 import torch.nn.functional as F
 
@@ -57,6 +60,88 @@ def _batch_slices(p, n: int):
     return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
 
 
+@contextlib.contextmanager
+def ieee_fp32():
+    """Run torch's fp32 convolutions in IEEE fp32, never TF32.
+
+    The references below are the fp32 truth a TF32 kernel is judged against,
+    and torch >= 2.9 defaults ``torch.backends.cudnn.conv.fp32_precision`` to
+    ``"tf32"`` (``allow_tf32=True`` before that): once the backend honours it,
+    the reference itself would silently become TF32. The new per-operator API
+    is used where it exists, for the GPU (cuDNN / MIOpen) and the CPU (oneDNN)
+    convolutions alike -- mixing it with the legacy ``allow_tf32`` flag makes
+    torch raise -- and the previous settings are restored on exit.
+    """
+    cudnn = torch.backends.cudnn
+    convs = [
+        conv
+        for conv in (
+            getattr(cudnn, "conv", None),
+            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
+        )
+        if conv is not None and hasattr(conv, "fp32_precision")
+    ]
+    if convs:
+        old = [conv.fp32_precision for conv in convs]
+        for conv in convs:
+            conv.fp32_precision = "ieee"
+        try:
+            yield
+        finally:
+            for conv, prec in zip(convs, old):
+                conv.fp32_precision = prec
+    else:
+        old = cudnn.allow_tf32
+        cudnn.allow_tf32 = False
+        try:
+            yield
+        finally:
+            cudnn.allow_tf32 = old
+
+
+# A TF32 kernel's error, peak-relative, against :func:`tf32_reference_inputs`:
+# gfx950's BF16x3 emulation is about fp32 accurate, and 1e-4 fails a single
+# bf16 pass or a dropped cross term. gfx942's native XF32 is judged on masked
+# inputs, which leaves only accumulation error, held to 1e-3.
+TF32_REFERENCE_TOL = {"emulated": 1e-4, "native": 1e-3}
+
+
+def _tf32_native(arch: str) -> bool:
+    from kernels.conv.direct_aot_jobs import tf32_is_emulated
+
+    return not tf32_is_emulated(arch)
+
+
+def tf32_reference_inputs(t: torch.Tensor, arch: str, dtype: str = "tf32"):
+    """``t`` as the MMA on ``arch`` consumes it for a ``dtype`` problem.
+
+    A native XF32 MFMA (gfx942) reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); the BF16x3 emulation (gfx950) and the fp32 atoms use
+    the full payload, so every other case returns ``t`` unchanged. The arch
+    question is the catalog's (``tf32_is_emulated``).
+    """
+    if dtype != "tf32" or not _tf32_native(arch):
+        return t
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+
+
+def tf32_reference_tol(arch: str) -> float:
+    """The TF32 bound for ``arch`` against :func:`tf32_reference_inputs`."""
+    return TF32_REFERENCE_TOL["native" if _tf32_native(arch) else "emulated"]
+
+
+def _ieee(fn):
+    """Decorate a torch reference to run under :func:`ieee_fp32`."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with ieee_fp32():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_ieee
 def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference weight gradient for a convolution problem.
 
@@ -102,6 +187,7 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
 
 
+@_ieee
 def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference input gradient for a convolution problem.
 
@@ -134,6 +220,7 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     return dX_nchw.permute(0, 2, 3, 1).contiguous()  # NCHW -> NHWC
 
 
+@_ieee
 def conv_reference(
     A: torch.Tensor, B: torch.Tensor, p, out_dtype: torch.dtype | None = None
 ) -> torch.Tensor:

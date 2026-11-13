@@ -199,7 +199,7 @@ walk derive its range.
 
 A length has one home: `TensorDesc.lengths`. The graph never holds one, and no entry takes a `bounds=`
 argument, so there is no second copy to drift from the first and no way to pass a wider bound than the tensor's.
-A runtime length (a `RuntimeValue`) proves a tile inside it by identity -- an end computed from the same IR value
+A runtime length (a plain `Value` with stated facts) proves a tile inside it by identity -- an end computed from the same IR value
 -- which works only because every user reads the same object (API 7). A narrower region is a different tensor
 description; one value against arbitrary ends is `emit_bound_check` (API 10).
 
@@ -248,7 +248,7 @@ parameter.
 
 | CK pad transform | rocke |
 |---|---|
-| the naive view's length `len` | the tensor's length (`TensorDesc.lengths`; a `RuntimeValue` for a runtime one) |
+| the naive view's length `len` | the tensor's length (`TensorDesc.lengths`; a `Value` for a runtime one) |
 | left pad | `offset(read, into, shift=-left)`, or a negative window origin |
 | right pad | nothing |
 

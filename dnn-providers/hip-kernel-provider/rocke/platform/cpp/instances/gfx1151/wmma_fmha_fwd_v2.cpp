@@ -74,12 +74,8 @@ bool v2_layout_is(const rocke_wmma_fmha_fwd_v2_spec_t* spec, const char* layout)
 bool v2_post_init_ok(const rocke_wmma_fmha_fwd_v2_spec_t* spec, char* reason, size_t cap)
 {
     char msg[160];
-    if(!rocke_scheduler_strategy_is_valid(spec->scheduler_strategy))
-    {
-        snprintf(msg, sizeof(msg), "unsupported scheduler_strategy '%s'", spec->scheduler_strategy);
-        rocke_spec_set_reason(reason, cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->scheduler_strategy, reason, cap))
         return false;
-    }
     if(spec->dtype == NULL
        || (strcmp(spec->dtype, "fp16") != 0 && strcmp(spec->dtype, "bf16") != 0))
     {

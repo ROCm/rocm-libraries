@@ -11,7 +11,7 @@ MatrixInstM/N contract regresses, every candidate is rejected, the group yields
 this test fails loudly instead of the drop being silently masked.
 
 --gpu-targets is pinned to gfx1250 (the revision that has the fp4 32x16 WMMA
-opcode); gfx1250v0 lacks it and would legitimately reject 32x16, so it must not
+opcode); gfx1250-strict lacks it and would legitimately reject 32x16, so it must not
 drive this guard.
 """
 
@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import Tensile
+from tensilelite import run
 
 _CONFIG = Path(__file__).parent / "test_data" / "fp4_SourceSwap_nonsquare_gfx1250.yaml"
 
@@ -39,7 +39,7 @@ def _no_stdin(monkeypatch):
 def test_fp4_ss_nonsquare_survives_validation(tensile_args, tmp_path):
     output_dir = tmp_path / "output"
     # Explicit --gpu-targets AFTER *tensile_args so it last-wins over any forwarded
-    # default (e.g. tox forwarding gfx1250v0): the 32x16 opcode only exists on gfx1250.
+    # default (e.g. tox forwarding gfx1250-strict): the 32x16 opcode only exists on gfx1250.
     args = [
         str(_CONFIG),
         str(output_dir),
@@ -50,7 +50,7 @@ def test_fp4_ss_nonsquare_survives_validation(tensile_args, tmp_path):
     ]
 
     # Regression -> 0 valid solutions -> BenchmarkProblems.printExit -> SystemExit.
-    Tensile.Tensile(args)
+    run.main(args)
 
     # Benchmark data proves the group actually ran with surviving solutions, rather
     # than the run being vacuously skipped (e.g. an arch filter dropping the group),

@@ -397,7 +397,7 @@ def test_emitted_step_counts_races_and_replicated_stores(arch, d, km, kn, w):
             )
         ]
         # P and dS: one store per accumulator slot of the wave's G0 fragments
-        slots = 2 * geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.c_frag_len
+        slots = 2 * geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.dst.frag_len
         assert len(guarded) == (slots if replicated else 0), (len(guarded), slots)
 
 

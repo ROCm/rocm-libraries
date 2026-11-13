@@ -4,13 +4,14 @@
 # rocKE CTest Categories (RFC0010) for pre-registered (non-GTest) CTest tests.
 #
 # rocke/platform/tests/cmake/*.cmake (C++ smoke binaries) and
-# rocke/platform/CMakeLists.txt (Python import/golden/pytest checks) register
+# rocke/platform/CMakeLists.txt (Python import/golden/pytest checks, plus the
+# library suites it includes from rocke/library/tests/ctest_lists.cmake) register
 # these tests directly via add_test(), not through a GTest binary categorized
 # by a shared YAML (rocKE's C++ client API and its GTest binaries were
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
 # Without an entry here they carry no quick/standard/comprehensive/full
-# label: the install-tree copy only has a hardcoded literal "quick" label
-# baked in by rocke/platform/CMakeLists.txt (nothing gives it
+# label: the install-tree copy has at most a hardcoded tier label baked
+# in by rocke/platform/CMakeLists.txt (nothing gives it
 # standard/comprehensive/full), and the build-tree copies registered by
 # rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
 # they silently drop out of `ctest -L <tier>` selection, which is how
@@ -20,11 +21,13 @@
 # Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
 # runs the same coverage. The arch-domain reproducibility gate is intentionally
 # standard-tier: it probes the external LLVM toolchain across the full
-# intrinsic/architecture matrix and does not belong in quick or FFM. It is
-# registered in both build-tree and installed-artifact CTest, so developers and
-# provider CI execute the same logical gate against their respective package data.
+# intrinsic/architecture matrix and does not belong in quick or FFM. The
+# compiler-option reproducibility gate joins it: it re-measures which -mllvm
+# options the loaded compiler accepts. Both are registered in build-tree and
+# installed-artifact CTest, so developers and provider CI execute the same
+# logical gates against their respective package data.
 #
-# The pinned GPU reference entries are regex patterns, unlike the other
+# The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
 # rocke_<operation>_reference_unit_pytest for each reference operation and
 # rocke_<operation>_gpu_<arch>_pytest for each published architecture, so a
@@ -40,44 +43,103 @@
 # rocke/platform/tests/test_gpu_references.py checks that each registered
 # pinned reference name still gets the labels of
 # rocke_reference_common_pytest.
+#
+# The platform pytest suite is a pattern too: rocke/platform/CMakeLists.txt
+# registers one rocke_pytest_<group> entry per group of test directories, so
+# a new group is labeled without an edit here. The rocke_pytest_ prefix is
+# reserved for those entries.
+# rocke/platform/tests/test_engine_linkage.py checks that every registered
+# part gets the same labels, including the quick, standard and ffm-quick
+# tiers.
+#
+# The comprehensive tier holds tests run only by scheduled CI: its entries
+# get only the comprehensive and full labels, so a `ctest -L '^quick$'` or
+# `-L '^standard$'` run (pull-request and push CI) skips them and the
+# scheduled (nightly) run, which selects `-L '^comprehensive$'`, runs them.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
+      - "rocke_mfma_operand_contract"
+      - "rocke_cdna_mfma_ops"
+      - "rocke_gfx12_wmma_ops"
+      - "rocke_gfx11_wmma_ops"
+      - "rocke_mma_result_dtype"
+      - "rocke_gfx1250_wmma_ops"
+      - "rocke_gfx1250_f8f6f4_wmma_ops"
+      - "rocke_gfx950_f8f6f4_mfma_ops"
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
+      - "rocke_flavor_decl_chain"
+      - "rocke_isa_backend_targets"
+      - "rocke_arch_data_mirror"
+      - "rocke_matrix_call_lowering"
+      - "rocke_global_load_index_width"
       - "rocke_ir_types"
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
+      - "rocke_intexpr"
+      - "rocke_workgroup_size"
+      - "rocke_param_facts"
+      - "rocke_gpu_checked_value"
+      - "rocke_portable_ir_dom_decoders"
+      - "rocke_portable_ir_recipe_vm_replay"
       - "rocke_qk_scale_spec_validate"
       - "rocke_tensor_view_buffer_errors"
+      - "rocke_mfma_atom_lane_to_output"
+      - "rocke_scf_for_name_reuse"
+      - "rocke_scf_for_lowering_restores_names"
+      - "rocke_unrolled_for_nested_regions"
       - "rocke_fp8_scale_conversion_gate"
       - "rocke_mx_scale_decode"
+      - "rocke_dense_fp8_k128_hip"
+      - "rocke_gemm_universal_spec_guards"
       - "rocke_buffer_rsrc_hip"
+      - "rocke_attention_dense_spec"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
+      # Registered only in the build tree: they read engine sources the
+      # installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_arch_table_engine_parity"
+      - "rocke_gemm_spec_dict_binding_parity"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_ir_pytest"
+      - "rocke_library_conv_tf32_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
-      - "rocke_pytest"
+      - "rocke_library_sdpa_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
+      - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
+      - "rocke_tiling_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -89,40 +151,86 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
+      - "rocke_mfma_operand_contract"
+      - "rocke_cdna_mfma_ops"
+      - "rocke_gfx12_wmma_ops"
+      - "rocke_gfx11_wmma_ops"
+      - "rocke_mma_result_dtype"
+      - "rocke_gfx1250_wmma_ops"
+      - "rocke_gfx1250_f8f6f4_wmma_ops"
+      - "rocke_gfx950_f8f6f4_mfma_ops"
       - "rocke_streamk_iter_partition"
       - "rocke_wgrad_streamk_host"
       - "rocke_conv_direct_dw_dgrad_host"
+      - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_wmma_fmha_decode_host"
       - "rocke_future_intrinsic_lowering"
+      - "rocke_flavor_decl_chain"
+      - "rocke_isa_backend_targets"
+      - "rocke_arch_data_mirror"
+      - "rocke_matrix_call_lowering"
+      - "rocke_global_load_index_width"
       - "rocke_ir_types"
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
+      - "rocke_intexpr"
+      - "rocke_workgroup_size"
+      - "rocke_param_facts"
+      - "rocke_gpu_checked_value"
+      - "rocke_portable_ir_dom_decoders"
+      - "rocke_portable_ir_recipe_vm_replay"
       - "rocke_qk_scale_spec_validate"
       - "rocke_tensor_view_buffer_errors"
+      - "rocke_mfma_atom_lane_to_output"
+      - "rocke_scf_for_name_reuse"
+      - "rocke_scf_for_lowering_restores_names"
+      - "rocke_unrolled_for_nested_regions"
       - "rocke_fp8_scale_conversion_gate"
       - "rocke_mx_scale_decode"
+      - "rocke_dense_fp8_k128_hip"
+      - "rocke_gemm_universal_spec_guards"
       - "rocke_buffer_rsrc_hip"
+      - "rocke_attention_dense_spec"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
+      # Registered only in the build tree: they read engine sources the
+      # installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_arch_table_engine_parity"
+      - "rocke_gemm_spec_dict_binding_parity"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_ir_pytest"
+      - "rocke_library_conv_tf32_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
-      - "rocke_pytest"
+      - "rocke_library_sdpa_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
+      - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
+      - "rocke_tiling_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -133,7 +241,14 @@ test_categories:
     description: "rocKE generated-artifact reproduction checks"
     test_patterns:
       - "rocke_arch_domain_reproducibility"
+      - "rocke_library_attention_cache_key_sweep_pytest"
+      - "rocke_compiler_options_reproducibility"
     labels:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  comprehensive:
+    description: "rocKE checks run by scheduled CI only"
+    test_patterns:
+      - "rocke_tiling_visualization_pytest"

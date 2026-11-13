@@ -132,7 +132,7 @@ Compatibility rules:
 - `EngineDetailsWrapper` should expose raw `int32` values so the FlatBuffers SDK does not depend on backend headers.
 - `EngineDescriptor::ensureDetailsLoaded()` converts raw values to `hipdnnBackendBehaviorNote_t` and rejects invalid values at the first metadata query, not during finalization.
 
-Plugins may initially emit empty behavior-note lists. Non-empty notes should only be emitted where the engine can make a true statement, for example runtime compilation or an external library dependency. Today only plugin SDK ingestor engines (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`) emit notes. Their descriptor files declare them by name, and only `runtime_compilation` is accepted.
+Plugins may initially emit empty behavior-note lists. Non-empty notes should only be emitted where the engine can make a true statement, for example runtime compilation or an external library dependency. Plugin SDK ingestor engines (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`) declare notes by name in their descriptor files, and only `runtime_compilation` and `supports_graph_capture` are accepted. Some hand-written engines report notes in `getDetails`.
 
 ### 4.3 Backend EngineDescriptor Query
 
@@ -198,7 +198,7 @@ Bind:
 
 - `RUNTIME_COMPILATION`: the engine may compile, generate, or specialize code at runtime. This is useful for callers that need predictable startup or plan-build latency.
 - `REQUIRES_LAYOUT_TRANSFORM`: the engine may require tensor layout conversion. This helps callers reason about workspace, memory traffic, and latency costs.
-- `SUPPORTS_GRAPH_CAPTURE`: the engine is compatible with graph-capture workflows. This is a hard deployment requirement for some repeated execution paths.
+- `SUPPORTS_GRAPH_CAPTURE`: the engine is capture-safe with default settings (benchmarking off): `execute` only enqueues work on the handle's stream, so a hipGraph stream capture of it succeeds, and the first execute of a plan may be captured. This is a hard deployment requirement for some repeated execution paths.
 - `EXTERNAL_LIBRARY_DEPENDENCY`: the engine depends on an external runtime or library beyond the core hipDNN API surface. This helps deployment and reproducibility checks.
 - `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`: the engine supports binary execution-plan serialization. This lets callers prefer engines that can participate in plan cache save/load flows without changing `SerializedExecutionPlan` in this RFC.
 

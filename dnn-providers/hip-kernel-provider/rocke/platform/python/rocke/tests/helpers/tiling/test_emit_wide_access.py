@@ -42,9 +42,9 @@ def _mma(interleaved: bool) -> TileMma:
     style = {"style": InterleavedStyle()} if interleaved else {}
     return TileMma(
         (64, 64, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
         **style,

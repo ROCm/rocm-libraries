@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "7c84db6a-ca93-5282-9444-3abde8cb6211",
+  "name": "flydsl sdpa_head_pad dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_head_pad.dispatch"
+}

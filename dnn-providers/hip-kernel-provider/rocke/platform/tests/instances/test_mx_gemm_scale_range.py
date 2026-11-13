@@ -35,16 +35,12 @@ Checks:
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
-import os
 import re
 import struct
 from typing import NamedTuple
 
 import numpy as np
 import pytest
-
 from rocke.helpers import compile_kernel
 from rocke.helpers.compile import lower_kernel_for_comgr
 from rocke.helpers.mx_scale import exact_mx_scale_split
@@ -53,7 +49,11 @@ from rocke.instances.common.mx_gemm import (
     build_mx_gemm,
     mx_gemm_element_format,
     mx_gemm_grid,
+    mx_gemm_signature,
 )
+from rocke.tests.engines import all_engines_backend
+from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.llvm_ir import KernelIR
 
 _NAN_CODE = 255
 _BIAS = 127
@@ -175,35 +175,18 @@ _MX_GPU_ARCHS = ("gfx942", "gfx950")
 
 @pytest.fixture(scope="module")
 def mx_gpu_arch():
-    """The arch of HIP device 0 if it is one the MX GEMM supports; skip
-    otherwise, or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the
-    device is not (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        arch = get_device_arch(0)
-    except Exception as exc:  # no HIP runtime on this host
-        arch = f"no GPU ({exc})"
-    for required in _MX_GPU_ARCHS:
-        if (
-            os.environ.get(f"ROCKE_REQUIRE_{required.upper()}") == "1"
-            and arch != required
-        ):
-            pytest.fail(f"requires a {required} GPU; found {arch}")
-    if arch not in _MX_GPU_ARCHS:
-        pytest.skip(f"requires a gfx942 or gfx950 GPU; found {arch}")
-    return arch
+    """The current GPU's arch if it is one the MX GEMM supports; skip otherwise,
+    or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the GPU is not
+    (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
+    return current_device_arch_in(_MX_GPU_ARCHS)
 
 
 def _run_on_gpu(arch, groups) -> np.ndarray:
     """Run a 16x16 MX GEMM with one scale group per entry of ``groups``
     (A mantissa, B mantissa, A scale code, B scale code) and return C."""
-    from rocke.runtime.hip_module import Runtime
-
     spec = MxGemmSpec(M=16, N=16, K=32 * len(groups), mantissa_dtype="bf8e5m2")
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     artifact = compile_kernel(
-        build_mx_gemm(spec, arch=arch), arch=arch, backend=backend
+        build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
     )
     a_bytes = [_bf8_byte(arch, group[0]) for group in groups]
     b_bytes = [_bf8_byte(arch, group[1]) for group in groups]
@@ -219,41 +202,15 @@ def _run_on_gpu(arch, groups) -> np.ndarray:
         "BScale": np.repeat(np.array(b_codes, dtype=np.uint8), spec.N),
         "C": np.zeros(spec.M * spec.N, dtype=np.float32),
     }
-    rt = Runtime()
-    module = rt.load_module(artifact.hsaco)
-    dev = {name: rt.alloc(array.nbytes) for name, array in host.items()}
-    try:
-        for name, array in host.items():
-            rt.memcpy_h2d(
-                dev[name],
-                (ctypes.c_uint8 * array.nbytes).from_buffer_copy(array.tobytes()),
-                array.nbytes,
-            )
-        args = struct.pack(
-            "<QQQQQiii",
-            dev["A"],
-            dev["AScale"],
-            dev["B"],
-            dev["BScale"],
-            dev["C"],
-            spec.M,
-            spec.N,
-            spec.K,
-        )
-        rt.launch(
-            module.get_function(artifact.kernel_name),
-            mx_gemm_grid(spec),
-            (spec.block_size, 1, 1),
-            args,
-        )
-        rt.sync()
-        out = (ctypes.c_uint8 * host["C"].nbytes)()
-        rt.memcpy_d2h(out, dev["C"], host["C"].nbytes)
-        return np.frombuffer(bytes(out), dtype=np.float32)
-    finally:
-        for ptr in dev.values():
-            rt.free(ptr)
-        module.unload()
+    launch_with_buffers(
+        artifact,
+        mx_gemm_signature(spec),
+        host,
+        grid=mx_gemm_grid(spec),
+        block=(spec.block_size, 1, 1),
+        scalars={"M": spec.M, "N": spec.N, "K": spec.K},
+    )
+    return host["C"]
 
 
 def _check_gpu_output(arch, name, groups):
@@ -299,72 +256,12 @@ def test_mx_gemm_accumulator_edges_on_gpu(mx_gpu_arch, name, groups):
 # kernel: an edit to the kernel or to the scale helper changes what they check.
 # ---------------------------------------------------------------------------
 
-_DEFINITION = re.compile(r"^\s*(%[\w.]+) = (.*)$")
 _LOCAL_NAME = re.compile(r"%[\w.]+")
-_CALLEE = re.compile(r"@([\w.]+)\((.*)\)")
-_INCOMING = re.compile(r"\[\s*([^,\]]+?)\s*,\s*(%[\w.]+)\s*\]")
 _FLOAT_MULTIPLIES = ("fmul", "llvm.fmuladd", "llvm.fma")
 
 
-class _KernelIR:
-    """The SSA definitions of the one kernel in an LLVM IR text, by name."""
-
-    def __init__(self, llvm_text: str):
-        self.lines = llvm_text.splitlines()
-        self.definitions = {}
-        for line in self.lines:
-            match = _DEFINITION.match(line)
-            if match:
-                self.definitions[match.group(1)] = match.group(2)
-
-    def opcode(self, name: str) -> str:
-        """The instruction (``fmul``, ``sub``, ...) or, for a call, the callee
-        without its type suffix (``llvm.smax``, ``llvm.exp2``, ...)."""
-        text = self.definitions[name]
-        if text.startswith("call "):
-            callee = _CALLEE.search(text).group(1)
-            if callee.startswith("llvm.amdgcn.mfma."):
-                return "mfma"
-            return callee.rsplit(".", 1)[0]
-        return text.split()[0]
-
-    def operands(self, name: str) -> list:
-        """The operand values, in order: an SSA name (``%x``) or a literal."""
-        text = self.definitions[name]
-        if text.startswith("call "):
-            text = _CALLEE.search(text).group(2)
-        else:
-            text = text.split(None, 1)[1]
-        values = []
-        for item in text.split(","):
-            item = item.split(" to ")[0]  # a cast: ``zext i8 %x to i32``
-            values.append(item.split()[-1])
-        return values
-
-    def find(self, opcode: str) -> list:
-        return [n for n in self.definitions if self.opcode(n) == opcode]
-
-    def copied(self, name: str) -> str:
-        """The value ``name`` copies: a ``bitcast`` to its own type, as the
-        lowering emits for loop-carried values, is followed to its source."""
-        while name in self.definitions and self.opcode(name) == "bitcast":
-            (name,) = self.operands(name)
-        return name
-
-    def incoming(self, phi: str) -> tuple:
-        """A loop phi's (initial value, value carried round the loop)."""
-        assert self.opcode(phi) == "phi", self.definitions[phi]
-        (initial, entry), (carried, latch) = _INCOMING.findall(self.definitions[phi])
-        assert entry != latch, self.definitions[phi]
-        return initial, self.copied(carried)
-
-    def line_of(self, name: str) -> int:
-        """The line number of ``name``'s definition."""
-        return next(
-            i
-            for i, line in enumerate(self.lines)
-            if line.strip().startswith(name + " = ")
-        )
+class _KernelIR(KernelIR):
+    """The MX GEMM's LLVM IR, with the queries these checks make of it."""
 
     def sources(self, name: str) -> set:
         """The loads, phis and MFMA results that ``name`` is computed from."""
@@ -430,9 +327,8 @@ def mx_gemm(request) -> _LoweredMxGemm:
     binding), for each target and mantissa type the builder supports."""
     arch, dtype = request.param
     spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype=dtype)
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     lowered = lower_kernel_for_comgr(
-        build_mx_gemm(spec, arch=arch), arch=arch, backend=backend
+        build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
     )
     element_format = mx_gemm_element_format(dtype, arch)
     return _LoweredMxGemm(arch, element_format, _KernelIR(lowered.llvm_text))

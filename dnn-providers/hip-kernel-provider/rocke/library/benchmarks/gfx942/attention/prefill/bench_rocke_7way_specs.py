@@ -108,7 +108,7 @@ PARENT_VARIANT = {
 }
 
 # Field deltas against the production spec. Production leaves use_cfvst=None,
-# which _use_cfvst resolves ON at BF16 D128 (#14367); dispatch canonicalizes a
+# which default_use_cfvst resolves ON at BF16 D128 (#14367); dispatch canonicalizes a
 # redundant use_cfvst=True pin back to None, so only the CFVST-off stage pins it.
 STAGE_OVERRIDES = {
     "A": {},  # Separate sweep-winner specification; not a B stage.
@@ -1206,7 +1206,7 @@ def _run_shapes(
                 bool(spec.v_reg_prefetch),
             )
             expected_pipeline = (
-                # Unpinned use_cfvst resolves ON at BF16 D128 (_use_cfvst).
+                # Unpinned use_cfvst resolves ON at BF16 D128 (default_use_cfvst).
                 bool(expected.get("use_cfvst", True)),
                 int(expected.get("lds_num_buffers", 1)),
                 bool(expected.get("v_reg_prefetch", False)),

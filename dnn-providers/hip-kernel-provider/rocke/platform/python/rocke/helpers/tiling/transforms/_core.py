@@ -91,8 +91,9 @@ def k_distribution(
 ) -> tuple[tuple[int, ...], ...]:
     """Project the encoding onto its K axis: per lane, the tuple of K coordinates by register slot.
 
-    ``k_axis`` is the contraction axis index (1 for both A=(M,K) and B=(N,K)). Two operands are
-    K-aligned iff their ``k_distribution`` are equal position-for-position.
+    ``k_axis`` is the contraction axis index (1 for both A=(M,K) and B=(N,K)). Whether two operands
+    are K-aligned is :func:`~rocke.helpers.tiling.transforms.mma_pair_k_aligned`'s question, answered
+    against the instruction's canonical layouts.
     """
     m = RegisterMapper(enc)
     return tuple(
@@ -242,43 +243,104 @@ def _axis_permutation(
     return None
 
 
-def _atom_k_signature(
-    per_lane_k: tuple[tuple[int, ...], ...], atoms: int, role: str
-) -> tuple[tuple[tuple[int, ...], ...], str]:
-    """Reduce a whole-fragment per-lane K-distribution to its PER-ATOM K signature.
+_Layout = WarpDistributionEncoding | dict[tuple[int, int], tuple[int, ...]]
 
-    A wave-tile fragment tiles ``atoms`` free-dim atoms (M-atoms for A, N-atoms for B) along the
-    register axis, each carrying the SAME K sequence (the free dim only permutes M/N, never K). So the
-    per-lane K-list is that atom K-signature repeated ``atoms`` times. Chop it back to one atom's worth
-    and verify the repeats are consistent. Returns ``(signature, reason)``; ``reason`` non-empty on a
-    malformed (non-uniform) repeat, which means the fragment is not a clean atom tiling.
+# One MMA operand position read against its canonical layout: (register, instruction K, K label).
+_KPosition = tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class _KRelabelling:
+    """How one MMA operand labels the instruction's K, read against the operand's canonical layout.
+
+    The instruction multiplies the A value at canonical ``(M, K)`` with the B value at canonical
+    ``(N, K)`` for every M and N of the wave tile that share the canonical (instruction) K. So an
+    operand is pairable only if, at each instruction K, every free row (M for A, N for B) holds the
+    same K label: ``labels`` maps instruction K to that label. ``conflict`` is ``None`` then; otherwise
+    it names the first instruction K two free rows disagree on, and ``labels`` holds the first label
+    seen at each instruction K. ``rows`` holds the operand's positions per ``(lane, canonical free
+    row)``, in register order: the positions an in-register reorder may permute among themselves
+    without moving a value to another row.
     """
-    sig: list[tuple[int, ...]] = []
-    for lane, kl in enumerate(per_lane_k):
-        if atoms <= 0 or len(kl) % atoms:
-            return (), (
-                f"{role} fragment lane {lane} has {len(kl)} K-slots, not divisible by {atoms} "
-                f"{role}-atoms -- not a clean atom tiling"
-            )
-        width = len(kl) // atoms
-        chunks = [kl[i * width : (i + 1) * width] for i in range(atoms)]
-        if any(c != chunks[0] for c in chunks):
-            return (), (
-                f"{role} fragment lane {lane} K-slots {kl} are not a uniform repeat across "
-                f"{atoms} atoms -- K differs between atoms"
-            )
-        sig.append(chunks[0])
-    return tuple(sig), ""
+
+    labels: dict[int, int]
+    conflict: str | None
+    rows: dict[tuple[int, int | tuple[int, ...]], tuple[_KPosition, ...]]
+
+    def unpaired_row(
+        self, labels: dict[int, int]
+    ) -> tuple[int, int | tuple[int, ...]] | None:
+        """The first ``(lane, free row)`` whose K labels are not, in any register order, the ones
+        ``labels`` gives its instruction K; ``None`` when an in-register reorder within each row
+        makes the operand hold ``labels``."""
+        for row, positions in self.rows.items():
+            held = sorted(label for _, _, label in positions)
+            if held != sorted(labels[k] for _, k, _ in positions):
+                return row
+        return None
+
+    def first_disagreement(self, labels: dict[int, int]) -> tuple[int, int, int, int]:
+        """``(lane, register, instruction K, K label)`` of the first position whose K label is not
+        the one ``labels`` gives its instruction K. The caller has found the operand not aligned
+        with ``labels``, so such a position exists."""
+        for (lane, _), positions in self.rows.items():
+            for register, instruction_k, label in positions:
+                if label != labels[instruction_k]:
+                    return lane, register, instruction_k, label
+        raise AssertionError(
+            "first_disagreement: every position holds the K label `labels` gives its instruction "
+            "K; call it only for an operand that disagrees with `labels`"
+        )
 
 
-def _kdist_from_fwd(
-    fwd: dict[tuple[int, int], tuple[int, ...]], k_axis: int = 1
-) -> tuple[tuple[int, ...], ...]:
-    """Per-lane K sequence (by ascending register) from a forward map -- the ``k_distribution`` of a map."""
-    lanes = sorted({l for l, _ in fwd})
-    return tuple(
-        tuple(fwd[(l, r)][k_axis] for r in sorted(rr for (ll, rr) in fwd if ll == l))
-        for l in lanes
+def _k_relabelling(
+    operand: _Layout, canon: _Layout, *, k_axis: int, role: str
+) -> _KRelabelling | str:
+    """The :class:`_KRelabelling` of ``operand`` against its canonical layout ``canon`` (each an
+    encoding or a forward map); a message when the two do not hold the same ``(lane, register)``
+    positions, since then ``canon`` is not this operand's canonical layout."""
+    fwd, canon_fwd = as_forward_map(operand), as_forward_map(canon)
+    if len(fwd) != len(canon_fwd):
+        return (
+            f"{role} holds {len(fwd)} (lane, register) positions but its canonical layout holds "
+            f"{len(canon_fwd)} -- pass canonical_layouts(traits, subtiles) of this wave tile"
+        )
+    if set(fwd) != set(canon_fwd):
+        return (
+            f"{role} holds (lane, register) {min(set(fwd) - set(canon_fwd))}, which its canonical "
+            "layout does not -- pass canonical_layouts(traits, subtiles) of this wave tile"
+        )
+    free_name = "M" if role == "A" else "N"
+    labels: dict[int, int] = {}
+    first_free: dict[int, int | tuple[int, ...]] = {}
+    conflict: str | None = None
+    rows: dict[tuple[int, int | tuple[int, ...]], list[_KPosition]] = {}
+    for lane, register in sorted(canon_fwd):
+        canonical = canon_fwd[(lane, register)]
+        instruction_k = canonical[k_axis]
+        label = fwd[(lane, register)][k_axis]
+        free_coords = canonical[:k_axis] + canonical[k_axis + 1 :]
+        free = free_coords[0] if len(free_coords) == 1 else free_coords
+        rows.setdefault((lane, free), []).append((register, instruction_k, label))
+        if instruction_k not in labels:
+            labels[instruction_k], first_free[instruction_k] = label, free
+        elif labels[instruction_k] != label and conflict is None:
+            if free == first_free[instruction_k]:
+                conflict = (
+                    f"{role}'s replicas of {free_name} {free} disagree on K: instruction K "
+                    f"{instruction_k} holds K {labels[instruction_k]} in one and K {label} in "
+                    "another; every replica must hold the same values"
+                )
+            else:
+                conflict = (
+                    f"{role}'s K labels depend on its {free_name} row: instruction K "
+                    f"{instruction_k} holds K {labels[instruction_k]} in {free_name} "
+                    f"{first_free[instruction_k]} but K {label} in {free_name} {free}; the "
+                    f"instruction multiplies every {free_name} row at one instruction K with the "
+                    "same K of the other operand"
+                )
+    return _KRelabelling(
+        labels, conflict, {row: tuple(found) for row, found in rows.items()}
     )
 
 

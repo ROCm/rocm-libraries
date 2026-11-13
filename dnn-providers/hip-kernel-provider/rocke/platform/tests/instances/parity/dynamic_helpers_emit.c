@@ -337,6 +337,37 @@ static void build_unmerge_mixed(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* Python build_mixed_strides: create() with a Value, an int and an int-1
+ * stride, through offset and offset_i64_split. */
+static void build_mixed_strides(rocke_ir_builder_t* b)
+{
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* o64 = ptr_param(b, "O64", rocke_i64(), false);
+    rocke_value_t* p_sb = rocke_b_param(b, "p_sB", rocke_i32(), NULL);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+
+    const char* base_names[3] = {"blk", "tok", "d"};
+    rocke_value_t* dyn[3] = {p_sb, NULL, NULL};
+    const int stat[3] = {0, 64, 1};
+    rocke_tensor_descriptor_t* desc
+        = rocke_tensor_descriptor_naive_dynamic_mixed(b, "kv_mixed", base_names, 3, dyn, stat);
+
+    rocke_value_t* in_values[3] = {tid, tid, tid};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    if(!rocke_transforms_descriptor_offset(b, desc, base_names, in_values, 3, &off, &valid))
+        return;
+    rocke_b_global_store(b, o, tid, off, 1);
+    rocke_value_t* base_i64 = NULL;
+    rocke_value_t* within = NULL;
+    if(!rocke_transforms_descriptor_offset_i64_split(
+           b, desc, "blk", base_names, in_values, 3, &base_i64, &within, &valid))
+        return;
+    rocke_b_global_store(b, o64, tid, base_i64, 1);
+    rocke_b_global_store(b, o, within, tid, 1);
+    rocke_b_ret(b);
+}
+
 static void build_pad_dynamic(rocke_ir_builder_t* b)
 {
     rocke_value_t* x = ptr_param(b, "X", rocke_f16(), true);
@@ -431,6 +462,7 @@ static const build_fn_t CONFIGS[] = {
     build_unmerge_mixed,
     build_chiplet_runtime_default,
     build_chiplet_runtime_chunk,
+    build_mixed_strides,
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

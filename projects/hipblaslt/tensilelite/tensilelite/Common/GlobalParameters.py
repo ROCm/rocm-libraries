@@ -233,6 +233,10 @@ globalParameters["BatchMode"] = 0
 # corrupting a later launch rather than the one that left it. Only StreamK,
 # GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
 globalParameters["CheckSynchronizer"] = True
+# Validate final output and (when enabled) synchronizer state after each enqueue
+# group. Keeps consecutive launches uninterrupted; adds readback between groups.
+# Requires CEqualD=False so repeated launches preserve the reference inputs.
+globalParameters["ValidateAfterEnqueues"] = False
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -364,6 +368,9 @@ globalParameters["IcacheRotateCopies"] = 0
 #   Non-Linux: used directly as the raw extras count (no ELF parsing).
 globalParameters["IcacheRotateSize"] = 64
 
+# Fused GEMM+A2A: benchmark only the problems whose world is listed; [] runs all.
+globalParameters["WorldFilter"] = []
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
@@ -425,7 +432,7 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 globalParameters["StinkyTofuTimePasses"] = False
 
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
@@ -443,7 +450,7 @@ globalParameters["StinkyTofuRegisterAllocationDump"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
-# Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
+# Internal plumbing for the --cpu-only CLI switch (see run.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
 # This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
@@ -528,6 +535,7 @@ defaultBenchmarkCommonParameters = [
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
+    {"LDSTrStoreShuffle": [0]},
     {"VectorStore": [-1]},
     {"StoreVectorWidth": [-1]},
     {"GlobalReadVectorWidthA": [-1]},
@@ -542,6 +550,8 @@ defaultBenchmarkCommonParameters = [
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
     {"PrefetchGL2": [0]},
+    {"PrefetchGL2Inc64Bit": [False]},
+    {"PrefetchGL2SAddr": [False]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -696,8 +706,9 @@ defaultBenchmarkCommonParameters = [
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
     # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
-    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
-    # -2 reads each cluster's XCC from the hardware.
+    # half of the cluster grid. -1 disables;
+    # -2 reads each cluster's XCC from the hardware. When active, the runtime
+    # WorkGroupMapping orders clusters inside each half in bands of |WGM| clusters.
     {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
@@ -759,7 +770,7 @@ def restoreDefaultGlobalParameters():
     global globalParameters
     global defaultGlobalParameters
     # Can't just assign globalParameters = deepcopy(defaultGlobalParameters) because that would
-    # result in dangling references, specifically in tensilelite.Tensile().
+    # result in dangling references, specifically in tensilelite.run.main().
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
@@ -889,24 +900,23 @@ def _assertGlobalParametersAreValid(config, ignoreKeys):
 # entries in the globalParameters registry. _assertGlobalParametersAreValid
 # skips these silently. Shared with the corpus test so the two never diverge.
 _GLOBAL_PARAMETER_IGNORE_KEYS = [
-    # --- CLI / TensileCreateLibrary-level config consumed outside the
+    # --- CLI / create_library config consumed outside the
     #     globalParameters registry (each has its own argparse dest or
     #     direct arguments[...] reader) ---
-    "Architecture",       # build-arch list, read directly in Tensile.py
-    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
-    "Device",             # device id, read from config in Tensile.py
-    "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
+    "Architecture",       # build-arch list, read directly in run.py
+    "PrintLevel",         # verbosity, read by setVerbosity in create_library/run.py
+    "Device",             # device id, read from config in run.py
+    "UseCompression",     # set in create_library/parse_arguments.py, read in run.py
     "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
     "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
     "OffloadBundler",     # --offload-bundler arg, resolved in Toolchain layer
     "Assembler",          # --assembler arg, resolved in Toolchain layer
-    "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
-    "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
-    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
-    "Experimental",       # --experimental logic-dir toggle in ParseArguments
-    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
-    "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
+    "LogicPath",          # library-logic dir, read by create_library/run.py
+    "LogicFilter",        # logic-file glob, read by create_library/run.py
+    "OutputPath",         # positional output dir arg in run.py / retune_library.py
+    "Experimental",       # --experimental toggle in logic/parse_arguments.py
+    "EnableGemmA2AFusion", # toggle in create_library/parse_arguments.py
+    "GenSolTable",        # --gen-sol-table toggle in create_library/parse_arguments.py
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     tensilelite/Common/Types.py) directly from the raw config dict

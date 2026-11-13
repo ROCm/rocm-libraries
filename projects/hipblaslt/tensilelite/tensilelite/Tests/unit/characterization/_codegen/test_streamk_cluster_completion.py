@@ -38,7 +38,12 @@ def _assert_scc0_jump_to_close(code):
 
 def _assert_phantom_completion(src):
     code = _assembly_code(src)
-    gate = re.search(r"^s_cmp_eq_u32 s\[sgprPersistentPhantomTile\], 0\n", code, re.M)
+    gate = re.search(
+        r"^s_wait_kmcnt 0\n"
+        r"s_cmp_eq_u32 s\[sgprPersistentPhantomTile\], 0\n",
+        code,
+        re.M,
+    )
     assert gate
     after_gate = gate.end() + _assert_scc0_jump_to_close(code[gate.end():])
     close = code.index("\nlabel_PersistentLoopClose:")

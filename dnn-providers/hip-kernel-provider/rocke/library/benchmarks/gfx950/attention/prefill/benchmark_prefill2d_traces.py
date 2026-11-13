@@ -128,7 +128,7 @@ class RockeComboBench:
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _attn_signature,
+            _tiled_2d_signature,
             _enable_i64_kv_addr,
         )
         from rocke.runtime import KernelLauncher
@@ -181,15 +181,13 @@ class RockeComboBench:
             use_fast_paged_kv_desc=use_combo,
             use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
-        # The display name intentionally omits several compile-time constants
-        # (notably num_seqs/binary_search_iters). Cache on the trace signature
-        # as well so shapes with the same kernel_name never reuse an HSACO that
-        # was specialized for a different batch geometry.
-        # kernel_name() does not encode the KV addressing width either.
+        # The kernel name identifies the binary (head counts, window and batch
+        # are kernargs; i64 addressing is in the name). Key on the trace
+        # signature as well because the cached spec also feeds per-shape launch
+        # values such as the K/V address limit.
         key = (
             shape.signature,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:
@@ -199,9 +197,7 @@ class RockeComboBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_attn_signature(
-                        dtype, include_bt_stride=True, include_qq_bias_stride=True
-                    ),
+                    signature=_tiled_2d_signature("gfx950", dtype),
                     cache_key=("prefill2d_trace_combo", key),
                 ),
                 spec,

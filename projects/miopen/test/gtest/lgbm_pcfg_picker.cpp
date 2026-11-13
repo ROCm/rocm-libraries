@@ -222,7 +222,7 @@ TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
                                               << max_abs_err);
 }
 
-// Pins which (solver, arch, direction) combinations the picker holds out although
+// Pins which (solver, arch, direction) combinations the picker holds out, whether or not
 // lgbm_pcfg.bin has buckets for them. ConvHipConv is held out on gfx1250 in every direction and
 // on gfx950 for backward weights only.
 TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)

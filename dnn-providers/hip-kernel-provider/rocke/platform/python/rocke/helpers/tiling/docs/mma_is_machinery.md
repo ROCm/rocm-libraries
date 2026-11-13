@@ -36,13 +36,31 @@ What this means:
 
 ## The invariant: a sound multiply-accumulate
 
-Start from what is *physical*. The atom hardwires **which slots accumulate into which output**: for each output register it pairs **A-slot-`s` with B-slot-`s`**, multiplies, and sums over the paired slots. That wiring is silicon — you cannot change which products land in one accumulator. The machine reads slot `s` and nothing more; it has no opinion about layout and does not know what $M$, $N$, or $K$ a register holds.
+Start from what is *physical*. The atom hardwires **which slots accumulate into which output**: for each output register it pairs each A slot with the B slot that holds the same hardware $K$ (**A-slot-`s` with B-slot-`s`** on every same-format atom; a mixed-width `f8f6f4` atom pairs them differently, condition 3 below), multiplies, and sums over the paired slots. That wiring is silicon — you cannot change which products land in one accumulator. The machine reads slot `s` and nothing more; it has no opinion about layout and does not know what $M$, $N$, or $K$ a register holds.
 
 Everything else follows from that one physical fact. Because the atom *physically* sums a fixed set of slots into each output, the labels you place on those slots must be coherent or the result is not a dot product at all. A **sound** multiply-accumulate is three conditions:
 
 1. **Atom-fixed accumulation.** Which physical slots sum into each output is fixed by the atom — not a choice.
 2. **One $M$ per output on A, one $N$ per output on B.** Every A-slot feeding a given output carries a single fixed $M$; every B-slot a single fixed $N$. If $M$ drifts across those slots, the accumulator holds a sum whose row wanders term to term — not $C_{ij}$ for any $(i,j)$.
-3. **$K$-match, position for position.** $A.K\text{-dist} = B.K\text{-dist}$: $A$ and $B$ agree on which contraction index $K$ sits in each paired slot, and $K$ is well-formed (each index present once).
+3. **$K$-match at every instruction $K$.** The atom multiplies **every** A row with **every** B column at each instruction $K$ -- the $K$ coordinate the atom's canonical A and B layouts hold at a position -- and sums over it. So $A$ and $B$ must label each instruction $K$ with the same contraction index $K$, in every row of A and every column of B, and $K$ is well-formed (each index present once). A $K$ label that depends on the row is wrong even when A and B match slot for slot: swap $K$ 0 and 1 on the odd rows of both, and $C_{0,1}$ multiplies A's $K$ 0 with B's $K$ 1. For every same-format atom the canonicals hold the same instruction $K$ at slot $s$ of A and B, so the rule reads $A.K\text{-dist} = B.K\text{-dist}$, with no row-dependent $K$. A mixed-width `f8f6f4` atom is the exception: its 8-bit operand holds $K$ in two runs of 16 per lane, its 6/4-bit operand in one run of 32, so the instruction $K$ sits at different positions:
+
+   ```
+   gfx950 16x16x128, fp8 A x fp4 B, lane 0
+     A slots 0-15 = K 0-15, slots 16-31 = K 64-79     (two runs of 16)
+     B slots 0-31 = K 0-31                            (one run of 32)
+     A (lane 0, slot 16) holds K 64  <->  B (lane 32, slot 0) holds K 64
+   ```
+
+   Comparing such a pair slot for slot is wrong both ways: it rejects the canonical fp8 A x fp4 B pair, and it accepts an fp4 B loaded with fp8's map, which multiplies the wrong $K$.
+
+   An atom whose lane holds several $M$ rows of A (`a_m_register_blocks > 1`) multiplies each row with the same B registers, so every $M$ block of A meets B at the same instruction $K$:
+
+   ```
+   gfx1250 32x16x128 fp4, lane 0
+     A slots 0-63 = (M 0, K 0-31 and 64-95), slots 64-127 = (M 16, the same K)
+     B slots 0-63 = (N 0, K 0-31 and 64-95)
+     A (lane 0, slot 64) holds K 0  <->  B (lane 0, slot 0) holds K 0
+   ```
 
 > The slots feeding one accumulator are fixed by silicon; a sound MAC labels them with **one $M$, one $N$, and a matched $K$** — nothing else is constrained.
 
@@ -89,18 +107,18 @@ Because A's $M$-placement and B's $N$-placement are free, *they* fix C's native 
 Two checks hide under "is this layout OK?", and conflating them is what sends people reaching for canonical:
 
 - **Per-operand soundness** (conditions 1–2) is checkable on *one* fragment: does every slot feeding an output carry a single $M$ (A) or $N$ (B)? It asks nothing about the partner, and nothing about canonical.
-- **Pairwise acceptability** (condition 3) is a property of the **pair**, never of one fragment: do A and B agree on $K$, slot for slot? Neither operand answers it alone — and neither is checked against a canonical reference.
+- **Pairwise acceptability** (condition 3) is a property of the **pair**, never of one fragment: do A and B label every instruction $K$ with the same $K$, in every row and column? Neither operand answers it alone. The canonical layouts enter only to say *which* instruction $K$ each position holds; neither operand's labels are compared against them.
 
 Consequences:
 
 - "Make this fragment acceptable" always means "reorder it until its $K$-row matches its **partner's**" — never "until it looks canonical."
-- `mma_pair_k_aligned(A, B)` compares the two fragments **to each other**; it never checks either against a canonical reference.
+- `mma_pair_k_aligned(A, B, a_canon=..., b_canon=...)` compares the two fragments **to each other** at every instruction $K$. The canonicals are required because they name the instruction $K$ of each position; neither fragment's labels are checked against them. The check is symmetric in A and B and covers a rectangular wave tile of several atoms without any atom counts.
 
 ## The traps agents fall into (name them, then don't)
 
 Wrong-turns that come from pattern-matching on training data instead of reasoning from the machinery:
 
-1. **"The MFMA has a fixed layout, so the fragment must be canonical."** — No. The hardware reads slots and multiply-accumulates; the layout is bookkeeping *we* maintain. $K$-pairing is the only **cross-operand** constraint — not canonical resemblance.
+1. **"The MFMA has a fixed layout, so the fragment must be canonical."** — No. The hardware reads slots and multiply-accumulates every A row with every B column at each instruction $K$ (slot $s$ with slot $s$, except on mixed-width `f8f6f4` atoms); the labels are bookkeeping *we* maintain. $K$-pairing at every instruction $K$ is the only **cross-operand** constraint — not canonical resemblance.
 2. **"A lane can only own these $N$ strided elements, so we're capped at dwordx2."** — Reasoning from *one* canonical distribution. $M/N$ placement is free; choose a distribution where the lane owns a contiguous run and the wide store exists. "Canonical caps us" is never a valid conclusion.
 3. **"Just shuffle the canonical C into the store order."** — C's ownership is derived from A/B. The store-friendly C is *produced* by choosing A/B placement, not recovered by post-hoc shuffling a canonical accumulator (often cross-lane and expensive).
 4. **Treating `mma_pair_k_aligned` passing as "canonical-valid."** — It only means A and B agree on $K$. A hand-rolled distribution's correctness is confirmed by **bit-exact**, not by resemblance to canonical.
@@ -110,7 +128,7 @@ Wrong-turns that come from pattern-matching on training data instead of reasonin
 
 For any layout/direction question about an MMA operand or accumulator:
 
-1. **Is this a correctness question?** Correctness = the sound MAC: per-operand $M$/$N$ fixed (1–2) **and** $A.K\text{-dist} = B.K\text{-dist}$ (3). If those hold, the MMA is correct — full stop.
+1. **Is this a correctness question?** Correctness = the sound MAC: per-operand $M$/$N$ fixed (1–2) **and** A and B hold the same $K$ at every instruction $K$ (3). If those hold, the MMA is correct — full stop.
 2. **Place $M/N$ for the goal, not for canon.** Choose A's $M$-placement and B's $N$-placement for the memory behavior you want (coalesced wide load, store-friendly C, feed a downstream MMA).
 3. **Let C be derived.** C emerges at the $M/N$ you chose; shape the *store* around that (or a cheap register reorder *within* the already-derived ownership), not by reshaping a canonical C.
 4. **Verify by bit-exact.** The GPU is the arbiter. "It doesn't look canonical" is not evidence of anything.

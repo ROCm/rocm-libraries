@@ -99,10 +99,13 @@ class Index:
 
     def follow(self, document: Document, key: str, hop: str) -> Document:
         """Resolve a declared id reference, naming the hop when it dangles."""
-        ref = document.doc.get(key)
+        return self.follow_ref(document.doc.get(key), document.path, key, hop)
+
+    def follow_ref(self, ref, path: str, key: str, hop: str) -> Document:
+        """Resolve @p ref, read from `key` of the document at @p path."""
         if not isinstance(ref, str) or not ref:
             raise DescriptorContextError(
-                f"{os.path.basename(document.path)}: '{key}' is not an id reference "
+                f"{os.path.basename(path)}: '{key}' is not an id reference "
                 f"({ref!r}). The {hop} hop cannot be walked, and binding to a "
                 f"same-stem sibling instead would gate a schema nothing wires this "
                 f"bundle to."
@@ -110,7 +113,7 @@ class Index:
         target = self.by_id.get(ref)
         if target is None:
             raise DescriptorContextError(
-                f"{os.path.basename(document.path)}: unresolved '{key}' reference -- "
+                f"{os.path.basename(path)}: unresolved '{key}' reference -- "
                 f"id {ref!r} matches no descriptor under {self.root}."
             )
         return target
@@ -187,7 +190,23 @@ def resolve_bundles(index: Index) -> list[Bundle]:
     bundles = []
     for kdp in index.of_type("kdp"):
         engine = index.follow(kdp, "engine", "KDP -> engine (UED)")
-        kmd = index.follow(engine, "metadata", "UED -> metadata (KMD)")
+        # A slotted engine's KMD is its slot's, which the pack names (RFC 0021 §4).
+        try:
+            kmd_ref = agreement.pack_kmd_reference(
+                engine.doc, kdp.doc, os.path.basename(kdp.path)
+            )
+        except HkpPackError as exc:
+            raise DescriptorContextError(str(exc)) from exc
+        kmd = index.follow_ref(
+            kmd_ref,
+            engine.path,
+            "metadata",
+            (
+                "UED -> metadata (KMD)"
+                if "slots" not in engine.doc
+                else "UED slot -> metadata (KMD)"
+            ),
+        )
         if kmd.dtype != "kmd":
             raise DescriptorContextError(
                 f"{os.path.basename(engine.path)}: 'metadata' resolves to "

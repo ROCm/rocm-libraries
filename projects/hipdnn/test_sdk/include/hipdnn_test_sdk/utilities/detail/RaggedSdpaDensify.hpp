@@ -9,13 +9,16 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
@@ -24,12 +27,12 @@ namespace hipdnn_test_sdk::detail
 
 // A ragged (RFC-0014) SDPA graph run as its dense padded equivalent. The references implement
 // every SDPA feature for dense tensors with per-batch lengths (seq_len_q/kv + padding_mask), and a
-// ragged tensor is that same data packed token by token, so a ragged graph the native ragged plans
+// ragged tensor is that same data at per-batch origins, so a ragged graph the native ragged plans
 // decline (backward, bias, dropout, sinks, paged K/V with ragged Q, dtypes they do not register)
-// is rewritten to the dense graph, its packed buffers are unpacked into dense ones, the dense plans
-// run, and the outputs are packed back. Per-batch lengths come from the ragged offsets; when the
-// graph also carries seq_len tensors (cuDNN's ragged + padding form) those give the live lengths
-// and must not exceed the packed ones.
+// is rewritten to the dense graph, its ragged buffers are unpacked into dense ones, the dense plans
+// run, and the outputs are packed back. Each tensor's origins are its ragged offsets; the lengths
+// are the graph's seq_len tensor for the tensor's role (seq_len_q: Q, O, dO, dQ, Stats, Max,
+// Sum_exp; seq_len_kv: K, V, dK, dV) or, without one, the offset blocks.
 
 // A packed primary of the node: the tensor, its offset table and its two layouts.
 struct RaggedSdpaPrimary
@@ -37,9 +40,10 @@ struct RaggedSdpaPrimary
     int64_t uid = 0;
     int64_t offsetUid = 0;
     size_t offsetElementSize = 4;
+    int64_t offsetStride = 1; // batch-axis stride of the offset table, in elements
     int64_t multiplier = 1;
     std::vector<int64_t> dims; // logical [B, H, S, D] (LSE: [B, H, S, 1])
-    std::vector<int64_t> packedStrides; // token-major strides of the packed tensor
+    std::vector<int64_t> packedStrides; // strides of the ragged tensor
     size_t elementSize = 0;
     bool queryPacking = true; // packed like Q (Q, O, dO, dQ, LSE) or like K (K, V, dK, dV)
     bool output = false;
@@ -59,15 +63,32 @@ struct DenseSdpaFromRagged
     // The dense graph's seq_len tensors (added or the graph's own).
     int64_t seqLenQUid = 0;
     int64_t seqLenKvUid = 0;
+    // Batch-axis strides (elements) of those seq_len tensors (1 for an added one).
+    int64_t seqLenQStride = 1;
+    int64_t seqLenKvStride = 1;
 };
 
 namespace ragged_densify_detail
 {
 
-inline size_t elementSizeOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+// Byte size of one element, or nullopt for a data type without a native mapping (INT8, UINT8,
+// UNSET, ...).
+inline std::optional<size_t> elementSizeOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
-    return std::visit([](auto value) { return sizeof(value); },
-                      hipdnn_test_sdk::utilities::datatypeToNativeVariant(type));
+    // datatypeToNativeVariant has no INT64 case; offset tables may be INT64.
+    if(type == hipdnn_flatbuffers_sdk::data_objects::DataType::INT64)
+    {
+        return sizeof(int64_t);
+    }
+    try
+    {
+        return std::visit([](auto value) { return sizeof(value); },
+                          hipdnn_test_sdk::utilities::datatypeToNativeVariant(type));
+    }
+    catch(const std::runtime_error&)
+    {
+        return std::nullopt;
+    }
 }
 
 inline std::vector<int64_t> contiguousStrides(const std::vector<int64_t>& dims)
@@ -127,9 +148,30 @@ inline std::vector<Role>
             {attrs.dv_tensor_uid, false, true, false}};
 }
 
+// Collects every tensor uid a node's attributes name (node_operands::visit reads them from the
+// serialized node, so a uid field added to the schema is covered).
+struct UidCollector
+{
+    std::vector<int64_t> uids;
+
+    void tensor(std::string_view /*role*/, int64_t uid, bool /*workDataDependent*/)
+    {
+        uids.push_back(uid);
+    }
+    template <typename T>
+    void scalar(std::string_view /*name*/, T /*value*/)
+    {
+    }
+    template <typename T>
+    void element(std::string_view /*name*/, size_t /*index*/, T /*value*/)
+    {
+    }
+};
+
 template <typename AttrsT>
 std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects::GraphT& graph,
-                                           AttrsT& attrs)
+                                           AttrsT& attrs,
+                                           const std::vector<int64_t>& referenced)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
@@ -163,7 +205,7 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
             return std::nullopt;
         }
     }
-    // Only the node's primaries (and a packed LSE) may be ragged.
+    // Only the node's primaries (and a ragged LSE) may be ragged.
     for(const auto& [uid, tensor] : tensors)
     {
         if(tensor->ragged_offset_tensor_uid.has_value() && roleOf.count(uid) == 0)
@@ -190,8 +232,33 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
     }
 
+    // Q and K are read as [B, H, S, D] below, ragged or not.
+    if(tensors.at(attrs.q_tensor_uid)->dims.size() != 4
+       || tensors.at(attrs.k_tensor_uid)->dims.size() != 4)
+    {
+        return std::nullopt;
+    }
+    const auto& qDims = tensors.at(attrs.q_tensor_uid)->dims;
+    // A seq_len tensor is INT32 [B, 1, 1, 1], with B the batch of Q; its values are read as INT32
+    // and its batch stride is only meaningful on that shape.
+    for(const auto& seqLenUid : {attrs.seq_len_q_tensor_uid, attrs.seq_len_kv_tensor_uid})
+    {
+        if(!seqLenUid.has_value())
+        {
+            continue;
+        }
+        const auto it = tensors.find(seqLenUid.value());
+        if(it == tensors.end() || it->second->data_type != DataType::INT32
+           || !hipdnn_data_sdk::utilities::detail::isBatchAxisVector(it->second->dims, qDims[0]))
+        {
+            return std::nullopt;
+        }
+    }
+
     DenseSdpaFromRagged result;
     std::vector<int64_t> offsetUids;
+    // Every offset table is read with Q's batch, so every ragged role must share it.
+    const int64_t batch = qDims[0];
     for(const auto& role : roles)
     {
         auto* tensor = tensors.at(role.uid);
@@ -201,22 +268,32 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
         const auto offsetUid = tensor->ragged_offset_tensor_uid.value();
         const auto offsetIt = tensors.find(offsetUid);
-        if(tensor->dims.size() != 4 || offsetIt == tensors.end() || tensor->virtual_
+        if(tensor->dims.size() != 4 || tensor->dims[0] != batch || offsetIt == tensors.end()
+           || tensor->virtual_
            || (offsetIt->second->data_type != DataType::INT32
                && offsetIt->second->data_type != DataType::INT64)
            || tensor->ragged_offset_multiplier < 1
-           || !isTokenMajorRaggedLayout(tensor->dims, tensor->strides))
+           || !hasValidRaggedStrides(tensor->dims, tensor->strides)
+           || !hipdnn_data_sdk::utilities::detail::isBatchAxisVector(offsetIt->second->dims,
+                                                                     tensor->dims[0] + 1))
+        {
+            return std::nullopt;
+        }
+        const auto offsetSize = elementSizeOf(offsetIt->second->data_type);
+        const auto primarySize = elementSizeOf(tensor->data_type);
+        if(!offsetSize.has_value() || !primarySize.has_value())
         {
             return std::nullopt;
         }
         RaggedSdpaPrimary primary;
         primary.uid = role.uid;
         primary.offsetUid = offsetUid;
-        primary.offsetElementSize = elementSizeOf(offsetIt->second->data_type);
+        primary.offsetElementSize = offsetSize.value();
+        primary.offsetStride = offsetIt->second->strides.empty() ? 1 : offsetIt->second->strides[0];
         primary.multiplier = tensor->ragged_offset_multiplier;
         primary.dims = tensor->dims;
         primary.packedStrides = tensor->strides;
-        primary.elementSize = elementSizeOf(tensor->data_type);
+        primary.elementSize = primarySize.value();
         primary.queryPacking = role.queryPacking;
         primary.output = role.output;
         result.primaries.push_back(primary);
@@ -231,14 +308,16 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         return std::nullopt;
     }
 
-    // The offset tables are inputs of the ragged graph only; drop them unless something else
-    // still refers to them.
+    // The offset tables are inputs of the ragged graph only; drop them unless one of the node's
+    // attributes still names the tensor.
     graph.tensors.erase(
         std::remove_if(graph.tensors.begin(),
                        graph.tensors.end(),
                        [&](const auto& tensor) {
                            return std::find(offsetUids.begin(), offsetUids.end(), tensor->uid)
-                                  != offsetUids.end();
+                                      != offsetUids.end()
+                                  && std::find(referenced.begin(), referenced.end(), tensor->uid)
+                                         == referenced.end();
                        }),
         graph.tensors.end());
 
@@ -286,6 +365,13 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
     attrs.padding_mask = true;
     result.seqLenQUid = attrs.seq_len_q_tensor_uid.value();
     result.seqLenKvUid = attrs.seq_len_kv_tensor_uid.value();
+    const auto batchStrideOf = [&](int64_t uid) {
+        const auto it = tensors.find(uid); // absent: a tensor the rewrite added (stride 1)
+        return it == tensors.end() || it->second->strides.empty() ? int64_t{1}
+                                                                  : it->second->strides[0];
+    };
+    result.seqLenQStride = batchStrideOf(result.seqLenQUid);
+    result.seqLenKvStride = batchStrideOf(result.seqLenKvUid);
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, &graph));
@@ -297,7 +383,8 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
 
 /// The dense padded graph equivalent to a single-node ragged SDPA forward or backward graph, or
 /// nullopt when the graph has no ragged primary or cannot be expressed densely (a ragged tensor
-/// that is not one of the node's primaries, a non-token-major layout, a dense Q beside a ragged K
+/// that is not one of the node's primaries, strides the ragged container cannot address, a dense Q
+/// beside a ragged K
 /// without seq_len_q, or the reverse).
 inline std::optional<DenseSdpaFromRagged> densifyRaggedSdpaGraph(const void* buffer, size_t size)
 {
@@ -311,35 +398,52 @@ inline std::optional<DenseSdpaFromRagged> densifyRaggedSdpaGraph(const void* buf
     {
         return std::nullopt;
     }
+    ragged_densify_detail::UidCollector referenced;
+    hipdnn_flatbuffers_sdk::data_objects::node_operands::visit(
+        *hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer)->nodes()->Get(0), referenced);
     auto& node = *graph->nodes.front();
     if(auto* fwd = node.attributes.AsSdpaAttributes(); fwd != nullptr)
     {
-        return ragged_densify_detail::densify(*graph, *fwd);
+        return ragged_densify_detail::densify(*graph, *fwd, referenced.uids);
     }
     if(auto* bwd = node.attributes.AsSdpaBackwardAttributes(); bwd != nullptr)
     {
-        return ragged_densify_detail::densify(*graph, *bwd);
+        return ragged_densify_detail::densify(*graph, *bwd, referenced.uids);
     }
     return std::nullopt;
 }
 
+/// Elements an offset table spans from its base pointer: B + 1 values at the table's batch stride.
+inline size_t raggedOffsetSpan(const RaggedSdpaPrimary& primary, int64_t batch)
+{
+    return static_cast<size_t>(batch * std::max<int64_t>(primary.offsetStride, 1) + 1);
+}
+
+/// Bytes a host copy of an offset table must cover (raggedOffsetSpan elements).
+inline size_t raggedOffsetBytes(const RaggedSdpaPrimary& primary, int64_t batch)
+{
+    return raggedOffsetSpan(primary, batch) * primary.offsetElementSize;
+}
+
 /// Element offset of each batch's first token: ragged_offset[b] * multiplier, read from a host copy
-/// of the offset table (B + 1 INT32 or INT64 entries).
+/// of the offset table (B + 1 INT32 or INT64 entries, value b at b * primary.offsetStride).
 inline std::vector<int64_t>
     raggedElementOffsets(const RaggedSdpaPrimary& primary, const void* offsetsHost, int64_t batch)
 {
+    (void)stridedAuxSpan(batch + 1, primary.offsetStride, "ragged_offset");
     std::vector<int64_t> offsets(static_cast<size_t>(batch + 1));
     for(size_t b = 0; b < offsets.size(); ++b)
     {
+        const size_t slot = b * static_cast<size_t>(std::max<int64_t>(primary.offsetStride, 1));
         int64_t value = 0;
         if(primary.offsetElementSize == 8)
         {
-            std::memcpy(&value, static_cast<const uint8_t*>(offsetsHost) + b * 8, 8);
+            std::memcpy(&value, static_cast<const uint8_t*>(offsetsHost) + slot * 8, 8);
         }
         else
         {
             int32_t narrow = 0;
-            std::memcpy(&narrow, static_cast<const uint8_t*>(offsetsHost) + b * 4, 4);
+            std::memcpy(&narrow, static_cast<const uint8_t*>(offsetsHost) + slot * 4, 4);
             value = narrow;
         }
         offsets[b] = value * primary.multiplier;
@@ -347,21 +451,28 @@ inline std::vector<int64_t>
     return offsets;
 }
 
-/// Per-batch token counts of a packed primary (validated as RaggedTokenBoundaries does).
+/// Per-batch token counts of a ragged primary, from its seq_len values (`seqLen`, B entries with
+/// value b at b * `seqLenStride`; null when the graph has none) or its offset blocks. The origins and lengths must form a layout the
+/// ragged container accepts; std::invalid_argument names the violated rule.
 inline std::vector<int64_t> raggedLengths(const RaggedSdpaPrimary& primary,
-                                          const std::vector<int64_t>& elementOffsets)
+                                          const std::vector<int64_t>& elementOffsets,
+                                          const int32_t* seqLen,
+                                          int64_t seqLenStride = 1)
 {
-    const auto tokens = raggedTokenBoundaries(elementOffsets,
-                                              primary.packedStrides.at(2),
-                                              primary.dims.at(2),
-                                              "ragged SDPA densify",
-                                              "primary");
-    std::vector<int64_t> lengths;
-    for(size_t b = 1; b < tokens.size(); ++b)
+    std::vector<int64_t> seqLens;
+    if(seqLen != nullptr)
     {
-        lengths.push_back(tokens[b] - tokens[b - 1]);
+        seqLens = gatherStridedAux(
+            seqLen, static_cast<int64_t>(elementOffsets.size()) - 1, seqLenStride, "seq_len");
     }
-    return lengths;
+    const auto batches
+        = hipdnn_data_sdk::utilities::detail::raggedBatches(elementOffsets,
+                                                            seqLen != nullptr ? &seqLens : nullptr,
+                                                            primary.packedStrides.at(2),
+                                                            primary.dims.at(2));
+    (void)hipdnn_data_sdk::utilities::detail::raggedFootprint(
+        primary.dims, primary.packedStrides, hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS, batches);
+    return batches.lengths;
 }
 
 /// Bytes a packed primary spans from its base pointer (what a device copy must cover).
@@ -458,23 +569,6 @@ inline std::pair<std::vector<int64_t>, std::vector<int64_t>>
         }
     }
     return {q, kv};
-}
-
-/// Supplied seq_len values (cuDNN's ragged + padding form) must not exceed the packed lengths.
-inline void requireSeqLensWithinPacked(const int32_t* seqLens,
-                                       const std::vector<int64_t>& packed,
-                                       const char* name)
-{
-    for(size_t b = 0; b < packed.size(); ++b)
-    {
-        if(seqLens[b] < 0 || seqLens[b] > packed[b])
-        {
-            throw std::invalid_argument(std::string("ragged SDPA densify: ") + name + "["
-                                        + std::to_string(b) + "] = " + std::to_string(seqLens[b])
-                                        + " exceeds the packed length "
-                                        + std::to_string(packed[b]));
-        }
-    }
 }
 
 } // namespace hipdnn_test_sdk::detail

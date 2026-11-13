@@ -437,6 +437,7 @@ namespace rocalution
     private:
         void CreateParallelManager_(void);
         void InitCommPattern_(void);
+        void InitEmptyGhost_(void);
 
         ParallelManager* pm_self_;
 

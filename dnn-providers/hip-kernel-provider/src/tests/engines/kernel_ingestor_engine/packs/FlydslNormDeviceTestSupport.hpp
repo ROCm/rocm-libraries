@@ -90,7 +90,9 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
                                                                             kernel.originDirectory,
                                                                             kernel.name,
                                                                             kernel.treeRoot,
-                                                                            kernel.sources});
+                                                                            kernel.sources,
+                                                                            nullptr,
+                                                                            nullptr});
         }
     }
     return kernels;
@@ -143,7 +145,7 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
 {
     // A table, not an if/else chain: the two ops usually ship the same arches, and
     // identical branch bodies trip bugprone-branch-clone.
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 8> SHIPPED{{
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 9> SHIPPED{{
         {"rmsnorm", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM},
         {"rmsnorm_bwd", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM_BWD},
         {"sdpa_cdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_CDNA},
@@ -152,6 +154,7 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
         {"sdpa_rdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA},
         {"sdpa_rdna_decode", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA_DECODE},
         {"sdpa_aiw", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_AIW},
+        {"sdpa_dropout_mask", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_DROPOUT_MASK},
     }};
     std::string list;
     bool known = false;
