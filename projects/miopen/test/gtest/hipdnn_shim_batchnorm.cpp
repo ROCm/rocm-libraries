@@ -316,8 +316,9 @@ miopenStatus_t BwdV1(miopen::Handle& handle, Data& d, bool with_saved_stats)
                                             with_saved_stats ? d.savedInvVar_dev.get() : nullptr);
 }
 
+template <typename Data>
 miopenStatus_t BwdActivation(miopen::Handle& handle,
-                             BwdData& d,
+                             Data& d,
                              bool with_saved_stats,
                              miopenActivationDescriptor_t activ)
 {
@@ -400,25 +401,32 @@ void CheckInfer(miopen::Handle& handle, Data& d)
 template <typename Data>
 void CheckBwd(miopen::Handle& handle, Data& d)
 {
-    d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
-    d.dScale.data = handle.Read<float>(d.dScale_dev, d.dScale.data.size());
-    d.dBias.data  = handle.Read<float>(d.dBias_dev, d.dBias.data.size());
+    using Dx      = typename decltype(d.output.data)::value_type;
+    using DScale  = typename decltype(d.dScale.data)::value_type;
+    d.output.data = handle.Read<Dx>(d.out_dev, d.output.data.size());
+    d.dScale.data = handle.Read<DScale>(d.dScale_dev, d.dScale.data.size());
+    d.dBias.data  = handle.Read<DScale>(d.dBias_dev, d.dBias.data.size());
 
     test::ComputeCPUBNBwd(d);
 
-    test::CompareTensor<float>(d.output, d.out_ref, kTol);
-    test::CompareTensor<float>(d.dScale, d.dScale_ref, kTol);
-    test::CompareTensor<float>(d.dBias, d.dBias_ref, kTol);
+    test::CompareTensor<Dx>(d.output, d.out_ref, kTol);
+    test::CompareTensor<DScale>(d.dScale, d.dScale_ref, kTol);
+    test::CompareTensor<DScale>(d.dBias, d.dBias_ref, kTol);
 }
 
 // Backward without saved stats recomputes them from x. The CPU reference reads
 // only savedMean and savedInvVar, so give it the true stats of the input.
-void FillTrueStats(BwdData& d, double eps)
+template <typename Data>
+void FillTrueStats(Data& d, double eps)
 {
     tensor<float> y{d.input.desc};
-    tensor<float> none;
-    batchNormSpatialHostFwdTrain(
-        d.input, y, d.bnScale, d.bnBias, eps, 0.0, d.savedMean, d.savedInvVar, none, none);
+    std::decay_t<decltype(d.savedMean)> none;
+    if(d.bn_mode == miopenBNPerActivation)
+        batchNormPerActHostFwdTrain(
+            d.input, y, d.bnScale, d.bnBias, eps, 0.0, d.savedMean, d.savedInvVar, none, none);
+    else
+        batchNormSpatialHostFwdTrain(
+            d.input, y, d.bnScale, d.bnBias, eps, 0.0, d.savedMean, d.savedInvVar, none, none);
 }
 
 // MIOpen silently runs training when the estimated stats are null, so the output
@@ -436,11 +444,13 @@ void CheckInferWithoutEstimates(miopen::Handle& handle, InferData& d)
 // x. Backward with the true stats of x then cancels to a residue of order
 // epsilon / variance: rounding noise, which the compare fails on in both modes.
 // Draw dy from a seed of its own.
-void DecoupleDy(miopen::Handle& handle, BwdData& d)
+template <typename Data>
+void DecoupleDy(miopen::Handle& handle, Data& d)
 {
+    using Dy = typename decltype(d.dy.data)::value_type;
     prng::reset_seed(1);
     for(auto& v : d.dy.data)
-        v = prng::gen_descreet_uniform_sign<float>(2e-3, 1000);
+        v = prng::gen_descreet_uniform_sign<Dy>(2e-3, 1000);
     d.dy_dev = handle.Write(d.dy.data);
 }
 
@@ -1269,30 +1279,49 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, InvVarianceRunsTrainingAtDefaul
 // graph needs the saved stats, the shim runs training first to compute them into
 // scratch. Every combination is served; the CPU reference is given the true stats
 // of the input at the call's epsilon. The other epsilon is large next to the
-// variance, so that results computed at the provider's epsilon instead fail.
-TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
+// variance, so that results computed at the provider's epsilon instead fail. Both
+// paths are also run over NHWC, per-activation, FP16 and BF16. Per-activation
+// drops the activation, so it runs without one.
+namespace {
+
+struct NoStatsCase
 {
-    struct NoStatsCase
-    {
-        const char* name;
-        double epsilon;
-        miopenActivationMode_t mode;
-    };
+    std::string name;
+    double epsilon;
+    miopenActivationMode_t mode;
+    miopenBatchNormMode_t bn_mode      = miopenBNSpatial;
+    miopenTensorLayout_t tensor_layout = miopenTensorNCHW;
+};
 
-    constexpr double kLargeEpsilon       = 0.5;
-    const std::vector<NoStatsCase> cases = {
-        {"bwd_no_saved_stats_provider_epsilon", kProviderEpsilon, miopenActivationPASTHRU},
-        {"bwd_no_saved_stats_large_epsilon", kLargeEpsilon, miopenActivationPASTHRU},
-        {"bwd_act_no_saved_stats", kProviderEpsilon, miopenActivationRELU},
-        {"bwd_act_no_saved_stats_large_epsilon", kLargeEpsilon, miopenActivationRELU},
-    };
+constexpr double kLargeEpsilon = 0.5;
 
+// The four combinations of epsilon and activation, with names that start with
+// the given prefix.
+std::vector<NoStatsCase> NoStatsCases(const std::string& prefix,
+                                      miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
+                                      miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
+{
+    return {
+        {prefix, kProviderEpsilon, miopenActivationPASTHRU, bn_mode, tensor_layout},
+        {prefix + "_large_epsilon", kLargeEpsilon, miopenActivationPASTHRU, bn_mode, tensor_layout},
+        {prefix + "_act", kProviderEpsilon, miopenActivationRELU, bn_mode, tensor_layout},
+        {prefix + "_act_large_epsilon",
+         kLargeEpsilon,
+         miopenActivationRELU,
+         bn_mode,
+         tensor_layout},
+    };
+}
+
+template <typename Data>
+void RunBwdWithoutSavedStats(const std::vector<NoStatsCase>& cases)
+{
     auto&& handle = get_handle();
     for(const auto& c : cases)
     {
         SCOPED_TRACE(c.name);
-        BwdData d;
-        SetUpBwd(d);
+        Data d;
+        SetUpBwd(d, c.bn_mode, c.tensor_layout);
         DecoupleDy(handle, d);
         d.epsilon = c.epsilon;
         SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, c.mode);
@@ -1317,6 +1346,40 @@ TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
             CheckBwd(handle, d);
         }
     }
+}
+
+using BwdHalfData = BNBwdTestData<half_float::half,
+                                  half_float::half,
+                                  half_float::half,
+                                  float,
+                                  float,
+                                  float,
+                                  double,
+                                  BN2DTestCase>;
+using BwdBfloat16Data =
+    BNBwdTestData<bfloat16, bfloat16, bfloat16, float, float, float, double, BN2DTestCase>;
+
+} // namespace
+
+TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
+{
+    auto cases = NoStatsCases("bwd_no_saved_stats");
+    for(auto&& c : NoStatsCases("bwd_no_saved_stats_nhwc", miopenBNSpatial, miopenTensorNHWC))
+        cases.push_back(c);
+    for(auto&& c : NoStatsCases("bwd_no_saved_stats_per_activation", miopenBNPerActivation))
+        if(c.mode == miopenActivationPASTHRU)
+            cases.push_back(c);
+    RunBwdWithoutSavedStats<BwdData>(cases);
+}
+
+TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP16, MatchesCpuReference)
+{
+    RunBwdWithoutSavedStats<BwdHalfData>(NoStatsCases("bwd_no_saved_stats_fp16"));
+}
+
+TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_BFP16, MatchesCpuReference)
+{
+    RunBwdWithoutSavedStats<BwdBfloat16Data>(NoStatsCases("bwd_no_saved_stats_bfp16"));
 }
 
 // ---------------------------------------------------------------------------
