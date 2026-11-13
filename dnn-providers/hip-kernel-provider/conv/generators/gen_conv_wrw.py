@@ -247,7 +247,12 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     ph = du(ph_raw, kv) * kv
     skew = 16 // e
     lda = tr_pitch(bk) if tr else bq + skew
-    ldb = tr_pitch(bc) if tr else du(ph + 2, skew) * skew + skew
+    units = du(ph + 2, skew) + 1  # k3CfPitch: odd at unit width stride, channels-first
+    ldb = (
+        tr_pitch(bc)
+        if tr
+        else (units | 1 if sw == 1 and layout == CF else units) * skew
+    )
     a = (bq if tr else bk) * lda + (vec if align else 0)
     b = rows * sw * (ph if tr else bc) * ldb
     return 2 * (a + b) * e
@@ -533,7 +538,11 @@ EXTRA_TILES = {
     # the output rows' 64 x 64 tile is 3.4x faster), deeplab 1x1 on the rows (gfx11 too:
     # 1.3-2.2x over the ring's tiles on gfx1101).
     ("wmma12", ("5x5",)): [(64, 32, 4, 2, 32)],
-    ("wmma", ("1x1r0",)): [(128, 64, 4, 2, 32)],
+    ("wmma", ("1x1r0",)): [(128, 64, 4, 2, 32), (128, 128, 4, 2, 32)],
+    # gfx950 channels-first pointwise on the output rows, wide tiles (fp16, best config before
+    # -> after; MIOpen): deeplab c256 k1024 128^2 0.38 -> 0.23 ms (0.38), c2048 k256 65^2 0.44
+    # -> 0.22 (0.38), resnext c1024 n128 16^2 0.71 -> 0.22 (0.16).
+    ("mfma32x16", ("1x1r0",)): [(256, 128, 4, 2, 32), (128, 128, 2, 2, 64)],
     # Packed rows, measured (fp16, n128): gfx950 resnet50 c512 7^2 / 14^2 s2, inception c288
     # 35^2 s2; gfx1201 the same and resnet50 c256 14^2 (its 128 x 32 tile at 64 positions ran
     # within 1% of the 64 x 64 one: not shipped); gfx11 (gfx1101) the WMMA tiles again, 2.4x.
@@ -561,6 +570,32 @@ EXTRA_TILES = {
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
     ("wmma", ("3x3s2pk",)): [(64, 32, 4, 2, 32), (64, 64, 4, 2, 32)],
 }
+# Channels-first ring tiles (loop 1, layout CF only) for dilated 3x3 rows on maps whose width
+# a 32- or 64-position chunk splits badly (deeplab ASPP 65^2: 65 = 64 + 1): one chunk of 72 / 80
+# positions a row. Measured (fp16 n16, best config against the next): gfx90a 65^2 d12 7.74 against
+# 8.70 ms, d36 9.44 / 9.50, c512 d2 4.16 / 4.47; gfx942 MI325X 65^2 d12 1.60 / 1.68, c512 d4
+# 0.84 / 0.91; gfx950 65^2 d12 0.96 / 1.24, d24 1.03 / 1.63, c512 d4 0.44 / 0.58.
+RING_CF_TILES = {
+    ("mfma32_f16", ("3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36")): [
+        (64, 64, 2, 2, 72)
+    ],
+    ("mfma32_bf16", ("3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36")): [
+        (64, 64, 2, 2, 72)
+    ],
+    ("mfma32x16", ("3x3d4", "3x3d12", "3x3d24")): [(128, 64, 4, 2, 80)],
+    # Channels-first pointwise on RDNA's ring: wide tiles for a long reduction behind a big
+    # output (deeplab 1x1 c1024 k2048 128^2: gfx1100 71.0 -> 23.7 ms, MIOpen 36.0; c256 k1024
+    # 5.43 -> 2.97 / 5.04; gfx1201 3.33 -> 2.21 / 2.31).
+    ("wmma", ("1x1",)): [
+        (128, 64, 4, 2, 64),
+        (128, 128, 4, 2, 32),
+        (64, 128, 2, 4, 64),
+    ],
+}
+# Dilated 3x3 ring rows on the 16-bit 32 x 32 atoms of gfx908 to gfx942 (xcd 0) also at 4 blocks per
+# dispatch unit: gfx942 MI325X 128^2 d24 4.01 against 5.56 ms at 2, d36 4.58 / 4.73, 65^2 d12
+# 1.60 / 1.70; gfx90a 65^2 d36 9.44 / 9.50 (bpu only sets the split count: no new program).
+BPU4_RING_ROWS = {"3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36"}
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
 # of 32 outputs spans 264 inputs): 8 positions per step.
@@ -1281,6 +1316,14 @@ def build():
                             cands.append(
                                 C(atom, 2, lay, t, s, sw, dw, fr, vec, 1, 0, LOOP2_NS)
                             )
+                if loop == 1 and CF in layouts and (lays is None or CF in lays):
+                    for (prefix, tags), extra in RING_CF_TILES.items():
+                        if atom.startswith(prefix) and tag in tags:
+                            for t in extra:
+                                if t not in picked:
+                                    cands.append(
+                                        C(atom, 1, CF, t, s, sw, dw, fr, vec, xcd, 0, 0)
+                                    )
                 if tag == "1x1" and TR in layouts:
                     for t in BIG1x1:
                         cands.append(C(atom, 1, TR, t, s, sw, dw, fr, vec, xcd, 0, 0))
@@ -1289,7 +1332,25 @@ def build():
                         )
                 for c in cands:
                     if valid(c, dtype):
-                        CATALOG[dtype].extend(with_bpu(c))
+                        variants = with_bpu(c)
+                        if (
+                            tag in BPU4_RING_ROWS
+                            and c["loop"] == 1
+                            and c["layout"] == CF
+                            and c["atom"] in ("mfma32_f16", "mfma32_bf16")
+                            and not any(v["bpu"] == 4 for v in variants)
+                        ):
+                            variants = variants + [dict(c, bpu=4)]
+                        # RDNA channels-first pointwise: also one block per dispatch unit
+                        # (gfx1100 deeplab c256 k1024 128^2: 2.97 ms at 1 against 3.87 at 2).
+                        if (
+                            tag in ("1x1", "1x1r0")
+                            and c["layout"] == CF
+                            and c["atom"].startswith("wmma")
+                            and not any(v["bpu"] == 1 for v in variants)
+                        ):
+                            variants = variants + [dict(c, bpu=1)]
+                        CATALOG[dtype].extend(variants)
                     else:
                         dropped += 1
                 for (atoms_of, btag), extra in BREADTH.items():

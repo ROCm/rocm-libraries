@@ -380,7 +380,7 @@ struct K3Tiles
     // TR: rows are positions of BK (dy) or BC (x) channels, pitch padded by 16 bytes; the x
     // tile holds PH rows per phase. Else rows are channels of positions.
     static constexpr int LDA = TR ? k3TrPitch(BK) : BQ + SKEW;
-    static constexpr int LDB = TR ? k3TrPitch(BC) : (PH + 2 + SKEW - 1) / SKEW * SKEW + SKEW;
+    static constexpr int LDB = TR ? k3TrPitch(BC) : k3CfPitch(PH, SKEW, SW, LAYOUT == K3_NCHW);
     // ALIGN: a guard of VEC elements ahead of the x tile takes the first row's shifted spill.
     static constexpr int A_ELEMS = (TR ? BQ : BK) * LDA + (ALIGN == 1 ? VEC : 0);
     static constexpr int B_ELEMS = FR * SW * (TR ? PH : BC) * LDB;
@@ -1108,6 +1108,77 @@ __device__ inline unsigned k3RowsOf(int m, int u, int r)
         rows |= (m - i >= 0 && m - i < u) ? 1u << i : 0u;
     return rows;
 }
+
+/// A row ring's cursor: tracks (n, od, rho, chunk) of steps m, m fastest. Height classes rho <
+/// a.trackLong have a.trackLen steps a track, the others a.trackLen - 1: the host ends each
+/// class's tracks at its last step with an x row in the image and a dy row for some tap
+/// (ConvWrwProblem.cpp ringTrackOf), and those lengths take at most two values, the longer on
+/// the lower classes.
+struct K3Track
+{
+    int n = 0, od = 0, rho = 0, chunk = 0, m = 0, len = 0;
+
+    __device__ int lenOf(const K3Args& a, int r) const
+    {
+        return r < a.trackLong ? a.trackLen : a.trackLen - 1;
+    }
+
+    /// Moves to step `begin`, backed up by at most `back` steps of its track (a split that
+    /// starts inside a track replays the ring's earlier rows); returns the step it is on.
+    __device__ long long seek(const K3Args& a, long long begin, int back)
+    {
+        const long long L = a.trackLen;
+        const long long longSpan = static_cast<long long>(a.trackLong) * a.chunks * L;
+        const long long plane
+            = longSpan + static_cast<long long>(a.dh - a.trackLong) * a.chunks * (L - 1);
+        const long long p = begin / plane;
+        long long r = begin - p * plane;
+        od = static_cast<int>(p % a.dout);
+        n = static_cast<int>(p / a.dout);
+        long long track = 0;
+        int m0 = 0;
+        if(r < longSpan)
+        {
+            track = r / L;
+            m0 = static_cast<int>(r - track * L);
+            rho = static_cast<int>(track / a.chunks);
+        }
+        else
+        {
+            r -= longSpan;
+            track = r / (L - 1);
+            m0 = static_cast<int>(r - track * (L - 1));
+            rho = a.trackLong + static_cast<int>(track / a.chunks);
+        }
+        chunk = static_cast<int>(track % a.chunks);
+        len = lenOf(a, rho);
+        const int b = m0 < back ? m0 : back;
+        m = m0 - b;
+        return begin - b;
+    }
+
+    __device__ void advance(const K3Args& a)
+    {
+        if(++m == len)
+        {
+            m = 0;
+            if(++chunk == a.chunks)
+            {
+                chunk = 0;
+                if(++rho == a.dh)
+                {
+                    rho = 0;
+                    if(++od == a.dout)
+                    {
+                        od = 0;
+                        ++n;
+                    }
+                }
+                len = lenOf(a, rho);
+            }
+        }
+    }
+};
 
 /// Where a kernel's sums of group g go: element (tap, k, c) (tap of `taps`, k and c within the
 /// group) at base + tap ts + k ks + c. The fp32 partials of `split` ([split][g][tap][k][c]), or
@@ -2465,8 +2536,9 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
 // height class rho mod dh, width chunk): step m of a track stages input row
 // ih = rho - ph + m dh and output row oh = rho + m dh, and tap row r pairs the input row with
 // output row oh - r dh, whose fragments sit in a register ring of the last R dy rows. A track
-// has trackLen = ceil(ho / dh) + R - 1 steps; a split that starts inside a track first replays
-// the R - 1 rows before it with its multiplies masked. Grid: (k tiles x c tiles, groups x ft,
+// has at most ceil(ho / dh) + R - 1 steps, ending at its last x row in the image (K3Track); a
+// split that starts inside a track first replays the R - 1 rows before it with its multiplies
+// masked. Grid: (k tiles x c tiles, groups x ft,
 // splits). Two LDS buffers, one barrier per step.
 template <class T,
           class Atom,
@@ -2529,7 +2601,6 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         phaseRows |= (r0 + phases * i < a.fr) ? 1u << i : 0u;
     const long long begin = bz * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
-    const int M = a.trackLen;
 
     typename Atom::acc acc[R * S][FK][FC];
 #pragma unroll
@@ -2553,21 +2624,10 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     // Cursor: (n, od, rho, chunk, m), m fastest. Replay up to R - 1 rows of the track before
     // `begin` (multiplies masked).
     long long it = begin;
-    int n = 0, od = 0, rho = 0, chunk = 0, m = 0;
+    K3Track cur;
     if(begin < end)
-    {
-        const long long track0 = begin / M;
-        const int m0 = static_cast<int>(begin - track0 * M);
-        const int back = m0 < R - 1 ? m0 : R - 1;
-        it = begin - back;
-        m = m0 - back;
-        chunk = static_cast<int>(track0 % a.chunks);
-        const long long t2 = track0 / a.chunks;
-        rho = static_cast<int>(t2 % a.dh);
-        const long long t3 = t2 / a.dh;
-        od = static_cast<int>(t3 % a.dout);
-        n = static_cast<int>(t3 / a.dout);
-    }
+        it = cur.seek(a, begin, R - 1);
+    int &n = cur.n, &od = cur.od, &rho = cur.rho, &chunk = cur.chunk, &m = cur.m;
     Tiles tiles;
     tiles.init(a, tid, g, k0, c0, kg, cg);
     // Loads the cursor's step into register set P.
@@ -2589,29 +2649,10 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
                                xOk,
                                xRow);
     };
-    auto advance = [&]() {
-        if(++m == M)
-        {
-            m = 0;
-            if(++chunk == a.chunks)
-            {
-                chunk = 0;
-                if(++rho == a.dh)
-                {
-                    rho = 0;
-                    if(++od == a.dout)
-                    {
-                        od = 0;
-                        ++n;
-                    }
-                }
-            }
-        }
-    };
+    auto advance = [&]() { cur.advance(a); };
 
     // Pipeline: LDS buffer j % 2 holds step j; the registers carry step j + 1, loaded while step j
     // multiplies.
-    int mc = m; // the computed step's place in its track
     if(begin < end)
     {
         issue(K3Int<0>{}, true, it >= begin);
@@ -2625,7 +2666,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         constexpr int J = decltype(pc)::value; // step parity
         // A new track starts with an empty ring; else the ring moves down one row. The cursor
         // is still on the computed step: its tap rows with a dy row in the image.
-        const bool trackStart = mc == 0;
+        const bool trackStart = m == 0;
         const unsigned rows
             = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R) & phaseRows;
         // A step whose x row lies in the padding only moves the ring: its window is zeros
@@ -2633,7 +2674,6 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         const int ihC = sh > 1 ? sh * (m - q0) + p : rho - a.ph + m * a.dh;
         const int idC = od * a.sd + t * a.dd - a.pd;
         const bool xIn = idC >= 0 && idC < a.di && ihC >= 0 && ihC < a.hi;
-        mc = mc + 1 == M ? 0 : mc + 1;
         advance();
         issue(K3Int<0>{}, it + 1 < end, it + 1 >= begin);
         // The loads above stay ahead of the multiplies.
@@ -2991,7 +3031,6 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
     const int t = blockIdx.y % a.ft;
     const long long begin = blockIdx.z * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
-    const int M = a.trackLen;
 
     float acc[R * S][TK][TC];
 #pragma unroll
@@ -3005,21 +3044,10 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
     const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
     const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
     long long it = begin;
-    int n = 0, od = 0, rho = 0, chunk = 0, m = 0;
+    K3Track cur;
     if(begin < end)
-    {
-        const long long track0 = begin / M;
-        const int m0 = static_cast<int>(begin - track0 * M);
-        const int back = m0 < R - 1 ? m0 : R - 1;
-        it = begin - back;
-        m = m0 - back;
-        chunk = static_cast<int>(track0 % a.chunks);
-        const long long t2 = track0 / a.chunks;
-        rho = static_cast<int>(t2 % a.dh);
-        const long long t3 = t2 / a.dh;
-        od = static_cast<int>(t3 % a.dout);
-        n = static_cast<int>(t3 / a.dout);
-    }
+        it = cur.seek(a, begin, R - 1);
+    int &n = cur.n, &od = cur.od, &rho = cur.rho, &chunk = cur.chunk, &m = cur.m;
     Tiles tiles;
     tiles.init(a, tid, g, k0, c0, kg, cg);
     auto issue = [&](bool live, bool math) {
@@ -3039,27 +3067,9 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
                    k0,
                    c0);
     };
-    auto advance = [&]() {
-        if(++m == M)
-        {
-            m = 0;
-            if(++chunk == a.chunks)
-            {
-                chunk = 0;
-                if(++rho == a.dh)
-                {
-                    rho = 0;
-                    if(++od == a.dout)
-                    {
-                        od = 0;
-                        ++n;
-                    }
-                }
-            }
-        }
-    };
+    auto advance = [&]() { cur.advance(a); };
     // Step j: dy row into ring slot (j - first) % SLOTS, x window into buffer (j - first) % 2.
-    int mc = m, slot = 0, xb = 0;
+    int slot = 0, xb = 0;
     for(int i = tid; i < SLOTS * Tiles::A_ELEMS; i += THREADS)
         ldsA[i] = T(0);
     k1LdsBarrier();
@@ -3072,12 +3082,10 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
     // Ring slots of the rows r = 0 .. R - 1 back (slot of the current row first).
     while(it < end)
     {
-        const bool trackStart = mc == 0;
         // A step whose x row lies in the padding only moves the ring (its window is zeros).
         const int ihC = rho - a.ph + m * a.dh;
         const int idC = od * a.sd + t * a.dd - a.pd;
         const bool xIn = idC >= 0 && idC < a.di && ihC >= 0 && ihC < a.hi;
-        mc = mc + 1 == M ? 0 : mc + 1;
         advance();
         issue(it + 1 < end, it + 1 >= begin);
         if(it >= begin && xIn)
@@ -3121,7 +3129,8 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
         // Next step's dy row replaces the oldest slot; a new track first clears the ring.
         const int ns = slot + 1 == SLOTS ? 0 : slot + 1;
         k1LdsBarrier();
-        if(mc == 0 && it + 1 < end)
+        // (The cursor is on the next step.)
+        if(m == 0 && it + 1 < end)
         {
             for(int i = tid; i < SLOTS * Tiles::A_ELEMS; i += THREADS)
                 ldsA[i] = T(0);
@@ -3129,7 +3138,6 @@ __device__ K3_LOOP_INLINE void k3WrwRingFma(const K3Args& a)
         }
         tiles.store(ldsA + ns * Tiles::A_ELEMS, ldsB + (xb ^ 1) * Tiles::B_ELEMS, tid);
         k1LdsBarrier();
-        (void)trackStart;
         slot = ns;
         xb ^= 1;
         ++it;
@@ -3683,7 +3691,6 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
     const int t = by % a.ft;
     const long long begin = bz * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
-    const int M = a.trackLen;
 
     typename Atom::acc acc[R * S][FK][FC];
 #pragma unroll
@@ -3728,46 +3735,17 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
     const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
     const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
     long long it = begin;
-    int n = 0, od = 0, rho = 0, chunk = 0, m = 0;
+    K3Track cur;
     if(begin < end)
-    {
-        const long long track0 = begin / M;
-        const int m0 = static_cast<int>(begin - track0 * M);
-        const int back = m0 < R - 1 ? m0 : R - 1;
-        it = begin - back;
-        m = m0 - back;
-        chunk = static_cast<int>(track0 % a.chunks);
-        const long long t2 = track0 / a.chunks;
-        rho = static_cast<int>(t2 % a.dh);
-        const long long t3 = t2 / a.dh;
-        od = static_cast<int>(t3 % a.dout);
-        n = static_cast<int>(t3 / a.dout);
-    }
-    auto advance = [&]() {
-        if(++m == M)
-        {
-            m = 0;
-            if(++chunk == a.chunks)
-            {
-                chunk = 0;
-                if(++rho == a.dh)
-                {
-                    rho = 0;
-                    if(++od == a.dout)
-                    {
-                        od = 0;
-                        ++n;
-                    }
-                }
-            }
-        }
-    };
+        it = cur.seek(a, begin, R - 1);
+    int &n = cur.n, &od = cur.od, &rho = cur.rho, &chunk = cur.chunk, &m = cur.m;
+    auto advance = [&]() { cur.advance(a); };
     // Per slot: the staged step's fix-up inputs (uniform).
     struct Staged
     {
         int n, q0, iw0, yRow, xRow;
         unsigned rows;
-        bool yOk, xOk, edge;
+        bool yOk, xOk, edge, start;
     };
     Staged st[NS];
 
@@ -3789,6 +3767,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
         s.yRow = od * ys2 + oh * ys3;
         s.xRow = id * xs2 + ih * xs3;
         s.rows = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R);
+        s.start = m == 0;
         // Edge: a run leaves its row, or (16-bit) a unit may pass the image's end.
         s.edge = (s.yOk && (s.q0 + BQ > a.wo || (sizeof(T) == 2 && oh == a.ho - 1)))
                  || (s.xOk && (s.iw0 < 0 || s.iw0 + NBV * VEC > a.wi || ih == 0 || ih == a.hi - 1));
@@ -3918,8 +3897,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
             advance();
         issue(sc, issued + decltype(sc)::value < end, issued + decltype(sc)::value >= begin);
     });
-    // Step it sits in slot (it - first step) % NS; mc is its place in its track.
-    int mc = static_cast<int>(it % M);
+    // Step it sits in slot (it - first step) % NS.
     while(it < end)
     {
         k3ForEach<NS>([&](auto sc) {
@@ -3934,8 +3912,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDma(const K3Args& a)
             constexpr int NEXT = (J + NS - 1) % NS;
             advance();
             issue(K3Int<NEXT>{}, it + NS - 1 < end, it + NS - 1 >= begin);
-            const bool trackStart = mc == 0;
-            mc = mc + 1 == M ? 0 : mc + 1;
+            const bool trackStart = st[J].start;
             const T* As = slotPtr(sc);
             const T* Bs = As + G::A_ELEMS;
 #pragma unroll
@@ -4045,7 +4022,6 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
     const int t = by % a.ft;
     const long long begin = bz * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
-    const int M = a.trackLen;
 
     typename Atom::acc acc[R * S][FK][FC];
 #pragma unroll
@@ -4092,42 +4068,14 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
     const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
     const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
     long long it = begin;
-    int n = 0, od = 0, rho = 0, chunk = 0, m = 0;
+    K3Track cur;
     if(begin < end)
-    {
-        const long long track0 = begin / M;
-        const int m0 = static_cast<int>(begin - track0 * M);
-        const int back = m0 < R - 1 ? m0 : R - 1;
-        it = begin - back;
-        m = m0 - back;
-        chunk = static_cast<int>(track0 % a.chunks);
-        const long long t2 = track0 / a.chunks;
-        rho = static_cast<int>(t2 % a.dh);
-        const long long t3 = t2 / a.dh;
-        od = static_cast<int>(t3 % a.dout);
-        n = static_cast<int>(t3 / a.dout);
-    }
-    auto advance = [&]() {
-        if(++m == M)
-        {
-            m = 0;
-            if(++chunk == a.chunks)
-            {
-                chunk = 0;
-                if(++rho == a.dh)
-                {
-                    rho = 0;
-                    if(++od == a.dout)
-                    {
-                        od = 0;
-                        ++n;
-                    }
-                }
-            }
-        }
-    };
+        it = cur.seek(a, begin, R - 1);
+    int &n = cur.n, &od = cur.od, &rho = cur.rho, &chunk = cur.chunk, &m = cur.m;
+    auto advance = [&]() { cur.advance(a); };
     unsigned rowsOf[NS];
     bool xInOf[NS]; // the step's x row is in the image (else its window is zeros)
+    bool startOf[NS]; // the step starts its track
     // Issues the cursor's step into slot I.
     auto issue = [&](auto sc, bool live, bool math) {
         constexpr int I = decltype(sc)::value;
@@ -4145,6 +4093,7 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
         const int xRow = id * xs2 + ih * xs3 + iw0 * xs4;
         rowsOf[I] = k3RowsOf(m, rho < a.ho ? (a.ho - rho + a.dh - 1) / a.dh : 0, R);
         xInOf[I] = xOk;
+        startOf[I] = m == 0;
 #if K3_HAS_DMA
         const __amdgpu_buffer_rsrc_t yr = __builtin_amdgcn_make_buffer_rsrc(
             const_cast<T*>(static_cast<const T*>(a.dy)) + nn * a.yImage,
@@ -4196,7 +4145,6 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
             advance();
         issue(sc, issued + decltype(sc)::value < end, issued + decltype(sc)::value >= begin);
     });
-    int mc = static_cast<int>(it % M);
     while(it < end)
     {
         k3ForEach<NS>([&](auto sc) {
@@ -4209,9 +4157,8 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
             advance();
             const unsigned rows = rowsOf[J];
             const bool xIn = xInOf[J];
+            const bool trackStart = startOf[J];
             issue(K3Int<NEXT>{}, it + NS - 1 < end, it + NS - 1 >= begin);
-            const bool trackStart = mc == 0;
-            mc = mc + 1 == M ? 0 : mc + 1;
             const T* As = slotPtr(sc);
             const T* Bs = As + G::A_ELEMS;
 #pragma unroll

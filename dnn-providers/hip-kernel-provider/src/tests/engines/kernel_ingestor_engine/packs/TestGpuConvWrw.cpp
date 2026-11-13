@@ -374,6 +374,14 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, false, 1, 1)},
         {"Deeplab3x3Dilation12Nhwc",
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, true, 1, 1)},
+        // Ring tracks of two lengths (ringTrackOf): dilation 24 on 41 rows (classes below 17
+        // one step longer) over three images, so splits start in long and short tracks and in
+        // a later image; and dilation 36 on a 65 x 65 map (2 dy rows below class 29, else 1)
+        // with partial channel tiles.
+        {"Deeplab3x3Dilation24ThreeImages",
+         conv(24, 40, {41, 45}, {3, 3}, {24, 24}, {24, 24}, {1, 1}, {24, 24}, false, 1, 3)},
+        {"Deeplab65Dilation36PartialTiles",
+         conv(24, 40, {65, 65}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 2)},
         {"Stride2", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1})},
         {"Stride2Nhwc", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, true)},
         {"Stride2Pad0OddChannels", conv(5, 7, {9, 10}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
@@ -396,6 +404,12 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 32, {9, 11}, {1, 1}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
         {"Pointwise1x1Nhwc", conv(64, 136, {6, 9}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true)},
         {"Pointwise1x1OddChannels", conv(70, 33, {6, 7}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
+        // Channels-first planes read as one row (9 x 13 = 117 positions: chunks run across row
+        // ends, the last partial), three images, partial channel tiles; and a 3-D plane.
+        {"Pointwise1x1PlaneAsOneRow",
+         conv(40, 72, {9, 13}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, false, 1, 3)},
+        {"Pointwise1x1x1PlaneAsOneRow",
+         conv(24, 40, {3, 5, 7}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1})},
         {"Pad0OddChannels", conv(5, 7, {7, 9}, {3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
         // The row reduce: channel runs of 64, 64 and 8 (K C R S).
         {"Nchw3x3ThreeChannelRuns", conv(136, 24, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},

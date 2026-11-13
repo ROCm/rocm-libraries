@@ -31,8 +31,10 @@ struct K3Args
     int splits;
     long long steps; ///< rows * chunks
     long long stepsPerSplit;
-    /// Row-ring kernel: steps per track (ceil(ho / dh) + fr - 1).
+    /// Row-ring kernels: steps per track of the height classes rho < trackLong; the other
+    /// classes' tracks have trackLen - 1 (at most ceil(ho / dh) + fr - 1; K3Track).
     int trackLen;
+    int trackLong;
     /// Direct loop: row segments per image and rows per segment. Packed rows (loop 7): the
     /// virtual row width (columns a step row takes) and the output rows a step packs.
     int segs;
