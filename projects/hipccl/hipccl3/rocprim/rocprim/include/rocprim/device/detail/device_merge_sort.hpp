@@ -26,6 +26,7 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../../types/uninitialized_array.hpp"
 
 #include "../../functional.hpp"
 #include "../../intrinsics.hpp"
@@ -192,7 +193,8 @@ struct block_permute_values_impl
     {
         syncthreads();
         const auto flat_id = block_thread_id<0>();
-        Value      values[ItemsPerThread];
+        ::rocprim::detail::thread_items_array<Value, ItemsPerThread> values_storage;
+        auto& values = values_storage.get_unsafe_array();
         block_load_direct_striped<BlockSize>(flat_id, values_input, values);
         values_exchange_type().gather_from_striped(values, values, ranks, storage.exchange);
         syncthreads();
@@ -209,7 +211,8 @@ struct block_permute_values_impl
     {
         syncthreads();
         const auto flat_id = block_thread_id<0>();
-        Value      values[ItemsPerThread];
+        ::rocprim::detail::thread_items_array<Value, ItemsPerThread> values_storage;
+        auto& values = values_storage.get_unsafe_array();
         block_load_direct_striped<BlockSize>(flat_id, values_input, values, valid_in_last_block);
         values_exchange_type().gather_from_striped(values, values, ranks, storage.exchange);
         syncthreads();
@@ -401,7 +404,8 @@ struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread, Targ
               BinaryFunction compare_function,
               storage_type&  storage)
     {
-        Key keys[ItemsPerThread];
+        ::rocprim::detail::thread_items_array<Key, ItemsPerThread> keys_storage;
+        auto& keys = keys_storage.get_unsafe_array();
 
         if(is_incomplete_block)
         {
@@ -497,8 +501,10 @@ struct block_sort_impl<Key,
               BinaryFunction       compare_function,
               storage_type&        storage)
     {
-        Key   keys[ItemsPerThread];
-        Value values[ItemsPerThread];
+        ::rocprim::detail::thread_items_array<Key, ItemsPerThread> keys_storage;
+        auto& keys = keys_storage.get_unsafe_array();
+        ::rocprim::detail::thread_items_array<Value, ItemsPerThread> values_storage;
+        auto& values = values_storage.get_unsafe_array();
 
         if(is_incomplete_block)
         {
@@ -589,7 +595,8 @@ struct block_sort_impl<Key,
               BinaryFunction       compare_function,
               storage_type&        storage)
     {
-        Key keys[ItemsPerThread];
+        ::rocprim::detail::thread_items_array<Key, ItemsPerThread> keys_storage;
+        auto& keys = keys_storage.get_unsafe_array();
 
         const auto   flat_id = block_thread_id<0>();
         unsigned int ranks[ItemsPerThread];
@@ -661,8 +668,10 @@ void block_merge_oddeven_kernel(KeysInputIterator    keys_input,
 
     const unsigned int thread_offset = flat_id * ItemsPerThread;
 
-    key_type   keys[ItemsPerThread];
-    value_type values[ItemsPerThread];
+    ::rocprim::detail::thread_items_array<key_type, ItemsPerThread> keys_storage;
+    auto& keys = keys_storage.get_unsafe_array();
+    ::rocprim::detail::thread_items_array<value_type, ItemsPerThread> values_storage;
+    auto& values = values_storage.get_unsafe_array();
 
     if(is_incomplete_block)
     {

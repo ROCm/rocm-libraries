@@ -92,6 +92,36 @@ private:
     alignas(Alignment) unsigned char storage[sizeof(T) * Count];
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail
+{
+
+/// \brief Plain C array wrapper with the same accessor as `uninitialized_array`.
+template<typename T, unsigned int Count>
+struct default_init_array
+{
+    using c_array_t = T[Count];
+
+    c_array_t  data;
+
+    ROCPRIM_HOST_DEVICE
+    c_array_t& get_unsafe_array()
+    {
+        return data;
+    }
+};
+
+/// \brief Storage for per-thread items that does not require `T` to be default constructible.
+/// Uses a plain array when `T` is default constructible, so codegen is unchanged for such types,
+/// and falls back to `uninitialized_array` otherwise.
+template<typename T, unsigned int Count>
+using thread_items_array = std::conditional_t<std::is_default_constructible<T>::value,
+                                              default_init_array<T, Count>,
+                                              uninitialized_array<T, Count>>;
+
+} // namespace detail
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_TYPES_UNINITIALIZED_ARRAY_HPP_
