@@ -60,8 +60,8 @@ batch when `seq_len_q/kv` are set).
   - The CPU executor and the dense and ragged GPU references all compose this way, through `PlanUtils.hpp`
     `extractDiagonalBandParams`, as the frontend documents (`SdpaAttributes.hpp:128-135`). Pinned for the ragged
     GPU reference by `TestGpuSdpaRaggedFwdPlanDeprecatedCausal`.
-  - Setting both deprecated flags is rejected: by `SdpaFwdNode` and `SdpaBwdNode` `pre_validate_node`
-    (`validateSdpaDeprecatedCausalFlags`), and by `extractDiagonalBandParams` for graphs that bypass the frontend.
+  - Setting both deprecated flags is rejected by `SdpaFwdNode` and `SdpaBwdNode` `pre_validate_node`
+    (`validateSdpaDeprecatedCausalFlags`).
   - The rocKE `sdpa_reference.py` (hip-kernel-provider) still forces `(-1, 0)`.
 - **Contract:** compose, as cuDNN does. All references use `extractDiagonalBandParams` semantics.
 

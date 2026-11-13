@@ -496,13 +496,14 @@ inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
 
 // Rejects an SDPA node whose deprecated causal_mask and causal_mask_bottom_right members are both
 // set (forward and backward share the rule). Each names a different diagonal alignment, so the
-// pair has no single meaning (SdpaSemanticsRegister SEM-002).
+// pair has no single meaning (SdpaSemanticsRegister SEM-002). The error code is the one
+// cudnn-frontend returned for the pair while it still had both members.
 inline Error validateSdpaDeprecatedCausalFlags(bool causalMask,
                                                bool causalMaskBottomRight,
                                                const std::string& nodeName)
 {
     HIPDNN_RETURN_IF_TRUE(causalMask && causalMaskBottomRight,
-                          ErrorCode::INVALID_VALUE,
+                          ErrorCode::GRAPH_NOT_SUPPORTED,
                           nodeName
                               + ": causal_mask and causal_mask_bottom_right cannot both be set. "
                                 "Use diagonal_alignment = TOP_LEFT or BOTTOM_RIGHT with "

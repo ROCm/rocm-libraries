@@ -103,7 +103,7 @@ TEST(TestSdpaFwdNode, PreValidateRejectsBothDeprecatedCausalFlags)
     EXPECT_EQ(validate(false, true).code, error_code_t::OK);
 
     const auto err = validate(true, true);
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_EQ(err.code, error_code_t::GRAPH_NOT_SUPPORTED);
     EXPECT_NE(err.err_msg.find("causal_mask_bottom_right"), std::string::npos) << err.err_msg;
     EXPECT_NE(err.err_msg.find("diagonal_alignment"), std::string::npos) << err.err_msg;
 }
@@ -120,6 +120,9 @@ TEST(TestSdpaFwdNode, PreValidateSetterCallsForBothCausalMasksStayValid)
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
     const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    EXPECT_EQ(node.attributes.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+    ASSERT_TRUE(node.attributes.right_bound.has_value());
+    EXPECT_EQ(node.attributes.right_bound.value(), 0);
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsGQA)
