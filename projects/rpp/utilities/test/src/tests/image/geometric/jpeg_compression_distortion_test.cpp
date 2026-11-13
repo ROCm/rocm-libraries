@@ -41,9 +41,8 @@ using namespace rpptest;
 
 namespace {
 
-// quality in [1, 99]. At q50 the scaled table is the Annex K base table, so it must stay green. q10
-// (needs the 255 clamp) and q90 (needs integer rounding) are red: the kernel quantizes by the raw
-// real-valued product.
+// quality in [1, 99]. At q50 the scaled table is the Annex K base table. q10 needs the 255 clamp
+// and q90 needs the integer rounding of the scaled table.
 struct JpegParams {
     int quality;
     std::string name() const {

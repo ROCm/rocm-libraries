@@ -146,7 +146,8 @@ inline void quantize_block(Rpp32f* block, const Rpp32f* quantTable, Rpp32s strid
         Rpp32s rowIdx = row * stride;
         Rpp32s rowQuantIdx = row * 8;
         for (Rpp32s col = 0; col < 8; col++) {
-            Rpp32f qCoeff = quantTable[rowQuantIdx + col] * qualityFactor;
+            Rpp32f qCoeff =
+                clamp(roundf(quantTable[rowQuantIdx + col] * qualityFactor), 1.0f, 255.0f);
             block[rowIdx + col] = qCoeff * roundf(block[rowIdx + col] / qCoeff);
         }
     }
@@ -301,6 +302,9 @@ inline void quantize_block_avx2(__m256* p, const float* quantTable, int qualityP
     for (int i = 0; i < 8; i++) {
         __m256 quantRow = _mm256_loadu_ps(&quantTable[i * 8]);
         quantRow = _mm256_mul_ps(quantRow, pQualityFactor);  // Scale by quality
+        // Round half up like roundf in quantize_block, and clamp to the baseline 8-bit range
+        quantRow = _mm256_min_ps(
+            _mm256_max_ps(_mm256_floor_ps(_mm256_add_ps(quantRow, avx_p1op2)), avx_p1), avx_p255);
         p[i] = accurate_quant_round(p[i], quantRow);         // Quantize
     }
 }
