@@ -2325,3 +2325,34 @@ BenchmarkProblems:
       - ActivationArgs:
         - - {Enum: none}
         - - {Enum: Gelu}
+  ########################################
+  # Develop's zgemm setup (zgemm_gfx1250.yaml): complex double D through the TDM block, whose descriptors
+  # count 8-byte units, on full tiles, on tiles past the M and N edges and with leading dimensions past M.
+  ########################################
+  - - {OperationType: GEMM, DataType: z, DestDataType: z, ComputeDataType: z, TransposeA: false,
+      TransposeB: false, UseBeta: true, Batched: true}
+    - BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - ThreadTile:
+        - [2, 2]
+      - WorkGroup:
+        - [8, 4, 1]
+        - [4, 8, 1]
+      - DepthU: [16]
+      - StaggerU: [0]
+      - ScheduleIterAlg: [4]
+      - PrefetchLocalRead: [1]
+      - PrefetchGlobalRead: [2]
+      - GlobalSplitU: [1]
+      - GlobalReadVectorWidthA: [1]
+      - GlobalReadVectorWidthB: [1]
+      - 1LDSBuffer: [0]
+      - WorkGroupMapping: [1]
+      - WavefrontSize: [32]
+      - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [127, 127, 1, 127]
+        - Exact: [128, 128, 1, 128]
+        - Exact: [127, 125, 2, 63, 136, 136, 128, 128]

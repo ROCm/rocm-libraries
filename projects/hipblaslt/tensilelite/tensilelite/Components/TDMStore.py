@@ -114,12 +114,13 @@ def tdmStoreRejectReason(state):
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
   converted = sixteenBit or pt["DestDataType"].is8bitFloat()
   integer = (pt["DestDataType"].isInt32() or pt["DestDataType"].isInt8()) and pt["ComputeDataType"].isInt32()
-  eightByte = (pt["DestDataType"].isDouble() and pt["ComputeDataType"].isDouble()) \
-    or (pt["DestDataType"].isSingleComplex() and pt["ComputeDataType"].isSingleComplex())
-  if not (integer or eightByte) and (not pt["ComputeDataType"].isSingle()
+  accumType = (pt["DestDataType"].isDouble() and pt["ComputeDataType"].isDouble()) \
+    or (pt["DestDataType"].isSingleComplex() and pt["ComputeDataType"].isSingleComplex()) \
+    or (pt["DestDataType"].isDoubleComplex() and pt["ComputeDataType"].isDoubleComplex())
+  if not (integer or accumType) and (not pt["ComputeDataType"].isSingle()
                                     or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
-    return "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
-           "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
+    return "TDMStoreInst supports fp32 D, fp64, complex float and complex double D from accumulators of their type, " \
+           "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1) \
      and state["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel":
     return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
@@ -303,12 +304,15 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
   of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
   which the second tmp SGPR keeps. The block assumes one free index per operand, as every GEMM problem
-  type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each.
+  type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each. TDM data_size is at most 8 bytes, so a
+  complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count; the byte offsets
+  and the staged tile do not change.
   """
   assert len(gwb.kernel["PackedC0IndicesX"]) == 1 and len(gwb.kernel["PackedC1IndicesX"]) == 1, \
     "the TDM block assumes one free index per operand"
   kw = gwb.parentWriter
   bpe = kw.states.bpeCexternalGSU1
+  units = bpe // min(bpe, 8)
   mt0 = gwb.kernel["MacroTile0"]
   ws = gwb.kernel["WavefrontSize"]
   colsPerWave = _waveColumns(gwb.kernel)
@@ -318,7 +322,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
   module.add(tdm.initOperands(g0, g1))
-  module.add(tdm.setDataSize(bpe, g1))
+  module.add(tdm.setDataSize(bpe // units, g1))
   module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
   module.add(SLShiftRightB32(dst=sgpr(col), shiftHex=int(log2(ws)), src=sgpr(col), comment="waveId"))
   module.add(SMulI32(dst=sgpr(col), src0=sgpr(col), src1=colsPerWave, comment="first tile column of this wave"))
@@ -336,6 +340,8 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(offLo), comment="global address lo"))
   module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr(offHi), comment="global address hi"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
+  if units > 1:
+    module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=sgpr(dim), comment="tensor_dim0 in 8-byte units"))
   module.add(tdm.setTensorDim0(g1, dim, kw))
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
   module.add(SAddU32(dst=sgpr(col), src0=sgpr(col), src1=sgpr(dim), comment="first %s column of this wave" % tc))
@@ -347,9 +353,13 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   else:
     module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
     module.add(tdm.setTensorDim1(g1, dim, kw))
-  module.add(tdm.setTensorTile0(g1, mt0))
+  module.add(tdm.setTensorTile0(g1, mt0 * units))
   module.add(tdm.setTensorTile1(g1, colsPerWave))
-  module.add(tdm.setTensorStride0(g1, stride1))
+  if units > 1:
+    module.add(SAddU32(dst=sgpr(offHi), src0=sgpr(stride1), src1=sgpr(stride1), comment="Stride%s in 8-byte units" % tc))
+    module.add(tdm.setTensorStride0(g1, offHi))
+  else:
+    module.add(tdm.setTensorStride0(g1, stride1))
 
 
 def _skipTest(gwb, sizeJ, tmp):
