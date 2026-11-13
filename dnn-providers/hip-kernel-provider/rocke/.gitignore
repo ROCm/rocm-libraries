@@ -29,8 +29,9 @@ _deps/
 #     (./kernel_cache, relative to wherever the benchmark is run from) ---
 kernel_cache/
 
-# --- Local scratch: logs, perf JSON dumps, ad-hoc studies ---
+# --- Local scratch: logs, generated capability reports, ad-hoc studies ---
 *.log
+capabilities.json
 logs/
 scratch/
 

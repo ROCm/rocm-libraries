@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rocm.docs.amd.com/schemas/rocke/compiler-capabilities-v1.schema.json",
+  "title": "rocKE compiler capability probe report version 1",
+  "description": "Evidence from the standalone compiler capability demonstration. This report compares focused probes across compiler builds; it is not a rocKE lowering input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "probe", "compiler", "tools", "capabilities"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "probe": { "$ref": "#/$defs/probe" },
+    "compiler": { "$ref": "#/$defs/compiler" },
+    "tools": { "$ref": "#/$defs/tools" },
+    "capabilities": { "$ref": "#/$defs/capabilities" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "revision": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        { "type": "null" }
+      ]
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "target_triple", "processor", "fingerprint"],
+      "properties": {
+        "name": { "const": "rocke-compiler-capabilities" },
+        "version": { "type": "integer", "minimum": 1 },
+        "target_triple": { "const": "amdgcn-amd-amdhsa" },
+        "processor": {
+          "type": "string",
+          "pattern": "^gfx[0-9a-z-]+$"
+        },
+        "fingerprint": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "compiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "executable",
+        "sha256",
+        "version_text",
+        "source_revision",
+        "patched_revision"
+      ],
+      "properties": {
+        "repository": { "const": "https://github.com/ROCm/llvm-project" },
+        "executable": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "version_text": { "type": "string", "minLength": 1 },
+        "source_revision": { "$ref": "#/$defs/revision" },
+        "patched_revision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "sha256", "version_text"],
+      "properties": {
+        "executable": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "version_text": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opt"],
+      "properties": {
+        "opt": { "$ref": "#/$defs/tool" }
+      }
+    },
+    "errorResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "diagnostic"],
+      "properties": {
+        "status": { "const": "error" },
+        "diagnostic": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dataLayoutValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "elf_mangling",
+        "address_space_8",
+        "additional_pointer_address_spaces"
+      ],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "elf_mangling": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "address_space_8": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "integer", "minimum": 1 }
+            },
+            { "type": "null" }
+          ]
+        },
+        "additional_pointer_address_spaces": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 10 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "dataLayoutResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/errorResult" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "value"],
+          "properties": {
+            "status": { "const": "known" },
+            "value": { "$ref": "#/$defs/dataLayoutValue" }
+          }
+        }
+      ]
+    },
+    "abiCandidate": {
+      "type": "string",
+      "enum": ["legacy_p1_i32", "p8_p1_i64"]
+    },
+    "canonicalAbi": {
+      "type": "string",
+      "enum": ["p1_i32", "p8_p1_i32", "p8_p1_i64"]
+    },
+    "acceptedAbi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate",
+        "canonical_abi",
+        "canonical_intrinsic",
+        "canonical_declaration"
+      ],
+      "properties": {
+        "candidate": { "$ref": "#/$defs/abiCandidate" },
+        "canonical_abi": { "$ref": "#/$defs/canonicalAbi" },
+        "canonical_intrinsic": { "type": "string", "minLength": 1 },
+        "canonical_declaration": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rejectedAbi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "diagnostic"],
+      "properties": {
+        "candidate": { "$ref": "#/$defs/abiCandidate" },
+        "diagnostic": { "type": "string", "minLength": 1 }
+      }
+    },
+    "bufferResourceValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "rejected"],
+      "properties": {
+        "accepted": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/acceptedAbi" }
+        },
+        "rejected": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rejectedAbi" }
+        }
+      }
+    },
+    "bufferResourceResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/errorResult" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "value"],
+          "properties": {
+            "status": { "const": "known" },
+            "value": { "$ref": "#/$defs/bufferResourceValue" }
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "amdgpu.ir.data_layout",
+        "amdgpu.intrinsic.make_buffer_resource.abis"
+      ],
+      "properties": {
+        "amdgpu.ir.data_layout": { "$ref": "#/$defs/dataLayoutResult" },
+        "amdgpu.intrinsic.make_buffer_resource.abis": {
+          "$ref": "#/$defs/bufferResourceResult"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "capabilities": {
+    "amdgpu.intrinsic.make_buffer_resource.abis": {
+      "status": "known",
+      "value": {
+        "accepted": [
+          {
+            "candidate": "p8_p1_i64",
+            "canonical_abi": "p8_p1_i64",
+            "canonical_declaration": "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1.i64(ptr addrspace(1) readnone, i16, i64, i32)",
+            "canonical_intrinsic": "llvm.amdgcn.make.buffer.rsrc.p8.p1.i64"
+          }
+        ],
+        "rejected": [
+          {
+            "candidate": "legacy_p1_i32",
+            "diagnostic": "Intrinsic has incorrect argument type!"
+          }
+        ]
+      }
+    },
+    "amdgpu.ir.data_layout": {
+      "status": "known",
+      "value": {
+        "additional_pointer_address_spaces": [],
+        "address_space_8": [
+          128,
+          128,
+          128,
+          48
+        ],
+        "elf_mangling": "e",
+        "text": "e-m:e-p:64:64-p8:128:128:128:48"
+      }
+    }
+  },
+  "compiler": {
+    "executable": "clang",
+    "patched_revision": null,
+    "repository": "https://github.com/ROCm/llvm-project",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_revision": null,
+    "version_text": "illustrative compiler identity"
+  },
+  "probe": {
+    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "rocke-compiler-capabilities",
+    "processor": "gfx950",
+    "target_triple": "amdgcn-amd-amdhsa",
+    "version": 1
+  },
+  "schema_version": 1,
+  "tools": {
+    "opt": {
+      "executable": "opt",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version_text": "illustrative tool identity"
+    }
+  }
+}
