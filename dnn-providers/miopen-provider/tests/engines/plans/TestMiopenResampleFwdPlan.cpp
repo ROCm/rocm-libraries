@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -33,6 +34,7 @@
 
 using namespace miopen_plugin;
 
+using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 using hipdnn_data_sdk::utilities::iterateAlongDimensions;
 using hipdnn_data_sdk::utilities::Tensor;
@@ -242,6 +244,25 @@ protected:
 
 class TestGpuMiopenResampleFwdPlan : public ResampleFwdPlanFixture
 {
+protected:
+    // Max pooling over a 4x4 plane whose every input is -inf, then NaN; 2x2 windows, no padding.
+    // MIOpen writes the same Y everywhere and index 0, even for windows that do not hold element 0.
+    template <typename T>
+    void expectNoFiniteInputResult(DataType dataType, float expectedY)
+    {
+        for(const float input :
+            {-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+        {
+            SCOPED_TRACE(input);
+            const auto result = run<T, int32_t>(planarMaxSpec(DataType::INT32, dataType),
+                                                std::vector<float>(16, input));
+            for(const float y : result.y)
+            {
+                EXPECT_FLOAT_EQ(y, expectedY);
+            }
+            EXPECT_EQ(result.index, (std::vector<int64_t>{0, 0, 0, 0}));
+        }
+    }
 };
 
 // ============================================================================
@@ -291,6 +312,26 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWithoutIndexWritesValues)
     const auto result = run(planarMaxSpec(std::nullopt), planarMaxInput());
     expectYNear(result.y, planarMaxExpected().y, 0.0);
     EXPECT_TRUE(result.index.empty());
+}
+
+// The result the Resample Forward note documents for a max-pool window with no finite input.
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWindowWithNoFiniteInputWritesLowestFloat)
+{
+    expectNoFiniteInputResult<float>(DataType::FLOAT, std::numeric_limits<float>::lowest());
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWindowWithNoFiniteInputWritesLowestHalf)
+{
+    expectNoFiniteInputResult<half>(DataType::HALF, -65504.0f);
+}
+
+// ALMIOPEN-3295 (see Workarounds.hpp): MIOpen rounds its -FLT_MAX starting value to BFLOAT16, which
+// gives -inf instead of the lowest finite BFLOAT16 value. Update the expected value when MIOpen is
+// fixed.
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWindowWithNoFiniteInputWritesNegativeInfinityBfloat16)
+{
+    expectNoFiniteInputResult<bfloat16>(DataType::BFLOAT16,
+                                        -std::numeric_limits<float>::infinity());
 }
 
 TEST_F(TestGpuMiopenResampleFwdPlan, MaxPool3dWritesInt32Indices)

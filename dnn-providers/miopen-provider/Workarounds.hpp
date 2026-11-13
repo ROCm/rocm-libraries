@@ -80,9 +80,10 @@
 //
 // To remove after the fix: delete this section and its macro, its call site in
 // engines/plans/MiopenResampleFwdChecks.cpp, and the decline test tagged
-// ALMIOPEN-3295 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp; drop
-// the BFLOAT16 padding note from the Resample Forward docs.
-// `git grep ALMIOPEN.3295` finds them all.
+// ALMIOPEN-3295 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp; update
+// the expected BFLOAT16 value of the plan test tagged ALMIOPEN-3295 in
+// tests/engines/plans/TestMiopenResampleFwdPlan.cpp; drop the BFLOAT16 notes
+// from the Resample Forward docs. `git grep ALMIOPEN.3295` finds them all.
 // ----------------------------------------------------------------------------
 
 #define WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding) \
