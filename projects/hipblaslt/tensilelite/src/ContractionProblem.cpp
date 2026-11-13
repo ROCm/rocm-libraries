@@ -1051,6 +1051,8 @@ namespace TensileLite
         getIndexNames(aNames, bNames, cNames, dNames, m_sumNames);
 
         m_operationIdentifier = getOperationIdentifier();
+        m_transA              = aNames == "lik";
+        m_transB              = bNames == "jlk";
 
         m_problemSizes.resize(0);
         m_problemSizes.reserve(cTensor.dimensions() + m_boundSizes.size());

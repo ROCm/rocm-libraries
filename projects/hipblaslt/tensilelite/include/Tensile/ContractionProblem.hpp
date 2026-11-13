@@ -1603,13 +1603,15 @@ namespace TensileLite
             return m_sumNames;
         }
 
+        // Cached in normalize() from the A/B index names, which are also encoded in
+        // operationIdentifier(); used by the hot std::hash<ContractionProblemGemm>.
         bool transA() const
         {
-            return m_names[ContractionProblemGemm::TENSOR::A] == "lik";
+            return m_transA;
         }
         bool transB() const
         {
-            return m_names[ContractionProblemGemm::TENSOR::B] == "jlk";
+            return m_transB;
         }
 
         std::string        operationName() const;
@@ -1706,6 +1708,8 @@ namespace TensileLite
 
         std::string m_sumNames;
         std::string m_operationIdentifier;
+        bool        m_transA = false;
+        bool        m_transB = false;
 
         ContractionProblemParameters m_params;
 
