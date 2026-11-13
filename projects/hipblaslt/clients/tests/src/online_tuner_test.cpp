@@ -399,7 +399,8 @@ namespace
     }
 
     // A stream held on a host-visible value until release(), so what is recorded
-    // on it stays in flight for as long as a case needs.
+    // on it stays in flight for as long as a case needs. Like Device, it brackets
+    // some work, so a pair never reads exactly 0.0 ms.
     class HeldStream
     {
     public:
@@ -415,6 +416,7 @@ namespace
         {
             EXPECT_EQ(hipSetDevice(id), hipSuccess);
             EXPECT_EQ(hipStreamCreate(&m_stream), hipSuccess);
+            EXPECT_EQ(hipMalloc(&m_scratch, c_scratchBytes), hipSuccess);
             EXPECT_EQ(hipHostMalloc(reinterpret_cast<void**>(&m_go), sizeof(*m_go), 0), hipSuccess);
             if(m_go)
             {
@@ -428,6 +430,7 @@ namespace
         {
             release();
             static_cast<void>(hipStreamDestroy(m_stream));
+            static_cast<void>(hipFree(m_scratch));
             static_cast<void>(hipHostFree(m_go));
         }
 
@@ -438,6 +441,7 @@ namespace
         void bracket(const Key& key, hipEvent_t start, hipEvent_t stop) const
         {
             EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
+            EXPECT_EQ(hipMemsetAsync(m_scratch, 0, c_scratchBytes, m_stream), hipSuccess);
             EXPECT_EQ(hipEventRecord(stop, m_stream), hipSuccess);
             tuner().endMeasurement(key, start);
         }
@@ -451,7 +455,10 @@ namespace
         }
 
     private:
+        static constexpr size_t c_scratchBytes = 4u << 20;
+
         hipStream_t m_stream   = nullptr;
+        void*       m_scratch  = nullptr;
         uint32_t*   m_go       = nullptr;
         bool        m_released = false;
     };
