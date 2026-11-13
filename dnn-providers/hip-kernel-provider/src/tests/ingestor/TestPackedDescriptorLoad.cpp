@@ -92,7 +92,7 @@ std::vector<std::filesystem::path> packedArchShards()
 
 /// The shards, or a skip explaining that nothing was packed.
 ///
-/// Skipping is correct only for "the packaging rule never ran" -- no hipcc, production
+/// Skipping is correct only for "the packaging rule never ran" -- no HIP compiler, production
 /// source root unset. Once a shard exists everything below is an assertion: a staged tree
 /// that cannot be loaded is the defect this file exists to catch, never a reason to pass
 /// quietly.
@@ -112,7 +112,7 @@ std::vector<std::filesystem::path> packedArchShards()
     {                                                                                     \
         GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                  \
                      << " -- the packaging rule did not run. Configure with "             \
-                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a discoverable hipcc, "   \
+                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a HIP compiler, "        \
                         "then build the descriptor staging targets.";                     \
     }                                                                                     \
     static_assert(true, "swallow the trailing semicolon")
