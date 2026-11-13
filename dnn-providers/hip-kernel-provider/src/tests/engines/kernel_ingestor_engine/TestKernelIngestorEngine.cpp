@@ -542,6 +542,27 @@ TEST(TestKernelIngestorEngine, NoNoteWithoutAResolvableDispatch)
         setWithKernels({{KernelSourceKind::KPACK}}, unregistered)));
 }
 
+TEST(TestKernelIngestorEngine, ASlottedSetIsNotSaveableThoughItsSlotsPacksWouldBe)
+{
+    // RFC 0021 §11: a slot program is not serialized (RFC 0009), so a slotted set advertises
+    // no serialization even when every slot's pack holds only saveable kernels.
+    const DescriptorSet unslotted
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    ASSERT_TRUE(supportsExecutionPlanSerialization(unslotted));
+
+    DescriptorSet slotted;
+    slotted.dispatches = unslotted.dispatches;
+    for(const auto& pack : unslotted.packs)
+    {
+        slotted.slots.emplace_back().packs.push_back(pack);
+    }
+    slotted.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slotted));
+    EXPECT_EQ(withComputedBehaviorNotes(slotted).engine.behaviorNotes,
+              std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
+}
+
 TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
 {
     DescriptorSet saveable
@@ -592,14 +613,13 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
         EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
     };
 
-    // The first Container takes the state managers that discovery built; a later one builds
-    // its own. Both construction paths must report the note.
-    rediscoverStateManagersForTesting();
+    // Every Container reads the shared state discovery built, the first and a later one
+    // alike. Both must report the note.
+    rediscoverSharedStatesForTesting();
     {
         SCOPED_TRACE("first Container");
         Container container;
-        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
-                  nullptr);
+        ASSERT_NE(discoveredSharedState(loadedSet(CONV_FWD.engineName).engine.id), nullptr);
         expectTheNoteOnlyOnConvFwd(container);
     }
     {
@@ -624,13 +644,33 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    constexpr std::array<std::string_view, 5> PACK_DISPATCH_SYMBOLS{
+    const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
+        "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
+        "hipkernel.gfx942_attention_unified3d.dispatch",
+        "hipkernel.gfx950_attention_unified_2d.dispatch",
+        "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
-        "hipkernel.gfx1151_wmma_attention_decode.dispatch"};
-    EXPECT_EQ(PACK_DISPATCH_SYMBOLS.size(), ingestorPacks().size())
+        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+#ifdef HIPDNN_ENGINE_FLYDSL
+        // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
+        "hipkernel.flydsl_rmsnorm.dispatch",
+        "hipkernel.flydsl_rmsnorm_bwd.dispatch",
+        "hipkernel.flydsl_sdpa_rdna.dispatch",
+        "hipkernel.flydsl_sdpa_rdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_aiw.dispatch",
+        "hipkernel.flydsl_sdpa_cdna.dispatch",
+        "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
+        "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+        "hipkernel.flydsl_sdpa_head_pad.dispatch",
+#endif
+    };
+    EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
 
     // Each handler once, with the first symbol that resolved to it.
@@ -650,7 +690,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         }
     }
     registerNativeIngestorSymbols();
-    for(const auto symbol : PACK_DISPATCH_SYMBOLS)
+    for(const auto symbol : packDispatchSymbols)
     {
         const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
         ASSERT_NE(handler, nullptr) << symbol;

@@ -3,10 +3,17 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "ConfigHelpers.hpp"
@@ -15,10 +22,12 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -32,6 +41,54 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
+
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
+                                           const std::function<void(GraphT&)>& mutate)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    mutate(*graph);
+    flatbuffers::FlatBufferBuilder mutated;
+    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
+    return mutated;
+}
+
+TensorAttributesT& findTensor(GraphT& graph, const std::string& name)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->name == name)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor named " + name);
+}
+
+TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            return *tensor;
+        }
+    }
+    throw std::runtime_error("No tensor with uid " + std::to_string(uid));
+}
+
+int64_t maxTensorUid(const GraphT& graph)
+{
+    int64_t maxUid = 0;
+    for(const auto& tensor : graph.tensors)
+    {
+        maxUid = std::max(maxUid, tensor->uid);
+    }
+    return maxUid;
+}
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
@@ -260,6 +317,239 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest aligned{createSdpaFwdGraph(), "All tensors 16-byte aligned"};
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, aligned.graphWrapper())) << aligned.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
+{
+    const GraphTest misaligned{
+        hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaFwdGraph(), 8),
+        "Q aligned to 8 bytes"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, misaligned.graphWrapper()))
+        << misaligned.message;
+}
+
+// =============================================================================
+// Ragged tensors / group mode
+// =============================================================================
+
+auto createBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                            const std::vector<int64_t>& vDims = {4, 8, 256, 128},
+                            bool withStats = false)
+{
+    const std::vector<int64_t> kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> bshd = {3, 1, 2, 0};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims, bshd),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims, bshd),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims, bshd),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        false,
+        false,
+        withStats);
+}
+
+auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
+                                  const std::vector<int64_t>& vDims = {4, 8, 256, 128})
+{
+    return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{createRaggedBshdSdpaFwdGraph(), "All of Q, K, V, O ragged -> group mode"}, true},
+        {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 192}, {4, 8, 256, 128}),
+                   "Group mode with q head dim 192 and v head dim 128"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o"}),
+                   "Group mode with generate_stats"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
+                   "Q, K, V ragged but not O"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
+                   "K, V, O ragged but not Q"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createBshdSdpaFwdGraph({4, 8, 256, 128},
+                                                                  {4, 8, 256, 128},
+                                                                  /*withStats=*/true),
+                                           {"q", "k", "v", "o", "stats"}),
+                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      /*withStats=*/true),
+                   "Dense Q, K, V, O with stats (baseline for the stats-only ragged case)"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph({4, 8, 256, 128},
+                                                              {4, 8, 256, 128},
+                                                              DataType::BFLOAT16,
+                                                              DataType::FLOAT,
+                                                              false,
+                                                              false,
+                                                              /*withStats=*/true),
+                                           {"stats"}),
+                   "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
+                   "tensor"},
+         false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto withMultiplier = [](const std::string& name, int64_t multiplier) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            findTensor(graph, name).ragged_offset_multiplier = multiplier;
+        });
+    };
+    const auto withOwnOffset = [](const std::string& name) {
+        return mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+            auto& tensor = findTensor(graph, name);
+            auto offset = std::make_unique<TensorAttributesT>(
+                findTensorByUid(graph, tensor.ragged_offset_tensor_uid.value()));
+            offset->uid = maxTensorUid(graph) + 1;
+            offset->name = name + "_own_ragged_offset";
+            tensor.ragged_offset_tensor_uid = offset->uid;
+            graph.tensors.push_back(std::move(offset));
+        });
+    };
+
+    // Mutates one ragged offset tensor of an otherwise valid group-mode graph.
+    const auto withOffset
+        = [](const std::string& offsetName, const std::function<void(TensorAttributesT&)>& mutate) {
+              return mutateGraph(createRaggedBshdSdpaFwdGraph(),
+                                 [&](GraphT& graph) { mutate(findTensor(graph, offsetName)); });
+          };
+
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph(), "Baseline group mode"}, true},
+           {GraphTest{withMultiplier("q", 1), "Q multiplier 1 (element-unit offsets)"}, false},
+           {GraphTest{withMultiplier("q", 128), "Q multiplier != Q sequence stride"}, false},
+           {GraphTest{withMultiplier("k", 128), "K multiplier != K sequence stride"}, false},
+           {GraphTest{withMultiplier("v", 128), "V multiplier != V sequence stride"}, false},
+           {GraphTest{withMultiplier("o", 128), "O multiplier != O sequence stride"}, false},
+           {GraphTest{withOwnOffset("o"), "O does not share Q's ragged offset tensor"}, false},
+           {GraphTest{withOwnOffset("v"), "V does not share K's ragged offset tensor"}, false}};
+
+    // The Q/O offset and the K/V offset are validated separately, so every defect is
+    // exercised on both. The graph has B = 4, so a valid offset tensor is [5, 1, 1, 1].
+    // Each dims/strides case violates exactly one clause of isTokenSeqstartTensor.
+    const std::vector<std::pair<std::string, std::vector<std::string>>> offsetTensors
+        = {{"qo_ragged_offset", {"q", "o"}}, {"kv_ragged_offset", {"k", "v"}}};
+    for(const auto& offsetTensor : offsetTensors)
+    {
+        const std::string& offsetName = offsetTensor.first;
+        const std::vector<std::string>& users = offsetTensor.second;
+        const auto addRejected
+            = [&](const std::string& defect, flatbuffers::FlatBufferBuilder&& graph) {
+                  std::string message = offsetName;
+                  message += ": ";
+                  message += defect;
+                  applicabilityTests.emplace_back(GraphTest{std::move(graph), message}, false);
+              };
+        const auto addShape = [&](const std::string& defect,
+                                  std::vector<int64_t> dims,
+                                  std::vector<int64_t> strides) {
+            addRejected(defect, withOffset(offsetName, [&](TensorAttributesT& t) {
+                            t.dims = dims;
+                            t.strides = strides;
+                        }));
+        };
+        addRejected("INT64", withOffset(offsetName, [](TensorAttributesT& t) {
+                        t.data_type = DataType::INT64;
+                    }));
+        addRejected("virtual",
+                    withOffset(offsetName, [](TensorAttributesT& t) { t.virtual_ = true; }));
+        addShape("B rather than B+1 entries", {4, 1, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[1] == 2", {5, 2, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[2] == 2", {5, 1, 2, 1}, {1, 1, 1, 1});
+        addShape("dims[3] == 2", {5, 1, 1, 2}, {1, 1, 1, 1});
+        addShape("stride[0] == 2", {5, 1, 1, 1}, {2, 1, 1, 1});
+        addRejected("uid missing from the tensor map",
+                    mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+                        const int64_t missingUid = maxTensorUid(graph) + 1;
+                        for(const auto& user : users)
+                        {
+                            findTensor(graph, user).ragged_offset_tensor_uid = missingUid;
+                        }
+                    }));
+    }
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
+{
+    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
+{
+    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 
 // =============================================================================
@@ -568,6 +858,277 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Attention scale range
+// =============================================================================
+
+TEST(TestSdpaPlanUtils, IsSupportedAttnScaleRequiresFinitePositiveNormalFloat)
+{
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_FALSE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_TRUE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+}
+
+TEST(TestSdpaPlanUtils, AttnScaleTextDistinguishesNormalBoundary)
+{
+    const float smallestNormal = std::numeric_limits<float>::min();
+    EXPECT_NE(plan_utils::attnScaleToString(smallestNormal),
+              plan_utils::attnScaleToString(std::nextafter(smallestNormal, 0.0F)));
+}
+
+// Exercise the DOUBLE tensor read in both baked forms, plus the pure runtime
+// read. The next double above FLT_MAX must decline even if a cast rounds it down.
+TEST(TestSdpaPlanUtils, DoubleAttnScaleChecksRangeBeforeNarrowing)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto scaleOf = [](double scale, bool runtimeWithDefault) {
+        const auto builder = withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        return plan_utils::attnScaleBeforeExecute(
+            graphWrapper.nodeWrappers().front()->attributesAs<SdpaAttributes>(),
+            graphWrapper.getTensorMap());
+    };
+
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        SCOPED_TRACE(name);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            const auto narrowed = scaleOf(scale, runtimeWithDefault);
+            ASSERT_TRUE(narrowed.has_value());
+            EXPECT_FALSE(plan_utils::isSupportedAttnScale(*narrowed));
+        }
+    }
+
+    // Ordinary values and both float endpoints remain usable as DOUBLE tensors.
+    // A double just below FLT_MIN rounds to FLT_MIN: the lower bound applies to
+    // the actual float kernarg, not the original double.
+    std::vector<std::pair<double, float>> accepted;
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        accepted.emplace_back(static_cast<double>(scale), scale);
+    }
+    accepted.emplace_back(
+        std::nextafter(static_cast<double>(std::numeric_limits<float>::min()), 0.0),
+        std::numeric_limits<float>::min());
+    for(const auto& [scale, expected] : accepted)
+    {
+        SCOPED_TRACE(scale);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            EXPECT_EQ(scaleOf(scale, runtimeWithDefault), expected);
+        }
+        double hostScale = scale;
+        const hipdnnPluginDeviceBuffer_t buffer{1, &hostScale};
+        const hipdnn_plugin_sdk::ScalarOperand operand{1, DataType::DOUBLE, true, 0.0};
+        EXPECT_EQ(plan_utils::resolveSupportedAttnScale(operand, &buffer, 1, "test"), expected);
+    }
+}
+
+// The scale isApplicable checks is the one execute will pass to the kernel.
+TEST(TestSdpaPlanUtils, AttnScaleBeforeExecute)
+{
+    const auto scaleOf = [](const flatbuffers::FlatBufferBuilder& builder) {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+        return plan_utils::attnScaleBeforeExecute(attrs, graphWrapper.getTensorMap());
+    };
+
+    EXPECT_EQ(scaleOf(createSdpaFwdGraph()), 1.0F) << "unset attn_scale_value";
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::ATTRIBUTE, 0.5F)), 0.5F);
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::CONSTANT_TENSOR, 0.25F)),
+              0.25F);
+    EXPECT_EQ(scaleOf(withAttnScale(
+                  createSdpaFwdGraph(), AttnScaleSource::RUNTIME_TENSOR_WITH_DEFAULT, 0.125F)),
+              0.125F);
+    EXPECT_FALSE(scaleOf(createSdpaFwdGraphWithRuntimePbvScale()).has_value())
+        << "pure runtime scale tensor";
+    EXPECT_THROW(scaleOf(withUnreadableScaleTensor(createSdpaFwdGraph())),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// Scales the kernels mishandle, from attn_scale_value, a constant scale tensor or
+// the default of a runtime scale tensor, and a scale tensor whose value cannot be
+// read. On gfx942 a negative scale or -0.0 gave NaN O and Inf LSE even with no
+// mask, and 0 or 1e-40 did with a bottom-right causal mask or S_kv = 200.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    for(const auto& [scale, scaleName] : unsupportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            declineTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                      attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            declineTests.emplace_back(
+                withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
+    declineTests.emplace_back(withUnreadableScaleTensor(createSdpaFwdGraph()),
+                              "FP8_E4M3 constant scale tensor");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Finite, positive, normal scales from every source, the unset default (1.0), and
+// a pure runtime scale tensor, which execute checks.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    acceptTests.emplace_back(createSdpaFwdGraph(), "unset attn_scale_value");
+    for(const auto& [scale, scaleName] : supportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            acceptTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                     attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            acceptTests.emplace_back(
+                withDoubleScaleTensor(
+                    createSdpaFwdGraph(), static_cast<double>(scale), runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
+    acceptTests.emplace_back(createSdpaFwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// A forward plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernel, whose
+// scale is a pure runtime pass-by-value tensor. Launching it fails with
+// INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the launch.
+constexpr int64_t K_FWD_RUNTIME_SCALE_UID = 5;
+const std::vector<int64_t> K_FWD_TENSOR_UIDS = {1, 2, 3, 4};
+
+SdpaFwdPlan createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType scaleType
+                                          = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+{
+    constexpr unsigned int K_ROW = 128;
+    constexpr unsigned int K_HEAD = 128 * 128;
+
+    SdpaFwdParams params{};
+    params.qUid = 1;
+    params.kUid = 2;
+    params.vUid = 3;
+    params.oUid = 4;
+    params.batchSize = 1;
+    params.numHeadsQ = 1;
+    params.numHeadsKv = 1;
+    params.seqLenQ = 128;
+    params.seqLenKv = 128;
+    params.headDimQk = 128;
+    params.headDimV = 128;
+    params.qStrideSeq = K_ROW;
+    params.qStrideRow = K_ROW;
+    params.qStrideHead = K_HEAD;
+    params.qStrideBatch = K_HEAD;
+    params.kStrideSeq = K_ROW;
+    params.kStrideHead = K_HEAD;
+    params.kStrideBatch = K_HEAD;
+    params.vStrideSeq = K_ROW;
+    params.vStrideHead = K_HEAD;
+    params.vStrideBatch = K_HEAD;
+    params.oStrideSeq = K_ROW;
+    params.oStrideHead = K_HEAD;
+    params.oStrideBatch = K_HEAD;
+    params.tileSizeQo = 128;
+    params.archString = "gfx942";
+    params.maskType = plan_utils::MaskType::NO_MASK;
+    params.attnScale
+        = hipdnn_plugin_sdk::ScalarOperand{K_FWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
+    return {std::make_shared<HipModuleGuard>(), params};
+}
+
+// A pure runtime scale tensor's value arrives only at execute, so execute returns
+// BAD_PARAM for an unsupported one, before the launch.
+TEST(TestSdpaFwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
+{
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+    const SdpaFwdPlan doublePlan
+        = createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      doublePlan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+}
+
+// A supported runtime scale passes the check and reaches the launch, which fails
+// because the plan has no kernel.
+TEST(TestSdpaFwdPlanExecute, PassesSupportedRuntimeAttnScaleToLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR)
+            << name;
+    }
+
+    // Clear the HIP error state left by the intentional failed launch, or the
+    // HipErrorHandler listener fails this test for it.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
 
 // =============================================================================

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "ae3e5789-3fe0-5032-904a-fca436d520d3",
+  "name": "flydsl sdpa_rdna: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_sdpa_rdna.kernel_match"
+}

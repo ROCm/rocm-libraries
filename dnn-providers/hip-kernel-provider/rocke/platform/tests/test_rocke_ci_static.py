@@ -9,7 +9,7 @@ architecture family without needing a GPU.
 
 Run:
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:python/test \
-    python tests/test_rocke_ci_static.py
+    python -m pytest tests/test_rocke_ci_static.py
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 # The representative-IR parity harness lives in the instances test layer; make
 # it importable from this root-level CI test (run via pytest or directly).
 sys.path.insert(0, str(Path(__file__).resolve().parents[0] / "instances"))
@@ -31,7 +33,8 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from rocke.core.arch import known_arches
-from rocke.core.ir_golden import load_golden
+from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
@@ -60,6 +63,11 @@ class TestExampleProblemSamples(unittest.TestCase):
     """Keep non-GPU CI anchored to shapes shipped with examples."""
 
     def test_gemm_example_shape_expands_dispatch_plan(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                self._check_gemm_example_plan(arch)
+
+    def _check_gemm_example_plan(self, arch):
         data = _read_json(
             _EXAMPLES / "gfx1151" / "gemm" / "data" / "01_f16_verify.json"
         )
@@ -72,7 +80,7 @@ class TestExampleProblemSamples(unittest.TestCase):
             verify=True,
         )
 
-        plan = expand_sweep(GemmSweepConfig(arch="gfx950", shapes=(sweep_shape,)))
+        plan = expand_sweep(GemmSweepConfig(arch=arch, shapes=(sweep_shape,)))
 
         self.assertGreater(len(plan.variants), 0)
         self.assertEqual(plan.config.shapes[0].as_tuple(), (128, 128, 128))
@@ -91,49 +99,95 @@ class TestExampleProblemSamples(unittest.TestCase):
 class TestIrParityCoverage(unittest.TestCase):
     """Validate that static parity samples span architectures and families."""
 
-    def test_ir_cases_cover_all_static_architectures(self):
-        arch_counts: dict[str, int] = {}
+    @staticmethod
+    def _families_by_arch() -> dict[str, set[str]]:
         family_by_arch: dict[str, set[str]] = {}
-
         for case in cases():
-            arch = case["arch"]
-            family = case["family"]
-            arch_counts[arch] = arch_counts.get(arch, 0) + 1
-            family_by_arch.setdefault(arch, set()).add(family)
+            family_by_arch.setdefault(case["arch"], set()).add(case["family"])
+        return family_by_arch
 
-        expected_arches = set(known_arches()) | {"gfx1201"}
+    def test_ir_cases_cover_all_static_architectures(self):
+        family_by_arch = self._families_by_arch()
+        arch_counts: dict[str, int] = {}
+        for case in cases():
+            arch_counts[case["arch"]] = arch_counts.get(case["arch"], 0) + 1
+
+        # The generic targets' only representative cases are the deep fused
+        # conv shims, which live with the other conv families in the library's
+        # own golden (library/tests/test_conv_ir_golden.py checks that it
+        # covers them).
+        expected_arches = (set(known_arches()) | {"gfx1201"}) - {
+            "gfx11-generic",
+            "gfx12-generic",
+        }
         self.assertLessEqual(expected_arches, set(arch_counts))
         for arch in expected_arches:
             self.assertGreater(arch_counts[arch], 0, f"{arch} has no IR cases")
         for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
             self.assertIn("gemm", family_by_arch[arch])
 
-        self.assertIn("moe", family_by_arch["gfx950"])
-        self.assertIn("deep_fused_conv", family_by_arch["gfx950"])
-        self.assertIn("kda_chunkwise", family_by_arch["gfx950"])
-        self.assertIn("kda_chunkwise", family_by_arch["gfx942"])
+        for arch in COVERED_ARCHES:
+            self.assertIn("moe", family_by_arch[arch])
+            self.assertIn("kda_chunkwise", family_by_arch[arch])
 
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
-    def test_ir_cases_match_golden_sha256(self):
-        """Byte-stability gate: every case's lowered-IR sha256 (and the set of
-        expected failures) must match the committed golden, for EVERY llvm
-        flavor the golden holds -- not just the one this host autodetects, or
-        the llvm23 sub-document would go unchecked below ROCm 7.13. A drift
-        here means emitted IR changed -- if intended & reviewed, re-bless the
-        changed families' shards with:
-          python tests/instances/rocke_ir_parity_harness.py \\
-            --write tests/golden/rocke_representative_ir_sha256 --only <family>
+    def test_nvfp4_variants_are_registered_and_lowerable(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-        """
-        self.assertTrue(
-            _GOLDEN.exists(),
-            f"golden missing: {_GOLDEN} (bless with harness --write)",
-        )
-        drift = check_golden(_GOLDEN)
-        self.assertEqual(drift, [], "IR drift vs golden:\n  " + "\n  ".join(drift))
+        registered = {case["case_id"]: case for case in cases()}
+        for dtype in ("bf16", "fp16"):
+            for k in (128, 256):
+                cid = f"gemm/gfx1250/nvfp4/{dtype}/k{k}"
+                with self.subTest(case=cid):
+                    self.assertIn(cid, registered)
+                    case = registered[cid]
+                    self.assertEqual(case["arch"], "gfx1250")
+                    self.assertEqual(case["family"], "gemm")
+                    kernel = case["build"]()
+                    self.assertEqual(len(kernel.params), 10)
+                    self.assertEqual(
+                        [param.name for param in kernel.params[-2:]],
+                        ["A_tensor_scale", "B_tensor_scale"],
+                    )
+                    for flavor in ("llvm23", "llvm24"):
+                        with self.subTest(case=cid, flavor=flavor):
+                            llvm = lower_kernel_to_llvm(
+                                kernel, arch=case["arch"], llvm_flavor=flavor
+                            )
+                            self.assertIn(
+                                "fmul float %A_tensor_scale, %B_tensor_scale", llvm
+                            )
+
+
+# The representative-IR byte-stability gate, split so each LLVM flavor is its own
+# test: lowering every case at every flavor in one test came close to the
+# per-test timeout. Together these check exactly what one all-flavor
+# check_golden call does -- the golden's flavor documents once, then every case
+# at every flavor in GOLDEN_FLAVORS (every lane rocke qualifies, not just the
+# one this host autodetects). A drift means emitted IR changed -- if intended
+# and reviewed, re-bless the changed families' shards with:
+#   python tests/instances/rocke_ir_parity_harness.py \
+#     --write tests/golden/rocke_representative_ir_sha256 --only <family>
+
+
+def test_golden_holds_every_llvm_flavor():
+    """The golden has a document (or alias) for every LLVM flavor and nothing
+    for a flavor rocke no longer qualifies."""
+    assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
+    errors = check_golden_flavors(_GOLDEN)
+    assert errors == [], "golden flavor set is wrong:\n  " + "\n  ".join(errors)
+
+
+@pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
+def test_ir_cases_match_golden_sha256(flavor):
+    """Every case's lowered-IR sha256 (and the set of expected failures) at
+    ``flavor`` matches the committed golden."""
+    assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
+    drift = check_golden(_GOLDEN, flavor)
+    assert drift == [], f"IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
 
 
 class TestGoldenShardWriter(unittest.TestCase):
@@ -199,4 +253,4 @@ class TestGoldenShardWriter(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    raise SystemExit(pytest.main([__file__, "-v"]))

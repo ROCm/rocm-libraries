@@ -255,7 +255,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         if(HIPBLASLT_ENABLE_ROCROLLER)
             target_link_libraries(hipblaslt-test PRIVATE
                 $<TARGET_OBJECTS:hipblaslt-rocroller>
-                rocroller
+                roc::rocroller
             )
         endif()
     endif()

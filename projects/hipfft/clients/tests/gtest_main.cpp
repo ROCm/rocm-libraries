@@ -67,6 +67,9 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
+bool quick_tests_only = false;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;
 size_t      max_nbatch_for_hipfftw_test;
@@ -371,7 +374,10 @@ int main(int argc, char* argv[])
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
-                   "default to alleviate redundancy with rocfft-test)")
+                   "default to alleviate redundancy with rocfft-test). "
+                   "2D or 3D emulation test probabilities are scaled relative to test_prob: "
+                   "emulation_prob is used directly when test_prob is 1 and scaled down by the "
+                   "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(0.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
@@ -413,6 +419,9 @@ int main(int argc, char* argv[])
 
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
+
+            // Very large transforms are not an emulation test target.
+            quick_tests_only = true;
 
             if(emulationtype == emulation_quick)
             {
@@ -534,7 +543,8 @@ int main(int argc, char* argv[])
         ->each([&](const std::string&) {
             // The objective is to have an test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob = 0.002;
+            test_prob        = 0.002;
+            quick_tests_only = true;
         });
     // Token string to fully specify fft params for the manual test.
     std::string test_token;

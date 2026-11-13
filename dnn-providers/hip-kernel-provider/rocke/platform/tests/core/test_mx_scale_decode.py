@@ -28,7 +28,7 @@ from rocke.core.backend import lower_mx_gemm
 from rocke.core.ir import F32, I8, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers import compile_kernel
 from rocke.helpers.mx_scale import (
     BF8_E5M2_FNUZ,
@@ -119,7 +119,7 @@ def test_decoder_hip_reads_the_byte_unsigned():
     assert _EXPECTED_HIP in hip
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_engines_lower_the_decoder_identically(flavor):
     if not _has_cpp_engine():
         pytest.skip("needs the rocke_engine binding")

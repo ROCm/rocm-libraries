@@ -123,6 +123,6 @@ foreach( sample ${sample_list} )
                         RUNTIME_OUTPUT_DIRECTORY 
                         ${SAMPLES_ROCFFT_OUT_DIR})
 
-  target_link_libraries( ${sample} PRIVATE hip::host hip::device )
+  target_link_libraries( ${sample} PRIVATE hip::host )
 
 endforeach( )

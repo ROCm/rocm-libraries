@@ -76,7 +76,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # validators on other targets.
 # ---------------------------------------------------------------------------
 
-from benchmarks.common import batched_timing  # noqa: E402
+from benchmarks.common import batched_timing, conv_fill  # noqa: E402
 from benchmarks.common.case_results import (  # noqa: E402
     RUNNERS_UP,
     ResultsWriter,
@@ -91,7 +91,17 @@ from benchmarks.common.early_stop import (  # noqa: E402
     case_key,
 )
 from benchmarks.common.module_cache import add_module_cache_arg  # noqa: E402
+from benchmarks.common.tf32_verify import (  # noqa: E402
+    TF32_VERIFY_TOL,
+    rank_verified,
+    tf32_implies_verify,
+)
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
+from kernels.conv.aot_jobs import (  # noqa: E402
+    conv_data_spec,
+    dtype_triple,
+    storage_dtype,
+)
 from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
@@ -136,8 +146,11 @@ def _conv_split_k_override() -> int | None:
 
 
 # Data types the benchmark accepts (--dtype) ...
-_DTYPES = ("fp16", "bf16", "fp32")
-# ... and the ones --compile-all builds when --dtype names none.
+# tf32 = fp32 tensors with TF32 matrix-core math (identity triple
+# tf32/tf32/fp32; see kernels.conv.aot_jobs.conv_data_spec).
+_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+# ... and the ones --compile-all builds when --dtype names none (tf32 only
+# by explicit --dtype tf32).
 _COMPILE_DTYPES = ("fp16", "bf16")
 
 # Group-merge degrees swept for depthwise wgrad and fwd. Powers of two only:
@@ -165,7 +178,7 @@ _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 # physical unit -- only ratios between degrees are compared -- so a constant's
 # absolute magnitude says nothing about its influence. Scope: gfx950, forward;
 # refit before relying on it elsewhere. Method and fitting tooling are described
-# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+# in library/builders/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
 _FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
 _FWD_MERGE_CONSTS = (
     # Cost of issuing the A load per K step, divided by the achieved vector
@@ -547,6 +560,54 @@ def _wgrad_exact_tile_combos(
     return out[:cap]
 
 
+# Verify bounds on the peak-normalised error max|out-ref| / max(max|ref|, 1).
+# TF32 has two rows, native (gfx942) and emulated (gfx950); both drivers take
+# them from tf32_verify.TF32_VERIFY_TOL.
+VERIFY_TOL = {
+    "fp16": 5e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-3,
+    **TF32_VERIFY_TOL,
+}
+
+
+def _tf32_is_emulated(arch: str, op_id: "str | None" = None) -> bool:
+    """Whether ``arch`` (or the atom ``op_id``) runs TF32 as bf16x3 emulation.
+
+    ``op_id`` (the kernel's MMA atom) is authoritative; without it the
+    catalog's 16x16 TF32 atom for ``arch`` decides
+    (:func:`kernels.conv.direct_aot_jobs.tf32_is_emulated`).
+    """
+    from rocke.core.arch.target import emulated_tf32_operand_lens
+
+    if op_id is not None:
+        return emulated_tf32_operand_lens(op_id) is not None
+    from kernels.conv.direct_aot_jobs import tf32_is_emulated
+
+    return tf32_is_emulated(arch)
+
+
+def _verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> float:
+    """``--verify`` bound for a kernel whose A/B MMA inputs are ``compute_dtype``.
+
+    Keyed on the compute dtype, not the storage dtype: an fp32 output of bf16
+    MFMAs is only as accurate as bf16 math.
+    """
+    if compute_dtype == "tf32":
+        key = "tf32_emulated" if _tf32_is_emulated(arch, op_id) else "tf32_native"
+        return VERIFY_TOL[key]
+    return VERIFY_TOL.get(compute_dtype, VERIFY_TOL["fp32"])
+
+
+def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
+    """``(ranked, failed)``: results by TFLOPS, verify failures split off.
+
+    The rule is :func:`tf32_verify.rank_verified`'s, shared with the direct
+    driver.
+    """
+    return rank_verified(results, lambda r: r.tflops, lambda r: r.passed, what)
+
+
 def _verify_kernel(
     *,
     rt,
@@ -565,6 +626,8 @@ def _verify_kernel(
     u8,
     arch: str,
     compute_dtype: "str | None" = None,
+    ref_floor: float = 1.0,
+    op_id: "str | None" = None,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -586,6 +649,9 @@ def _verify_kernel(
     extra_tensors:
         Additional {name: tensor} pairs saved alongside out/ref/diff when
         ``dump_fail`` is set (e.g. ``{"dY": dY_t, "X": X_t}`` for wgrad).
+    ref_floor:
+        Floor of the reference peak in the error's denominator
+        (:func:`conv_fill.ref_floor` of the direction; 1 for U(-1, 1) data).
 
     Returns
     -------
@@ -612,11 +678,11 @@ def _verify_kernel(
     if arch == "gfx1250":
         out_f32 = out_cpu.float()
         abs_diff = out_f32.sub(ref_out.cpu()).abs()
-        ref_scale = ref_out.cpu().abs().max().clamp(min=1.0)
+        ref_scale = ref_out.cpu().abs().max().clamp(min=ref_floor)
     else:
         out_f32 = out_cpu.float().cuda()
         abs_diff = out_f32.sub(ref_out).abs()
-        ref_scale = ref_out.abs().max().clamp(min=1.0)
+        ref_scale = ref_out.abs().max().clamp(min=ref_floor)
     rel_err = float(abs_diff.max() / ref_scale)
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
@@ -629,11 +695,11 @@ def _verify_kernel(
     # keying off out_t.dtype would apply the 1e-3 fp32 bound to a 16-bit result
     # and fail every kernel. compute_dtype is the A/B dtype when the caller
     # separates them; without it, fall back to the output dtype.
-    if compute_dtype is not None:
-        _lowp = compute_dtype in ("fp16", "bf16")
-    else:
-        _lowp = out_t.dtype in (torch.float16, torch.bfloat16)
-    tol = 5e-2 if _lowp else 1e-3
+    if compute_dtype is None:
+        compute_dtype = (
+            "fp16" if out_t.dtype in (torch.float16, torch.bfloat16) else "fp32"
+        )
+    tol = _verify_tol(compute_dtype, arch, op_id)
     err = rel_err
     status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
@@ -692,9 +758,11 @@ def parse_json_case(entry: dict):
 
     Supports entries from bench_cases_conv.json and bench_cases_conv_bwd.json.
     Fields: N, Cin, Cout, H, W, Kh, Kw, stride (int or [sH,sW]), pad (int or [pH,pW]),
-    dilation (int or [dH,dW]), groups, dtype, layout, Di/D/Kd for 3-D.
+    dilation (int or [dH,dW]), groups, dtype, math ("fp32" | "tf32"), layout,
+    Di/D/Kd for 3-D.
 
-    Raises ``ValueError`` for unsupported layouts (NCHW) or unsupported op types.
+    Raises ``ValueError`` for unsupported layouts (NCHW), op types, dtypes or
+    math modes.
     """
     op = entry.get("op", "conv2d")
     layout = entry.get("layout", "NHWC").upper()
@@ -703,8 +771,23 @@ def parse_json_case(entry: dict):
         raise ValueError(f"op={op!r} is not supported")
 
     dtype = entry.get("dtype", "fp16")
-    if dtype not in ("fp16", "bf16", "fp32"):
-        raise ValueError(f"dtype={dtype!r} is not supported (only fp16, bf16, fp32)")
+    if dtype not in ("fp16", "bf16", "fp32", "tf32"):
+        raise ValueError(
+            f"dtype={dtype!r} is not supported (only fp16, bf16, fp32, tf32)"
+        )
+    # TF32 is fp32 storage with a math mode: spelled "tf32", or "fp32" with
+    # "math": "tf32" ("math": "fp32" is the IEEE default). A math field is
+    # checked, not coerced: anything else, or one that contradicts the
+    # dtype, is rejected rather than read as fp32.
+    if "math" in entry:
+        math_mode = entry["math"]
+        if not isinstance(math_mode, str) or math_mode not in ("fp32", "tf32"):
+            raise ValueError(
+                f"math={math_mode!r} is not supported (only 'fp32' or 'tf32')"
+            )
+        if dtype not in ("fp32", "tf32") or (dtype == "tf32" and math_mode != "tf32"):
+            raise ValueError(f"math={math_mode!r} does not apply to dtype={dtype!r}")
+        dtype = math_mode
 
     from kernels.common.conv_implicit_gemm import ConvProblem
 
@@ -847,8 +930,8 @@ def parse_json_case(entry: dict):
     return problem, dtype
 
 
-def parse_miopen_cmd(cmd: str):
-    """Parse a MIOpenDriver command string into a ``(ConvProblem, dtype)`` tuple.
+def parse_miopen_cmd(cmd: str, *, require_layout: bool = False):
+    """Parse a MIOpenDriver command string into a ``(ConvProblem, dtype, forw)`` tuple.
 
     Accepts the full command line (including the binary path and driver name),
     e.g.::
@@ -857,11 +940,20 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only 2-D NHWC convolutions are supported; the function raises
-    ``ValueError`` for unsupported cases (3-D, NCHW).
-    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
-    ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
-    value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
+    2-D (``-_ 2``, the default) NHWC/NWC and 3-D (``-_ 3``: ``-!`` depth,
+    ``-@`` filter depth, ``-#`` depth stride, ``-$`` depth pad, ``-^`` depth
+    dilation) NDHWC convolutions are supported; anything else raises
+    ``ValueError``.
+
+    ``dtype`` is ``"fp16"``, ``"bf16"``, ``"fp32"`` or ``"tf32"``: the plain
+    fp32 driver (``conv``/``convfp32``) with ``-M 0`` (MIOpen's "use TF32 if possible" math
+    type) is ``"tf32"``. ``-M`` has no effect on the 16-bit drivers, which
+    MIOpen never runs as TF32. ``forw`` is the raw MIOpenDriver ``-F`` value
+    (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
+
+    MIOpen's default layout is NCHW/NCDHW, which this benchmark does not run.
+    A command without ``-I``/``--in_layout`` is read as channels-last with a
+    warning, or rejected with ``require_layout=True``.
     """
     import shlex
 
@@ -892,42 +984,94 @@ def parse_miopen_cmd(cmd: str):
             file=sys.stderr,
         )
 
-    # Re-parse the tokens after the driver keyword using argparse.
-    sub = argparse.ArgumentParser(add_help=False)
-    sub.add_argument("-n", "--n", dest="N", type=int, default=1)
-    sub.add_argument("-c", "--c", dest="C", type=int, default=1)
-    sub.add_argument("-H", "--H", dest="Hi", type=int, default=1)
-    sub.add_argument("-W", "--W", dest="Wi", type=int, default=1)
-    sub.add_argument("-k", "--k", dest="K", type=int, default=1)
-    sub.add_argument("-y", "--y", dest="Y", type=int, default=1)
-    sub.add_argument("-x", "--x", dest="X", type=int, default=1)
-    sub.add_argument("-p", "--p", dest="pH", type=int, default=0)
-    sub.add_argument("-q", "--q", dest="pW", type=int, default=0)
-    sub.add_argument("-u", "--u", dest="sH", type=int, default=1)
-    sub.add_argument("-v", "--v", dest="sW", type=int, default=1)
-    sub.add_argument("-l", "--l", dest="dH", type=int, default=1)
-    sub.add_argument("-j", "--j", dest="dW", type=int, default=1)
-    sub.add_argument("-g", "--g", dest="groups", type=int, default=1)
-    sub.add_argument("-F", "--F", dest="forw", type=int, default=1)
+    # Re-parse the tokens after the driver keyword using argparse. Each flag
+    # takes its short form, the legacy ``--<short>`` spelling and MIOpenDriver's
+    # own long name.
+    # No abbreviations: ``-i 10`` (iterations) would otherwise match
+    # ``-in_layout``.
+    sub = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    sub.add_argument("-n", "--n", "--batchsize", dest="N", type=int, default=1)
+    sub.add_argument("-c", "--c", "--in_channels", dest="C", type=int, default=1)
+    sub.add_argument("-H", "--H", "--in_h", dest="Hi", type=int, default=1)
+    sub.add_argument("-W", "--W", "--in_w", dest="Wi", type=int, default=1)
+    sub.add_argument("-k", "--k", "--out_channels", dest="K", type=int, default=1)
+    sub.add_argument("-y", "--y", "--fil_h", dest="Y", type=int, default=1)
+    sub.add_argument("-x", "--x", "--fil_w", dest="X", type=int, default=1)
+    sub.add_argument("-p", "--p", "--pad_h", dest="pH", type=int, default=0)
+    sub.add_argument("-q", "--q", "--pad_w", dest="pW", type=int, default=0)
+    sub.add_argument("-u", "--u", "--conv_stride_h", dest="sH", type=int, default=1)
+    sub.add_argument("-v", "--v", "--conv_stride_w", dest="sW", type=int, default=1)
+    sub.add_argument("-l", "--l", "--dilation_h", dest="dH", type=int, default=1)
+    sub.add_argument("-j", "--j", "--dilation_w", dest="dW", type=int, default=1)
+    sub.add_argument("-g", "--g", "--group_count", dest="groups", type=int, default=1)
+    sub.add_argument("-F", "--F", "--forw", dest="forw", type=int, default=1)
+    # 3-D (-_ 3); defaults are MIOpenDriver's.
+    sub.add_argument("-!", "--in_d", dest="Di", type=int, default=32)
+    sub.add_argument("-@", "--fil_d", dest="Z", type=int, default=3)
+    sub.add_argument("-#", "--conv_stride_d", dest="sD", type=int, default=1)
+    sub.add_argument("-$", "--pad_d", dest="pD", type=int, default=0)
+    sub.add_argument("-^", "--dilation_d", dest="dD", type=int, default=1)
     sub.add_argument(
-        "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
+        "-I", "-in_layout", "--in_layout", dest="in_layout", type=str, default=None
     )
+    sub.add_argument(
+        "-f", "-fil_layout", "--fil_layout", dest="fil_layout", type=str, default=None
+    )
+    sub.add_argument(
+        "-O", "-out_layout", "--out_layout", dest="out_layout", type=str, default=None
+    )
+    # 0 = TF32 if possible, 1 = IEEE (MIOpenDriver's default).
+    sub.add_argument("-M", "--math_type", dest="math_type", type=int, default=1)
     # Ignored flags — consumed to avoid parse errors.
-    sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
-    sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
-    sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
-    sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
+    sub.add_argument("-m", "--m", "--mode", dest="_mode", type=str, default="conv")
+    sub.add_argument("-t", "--t", "--time", dest="_time", type=int, default=0)
+    sub.add_argument("-V", "--V", "--verify", dest="_verify", type=int, default=1)
+    sub.add_argument("-i", "--iter", dest="_iter", type=int, default=10)
+    sub.add_argument(
+        "-_", "--_", "--spatial_dim", dest="spatial_dim", type=int, default=2
+    )
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
 
-    layout = miopen_args.in_layout.upper()
-    if layout not in ("NHWC", "NWC"):
-        raise ValueError(
-            f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
+    if _MIOPEN_DTYPE_MAP[driver_kw] == "fp32" and miopen_args.math_type == 0:
+        dtype = "tf32"
+
+    spatial = miopen_args.spatial_dim
+    if spatial not in (2, 3):
+        raise ValueError(f"-_ {spatial}: only 2-D and 3-D convolutions are supported")
+    is_3d = spatial == 3
+    accepted = ("NDHWC",) if is_3d else ("NHWC", "NWC")
+    if miopen_args.in_layout is None:
+        msg = (
+            "no -I/--in_layout given: MIOpenDriver defaults to "
+            f"{'NCDHW' if is_3d else 'NCHW'}, this benchmark runs "
+            f"{accepted[0]}"
         )
+        if require_layout:
+            raise ValueError(msg)
+        print(f"[warn] {msg}; reading the shape as {accepted[0]}", file=sys.stderr)
+    for name in ("in_layout", "fil_layout", "out_layout"):
+        layout = getattr(miopen_args, name)
+        if layout is not None and layout.upper() not in accepted:
+            raise ValueError(
+                f"{name} {layout!r} is not supported; only "
+                f"{'/'.join(accepted)} is accepted for a "
+                f"{'3-D' if is_3d else '2-D'} convolution"
+            )
 
     from kernels.common.conv_implicit_gemm import ConvProblem
 
+    depth = (
+        dict(
+            Di=miopen_args.Di,
+            Z=miopen_args.Z,
+            sD=miopen_args.sD,
+            pD=miopen_args.pD,
+            dD=miopen_args.dD,
+        )
+        if is_3d
+        else {}
+    )
     problem = ConvProblem(
         N=miopen_args.N,
         Hi=miopen_args.Hi,
@@ -943,6 +1087,7 @@ def parse_miopen_cmd(cmd: str):
         dH=miopen_args.dH,
         dW=miopen_args.dW,
         groups=miopen_args.groups,
+        **depth,
     )
     return problem, dtype, miopen_args.forw
 
@@ -1127,8 +1272,9 @@ def main() -> int:
         "--dtype",
         default=None,
         choices=_DTYPES,
-        help="data type (default: fp16). --compile-all builds the cache for "
-        "fp16 and bf16 unless --dtype names one.",
+        help="data type (default: fp16). tf32 = fp32 tensors, TF32 matrix-core "
+        "math. --compile-all builds the cache for fp16 and bf16 unless --dtype "
+        "names one.",
     )
     parser.add_argument(
         "--top",
@@ -1227,7 +1373,7 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="verify first valid kernel against torch reference before sweep",
+        help="verify every kernel against the torch reference; ranking skips failures",
     )
     parser.add_argument(
         "--dump-fail",
@@ -1390,7 +1536,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built); "
+            "cannot be built), except under --run-from-cache, where the cached "
+            "two-stage kernels always compete with the packed-atomic ones; "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -1647,7 +1794,15 @@ def main() -> int:
         help="AOT only: stop after building this many kernels (smoke tests).",
     )
 
+    conv_fill.add_argument(parser)
+    parser.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached kernels whose labels the file "
+        "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
+    )
     args = parser.parse_args()
+    conv_fill.set_mode(args.fill)
     if args.skip_measured and not args.run_from_cache:
         print(
             "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
@@ -1678,6 +1833,10 @@ def main() -> int:
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else _COMPILE_DTYPES
     if args.dtype is None:
         args.dtype = "fp16"
+    # A TF32 ranking is only meaningful over verified kernels.
+    tf32_implies_verify(
+        args, "tf32" in args.compile_dtypes, "--dtype tf32 implies --verify"
+    )
     # --direction likewise: fwd for shape flags, every direction for
     # --compile-all unless one is named.
     args.compile_directions = (
@@ -1776,8 +1935,8 @@ def main() -> int:
     arch = args.arch
     target = ArchTarget.from_gfx(arch)
 
-    # Build the list of (problem, dtype) cases to sweep.
-    cases: list  # List[Tuple[ConvProblem, str]]
+    # Build the list of (problem, dtype, direction) cases to sweep.
+    cases: list  # List[Tuple[ConvProblem, str, str]]
     if args.json_file is not None:
         import json
 
@@ -1805,7 +1964,7 @@ def main() -> int:
                     continue
             try:
                 prob, dt = parse_json_case(entry)
-                cases.append((prob, dt))
+                cases.append((prob, dt, args.direction))
             except ValueError as e:
                 print(f"[warn] {path} case {case_id}: skipping — {e}", file=sys.stderr)
         if not cases:
@@ -1855,6 +2014,15 @@ def main() -> int:
             groups=args.groups,
         )
         cases = [(problem, args.dtype, args.direction)]
+
+    # A TF32 case can come from --dtype, a JSON case or a MIOpenDriver
+    # ``-M 0`` command; whichever, its ranking is only meaningful over
+    # verified kernels.
+    tf32_implies_verify(
+        args,
+        any(len(c) > 1 and c[1] == "tf32" for c in cases),
+        "tf32 cases imply --verify",
+    )
 
     _csv_fields = [
         "rank",
@@ -1915,7 +2083,7 @@ def main() -> int:
     n_csv_rows = 0
     try:
         for case_idx, (problem, dtype, direction) in enumerate(cases):
-            _elem_bytes = 4 if dtype == "fp32" else 2
+            _elem_bytes = 4 if storage_dtype(dtype) == "fp32" else 2
             _A_bytes = (
                 problem.N
                 * (problem.Di or 1)
@@ -2100,7 +2268,6 @@ def _build_fwd_one(args_tuple):
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import (
-        ConvDataSpec,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
         is_valid_spec_for_problem,
@@ -2123,7 +2290,7 @@ def _build_fwd_one(args_tuple):
     spec = ImplicitGemmConvSpec(
         problem=problem,
         name="rocke_bench_igemm_conv",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2171,7 +2338,6 @@ def _build_wgrad_one(args_tuple):
     group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
@@ -2199,8 +2365,8 @@ def _build_wgrad_one(args_tuple):
     # same predicate dispatch uses.
     lds_k_outer = WgradConvSpec.default_lds_k_outer(
         arch=arch,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         warp_tile_m=warp_tile_mn,
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
@@ -2211,8 +2377,8 @@ def _build_wgrad_one(args_tuple):
     lds_k_pad = WgradConvSpec.default_lds_k_pad(
         arch=arch,
         tile_k=tile_k,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
         wave_size=target.wave_size,
@@ -2243,7 +2409,7 @@ def _build_wgrad_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2324,7 +2490,6 @@ def _build_wgrad_two_stage_one(args_tuple):
     ws_replicas = combo.ws_replicas
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
@@ -2382,8 +2547,8 @@ def _build_wgrad_two_stage_one(args_tuple):
     # it: an explicit pad is rejected under the K-outer tile.
     _ts_k_outer = WgradConvSpec.default_lds_k_outer(
         arch=arch,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         warp_tile_m=warp_tile_mn,
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
@@ -2392,7 +2557,7 @@ def _build_wgrad_two_stage_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad_2s",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2424,8 +2589,8 @@ def _build_wgrad_two_stage_one(args_tuple):
         lds_k_pad=WgradConvSpec.default_lds_k_pad(
             arch=arch,
             tile_k=tile_k,
-            dtype_a=dtype,
-            dtype_b=dtype,
+            dtype_a=storage_dtype(dtype),
+            dtype_b=storage_dtype(dtype),
             lds_k_outer=_ts_k_outer,
             async_dma=async_dma,
             wave_size=target.wave_size,
@@ -2455,7 +2620,7 @@ def _build_wgrad_two_stage_one(args_tuple):
 
     s2_spec = WgradReduceSpec(
         problem=problem,
-        dtype_d=dtype,
+        dtype_d=storage_dtype(dtype),
         groups=problem.groups,
         # Must match Stage 1. Folding fewer slabs than Stage 1 wrote silently
         # drops part of the sum; folding more reads past the scratch.
@@ -2500,7 +2665,6 @@ def _build_dgrad_one(args_tuple):
         return None
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
@@ -2551,14 +2715,14 @@ def _build_dgrad_one(args_tuple):
         # layouts directly rather than going through this driver.
         lds_k_outer=DgradConvSpec.default_lds_k_outer(
             arch=arch,
-            dtype_b=dtype,
+            dtype_b=storage_dtype(dtype),
             warp_tile_n=warp_tile_mn,
             cpg=problem.cpg,
             wave_size=target.wave_size,
             pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2786,6 +2950,19 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
     return artifact_map
 
 
+def _fwd_sweep_inputs(a_shape: tuple, b_shape: tuple, dtype: str, args):
+    """The forward sweep's fp32 ``(A, B)`` (activations, weights), A first:
+    the ``--debug-init`` constant when given, else filled per ``--fill``
+    (:mod:`benchmarks.common.conv_fill`; ``dtype`` is the io dtype)."""
+    import torch
+
+    if args.debug_init is not None:
+        return torch.full(a_shape, args.debug_init), torch.full(
+            b_shape, args.debug_init
+        )
+    return conv_fill.fwd_operands(a_shape, b_shape, dtype)
+
+
 def _run_sweep(
     *,
     args,
@@ -2820,23 +2997,18 @@ def _run_sweep(
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
-    }[dtype]
+    }[storage_dtype(dtype)]
     torch.manual_seed(42)
 
-    def _make(*shape):
-        return (
-            torch.full(shape, args.debug_init)
-            if args.debug_init is not None
-            else torch.empty(*shape).uniform_(-1.0, 1.0)
-        )
-
     if p.is_3d:
-        _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.cpg)
+        _A_f32, _B_f32 = _fwd_sweep_inputs(
+            (p.N, p.Di, p.Hi, p.Wi, p.C), (p.K, p.Z, p.Y, p.X, p.cpg), dtype, args
+        )
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
-        _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _B_f32 = _make(p.K, p.Y, p.X, p.cpg)
+        _A_f32, _B_f32 = _fwd_sweep_inputs(
+            (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.cpg), dtype, args
+        )
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)
@@ -2844,7 +3016,7 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype, is_3d=p.is_3d)
+    sig = conv_args_signature(storage_dtype(dtype), is_3d=p.is_3d)
     # AOT args: extents, strides and magic constants the kernel would otherwise
     # have had folded in as compile-time constants.
     # Built per spec below: the tile is part of the args object because the
@@ -3121,6 +3293,8 @@ def _run_sweep(
                 dump_fail=args.dump_fail,
                 u8=_u8,
                 arch=arch,
+                ref_floor=conv_fill.ref_floor(),
+                compute_dtype=dtype,
             )
             if stopped:
                 rt.free(A_dev)
@@ -3153,7 +3327,7 @@ def _run_sweep(
         # making the merged and unmerged legs indistinguishable in the table.
         _pl = spec.merged_problem
         _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(
-            _pl.cpg, _pl.kpg, dtype
+            _pl.cpg, _pl.kpg, storage_dtype(dtype)
         )
         _tile_vec = _choose_load_vec(spec)
         _va = min(_va, _tile_vec)
@@ -3212,7 +3386,10 @@ def _run_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results)
+    if not results:
+        print("No configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     show_verify = args.verify
@@ -3248,7 +3425,7 @@ def _run_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0, results
+    return 0, results + _failed
 
 
 def _run_wgrad_sweep(
@@ -3303,8 +3480,8 @@ def _run_wgrad_sweep(
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
     }
-    _torch_dtype = _TORCH_DT[dtype]
-    _torch_dtype_d = _TORCH_DT[dtype]
+    _torch_dtype = _TORCH_DT[storage_dtype(dtype)]
+    _torch_dtype_d = _TORCH_DT[dtype_triple(dtype)[2]]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -3333,7 +3510,7 @@ def _run_wgrad_sweep(
     # AOT: wgrad-specific signature with runtime problem dims. There is only
     # one form now -- ks/ks_count are always kernargs -- so the split and
     # unsplit launches below share it.
-    sig = conv_args_signature(dtype, direction="wgrad", is_3d=p.is_3d)
+    sig = conv_args_signature(storage_dtype(dtype), direction="wgrad", is_3d=p.is_3d)
 
     # Pre-compute wgrad AOT args (dims, strides, magic numbers).
     # Built per spec below; see the forward sweep.
@@ -3552,7 +3729,11 @@ def _run_wgrad_sweep(
     # axis here; the pipelines that alias another's code are skipped as in
     # the AOT grid. The CTA pool is a kernarg (--streamk-ctas).
     _sk_reductions = tuple(
-        r for r in args.streamk_reductions if r != "atomic" or dtype == "fp32"
+        r
+        for r in args.streamk_reductions
+        # The atomic reduction adds into dW, which needs a 32-bit dW (tf32
+        # stores dW as fp32).
+        if r != "atomic" or dtype_triple(dtype)[2] == "fp32"
     )
     pending_sk = []
     if args.streamk_modes and arch not in ("gfx942", "gfx950"):
@@ -3798,7 +3979,7 @@ def _run_wgrad_sweep(
             n_run += 1
 
             _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                p.C, p.K, dtype, split_k=_launch_sk
+                p.C, p.K, storage_dtype(dtype), split_k=_launch_sk
             )
             results.append(
                 Result(
@@ -3821,6 +4002,7 @@ def _run_wgrad_sweep(
                     vec_b=_vb,
                     vec_c=_vc,
                     group_merge=_gm,
+                    passed=kernel_passed,
                 )
             )
 
@@ -4055,7 +4237,7 @@ def _run_wgrad_sweep(
                 n_run += 1
 
                 _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                    p.C, p.K, dtype, split_k=_launch_sk
+                    p.C, p.K, storage_dtype(dtype), split_k=_launch_sk
                 )
                 results.append(
                     Result(
@@ -4079,6 +4261,7 @@ def _run_wgrad_sweep(
                         two_stage=True,
                         group_merge=_gm,
                         ws_replicas=spec.ws_replicas,
+                        passed=kernel_passed,
                     )
                 )
                 print(
@@ -4187,7 +4370,7 @@ def _run_wgrad_sweep(
                 cur_gbps = (bytes_xfer / ms) * 1e-6
                 n_run += 1
                 _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                    p.C, p.K, dtype, split_k=1
+                    p.C, p.K, storage_dtype(dtype), split_k=1
                 )
                 results.append(
                     Result(
@@ -4234,7 +4417,10 @@ def _run_wgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results, "wgrad ")
+    if not results:
+        print("No wgrad configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     print(f"\n{'='*92}")
@@ -4265,7 +4451,7 @@ def _run_wgrad_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0, results
+    return 0, results + _failed
 
 
 def _run_dgrad_sweep(
@@ -4315,11 +4501,20 @@ def _run_dgrad_sweep(
     _u8 = u8
     p = problem
 
+    if p.is_3d:
+        # The dgrad kernel (tilde sub-GEMMs, 4-D dX) is 2-D only.
+        print(
+            f"error: dgrad of a 3-D convolution ({p.short()}) is not supported "
+            f"by the implicit-GEMM dgrad kernel (2-D only).",
+            file=sys.stderr,
+        )
+        return 2, []
+
     _torch_dtype = {
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
-    }[dtype]
+    }[storage_dtype(dtype)]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -4339,11 +4534,13 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(
+        p.cpg, p.kpg, storage_dtype(dtype)
+    )
     # AOT: dgrad signature with runtime dims + sub_gemm tilde buffer.
     # The dgrad ABI already carries the tilde record buffer; there is no
     # separate "extended" form.
-    base_sig = conv_args_signature(dtype, direction="dgrad")
+    base_sig = conv_args_signature(storage_dtype(dtype), direction="dgrad")
     ext_sig = base_sig
 
     # Pre-compute dgrad AOT args.
@@ -4499,13 +4696,14 @@ def _run_dgrad_sweep(
                 extra_tensors={"dY": dY_t, "W": W_t},
                 u8=_u8,
                 arch=arch,
+                compute_dtype=dtype,
             )
             if stopped:
                 rt.free(sgbuf_dev)
                 rt.free(dY_dev)
                 rt.free(W_dev)
                 rt.free(dX_dev)
-                return 1
+                return 1, []
 
         if _zero_init:
             from rocke.runtime import resolve_stream
@@ -4555,6 +4753,7 @@ def _run_dgrad_sweep(
                 vec_a=vec_a,
                 vec_b=vec_b,
                 vec_c=vec_c,
+                passed=kernel_passed,
             )
         )
 
@@ -4585,7 +4784,10 @@ def _run_dgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results, "dgrad ")
+    if not results:
+        print("No dgrad configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     print(f"\n{'='*80}")
@@ -4606,8 +4808,8 @@ def _run_dgrad_sweep(
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 
     best = results[0]
-    print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
-    return 0, results
+    print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
+    return 0, results + _failed
 
 
 # ---------------------------------------------------------------------------
@@ -4670,6 +4872,22 @@ def _cache_dispatch(args, arch, target, cases) -> int:
     return _run_from_cache(args, arch, target, cases, cache, directions)
 
 
+def _filter_wgrad_two_stage_candidates(candidates, two_stage_mode):
+    """Cached-candidate wgrad two-stage filter.
+
+    By default both split-K reductions compete: the cached two-stage
+    (scratch + reduce) kernels are timed next to the packed-atomic ones
+    whatever C/groups is -- the JIT sweep builds them for odd C/groups only,
+    but here they are already compiled, and deep f32-workspace splits beat
+    the atomic ones on many even shapes. Only an explicit
+    ``--two-stage never`` drops them outright; "auto" and "always" leave
+    ``candidates`` untouched regardless of C/groups parity.
+    """
+    if two_stage_mode != "never":
+        return candidates
+    return [c for c in candidates if not c[0].two_stage]
+
+
 def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     """Benchmark every cached kernel that can run each requested case.
 
@@ -4713,6 +4931,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     overall_rc = 0
     # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
     stage2_kernels: dict = {}
+    # --kernels-file: only the cached kernels named there (labels as the
+    # results print them, with or without the direction prefix)
+    kernel_map = conv_fill.load_kernels_file(getattr(args, "kernels_file", None))
     for case_idx, case in enumerate(cases, 1):
         problem = case[0]
         case_dtype = case[1] if len(case) > 1 else args.dtype
@@ -4724,7 +4945,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # otherwise open with a few thousand lines of nothing.
                 n_skipped += 1
                 continue
-            # The problem the kernels launch on (dgrad runs width-folded, as
+            # The problem the kernels launch on (fwd and dgrad run width-folded, as
             # the dispatcher launches it); the tensors, the reference and the
             # FLOP count stay the case's own -- the fold keeps every byte.
             run_problem = _launch_problem(direction, problem)
@@ -4740,12 +4961,20 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # A kernel launches on one batch slice at a time, so it is offered
             # against the largest slice: the grid limits apply to that.
             fit_problem = dc_replace(run_problem, N=batch_chunks[0][1])
+            keep = (
+                None
+                if kernel_map is None
+                else conv_fill.kernels_for(
+                    kernel_map, case_key(problem, case_dtype, direction)
+                )
+            )
             candidates = [
                 (ident, path, meta)
                 for ident, path, meta in cache.compatible(
                     fit_problem, direction=direction
                 )
                 if ident.dtype_a == case_dtype
+                and (keep is None or ident.label() in keep)
             ]
             if not candidates:
                 _, why = next(
@@ -4783,26 +5012,29 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
-            if direction == "wgrad" and args.two_stage != "always":
-                # Same rule as the JIT sweep's --two-stage: by default the
-                # two-stage (scratch + reduce) kernels only run when C/groups
-                # is odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright; "always" keeps them alongside
-                # the packed-atomic ones, so both reductions compete.
-                odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                if args.two_stage == "never" or not odd:
-                    candidates = [c for c in candidates if not c[0].two_stage]
+            if direction == "wgrad" and len(batch_chunks) > 1:
+                # A batch too large for the kernels' i32 addressing runs as
+                # slices that accumulate into dW: only the kernels that add
+                # into dW can serve it.
+                candidates = [c for c in candidates if _wgrad_accumulates(c[0])]
                 if not candidates:
                     print(
                         f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
-                        f"no compatible kernel ("
-                        + (
-                            "two-stage disabled by --two-stage never"
-                            if args.two_stage == "never"
-                            else "two-stage kernels only run for odd C/groups; "
-                            "see --two-stage"
-                        )
-                        + ")",
+                        f"no compatible kernel (the batch runs as "
+                        f"{len(batch_chunks)} slices, which needs a split-K "
+                        f"kernel that accumulates into dW)",
+                        flush=True,
+                    )
+                    continue
+            if direction == "wgrad":
+                candidates = _filter_wgrad_two_stage_candidates(
+                    candidates, args.two_stage
+                )
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        "no compatible kernel (two-stage disabled by "
+                        "--two-stage never)",
                         flush=True,
                     )
                     continue
@@ -4865,7 +5097,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     flush=True,
                 )
 
-            torch_dt = _TORCH_DT[case_dtype]
+            torch_dt = _TORCH_DT[storage_dtype(case_dtype)]
             torch.manual_seed(42)
             # Operand shapes follow the direction: fwd contracts A x B -> D,
             # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
@@ -4881,8 +5113,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             else:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
-            A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
-            B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
+            if direction == "fwd":
+                A_t = conv_fill.fill_x(torch.empty(*a_shape, dtype=torch_dt))
+                B_t = conv_fill.fill_w(
+                    torch.empty(*b_shape, dtype=torch_dt), case_dtype
+                )
+            else:
+                A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
+                B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
             D_t = torch.empty(*d_shape, dtype=torch_dt)
 
             rt = Runtime()
@@ -5086,6 +5324,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                                 u8=_u8,
                                 arch=arch,
                                 compute_dtype=case_dtype,
+                                ref_floor=conv_fill.ref_floor(direction),
                             )
                         except (HipError, RuntimeError) as e:
                             print(f"  verify {label}: FAIL({e})", flush=True)
@@ -5213,20 +5452,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
 def _launch_problem(direction, problem):
     """The problem the cached kernels of ``direction`` launch on for ``problem``.
 
-    A dgrad whose width folds into its channels runs folded
+    A forward or dgrad pass whose width folds into its channels runs folded
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
-    bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
-    ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
-    is what dispatch runs.
-
-    A forward folds the same way: the identity behind ``fold_width`` does not
-    depend on the direction, so a patch embedding (stride = filter, no
-    padding) or a 2x2 stride-2 downsample runs as a ``Y x 1`` convolution
-    over ``X * C`` contiguous channels -- vector-wide A loads instead of
-    ``C``-element gathers -- on exactly the case's tensors. Every other
-    problem launches as it is.
+    bytes in all three tensors, fewer and wider sub-GEMMs (dgrad) or
+    vector-wide patch rows (fwd) -- exactly as ``dispatch.grouped_convolution``
+    launches it, so what is benchmarked here is what dispatch runs. Every
+    other problem (and wgrad) launches as it is.
     """
-    if direction not in ("dgrad", "fwd"):
+    if direction not in ("fwd", "dgrad"):
         return problem
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
@@ -5314,7 +5547,9 @@ def _fast_rank_candidates(
             # A stream-K binary partitions K over its CTA pool itself; the
             # split-K kernarg is not its knob, so it ranks once.
             degrees = (None,)
-        elif direction == "wgrad" and ident.split_k > 1:
+        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
+            # A split-K forward binary takes its degree as a kernarg too, so
+            # it ranks once per degree like wgrad's.
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
@@ -5438,6 +5673,7 @@ def _fast_rank_candidates(
                 u8=u8,
                 arch=arch,
                 compute_dtype=case_dtype,
+                ref_floor=conv_fill.ref_floor(direction),
             )
         except (HipError, RuntimeError) as e:
             print(f"  verify {labels[i]}: FAIL({e})", flush=True)
@@ -5518,10 +5754,13 @@ def _widest_vector_sizes(candidates):
     thread) only in narrower copies. Narrower access does not win, so only the
     kernels at the problem's widest combination are run.
 
-    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
-    group merging -- because the kind caps some widths regardless of the
-    problem: the default epilogue stores scalar (c = 1), and a group-merged
-    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode,
+    group merging and the K loop (synchronous or async-DMA) -- because the
+    kind caps some widths regardless of the problem: the default epilogue
+    stores scalar (c = 1), a group-merged kernel derives its widths in the
+    builder (recorded as 0), and an async-DMA kernel records the chunk widths
+    its copies use where a synchronous one records its width caps, which its
+    loader can narrow at build time, so the two do not compare. Default-epilogue
     kernels are dropped altogether where a kernel of the same kind can store
     wider than 1 for this problem.
     ``supports_problem`` has already dropped widths the problem cannot take,
@@ -5539,15 +5778,22 @@ def _widest_vector_sizes(candidates):
             ident.group_merge,
             ident.streamk,
             ident.streamk_reduction,
+            bool(getattr(ident, "async_dma", False)),
         )
 
     def rank(ident):
-        return (
-            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
-            ident.vector_size_a,
-            ident.vector_size_b,
-            ident.vector_size_c,
-        )
+        # An async-DMA binary leaves A / B unset and records the chunk widths
+        # its copies use instead; it ranks by those against the other async
+        # binaries of its kind (kind() keeps it apart from the synchronous
+        # kernels, whose recorded caps are not their effective load widths).
+        a = ident.vector_size_a
+        b = ident.vector_size_b
+        if a is None:
+            a = getattr(ident, "async_chunk_a", 0) or 8
+        if b is None:
+            b = getattr(ident, "async_chunk_b", 0) or 8
+        c = ident.vector_size_c or 0
+        return (a + b + c, a, b, c)
 
     # The default epilogue stores scalar (c = 1) straight from the MMA
     # accumulators. Where the same kind of kernel can store wider -- a
@@ -5614,15 +5860,19 @@ def _signature_for_identity(ident, dtype):
 
     if ident.direction == "wgrad":
         return conv_args_signature(
-            dtype,
+            storage_dtype(dtype),
             direction="wgrad",
             is_3d=ident.is_3d,
             two_stage=ident.two_stage,
             streamk=ident.streamk_reduction if ident.streamk != "off" else None,
         )
     if ident.direction == "dgrad":
-        return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
-    return conv_args_signature(dtype, is_3d=ident.is_3d, two_stage=ident.two_stage)
+        return conv_args_signature(
+            storage_dtype(dtype), direction="dgrad", is_3d=ident.is_3d
+        )
+    return conv_args_signature(
+        storage_dtype(dtype), is_3d=ident.is_3d, two_stage=ident.two_stage
+    )
 
 
 def _ws_replicas_of(ident) -> int:
@@ -5824,14 +6074,11 @@ def _cached_streamk_run(
     kernargs depend only on the tile, the warp layout, the stream-K mode and
     reduction, the scratch replicas and the launch shape.
     """
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     spec = WgradConvSpec(
         problem=problem,
-        data=ConvDataSpec(
-            dtype_a=ident.dtype_a, dtype_b=ident.dtype_b, dtype_d=ident.dtype_d
-        ),
+        data=conv_data_spec(ident.dtype_a, ident.dtype_b, ident.dtype_d),
         tile_m=ident.tile_m,
         tile_n=ident.tile_n,
         tile_k=ident.tile_k,
@@ -5897,7 +6144,7 @@ def _split_k_degrees(
 
     ``direction="fwd"`` serves the split-K forward binary: the resolver's
     degree is the forward policy's
-    (:func:`rocke.helpers.split_k.select_split_k_fwd`), added only where it
+    (:func:`kernels.common.conv_split_k.select_split_k_fwd`), added only where it
     splits -- where it does not, the plain forward binary is the one to time --
     and a degree is also dropped when its grid exceeds
     ``_FWD_SPLIT_K_MAX_CTAS`` workgroups or its fp32 workspace passes the i32
@@ -6090,13 +6337,18 @@ def _batch_chunks(direction, problem, dtype) -> list:
     sentinel is the i32 maximum, so no operand it is launched on may exceed
     2^31 - 1 bytes. fwd and dgrad compute every image independently, and N is
     a kernarg: a batch whose activations are larger runs as consecutive
-    launches of the same binary over equal slices of N, at offset pointers.
-    wgrad reduces over N, so it cannot be split that way; neither can a weight
-    tensor, which has no batch.
+    launches of the same binary over equal slices of N, at offset pointers. A
+    weight tensor, which has no batch, cannot be split.
+
+    wgrad reduces over N, so its slices are not independent launches -- but
+    they can accumulate: a kernel that adds into dW (the packed-atomic split-K
+    family), run over consecutive slices with dW zeroed once before the first,
+    computes the whole reduction. The caller offers only such kernels when
+    this returns more than one slice (see :func:`_wgrad_accumulates`).
 
     Raises ``ValueError`` for a problem no split can bring into range.
     """
-    elem = 4 if dtype == "fp32" else 2
+    elem = 4 if storage_dtype(dtype) == "fp32" else 2
     spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
     spatial_out = (problem.Do if problem.is_3d else 1) * problem.Ho * problem.Wo
     per_image = max(spatial_in * problem.C, spatial_out * problem.K) * elem
@@ -6108,12 +6360,6 @@ def _batch_chunks(direction, problem, dtype) -> list:
         )
     if per_image * problem.N <= _INT32_MAX:
         return [(0, problem.N)]
-    if direction == "wgrad":
-        raise ValueError(
-            f"the activations ({per_image * problem.N} bytes) exceed the "
-            f"kernels' 2^31-byte operand addressing, and wgrad reduces over the "
-            f"batch, so it cannot run as batch slices"
-        )
     if per_image > _INT32_MAX:
         raise ValueError(
             f"one image's activations ({per_image} bytes) exceed the kernels' "
@@ -6122,6 +6368,17 @@ def _batch_chunks(direction, problem, dtype) -> list:
     n_chunks = -(-problem.N // (_INT32_MAX // per_image))
     step = -(-problem.N // n_chunks)
     return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
+
+
+def _wgrad_accumulates(ident) -> bool:
+    """Whether a cached wgrad binary adds into dW rather than storing it.
+
+    Only those can run a wgrad problem as batch slices (:func:`_batch_chunks`):
+    the packed-atomic split-K family accumulates into a dW zeroed once. The
+    non-split kernel stores dW, and two-stage and stream-K finish with a
+    reduce that overwrites it, so each slice would erase the previous ones.
+    """
+    return ident.split_k > 1 and not ident.two_stage and ident.streamk == "off"
 
 
 def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
@@ -6135,9 +6392,28 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
     if len(batch_chunks) == 1:
         return _cached_bind(direction, problem, ident, *rest)
     (meta, rt, launcher, case_dtype, split_k, ptrs, sizes, *tail) = rest
-    a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
     runs = []
+    if direction == "wgrad":
+        # A (dY) and B (X) are the activations, D (dW) the reduction target:
+        # every slice adds into the whole dW, which only the first one zeroes.
+        if not _wgrad_accumulates(ident):
+            print(
+                f"  [skip] {ident.label()}: a wgrad problem split into "
+                f"{len(batch_chunks)} batch slices needs a kernel that "
+                f"accumulates into dW",
+                flush=True,
+            )
+            return None
+        a_image, b_image = sizes[0] // problem.N, sizes[1] // problem.N
+    else:
+        a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
     for n0, n in batch_chunks:
+        if direction == "wgrad":
+            sl_ptrs = (ptrs[0] + n0 * a_image, ptrs[1] + n0 * b_image, ptrs[2])
+            sl_sizes = (n * a_image, n * b_image, sizes[2])
+        else:
+            sl_ptrs = (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image)
+            sl_sizes = (n * a_image, sizes[1], n * d_image)
         bound = _cached_bind(
             direction,
             dc_replace(problem, N=n),
@@ -6147,9 +6423,10 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
             launcher,
             case_dtype,
             split_k,
-            (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image),
-            (n * a_image, sizes[1], n * d_image),
+            sl_ptrs,
+            sl_sizes,
             *tail,
+            zero_dw=n0 == 0,
         )
         if bound is None:
             return None
@@ -6178,8 +6455,13 @@ def _cached_bind(
     KernelLauncher,
     LaunchConfig,
     live_extras: list,
+    zero_dw: bool = True,
 ):
     """``(run, label)`` of a cached (non-stream-K) binary at ``split_k``.
+
+    ``zero_dw=False`` leaves out the dW clear of the packed-atomic split-K
+    wgrad launch: the later batch slices of a sliced wgrad problem add into
+    the dW the first slice zeroed (:func:`_cached_bind_batch`).
 
     ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
     launch config allocates is appended to ``live_extras`` (freed by
@@ -6228,7 +6510,8 @@ def _cached_bind(
     # queues ahead of this kernel's launches rather than draining for them.
     stream = resolve_stream(cfg.stream)
     if (
-        direction == "wgrad"
+        zero_dw
+        and direction == "wgrad"
         and ident.split_k > 1
         and not ident.two_stage
         and ident.streamk == "off"

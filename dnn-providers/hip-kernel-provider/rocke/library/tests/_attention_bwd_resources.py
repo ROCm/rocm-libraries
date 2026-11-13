@@ -37,6 +37,7 @@ import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -50,6 +51,7 @@ GATE_FLAVOR = "llvm22"
 # not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
 # process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
+
 
 # Per-arch register and LDS budgets used by the gate. The CDNA register file is
 # two budgets: at most 256 arch VGPRs and at most 256 AGPRs per wave.
@@ -664,7 +666,12 @@ def find_objdump() -> str | None:
     cands = [os.environ.get("LLVM_OBJDUMP"), shutil.which("llvm-objdump")]
     for root in (os.environ.get("ROCM_PATH"), os.environ.get("ROCM_HOME"), "/opt/rocm"):
         if root:
-            cands.append(str(Path(root) / "llvm" / "bin" / "llvm-objdump"))
+            cands.extend(
+                (
+                    str(Path(root) / "llvm" / "bin" / "llvm-objdump"),
+                    str(Path(root) / "lib" / "llvm" / "bin" / "llvm-objdump"),
+                )
+            )
     spec = importlib.util.find_spec("_rocm_sdk_core")
     if spec is not None and spec.submodule_search_locations:
         for loc in spec.submodule_search_locations:
@@ -677,26 +684,50 @@ def find_objdump() -> str | None:
     return None
 
 
+def validate_objdump(path: str) -> str | None:
+    """Why ``path`` cannot execute ``llvm-objdump --version``, else ``None``."""
+    try:
+        subprocess.run(
+            [path, "--version"],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
 def _probe_isa_inspect():
-    here = Path(__file__).resolve()
-    rocke_root = here.parents[2]
-    path = (
-        rocke_root
-        / "platform"
-        / "dsl_docs"
-        / "optimization"
-        / "utilities"
-        / "tools"
-        / "dsl_probes"
-        / "probe_isa_inspect.py"
-    )
+    override = os.environ.get("ROCKE_ISA_INSPECT_PROBE", "").strip()
+    if override:
+        path = Path(override)
+    else:
+        here = Path(__file__).resolve()
+        rocke_root = here.parents[2]
+        path = (
+            rocke_root
+            / "platform"
+            / "dsl_docs"
+            / "optimization"
+            / "utilities"
+            / "tools"
+            / "dsl_probes"
+            / "probe_isa_inspect.py"
+        )
+    if not path.is_file():
+        raise FileNotFoundError(f"ISA inspection support not found: {path}")
     name = "_bwd_probe_isa_inspect"
     if name in sys.modules:
         return sys.modules[name]
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return mod
 
 
@@ -789,21 +820,31 @@ def gate_toolchain_gap(arch: str) -> str | None:
 def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
 
-    A compile error skips the test only where the loaded toolchain is not the
+    A loaded compiler that does not accept a ``-mllvm`` option the kernel
+    needs is handled by the shared compile-test policy
+    (:func:`~._compiler_test_utils.skip_where_compiler_refuses_option`): the
+    test skips, or fails under ``ROCKE_REQUIRE_COMPILER_TOOLS=1``. Any other
+    compile error skips the test only where the loaded toolchain is not the
     gate's (:func:`gate_toolchain_gap`). On the gate's toolchain (the
     production comgr, ``llvm22``) a kernel the validator admits must compile,
     so the error is raised and fails the test.
     """
     import pytest
     from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import CompilerOptionNotAccepted
 
-    try:
-        return compile_kernel(kernel, arch=arch, **kw)
-    except Exception as exc:  # noqa: BLE001 - a defect unless the toolchain differs
-        gap = gate_toolchain_gap(arch)
-        if gap is None:
-            raise
-        pytest.skip(f"comgr cannot compile for {arch} ({gap}): {exc}")
+    from ._compiler_test_utils import skip_where_compiler_refuses_option
+
+    with skip_where_compiler_refuses_option():
+        try:
+            return compile_kernel(kernel, arch=arch, **kw)
+        except CompilerOptionNotAccepted:
+            raise  # a fact about the host's compiler: the shared policy decides
+        except Exception as exc:  # noqa: BLE001 - a defect unless the toolchain differs
+            gap = gate_toolchain_gap(arch)
+            if gap is None:
+                raise
+            pytest.skip(f"comgr cannot compile for {arch} ({gap}): {exc}")
 
 
 # --------------------------------------------------------------------------- gate
@@ -820,14 +861,19 @@ class ResourceGateResult:
     loops: tuple[dict, ...] = ()  # per matrix loop: copies and MFMA dst classes
 
     @property
-    def valid(self) -> bool:
-        """True only for results produced on the production flavor by the
-        production comgr (``GATE_COMGR_ROCM``)."""
+    def matches_reference_toolchain(self) -> bool:
+        """Whether this result uses the historical resource-table toolchain."""
         return self.flavor == GATE_FLAVOR and comgr_is_production(self.comgr)
 
     @property
-    def passed(self) -> bool:
-        return self.valid and not self.failures
+    def valid(self) -> bool:
+        """Compatibility name for historical resource-table qualification."""
+        return self.matches_reference_toolchain
+
+    @property
+    def passes_reference_policy(self) -> bool:
+        """Whether resource checks pass on the historical reference toolchain."""
+        return self.matches_reference_toolchain and not self.failures
 
     def record(self) -> dict:
         return {
@@ -847,7 +893,7 @@ class ResourceGateResult:
             "loops": [dict(x) for x in self.loops],
             "flavor": self.flavor,
             "comgr": self.comgr,
-            "valid": self.valid,
+            "matches_reference_toolchain": self.matches_reference_toolchain,
         }
 
 

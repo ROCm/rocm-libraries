@@ -128,12 +128,11 @@ void forwardInto(ITensor& q,
         kView,
         vView,
         oView,
-        scale,
-        maskView.has_value() ? &*maskView : nullptr,
-        band.leftBound,
-        band.rightBound,
-        band.topLeftAlignment,
-        &lseView);
+        hipdnn_test_sdk::utilities::SdpaFwdOptions<Mask>{}
+            .setScale(scale)
+            .setMask(maskView.has_value() ? &*maskView : nullptr)
+            .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
+            .setLse(&lseView));
 
     // The views write the host copies; a device-resident tensor uploads them only
     // once told the host copy is the current one.

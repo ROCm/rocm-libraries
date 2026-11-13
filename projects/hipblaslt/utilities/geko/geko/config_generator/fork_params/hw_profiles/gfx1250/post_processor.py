@@ -69,7 +69,7 @@ def _mi_wave_tile(mi: Sequence[int]) -> Tuple[int, int]:
     """``MIWaveTile`` as Tensile derives it: ``[mi[5], mi[6]]``.
 
     See ``matrixInstructionToMIParameters`` in
-    ``Tensile/SolutionStructs/Validators/MatrixInstruction.py``.
+    ``tensilelite/SolutionStructs/Validators/MatrixInstruction.py``.
     """
     return mi[5], mi[6]
 
@@ -258,4 +258,3 @@ class GFX1250GAPostProcessor(
     BasePostProcessor,
 ):
     """gfx1250 generic (GA) post-processor (no MI augmentation, no CMS)."""
-

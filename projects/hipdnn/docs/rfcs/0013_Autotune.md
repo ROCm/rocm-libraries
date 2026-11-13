@@ -573,6 +573,8 @@ Failed entries (`succeeded = false`) are always placed after successful entries,
 
 **Tensor data validity**: Autotuning assumes idempotent execution or separate input/output buffers. Repeated execution may produce different results for non-idempotent operations (in-place ops or operations where the output is also an input).
 
+**Winner executes last**: After ranking, `autotune()` executes the winning plan once more, after every timed pass (including a stalled-restart pass). On success the caller's output buffers therefore hold the winner's output, not the last timed plan's. If that final execution fails, `autotune()` returns its error: the winner stays the active plan, no results are persisted, and the results vector is not filled.
+
 **`HIPDNN_HEUR_CONFIG_PATH` interaction**: The config file influences engine ordering in the heuristic selection policy but does not affect `autotune()`, which benchmarks all candidates independently.
 
 ### 6.4 Benchmarking Flows

@@ -4,9 +4,7 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,20 +13,24 @@ from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-
-# The runtime body below builds+launches a gfx950 code object, so gate on the exact arch
-# (via the rocke HIP runtime, no torch): on any other device the launch would fail with
-# hipError(209) no kernel image.
+# The runtime body below builds+launches a code object for the device arch, so gate on
+# the exact arch (via the rocke HIP runtime, no torch): on any other device the launch
+# would fail with hipError(209) no kernel image.
 _ARCH = get_device_arch(0)
 
 
-@unittest.skipUnless(_ARCH == "gfx950", "requires a gfx950 GPU")
+@unittest.skipUnless(_ARCH in COVERED_ARCHES, "requires a gfx942 or gfx950 GPU")
 class TestDispatchGemmRuntime(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.work_dir = Path(tempfile.mkdtemp(prefix="rocke_dispatch_gemm_test_"))
-        req = GemmRequest(M=4096, N=4096, K=4096, arch="gfx950")
+        req = GemmRequest(M=4096, N=4096, K=4096, arch=_ARCH)
         cls.dispatch_result = dispatch_gemm_fp16(req)
         cls.spec = cls.dispatch_result.spec
         artifact = compile_kernel(build_kernel(cls.dispatch_result), arch=req.arch)
@@ -52,20 +54,15 @@ class TestDispatchGemmRuntime(unittest.TestCase):
     def _run_manifest(
         self, shape: tuple[int, int, int], *, verify: bool, timeout: int = 180
     ) -> str:
-        env = dict(os.environ)
-        # Keep the package under test first even when this test is invoked from
-        # a different working directory.
-        py_root = str(Path(__file__).resolve().parents[4] / "python")
-        env["PYTHONPATH"] = py_root + os.pathsep + env.get("PYTHONPATH", "")
-        cmd = [
-            sys.executable,
+        env = rocke_subprocess_env()
+        cmd = rocke_python_command(
             "-m",
             "rocke.run_manifest",
             str(self.hsaco),
             str(self.manifest),
             "--shape",
             ",".join(str(x) for x in shape),
-        ]
+        )
         if verify:
             cmd.append("--verify")
         proc = subprocess.run(

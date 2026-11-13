@@ -18,7 +18,7 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // Signature key for the ragged SDPA forward GPU reference (RFC-0014 packed + ragged_offset).
 // It has the same fields as GpuSdpaFwdSignatureKey but is a separate type, so dense and ragged
 // plans land in separate registry buckets. GpuReferenceGraphExecutor::buildSignatureKey picks
-// one based on whether Q has a ragged_offset_tensor_uid.
+// one based on hasRaggedSdpaPrimary.
 struct GpuSdpaRaggedFwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType{

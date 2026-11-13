@@ -148,6 +148,36 @@ endif()
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
+# Save original targets (with :xnack- suffix) for TensileCreateLibrary.
+#
+# Deliberately a normal variable, not a cache entry: derived from GPU_TARGETS,
+# it has to be re-derived whenever that changes. Cached, it outlived the targets
+# it was derived from, so reconfiguring an existing build directory kept the
+# first configure's value while GPU_TARGETS moved on -- and since the two differ
+# only by a suffix hip::device never sees, nothing looked wrong. `invoke build`
+# reconfigures in place unless --clean is passed, so that was the common path.
+#
+# The condition still defers to a value supplied from outside, whether by
+# -DTENSILELITE_GPU_TARGETS or by an enclosing project: hipSPARSELt sets it from
+# its unstripped list before adding us as a subdirectory, and the GPU_TARGETS we
+# see by then has had the suffix stripped, so overwriting would drop it before
+# hipSPARSELt's own create_device_library() reads it back.
+if(NOT TENSILELITE_GPU_TARGETS)
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+else()
+    # A value from outside never passed the check above, and this is the list
+    # TensileLite builds from -- the one an xnack qualifier still reaches, since
+    # GPU_TARGETS has it stripped by then. Checking it here is what stops an
+    # enclosing project from handing us a target the direct path would refuse,
+    # device ASAN beside xnack- among them.
+    tensilelite_validate_gpu_targets("${TENSILELITE_GPU_TARGETS}")
+endif()
+
+# Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+# offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+# hip::device, and xnack_any platforms must use the bare arch.
+tensilelite_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
+
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
@@ -276,15 +306,59 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
+# Only a MessagePack host library compiles the C++ msgpack sources.
+# A YAML host does not, including when device libraries are enabled:
+# those libraries are produced by the Python Tensile step.
 if(NOT HIPBLASLT_ENABLE_YAML)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    set(hipblaslt_msgpack_fetched FALSE)
     find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
         set(hipblaslt_msgpack_target "msgpack-cxx")
     else()
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
+        # TODO: set minimum version required for *-cxx library
+        find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+        if(msgpackc-cxx_FOUND)
+            set(hipblaslt_msgpack_target "msgpackc-cxx")
+            message(STATUS "Found msgpack (<=5.x)")
+        elseif(HIPBLASLT_ENABLE_FETCH)
+            # Header-only, downloaded at configure time. Opt-in, so a machine
+            # with no msgpack package and no network still gets an immediate,
+            # legible configure failure instead of a silent download.
+            message(STATUS "msgpack-cxx was not found; fetching 6.1.0")
+            include(FetchContent)
+            FetchContent_Declare(
+                msgpack-cxx
+                URL https://github.com/msgpack/msgpack-c/releases/download/cpp-6.1.0/msgpack-cxx-6.1.0.tar.gz
+                URL_HASH SHA256=23ede7e93c8efee343ad8c6514c28f3708207e5106af3b3e4969b3a9ed7039e7
+            )
+            set(MSGPACK_USE_BOOST OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_CXX17 ON CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            # msgpack-cxx 6.1.0 still calls cmake_minimum_required(VERSION 3.1).
+            # CMake 4 rejects that. The floor applies only while that project is added.
+            set(_hipblaslt_saved_policy_minimum "${CMAKE_POLICY_VERSION_MINIMUM}")
+            set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+            FetchContent_MakeAvailable(msgpack-cxx)
+            if(_hipblaslt_saved_policy_minimum STREQUAL "")
+                unset(CMAKE_POLICY_VERSION_MINIMUM)
+            else()
+                set(CMAKE_POLICY_VERSION_MINIMUM "${_hipblaslt_saved_policy_minimum}")
+            endif()
+            set(hipblaslt_msgpack_target "msgpack-cxx")
+            set(hipblaslt_msgpack_fetched TRUE)
+        else()
+            message(FATAL_ERROR
+                "msgpack-cxx was not found. Install msgpack-cxx (>=6.x) or "
+                "msgpackc-cxx (<=5.x), or configure with "
+                "-DHIPBLASLT_ENABLE_FETCH=ON to download it at configure time. "
+                "A msgpack package is required when the host library is "
+                "built against MessagePack.")
+        endif()
     endif()
 endif()
 
@@ -602,9 +676,21 @@ if(_hipblaslt_export_targets)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(NOT HIPBLASLT_ENABLE_YAML
-           AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
-            if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+        if(NOT HIPBLASLT_ENABLE_YAML AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+            if(hipblaslt_msgpack_fetched)
+                # A static archive carries msgpack into INTERFACE_LINK_LIBRARIES
+                # as $<LINK_ONLY:msgpack-cxx>, so the export set references it.
+                # A fetched msgpack-cxx is a build-tree target, not an imported
+                # one, and cannot be exported; downstream static consumers would
+                # also have no msgpack to link against. Say so here rather than
+                # at generate time.
+                message(FATAL_ERROR
+                    "A static, exported hipBLASLt needs an installed msgpack "
+                    "package: a fetched msgpack-cxx is a build-tree target and "
+                    "cannot be exported. Install msgpack-cxx (>=6.x) or "
+                    "msgpackc-cxx (<=5.x), or build shared with "
+                    "-DHIPBLASLT_BUILD_SHARED_LIBS=ON.")
+            elseif(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()
                 list(APPEND _hipblaslt_static_depends
@@ -784,7 +870,6 @@ endif()
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
 #   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
-#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 #   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
@@ -803,32 +888,18 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.pyc" EXCLUDE
         PATTERN "source_only" EXCLUDE
     )
-    install(
-        FILES "${_tensilelite_src}/Tensile/__init__.py"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
-        COMPONENT tests
-    )
 
     # Scripts used by unit tests
     install(
         FILES
             "${_tensilelite_src}/scripts/analyze_timing.py"
             "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
+            "${_tensilelite_src}/scripts/lcov_dir_summary.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
 
-    # Imported or executed directly by unit tests, so these must ship at the
-    # tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
-            "${_tensilelite_src}/SoftmaxGenerator.py"
-            "${_tensilelite_src}/LayerNormGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS

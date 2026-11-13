@@ -8,9 +8,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -34,6 +36,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelFeatureRows.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 /// @file UhdKernelHeuristic.hpp
@@ -43,46 +46,6 @@ namespace hipdnn_plugin_sdk::ingestor
 
 namespace detail
 {
-
-/// Converts a scalar metadata value; `vector<int64_t>` yields nullopt and stays unbound,
-/// so a bare reference to it fails closed (RFC 0019 §5).
-inline std::optional<uhd::VariableContext::ValueType> toValueType(const MetadataValue& value)
-{
-    if(const auto* v = std::get_if<bool>(&value))
-    {
-        return uhd::VariableContext::ValueType{*v};
-    }
-    if(const auto* v = std::get_if<int64_t>(&value))
-    {
-        return uhd::VariableContext::ValueType{*v};
-    }
-    if(const auto* v = std::get_if<double>(&value))
-    {
-        return uhd::VariableContext::ValueType{*v};
-    }
-    if(const auto* v = std::get_if<std::string>(&value))
-    {
-        return uhd::VariableContext::ValueType{*v};
-    }
-    return std::nullopt;
-}
-
-inline void appendFeatureValue(uhd::FeatureExtractionContext::ValueMap& vars,
-                               const std::string& name,
-                               const MetadataValue& value)
-{
-    if(const auto* array = std::get_if<std::vector<int64_t>>(&value))
-    {
-        for(size_t i = 0; i < array->size(); ++i)
-        {
-            vars.emplace(name + "[" + std::to_string(i) + "]", (*array)[i]);
-        }
-    }
-    else if(auto scalar = toValueType(value))
-    {
-        vars.insert_or_assign(name, std::move(*scalar));
-    }
-}
 
 inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& bound)
 {
@@ -96,7 +59,10 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
 
 /// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
 /// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
-inline bool isReservedFeatureName(const std::string& name)
+/// @param reserveWorkspace Also reserves the `ws.*` root, the shared-workspace tokens of a
+///        slotted engine's graph match (RFC 0021 §6); an unslotted engine's `ws.*` tokens stay
+///        ordinary features.
+inline bool isReservedFeatureName(const std::string& name, bool reserveWorkspace = false)
 {
     const std::string_view bare
         = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
@@ -107,17 +73,27 @@ inline bool isReservedFeatureName(const std::string& name)
             return true;
         }
     }
-    return false;
+    return reserveWorkspace && isWorkspaceToken(name);
+}
+
+/// True for a token a graph matcher binds only for its own kernel matchers: a name
+/// starting with `_` (after an optional `$`) is never a feature, in a ranker or a corpus.
+inline bool isPrivateToken(const std::string& name)
+{
+    const std::string_view bare
+        = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
+    return !bare.empty() && bare.front() == '_';
 }
 
 /// Binds graph-match tokens as features. Reserved names are skipped so a matcher cannot
-/// override a canonical feature such as `graph.flops`.
+/// override a canonical feature such as `graph.flops`, and private tokens are skipped.
 inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
-                                   const BoundTokens& bound)
+                                   const BoundTokens& bound,
+                                   bool reserveWorkspace = false)
 {
     for(const auto& entry : queryVarsFrom(bound))
     {
-        if(!isReservedFeatureName(entry.first))
+        if(!isReservedFeatureName(entry.first, reserveWorkspace) && !isPrivateToken(entry.first))
         {
             features.bind(entry.first, entry.second);
         }
@@ -129,24 +105,142 @@ inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
 /// features. Excludes `constraint.*` because ranked catalogs are cached per CatalogKey.
 /// Compute once per graph, not per candidate.
 inline uhd::FeatureExtractionContext catalogProblemFeatures(const MatchContext& context,
-                                                            const BoundTokens& bound)
+                                                            const BoundTokens& bound,
+                                                            bool reserveWorkspace = false)
 {
     auto features = heuristics::problemFeatures(context.graph, context.deviceProperties);
-    bindGraphMatchBindings(features, bound);
+    bindGraphMatchBindings(features, bound, reserveWorkspace);
     return features;
 }
 
-inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefinition& kernel)
+/// What a stat says about a model artifact: whether it exists, when it was last written and
+/// how large it is. Two equal stamps mean the file is taken to be unchanged; a rewrite within
+/// the file system's timestamp granularity that keeps the size is not seen.
+struct ArtifactStamp
 {
-    uhd::FeatureExtractionContext::ValueMap vars;
-    for(const auto& [name, value] : kernel.metadata)
-    {
-        appendFeatureValue(vars, name, value);
-    }
-    vars.emplace("priority", kernel.priority);
+    std::filesystem::path path;
+    bool exists = false;
+    std::filesystem::file_time_type modified;
+    std::uintmax_t size = 0;
 
-    // `id` is deliberately unbound: it is a UUID, and it already breaks ties in rank().
-    return vars;
+    /// Never throws: a file that cannot be stat'ed is stamped as absent.
+    static ArtifactStamp of(const std::filesystem::path& path)
+    {
+        ArtifactStamp stamp;
+        stamp.path = path;
+        std::error_code error;
+        const auto modified = std::filesystem::last_write_time(path, error);
+        if(error)
+        {
+            return stamp;
+        }
+        const auto size = std::filesystem::file_size(path, error);
+        if(error)
+        {
+            return stamp;
+        }
+        stamp.exists = true;
+        stamp.modified = modified;
+        stamp.size = size;
+        return stamp;
+    }
+
+    friend bool operator==(const ArtifactStamp& lhs, const ArtifactStamp& rhs)
+    {
+        return lhs.path == rhs.path && lhs.exists == rhs.exists && lhs.modified == rhs.modified
+               && lhs.size == rhs.size;
+    }
+    friend bool operator!=(const ArtifactStamp& lhs, const ArtifactStamp& rhs)
+    {
+        return !(lhs == rhs);
+    }
+};
+
+/// One candidate's number, in the two forms that must not be conflated.
+struct CandidateScore
+{
+    /// Higher wins; -infinity when there is no measurement, so it always sorts last.
+    double ordering;
+    /// RFC 0019.13 §15.2's figure of merit; 0 when there is no measurement (§5 step 4).
+    double reported;
+};
+
+/// One scored candidate, as the ranking holds it before it becomes a ScoredKernel.
+struct Ranked
+{
+    CandidateScore score;
+    const KernelDefinition* entry;
+    /// The grouping feature's value; NaN for a single-layer model (see ScoredKernel::group).
+    double group = std::numeric_limits<double>::quiet_NaN();
+    /// Early exit: the adapter stopped scoring this candidate after `stage` stages (see
+    /// uhd::BatchScores). `partial`, the oriented partial sum, orders only candidates
+    /// pruned at the same stage; `score` then carries the no-measurement values.
+    bool pruned = false;
+    uint8_t stage = 0;
+    double partial = 0.0;
+};
+
+/// A candidate the adapter stopped scoring after @p stage early-exit stages, with @p raw the
+/// partial sum it reached. The partial sum is in no unit: it only orders candidates pruned at
+/// the same stage, so no physical estimate is reported for it (0, "no measurement").
+inline Ranked prunedCandidate(
+    const KernelDefinition* entry, double group, uint8_t stage, double raw, double objectiveSign)
+{
+    Ranked candidate{{-std::numeric_limits<double>::infinity(), 0.0}, entry, group};
+    candidate.pruned = true;
+    candidate.stage = stage;
+    // NaN would break the strict weak ordering orderRanked needs.
+    const double oriented = objectiveSign * raw;
+    candidate.partial = std::isnan(oriented) ? -std::numeric_limits<double>::infinity() : oriented;
+    return candidate;
+}
+
+/// The tier a candidate ranks in, best first: 0 a fully scored candidate with a usable score,
+/// 1 a pruned one, 2 an unusable one (declined, or an out-of-range score), which therefore
+/// ranks last exactly as without early exit.
+inline int rankTier(const Ranked& candidate)
+{
+    if(candidate.pruned)
+    {
+        return 1;
+    }
+    return std::isfinite(candidate.score.ordering) ? 0 : 2;
+}
+
+/// Best first, by tier (see rankTier). Tier 0 orders by score; tier 1 by how many stages the
+/// candidate survived, later first, then by partial sum. Ties fall to declared priority,
+/// then kernel id. Scores are never NaN here (scoreFromRaw maps them to -infinity); NaN would
+/// break the strict weak ordering std::stable_sort requires.
+inline void orderRanked(std::vector<Ranked>& scored)
+{
+    std::stable_sort(scored.begin(), scored.end(), [](const Ranked& a, const Ranked& b) {
+        const int tierA = rankTier(a);
+        const int tierB = rankTier(b);
+        if(tierA != tierB)
+        {
+            return tierA < tierB;
+        }
+        if(tierA == 1)
+        {
+            if(a.stage != b.stage)
+            {
+                return a.stage > b.stage;
+            }
+            if(a.partial != b.partial)
+            {
+                return a.partial > b.partial;
+            }
+        }
+        else if(a.score.ordering != b.score.ordering)
+        {
+            return a.score.ordering > b.score.ordering;
+        }
+        if(a.entry->priority != b.entry->priority)
+        {
+            return a.entry->priority > b.entry->priority;
+        }
+        return a.entry->kernelId < b.entry->kernelId;
+    });
 }
 
 } // namespace detail
@@ -182,6 +276,8 @@ public:
     /// model: longest matching arch-key prefix, then `default`, within the metric (RFC 0019
     /// §3.1, §8.3).
     /// @param byMetric Metric (`""` for the metric-less ranker) to arch key to descriptor.
+    /// @param reserveWorkspaceTokens Keep `ws.*` graph-match tokens out of every feature row,
+    ///        as a slotted engine's ranker requires (RFC 0021 §6).
     /// @param unavailable Metric to arch keys whose named model was refused: such a key never
     ///        falls back to the `default` key's model for the same metric.
     static std::shared_ptr<UhdKernelHeuristic> makeResolver(
@@ -189,13 +285,15 @@ public:
         const std::string& describedBy,
         const std::vector<std::string>& knobs,
         const std::unordered_set<std::string>& kmdFields = {},
-        const std::map<std::string, std::set<std::string>>& unavailable = {})
+        const std::map<std::string, std::set<std::string>>& unavailable = {},
+        bool reserveWorkspaceTokens = false)
     {
         auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
         built->_byMetric = byMetric;
         built->_knobs = knobs;
         built->_kmdFields = kmdFields;
         built->_unavailable = unavailable;
+        built->_reserveWorkspaceTokens = reserveWorkspaceTokens;
         return built;
     }
 
@@ -253,6 +351,9 @@ public:
         case UhdAdapter::TREE_DATA:
             config.adapterType = "tree_data";
             break;
+        case UhdAdapter::LINEAR_DATA:
+            config.adapterType = "linear_data";
+            break;
         case UhdAdapter::TABLE:
             config.adapterType = "table";
             break;
@@ -291,7 +392,7 @@ public:
         {
             return 0.0;
         }
-        auto ctx = detail::catalogProblemFeatures(context, bound);
+        auto ctx = detail::catalogProblemFeatures(context, bound, _reserveWorkspaceTokens);
         ctx.bindKernelVars(detail::kernelVarsFrom(kernel));
         // The reported form; ranking goes through rankScored instead.
         return scoreCandidate(_extractor->extract(ctx)).reported;
@@ -423,12 +524,17 @@ public:
     }
 
     /// The model @p metric's own entries name for @p arch, loaded once per (metric, arch key)
-    /// and cached, failures included, so a broken model is read and reported once. The one
-    /// outcome not cached is an artifact that is not deployed yet: it is retried on the next
-    /// call so a model being deployed recovers (RFC 0019 §5), and reported once. The same
-    /// policy as uhd::EngineModelBinding. Loads outside the lock; concurrent first uses may
-    /// both load, and the first cached result wins. Fallback stays inside the metric (RFC 0019
-    /// §3.1).
+    /// and cached. A model that loads is kept for the resolver's lifetime. A model that is
+    /// refused is cached as refused together with the stat signature (modification time and
+    /// size) its artifact had when it was read, so an unchanged broken model is read and
+    /// reported once; each later call costs one stat, and a model whose artifact has changed
+    /// since is loaded again, so one replaced after a failed load (e.g. read while still being
+    /// written) is used without a restart. A refusal that never read the artifact (e.g. a KMD
+    /// field check) does not depend on it and stays cached. An artifact that is not deployed
+    /// yet is not cached: it is retried on the next call so a model being deployed recovers
+    /// (RFC 0019 §5), and reported once. Loads outside the lock; concurrent uses may both
+    /// load, a loaded model is never replaced, and a newer outcome replaces a refusal.
+    /// Fallback stays inside the metric (RFC 0019 §3.1).
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
@@ -439,30 +545,73 @@ public:
             return nullptr;
         }
         const auto cacheKey = std::make_pair(metric, key);
+        std::optional<ArtifactStamp> refusedAt;
         {
             const std::lock_guard<std::mutex> lock(_archMutex);
             if(const auto cached = _archCache.find(cacheKey); cached != _archCache.end())
             {
-                return cached->second;
+                if(cached->second.model != nullptr || !cached->second.refusedAt.has_value())
+                {
+                    return cached->second.model;
+                }
+                refusedAt = cached->second.refusedAt;
             }
         }
+        // Stat outside the lock: an artifact unchanged since it was refused is not read again.
+        if(refusedAt.has_value() && ArtifactStamp::of(refusedAt->path) == *refusedAt)
+        {
+            return nullptr;
+        }
+
         // Lazily resolved models face the same knob/field checks (RFC 0019 §8.3).
         std::ostringstream failure;
         bool awaitingArtifact = false;
-        std::shared_ptr<const UhdKernelHeuristic> loaded
-            = create(*chosen, _describedBy, _knobs, _kmdFields, failure, awaitingArtifact);
+        std::optional<ArtifactStamp> readAt;
+        std::shared_ptr<const UhdKernelHeuristic> loaded = create(*chosen,
+                                                                  _describedBy,
+                                                                  _knobs,
+                                                                  _kmdFields,
+                                                                  failure,
+                                                                  awaitingArtifact,
+                                                                  _reserveWorkspaceTokens,
+                                                                  &readAt);
 
         const std::lock_guard<std::mutex> lock(_archMutex);
         bool report = false;
+        const auto cached = _archCache.find(cacheKey);
         if(awaitingArtifact)
         {
+            // A refused artifact since removed is back to not deployed.
+            if(cached != _archCache.end() && cached->second.model == nullptr)
+            {
+                _archCache.erase(cached);
+            }
             report = _archAwaitingReported.insert(cacheKey).second;
+        }
+        else if(cached == _archCache.end())
+        {
+            report = loaded == nullptr;
+            _archCache.emplace(cacheKey,
+                               ArchEntry{loaded, loaded == nullptr ? readAt : std::nullopt});
+        }
+        else if(cached->second.model != nullptr)
+        {
+            // A concurrent load won; keep the model already handed out.
+            loaded = cached->second.model;
         }
         else
         {
-            const auto [cached, inserted] = _archCache.emplace(cacheKey, std::move(loaded));
-            loaded = cached->second;
-            report = inserted && loaded == nullptr;
+            // Replacing a refusal. A concurrent retry that read the same artifact already
+            // reported it.
+            report = loaded == nullptr && cached->second.refusedAt != readAt;
+            if(loaded != nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("uhd: " << _describedBy << " model for metric "
+                                               << (metric.empty() ? "(none)" : "'" + metric + "'")
+                                               << " on '" << key
+                                               << "' loaded after its artifact changed");
+            }
+            cached->second = ArchEntry{loaded, loaded == nullptr ? readAt : std::nullopt};
         }
         if(report)
         {
@@ -501,16 +650,22 @@ public:
     }
 
 private:
+    using ArtifactStamp = detail::ArtifactStamp;
+
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
     /// that retries can report it once. @p awaitingArtifact is set when the refusal is only
-    /// that the model artifact is not deployed yet, so a later call may succeed.
+    /// that the model artifact is not deployed yet, so a later call may succeed. @p readAt,
+    /// when given, receives the artifact's stat signature taken just before the artifact is
+    /// read, and stays empty when the outcome did not depend on reading it.
     static std::shared_ptr<UhdKernelHeuristic>
         create(const HeuristicDescriptor& descriptor,
                const std::string& describedBy,
                const std::vector<std::string>& knobs,
                const std::unordered_set<std::string>& kmdFields,
                std::ostream& failure,
-               bool& awaitingArtifact)
+               bool& awaitingArtifact,
+               bool reserveWorkspaceTokens = false,
+               std::optional<ArtifactStamp>* readAt = nullptr)
     {
         // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
         const auto loadStart = Clock::now();
@@ -615,6 +770,12 @@ private:
                             << "' is not deployed; kernels rank by priority, then id";
                     return nullptr;
                 }
+                // Before the read: a write that lands during it changes the signature, so
+                // the next call retries.
+                if(readAt != nullptr)
+                {
+                    *readAt = ArtifactStamp::of(config.modelArtifactPath);
+                }
             }
 
             auto adapter = uhd::makeUhdAdapter(config);
@@ -666,6 +827,7 @@ private:
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
             built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
+            built->_reserveWorkspaceTokens = reserveWorkspaceTokens;
             return built;
         }
         catch(const std::exception& e)
@@ -771,23 +933,8 @@ private:
         return {};
     }
 
-    /// One candidate's number, in the two forms that must not be conflated.
-    struct CandidateScore
-    {
-        /// Higher wins; -infinity when there is no measurement, so it always sorts last.
-        double ordering;
-        /// RFC 0019.13 §15.2's figure of merit; 0 when there is no measurement (§5 step 4).
-        double reported;
-    };
-
-    /// One scored candidate, as the ranking holds it before it becomes a ScoredKernel.
-    struct Ranked
-    {
-        CandidateScore score;
-        const KernelDefinition* entry;
-        /// The grouping feature's value; NaN for a single-layer model (see ScoredKernel::group).
-        double group = std::numeric_limits<double>::quiet_NaN();
-    };
+    using CandidateScore = detail::CandidateScore;
+    using Ranked = detail::Ranked;
 
     std::vector<ScoredKernel> rankWith(const Catalog& catalog, const MatchContext& context) const
     {
@@ -806,36 +953,30 @@ private:
             // RFC 0019 §5 step 2: problem/device slots are evaluated once per selection;
             // only kernel slots vary. §9.4 times the prefix and per-candidate tail apart.
             const auto prefixStart = Clock::now();
-            auto ctx = detail::catalogProblemFeatures(context, catalog.bound);
-            auto features = _extractor->prepare(ctx);
+            auto ctx
+                = detail::catalogProblemFeatures(context, catalog.bound, _reserveWorkspaceTokens);
+            const auto prefix = _extractor->prepare(ctx);
             _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
             _timing.selections.fetch_add(1, std::memory_order_relaxed);
 
             // One batched scoring call: a grouped model compares candidates against each other.
-            uint64_t tailNs = 0;
-            std::vector<std::vector<double>> rows;
-            rows.reserve(catalog.entries.size());
-            for(const KernelDefinition* entry : catalog.entries)
-            {
-                const auto tailStart = Clock::now();
-                ctx.clearKernelVars();
-                ctx.bindKernelVars(detail::kernelVarsFrom(*entry));
+            // The tail is timed once around the whole candidate loop, not per candidate.
+            const auto tailStart = Clock::now();
+            const auto rows = _rows->build(ctx, prefix, catalog.entries);
+            const uint64_t tailNs = elapsedNs(tailStart);
 
-                _extractor->extractKernelInto(ctx, features);
-                tailNs += elapsedNs(tailStart);
-                rows.push_back(features.values);
-            }
-
+            const size_t width = _extractor->featureCount();
             const auto scoreStart = Clock::now();
-            const auto raw = _adapter->scoreBatch(rows);
+            const auto batch = _adapter->scoreBatch(
+                uhd::FeatureRows{rows.data(), catalog.entries.size(), width});
             const auto scoreNs = elapsedNs(scoreStart);
 
             // Read the group from the scored row, not metadata, which derived or categorical
             // features could make disagree.
             const int groupSlot = _adapter->groupFeatureIndex();
-            const auto groupOf = [&](const std::vector<double>& row) {
-                return groupSlot >= 0 && static_cast<size_t>(groupSlot) < row.size()
-                           ? row[static_cast<size_t>(groupSlot)]
+            const auto groupOf = [&](size_t index) {
+                return groupSlot >= 0 && static_cast<size_t>(groupSlot) < width
+                           ? rows[(index * width) + static_cast<size_t>(groupSlot)]
                            : std::numeric_limits<double>::quiet_NaN();
             };
 
@@ -843,8 +984,20 @@ private:
             scored.reserve(catalog.entries.size());
             for(size_t index = 0; index < catalog.entries.size(); ++index)
             {
-                scored.push_back(
-                    {scoreFromRaw(raw[index]), catalog.entries[index], groupOf(rows[index])});
+                Ranked candidate{{}, catalog.entries[index], groupOf(index)};
+                if(batch.fullyScored(index))
+                {
+                    candidate.score = scoreFromRaw(batch.raw[index]);
+                }
+                else
+                {
+                    candidate = detail::prunedCandidate(candidate.entry,
+                                                        candidate.group,
+                                                        batch.stage[index],
+                                                        batch.raw[index],
+                                                        _objectiveSign);
+                }
+                scored.push_back(candidate);
             }
 
             _timing.tailNs.fetch_add(tailNs, std::memory_order_relaxed);
@@ -853,12 +1006,18 @@ private:
 
             // A raw -infinity is a candidate the adapter declined (a grouped model's losing
             // groups), not an out-of-range prediction; only the latter are reported, out of
-            // the candidates actually scored.
+            // the candidates fully scored. A pruned candidate is neither: it has no full
+            // score to be out of range, so it counts in neither number.
             size_t declined = 0;
+            size_t pruned = 0;
             size_t outOfRange = 0;
             for(size_t index = 0; index < scored.size(); ++index)
             {
-                if(raw[index] == -std::numeric_limits<double>::infinity())
+                if(scored[index].pruned)
+                {
+                    ++pruned;
+                }
+                else if(batch.raw[index] == -std::numeric_limits<double>::infinity())
                 {
                     ++declined;
                 }
@@ -867,21 +1026,9 @@ private:
                     ++outOfRange;
                 }
             }
-            reportOutOfRangeOnce(outOfRange, scored.size() - declined);
+            reportOutOfRangeOnce(outOfRange, scored.size() - declined - pruned, pruned);
 
-            // Scores are never NaN here (scoreFromRaw maps them to -infinity); NaN would break
-            // the strict weak ordering std::stable_sort requires.
-            std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
-                if(a.score.ordering != b.score.ordering)
-                {
-                    return a.score.ordering > b.score.ordering;
-                }
-                if(a.entry->priority != b.entry->priority)
-                {
-                    return a.entry->priority > b.entry->priority;
-                }
-                return a.entry->kernelId < b.entry->kernelId;
-            });
+            detail::orderRanked(scored);
 
             std::vector<ScoredKernel> ordered;
             ordered.reserve(scored.size());
@@ -978,6 +1125,7 @@ private:
         : _config(std::move(config))
         , _adapter(std::move(adapter))
         , _extractor(std::move(extractor))
+        , _rows(_extractor ? std::make_unique<const detail::KernelRowBuilder>(_extractor) : nullptr)
         , _objectiveSign(objectiveSignOf(_config.objective))
         , _positiveRequired(
               uhd::score_transform::isPhysicalScore(_config.scoreMetric, _config.scoreTransform))
@@ -1063,38 +1211,55 @@ private:
 
     /// Reports a model predicting outside the range its target can occupy, once per heuristic.
     /// ERROR because the score is wrong, not merely uncertain, and is discarded.
-    void reportOutOfRangeOnce(size_t affected, size_t total) const
+    /// @param total The candidates fully scored; @p pruned were pruned by early exit.
+    void reportOutOfRangeOnce(size_t affected, size_t total, size_t pruned) const
     {
         if(affected == 0 || _reportedScoreOutOfRange.exchange(true))
         {
             return;
         }
+        const char* outcome = "The remaining candidates ranked on the model.";
+        if(affected == total)
+        {
+            outcome = pruned == 0
+                          ? "Every candidate was affected, so this ranking is declared order "
+                            "and the model contributed nothing."
+                          : "Every fully scored candidate was affected; the candidates early "
+                            "exit pruned rank ahead of them on their partial scores.";
+        }
         HIPDNN_PLUGIN_LOG_ERROR(
             "uhd: " << _describedBy << " predicted a score its target cannot take for " << affected
-                    << " of " << total << " candidates (raw=" << _lastOutOfRangeRaw
+                    << " of " << total << " fully scored candidates (raw=" << _lastOutOfRangeRaw
                     << ", recovered=" << _lastOutOfRangeRecovered << ", transform='"
                     << _config.scoreTransform
                     << "'). A metric value cannot be negative, so those scores are discarded and "
                        "those candidates rank last. "
-                    << (affected == total
-                            ? "Every candidate was affected, so this ranking is declared order "
-                              "and the model contributed nothing."
-                            : "The remaining candidates ranked on the model.")
-                    << " Further occurrences for this heuristic are not logged.");
+                    << outcome << " Further occurrences for this heuristic are not logged.");
     }
 
     /// Authored (metric, architecture) entries and their lazily loaded per-engine models.
     std::map<std::string, std::map<std::string, HeuristicDescriptor>> _byMetric;
     std::map<std::string, std::set<std::string>> _unavailable;
     std::vector<std::string> _knobs;
+    /// Whether this ranker belongs to a slotted engine, whose `ws.*` tokens are not features.
+    bool _reserveWorkspaceTokens = false;
 
     /// The KMD's declared field names, for checking lazily resolved models (§6.3 check 2).
     std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
+    /// One resolveFor() outcome.
+    struct ArchEntry
+    {
+        /// Null when the model was refused.
+        std::shared_ptr<const UhdKernelHeuristic> model;
+        /// For a refused model whose artifact was read: the artifact as it was then, so a
+        /// changed one is loaded again. Empty for a refusal that is permanent.
+        std::optional<ArtifactStamp> refusedAt;
+    };
     /// Keyed by (metric, arch key): one UHD per metric per key, so the pair names a model.
-    /// Holds every load outcome, a failure as nullptr, except an artifact not yet deployed.
-    mutable std::map<std::pair<std::string, std::string>, std::shared_ptr<const UhdKernelHeuristic>>
-        _archCache;
+    /// Holds every load outcome, a failure as a null model, except an artifact not yet
+    /// deployed.
+    mutable std::map<std::pair<std::string, std::string>, ArchEntry> _archCache;
     /// Keys whose undeployed artifact was already logged; guarded by _archMutex.
     mutable std::set<std::pair<std::string, std::string>> _archAwaitingReported;
 
@@ -1102,6 +1267,9 @@ private:
     std::shared_ptr<const IKernelHeuristic> _direct;
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
+    /// Builds this model's candidate rows and caches the per-kernel part of them; null
+    /// without an extractor.
+    std::unique_ptr<const detail::KernelRowBuilder> _rows;
     double _objectiveSign = 1.0;
     /// Whether §8.3 requires this model's recovered score to be positive as well as finite.
     bool _positiveRequired = true;

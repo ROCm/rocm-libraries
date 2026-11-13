@@ -7,10 +7,10 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
-this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
-ported those onto it, so those
+forward and backward-data (dgrad) convolutions on gfx950 and backward-data
+convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
+forward have no list registered at all: this rewrite moved fwd/dgrad onto the
+instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
 default.
@@ -23,6 +23,10 @@ points list every safe Winograd plan of an eligible request. Its kernels are
 built per problem (no AOT binary), its eligibility and plan come from
 :mod:`kernels.common.conv_winograd_select`, and its :class:`ConvLaunchPlan`
 runs the transform, GEMM and output kernels in order over named workspaces.
+Its AOT twin, ``conv_winograd_fwd_aot`` (``algorithm="winograd_aot"``, also
+opt-in), runs the same 3x3 plans on the shape-generic transform binaries of
+:mod:`kernels.common.conv_winograd_fwd_rt` (plan kind ``unfused2d_rt``):
+every kernel of its plans is compiled once and named by its kernel name.
 
 Every
 record there spells the :class:`KernelIdentity` of one AOT kernel (format:
@@ -51,13 +55,19 @@ WHAT DISPATCH DECIDES
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
   name, and admission checks it against ``ConvGroupedRequest.llvm_flavor``
-  (default :data:`DEFAULT_LLVM_FLAVOR`, the flavor the registered lists are
-  built for): a request for another flavor admits none of them. Selection is
+  (default: the arch's :data:`DEFAULT_LLVM_FLAVORS` entry, the flavor its
+  registered lists are built for): a request for another flavor admits none
+  of them. Selection is
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
-* **Selection** among admitted instances is the list order: the first listed
-  wins. That is a placeholder policy until measured rankings exist; the
-  ``ranker`` hook of :func:`dispatch_conv_grouped` is where one plugs in.
+* **Selection** among admitted instances, with no ``ranker``, is the first one
+  in the direction's list order. dgrad's list is a set
+  (:func:`instance_list_is_set`): the first by a deterministic key (the
+  instance's label, sorted; see ``_instance_sort_key``), its on-disk position
+  carrying no meaning. fwd's list is a priority order: the first in the
+  file's own hand-tuned order. That is a placeholder policy until measured
+  rankings exist; the ``ranker`` hook of :func:`dispatch_conv_grouped` is
+  where one plugs in.
 
 Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
@@ -70,8 +80,10 @@ a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
 order -- each one's identity, launch geometry, kernarg signature and buffers
 -- plus the scratch and host tables they need. Most instances are one kernel;
 the MFMA direct dgrad first runs the weight transforms named in its spec's
-``helpers``, and implicit-GEMM dgrad reads a tilde sub-GEMM table the caller
-uploads.
+``helpers``, a split-C direct forward instance runs the reduction named there
+after it (into ``y`` from an fp32 workspace), and implicit-GEMM dgrad reads a
+tilde sub-GEMM table the caller uploads. Implicit-GEMM instances run a
+convolution whose width folds into its channels (a patch embedding) folded.
 """
 
 from __future__ import annotations
@@ -84,7 +96,12 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+from kernels.conv.aot_jobs import (
+    job_for_identity,
+    kernel_for_job,
+    spec_for_job,
+    spec_launch_block_size,
+)
 from kernels.conv.direct_aot_jobs import (
     direct_job_for_identity,
     direct_kernel_for_job,
@@ -92,6 +109,7 @@ from kernels.conv.direct_aot_jobs import (
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
     DIRECT_MFMA_DGRAD,
+    direct_dgrad_kernarg_direction,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
@@ -111,7 +129,7 @@ from kernels.common.conv_winograd_select import (
     winograd_ineligible_reason,
     winograd_plans,
 )
-from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
+from rocke.helpers.split_k import num_cus as arch_num_cus
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from .conv_winograd_plan import (
     ConvWinogradSpec,
@@ -142,6 +160,7 @@ __all__ = [
     "CONV_GROUPED_ABI_VERSION",
     "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
+    "DEFAULT_LLVM_FLAVORS",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
@@ -154,6 +173,7 @@ __all__ = [
     "dispatch_conv_grouped",
     "dispatch_conv_grouped_all",
     "format_instance_list",
+    "instance_list_is_set",
     "iter_dispatch_conv_grouped_all",
     "launch_plan_for",
     "load_instance_list",
@@ -180,12 +200,15 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx1250", "dgrad"): "gfx1250_dgrad.json",
 }
 
-# The LLVM flavor a request is admitted against unless it names its own: the
-# one every registered list is built for (pinned by
-# test_default_llvm_flavor_is_the_registered_one).
+# The LLVM flavor a request is admitted against unless it names its own: per
+# arch, the one its registered lists are built for (pinned by
+# test_default_llvm_flavor_is_the_registered_one); DEFAULT_LLVM_FLAVOR for an
+# arch with no list.
 DEFAULT_LLVM_FLAVOR = "llvm22"
+DEFAULT_LLVM_FLAVORS: dict[str, str] = {"gfx950": "llvm22", "gfx1250": "llvm24"}
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
@@ -228,11 +251,21 @@ class ConvGroupedRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     # LLVM flavor the caller lowers to; instances built for another flavor are
-    # not admitted. Part of the request, never read from the process.
-    llvm_flavor: str = DEFAULT_LLVM_FLAVOR
+    # not admitted. Part of the request, never read from the process. None (the
+    # default) stays None in the field and means the arch's DEFAULT_LLVM_FLAVORS
+    # entry, resolved where it is read (resolved_llvm_flavor), so
+    # dataclasses.replace(req, arch=...) follows the new arch's default.
+    llvm_flavor: str | None = None
+
+    def resolved_llvm_flavor(self) -> str:
+        """``llvm_flavor``, or the arch's default when the request names none."""
+        if self.llvm_flavor is not None:
+            return self.llvm_flavor
+        return DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
 
     def normalized(self) -> dict:
         d = asdict(self)
+        d["llvm_flavor"] = self.resolved_llvm_flavor()
         d["dtype"] = d["dtype"].lower()
         d["layout"] = d["layout"].upper()
         d["direction"] = d["direction"].lower()
@@ -312,14 +345,16 @@ def _conv_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
     """The problem the implicit-GEMM instances run for ``req``.
 
-    A dgrad whose width folds into its channels
+    A convolution whose width folds into its channels
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`: a patch
-    embedding, say) runs folded -- the same bytes in all three tensors, in
-    fewer and wider tilde sub-GEMMs. Admission, grid and kernargs all read
+    embedding, say) runs folded -- the same bytes in all three tensors. A
+    dgrad runs fewer and wider tilde sub-GEMMs; a forward pass reads the
+    ``X * C`` contiguous input of a patch row as one channel run, so a
+    3-channel stem loads vector-wide. Admission, grid and kernargs all read
     this problem, so an instance is admitted for the shape it actually runs.
     """
     p = _conv_problem(req)
-    if p is None or req.direction.lower() != "dgrad":
+    if p is None:
         return p
     return fold_width(p)
 
@@ -379,9 +414,10 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
-    if req.llvm_flavor not in LLVM_FLAVORS:
+    flavor = req.resolved_llvm_flavor()
+    if flavor not in LLVM_FLAVORS:
         errors.append(
-            f"unknown llvm_flavor {req.llvm_flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
+            f"unknown llvm_flavor {flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
         )
     try:
         ArchTarget.from_gfx(req.arch)
@@ -430,8 +466,9 @@ class ConvInstanceSpec:
     identity it decodes to -- the key its binary is built and cached under.
     ``block`` is the workgroup size the binary is launched with; it is a
     function of the instance's tuning alone, never of the shape. ``helpers``
-    are the binaries a run launches before it (the MFMA dgrad's weight
-    transforms), built and cached alongside it.
+    are the other binaries a run launches -- before it, the MFMA dgrad's
+    weight transforms; after it, a split-C instance's reduction -- built and
+    cached alongside it.
     """
 
     name: str
@@ -489,7 +526,9 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
+        return identity_supports_problem(
+            identity, _gemm_problem(req), req.resolved_llvm_flavor()
+        )
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -497,7 +536,7 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     problem, why = _direct_problem(req)
     if problem is None:
         return False, why
-    ok, why = identity_supports_problem(identity, problem, req.llvm_flavor)
+    ok, why = identity_supports_problem(identity, problem, req.resolved_llvm_flavor())
     if not ok:
         return False, why
     spec, why = _direct_launch_spec(identity, req)
@@ -507,7 +546,11 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
 def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     """Workgroup size of an instance, from its tuning alone."""
     if not identity.is_direct:
-        return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        if identity.pipeline != "wavelet":
+            return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        # Wavelet appends load waves to the workgroup; the spec knows how many.
+        spec = spec_for_job(job_for_identity(identity), identity.dtype_a)
+        return (spec_launch_block_size(spec), 1, 1)
     # threads_per_block reads only the knobs, so any shape the spec accepts
     # at construction answers it.
     probe = DirectConvProblem(
@@ -531,13 +574,30 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     return (spec.threads_per_block, 1, 1)
 
 
-def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
-    """The weight-transform binaries an MFMA dgrad instance launches first.
+def _split_c(identity: KernelIdentity) -> int:
+    """The C-split degree of a forward direct instance (1: not split)."""
+    if not identity.is_direct or identity.direction != "direct_fwd":
+        return 1
+    return int(_instance_knobs(identity).get("split_c", 1))
 
-    They read the filter and channel counts alone, so the AOT cache keys them
-    with padding and stride zeroed: every instance sharing a filter shares
-    them.
+
+def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
+    """The helper binaries an instance launches besides its own kernel.
+
+    An MFMA dgrad instance launches its weight transforms first. They read the
+    filter and channel counts alone, so the AOT cache keys them with padding
+    and stride zeroed: every instance sharing a filter shares them. A split-C
+    forward instance launches the reduction that folds its fp32 partial sums
+    into the output after it; it bakes no shape, only the degree.
     """
+    split_c = _split_c(identity)
+    if split_c > 1:
+        from kernels.conv.direct_aot_jobs import _split_reduce_identity
+
+        reduce_id = _split_reduce_identity(
+            identity.arch, identity.wave_size, split_c, identity.dtype_a
+        )
+        return (dataclasses.replace(reduce_id, llvm_flavor=identity.llvm_flavor),)
     if identity.algorithm not in DIRECT_MFMA_DGRAD:
         return ()
     return tuple(
@@ -574,8 +634,22 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
                 spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
             )
         )
-    # The MFMA dgrad's own kernel is a forward pass over the transposed problem.
-    direction = "fwd" if spec.helpers else spec.direction
+    # The MFMA dgrad's own kernel, and the FPROP_SINGLE dgrad variants
+    # (direct_grouped_dgrad_4c / _fused, built by dc.build_direct_conv[_4c] --
+    # the forward builder, reused for dgrad over the transposed problem), are
+    # both a forward pass; ``spec.helpers`` alone used to gate this (true only
+    # for the MFMA ones, which run weight-transform kernels first), silently
+    # mislabeling the FPROP_SINGLE pair's dgrad-shaped kernargs as the fwd
+    # names until the v3 dgrad catalog first registered one for a request this
+    # test suite exercises (test_launch_plan_matches_the_aot_run_path). See
+    # direct_dgrad_kernarg_direction for the FPROP_SINGLE half of this check,
+    # shared with launch_plan_for, the AOT adapter and the benchmark sweep.
+    direction = (
+        "fwd"
+        if spec.helpers
+        or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
+        else spec.direction
+    )
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
 
 
@@ -650,7 +724,8 @@ class ConvLaunchPlan:
     """Everything a launcher needs to run one instance on one request.
 
     The steps run in order on one stream; the last is the instance's own
-    kernel. Buffers are named: the operands ``x``/``w``/``y`` (fwd) or
+    kernel, except for a split-C forward instance, whose fp32 partial sums the
+    reduction after it folds into ``y``. Buffers are named: the operands ``x``/``w``/``y`` (fwd) or
     ``dy``/``w``/``dx`` (dgrad), the caller-allocated scratch in
     ``workspaces`` (name -> bytes, no initial contents), and for implicit-GEMM
     dgrad ``sub_gemms``, a device copy of the i32 table ``sub_gemm_table``
@@ -741,8 +816,36 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         )
     problem, _ = _direct_problem(req)
     if not spec.helpers:
-        args = ConvArgs.from_problem(problem, direction=spec.direction)
+        # See direct_dgrad_kernarg_direction: which problem orientation a
+        # FPROP_SINGLE instance's kernargs come from must agree with the AOT
+        # adapter's copy of this same decision.
+        if direct_dgrad_kernarg_direction(ident.algorithm) == "fwd":
+            launch_spec, _ = _direct_launch_spec(ident, req)
+            args = ConvArgs.from_problem(launch_spec.problem, direction="fwd")
+        else:
+            args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))
+    split_c = _split_c(ident)
+    if split_c > 1:
+        # Split-C: the conv pass writes fp32 partial sums into a workspace and
+        # the reduction folds them into y. Both take the forward ABI and the
+        # same extents (as benchmarks/common/direct_kernel_sweep.direct_plan).
+        (reduce_id,) = spec.helpers
+        launch_spec, _ = _direct_launch_spec(ident, req)
+        reduce_spec = make_direct_spec(
+            reduce_id.algorithm, problem, {"split_c": split_c}
+        )
+        args = ConvArgs.from_problem(problem, direction="fwd")
+        conv = dataclasses.replace(step(args), buffers=("x", "w", "ws_split"))
+        fold = ConvLaunchStep(
+            reduce_id,
+            reduce_spec.grid(problem),
+            (reduce_spec.threads, 1, 1),
+            conv.signature,
+            ("ws_split", "w", "y"),
+            args,
+        )
+        return ConvLaunchPlan((conv, fold), {"ws_split": launch_spec.workspace_bytes})
 
     # MFMA dgrad: the weight transforms, then a forward pass over the
     # transposed problem reading the transformed weights.
@@ -903,7 +1006,11 @@ class InstanceListError(ValueError):
 class InstanceList:
     """One instance list file: ``grouped_convolution_instances/<arch>_<dir>.json``.
 
-    ``identities`` are in priority order. ``defaults`` are field values every
+    ``identities`` are a set for a direction where
+    :func:`instance_list_is_set` (dgrad), no position meaning carried, stored
+    sorted by label (:func:`_instance_sort_key`) for diff stability; for any
+    other direction (fwd) they are a priority order, the file's own order
+    deciding the default pick. ``defaults`` are field values every
     record shares unless it spells its own (``llvm_flavor``, ``wave_size``);
     a record spells only the fields that leave the family's baseline
     (:func:`kernels.conv.kernel_label.field_baseline`) or ``defaults``,
@@ -1016,7 +1123,10 @@ class InstanceList:
 
 
 def load_instance_list(path: Path) -> InstanceList:
-    """The instance list in ``path``, its identities in priority order.
+    """The instance list in ``path``: its identities in on-disk order, never
+    re-sorted on load. For a set direction (:func:`instance_list_is_set`,
+    dgrad) that order carries no meaning (a canonically written file is
+    sorted by :func:`_instance_sort_key`); for fwd it is the priority order.
 
     Fails on a broken list rather than skipping an entry: a record that does
     not spell an identity of the list's arch and direction, or one that repeats an
@@ -1060,10 +1170,6 @@ def load_instance_list(path: Path) -> InstanceList:
     for i, record in enumerate(records):
         where = f"{path.name}: instances[{i}]"
         identity = lst.identity(record, where)
-        if identity.pipeline == "wavelet":
-            # Wavelet appends load waves to the workgroup, which _instance_block
-            # does not model; no registered arch builds it.
-            raise InstanceListError(f"{where}: wavelet instances are not supported")
         if identity in seen:
             raise InstanceListError(
                 f"{where}: {identity.label()} is already instances[{seen[identity]}]"
@@ -1077,8 +1183,35 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _instance_sort_key(identity: KernelIdentity) -> str:
+    """The deterministic key a set direction's instances are ordered by.
+
+    In a set direction (:func:`instance_list_is_set`, dgrad) a list's
+    ``identities`` carry no selection meaning by position; a record's file
+    order is irrelevant. (fwd's list is a priority order and is never sorted
+    by this key.) ``label()`` is already the canonical,
+    unique, lossless name every identity has (used for dedup in
+    :func:`load_instance_list`), so it doubles as the sort key that makes the
+    on-disk file -- and the default (no ``ranker``) pick among admitted
+    candidates -- reproducible regardless of edit/append order.
+    """
+    return identity.label()
+
+
 def format_instance_list(lst: InstanceList) -> str:
-    """``lst`` as its file's text: canonical records, one per line."""
+    """``lst`` as its file's text: canonical records, one per line.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS` (dgrad), sorted by
+    :func:`_instance_sort_key` -- a set, not the order ``lst.identities`` happens
+    to hold (insertion/append order is not preserved). Any other direction
+    (fwd) keeps ``lst.identities``'s own order: its hand-tuned on-disk
+    priority (see :func:`_read_instance_list`) is meaning this formatter must
+    not erase."""
+    identities = (
+        sorted(lst.identities, key=_instance_sort_key)
+        if instance_list_is_set(lst.direction)
+        else lst.identities
+    )
     lines = ["{"]
     if lst.comment:
         lines.append('  "comment": [')
@@ -1089,9 +1222,9 @@ def format_instance_list(lst: InstanceList) -> str:
     lines.append(f'  "direction": {_json(lst.direction)},')
     if lst.defaults:
         lines.append(f'  "defaults": {_json(lst.defaults)},')
-    if lst.identities:
+    if identities:
         lines.append('  "instances": [')
-        lines += [f"    {_json(lst.record(i))}," for i in lst.identities]
+        lines += [f"    {_json(lst.record(i))}," for i in identities]
         lines[-1] = lines[-1].rstrip(",")
         lines.append("  ]")
     else:
@@ -1100,8 +1233,33 @@ def format_instance_list(lst: InstanceList) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: Directions whose default (no-``ranker``) pick is the deterministic
+#: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
+#: list file's on-disk order. Scoped to dgrad only: fwd's default pick is a
+#: hand-tuned family preference (e.g. the windowed depthwise kernel sorting
+#: first in its catalog) that label order does not reproduce, and
+#: re-deriving it needs fresh measurement this change does not make.
+_SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
+
+
+def instance_list_is_set(direction: str) -> bool:
+    """Whether ``direction``'s instance lists are a set rather than a
+    priority order.
+
+    True (dgrad): file position carries no meaning; the lists are written and
+    read sorted by label (:func:`_instance_sort_key`). False (fwd): the file's
+    own order is the default-pick priority, which every reader and writer
+    keeps.
+    """
+    return direction in _SET_SEMANTICS_DIRECTIONS
+
+
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
-    """The registered instances of ``(arch, direction)``, in priority order.
+    """The registered instances of ``(arch, direction)``.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS`, a set sorted by
+    :func:`_instance_sort_key` for a deterministic default order; otherwise
+    the list file's own on-disk order (its unwritten priority table).
 
     Fails at import rather than at a first request: a list that does not
     load, or that declares another arch or direction than it is registered
@@ -1114,7 +1272,9 @@ def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]
             f"{path.name}: declares {lst.arch} {lst.direction}, "
             f"registered as {arch} {direction}"
         )
-    return lst.identities
+    if instance_list_is_set(direction):
+        return tuple(sorted(lst.identities, key=_instance_sort_key))
+    return tuple(lst.identities)
 
 
 _CONV_DIM_VOCABULARY = (
@@ -1168,6 +1328,9 @@ CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
 CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
 
 # Registered instances by name; a candidate's spec does not depend on the request.
+# ``priority`` here is the index in _read_instance_list's order: sorted by
+# label for a set direction (dgrad; see _instance_sort_key), the file's own
+# order for fwd.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
     for _priority, _identity in enumerate(_read_instance_list(_arch, _direction)):
@@ -1192,21 +1355,23 @@ _WINOGRAD_ARCHES = ("gfx1250",)
 
 
 def _winograd_model(arch: str) -> WinogradCostModel:
-    return WinogradCostModel(num_cus=_ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS))
+    return WinogradCostModel(num_cus=arch_num_cus(arch))
 
 
-def _winograd_spec(req: ConvGroupedRequest, plan) -> ConvWinogradSpec:
+def _winograd_spec(
+    req: ConvGroupedRequest, plan, name: str = _WINOGRAD_NAME
+) -> ConvWinogradSpec:
     """The spec of ``plan`` on ``req``; raises ``ValueError`` when a kernel of
     the plan cannot run the problem or does not lower at the request's LLVM
     flavor (the K3 GEMM lowers at llvm23 only)."""
     problem = _conv_problem(req)
     dtype = req.dtype.lower()
     steps, _ = winograd_steps(problem, dtype, plan)
-    why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
+    why = winograd_flavor_reason(problem, dtype, plan, req.resolved_llvm_flavor())
     if why is not None:
-        raise ValueError(f"{_WINOGRAD_NAME}:{plan.label}: {why}")
+        raise ValueError(f"{name}:{plan.label}: {why}")
     return ConvWinogradSpec(
-        name=f"{_WINOGRAD_NAME}:{plan.label}",
+        name=f"{name}:{plan.label}",
         plan=plan,
         problem=problem,
         dtype=dtype,
@@ -1266,12 +1431,81 @@ def _winograd_selection(
         return None, str(e)
 
 
+# The same 3x3 plans on the shape-generic transform binaries
+# (:mod:`kernels.common.conv_winograd_fwd_rt`): every kernel of the pipeline is
+# compiled once, ahead of time, and named by its kernel name.
+_WINOGRAD_AOT_NAME = "conv_winograd_fwd_aot"
+
+
+def _as_aot(plan):
+    """The ``unfused2d_rt`` twin of a 3x3 ``unfused2d`` plan, else ``None``
+    (the 1-D and generalized plans have no shape-generic kernels)."""
+    if plan.kind != "unfused2d":
+        return None
+    return dataclasses.replace(plan, kind="unfused2d_rt", merge="")
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_aot_sweep(req: ConvGroupedRequest) -> tuple[ConvWinogradSpec, ...]:
+    """Every safe 3x3 Winograd plan of ``req`` on the AOT binaries, in model
+    cost order."""
+    if _winograd_problem_reason(req) is not None:
+        return ()
+    dtype = req.dtype.lower()
+    out = []
+    for plan in winograd_plans(
+        _conv_problem(req), dtype, model=_winograd_model(req.arch)
+    ):
+        aot = _as_aot(plan)
+        if aot is None:
+            continue
+        try:
+            out.append(_winograd_spec(req, aot, _WINOGRAD_AOT_NAME))
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=256)
+def _winograd_aot_selection(
+    req: ConvGroupedRequest,
+) -> tuple[ConvWinogradSpec | None, str]:
+    """The selector's plan for ``req`` on the AOT binaries (the cheapest safe
+    3x3 plan when the selector picks a 1-D / generalized one, or when a
+    binary of its plan cannot run the problem), or ``(None, why)``."""
+    why = _winograd_problem_reason(req)
+    if why is not None:
+        return None, why
+    sel = select_winograd(
+        _conv_problem(req), req.dtype.lower(), model=_winograd_model(req.arch)
+    )
+    if sel.kind == "none":
+        return None, sel.reason
+    aot = _as_aot(sel)
+    if aot is not None:
+        try:
+            return _winograd_spec(req, aot, _WINOGRAD_AOT_NAME), "ok"
+        except ValueError as e:
+            why = str(e)
+    else:
+        why = f"the selected {sel.label} plan has no AOT kernels"
+    rest = _winograd_aot_sweep(req)
+    if rest:
+        return rest[0], "ok"
+    return None, why
+
+
 def _winograd_last_step(spec: ConvWinogradSpec):
     steps, _ = winograd_steps(spec.problem, spec.dtype, spec.plan)
     return steps[-1]
 
 
-def _make_winograd_candidate() -> KernelCandidate:
+def _make_winograd_candidate(
+    name: str = _WINOGRAD_NAME,
+    algorithm: str = "winograd",
+    selection=_winograd_selection,
+    sweep=_winograd_sweep,
+) -> KernelCandidate:
     def support(req: OperatorRequest) -> tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
@@ -1280,27 +1514,27 @@ def _make_winograd_candidate() -> KernelCandidate:
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
-        spec, why = _winograd_selection(req)
+        spec, why = selection(req)
         return spec is not None, why
 
     def select(req: OperatorRequest) -> ConvWinogradSpec:
         ok, why = candidate.admits(req)
         if not ok:
-            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+            raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
-        spec, why = _winograd_selection(req)
+        spec, why = selection(req)
         if spec is None:
-            raise ValueError(f"{_WINOGRAD_NAME} does not support request: {why}")
+            raise ValueError(f"{name} does not support request: {why}")
         return spec
 
     def build(spec: ConvWinogradSpec, arch: str):
         return _winograd_last_step(spec).kernel.build(arch)
 
     candidate = KernelCandidate(
-        name=_WINOGRAD_NAME,
+        name=name,
         family=_FAMILIES["fwd"],
-        algorithm="winograd",
-        spec_id=_WINOGRAD_NAME,
+        algorithm=algorithm,
+        spec_id=name,
         abi_version=CONV_WINOGRAD_ABI_VERSION,
         # After every listed instance; opt-in, so never picked under "auto".
         priority=1_000_000,
@@ -1314,9 +1548,7 @@ def _make_winograd_candidate() -> KernelCandidate:
         signature=lambda spec: _winograd_last_step(spec).signature,
         grid=lambda spec, req: _winograd_last_step(spec).grid,
         block=lambda spec: _winograd_last_step(spec).block,
-        sweep_space=lambda req: (
-            _winograd_sweep(req) if candidate.admits(req)[0] else ()
-        ),
+        sweep_space=lambda req: (sweep(req) if candidate.admits(req)[0] else ()),
         build=build,
         opt_in=True,
     )
@@ -1326,6 +1558,14 @@ def _make_winograd_candidate() -> KernelCandidate:
 _WINOGRAD_CANDIDATE = _make_winograd_candidate()
 _REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
 _EXECUTION_REGISTRIES["fwd"].register(_WINOGRAD_CANDIDATE)
+_WINOGRAD_AOT_CANDIDATE = _make_winograd_candidate(
+    _WINOGRAD_AOT_NAME,
+    "winograd_aot",
+    _winograd_aot_selection,
+    _winograd_aot_sweep,
+)
+_REGISTRIES["fwd"].register(_WINOGRAD_AOT_CANDIDATE)
+_EXECUTION_REGISTRIES["fwd"].register(_WINOGRAD_AOT_CANDIDATE)
 
 
 # ---------------------------------------------------------------------------
@@ -1345,7 +1585,7 @@ def _registry(req: ConvGroupedRequest) -> CandidateRegistry:
 
 
 def conv_grouped_candidates(direction: str = "fwd") -> tuple[KernelCandidate, ...]:
-    """Every registered candidate of ``direction``, in priority order."""
+    """Every registered candidate of ``direction``, in deterministic (sorted-label) order."""
     registry = _REGISTRIES.get(direction)
     return registry.candidates() if registry is not None else ()
 
@@ -1353,7 +1593,7 @@ def conv_grouped_candidates(direction: str = "fwd") -> tuple[KernelCandidate, ..
 def registered_conv_grouped_instances(
     arch: str | None = None, direction: str = "fwd"
 ) -> tuple[ConvInstanceSpec, ...]:
-    """Every registered instance (optionally of one ``arch``), in priority order.
+    """Every registered instance (optionally of one ``arch``), in deterministic (sorted-label) order.
 
     What an AOT build compiles: request-independent, no GPU needed.
     """
@@ -1367,14 +1607,14 @@ def registered_conv_grouped_instances(
 def registered_conv_grouped_combos(
     req: OperatorRequest,
 ) -> tuple[tuple[KernelCandidate, ConvInstanceSpec], ...]:
-    """Every registered ``(candidate, spec)`` that can run ``req``, in priority order."""
+    """Every registered ``(candidate, spec)`` that can run ``req``, in deterministic (sorted-label) order."""
     if _request_errors(req):
         return ()
     return _registry(req).combos(req)
 
 
 def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvInstanceSpec]:
-    """Every registered instance that can run ``req``, in priority order."""
+    """Every registered instance that can run ``req``, in deterministic (sorted-label) order."""
     if _request_errors(req):
         return ()
     return _registry(req).sweep_space(req, spec_key=lambda spec: spec.name)
@@ -1383,7 +1623,7 @@ def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvInstanceSpec]
 def dispatch_conv_grouped_all(req: ConvGroupedRequest) -> tuple[DispatchResult, ...]:
     """A :class:`DispatchResult` for every instance that can run ``req``.
 
-    In priority order, each with its own launch geometry and signature -- the
+    In deterministic (sorted-label) order, each with its own launch geometry and signature -- the
     benchmark primitive.
     """
     if _request_errors(req):

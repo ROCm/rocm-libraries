@@ -13,11 +13,20 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
-    # lane points the production source root. Gfx950AttentionDense ships from descriptors/.
+    # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
+    # Gfx950AttentionUnified3D, Gfx942AttentionDense, Gfx950ConvDgradAot and
+    # Gfx1250ConvDgradAot ship from descriptors/; the two dense attention engines share
+    # AttentionDenseNative.cpp, the two dgrad engines ConvDgradAotNative.cpp.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionUnified3dNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionUnified2DNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionUnified3DNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDgradAotNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp
 )
@@ -200,3 +209,25 @@ endblock()
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
 # definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+
+# The FlyDSL pack rides its own gate on top of the ingestor's: the ACTIVE variable, not
+# the option (see its definition in the provider's CMakeLists.txt). It holds whenever the
+# production root has FlyDSL content, not only when this build packs objects for one of
+# its targets: the seams are host code, shipped from one shard of a multi-arch build to
+# every architecture. With no objects for the device, no descriptor names them, so the
+# engines simply do not appear.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormBwdNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaDecodeNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaAiwNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDualwaveNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaDropoutMaskNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaHeadPadNative.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
+endif()

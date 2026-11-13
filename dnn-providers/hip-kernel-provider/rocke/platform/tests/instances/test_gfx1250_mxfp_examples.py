@@ -5,7 +5,6 @@
 import argparse
 import importlib
 import subprocess
-import sys
 
 import pytest
 
@@ -13,6 +12,7 @@ from rocke.core.arch.target import normalize_dtype
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm import _scaled_gemm_example
 from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 
 @pytest.mark.parametrize(
@@ -80,8 +80,7 @@ def test_example_cli_rejects_unsupported_output(monkeypatch, family, capsys):
 @pytest.mark.parametrize("path", ["wmma_scale", "wmma_scale16"])
 @pytest.mark.parametrize("route", ["comgr", "hip"])
 def test_example_fp16_output_numeric(gpu_env, family, dtype, path, route):
-    command = [
-        sys.executable,
+    command = rocke_python_command(
         "-m",
         f"rocke.examples.gfx1250.gemm.{family}_gemm",
         "--output-dtype",
@@ -98,7 +97,7 @@ def test_example_fp16_output_numeric(gpu_env, family, dtype, path, route):
         "256",
         "--case",
         "mixed",
-    ]
+    )
     if dtype is not None:
         command.extend(["--dtype", dtype])
     result = subprocess.run(

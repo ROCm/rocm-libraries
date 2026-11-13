@@ -9,6 +9,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
@@ -29,6 +30,19 @@
     ckc::raise_status(st, msg ? msg : "");
 }
 
+/* Python _NOT_GFX950: the body uses gfx950-only wide MFMA atoms and transposed
+ * LDS reads. True (with the reason written) for any target but gfx950; NULL arch
+ * is the Python default "gfx950". */
+static bool rocke__fastkv_regp_not_gfx950(const char* arch, char* reason, size_t reason_cap)
+{
+    if(arch == NULL || strcmp(arch, "gfx950") == 0)
+        return false;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(
+            reason, reason_cap, "fastKV register-P is a gfx950 kernel; %s is not supported", arch);
+    return true;
+}
+
 /* gfx950 UnifiedAttention2DTiledSpec.kernel_name() (rocke/instances/gfx950/
  * attention_tiled_2d.py kernel_name). The gfx950 part list is SHORTER than the
  * gfx942 one (no wpe, no mfma32x8/qdir/kvcp/gldlds/qgrid/cfv/... parts), so the
@@ -38,10 +52,11 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
                                                      char* out,
                                                      size_t out_cap)
 {
-    char t_buf[32], hkv_buf[64], kv_buf[64], sw_buf[32], w_buf[32], mw_buf[32];
+    char t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64], sw_buf[32], w_buf[32], mw_buf[32];
     char d_buf[16], b_buf[16];
 
-    if(s == NULL || out == NULL)
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(s == NULL || out == NULL || s->num_kv_heads <= 0)
         return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
@@ -50,13 +65,20 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", s->num_query_heads / s->num_kv_heads);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype != NULL)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)
@@ -74,8 +96,11 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
@@ -98,6 +123,7 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
             s->use_fp8_mfma_qk ? "fp8mfma" : "",
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
+            s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(
@@ -229,6 +255,11 @@ bool rocke_gfx950_supports_fastkv_register_p_2d(
     if(args == NULL)
         return false;
 
+    /* if arch != "gfx950": return False, _NOT_GFX950 -- supports_tiled_2d also
+     * admits gfx942, but this body is gfx950-only. NULL arch == Python "gfx950". */
+    if(rocke__fastkv_regp_not_gfx950(args->arch, reason, reason_cap))
+        return false;
+
     /* ok, reason = supports_tiled_2d(... num_warps=4, kv_storage_dtype=None,
      *   tile_size = tile_size if tile_size is not None else 2*block_size,
      *   arch=arch) */
@@ -284,6 +315,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
         if(b->status != ROCKE_OK) /* dead builder: no-op */
             return NULL;
 
+        /* if arch != "gfx950": raise ValueError(_NOT_GFX950) */
+        {
+            char why[128];
+            if(rocke__fastkv_regp_not_gfx950(arch, why, sizeof(why)))
+            {
+                rocke__fastkv_regp_set_err(b, ROCKE_ERR_VALUE, why);
+                return NULL;
+            }
+        }
+
         /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
         if(!spec->use_fast_paged_kv_desc)
         {
@@ -304,6 +345,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             rocke__fastkv_regp_set_err(
                 b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support FP8 KV cache");
             return NULL;
+        }
+        /* The tiled build reads spec.num_queries_per_kv, which raises ValueError
+         * with the head-count rule's text; check it here, before the shared
+         * scaffold divides by num_kv_heads. */
+        {
+            char why[160];
+            if(!rocke_attention_check_head_counts(
+                   spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            {
+                rocke__fastkv_regp_set_err(b, ROCKE_ERR_VALUE, why);
+                return NULL;
+            }
         }
 
         /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)

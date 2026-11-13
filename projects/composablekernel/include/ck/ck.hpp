@@ -77,7 +77,7 @@
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
 #define __gfx120__
 #endif
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
 #define __gfx125__
 #endif
 #if defined(__gfx120__) || defined(__gfx125__)
@@ -143,6 +143,13 @@
 #define CK_USE_AMD_MFMA
 #elif defined(__gfx9__) // for GPU code
 #define CK_USE_AMD_MFMA
+#endif
+
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_asyncmark) && \
+    __has_builtin(__builtin_amdgcn_wait_asyncmark)
+#define CK_HAS_ASYNCMARK 1
+#else
+#define CK_HAS_ASYNCMARK 0
 #endif
 
 #if(defined(__gfx90a__) || defined(__gfx94__))

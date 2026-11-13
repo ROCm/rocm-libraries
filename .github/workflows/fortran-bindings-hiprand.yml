@@ -1,0 +1,31 @@
+# Fortran binding of hiprand: see fortran-bindings.yml.
+name: Fortran bindings (hiprand)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hiprand/library/include/**.h'
+      - 'projects/rocrand/library/include/**.h'
+      - 'bindings/fortran/hiprand/metadata/**'
+      - '.github/workflows/fortran-bindings-hiprand.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: hiprand
+      libs: hiprand
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

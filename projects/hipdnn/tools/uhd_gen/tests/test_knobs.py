@@ -362,6 +362,29 @@ def test_a_field_the_pack_pinned_is_told_apart_from_one_the_graph_binds():
     assert "re-sweep" in ranked["waves_per_eu"]["advice"]
 
 
+def test_an_unslotted_dotted_knob_is_not_bound_by_a_coincident_problem_column():
+    """Only a slotted corpus names a knob by its last segment; `q.cfg0` is not twin of
+    `kernel.descriptor.cfg0` when no kernel identity is a composite."""
+    rows = [
+        {
+            "q.M": m,
+            "q.cfg0": 7,
+            "kernel": f"k{cfg}",
+            "kernel.descriptor.cfg0": cfg,
+            "benchmark": f"p{m}",
+            "robustMeanMs": cfg * (1 + m / 100),
+            "device.gcnArchName": "gfx90a",
+        }
+        for m in (16, 32)
+        for cfg in (1, 2)
+    ]
+
+    knob = _knob(analyse_knobs(pd.DataFrame(rows)), "kernel.descriptor.cfg0")
+
+    assert knob["graph_bound"] is False
+    assert knob["bound_as"] is None
+
+
 def test_a_pinned_field_reaches_what_to_change_but_a_graph_bound_one_does_not():
     report = analyse_knobs(_corpus_with_geometry())
     text = format_author_report(report, rank_knobs(report), "eng")

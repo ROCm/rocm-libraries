@@ -12,12 +12,15 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -109,19 +112,11 @@ protected:
                           gap);
     }
 
-    // The first GPU entry in the table, or empty once every gap has been closed.
-    // Taken from the live table rather than hardcoded so these cases follow the list
-    // instead of pinning one bundle name that is expected to be deleted.
-    static std::optional<KnownReferenceGap> aKnownGpuGap()
+    // A GPU gap entry. The harness asserts whatever entry it is handed and looks nothing
+    // up, so a fixture entry exercises the path even when the live table is empty.
+    static KnownReferenceGap aKnownGpuGap()
     {
-        for(const auto& gap : knownReferenceGaps())
-        {
-            if(gap.reference == ReferenceExecutorType::GPU)
-            {
-                return gap;
-            }
-        }
-        return std::nullopt;
+        return {ReferenceExecutorType::GPU, "fixture_gap.Small", "fixture GPU gap"};
     }
 };
 
@@ -162,6 +157,31 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("no tensor data"), std::string::npos);
+}
+
+// A bundle cannot declare both an alias and golden/output tensor data at once: the
+// normal loader already blocks that combination earlier (checkAliasRules), so the only
+// way to reach this guard is a hand-built bundle that bypasses it, the same way the
+// test above reaches the neighboring no-tensor-data guard.
+TEST_F(TestBundleReferenceValidationHarness, BodyFailsForABundleWithAnAliasAndGoldenData)
+{
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->hasGoldenOutputs = true; // clears SetUp()'s first guard
+    bundle->blobs.emplace(); // clears SetUp()'s second guard
+    bundle->metadata.aliases.push_back(TensorAlias{1, 0, 0});
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(bundle, "alias-and-golden-data-bundle", /*expectedGap=*/std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find(
+                  "aliases cannot be used with golden tensor data"),
+              std::string::npos)
+        << testing_support::allMessages(results);
 }
 
 // The regression this rework fixes: useDevice() used to read _referenceType ==
@@ -274,10 +294,6 @@ TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherTha
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault(::testing::Return(false));
@@ -285,7 +301,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -300,10 +316,6 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPasses)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault([](void*, size_t) -> bool {
@@ -313,7 +325,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPas
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -329,17 +341,13 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPas
 TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails)
 {
     const auto gap = aKnownGpuGap();
-    if(!gap.has_value())
-    {
-        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
-    }
 
     ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
         .WillByDefault(::testing::Return(true));
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
-    setGoldenBundleExpecting(harness, *gap);
+    setGoldenBundleExpecting(harness, gap);
 
     ::testing::TestPartResultArray results;
     drive(harness, &results);
@@ -348,7 +356,7 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails
     EXPECT_FALSE(testing_support::anySkipped(results));
     const auto messages = testing_support::allMessages(results);
     EXPECT_NE(messages.find("now reports this graph applicable"), std::string::npos) << messages;
-    EXPECT_NE(messages.find(std::string(gap->bundleId)), std::string::npos) << messages;
+    EXPECT_NE(messages.find(std::string(gap.bundleId)), std::string::npos) << messages;
 }
 
 // Same contract by the other route: the reference accepts the graph up front and
@@ -471,6 +479,147 @@ TEST_F(TestBundleReferenceValidationHarness, DriftedReferenceOutputFailsNamingTh
     const std::string messages = testing_support::allMessages(results);
     EXPECT_NE(messages.find("Golden data validation"), std::string::npos) << messages;
     EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
+}
+
+// The reference is handed output buffers laid out like the golden data: an SDPA bundle whose
+// Stats sits [H,T] with a gap between its batches (L7d) allocates both outputs to the
+// elementSpace of the dense view, built with the node's seq_len lengths.
+TEST_F(TestBundleReferenceValidationHarness, RaggedSdpaOutputsTakeTheirLengthsFromSeqLen)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+            auto variantPackCopy = variantPack;
+            fixtures::writeRaggedSdpaGappedOutputs(variantPackCopy, 0.0f);
+        });
+
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::loadWrittenBundle(dir, layout.name), dir, std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// ---- live_rows -------------------------------------------------------------
+
+namespace
+{
+
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float K_NEGATIVE_INF = -std::numeric_limits<float>::infinity();
+
+// A reference that writes `value` to every element of y, including the rows past the
+// live lengths.
+void referenceWrites(::testing::NiceMock<MockReferenceGraphExecutor>& executor, float value)
+{
+    ON_CALL(executor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([value](void*, size_t, const VariantPack& variantPack) {
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, value);
+        });
+}
+
+} // namespace
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenNaNPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_rows", {1, 0}, K_NAN),
+                      _tempDir / "live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// Golden y holds -inf past the lengths and the reference writes a finite value there:
+// only the lengths keep those positions out of the comparison.
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(
+        fixtures::writeLiveRowBundle(_tempDir, "live_rows_inf", {1, 0}, K_NEGATIVE_INF),
+        _tempDir / "live_rows_inf",
+        std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfWithoutLiveRowsFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(
+                          _tempDir, "no_live_rows", {1, 0}, K_NEGATIVE_INF, /*withLiveRows=*/false),
+                      _tempDir / "no_live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowDriftInALiveRowFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE + 100.0f);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_drift", {1, 0}, K_NAN),
+                      _tempDir / "live_drift",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowLengthPastTheExtentFailsTheValidation)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_too_long", {5, 0}, K_NAN),
+                      _tempDir / "live_too_long",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("live_rows cannot be applied"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("length 5 of batch 0 is not in the range 0 to 4"), std::string::npos)
         << messages;
 }
 

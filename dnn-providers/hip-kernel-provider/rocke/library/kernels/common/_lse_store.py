@@ -7,11 +7,13 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
-  masking, and ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer;
-* the unified split-KV reduce: the same IR helpers emit its LSE store, and
-  ``validate_unified_lse`` is its host-side buffer contract.  Both validators
-  sit on the common ``_check_lse_buffer``;
+  masking, ``validate_dense_lse`` is the host-side contract for the
+  caller-owned LSE buffer, and ``validate_varlen_keys`` the host check for a packed
+  varlen launch without LSE;
+* the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
+  gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
+  ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
+  contract.  Both validators sit on the common ``_check_lse_buffer``;
 * the MFMA / WMMA attention forward inner bodies: ``make_*_lse_epilogue``
   produce *epilogue callables* for
   :class:`rocke.helpers.attention_fwd_ext.AttnFwdExt.epilogue_hook`.
@@ -61,16 +63,55 @@ __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
     "lse_row_value",
+    "lse_row_has_mass",
     "lse_store",
     "make_lse_epilogue",
     "make_mfma_lse_epilogue",
     "make_wmma_lse_epilogue",
+    "UNIFIED_LSE_LAYOUTS",
+    "unified_lse_offset",
     "validate_dense_lse",
+    "validate_varlen_keys",
     "zero_keyless_row",
 ]
 
 # Row slots a lane holds per accumulator tile.
 LSE_ROWS_PER_LANE = {"mfma": 4, "wmma": 8}
+
+# Element orders of the unified-attention LSE buffer; the first is the default.
+UNIFIED_LSE_LAYOUTS = ("token_major", "head_major")
+
+
+def unified_lse_offset(
+    b: IRBuilder,
+    layout: str,
+    *,
+    cu_q_start: Value,
+    q_len: Value,
+    pos: Value,
+    head: Value,
+    num_heads: Union[int, Value],
+) -> Value:
+    """Element index of (sequence-local row ``pos``, query head ``head``).
+
+    token_major: ``(cu_q_start + pos) * num_heads + head``, i.e. [total_q, Hq, 1].
+    head_major: ``cu_q_start * num_heads + head * q_len + pos``, each sequence a
+    [Hq, q_len] block, i.e. [B, Hq, S, 1] when every sequence has length S.
+    ``num_heads`` is a baked int or the kernel's runtime head-count kernarg.
+    """
+
+    def heads() -> Value:
+        return b.const_i32(num_heads) if isinstance(num_heads, int) else num_heads
+
+    # Op order is the C++ twin's (rocke_unified_lse_offset): it names the SSA values.
+    if layout == "token_major":
+        tok = b.add(cu_q_start, pos)
+        return b.add(b.mul(tok, heads()), head)
+    if layout == "head_major":
+        seq_base = b.mul(cu_q_start, heads())
+        head_base = b.mul(head, q_len)
+        return b.add(b.add(seq_base, head_base), pos)
+    raise ValueError(f"lse layout must be one of {UNIFIED_LSE_LAYOUTS}, got {layout!r}")
 
 
 def lse_store(
@@ -88,6 +129,17 @@ def lse_store(
     value = natural_lse_from_log2_stats(b, safe_m, safe_l)
     value = b.select(row_has_mass, value, b.const_f32(float("-inf")))
     b.global_store(dst, element_offset, value, align=4)
+
+
+def lse_row_has_mass(b: IRBuilder, l: Value) -> Value:
+    """``!(l == 0)``, NaN included: the exact inverse of the tiled 2D O guard
+    ``fcmp("oeq", l, 0)``. A keyless row (l == 0) gets -inf; a NaN row keeps NaN.
+
+    Built as ``one OR uno`` instead of ``lnot(oeq)``: the HIP lowerer maps i1 to
+    ``bool`` and lowers ``arith.not`` to ``~x``, which is true for both inputs.
+    """
+    zero = b.const_f32(0.0)
+    return b.lor(b.fcmp("one", l, zero), b.fcmp("uno", l, zero))
 
 
 def dense_row_has_key(
@@ -261,6 +313,50 @@ def validate_dense_lse(
                 raise ValueError("LSE-enabled packed KV sequences must be nonempty")
 
 
+def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
+    """Host check for a packed varlen launch WITHOUT the LSE output.
+
+    The packed body zeroes no keyless row without LSE and has no empty-KV path, so
+    reject what would come out wrong instead of returning it: a sequence that has
+    queries but a KV length of 0, and, with a sliding window, a sequence whose last
+    query rows see no key (``q_len - kv_len >= window``). A slot with no queries exits
+    before touching KV, so it may have no keys. Both rejections are implementation
+    shortcuts of the packed body, not hardware limits, so they raise
+    ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
+    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
+    Tile alignment and the spec maxima are not checked here; with LSE,
+    :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
+    Synchronizes both offset tensors to host.
+    """
+    for name, tensor in (
+        ("cu_seqlens_q", cu_seqlens_q),
+        ("cu_seqlens_kv", cu_seqlens_kv),
+    ):
+        if str(tensor.dtype) != "torch.int32":
+            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
+    q_off = cu_seqlens_q.tolist()
+    kv_off = cu_seqlens_kv.tolist()
+    if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
+        raise ValueError(
+            "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"
+        )
+    window = spec.sliding_window
+    q_lens = [stop - start for start, stop in zip(q_off, q_off[1:])]
+    kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
+    for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+        if q_len > 0 and kv_len <= 0:
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
+                "without LSE"
+            )
+        if window and q_len - kv_len >= window:
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
+                f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
+                "use emit_lse"
+            )
+
+
 Stride = Union[int, Value]
 ExtraValid = Callable[[IRBuilder, RowEpilogue], Optional[Value]]
 
@@ -355,21 +451,36 @@ def validate_unified_lse(
     alibi_slopes=None,
     qq_bias=None,
     additive_bias=None,
+    lse_layout="token_major",
 ):
     """Caller-owned LSE contract for unified attention: FP32 [total_q, Hq, 1].
 
     The row extent is ``problem.total_q`` -- the reduce grid's x extent -- so the
-    buffer is tied to the rows the kernel writes, not to the caller's q view."""
+    buffer is tied to the rows the kernel writes, not to the caller's q view.
+    ``lse_layout="head_major"`` (see ``unified_lse_offset``) takes any contiguous
+    view of ``total_q * Hq`` elements, e.g. [B, Hq, S, 1]."""
+    if lse_layout not in UNIFIED_LSE_LAYOUTS:
+        raise ValueError(
+            f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, got {lse_layout!r}"
+        )
     if not problem.emit_lse:
         if lse is not None:
             raise ValueError("lse requires problem.emit_lse=True")
         return
     if lse is None:
         raise ValueError("emit_lse=True requires a caller-owned lse buffer")
+    expected = (problem.total_q, problem.num_query_heads, 1)
+    if lse_layout == "head_major":
+        # Any contiguous view of the elements; _check_lse_buffer rejects a non-tensor.
+        if hasattr(lse, "is_contiguous"):
+            if not lse.is_contiguous():
+                raise ValueError("lse must be contiguous")
+            lse = lse.reshape(-1)
+        expected = (problem.total_q * problem.num_query_heads,)
     _check_lse_buffer(
         lse,
         q,
-        (problem.total_q, problem.num_query_heads, 1),
+        expected,
         {
             "q": q,
             "k": k,

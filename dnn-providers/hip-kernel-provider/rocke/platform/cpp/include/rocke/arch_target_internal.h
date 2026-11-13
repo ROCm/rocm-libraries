@@ -40,6 +40,9 @@ typedef struct rocke_ati_arch_row
 {
     const char* gfx;
     const rocke_arch_target_t* target; /* fully-built singleton descriptor */
+    /* The generic target this row takes its facts from (arch_specs.json
+     * "facts_of"), or NULL for a row that holds its own facts. */
+    const char* facts_of;
 } rocke_ati_arch_row_t;
 
 /* The registry of all known arches, sorted by gfx token (so rocke_known_arches

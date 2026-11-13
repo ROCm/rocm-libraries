@@ -41,17 +41,20 @@ namespace TensileLite
                 args["results-file"].as<std::string>(),
                 args["csv-export-extra-cols"].as<bool>(),
                 args["csv-merge-same-problems"].as<bool>(),
-                args["performance-metric"].as<PerformanceMetric>());
+                args["performance-metric"].as<PerformanceMetric>(),
+                args["fused-gemm-a2a"].as<bool>());
         }
 
         ResultFileReporter::ResultFileReporter(std::string const& filename,
                                                bool               exportExtraCols,
                                                bool               mergeSameProblems,
-                                               PerformanceMetric  performanceMetric)
+                                               PerformanceMetric  performanceMetric,
+                                               bool               fusedA2ACols)
             : m_output(filename)
             , m_extraCol(exportExtraCols)
             , m_mergeSameProblems(mergeSameProblems)
             , m_performanceMetric(performanceMetric)
+            , m_fusedA2ACols(fusedA2ACols)
         {
             if(m_performanceMetric == PerformanceMetric::CUEfficiency)
                 m_output.setHeaderForKey(ResultKey::ProblemIndex, "GFlopsPerCU");
@@ -174,6 +177,11 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDC, "LDC");
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
+                if(m_fusedA2ACols)
+                {
+                    m_output.setHeaderForKey(ResultKey::World, "World");
+                    m_output.setHeaderForKey(ResultKey::FusedA2AExtent, "A2AExtent");
+                }
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
                 m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
 
@@ -238,7 +246,9 @@ namespace TensileLite
                 if(key.compare(ResultKey::ProblemIndex) == 0
                    || key.find("Size") != std::string::npos || key.compare(ResultKey::LDD) == 0
                    || key.compare(ResultKey::LDC) == 0 || key.compare(ResultKey::LDA) == 0
-                   || key.compare(ResultKey::LDB) == 0 || key.compare(ResultKey::TotalFlops) == 0)
+                   || key.compare(ResultKey::LDB) == 0 || key.compare(ResultKey::TotalFlops) == 0
+                   || key.compare(ResultKey::World) == 0
+                   || key.compare(ResultKey::FusedA2AExtent) == 0)
                 {
                     // these data should be the same for same problem
                     assert(oldRowIter.second == newRow[key]);

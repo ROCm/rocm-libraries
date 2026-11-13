@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "d5b00000-0000-4000-8000-000000000004",
+  "name": "dq variant fields",
+  "fields": [
+    {
+      "name": "family",
+      "type": "string"
+    }
+  ]
+}

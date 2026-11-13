@@ -72,10 +72,13 @@ bool isGfx9()
 
     std::string deviceName(mProps.gcnArchName);
 
+    // clang-format off
     return ((deviceName.find("gfx908") != std::string::npos)
             || (deviceName.find("gfx90a") != std::string::npos)
             || (deviceName.find("gfx942") != std::string::npos)
-            || (deviceName.find("gfx950") != std::string::npos));
+            || (deviceName.find("gfx950") != std::string::npos)
+            );
+    // clang-format on
 }
 
 bool isGfx11()
@@ -88,6 +91,7 @@ bool isGfx11()
 
     std::string deviceName(mProps.gcnArchName);
 
+    // clang-format off
     return ((deviceName.find("gfx1100") != std::string::npos)
             || (deviceName.find("gfx1101") != std::string::npos)
             || (deviceName.find("gfx1102") != std::string::npos)
@@ -97,7 +101,9 @@ bool isGfx11()
             || (deviceName.find("gfx1152") != std::string::npos)
             || (deviceName.find("gfx1153") != std::string::npos)
             || (deviceName.find("gfx1170") != std::string::npos)
-            || (deviceName.find("gfx1171") != std::string::npos));
+            || (deviceName.find("gfx1171") != std::string::npos)
+            );
+    // clang-format on
 }
 
 bool isGfx12()
@@ -110,9 +116,12 @@ bool isGfx12()
 
     std::string deviceName(mProps.gcnArchName);
 
+    // clang-format off
     return ((deviceName.find("gfx1200") != std::string::npos)
             || (deviceName.find("gfx1201") != std::string::npos)
-            || (deviceName.find("gfx1250") != std::string::npos));
+            || (deviceName.find("gfx1250") != std::string::npos)
+            );
+    // clang-format on
 }
 
 // HIP Host function to find if the device supports f64
@@ -126,9 +135,12 @@ bool isF64Supported()
 
     std::string deviceName(mProps.gcnArchName);
 
+    // clang-format off
     return ((deviceName.find("gfx90a") != std::string::npos)
             || (deviceName.find("gfx942") != std::string::npos)
-            || (deviceName.find("gfx950") != std::string::npos));
+            || (deviceName.find("gfx950") != std::string::npos)
+            );
+    // clang-format on
 }
 
 bool isF32Supported()
@@ -141,7 +153,11 @@ bool isF32Supported()
 
     std::string deviceName(mProps.gcnArchName);
 
-    return isGfx9() || (deviceName.find("gfx1250") != std::string::npos);
+    // clang-format off
+    return isGfx9()
+           || (deviceName.find("gfx1250") != std::string::npos)
+           ;
+    // clang-format on
 }
 
 inline double calculateGFlops(uint32_t m, uint32_t n, uint32_t k)

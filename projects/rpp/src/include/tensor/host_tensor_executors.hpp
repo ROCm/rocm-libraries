@@ -112,8 +112,6 @@ RppStatus subtract_scalar_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr
 /**************************************** AUDIO AUGMENTATIONS
  * ****************************************/
 
-#ifdef AUDIO_SUPPORT
-
 // -------------------- down_mixing --------------------
 
 RppStatus down_mixing_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -178,8 +176,6 @@ RppStatus audio_tensor_add_tensor_host(Rpp32f* srcPtr1, Rpp32f* srcPtr2, RpptDes
 RppStatus audio_tensor_mul_scalar_host(Rpp32f* srcPtr, Rpp32f scalarValue, RpptDescPtr srcDescPtr,
                                        Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
                                        Rpp32s* srcLengthTensor, rpp::Handle& handle);
-
-#endif  // AUDIO_SUPPORT
 
 /**************************************** BITWISE OPERATIONS
  * ****************************************/
@@ -653,6 +649,14 @@ RppStatus channel_permute_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDes
 RppStatus channel_permute_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
                                             RpptDescPtr dstDescPtr, Rpp32u* permutationTensor,
                                             RppLayoutParams layoutParams, rpp::Handle& handle);
+
+// -------------------- bayer_to_rgb --------------------
+
+template <typename T>
+RppStatus bayer_to_rgb_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                   RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
+                                   RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                   rpp::Handle& handle);
 
 // -------------------- color_to_greyscale --------------------
 
@@ -1187,6 +1191,14 @@ RppStatus sobel_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    RpptDescPtr dstDescPtr, Rpp32u sobelType, Rpp32u kernelSize,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                    rpp::Handle& handle);
+
+// -------------------- prewitt_filter --------------------
+
+template <typename T>
+RppStatus prewitt_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32u prewittType,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle);
 
 // -------------------- median_filter --------------------
 

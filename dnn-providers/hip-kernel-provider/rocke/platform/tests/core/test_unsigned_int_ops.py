@@ -14,24 +14,24 @@ the same texts as here.
 from __future__ import annotations
 
 import ctypes
-import os
 import shutil
 import struct
 import subprocess
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from rocke.core.ir import F32, I1, I8, I32, I64, IRBuilder, PtrType
+from rocke.core.ir import F32, I1, I8, I32, I64, IRBuilder, PtrType, Type
 from rocke.core.ir_print import print_ir
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import ERROR, verify
+from rocke.tests.built_programs import assert_refuses_arguments, built_program
+from rocke.tests.engines import ENGINES, assert_engine_rejects_hip
 
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 
 def _two_op_kernel(int_type):
@@ -87,21 +87,23 @@ def test_plain_add_still_emits_nsw():
     assert "wrap" not in b.kernel.body.ops[0].attrs
 
 
+@pytest.mark.parametrize("arguments", [("--print-lvm",), ("--print-llvm", "extra")])
+def test_cpp_program_refuses_a_mistyped_mode(arguments):
+    """A mistyped mode or a wrong argument count exits 2 with the usage, instead
+    of running the self-test and passing."""
+    program = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
+    assert_refuses_arguments(program, *arguments)
+
+
 def test_c_api_builders_match_the_python_builder():
     """The C API's rocke_b_add_nuw / rocke_b_cmp_ult build the same function.
 
     ``ROCKE_UNSIGNED_INT_OPS_CLI`` names the built ``rocke_unsigned_int_ops``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
-    ``rocke_pytest`` ctest sets it. A value that names no file is a broken
+    ``rocke_pytest_*`` ctest entries set it. A value that names no file is a broken
     setup, so it fails instead of skipping.
     """
-    executable = os.environ.get("ROCKE_UNSIGNED_INT_OPS_CLI")
-    if not executable:
-        pytest.skip(
-            "Set ROCKE_UNSIGNED_INT_OPS_CLI to the built rocke_unsigned_int_ops"
-        )
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_UNSIGNED_INT_OPS_CLI names {path}, not a file"
+    path = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
     printed = subprocess.run(
         [str(path), "--print-llvm"],
         capture_output=True,
@@ -140,8 +142,8 @@ def test_verifier_accepts_the_new_attrs():
     n = b.param("n", I32)
     b.add_nuw(a, n)
     b.cmp_ult(a, n)
-    b._assume_range(a, lo=0, hi_value=n, hi_plus=1, multiple_of=4, residue=3)
-    b._assume_range(a, lo=0, hi=64)
+    b._assume_range(a, ge=0, lt=n, lt_plus=1, multiple_of=4, residue=3)
+    b._assume_range(a, ge=0, lt=64)
     b.ret()
     assert _errors(b.kernel) == []
 
@@ -235,13 +237,14 @@ _BAD_MARKERS = [
     ),
     (
         True,
-        {"multiple_of": 1, "residue": 0, "hi": 8, "hi_plus": 0},
-        "arith.assume_range: hi and hi_value are both given; state at most one end",
+        {"multiple_of": 1, "residue": 0, "lt": 8, "lt_plus": 0},
+        "arith.assume_range: lt is given both as an attr and as an operand; "
+        "state one upper end",
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "lo": 8, "hi": 8},
-        "arith.assume_range: lo (8) must be below hi (8)",
+        {"multiple_of": 1, "residue": 0, "ge": 8, "lt": 8},
+        "arith.assume_range: ge (8) must be below lt (8)",
     ),
     # A value that is not an integer is refused before any value rule reads it.
     (
@@ -251,18 +254,18 @@ _BAD_MARKERS = [
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "lo": True},
-        "arith.assume_range: lo must be an integer",
+        {"multiple_of": 1, "residue": 0, "ge": True},
+        "arith.assume_range: ge must be an integer",
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "hi": 8.5},
-        "arith.assume_range: hi must be an integer",
+        {"multiple_of": 1, "residue": 0, "lt": 8.5},
+        "arith.assume_range: lt must be an integer",
     ),
     (
         True,
-        {"multiple_of": 1, "residue": 0, "hi_plus": False},
-        "arith.assume_range: hi_plus must be an integer",
+        {"multiple_of": 1, "residue": 0, "lt_plus": False},
+        "arith.assume_range: lt_plus must be an integer",
     ),
 ]
 
@@ -278,15 +281,22 @@ def test_verifier_rejects_bad_marker_attrs(runtime_end, attrs, message):
     assert _errors(b.kernel) == [message]
 
 
-@pytest.mark.parametrize("runtime_end,attrs,message", _BAD_MARKERS)
+# The builder takes one ``lt``, an int or a Value, so it cannot state the upper
+# end both ways; every other bad marker it refuses with the verifier's text.
+_BAD_BUILDER_MARKERS = [
+    case for case in _BAD_MARKERS if not (case[0] and "lt" in case[1])
+]
+
+
+@pytest.mark.parametrize("runtime_end,attrs,message", _BAD_BUILDER_MARKERS)
 def test_marker_builder_refuses_the_same_attrs(runtime_end, attrs, message):
     b = IRBuilder("bad_marker_builder")
     a = b.param("a", I32)
     n = b.param("n", I32)
-    kwargs = {k: v for k, v in attrs.items() if k != "hi_plus"}
+    kwargs = {k: v for k, v in attrs.items() if k != "lt_plus"}
     if runtime_end:
-        kwargs["hi_value"] = n
-        kwargs["hi_plus"] = attrs["hi_plus"]
+        kwargs["lt"] = n
+        kwargs["lt_plus"] = attrs["lt_plus"]
     with pytest.raises(ValueError) as raised:
         b._assume_range(a, **kwargs)
     assert str(raised.value) == message
@@ -457,7 +467,7 @@ def test_marker_on_a_constant_folds_to_the_constant():
     b = IRBuilder("fold_marker")
     out = b.param("out", PtrType(I32, "global"))
     n = b.param("n", I32)
-    b.store(b._assume_range(b.const_i32(5), hi_value=n), out)
+    b.store(b._assume_range(b.const_i32(5), lt=n), out)
     b.ret()
     assert _folded_store_value(b.kernel) == 5
 
@@ -476,7 +486,7 @@ def test_marker_lowers_to_the_text_without_it():
     x = b.param("x", I32)
     n = b.param("n", I32)
     out = b.param("out", PtrType(I32, "global"))
-    marked = b._assume_range(x, lo=0, hi_value=n, hi_plus=1, multiple_of=2, residue=0)
+    marked = b._assume_range(x, ge=0, lt=n, lt_plus=1, multiple_of=2, residue=0)
     b.store(b.add(marked, b.const_i32(1)), out)
     b.ret()
     kernel = b.kernel
@@ -496,12 +506,12 @@ def test_marker_attrs_round_trip():
     b = IRBuilder("marker_attrs")
     x = b.param("x", I32)
     n = b.param("n", I32)
-    b._assume_range(x, lo=0, hi_value=n, hi_plus=1, multiple_of=4, residue=2)
-    b._assume_range(x, hi=16)
+    b._assume_range(x, ge=0, lt=n, lt_plus=1, multiple_of=4, residue=2)
+    b._assume_range(x, lt=16)
     b.ret()
     printed = print_ir(b.kernel)
-    assert "{hi_plus = 1, lo = 0, multiple_of = 4, residue = 2}" in printed
-    assert "{hi = 16, multiple_of = 1, residue = 0}" in printed
+    assert "{ge = 0, lt_plus = 1, multiple_of = 4, residue = 2}" in printed
+    assert "{lt = 16, multiple_of = 1, residue = 0}" in printed
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
     assert print_ir(parse(ir)) == printed
@@ -520,7 +530,7 @@ def _hip_kernel():
     below = b.param("below", PtrType(I1, "global"))
     b.store(b.add_nuw(a, c), out)
     b.store(b.cmp_ult(a, c), below)
-    b.store(b._assume_range(a, lo=0), out, b.const_i32(1))
+    b.store(b._assume_range(a, ge=0), out, b.const_i32(1))
     b.ret()
     return b.kernel
 
@@ -530,6 +540,38 @@ def test_hip_lowering_spells_unsigned_forms():
     assert "int add1 = (int32_t)((uint32_t)a + (uint32_t)b);" in hip
     assert "bool ult3 = (uint32_t)a < (uint32_t)b;" in hip
     assert "int range5 = a;" in hip
+
+
+# (pred attr, operand type, the refusal): the verifier's rule and text. ``ult``
+# takes i32 or i64 operands, so an f32 or i8 one is refused, not lowered.
+_REFUSED_HIP_PREDS = [
+    ("ult", F32, "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"),
+    ("ult", I8, "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"),
+    ("ugt", I32, "arith.cmp: unknown pred 'ugt'"),
+    (1, I32, "arith.cmp: pred must be a string"),
+]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "pred,operand_type,message",
+    _REFUSED_HIP_PREDS,
+    ids=["ult_f32", "ult_i8", "unknown", "not_a_string"],
+)
+def test_hip_lowering_refuses_a_pred_the_ir_rule_refuses(
+    pred: str | int, operand_type: Type, message: str, engine: str
+) -> None:
+    """Each engine's HIP lowering checks an ``arith.cmp`` pred against the
+    verifier's rule before reading it, and refuses it with a ``ValueError``
+    (``ROCKE_ERR_VALUE``) in the verifier's words. The ctest repeats these
+    cases for the C++ engine without the binding."""
+    b = IRBuilder("refused_pred")
+    a = b.param("a", operand_type)
+    b._op("arith.cmp", [a, a], [I1], attrs={"pred": pred})
+    b.ret()
+    assert_engine_rejects_hip(
+        b.kernel, "gfx942", engine=engine, error_type=ValueError, message=message
+    )
 
 
 def test_hip_add_nuw_compiles_without_nsw(tmp_path):

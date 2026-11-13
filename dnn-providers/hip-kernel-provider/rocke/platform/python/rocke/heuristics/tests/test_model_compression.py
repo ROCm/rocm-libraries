@@ -10,7 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from predict import Predictor
 
+from rocke.tests.arch_marks import arch_specific
 
+
+@arch_specific(
+    ("gfx950",),
+    reason="the test loads models/gemm_universal_fp16_gfx950; no gfx942 model is named",
+)
 def test_fp16_model_decompression():
     """Test that fp16 model is auto-decompressed and usable."""
     model_dir = Path(__file__).parent.parent / "models" / "gemm_universal_fp16_gfx950"
@@ -46,6 +52,10 @@ def test_fp16_model_decompression():
     return True
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the test loads models/gemm_universal_fp8_gfx950; no gfx942 model is named",
+)
 def test_fp8_model_decompression():
     """Test that fp8 model is auto-decompressed and usable."""
     model_dir = Path(__file__).parent.parent / "models" / "gemm_universal_fp8_gfx950"

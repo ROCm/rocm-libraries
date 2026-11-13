@@ -7,9 +7,12 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
+#include "core/Utils.hpp"
 
 namespace hip_flash2_engine
 {
@@ -22,6 +25,16 @@ void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 bool HipFlash2Engine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[HipFlash2Engine::isApplicable] ";
+
+    const auto& tensorMap = opGraph.getTensorMap();
+    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
+                               "Ragged tensors are not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
+        "All tensors must be aligned to a multiple of 16 bytes");
+
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))
@@ -38,8 +51,11 @@ void HipFlash2Engine::getDetails(
     hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
+
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        builder, id(), nullptr, &behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

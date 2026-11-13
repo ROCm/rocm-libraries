@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,9 +27,13 @@
 #include "type_dispatch.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <future>
+#include <memory>
+#include <thread>
 #ifdef WIN32
 #include <stdlib.h>
 #define setenv(A, B, C) _putenv_s(A, B)
@@ -244,6 +248,19 @@ void testing_logging(const Arguments& arg)
     DEVICE_MEMCHECK(device_vector<T>, dc, (size_c));
     DEVICE_MEMCHECK(device_vector<T>, dd, (size_d));
 
+    // bf16 alpha_type in axpy_ex and scal_ex is only supported with an f32 execution type
+    rocblas_bfloat16  h_bf16_alpha(1.5f);
+    rocblas_bfloat16* bf16_alpha = &h_bf16_alpha;
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, d_bf16_alpha, (1));
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, dx_bf16, (size_x));
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, dy_bf16, (size_y));
+    if(device_mode)
+    {
+        CHECK_HIP_ERROR(
+            hipMemcpy(d_bf16_alpha, bf16_alpha, sizeof(rocblas_bfloat16), hipMemcpyHostToDevice));
+        bf16_alpha = d_bf16_alpha;
+    }
+
     int64_t     h_i64_result;
     rocblas_int h_i32_result;
 
@@ -311,6 +328,19 @@ void testing_logging(const Arguments& arg)
         // fixed datatype dispatch
         rocblas_datatype dt = rocblas_type2datatype<T>();
         DAPI_CHECK(rocblas_axpy_ex_fn, (handle, n, alpha, dt, dx, dt, incx, dy, dt, incy, dt));
+
+        if constexpr(std::is_same_v<T, float>)
+        {
+            constexpr rocblas_datatype bf16 = rocblas_datatype_bf16_r;
+            constexpr rocblas_datatype f32  = rocblas_datatype_f32_r;
+            DAPI_CHECK(
+                rocblas_axpy_ex_fn,
+                (handle, n, bf16_alpha, bf16, dx_bf16, bf16, incx, dy_bf16, bf16, incy, f32));
+
+            auto rocblas_scal_ex_fn    = rocblas_scal_ex;
+            auto rocblas_scal_ex_fn_64 = rocblas_scal_ex_64;
+            DAPI_CHECK(rocblas_scal_ex_fn, (handle, n, bf16_alpha, bf16, dx_bf16, bf16, incx, f32));
+        }
 
         auto rocblas_dot_fn    = rocblas_dot<T>;
         auto rocblas_dot_fn_64 = rocblas_dot_64<T>;
@@ -802,6 +832,47 @@ void testing_logging(const Arguments& arg)
                    << (void*)dx << "," << dt_str << "," << incx << "," << (void*)dy << "," << dt_str
                    << "," << incy << "," << dt_str << ",atomics_not_allowed\n";
         // no bench output TODO
+    }
+
+    //
+    // AXPY_EX and SCAL_EX with bf16 alpha_type
+    //
+    if constexpr(std::is_same_v<T, float>)
+    {
+        std::string bf16_str(rocblas_datatype_string(rocblas_datatype_bf16_r));
+        std::string f32_str(rocblas_datatype_string(rocblas_datatype_f32_r));
+        if(test_pointer_mode == rocblas_pointer_mode_host)
+        {
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << ","
+                       << float(h_bf16_alpha) << "," << bf16_str << "," << (void*)dx_bf16 << ","
+                       << bf16_str << "," << incx << "," << (void*)dy_bf16 << "," << bf16_str << ","
+                       << incy << "," << f32_str << ",atomics_not_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f axpy_ex"
+                       << " -n " << n << " "
+                       << rocblas_internal_log_bench_scalar_value("alpha", &h_bf16_alpha)
+                       << " --a_type " << bf16_str << " --b_type " << bf16_str << " --incx " << incx
+                       << " --c_type " << bf16_str << " --incy " << incy << " --compute_type "
+                       << f32_str << bench_endl;
+
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_scal_ex") << "," << n << ","
+                       << float(h_bf16_alpha) << "," << bf16_str << "," << (void*)dx_bf16 << ","
+                       << bf16_str << "," << incx << "," << f32_str << ",atomics_not_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f scal_ex"
+                       << " -n " << n << " "
+                       << rocblas_internal_log_bench_scalar_value("alpha", &h_bf16_alpha)
+                       << " --incx " << incx << " --a_type " << bf16_str << " --b_type " << bf16_str
+                       << " --compute_type " << f32_str << bench_endl;
+        }
+        else
+        {
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << "," << bf16_str
+                       << "," << (void*)dx_bf16 << "," << bf16_str << "," << incx << ","
+                       << (void*)dy_bf16 << "," << bf16_str << "," << incy << "," << f32_str
+                       << ",atomics_not_allowed\n";
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_scal_ex") << "," << n << "," << bf16_str
+                       << "," << (void*)dx_bf16 << "," << bf16_str << "," << incx << "," << f32_str
+                       << ",atomics_not_allowed\n";
+        }
     }
 
     //
@@ -1345,4 +1416,73 @@ void testing_logging(const Arguments& arg)
         fs::remove(bench_fspath1);
         fs::remove(bench_fspath2);
     }
+}
+
+// A failed write to a log file (e.g. a full disk) must not hang later logged calls.
+// /dev/full fails every write with ENOSPC. The logged calls run on a detached thread so
+// that a hang is reported as a test failure instead of blocking the test binary.
+inline void testing_logging_write_error(const Arguments&)
+{
+#ifndef WIN32
+    static constexpr rocblas_int c_n       = 1024;
+    static constexpr int         c_calls   = 3;
+    static constexpr auto        c_timeout = std::chrono::seconds(60);
+
+    DEVICE_MEMCHECK(device_vector<float>, dx, (c_n, 1));
+
+    // The current device is per thread and a new thread starts on device 0, so the
+    // logged calls must select the device that holds dx
+    int device;
+    CHECK_HIP_ERROR(hipGetDevice(&device));
+
+    ASSERT_EQ(setenv("ROCBLAS_LAYER", "1", true), 0);
+    ASSERT_EQ(setenv("ROCBLAS_LOG_TRACE_PATH", "/dev/full", true), 0);
+
+    // Status of the first failing call, or rocblas_status_success
+    auto   done   = std::make_shared<std::promise<rocblas_status>>();
+    auto   future = done->get_future();
+    float* x      = dx;
+
+    // The failed write below makes rocBLAS print an error to stderr, which is expected.
+    // No newline, so the error completes the line as "IGNORE: Error writing log file: ..."
+    rocblas_cerr << "IGNORE: " << std::flush;
+
+    std::thread([done, x, device] {
+        if(hipSetDevice(device) != hipSuccess)
+        {
+            done->set_value(rocblas_status_internal_error);
+            return;
+        }
+
+        rocblas_handle handle;
+
+        // Handle creation writes the first trace line, which fails
+        rocblas_status status = rocblas_create_handle(&handle);
+        if(status == rocblas_status_success)
+        {
+            const float alpha = 2.0f;
+            for(int i = 0; i < c_calls && status == rocblas_status_success; i++)
+                status = rocblas_sscal(handle, c_n, &alpha, x, 1);
+
+            rocblas_status destroy_status = rocblas_destroy_handle(handle);
+            if(status == rocblas_status_success)
+                status = destroy_status;
+        }
+        done->set_value(status);
+    }).detach();
+
+    if(future.wait_for(c_timeout) != std::future_status::ready)
+    {
+        // The thread is stuck in rocBLAS and the log worker would also block process
+        // exit, so report the failure and exit immediately
+        ADD_FAILURE() << "logged rocBLAS call hung after a failed log write";
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
+
+    ASSERT_EQ(setenv("ROCBLAS_LAYER", "0", true), 0);
+    ASSERT_EQ(unsetenv("ROCBLAS_LOG_TRACE_PATH"), 0);
+
+    EXPECT_ROCBLAS_STATUS(future.get(), rocblas_status_success);
+#endif
 }

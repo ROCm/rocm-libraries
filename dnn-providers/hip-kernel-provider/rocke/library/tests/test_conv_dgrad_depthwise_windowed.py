@@ -23,12 +23,22 @@ under w_fold (a half-empty last tile), images narrower than the tile, two W
 tiles, partial channel blocks, ragged row tiles, pad 0 and pad > K/2, filters
 larger than the image, 3x3 to 11x11 and non-square filters, fp16 and bf16.
 
+The forward form (``fwd=True``, the AOT variant ``direct_depthwise_win``)
+is checked against a NumPy grouped forward reference through the forward
+ABI: depthwise and grouped (cpg 8 / 16 / 24 / 32), stride 1 and 2, fp16 and
+bf16 (TestForwardNumerics, gfx950).
+
 Non-finite inputs: the VALU forms keep an Inf / NaN in dY inside its
 receptive field and channel exactly. The MFMA form multiplies one-hot
 weights against 8 channels at once, so a non-finite dY value may reach every
 channel of its 8-channel group, in its receptive field widened to
 4 * ceil((KW + 1) / 4) columns (the zero-weight taps of its passes);
 TestNonFiniteGradients asserts that bound for it.
+
+The same Toeplitz form on the wave32 16x16x32 WMMA (``mfma`` with
+``wave_size=32``, gfx1250) is checked host-side (arch / wave rules, fragment
+budget, lowering) and, on gfx1250, numerically on the MFMA set where it fits
+the fragment budget plus large 5x5 / 7x7 layers with 28- and 32-row tiles.
 
 Run (GPU part as a script, as the other numeric suites):
     PYTHONPATH=rocke/platform/python:rocke/library python \\
@@ -237,6 +247,49 @@ class TestMfmaSpec(unittest.TestCase):
         tall = self._mfma(_problem(1, 224, 16, 64, 7, 7, 3))
         self.assertTrue(self._ok(tall)[0])
 
+    def test_fwd_rejects_a_non_square_filter(self):
+        # N1: _depthwise_dgrad_win_check used to accept fwd with KH != KW, so
+        # a spec built directly read shifted columns; the C++ twin mirrors
+        # this check.
+        p = _problem(2, 16, 16, 64, 3, 5, 1)
+        spec = DirectDepthwiseDgradWindowedSpec(
+            problem=p,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            block_h=8,
+            w_fold=1,
+            prefetch_rows=1,
+        )
+        ok, why = self._ok(spec)
+        self.assertFalse(ok)
+        self.assertIn("square filter", why)
+        with self.assertRaises(ValueError):
+            build_direct_depthwise_dgrad_windowed(spec)
+
+    def test_grouped_mfma_count_includes_the_channel_chunks(self):
+        # N1: unrolled_mfmas() used to ignore the cpg/8 input chunks, so a
+        # grouped spec's MFMA cap missed them (96 estimated instead of 768);
+        # the C++ twin mirrors this count.
+        p = DirectConvProblem(
+            N=1, H=16, W=16, groups=2, cpg=64, kpg=64, KH=3, KW=3, PAD=1, dtype="fp16"
+        )
+        spec = DirectDepthwiseDgradWindowedSpec(
+            problem=p,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            block_h=32,
+            w_fold=1,
+            prefetch_rows=1,
+        )
+        self.assertEqual(spec.unrolled_mfmas(), 768)
+        ok, why = self._ok(spec)
+        self.assertFalse(ok)
+        self.assertIn("MFMAs", why)
+        with self.assertRaises(ValueError):
+            build_direct_depthwise_dgrad_windowed(spec)
+
     def test_mfma_only_knobs_need_mfma(self):
         p = _problem(2, 8, 8, 64, 3, 3, 1)
         for kw in ({"w_fold": 2}, {"prefetch_rows": 2}):
@@ -294,6 +347,171 @@ class TestMfmaSpec(unittest.TestCase):
                 build_direct_depthwise_dgrad_windowed(spec), arch="gfx950"
             )
             self.assertIn(f"@llvm.amdgcn.mfma.f32.{intrin}", ll)
+            self.assertIn("addrspace(3)", ll)
+
+
+class TestWmmaSpec(unittest.TestCase):
+    """Host-only checks of the Toeplitz form on the wave32 WMMA (gfx1250)."""
+
+    def _wmma(self, problem=None, **kw):
+        base = {
+            "block_waves": 8,
+            "block_h": 28,
+            "mfma": True,
+            "w_fold": 1,
+            "prefetch_rows": 2,
+            "wave_size": 32,
+        }
+        base.update(kw)
+        return DirectDepthwiseDgradWindowedSpec(
+            problem=problem or _problem(4, 56, 56, 128, 7, 7, 3, "bf16"), **base
+        )
+
+    def test_wave32_form_is_gfx1250_only(self):
+        ok, why = is_valid_depthwise_dgrad_win_spec(self._wmma(), arch="gfx1250")
+        self.assertTrue(ok, why)
+        ok, why = is_valid_depthwise_dgrad_win_spec(self._wmma(), arch="gfx950")
+        self.assertFalse(ok)
+        self.assertIn("wave32 mfma needs one of ('gfx1250',)", why)
+        # The wave64 MFMA form stays gfx950-only.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(wave_size=64), arch="gfx1250"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(
+            why, "mfma needs one of ('gfx950',) (got gfx1250); set wave_size=32"
+        )
+        # No wave32 hint on a target without the WMMA form.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(wave_size=64), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(why, "mfma needs one of ('gfx950',) (got gfx942)")
+
+    def test_fragment_widths_come_from_the_atom(self):
+        """The validator's VGPR count and the builder read the fragment width
+        from the one atom pick: two K chunks per lane (8 VGPRs per fragment)
+        on the wave32 WMMA, one (4) on the wave64 MFMA."""
+        from kernels.common.conv_direct_grouped import (
+            _dw_toeplitz_atom,
+            _dw_toeplitz_lanes,
+        )
+
+        for wave, arch, chunks in ((32, "gfx1250", 2), (64, "gfx950", 1)):
+            spec = self._wmma(wave_size=wave)
+            lanes = _dw_toeplitz_lanes(wave)
+            atom = _dw_toeplitz_atom(spec, arch)
+            self.assertEqual((lanes.wave, lanes.k_chunks), (wave, chunks))
+            self.assertEqual((atom.wave, atom.k_chunks), (wave, chunks))
+            self.assertEqual(atom.wmma_op is None, wave == 64)
+            p = spec.problem
+            kwp = (p.KW + 4) // 4
+            rows = spec.prefetch_rows * spec._mfma_in_passes()
+            self.assertEqual(
+                spec.mfma_frag_vgprs(),
+                4 * chunks * (p.KH * kwp + p.KH + kwp) + 4 * rows,
+            )
+
+    def test_forward_mode_at_wave32_is_depthwise_stride1_only(self):
+        """At wave32 ``fwd`` runs the depthwise forward at stride 1 (the
+        kernel of the gfx1250 depthwise forward). The grouped form stays a
+        wave64 MFMA mode (its dense A row is one K chunk per lane, which the
+        WMMA's two K chunks per lane do not fit), and so does ``out_stride=2``.
+        The C++ mirror gives the same verdicts (parity configs 71, 72 of
+        conv_direct_dgrad_ext_emit; conv_direct_dw_dgrad_host)."""
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(_problem(2, 14, 14, 64, 3, 3, 1, "fp16"), block_h=14, fwd=True),
+            arch="gfx1250",
+        )
+        self.assertTrue(ok, why)
+        cases = (
+            (
+                _problem(2, 14, 14, 64, 3, 3, 1, "bf16"),
+                {"out_stride": 2},
+                "fwd at wave_size=32 needs out_stride=1 (got 2)",
+            ),
+            (
+                DirectConvProblem(
+                    N=2, H=13, W=21, groups=10, cpg=8, kpg=8, KH=3, KW=3, PAD=1
+                ),
+                {},
+                "the grouped fwd form needs the wave64 MFMA (got wave_size=32)",
+            ),
+        )
+        for problem, extra, text in cases:
+            knobs = dict(block_h=14 if problem.cpg == 1 else 8, fwd=True, **extra)
+            with self.subTest(cpg=problem.cpg, **extra):
+                ok, why = is_valid_depthwise_dgrad_win_spec(
+                    self._wmma(problem, **knobs), arch="gfx1250"
+                )
+                self.assertFalse(ok)
+                self.assertEqual(why, text)
+                # The same knobs at wave64 are the valid gfx950 forward form.
+                ok, why = is_valid_depthwise_dgrad_win_spec(
+                    self._wmma(problem, wave_size=64, **knobs), arch="gfx950"
+                )
+                self.assertTrue(ok, why)
+
+    def test_make_direct_spec_takes_the_target_wave_size(self):
+        """The AOT spec factory gives the matrix form the target's wave size
+        and rejects an explicit wave_size knob that conflicts with it."""
+        from kernels.conv.direct_variants import make_direct_spec
+
+        problem = _problem(4, 56, 56, 128, 7, 7, 3, "bf16")
+        knobs = dict(block_waves=8, block_h=28, mfma=True, w_fold=1, prefetch_rows=2)
+        variant = "direct_depthwise_dgrad_win"
+        for wave in (32, 64):
+            spec = make_direct_spec(variant, problem, knobs, wave)
+            self.assertEqual(spec.wave_size, wave)
+            spec = make_direct_spec(variant, problem, dict(knobs, wave_size=wave), wave)
+            self.assertEqual(spec.wave_size, wave)
+        for knob, wave in ((64, 32), (32, 64), (16, 32)):
+            with self.subTest(knob=knob, wave=wave):
+                with self.assertRaisesRegex(ValueError, "conflicts with wave_size"):
+                    make_direct_spec(
+                        variant, problem, dict(knobs, wave_size=knob), wave
+                    )
+        # The VALU form keeps its logical wave64 on a wave32 target.
+        valu = dict(block_w=16, block_h=4, block_waves=4, ch_per_lane=2)
+        self.assertEqual(make_direct_spec(variant, problem, valu, 32).wave_size, 64)
+
+    def test_fragments_are_twice_the_wave64_ones(self):
+        # 7x7: 2 passes per filter row; A, accumulator and B fragments take
+        # 8 VGPRs each on wave32 (4 on wave64), the dY rows 4 per load.
+        for wave, frag in ((32, 8), (64, 4)):
+            spec = self._wmma(wave_size=wave)
+            rows = spec.prefetch_rows * spec._mfma_in_passes()
+            self.assertEqual(
+                spec.mfma_frag_vgprs(), frag * (7 * 2 + 7 + 2) + 4 * rows, wave
+            )
+        # 9x9 (3 passes per row) exceeds the fragment budget at wave32.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(_problem(2, 18, 18, 64, 9, 9, 4, "bf16"), block_h=8),
+            arch="gfx1250",
+        )
+        self.assertFalse(ok)
+        self.assertIn("VGPRs", why)
+
+    def test_grid_threads_and_name(self):
+        spec = self._wmma(block_waves=4, w_fold=2)
+        self.assertEqual(spec.threads_per_block, 4 * 32)
+        self.assertEqual(spec.block_ch, 4 * DW_DGRAD_MFMA_CH)
+        # 16-column W tiles, 32-channel blocks, 2 image tiles of 2 row tiles.
+        self.assertEqual(spec.grid(), (4, 4, 4))
+        for part in ("r7s7p3", "wv4", "bh28", "f2", "pf2", "mfma", "bf16"):
+            self.assertIn(part, spec.kernel_name())
+
+    def test_lowers_to_wmma_with_lds_staging(self):
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for dtype, ab in (("bf16", "bf16"), ("fp16", "f16")):
+            spec = self._wmma(_problem(2, 7, 9, 16, 5, 5, 2, dtype), block_waves=2)
+            ll = _lower_kernel_to_llvm_python(
+                build_direct_depthwise_dgrad_windowed(spec, arch="gfx1250"),
+                arch="gfx1250",
+            )
+            self.assertIn("@llvm.amdgcn.wmma.f32.16x16x32." + ab, ll)
+            self.assertNotIn("mfma", ll.replace(spec.kernel_name(), ""))
             self.assertIn("addrspace(3)", ll)
 
 
@@ -599,6 +817,62 @@ class TestMfmaNumerics(unittest.TestCase):
                     self.assertEqual(bad, 0, f"bad={bad} max_err={max_err:.3e}")
 
 
+# The wave32 WMMA form at the ConvNeXt-style 7x7 layers it is cached for
+# (the 28- and 32-row tiles included) and 5x5, fp16 and bf16.
+_WMMA_CASES = (
+    _MfmaCase("7x7_c128_64sq_bh32", 16, 64, 64, 128, 7, 7, 3, "bf16", 8, 1, 2, 32),
+    _MfmaCase("7x7_c256_32sq_bh32", 16, 32, 32, 256, 7, 7, 3, "fp16", 8, 2, 2, 32),
+    _MfmaCase("7x7_c128_56sq_bh28", 16, 56, 56, 128, 7, 7, 3, "bf16", 4, 2, 2, 28),
+    _MfmaCase("7x7_c128_56sq_bh28_f16", 16, 56, 56, 128, 7, 7, 3, "fp16", 8, 1, 2, 28),
+    _MfmaCase("5x5_c64_28sq_bh14", 8, 28, 28, 64, 5, 5, 2, "fp16", 4, 2, 2, 14),
+    _MfmaCase("5x5_partial_ch_ragged", 3, 13, 15, 40, 5, 5, 2, "bf16", 4, 4, 2, 4),
+)
+
+
+# The MFMA cases the wave32 WMMA form does not take: 9x9 and 11x11 are past
+# its fragment budget. Every other case must validate at wave32.
+_WMMA_UNSUPPORTED_MFMA_CASES = frozenset({"9x9_fold2", "11x11_fold4_split"})
+
+
+class TestWmmaMfmaCaseCoverage(unittest.TestCase):
+    """Host-only: the wave32 form takes every MFMA case except the
+    explicitly unsupported filters, so none drops out of the GPU set."""
+
+    def test_only_the_unsupported_filters_are_rejected(self):
+        ids = {c.id for c in _MFMA_CASES}
+        self.assertLessEqual(_WMMA_UNSUPPORTED_MFMA_CASES, ids)
+        for c in _MFMA_CASES:
+            spec = replace(_mfma_spec(c), wave_size=32)
+            ok, why = is_valid_depthwise_dgrad_win_spec(spec, arch="gfx1250")
+            with self.subTest(case=c.id):
+                if c.id in _WMMA_UNSUPPORTED_MFMA_CASES:
+                    self.assertFalse(ok, f"{c.id} now validates at wave32")
+                else:
+                    self.assertTrue(ok, f"{c.id}: {why}")
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx1250", f"needs gfx1250, got {GPU_ARCH!r}")
+class TestWmmaNumerics(unittest.TestCase):
+    def test_mfma_cases_at_wave32(self):
+        """The MFMA form's adversarial set, on the WMMA where it fits."""
+        for c in _MFMA_CASES:
+            if c.id in _WMMA_UNSUPPORTED_MFMA_CASES:
+                continue  # 9x9 / 11x11: past the wave32 fragment budget
+            spec = replace(_mfma_spec(c), wave_size=32)
+            with self.subTest(case=c.id):
+                ok, why = is_valid_depthwise_dgrad_win_spec(spec, arch=GPU_ARCH)
+                self.assertTrue(ok, f"{c.id}: {why}")
+                bad, max_err = run_windowed(spec, GPU_ARCH)
+                self.assertEqual(bad, 0, f"{c.id}: bad={bad} max_err={max_err:.3e}")
+
+    def test_large_layers(self):
+        for c in _WMMA_CASES:
+            spec = replace(_mfma_spec(c), wave_size=32)
+            with self.subTest(case=c.id):
+                bad, max_err = run_windowed(spec, GPU_ARCH)
+                self.assertEqual(bad, 0, f"{c.id}: bad={bad} max_err={max_err:.3e}")
+
+
 def _mfma_spread_zone(p: DirectConvProblem, bad_inputs) -> np.ndarray:
     """dX elements a non-finite dY value may reach in the MFMA form: its
     receptive field rows, its columns widened by the ``4 * passes - KW``
@@ -741,6 +1015,130 @@ class TestNonFiniteGradients(unittest.TestCase):
                     ok[n, :, :, g0 : g0 + DW_DGRAD_MFMA_CH] = True
                 # Every other image / group is exact.
                 self.assertEqual(int(np.count_nonzero(~ok)), 0)
+
+
+# ---------------------------------------------------------------------------
+# The forward form (``fwd=True``): depthwise and grouped forward convolution,
+# stride 1 and 2, launched with the forward ABI the AOT variant
+# ``direct_depthwise_win`` uses.
+# ---------------------------------------------------------------------------
+
+
+def _fwd_reference(x: np.ndarray, w: np.ndarray, p: DirectConvProblem) -> np.ndarray:
+    """y[n, ho, wo, g*kpg + k] = sum_{r, s, c} W[g*kpg + k, r, s, c] *
+    x[n, ho*S - PAD + r, wo*S - PAD + s, g*cpg + c]."""
+    S, P = p.stride, p.PAD
+    xp = np.zeros((p.N, p.H + 2 * P, p.W + 2 * P, p.total_c), np.float32)
+    xp[:, P : P + p.H, P : P + p.W, :] = x
+    y = np.zeros((p.N, p.Ho, p.Wo, p.total_k), np.float32)
+    for g in range(p.groups):
+        xs = xp[..., g * p.cpg : (g + 1) * p.cpg]
+        wg = w[g * p.kpg : (g + 1) * p.kpg]  # [kpg, KH, KW, cpg]
+        for r in range(p.KH):
+            for t in range(p.KW):
+                win = xs[
+                    :, r : r + S * (p.Ho - 1) + 1 : S, t : t + S * (p.Wo - 1) + 1 : S
+                ]
+                y[..., g * p.kpg : (g + 1) * p.kpg] += win @ wg[:, r, t, :].T
+    return y
+
+
+def _fwd_launch(knobs: dict, p: DirectConvProblem, arch: str):
+    """Build the ``direct_depthwise_win`` kernel for ``p`` and run it through
+    the forward ABI on a NaN-filled output; return ``(y, ref)``."""
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.conv.direct_variants import (
+        DIRECT_DEPTHWISE_WIN_FWD,
+        direct_spec_for_problem,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    spec, why = direct_spec_for_problem(DIRECT_DEPTHWISE_WIN_FWD, p, knobs, arch)
+    assert spec is not None, why
+    art = _compiled(spec, arch)
+    rng = np.random.default_rng(4321)
+    x32 = rng.uniform(-1, 1, (p.N, p.H, p.W, p.total_c)).astype(np.float32)
+    w32 = rng.uniform(-1, 1, (p.total_k, p.KH, p.KW, p.cpg)).astype(np.float32)
+    if p.dtype == "bf16":
+        x_b, w_b = _to_bf16_bits(x32), _to_bf16_bits(w32)
+    else:
+        x_b = x32.astype(np.float16).view(np.uint16)
+        w_b = w32.astype(np.float16).view(np.uint16)
+    ref = _fwd_reference(_bits_to_f32(x_b, p.dtype), _bits_to_f32(w_b, p.dtype), p)
+
+    rt = Runtime()
+    y_bytes = ref.size * 2
+    X_d, W_d, Y_d = rt.alloc(x_b.nbytes), rt.alloc(w_b.nbytes), rt.alloc(y_bytes)
+    try:
+        rt.memcpy_h2d(X_d, x_b.ctypes.data_as(ctypes.c_void_p), x_b.nbytes)
+        rt.memcpy_h2d(W_d, w_b.ctypes.data_as(ctypes.c_void_p), w_b.nbytes)
+        rt.memset(Y_d, 0xFF, y_bytes)  # NaN in both fp16 and bf16
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=conv_direct_args_signature(p.dtype, direction="fwd"),
+        )
+        values = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
+            int(X_d), int(W_d), int(Y_d), x_b.nbytes, w_b.nbytes, y_bytes
+        )
+        grid, block = direct_launch_geometry(spec)
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        out = np.empty(y_bytes // 2, np.uint16)
+        rt.memcpy_d2h(out.ctypes.data_as(ctypes.c_void_p), Y_d, y_bytes)
+    finally:
+        rt.free(X_d)
+        rt.free(W_d)
+        rt.free(Y_d)
+        synchronize_and_release(0)
+    return _bits_to_f32(out, p.dtype).reshape(ref.shape), ref
+
+
+# (N, H, W, groups, cpg, K, stride, dtype, knobs): depthwise and grouped, odd
+# and ragged extents, partial channel blocks, N not a multiple of w_fold,
+# a 3-wave block holding one 24-channel group, stride 2 on odd images, a 9x9
+# depthwise filter, cpg 56 (not a power of two), cpg 24 at stride 1, and
+# cpg 64 at stride 2.
+_FWD_CASES = (
+    (3, 15, 17, 64, 1, 3, 1, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
+    (2, 13, 21, 40, 1, 7, 1, "bf16", dict(block_waves=4, block_h=14, w_fold=1)),
+    (2, 15, 13, 72, 1, 5, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=4)),
+    (2, 17, 19, 32, 1, 9, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=1)),
+    (2, 14, 19, 12, 8, 3, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=2)),
+    (3, 13, 11, 6, 16, 3, 2, "bf16", dict(block_waves=4, block_h=4, w_fold=1)),
+    (1, 9, 18, 4, 32, 3, 1, "fp16", dict(block_waves=8, block_h=16, w_fold=1)),
+    (2, 11, 10, 3, 24, 3, 2, "bf16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 12, 14, 3, 24, 3, 1, "fp16", dict(block_waves=3, block_h=12, w_fold=2)),
+    (2, 10, 13, 2, 56, 3, 1, "bf16", dict(block_waves=7, block_h=4, w_fold=1)),
+    (2, 11, 12, 2, 64, 3, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
+)
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx950", f"needs gfx950, got {GPU_ARCH!r}")
+class TestForwardNumerics(unittest.TestCase):
+    def test_depthwise_and_grouped_forward(self):
+        for N, H, W, G, cpg, K, S, dtype, knobs in _FWD_CASES:
+            p = DirectConvProblem(
+                N=N,
+                H=H,
+                W=W,
+                groups=G,
+                cpg=cpg,
+                kpg=cpg,
+                KH=K,
+                KW=K,
+                PAD=(K - 1) // 2,
+                stride=S,
+                dtype=dtype,
+            )
+            with self.subTest(problem=p.short(), stride=S, dtype=dtype, **knobs):
+                y, ref = _fwd_launch(dict(knobs, prefetch_rows=2), p, GPU_ARCH)
+                ok, err = _elementwise_ok(y, ref)
+                self.assertEqual(
+                    int(np.count_nonzero(~ok)), 0, f"max err {float(err.max())}"
+                )
 
 
 if __name__ == "__main__":

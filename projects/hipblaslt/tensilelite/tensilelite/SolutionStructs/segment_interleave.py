@@ -33,7 +33,7 @@ The component sizes and LDS base determine which of two layouts applies:
     ping and pong blocks separate, each with the same internal order and gap.
 
   Packed order already reaches another segment ("tight"):
-    Nonpersistent kernels place each group's ping/pong copies together:
+    Place each group's ping/pong copies together:
       split A/B: [A0 pair][B0 pair][gap if needed][A1 pair][B1 pair]
       B whole:   [A0 pair][B pair] [gap if needed][A1 pair]
       A whole:   [B0 pair][A pair] [gap if needed][B1 pair]
@@ -41,20 +41,33 @@ The component sizes and LDS base determine which of two layouts applies:
     occupy disjoint segments in each phase: ping versus ping, pong versus pong.
     Different operands or phases may share segments.
 
-For example, with [2,2], split B and LDS base 0, let fA/fB include one component's
-internal padding. If fA + fB < 64 KiB, insert a gap after [A0][B0] (aligned).
-Otherwise the one-buffer order needs no gap (tight).
+For example, with [2,2] and split B, the first component spans fA + fB plus
+MXSA0's slot when MXSA is M-split. The footprints include internal padding.
+Insert a gap before A1 only if that complete span leaves A1 in A0's segment
+(aligned). Otherwise the one-buffer order needs no gap (tight).
 Pairing can still add gaps; "tight" describes the one-buffer order, not the final
 ping/pong allocation. See paired_buffer_reason() for supported buffering settings.
-Persistent kernels retain their existing interleave layout with separate ping/pong
-blocks; they do not use pairing.
+StreamK and Persistent DataParallel use paired placement when supported and keep
+separate ping/pong blocks otherwise, including when prefetching across persistent
+tiles. Persistent MX kernels with shadow init keep separate blocks to avoid extra
+SGPRs (see persistent_keeps_unpaired()).
 
-For problems with both MX scales, buffer placement is:
+Without MXSA M splitting, buffer placement for both MX scales is:
   Non-TDMSplit tight, with supported pairing:
     [all paired A/B data][MXSA ping][MXSA pong][MXSB ping][MXSB pong]
-  Aligned, TDMSplit or persistent interleave:
+  Aligned, TDMSplit, or persistent without pairing:
     ping: [interleaved A/B data][MXSA][MXSB]
     pong: [interleaved A/B data][MXSA][MXSB]
+
+On coarse [2,2] InMemorySwizzle layouts, MXSA can instead be loaded as two M
+halves, one per SIMD pair, when TDM uses exactly two components. The halves
+occupy separate segments and each contains all K scale groups. The builders
+size the halves before assigning final A/B
+bases and strides. With split B, each MXSA half follows its component's B
+data; with whole B, it follows A instead and B keeps its baseline addressing.
+Paired layouts preserve 256-byte alignment for every group. Auto compares the complete
+split candidate with the ordinary layout's LDS reservation and falls back to
+ordinary placement if the candidate needs more LDS.
 
 With TDMSplit
 -------------
@@ -98,6 +111,8 @@ Only the full and half WaveTile widths above are supported. The half-width case
 requires TDMSplit; without it, [2,2]/[4,1] need VWA == WaveTileA and [1,4] needs
 VWB == WaveTileB.
 """
+
+from ..Components.TDMFuse import tdmWaveComponents
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
@@ -145,17 +160,92 @@ def _mx_scale_bases(state, mxsaStart):
     szB = int(state.get("LdsNumElementsAlignedMXSB", 0)) if hasB else 0
     return (baseA if hasA else None), (baseB if hasB else None), baseB + szB
 
+
+def _mxsa_half_layout(state, paired=False):
+    """Size the MXSA M halves before placing any A/B components."""
+    pt = state["ProblemType"]
+    if (state.get("MIWaveGroup") != [2, 2] or state.get("NumWaves") != 4
+            or state.get("LDSSegmentInterleave", -1) == 0
+            or not pt.get("MXBlockA") or pt.get("MXBlockFreeA", 1) != 1
+            or state.get("MXScaleFormat") != "InMemorySwizzle"
+            or state.get("TDMFuse") or state.get("TDMSplit")
+            or state.get("DirectToVgprMXSA") or not _coarse(state, "A")):
+        return None
+    # The TDM component IDs must map directly to the two reserved M-half slots.
+    if tdmWaveComponents(state, "MXSA")[0] != 2:
+        return None
+    rawHalf = state["MacroTile0"] * (state["DepthU"] // pt["MXBlockA"]) // 2
+    pad, block = state.get("LdsPadMXSA", 0), state.get("LdsBlockSizePerPadMXSA", 0)
+    if pad < 0 or block < 0 or (pad > 0 and (block == 0 or rawHalf % block)):
+        return None
+    footprint = rawHalf + (rawHalf // block * pad if block else 0)
+    if footprint <= 0:
+        return None
+    # Each new slot is aligned independently of the ordinary full MXSA buffer.
+    slotBytes = _align_paired(footprint) if paired else ((footprint + 15) // 16) * 16
+    return dict(mxsSplitA=True, mxsaHalfBytes=slotBytes,
+                mxsaHalfFootprintBytes=footprint)
+
+
+def _component_offsets(state, bWhole, portSplit):
+    """Build final one-buffer A/B and scale positions together.
+
+    Split B: [A0 B0 MXSA0] [A1 B1 MXSA1] [MXSB].
+    Whole B: [A0 MXSA0 B]  [A1 MXSA1]    [MXSB].
+    Aligned placement inserts a segment gap before A1. Each component reserves
+    one independently aligned MXSA slot.
+    """
+    base = state["LdsOffsetA"]
+    fA = _footprint(state, "A")
+    fB = _tensor_footprint(state, "B") if bWhole else _footprint(state, "B")
+    mxsa = _mxsa_half_layout(state)
+    if mxsa and ((base + fA) % 16 or (fA + fB) % 16):
+        mxsa = None
+    half = mxsa["mxsaHalfBytes"] if mxsa else 0
+    naturalStride = fA + fB + half
+    # Use the complete first component for both selection and placement.
+    aligned = (base + naturalStride) // SEG == base // SEG
+    stride = _ceil_seg(base + naturalStride) - base if aligned else naturalStride
+    offsets = dict(ldsBaseB=base + fA + (half if bWhole else 0),
+                   writeStrideBytes=stride, footprintPacked=True)
+    if bWhole:
+        offsets["bBaseline"] = True
+    if portSplit:
+        offsets["portSplitA"] = True
+    end = base + stride + fA + (0 if bWhole else fB)
+    pt = state["ProblemType"]
+    if mxsa:
+        offsets.update(mxsa, ldsBaseMXSA=base + fA + (0 if bWhole else fB),
+                       mxsaStrideBytes=stride)
+        end += half
+        if state.get("LDSSegmentBRotate"):
+            # B's DS half selection uses its original logical component stride.
+            offsets["readStrideBytesB"] = stride if aligned else fA + fB
+    elif pt.get("MXBlockA") and not state.get("DirectToVgprMXSA"):
+        offsets["ldsBaseMXSA"] = end
+        end += int(state.get("LdsNumElementsAlignedMXSA", 0))
+    if pt.get("MXBlockB") and not state.get("DirectToVgprMXSB"):
+        offsets["ldsBaseMXSB"] = end
+        end += int(state.get("LdsNumElementsAlignedMXSB", 0))
+    return offsets, end, aligned
+
 def _wactive(state, tc):
     return state["MIWaveGroup"][0] if tc == "A" else state["MIWaveGroup"][1]
 
+def wave_tile_span(state, tc, vectorWidth=None):
+    """Free-dimension span of one wave's complete instruction tile, in elements."""
+    dim = "M" if tc == "A" else "N"
+    vw = state["VectorWidth" + tc] if vectorWidth is None else vectorWidth
+    # A rectangular instruction has multiple min(M,N)-wide tiIdx subtiles.
+    # All of them belong to the wave, as do its blocks along this operand's axis.
+    return state["MatrixInst" + dim] * state.get("MatrixInstB" + dim, 1) * vw
+
 def _coarse(state, tc):
-    # coarse = VW == WaveTile (one read fits one segment). W = waves on this tensor's dim
+    # coarse = VW == WaveTile (the complete wave tile covers its component). W = waves on this tensor's dim
     # (MIWaveGroup[dim]); for [2,2] W == 2.
     W = _wactive(state, tc)
     mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
-    vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    return W > 0 and mi_threads * vw >= mt // W
+    return W > 0 and wave_tile_span(state, tc) >= mt // W
 
 def _port_split(state, tc):
     # VW==WaveTile/2 (2 vIdx per port) with TDMSplit. A smaller VW would need a >2-way split.
@@ -174,8 +264,7 @@ def _b_readable(state):
     # component (coarse), or its per-vIdx column span (vIdxColsB) divides compColsB evenly so no
     # single ds_load straddles the component boundary. WaveTileB=7 -> 112 % 32 != 0 -> False.
     numComp = state["NumWaves"] // 2
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    if mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp:
+    if wave_tile_span(state, "B") >= state["MacroTile1"] // numComp:
         return True
     compColsB = state["MacroTile1"] // numComp
     vIdxColsB = state["MatrixInstN"] * state.get("MatrixInstBN", 1) * state["MIWaveGroup"][1] * state["VectorWidthB"]
@@ -183,7 +272,7 @@ def _b_readable(state):
 
 def _no(reason):
     return {"applicable": False, "aligned": False, "offsets": None,
-            "blockSpan": 0, "reason": reason, "segmentMap": ""}
+            "blockSpan": 0, "reason": reason}
 
 def _ceil_seg(x):
     return ((x + SEG - 1) // SEG) * SEG
@@ -243,9 +332,7 @@ def _evaluate_asymmetric(state):
             o = _build_offsets(strideAct)
             o[splitKey] = True
             return {"applicable": True, "aligned": False, "offsets": o,
-                    "blockSpan": 0, "reason": "compaxis-asym" if useCompAxis else "portaxis-asym",
-                    "segmentMap": "%s active=%s seg%d/seg%d" % ("COMPAXIS" if useCompAxis else "PORTAXIS",
-                                  activeTC, base // SEG, (base + strideAct) // SEG)}
+                    "blockSpan": 0, "reason": "compaxis-asym" if useCompAxis else "portaxis-asym"}
         # port1 still shares port0's segment: pad it to the next segment boundary. Grows LDS.
         if state.get("PrefetchGlobalRead") != 2:        return _no(("compaxis-asym" if useCompAxis else "portaxis-asym") + ": both components fit one segment, aligned layout (LDS grows) needs PGR=2")
         if state.get("LDSSegmentInterleave", -1) == -1: return _no("auto: skip aligned (LDS growth)")
@@ -259,9 +346,7 @@ def _evaluate_asymmetric(state):
         blockSpan = max(blockSpan, mxEnd)
         return {"applicable": True, "aligned": True, "offsets": o,
                 "blockSpan": blockSpan,
-                "reason": "compaxis-asym-aligned" if useCompAxis else "portaxis-asym-aligned",
-                "segmentMap": "%s-ALIGNED active=%s seg%d/seg%d"
-                              % ("COMPAXIS" if useCompAxis else "PORTAXIS", activeTC, base // SEG, (base + pre) // SEG)}
+                "reason": "compaxis-asym-aligned" if useCompAxis else "portaxis-asym-aligned"}
 
     # active must be coarse (VW == WaveTile).
     if not _coarse(state, activeTC):
@@ -278,15 +363,13 @@ def _evaluate_asymmetric(state):
     #   A active: [A0][B][A1] bBaseline    B active: [B0][A][B1] aBaseline
     strideAct = fAct + sharedSpan            # comp0 -> comp1 gap
 
-    c0 = base // SEG
     # comp0 can span 2 segments (unaligned base); comp1 must start past its last one.
     c0end = (base + fActData - 1) // SEG
     c1 = (base + strideAct) // SEG
     if c1 > c0end:
         # shared block already pushed comp1 to a new segment; free.
         return {"applicable": True, "aligned": False, "offsets": _build_offsets(strideAct),
-                "blockSpan": 0, "reason": "bcontig-asym",
-                "segmentMap": "BCONTIG-ASYM active=%s seg%d={c0,shared} seg%d={c1}" % (activeTC, c0, c1)}
+                "blockSpan": 0, "reason": "bcontig-asym"}
 
     # smaller: pad comp1 to the next segment. grows LDS -> PGR1/PGR2 + force only.
     if state.get("PrefetchGlobalRead") not in (1, 2):
@@ -300,9 +383,7 @@ def _evaluate_asymmetric(state):
     if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
     blockSpan = max(blockSpan, mxEnd)
     return {"applicable": True, "aligned": True, "offsets": offsets,
-            "blockSpan": blockSpan, "reason": "bcontig-asym-aligned",
-            "segmentMap": "BCONTIG-ASYM-ALIGNED active=%s seg%d/seg%d"
-                          % (activeTC, base // SEG, (base + pre) // SEG)}
+            "blockSpan": blockSpan, "reason": "bcontig-asym-aligned"}
 
 
 def evaluate(state):
@@ -349,105 +430,22 @@ def evaluate(state):
     _portSplit = _port_split_a(state)
     if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
 
-    fA, fB = _footprint(state, "A"), _footprint(state, "B")
-    bBaselineSpan = _tensor_footprint(state, "B")
-    base = state["LdsOffsetA"]
-
-    # bcontig fallback [A0][B0][B1][A1] (auto-only, not user-forceable): when B can't be split
-    # (odd WaveTileB), keep B whole and use it as the gap that pushes A1 into the next segment.
-    if not _b_readable(state):
-        strideA = fA + bBaselineSpan                 # distance A0 -> A1: skip A0 and the whole B block
-        a0 = base // SEG
-        a1 = (base + strideA) // SEG
-        if a1 != a0:
-            # The B block already pushes A1 into the next segment, so this uses no extra LDS.
-            offsets = {
-                "ldsBaseB":         base + fA,      # B starts right after A0
-                "writeStrideBytes": strideA,        # A0 -> A1 distance (pad already included)
-                "footprintPacked":  True,
-                "bBaseline":        True,           # B uses its normal (non-interleaved) addressing
-            }
-            if _portSplit:
-                offsets["portSplitA"] = True
-            # mxf8: put the scale block after A1 (bf16/fp16 have no scales).
-            bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fA + bBaselineSpan)
-            if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
-            if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
-            return {"applicable": True, "aligned": False, "offsets": offsets,
-                    "blockSpan": 0, "reason": "bcontig",
-                    "segmentMap": "BCONTIG seg%d={A0,B0,B1} seg%d={A1}" % (a0, a1)}
-
-        # Small tile: A0+B0+B1 all fit in one segment, so A1 would stay with A0. Pad the A0 -> A1
-        # distance up to the next segment boundary so A1 lands in a different segment. Uses more LDS
-        # (checked in Solution.py). This requires PGR1/PGR2, or PGR2 for TDMSplit.
+    bWhole = not _b_readable(state)
+    offsets, end, aligned = _component_offsets(state, bWhole, _portSplit)
+    if aligned:
+        # Auto retains its existing rule: segment gaps require an explicit request.
         if (state.get("PrefetchGlobalRead") != 2
                 and (state.get("TDMSplit") or state.get("PrefetchGlobalRead") != 1)):
-            return _no("bcontig: aligned layout needs PGR=2 with TDMSplit, otherwise PGR=1 or 2")
-        if mode == -1:                             return _no("auto: skip aligned (LDS growth)")
-        pre = _ceil_seg(base + strideA) - base      # round A0 -> A1 distance up to a segment boundary
-        offsets = {
-            "ldsBaseB":         base + fA,          # B starts right after A0
-            "writeStrideBytes": pre,                # A0 -> A1 distance (rounded to a segment)
-            "footprintPacked":  True,
-            "bBaseline":        True,
-        }
-        if _portSplit:
-            offsets["portSplitA"] = True
-        blockSpan = base + pre + fA                 # A1 ends here (past the B block, with a gap)
-        bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
-        if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
-        if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
-        blockSpan = max(blockSpan, mxEnd)
-        return {"applicable": True, "aligned": True, "offsets": offsets,
-                "blockSpan": blockSpan, "reason": "bcontig-aligned",
-                "segmentMap": "BCONTIG-ALIGNED seg%d={A0,B0,B1} seg%d={A1}"
-                              % (base // SEG, (base + pre) // SEG)}
-
-    if (base % SEG) + fA + fB < SEG:
-        # Small MacroTile: A0,B0 fit one segment, so push component 1 to the next segment boundary
-        # with a segment-aligned stride. Grows LDS (Solution.py budget-checks).
-        if (state.get("PrefetchGlobalRead") != 2
-                and (state.get("TDMSplit") or state.get("PrefetchGlobalRead") != 1)):
-            return _no("aligned: needs PGR=2 with TDMSplit, otherwise PGR=1 or 2")
-        if mode == -1:                                  return _no("auto: skip aligned (LDS growth)")
-        pre = _ceil_seg(base + fA + fB) - base          # segment-aligned stride (== SEG for base<SEG)
-        offsets = {
-            "ldsBaseB":         base + fA,              # B0 right after A0 in seg0
-            "writeStrideBytes": pre,                    # segment stride; no re-pad on the jump
-            "footprintPacked":  True,
-        }
-        if _portSplit:
-            offsets["portSplitA"] = True
-        # Per-buffer span: B1 ends at base + pre(=A1) + fA + fB.
-        blockSpan = base + pre + fA + fB
-        # mxf8: put the scale block after B1. Needs extra LDS, so extend the size below.
-        bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
-        if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
-        if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
-        blockSpan = max(blockSpan, mxEnd)
-        return {"applicable": True, "aligned": True, "offsets": offsets,
-                "blockSpan": blockSpan, "reason": "aligned",
-                "segmentMap": "ALIGNED seg%d={A0,B0} seg%d={A1,B1}"
-                              % (base // SEG, (base + pre) // SEG)}
-
-    # Tight: pack [A0][B0][A1][B1] with component stride fA+fB (each footprint already includes its
-    # pad, so the jump is not re-padded -> A1/B1 land exactly at the previous tile's end). No LDS growth.
-    offsets = {
-        "ldsBaseB":         base + fA,          # B0 right after A0
-        "writeStrideBytes": fA + fB,            # footprint stride (post-pad), no re-pad on the jump
-        "footprintPacked":  True,
-    }
-    if _portSplit:
-        offsets["portSplitA"] = True
-    # mxf8: put the scale block after B1. Uses no more LDS than the non-interleaved layout.
-    bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * (fA + fB))
-    if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
-    if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
-    a0 = base // SEG
-    a1 = (base + fA + fB) // SEG                 # tight branch guarantees a1 > a0
-    seg_map = "TIGHT seg%d={A0,B0} seg%d={A1,B1}" % (a0, a1)
-    return {"applicable": True, "aligned": False, "offsets": offsets,
-            "blockSpan": 0, "reason": "tight", "segmentMap": seg_map}
+            reason = "bcontig: aligned layout needs" if bWhole else "aligned: needs"
+            return _no(reason + " PGR=2 with TDMSplit, otherwise PGR=1 or 2")
+        if mode == -1:
+            return _no("auto: skip aligned (LDS growth)")
+    if bWhole:
+        reason = "bcontig-aligned" if aligned else "bcontig"
+    else:
+        reason = "aligned" if aligned else "tight"
+    return {"applicable": True, "aligned": aligned, "offsets": offsets,
+            "blockSpan": end if aligned else 0, "reason": reason}
 
 
 def b_rotate_reason(state, persistent=False):
@@ -513,7 +511,7 @@ def b_rotate_reason(state, persistent=False):
     return None
 
 
-def paired_buffer_reason(state, persistent=False):
+def paired_buffer_reason(state):
     """Limit general pairing to the existing two-buffer TDM emit path."""
     if state.get("LDSSegmentInterleave") != 1:
         return "segment interleave is not active"
@@ -525,8 +523,6 @@ def paired_buffer_reason(state, persistent=False):
         return "needs wave32"
     if state.get("PrefetchGlobalReadA", -1) != -1 or state.get("PrefetchGlobalReadB", -1) != -1:
         return "decoupled prefetch is not supported"
-    if persistent:
-        return "persistent / StreamK is not supported"
     for key in ("ExpandPointerSwap", "TDMSplit", "UseSubtileImpl", "DirectToVgprA",
                 "DirectToVgprB", "DirectToLdsA", "DirectToLdsB", "enableLDSTrA",
                 "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
@@ -537,6 +533,17 @@ def paired_buffer_reason(state, persistent=False):
     if state.get("LocalSplitU", 1) != 1 or state.get("NumWaveSplitK", 1) > 1:
         return "split-K LDS layout is not supported"
     return None
+
+
+def persistent_keeps_unpaired(state):
+    """Whether a persistent kernel keeps the interleave's separate ping/pong blocks.
+
+    Pairing reserves a per-wave swap-mask SGPR for each descriptor set (A/B, and
+    the MX scales). Persistent MX kernels with shadow init can already sit at the
+    SGPR limit, so they keep the unpaired layout instead of failing code generation.
+    """
+    pt = state["ProblemType"]
+    return bool(pt["MXBlockA"] or pt["MXBlockB"]) and not state["ForceDisableShadowInit"]
 
 
 def paired_buffer_offsets(state, isolate_operands=False):
@@ -550,8 +557,12 @@ def paired_buffer_offsets(state, isolate_operands=False):
     bufferStride<tensor> is the ping-to-pong distance within a pair;
     writeStrideBytes is the component-0-to-component-1 distance. Both distances
     and group bases are 256-byte aligned without changing internal padding.
+    Include supported MXSA M-half placement before checking the final LDS size.
     """
-    offsets = dict(state["LDSSegInterleaveOffsets"])
+    original = state["LDSSegInterleaveOffsets"]
+    offsets = {key: original[key] for key in (
+        "footprintPacked", "aBaseline", "bBaseline", "activeTC", "portSplitA",
+        "portSplitB", "componentSplit") if key in original}
     base = _align_paired(state["LdsOffsetA"])
     shared = "A" if offsets.get("aBaseline") else ("B" if offsets.get("bBaseline") else None)
     active = "B" if shared == "A" else "A"
@@ -561,8 +572,18 @@ def paired_buffer_offsets(state, isolate_operands=False):
     dOther = _align_paired(fOther)
     other = shared or "B"
     activeEnd = base + dActive + fActive
-    otherBase = _ceil_seg(activeEnd) if isolate_operands else _align_paired(activeEnd)
-    stride = _align_paired(otherBase - base + dOther + fOther)
+    mxsa = _mxsa_half_layout(state, paired=True) if active == "A" else None
+    half = mxsa["mxsaHalfBytes"] if mxsa else 0
+    # With whole B, place the scale pair immediately after A0, before B.
+    # With split B, it follows B0. Both orders repeat at component stride S.
+    mxsaBase = _align_paired(activeEnd) if mxsa and shared else None
+    otherStart = mxsaBase + 2 * half if mxsa and shared else activeEnd
+    otherBase = _ceil_seg(otherStart) if isolate_operands else _align_paired(otherStart)
+    otherEnd = otherBase + dOther + fOther
+    if mxsa and not shared:
+        mxsaBase = _align_paired(otherEnd)
+    componentEnd = mxsaBase + 2 * half if mxsa and not shared else otherEnd
+    stride = _align_paired(componentEnd - base)
     if isolate_operands:
         stride = _ceil_seg(base + stride) - base
     else:
@@ -573,6 +594,8 @@ def paired_buffer_offsets(state, isolate_operands=False):
         splitPairs = [(base, fActive, dActive)]
         if not shared:
             splitPairs.append((otherBase, fOther, dOther))
+        if mxsa:
+            splitPairs.append((mxsaBase, mxsa["mxsaHalfFootprintBytes"], half))
         for pairBase, size, bufferStride in splitPairs:
             for buffer in (0, 1):
                 start = pairBase + buffer * bufferStride
@@ -587,20 +610,20 @@ def paired_buffer_offsets(state, isolate_operands=False):
     if state.get("LDSSegmentBRotate"):
         # Preserve logical DS half selection while VGPR bases bridge the common
         # physical stride. Rotation changes read order, never data placement.
-        offsets["readStrideBytesB"] = offsets.get("readStrideBytesB", offsets["writeStrideBytes"])
-    else:
-        offsets.pop("readStrideBytesB", None)
+        offsets["readStrideBytesB"] = original.get("readStrideBytesB", original["writeStrideBytes"])
     offsets["writeStrideBytes"] = stride
     end = base + stride + dActive + fActive if shared else otherBase + stride + dOther + fOther
+    if mxsa:
+        offsets.update(mxsa, ldsBaseMXSA=mxsaBase, bufferStrideMXSA=half,
+                       mxsaStrideBytes=stride)
+        end = mxsaBase + stride + 2 * half
     for tc in ("MXSA", "MXSB"):
-        if "ldsBase" + tc in offsets:
+        if "ldsBase" + tc in original and not (tc == "MXSA" and mxsa):
             size = int(state["LdsNumElementsAligned" + tc])
             scaleBase = _align_paired(end)
             offsets["ldsBase" + tc] = scaleBase
             offsets["bufferStride" + tc] = _align_paired(size)
             end = scaleBase + offsets["bufferStride" + tc] + size
-    if end > state["MaxLDS"]:
-        return None
     offsets["pairedBuffers"] = True
     offsets["pairedUsedBytes"] = end
     offsets["pairedOperandIsolation"] = isolate_operands
@@ -613,7 +636,7 @@ def paired_buffer_offsets(state, isolate_operands=False):
         windows = set(range((fOther - 1)//SEG + 1))
         windows.update(range(stride//SEG, (stride + fOther - 1)//SEG + 1))
         offsets["readAddressWindowsB"] = sorted(windows)
-    return offsets
+    return offsets if offsets["pairedUsedBytes"] <= state["MaxLDS"] else None
 
 
 def paired_buffer_layout_reason(state, offsets):
@@ -632,15 +655,17 @@ def paired_buffer_layout_reason(state, offsets):
         else:
             if "ldsBase" + tc not in offsets:
                 continue
-            size = int(state["LdsNumElementsAligned" + tc])
-            components = 1
+            split = tc == "MXSA" and offsets.get("mxsSplitA", False)
+            size = offsets["mxsaHalfBytes"] if split else int(state["LdsNumElementsAligned" + tc])
+            components = 2 if split else 1
         base = offsets.get("ldsBase" + tc, state["LdsOffsetA"])
         bufferStride = offsets["bufferStride" + tc]
         if size <= 0:
             return "%s has an empty paired footprint" % tc
         for component in range(components):
             for buffer in (0, 1):
-                start = base + component * offsets["writeStrideBytes"] + buffer * bufferStride
+                stride = offsets["mxsaStrideBytes"] if tc == "MXSA" and offsets.get("mxsSplitA") else offsets["writeStrideBytes"]
+                start = base + component * stride + buffer * bufferStride
                 name = "%s%d %s" % (tc, component, "pong" if buffer else "ping")
                 if start < 0 or start % 256:
                     return "%s start %d is not a non-negative 256-byte-aligned address" % (name, start)

@@ -90,6 +90,126 @@ class TestTensorAttributes:
 
         assert tensor.get_is_virtual()
 
+    def test_alignment_round_trip(self):
+        """set_alignment()/get_alignment() round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_alignment() == 16
+        tensor.set_alignment(32)
+        assert tensor.get_alignment() == 32
+
+    def test_set_alignment_returns_self(self):
+        """set_alignment() returns self for chaining."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.set_alignment(32) is tensor
+
+    def test_validate_rejects_alignment_below_one(self):
+        """validate() fails when alignment is less than 1."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_alignment(0)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert " alignment must be >= 1" in result.get_message()
+
+    def test_ragged_offset_multiplier_round_trip(self):
+        """Ragged offset multiplier setter/getter round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_ragged_offset_multiplier() == 1
+        assert not tensor.has_ragged_offset_multiplier()
+
+        tensor.set_ragged_offset_multiplier(4)
+
+        assert tensor.get_ragged_offset_multiplier() == 4
+        assert tensor.has_ragged_offset_multiplier()
+
+    def test_validate_rejects_multiplier_below_one(self):
+        """validate() fails when the ragged offset multiplier is less than 1."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset_multiplier(0)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert " ragged offset multiplier must be >= 1" in result.get_message()
+
+    def test_validate_rejects_multiplier_without_ragged_offset(self):
+        """validate() fails when a multiplier is set without a ragged offset."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset_multiplier(4)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert (
+            " ragged offset multiplier requires a ragged offset" in result.get_message()
+        )
+
+    def test_has_compile_time_constant_follows_set_value(self):
+        """set_value() makes a compile-time constant; clear_value() removes it."""
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+
+        assert not tensor.get_has_compile_time_constant()
+
+        tensor.set_value(2.5)
+        assert tensor.get_has_compile_time_constant()
+
+        assert tensor.clear_value() is tensor
+        assert not tensor.get_has_compile_time_constant()
+
+    def test_set_as_runtime_parameter(self):
+        """set_as_runtime_parameter() marks the tensor runtime pass-by-value."""
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        tensor.set_value(2.5)
+
+        assert tensor.set_as_runtime_parameter() is tensor
+        assert tensor.get_is_runtime_pass_by_value()
+        assert not tensor.get_has_compile_time_constant()
+        assert tensor.get_value_variant() is None
+
+    def test_ragged_offset_round_trip(self):
+        """set_ragged_offset()/get_ragged_offset() round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        offset = hipdnn.Tensor.create([4], hipdnn.DataType.INT32)
+
+        assert not tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is None
+
+        tensor.set_ragged_offset(offset)
+
+        assert tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is offset
+
+    def test_set_ragged_offset_accepts_none(self):
+        """set_ragged_offset(None) clears the ragged offset."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset(hipdnn.Tensor.create([4], hipdnn.DataType.INT32))
+
+        tensor.set_ragged_offset(None)
+
+        assert not tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is None
+
+    def test_multiplier_with_ragged_offset_validates(self):
+        """A multiplier is valid once a ragged offset is set."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset(hipdnn.Tensor.create([4], hipdnn.DataType.INT32))
+        tensor.set_ragged_offset_multiplier(4)
+
+        result = tensor.validate()
+
+        assert result.is_good(), result.get_message()
+
+    def test_set_ragged_offset_returns_self(self):
+        """set_ragged_offset() returns self for chaining."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        offset = hipdnn.Tensor.create([4], hipdnn.DataType.INT32)
+
+        assert tensor.set_ragged_offset(offset) is tensor
+
     def test_create_does_not_auto_assign_uid(self):
         """create() leaves the uid unset until set_uid() is called."""
         tensor = hipdnn.Tensor.create([1, 2], hipdnn.DataType.FLOAT)
@@ -192,3 +312,120 @@ class TestSetValue:
             hipdnn.Tensor().set_value(1.5, hipdnn.DataType.INT32)
         with pytest.raises(TypeError, match="cannot infer"):
             hipdnn.Tensor().set_value("2.5")
+
+
+class TestScalarValueGetters:
+    """Getters return the stored scalar as a plain Python value."""
+
+    @pytest.mark.parametrize(
+        "data_type, value, python_type",
+        [
+            (hipdnn.DataType.FLOAT, 2.5, float),
+            (hipdnn.DataType.DOUBLE, 0.1, float),
+            (hipdnn.DataType.HALF, 2.5, float),
+            (hipdnn.DataType.BFLOAT16, 2.5, float),
+            (hipdnn.DataType.UINT8, 200, int),
+            (hipdnn.DataType.INT32, -7, int),
+            (hipdnn.DataType.INT64, 1 << 40, int),
+            (hipdnn.DataType.BOOLEAN, True, bool),
+        ],
+    )
+    def test_value_variant_returns_plain_python_scalar(
+        self, data_type, value, python_type
+    ):
+        tensor = hipdnn.Tensor().set_value(value, data_type)
+
+        result = tensor.get_value_variant()
+
+        assert type(result) is python_type
+        assert result == value
+
+    def test_getters_follow_the_scalar_state(self):
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_value_variant() is None
+        assert tensor.get_compile_time_constant() is None
+        assert tensor.get_pass_by_value() is None
+
+        tensor.set_value(2.5)
+        assert tensor.get_compile_time_constant() == 2.5
+        assert tensor.get_pass_by_value() is None
+
+        tensor.set_is_pass_by_value(True)
+        assert tensor.get_pass_by_value() == 2.5
+        assert tensor.get_compile_time_constant() is None
+
+        tensor.clear_value()
+        assert tensor.get_value_variant() is None
+
+
+class TestSetCompileTimeConstant:
+    """set_compile_time_constant() is an alias of set_value()."""
+
+    def test_bakes_a_constant_like_set_value(self):
+        tensor = hipdnn.Tensor()
+
+        assert tensor.set_compile_time_constant(2.5, hipdnn.DataType.HALF) is tensor
+        assert tensor.get_data_type() == hipdnn.DataType.HALF
+        assert tensor.get_compile_time_constant() == 2.5
+
+    def test_type_inferred_from_python_value(self):
+        tensor = hipdnn.Tensor().set_compile_time_constant(3)
+
+        assert tensor.get_data_type() == hipdnn.DataType.INT64
+
+    def test_rejects_multi_element_tensor(self):
+        tensor = hipdnn.Tensor.create([2], hipdnn.DataType.FLOAT)
+
+        with pytest.raises(ValueError, match="one element"):
+            tensor.set_compile_time_constant(1.0)
+
+
+class TestGraphTensorScalar:
+    """Graph.tensor_scalar() creates a scalar tensor; the Python value picks the type."""
+
+    @pytest.mark.parametrize(
+        "value, data_type",
+        [
+            (0.5, hipdnn.DataType.FLOAT),
+            (0.1, hipdnn.DataType.DOUBLE),
+            (3, hipdnn.DataType.INT32),
+            (2**40, hipdnn.DataType.INT64),
+        ],
+    )
+    def test_data_type_follows_the_python_value(self, value, data_type):
+        kind = hipdnn.ScalarType.COMPILE_TIME_CONST
+
+        scalar = hipdnn.Graph.tensor_scalar(value, kind)
+
+        assert scalar.get_data_type() == data_type
+
+    def test_compile_time_constant_keeps_the_value(self):
+        kind = hipdnn.ScalarType.COMPILE_TIME_CONST
+
+        scalar = hipdnn.Graph.tensor_scalar(0.5, kind)
+
+        assert scalar.get_compile_time_constant() == 0.5
+        assert not scalar.get_is_runtime_pass_by_value()
+
+    def test_runtime_param_is_runtime_with_default(self):
+        kind = hipdnn.ScalarType.RUNTIME_PARAM
+
+        scalar = hipdnn.Graph.tensor_scalar(0.5, kind)
+
+        assert scalar.get_pass_by_value() == 0.5
+        assert scalar.get_is_runtime_pass_by_value()
+
+    @pytest.mark.parametrize(
+        "scalar_type, api",
+        [
+            (hipdnn.ScalarType.COMPILE_TIME_CONST, (1, 0)),
+            (hipdnn.ScalarType.RUNTIME_PARAM, (1, 2)),
+        ],
+    )
+    def test_serializes_in_a_graph(self, scalar_type, api):
+        entry, min_api = _serialized_scalar(
+            hipdnn.Graph.tensor_scalar(0.5, scalar_type)
+        )
+
+        assert (entry["data_type"], entry["value"], min_api) == ("float", 0.5, api)

@@ -1,12 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """f64 MFMA atom contracts and native parity, independent of GPU access."""
+
+from dataclasses import replace
+from unittest.mock import patch
+
 import pytest
-from rocke.core.arch import ArchTarget
+from rocke.instances.gfx942 import f64_mma_probe as probe
+from rocke.core.arch import ArchTarget, MmaCatalog, known_arches
 from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.instances.gfx942.f64_mma_probe import (
     F64MmaProbeSpec,
     build_f64_mma_probe,
@@ -40,12 +45,17 @@ def test_catalog_isolation(m):
     assert atom.op_id == op_id
     assert atom.c_dtype == "fp64"
     assert (atom.a_frag_len, atom.b_frag_len, atom.c_frag_len) == (1, 1, c_frag_len)
+    assert atom.srcs[2].frag_len == atom.dst.frag_len == c_frag_len
     fp32 = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
     )
     assert fp32.op_id == "mfma_f32_16x16x4_f32"
-    for gfx in ("gfx950", "gfx1151", "gfx1250"):
-        assert not any(op.a_dtype == "fp64" for op in ArchTarget.from_gfx(gfx).mma.ops)
+    # gfx90a and gfx950 list the 16x16x4 atom too; the four-block atom is
+    # gfx942's alone, and no other target lists either.
+    listed_on = {"gfx942"} if m == 4 else {"gfx90a", "gfx942", "gfx950"}
+    for gfx in known_arches():
+        lists = any(op.op_id == op_id for op in ArchTarget.from_gfx(gfx).mma.ops)
+        assert lists == (gfx in listed_on), gfx
 
 
 @pytest.mark.parametrize("m", [16, 4])
@@ -114,7 +124,7 @@ def test_probe_rejects_bad_spec(m, k):
 
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
-def test_both_builders_and_lowerers(m, k):
+def test_python_builder_and_lowerers(m, k):
     kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
@@ -125,9 +135,159 @@ def test_both_builders_and_lowerers(m, k):
         if m == 16
         else "call double @llvm.amdgcn.mfma.f64.4x4x4f64("
     )
+    for flavor in LLVM_FLAVORS:
+        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
+        assert ll.count(call) == k // 4
+        assert ll.count("store double ") == _ATOMS[m][1]
+
+
+@pytest.mark.parametrize("m", [16, 4])
+@pytest.mark.parametrize("k", [4, 8, 64])
+def test_native_builder_and_lowerers_match_python(m, k):
     native = pytest.importorskip("rocke_engine")
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
+    ir = serialize(kernel)
     assert native.f64_mma_probe_serialize_ir(m, k) == ir
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor) == ll
-        assert ll.count(call) == k // 4
+
+
+_CONTRACT_CASES = [
+    pytest.param(role, field, id=f"{name}-{field}")
+    for role, name in enumerate(("src0", "src1", "src2", "dst"))
+    for field in (
+        "dtype",
+        "width_short",
+        "width_long",
+        "width_float",
+        "missing_map",
+        "no_fn",
+        "wrong_map",
+        "map_width",
+        "map_wave",
+        "map_float",
+    )
+    if field != "wrong_map" or role in (2, 3)
+] + [
+    pytest.param(-1, field, id=field)
+    for field in (
+        "missing_atom",
+        "family",
+        "m",
+        "n",
+        "k",
+        "shape_float",
+        "wave",
+        "wave_float",
+        "both_width_short",
+        "both_capacity",
+    )
+]
+
+
+@pytest.mark.parametrize("m", [16, 4])
+@pytest.mark.parametrize("role,field", _CONTRACT_CASES)
+def test_probe_rejects_incompatible_contract_before_emission(m, role, field):
+    atom = _f64_atom(m)
+    srcs, dst = list(atom.srcs), atom.dst
+    if role >= 0:
+        desc = dst if role == 3 else srcs[role]
+        if field == "dtype":
+            desc = replace(desc, dtype="fp32")
+        elif field.startswith("width_"):
+            width = (
+                float(desc.frag_len)
+                if field == "width_float"
+                else desc.frag_len + (1 if field == "width_long" else -1)
+            )
+            desc = replace(desc, frag_len=width)
+        else:
+            layout = desc.layout
+            if field == "missing_map":
+                layout = None
+            elif field == "no_fn":
+                layout = replace(layout, fn=None)
+            elif field == "wrong_map":
+                layout = replace(layout, fn=lambda b, lane, slot: (lane, slot))
+            elif field == "map_width":
+                layout = replace(layout, frag_len=layout.frag_len + 1)
+            elif field == "map_float":
+                layout = replace(layout, frag_len=float(layout.frag_len))
+            else:
+                layout = replace(layout, wave_size=32)
+            desc = replace(desc, layout=layout)
+        if role == 3:
+            dst = desc
+        else:
+            srcs[role] = desc
+        atom = replace(atom, srcs=tuple(srcs), dst=dst)
+    elif field.startswith("both_"):
+        width = 5 if field == "both_capacity" else dst.frag_len - 1
+        srcs[2] = replace(srcs[2], frag_len=width)
+        dst = replace(dst, frag_len=width)
+        atom = replace(atom, srcs=tuple(srcs), dst=dst)
+    elif field == "missing_atom":
+        atom = None
+    else:
+        updates = {
+            "family": {"family": "wrong"},
+            "m": {"m": m + 1},
+            "n": {"n": m + 1},
+            "k": {"k": 8},
+            "shape_float": {"m": float(m)},
+            "wave": {"wave_size": 32},
+            "wave_float": {"wave_size": 64.0},
+        }
+        atom = replace(atom, **updates[field])
+    target = ArchTarget.from_gfx("gfx942")
+    # Both shape and ID lookup see this catalog; leave the real query intact.
+    catalog = MmaCatalog(
+        [atom if op.op_id == _ATOMS[m][0] else op for op in target.mma.ops]
+        if atom is not None
+        else [op for op in target.mma.ops if op.op_id != _ATOMS[m][0]]
+    )
+    with (
+        patch.object(ArchTarget, "from_gfx", return_value=replace(target, mma=catalog)),
+        patch.object(probe, "IRBuilder", wraps=IRBuilder) as builder,
+    ):
+        with pytest.raises(ValueError) as error:
+            build_f64_mma_probe(F64MmaProbeSpec(m))
+        assert str(error.value) == (
+            "F64 probe requires the fixed gfx942 instruction and layout contract"
+        )
+        builder.assert_not_called()
+
+
+@pytest.mark.parametrize("m", [16, 4])
+@pytest.mark.parametrize("forwarded", [False, True], ids=["copied", "shared-forwarder"])
+def test_probe_accepts_copied_contract(m, forwarded):
+    atom = _f64_atom(m)
+    copied = replace(
+        atom,
+        srcs=tuple(replace(src, layout=replace(src.layout)) for src in atom.srcs),
+        dst=replace(atom.dst, layout=replace(atom.dst.layout)),
+    )
+    if forwarded:
+        original = atom.srcs[2].layout.fn
+
+        def forward(b, lane, slot):
+            return original(b, lane, slot)
+
+        srcs = list(copied.srcs)
+        srcs[2] = replace(srcs[2], layout=replace(srcs[2].layout, fn=forward))
+        copied = replace(
+            copied,
+            srcs=tuple(srcs),
+            dst=replace(copied.dst, layout=replace(copied.dst.layout, fn=forward)),
+        )
+    spec = F64MmaProbeSpec(m)
+    expected = serialize(build_f64_mma_probe(spec))
+    target = ArchTarget.from_gfx("gfx942")
+    catalog = MmaCatalog(
+        [copied if op.op_id == atom.op_id else op for op in target.mma.ops]
+    )
+    with patch.object(
+        ArchTarget, "from_gfx", return_value=replace(target, mma=catalog)
+    ):
+        assert serialize(build_f64_mma_probe(spec)) == expected

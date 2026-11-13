@@ -95,6 +95,7 @@ static rocke_status_t rocke_x_make_lds_view(rocke_ir_builder_t* b,
     }
     out->base = smem;
     out->addr_space = ROCKE_ADDR_LDS;
+    memset(&out->buffer, 0, sizeof(out->buffer)); /* no BufferResource */
     return ROCKE_OK;
 }
 

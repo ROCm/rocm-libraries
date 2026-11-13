@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -46,6 +44,27 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "nontemporal/gfx942/copy_bf16x8": {
+          "arch": "gfx942",
+          "bytes": 1099,
+          "family": "nontemporal",
+          "kernel_name": "irhash_nontemporal_copy_gfx942",
+          "sha256": "e936a413c8618372745ec628d70965a729dd850ec26e33433c4bb241c3795ac5",
+          "status": "ok"
+        },
+        "nontemporal/gfx950/copy_bf16x8": {
+          "arch": "gfx950",
+          "bytes": 1099,
+          "family": "nontemporal",
+          "kernel_name": "irhash_nontemporal_copy_gfx950",
+          "sha256": "84b0fb5a8a92a0abec1e550febe86cbefe306b413ecdef02f3f04a6883d5a4fb",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "nontemporal/gfx942/copy_bf16x8": {
           "arch": "gfx942",

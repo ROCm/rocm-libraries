@@ -153,7 +153,7 @@ graph-level form is true fusion, and it is not wired in yet.
   C++ lowerer support or an explicit `BackendCoverageGap`. The golden still gates
   either way.
 - **Re-run the gate.** `tools/check_byte_identity.py` GREEN for every family at
-  every LLVM flavor (`llvm20`, `llvm22`, and `llvm23`). If the emission is meant to
+  every LLVM flavor (`llvm20`, `llvm22`, `llvm23`, and `llvm24`). If the emission is meant to
   change, re-bless the golden IR hash in the same change, never separately.
 - **Keep the unfused path as the correctness reference.** Byte-identity and the
   golden are blind to a wrong-but-stable kernel, they pin stability, not
@@ -246,7 +246,7 @@ shares nothing.
 4. **Compose over bespoke** — add an `EpilogueOp` / pattern entry / schedule choice
    rather than a monolithic kernel; parameterize the case-specific stage.
 5. **Mirror both engines** and re-run `tools/check_byte_identity.py` GREEN at
-   `llvm20`, `llvm22`, and `llvm23`; re-bless the golden in the same change if
+   `llvm20`, `llvm22`, `llvm23`, and `llvm24`; re-bless the golden in the same change if
    emission changed.
 6. **Verify correctness before claiming a win** — run fused and unfused paths
    against a numpy/torch reference and explicitly assert every reported error

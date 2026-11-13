@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple
 
 @dataclass
 class ParamMeta:
-    """Static metadata for a parameter, sourced from Tensile.
+    """Static metadata for a parameter, sourced from TensileLite.
     Loaded once. Provides default values and valid ranges for comments."""
     name: str
     default_value: Any

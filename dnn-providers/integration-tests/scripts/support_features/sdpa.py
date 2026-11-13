@@ -20,7 +20,7 @@ The value sets of ``dtype`` and ``head_dim`` are not in the schema, which
 types them only as tensors. They list what the op is meant to support; a graph
 outside them raises ``FeatureError`` rather than widening the denominator.
 FNUZ fp8 is not folded into OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
-``fp8e4m3``, and the two are not bit-compatible.
+``fp8e4m3``, and the two are not bit-compatible. The same holds for e5m2.
 """
 
 from __future__ import annotations
@@ -55,14 +55,18 @@ DTYPES = {
     "half": "fp16",
     "fp8_e4m3": "fp8e4m3",
     "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
+    "fp8_e5m2": "fp8e5m2",
+    "fp8_e5m2_fnuz": "fp8e5m2_fnuz",
 }
 # (q / k head dim, v head dim) -> head_dim value. v may be narrower than q / k:
-# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv). 256 is the widest head the gfx942
+# split-KV decode kernels (hipkernel:Gfx942AttentionUnified3d) are built for.
 HEAD_DIMS = {
     (64, 64): "64",
     (128, 128): "128",
     (192, 192): "192",
     (192, 128): "192x128",
+    (256, 256): "256",
 }
 # Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
 LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}
@@ -72,6 +76,8 @@ FEATURES = (
     Feature("dtype:fp16", ("q_tensor_uid",)),
     Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
     Feature("dtype:fp8e4m3_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e5m2_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
     *(Feature(f"head_dim:{d}", QV_FIELDS) for d in HEAD_DIMS.values()),
     Feature("heads:mha", QK_FIELDS, "as many k/v heads as q heads"),
     Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),

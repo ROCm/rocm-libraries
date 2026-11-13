@@ -24,6 +24,11 @@ edge:
                       executable`. Provides `build_hsaco_from_llvm_ir`.
                       Steady-state ~1.2 ms per kernel.
 
+  - ``compiler_options``: the measured table of which ``-mllvm`` options
+                      each LLVM major accepts. A compile that needs one the
+                      loaded compiler refuses raises
+                      `CompilerOptionNotAccepted`.
+
   - ``hip_module``  : ctypes wrapper over `libamdhip64.so`. Bare
                       minimum for `hipModuleLoadData`,
                       `hipModuleLaunchKernel`, `hipMalloc`,
@@ -40,6 +45,12 @@ edge:
                       `pack_args_kernelparams`) for the AMDGPU kernarg
                       ABI. Used by both the numpy and torch paths.
 
+  - ``contract``    : a kernel's parameter contract -- the facts, pointer
+                      alignments and exact workgroup size it states, which
+                      a launcher built by `KernelLauncher.from_artifact`
+                      checks before each launch
+                      (`parameter_contract`, `LaunchRefused`).
+
   - ``torch_interop``: torch-tensor launch glue -- `resolve_stream`
                       (collapses ``stream=0`` to torch's current stream
                       so the caching allocator sees our launches),
@@ -52,7 +63,10 @@ edge:
                         * :class:`KernelLauncher`  -- owns one compiled
                           HSACO + loaded HIP module + function entry.
                           Construct once per (problem-shape, dtype),
-                          call many times.
+                          call many times. ``from_artifact`` builds one
+                          that checks the kernel's parameter contract.
+                        * :func:`first_supported` -- the first launcher
+                          whose contract accepts a launch.
                         * :class:`PipelineLauncher` -- N stages on one
                           stream (split-KV attention's seg+reduce,
                           grouped GEMM's k-fixup, ...).
@@ -91,8 +105,15 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .compiler_options import CompilerOptionNotAccepted
+from .contract import (
+    LaunchRefused,
+    LaunchSupport,
+    ParameterContract,
+    parameter_contract,
+)
 from .device_info import DeviceInfo, get_device_info
-from .hip_module import HipError, Runtime
+from .hip_module import GpuCheckCaptureRefused, GpuCheckFailed, HipError, Runtime
 from .launcher import (
     DeviceMem,
     KernelLauncher,
@@ -100,6 +121,8 @@ from .launcher import (
     LaunchSummary,
     PipelineLauncher,
     WorkspacePool,
+    check_gpu_checks,
+    first_supported,
     no_fence,
     release_retained_for_stream,
     synchronize_and_release,
@@ -118,12 +141,18 @@ from .torch_interop import (
 __all__ = [
     "ComgrError",
     "ComgrTimings",
+    "CompilerOptionNotAccepted",
     "DeviceInfo",
     "DeviceMem",
+    "GpuCheckCaptureRefused",
+    "GpuCheckFailed",
     "HipError",
     "KernelLauncher",
     "LaunchConfig",
+    "LaunchRefused",
     "LaunchSummary",
+    "LaunchSupport",
+    "ParameterContract",
     "PipelineLauncher",
     "Runtime",
     "StallGate",
@@ -131,11 +160,14 @@ __all__ = [
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
+    "check_gpu_checks",
     "empty_workspace",
+    "first_supported",
     "get_device_info",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
+    "parameter_contract",
     "release_retained_for_stream",
     "resolve_stream",
     "synchronize_and_release",

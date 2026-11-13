@@ -2,11 +2,16 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/attention_unified_emit.c -- C-side emitter for the unified
- * (scalar 2D) attention parity harness. Selects one of the sampled configs by
+ * scalar attention parity harness. Selects one of the sampled configs by
  * argv[1] (the config index), fills a rocke_unified_attention_problem_t
- * identically to the Python emitter attention_unified_emit.py, builds the
- * scalar 2D kernel via rocke_build_unified_attention_2d_scalar (kernel name from
- * rocke_unified_attention_2d_scalar_kernel_name), lowers the returned KernelDef
+ * identically to the Python emitter attention_unified_emit.py and builds
+ * configs 0-5 as the scalar 2D kernel via rocke_build_unified_attention_2d_scalar
+ * (kernel name from rocke_unified_attention_2d_scalar_kernel_name), configs 6-7
+ * as the scalar split-3D reduce (8 segments) of the problem named in
+ * reduce_source() via rocke_build_unified_attention_reduce_scalar_new, and
+ * configs 8-10 as the scalar split-3D segment kernel (8 segments; config 10 with
+ * a sliding window) of the problem named in segment_source() via
+ * rocke_build_unified_attention_3d_scalar_new. It lowers the returned KernelDef
  * via rocke_lower_kernel_to_llvm_ex (arch gfx950, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
  */
@@ -109,6 +114,39 @@ static int make_problem(int idx, rocke_unified_attention_problem_t* p)
     return 0;
 }
 
+/* Reduce config index -> the 2D config whose problem it reduces (mirrors the
+ * Python _REDUCE_CONFIGS), or -1 for any other config. */
+#define NUM_SEGMENTS 8
+static int reduce_source(int idx)
+{
+    switch(idx)
+    {
+    case 6:
+        return 2;
+    case 7:
+        return 1;
+    default:
+        return -1;
+    }
+}
+
+/* Segment config index -> the 2D config whose problem the split-3D segment
+ * kernel runs (mirrors the Python _SEGMENT_CONFIGS), or -1 for any other config. */
+static int segment_source(int idx)
+{
+    switch(idx)
+    {
+    case 8:
+        return 2;
+    case 9:
+        return 1;
+    case 10:
+        return 3;
+    default:
+        return -1;
+    }
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -126,25 +164,40 @@ int main(int argc, char** argv)
     }
 
     rocke_unified_attention_problem_t p;
-    if(make_problem(idx, &p) != 0)
+    int red_src = reduce_source(idx);
+    int seg_src = segment_source(idx);
+    int src = red_src >= 0 ? red_src : (seg_src >= 0 ? seg_src : idx);
+    if(make_problem(src, &p) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
     rocke_ir_builder_t b;
-    char kname[256];
-    kname[0] = 0;
-    rocke_status_t nst
-        = rocke_unified_attention_2d_scalar_kernel_name(&p, NULL, kname, sizeof kname);
-    if(nst != ROCKE_OK)
+    rocke_kernel_def_t* kernel = NULL;
+    if(red_src >= 0)
     {
-        fprintf(stderr, "kernel_name failed: status=%d\n", (int)nst);
-        return 1;
+        /* The _new entry names the kernel and initializes the builder. */
+        kernel = rocke_build_unified_attention_reduce_scalar_new(&b, &p, NUM_SEGMENTS, NULL);
     }
-    rocke_ir_builder_init(&b, kname);
-
-    rocke_kernel_def_t* kernel = rocke_build_unified_attention_2d_scalar(&b, &p, NULL);
+    else if(seg_src >= 0)
+    {
+        kernel = rocke_build_unified_attention_3d_scalar_new(&b, &p, NULL, NUM_SEGMENTS);
+    }
+    else
+    {
+        char kname[256];
+        kname[0] = 0;
+        rocke_status_t nst
+            = rocke_unified_attention_2d_scalar_kernel_name(&p, NULL, kname, sizeof kname);
+        if(nst != ROCKE_OK)
+        {
+            fprintf(stderr, "kernel_name failed: status=%d\n", (int)nst);
+            return 1;
+        }
+        rocke_ir_builder_init(&b, kname);
+        kernel = rocke_build_unified_attention_2d_scalar(&b, &p, NULL);
+    }
     if(!kernel)
     {
         fprintf(stderr, "build failed for config %d (sticky err)\n", idx);

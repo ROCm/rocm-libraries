@@ -82,35 +82,95 @@ the caller must apply both. A pre-kernel that does so is a follow-up.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import (
-    BF16,
-    F32,
-    I32,
-    I64,
-    IRBuilder,
-    KernelDef,
-    PtrType,
-    Value,
-    VectorType,
-)
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
-from rocke.helpers.attention import (
-    binary_search_seq_idx as _binary_search_seq_idx,
-    mfma_16x16x16_for_dtype as _mfma_16x16x16,
-    safe_inv_l as _safe_inv_l,
-)
-from rocke.helpers.distribution import make_static_tile_distribution
-from rocke.helpers.grid import chiplet_transform_chunked_dynamic as _chiplet_chunked
-from rocke.helpers.schedule import DS_READ as _SGB_DS_READ
-from rocke.helpers.schedule import MFMA as _SGB_MFMA
-from rocke.helpers.spec import SignatureBuilder
+from rocke.core.ir import BF16, F32, KernelDef
+from rocke.helpers.attention import safe_inv_l
 
+from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
+from kernels.mla._mla_body import (
+    C_PER_LANE,
+    C_STAGE_W,
+    MFMA_K,
+    MFMA_M,
+    MFMA_N,
+    V8_PAD,
+    WAVE_SIZE,
+    WT_PAD,
+    KernelArg,
+    acc_iter_args,
+    kernel_signature,
+    key_mask,
+    lane_ids,
+    mfma_16x16x16,
+    on_wave,
+    online_softmax_row,
+    open_kernel,
+    pack_p,
+    pick4,
+    rescale_if_any,
+    run_k_loops,
+    scale_frag,
+    shift,
+    softmax_consts,
+    softmax_iter_args,
+    split_softmax_state,
+    tail_args,
+    wave_tile_row,
+    zero_tiles,
+)
+from kernels.mla._mla_prefill_gfx942_body import (
+    AgprAcc,
+    KvRegStager,
+    KvSharedStager,
+    KvTileDma,
+    PageTable,
+    ScorePartials,
+    absorb_query,
+    absorb_query_t,
+    causal_k_tiles,
+    causal_keys,
+    clamp_tile,
+    copy_rows_to_lds,
+    epilogue_lane_row,
+    expand_latent,
+    full_k_tiles,
+    gather_keys_t,
+    in_window,
+    lds_gemm_tile,
+    load_q_frags,
+    load_q_nope_rope,
+    park_q_rope,
+    project_wuv_heads,
+    query_rows,
+    read_k_rope_swizzled,
+    read_kv_rows,
+    read_pv_group,
+    read_q_rope,
+    reversed_q_block,
+    row_of,
+    seq_len_k,
+    split_k_scores,
+    stage_q_cols,
+    store_acc_t,
+    store_c_frag,
+    store_latent_out,
+    store_lse,
+    store_out_frag,
+    store_probe_scores,
+    take_window_frags,
+    tile_ahead,
+    tile_pairs,
+    varlen_tile,
+    w_head_base,
+    wave_head,
+    wave_k_col,
+    wave_q_start,
+    window_rank,
+)
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaPrefillSpec",
@@ -127,57 +187,6 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "mla_prefill_fwd_signature",
     "build_mla_prefill_fwd",
 ]
-
-MFMA_M = 16
-MFMA_N = 16
-MFMA_K = 16
-WAVE_SIZE = 64
-
-# C registers each lane holds for one 16x16 MFMA tile.
-C_PER_LANE = 4
-
-# Unused trailing columns on an LDS buffer, in bf16 elements. Purely an LDS-layout
-# knob: it shifts the row stride off the 32-dword bank width so that a strided
-# walk down the row index spreads across banks instead of serialising on one.
-# Must stay even -- ``smem_load_vN(..., n=4)`` reads 8 B and an odd element pad
-# would misalign every row. 0 restores the natural (bank-conflicting) layout.
-WT_PAD = 4
-
-# Same idea as ``WT_PAD``, for buffers that are *written* with 8-wide (16 B) bf16
-# vector stores. ``smem_store_vN`` declares ``align = n * elem_bytes``, so an
-# 8-wide bf16 store promises 16 B alignment; a pad of 4 would leave odd rows only
-# 8 B-aligned and the promise would be a lie. 8 keeps every row start at 16 B.
-V8_PAD = 8
-
-# Width, in bf16 elements, of one lane's slice when staging ``c_kv`` into
-# ``kv_lds``. This is 4, not 8, and the narrower store is what lets ``kv_lds``
-# carry ``WT_PAD`` instead of ``V8_PAD`` -- which is the whole point.
-#
-# ``kv_lds`` is the B operand of the score GEMM, and that read is the hottest
-# LDS access in the kernel (``SCORE_K_ITERS * K_TILES`` of them per k-tile).
-# Lane ``l`` of a 16-lane group reads row ``a = l % 16``, so the bank it lands
-# on is ``(stride_dwords * a + const) % 32``. With ``V8_PAD`` the stride is 292
-# dwords == 4 mod 32, whose period over ``a`` is only 8: lanes ``a`` and
-# ``a + 8`` collide on every read, 2-way, for the whole loop. ``WT_PAD`` puts
-# the stride at 290 == 2 mod 32, period 16, so all sixteen lanes land on
-# distinct banks and the read goes conflict-free.
-#
-# The pad cannot simply be lowered on its own: a 4-element pad leaves odd rows
-# at 8 mod 16 B, and an 8-wide store's ``align = 16`` declaration would become
-# a lie -- a silent miscompile, not an assert. So the store width has to come
-# down with it. An XOR swizzle was considered instead and is structurally
-# blocked: a column bit XORed at bit ``k`` displaces the bank by ``2**(k-1)``
-# dwords, and only a displacement of 2 mod 4 breaks a stride of 4 mod 32, which
-# pins ``k == 2`` -- exactly the column bit an 8-wide store must preserve.
-# Either route therefore requires the narrower store, and given that, the pad
-# is the simpler of the two and costs no swizzle arithmetic.
-#
-# Narrowing is not a concession on either side of the copy. The global load
-# stays fully coalesced (lanes read 8 B at an 8 B stride == contiguous), and
-# the ``kv_lds`` *store* improves too: at width 8 its column term is ``4a``,
-# the same 2-way pattern as the read, while at width 4 it is ``2a`` and goes
-# conflict-free as well.
-C_STAGE_W = 4
 
 # k-steps per scheduler-ordered block in the score GEMM.
 #
@@ -277,76 +286,6 @@ MLA_MAX_NUM_SEQS = 2**MLA_BINARY_SEARCH_ITERS - 1
 # ``num_records`` of the paged c_kv / k_rope buffer resources.
 KV_RSRC_BYTES = 0x7FFF0000
 
-_C16_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
-)
-
-
-def _query_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
-    """Reduce ``scalar`` across the four 16-lane groups of a wave.
-
-    In the transposed score fragment (Sᵀ, ``m = key``, ``n = query``) lane ``l``
-    holds query ``l % 16`` and keys ``4 * (l // 16) + r``. After the in-lane
-    fold over ``r``, a query's partials sit in lanes ``l``, ``l ^ 16``,
-    ``l ^ 32`` and ``l ^ 48``: two XOR stages leave the result in all four. XOR
-    16 stays inside a 32-lane half and runs as ``ds_swizzle``; XOR 32 crosses
-    halves, which ``ds_swizzle`` cannot, and runs as ``ds_bpermute``.
-    """
-    fold = b.fadd if combine == "sum" else b.fmax
-    v = fold(scalar, b.warp_shuffle_xor(scalar, 16))
-    return fold(v, b.warp_shuffle_xor(v, 32))
-
-
-def _mfma_16x16_c_row(b: IRBuilder, lane, reg: int):
-    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3).
-
-    ``lane`` must be the *wave*-local lane id, not the workgroup thread id:
-    every wave decodes its own accumulator independently.
-    """
-    if not (0 <= reg < 4):
-        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
-    m_blk = b.div(lane, b.const_i32(16))
-    n = b.mod(lane, b.const_i32(16))
-    row, _col = _C16_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
-    )
-    return row
-
-
-def _shift(b: IRBuilder, offset: int, value: Value) -> Value:
-    """``value + offset``, skipping the add when ``offset`` is 0.
-
-    The IR builder is side-effecting: ``b.const_i32(0)`` emits an op whether or
-    not its handle is used. Unrolled tile loops that degenerate to a single
-    iteration would otherwise leave a trail of dead constants in the IR.
-    """
-    return value if offset == 0 else b.add(b.const_i32(offset), value)
-
-
-def _wt_swizzle(b: IRBuilder, row: Value, col: Value, r_tile: int) -> Value:
-    """Permute ``wt_lds`` 4-column groups by ``(row >> 4) & mask``.
-
-    ``wt_lds`` is the epilogue's transposed ``W_UV`` slice, ``[d_v, r_tile]``,
-    written one bf16 at a time and read as the MFMA B operand. Within a 16-lane group
-    the store's column ``rl`` is uniform and its row is ``lane * 8 + e``, so at
-    the ``WT_PAD`` stride (2 mod 32 dwords) the row term ``lane * 16`` reaches
-    only two banks. XORing the column group with row bits 4 and up -- lane bits
-    1-3, disjoint from the stride's lane bit 0 -- spreads it across 16.
-
-    On the read side ``row >> 4`` is the MFMA n-tile, constant across the 16
-    lanes of one read, so the twist only relabels which groups a tile reads and
-    the read keeps its conflict-free bank pattern. Groups of four keep the
-    ``n=4`` read contiguous and 8 B-aligned. The mask is the widest power of two
-    (at most 8) dividing the group count, so the XOR never leaves the row.
-    """
-    groups = r_tile // 4
-    mask = 1
-    while mask < 8 and groups % (mask * 2) == 0:
-        mask *= 2
-    twist = b.land(b.lshr(row, b.const_i32(4)), b.const_i32(mask - 1))
-    grp = b.xor(b.lshr(col, b.const_i32(2)), twist)
-    return b.lor(b.shl(grp, b.const_i32(2)), b.land(col, b.const_i32(3)))
-
 
 @dataclass(frozen=True)
 class MlaPrefillSpec:
@@ -404,7 +343,8 @@ class MlaPrefillSpec:
     num_xcds: int = 0
     # Latent accumulator in AGPRs (one-wave-per-head layout). It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
-    # workgroup per CU; see ``_AgprAcc``. Needs the llvm22 or llvm23 flavor.
+    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs the
+    # llvm22 or llvm23 flavor.
     agpr_acc: bool = False
     # Unfused head projections. False (the default) is the fused kernel: it
     # takes the projected query and ``W_UK`` and applies both head projections
@@ -809,6 +749,19 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, st
                 "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
                 f"keep the backend out of the AGPR file), got {flavor}"
             )
+        # The key-tile DMA moves 256 B per wave instruction: a latent row must
+        # be a whole number of them, and a RoPE row exactly half of one (two
+        # rows per instruction, swizzled over 16 8 B units).
+        if (spec.r_kv * 2) % 256 != 0:
+            return False, (
+                f"agpr_acc DMAs latent rows in 256 B chunks: r_kv={spec.r_kv}, "
+                "expected a multiple of 128"
+            )
+        if spec.d_rope * 2 != 128:
+            return False, (
+                f"agpr_acc DMAs two 128 B RoPE rows per chunk: d_rope={spec.d_rope}, "
+                "expected 64"
+            )
     # The PV gathers four latent tiles per read and the epilogue stages W_UV
     # in 64-row latent blocks and EPI_VQ-wide v windows.
     if spec.r_kv % 64 != 0:
@@ -903,6 +856,39 @@ def check_mla_prefill_extents(
     return True, ""
 
 
+def fwd_kernel_args(spec) -> tuple[KernelArg, ...]:
+    """The forward kernel's arguments, in declaration order.
+
+    ``max_k`` is unused by the forward kernel but stays declared so it shares
+    one argument pack with the score probe. With ``absorbed_query`` the query
+    is the absorbed ``qa_ptr`` and there is no ``w_uk_ptr``.
+    """
+    io = "bf16" if spec.dtype == "bf16" else "f16"
+    args = [
+        KernelArg("out", "out_ptr", io, "out"),
+        KernelArg("lse", "lse_ptr", "f32", "out"),
+        KernelArg("q", "qa_ptr" if spec.absorbed_query else "q_ptr", io, "in"),
+        KernelArg("c_kv", "c_kv_ptr", io, "in"),
+        KernelArg("k_rope", "k_rope_ptr", io, "in"),
+    ]
+    if not spec.absorbed_query:
+        args.append(KernelArg("w_uk", "w_uk_ptr", io, "in"))
+    return (*args, *tail_args())
+
+
+def probe_kernel_args(spec) -> tuple[KernelArg, ...]:
+    """The score probe's arguments, in declaration order."""
+    io = "bf16" if spec.dtype == "bf16" else "f16"
+    return (
+        KernelArg("scores", "scores_ptr", "f32", "out"),
+        KernelArg("q", "q_ptr", io, "in"),
+        KernelArg("c_kv", "c_kv_ptr", io, "in"),
+        KernelArg("k_rope", "k_rope_ptr", io, "in"),
+        KernelArg("w_uk", "w_uk_ptr", io, "in"),
+        *tail_args(),
+    )
+
+
 def mla_prefill_block(spec: MlaPrefillSpec) -> Tuple[int, int, int]:
     """Workgroup shape: one flat dimension of ``64 * num_warps`` threads."""
     return (spec.threads, 1, 1)
@@ -938,23 +924,7 @@ def mla_prefill_score_probe_signature(spec: MlaPrefillSpec):
     natural domain because no exponential has been applied yet. The log2-domain
     ABI question belongs to the milestone that introduces softmax.
     """
-    io_dtype = "bf16" if spec.dtype == "bf16" else "f16"
-    return (
-        SignatureBuilder()
-        .ptr("scores_ptr", "f32")
-        .ptr("q_ptr", io_dtype)
-        .ptr("c_kv_ptr", io_dtype)
-        .ptr("k_rope_ptr", io_dtype)
-        .ptr("w_uk_ptr", io_dtype)
-        .ptr("cu_seqlens_q_ptr", "i32")
-        .ptr("cu_seqlens_k_ptr", "i32")
-        .ptr("block_table_ptr", "i32")
-        .scalar("scale", "f32")
-        .scalar("num_seqs", "i32")
-        .scalar("block_table_stride", "i32")
-        .scalar("max_k", "i32")
-        .build()
-    )
+    return kernel_signature(probe_kernel_args(spec))
 
 
 def build_mla_prefill_score_probe(
@@ -985,6 +955,20 @@ def build_mla_prefill_score_probe(
             f"d_nope/{MFMA_N} = {spec.d_nope // MFMA_N} n-tiles must divide "
             f"evenly across num_warps={spec.num_warps}"
         )
+    # Its staging loops hand each thread whole chunks with no remainder, so a
+    # tile that does not divide would leave part of the operand unstaged.
+    for name, count, width in (
+        ("Q tile", spec.block_q * spec.head_dim_qk, 4),
+        ("c_kv tile", spec.block_k * spec.r_kv, 8),
+        ("k_rope tile", spec.block_k * spec.d_rope, 4),
+        ("W_UK slice", spec.r_kv_tile * spec.d_nope, 8),
+    ):
+        if count % (spec.threads * width) != 0:
+            raise NotImplementedError(
+                f"the MLA score probe stages its {name} ({count} elements) in "
+                f"{width}-wide chunks, which must divide across "
+                f"num_warps={spec.num_warps} x 64 threads"
+            )
 
     dtype = BF16
     BQ = spec.block_q
@@ -1000,80 +984,25 @@ def build_mla_prefill_score_probe(
     H = spec.num_heads
 
     N_SLICES = R_KV // R_TILE
-    N_TILES = D_NOPE // MFMA_N  # n-tiles of the K-expansion GEMM
-    N_TILES_PER_WAVE = N_TILES // spec.num_warps
-    EXP_K_ITERS = R_TILE // MFMA_K  # k-iters per r-slice
+    N_TILES_PER_WAVE = (D_NOPE // MFMA_N) // spec.num_warps
     SCORE_K_ITERS = HDQK // MFMA_K
 
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-
-    scores = b.param(
-        "scores_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
-    )
-    q_ptr = b.param(
-        "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    c_kv = b.param(
-        "c_kv_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    k_rope = b.param(
-        "k_rope_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    w_uk = b.param(
-        "w_uk_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    cu_q = b.param("cu_seqlens_q_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    cu_k = b.param("cu_seqlens_k_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    block_table = b.param(
-        "block_table_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    scale_p = b.param("scale", F32)
-    num_seqs_p = b.param("num_seqs", I32)
-    bt_stride_p = b.param("block_table_stride", I32)
-    max_k_p = b.param("max_k", I32)
-
+    b, args = open_kernel(spec.kernel_name(), THREADS, probe_kernel_args(spec))
     q_block_global_idx = b.block_id_x()
     head = b.block_id_y()
     k_tile = b.block_id_z()
-
-    tid = b.thread_id_x()
-    lane = b.mod(tid, b.const_i32(WAVE_SIZE))
-    wave = b.div(tid, b.const_i32(WAVE_SIZE))
-    lane_row = b.mod(lane, b.const_i32(16))  # MFMA A-row / B-row selector
-    lane_kq = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4))  # K sub-offset
+    lanes = lane_ids(b)
 
     # ---- ragged bounds -------------------------------------------------
-    seq_idx = _binary_search_seq_idx(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BQ,
-        iterations=spec.binary_search_iters,
+    # Both early exits are uniform across the workgroup (they depend only on
+    # block ids), so no barrier below is reached by a partial workgroup.
+    tile = varlen_tile(
+        b, args, q_block_global_idx, block_q=BQ, iters=spec.binary_search_iters
     )
-    cu_q_start = b.global_load_i32(cu_q, seq_idx)
-    cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    s_q = b.sub(cu_q_stop, cu_q_start)
-
-    # Same inversion as the dense prefill kernel: the binary search's loop
-    # invariant is `cu_q[i] // BLOCK_Q + i <= target`, so the first q-block of
-    # this sequence sits at `cu_q_start // BQ + seq_idx`.
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BQ)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
-    qb_start = b.mul(q_block_local_idx, b.const_i32(BQ))
-    with b.scf_if(b.cmp_ge(qb_start, s_q)):
-        b.ret()
-
-    cu_k_start = b.global_load_i32(cu_k, seq_idx)
-    cu_k_stop = b.global_load_i32(cu_k, b.add(seq_idx, b.const_i32(1)))
-    s_k = b.sub(cu_k_stop, cu_k_start)
+    s_k = seq_len_k(b, args, tile.seq_idx)
     kb_start = b.mul(k_tile, b.const_i32(BK))
     with b.scf_if(b.cmp_ge(kb_start, s_k)):
         b.ret()
-
-    # Both early exits are uniform across the workgroup (they depend only on
-    # block ids), so no barrier below is reached by a partial workgroup.
 
     # ---- LDS -----------------------------------------------------------
     # Q_lds / KT_lds share one 192-wide layout: [:, :128] is the nope half and
@@ -1084,105 +1013,86 @@ def build_mla_prefill_score_probe(
     wt_lds = b.smem_alloc(dtype, [D_NOPE, R_TILE], name_hint="wt_lds")
 
     # ---- stage the projected query tile --------------------------------
-    # Rows past S_q are clamped onto the last valid token rather than masked.
-    # They still produce scores, but every such score is dropped by the store
-    # predicate below, and clamping keeps the load in-bounds without needing a
-    # masked vector load (which the builder does not offer).
-    q_last_row = b.sub(s_q, b.const_i32(1))
-    q_chunks = (BQ * HDQK) // (THREADS * 4)
-    q_chunks_per_row = HDQK // 4
-    for j in range(q_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(q_chunks_per_row))
-        d0 = b.mul(b.mod(c, b.const_i32(q_chunks_per_row)), b.const_i32(4))
-        q_local = b.add(qb_start, m)
-        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-        token = b.add(cu_q_start, q_local)
-        idx = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)), d0
-        )
-        b.smem_store_vN(q_lds, [m, d0], b.global_load_vN(q_ptr, idx, dtype, 4), 4)
+    qrows = query_rows(b, tile, head, H)
+    stage_q_cols(
+        b,
+        args.q,
+        q_lds,
+        qrows,
+        tid=lanes.tid,
+        threads=THREADS,
+        rows=BQ,
+        cols=HDQK,
+        row_cols=HDQK,
+        src_col=0,
+        dst_col=0,
+        dtype=dtype,
+    )
 
     # ---- stage the paged latent tile and its head-shared RoPE half ------
     # page_block_size == block_k, so a k-tile is exactly one page and the
-    # in-page row offset is the in-tile row offset.
-    page = b.global_load_i32(block_table, b.add(b.mul(seq_idx, bt_stride_p), k_tile))
-    c_base = b.mul(page, b.const_i32(PAGE * R_KV))
-    c_chunks = (BK * R_KV) // (THREADS * 8)
-    c_chunks_per_row = R_KV // 8
-    for j in range(c_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(c_chunks_per_row))
-        r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(8))
-        idx = b.add(b.add(c_base, b.mul(m, b.const_i32(R_KV))), r0)
-        b.smem_store_vN(c_lds, [m, r0], b.global_load_vN(c_kv, idx, dtype, 8), 8)
-
-    # Rows past S_k inside the final page hold whatever the allocator left
-    # there. They are finite bf16, they only pollute their own key column, and
-    # that column is dropped by the store predicate -- no cross-contamination.
-    kr_base = b.mul(page, b.const_i32(PAGE * D_ROPE))
-    kr_chunks = (BK * D_ROPE) // (THREADS * 4)
-    kr_chunks_per_row = D_ROPE // 4
-    for j in range(kr_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(kr_chunks_per_row))
-        d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
-        idx = b.add(b.add(kr_base, b.mul(m, b.const_i32(D_ROPE))), d0)
-        b.smem_store_vN(
-            kt_lds,
-            [m, b.add(d0, b.const_i32(D_NOPE))],
-            b.global_load_vN(k_rope, idx, dtype, 4),
-            4,
-        )
+    # in-page row offset is the in-tile row offset. Rows past S_k inside the
+    # final page hold whatever the allocator left there. They are finite bf16,
+    # they only pollute their own key column, and that column is dropped by
+    # the store predicate -- no cross-contamination.
+    page = PageTable(b, args.block_table, tile.seq_idx, args.bt_stride).load(k_tile)
+    copy_rows_to_lds(
+        b,
+        args.c_kv,
+        c_lds,
+        tid=lanes.tid,
+        threads=THREADS,
+        base=b.mul(page, b.const_i32(PAGE * R_KV)),
+        rows=BK,
+        cols=R_KV,
+        width=8,
+        dtype=dtype,
+    )
+    copy_rows_to_lds(
+        b,
+        args.k_rope,
+        kt_lds,
+        tid=lanes.tid,
+        threads=THREADS,
+        base=b.mul(page, b.const_i32(PAGE * D_ROPE)),
+        rows=BK,
+        cols=D_ROPE,
+        width=4,
+        dtype=dtype,
+        dst_col=D_NOPE,
+    )
 
     # ---- per-head latent K expansion -----------------------------------
     # K_nope[s, n] = sum_r c_kv[s, r] * W_UK[head, r, n], streamed in r-slices
     # so the 256 KB per-head W_UK never has to fit in LDS. Accumulators are
     # fp32 and live across every slice; wave w owns n-tiles
-    # [w*N_TILES_PER_WAVE, (w+1)*N_TILES_PER_WAVE).
-    acc = [b.zero_vec_f32(4) for _ in range(N_TILES_PER_WAVE)]
-    w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
-    wt_chunks = (R_TILE * D_NOPE) // (THREADS * 8)
-    wt_chunks_per_row = D_NOPE // 8
-
-    for s in range(N_SLICES):
-        r_base = s * R_TILE
-        # Single-buffered LDS: drain readers of the previous slice before
-        # overwriting it. b.sync() emits `s_waitcnt vmcnt(0) lgkmcnt(0)`
-        # ahead of the barrier, so the lgkmcnt drain is already covered.
-        b.sync()
-        # Store-path transpose: read along the contiguous n axis, scatter to
-        # wt_lds[n][r_local]. gfx942 has no ds_read_tr to do this on the read
-        # side, and a strided read-side gather would cost 8x more ds_reads.
-        for j in range(wt_chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            rl = b.div(c, b.const_i32(wt_chunks_per_row))
-            n0 = b.mul(b.mod(c, b.const_i32(wt_chunks_per_row)), b.const_i32(8))
-            idx = b.add(
-                b.add(
-                    w_head_base,
-                    b.mul(b.add(rl, b.const_i32(r_base)), b.const_i32(W_COLS)),
-                ),
-                n0,
-            )
-            v8 = b.global_load_vN(w_uk, idx, dtype, 8)
-            for e in range(8):
-                b.smem_store_vN(
-                    wt_lds, [b.add(n0, b.const_i32(e)), rl], b.vec_extract(v8, e), 1
-                )
-        b.sync()
-
-        for kk in range(EXP_K_ITERS):
-            a_col = b.add(b.const_i32(r_base + kk * MFMA_K), lane_kq)
-            a_v = b.smem_load_vN(c_lds, lane_row, a_col, dtype=dtype, n=4)
-            b_col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            for t in range(N_TILES_PER_WAVE):
-                n_tile = b.add(
-                    b.mul(wave, b.const_i32(N_TILES_PER_WAVE)), b.const_i32(t)
-                )
-                b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                b_v = b.smem_load_vN(wt_lds, b_row, b_col, dtype=dtype, n=4)
-                acc[t] = _mfma_16x16x16(b, dtype, a_v, b_v, acc[t])
+    # [w*N_TILES_PER_WAVE, (w+1)*N_TILES_PER_WAVE). The weight is transposed
+    # on the store path: gfx942 has no ds_read_tr to do it on the read side,
+    # and a strided read-side gather would cost 8x more ds_reads.
+    acc = zero_tiles(b, 1, N_TILES_PER_WAVE)
+    (acc,) = expand_latent(
+        b,
+        w_uk=args.w_uk,
+        c_lds=c_lds,
+        wt_lds=wt_lds,
+        tid=lanes.tid,
+        wave=lanes.wave,
+        lane_row=lanes.lane_row,
+        lane_kq=lanes.lane_kq,
+        w_head_base=w_head_base(b, head, R_KV, W_COLS),
+        col_offset=None,
+        dtype=dtype,
+        threads=THREADS,
+        slices=range(N_SLICES),
+        c_col_base=0,
+        r_tile=R_TILE,
+        d_out=D_NOPE,
+        w_cols=W_COLS,
+        exp_k_iters=R_TILE // MFMA_K,
+        n_tiles_per_wave=N_TILES_PER_WAVE,
+        swizzle=False,
+        acc=acc,
+    )
 
     # Write the expanded K_nope into the nope half of KT_lds. The C decode
     # gives row = kv token (the A-operand's m) and col = d_nope index (the
@@ -1190,44 +1100,29 @@ def build_mla_prefill_score_probe(
     # GEMM's B operand reads.
     b.sync()
     for t in range(N_TILES_PER_WAVE):
-        n_tile = b.add(b.mul(wave, b.const_i32(N_TILES_PER_WAVE)), b.const_i32(t))
-        col = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-        packed = b.vec_trunc_f32_to_bf16(acc[t])
-        for reg in range(4):
-            row = _mfma_16x16_c_row(b, lane, reg)
-            b.smem_store_vN(kt_lds, [row, col], b.vec_extract(packed, reg), 1)
+        col = wave_tile_row(b, lanes.wave, N_TILES_PER_WAVE, t, lanes.lane_row)
+        store_c_frag(b, kt_lds, acc[t], lanes.lane, col=col)
     b.sync()
 
     # ---- score GEMM ----------------------------------------------------
     # One 16x16 output tile, so one wave does the whole thing. The nope and
     # rope contributions are the same loop because both operands are laid out
     # 192 wide -- the head-shared RoPE half is simply the tail 64 columns.
-    with b.scf_if(b.cmp_eq(wave, b.const_i32(0))):
-        s_acc = b.zero_vec_f32(4)
-        for kk in range(SCORE_K_ITERS):
-            col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            a_v = b.smem_load_vN(q_lds, lane_row, col, dtype=dtype, n=4)
-            b_v = b.smem_load_vN(kt_lds, lane_row, col, dtype=dtype, n=4)
-            s_acc = _mfma_16x16x16(b, dtype, a_v, b_v, s_acc)
-
-        k_abs = b.add(kb_start, lane_row)
-        for reg in range(4):
-            row = _mfma_16x16_c_row(b, lane, reg)
-            q_local = b.add(qb_start, row)
-            value = b.fmul(b.vec_extract(s_acc, reg), scale_p)
-            # Two-term predicate as nested ifs: the builder exposes no boolean
-            # AND over i1.
-            with b.scf_if(b.cmp_lt(q_local, s_q)):
-                with b.scf_if(b.cmp_lt(k_abs, s_k)):
-                    token = b.add(cu_q_start, q_local)
-                    idx = b.add(
-                        b.mul(
-                            b.add(b.mul(token, b.const_i32(H)), head),
-                            max_k_p,
-                        ),
-                        k_abs,
-                    )
-                    b.global_store(scores, idx, value, align=4)
+    with on_wave(b, lanes.wave, 0):
+        s_acc = lds_gemm_tile(
+            b, q_lds, kt_lds, lanes, k_iters=SCORE_K_ITERS, dtype=dtype
+        )
+        store_probe_scores(
+            b,
+            args.scores,
+            s_acc,
+            qrows,
+            lanes,
+            kb_start=kb_start,
+            s_k=s_k,
+            scale=args.scale,
+            row_stride=args.max_k,
+        )
 
     return b.kernel
 
@@ -1270,258 +1165,7 @@ def mla_prefill_fwd_signature(spec: MlaPrefillSpec):
     ``[total_q, H, r_kv + d_rope]``, and ``out_ptr`` receives the normalized
     latent output ``[total_q, H, r_kv]`` -- ``W_UV`` is applied by the caller.
     """
-    io_dtype = "bf16" if spec.dtype == "bf16" else "f16"
-    if spec.absorbed_query:
-        return (
-            SignatureBuilder()
-            .ptr("out_ptr", io_dtype)
-            .ptr("lse_ptr", "f32")
-            .ptr("qa_ptr", io_dtype)
-            .ptr("c_kv_ptr", io_dtype)
-            .ptr("k_rope_ptr", io_dtype)
-            .ptr("cu_seqlens_q_ptr", "i32")
-            .ptr("cu_seqlens_k_ptr", "i32")
-            .ptr("block_table_ptr", "i32")
-            .scalar("scale", "f32")
-            .scalar("num_seqs", "i32")
-            .scalar("block_table_stride", "i32")
-            .scalar("max_k", "i32")
-            .build()
-        )
-    return (
-        SignatureBuilder()
-        .ptr("out_ptr", io_dtype)
-        .ptr("lse_ptr", "f32")
-        .ptr("q_ptr", io_dtype)
-        .ptr("c_kv_ptr", io_dtype)
-        .ptr("k_rope_ptr", io_dtype)
-        .ptr("w_uk_ptr", io_dtype)
-        .ptr("cu_seqlens_q_ptr", "i32")
-        .ptr("cu_seqlens_k_ptr", "i32")
-        .ptr("block_table_ptr", "i32")
-        .scalar("scale", "f32")
-        .scalar("num_seqs", "i32")
-        .scalar("block_table_stride", "i32")
-        .scalar("max_k", "i32")
-        .build()
-    )
-
-
-def _expand_latent(
-    b: IRBuilder,
-    *,
-    w_uk,
-    c_lds,
-    wt_lds,
-    tid,
-    wave,
-    lane_row,
-    lane_kq,
-    w_head_base,
-    col_offset: int,
-    dtype,
-    threads: int,
-    slices: range,
-    c_col_base: int,
-    r_tile: int,
-    d_out: int,
-    w_cols: int,
-    exp_k_iters: int,
-    n_tiles_per_wave: int,
-    m_tiles: int = 1,
-    out_transposed: bool = False,
-    acc=None,
-):
-    """``C_lds @ W_UK[head, :, col_offset : col_offset + d_out]``, in registers.
-
-    Only the r-slices in ``slices`` are walked; ``C_lds`` holds latent column
-    ``r`` at column ``r - c_col_base``, and the products accumulate onto
-    ``acc`` (zeros when ``None``) -- so a caller can stage the latent through
-    ``C_lds`` one column range at a time.
-
-    Walks the latent dimension in ``r_tile`` slices, staging each slice of the
-    weight through ``wt_lds`` transposed on the store path (MFMA reads the B
-    operand as ``[n][k]``, and gfx942 has no ``ds_read_tr``). The caller owns the
-    C-layout writeback, and the barrier that opens each slice lives here so a
-    caller that shares the ``wt_lds`` slot with something else needs no extra
-    fencing of its own.
-
-    ``m_tiles`` register-blocks the M axis: the weight slice in ``wt_lds`` is
-    read once and fed to every M tile, so a taller ``C_lds`` costs extra MFMAs
-    and accumulators but no extra LDS traffic on the B side.
-
-    Returns ``acc[m_tile][n_tile]``, one f32x4 per (M tile, n-tile owned by the
-    calling wave).
-    """
-    if acc is None:
-        acc = [
-            [b.zero_vec_f32(4) for _ in range(n_tiles_per_wave)] for _ in range(m_tiles)
-        ]
-    wt_chunks = (r_tile * d_out) // (threads * 8)
-    wt_chunks_per_row = d_out // 8
-    for s in slices:
-        r_base = s * r_tile
-        b.sync()  # WAR: previous slice's (or previous GEMM's) readers must retire
-        for j in range(wt_chunks):
-            c = b.add(tid, b.const_i32(j * threads))
-            rl = b.div(c, b.const_i32(wt_chunks_per_row))
-            n0 = b.mul(b.mod(c, b.const_i32(wt_chunks_per_row)), b.const_i32(8))
-            idx = b.add(
-                b.add(
-                    w_head_base,
-                    b.mul(b.add(rl, b.const_i32(r_base)), b.const_i32(w_cols)),
-                ),
-                b.add(n0, b.const_i32(col_offset)),
-            )
-            v8 = b.global_load_vN(w_uk, idx, dtype, 8)
-            for e in range(8):
-                row = b.add(n0, b.const_i32(e))
-                b.smem_store_vN(
-                    wt_lds,
-                    [row, _wt_swizzle(b, row, rl, r_tile)],
-                    b.vec_extract(v8, e),
-                    1,
-                )
-        b.sync()
-        for kk in range(exp_k_iters):
-            a_col = b.add(b.const_i32(r_base - c_col_base + kk * MFMA_K), lane_kq)
-            a_vs = [
-                b.smem_load_vN(
-                    c_lds, _shift(b, mt * MFMA_M, lane_row), a_col, dtype=dtype, n=4
-                )
-                for mt in range(m_tiles)
-            ]
-            b_col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            for t in range(n_tiles_per_wave):
-                n_tile = b.add(
-                    b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
-                )
-                b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                b_v = b.smem_load_vN(
-                    wt_lds,
-                    b_row,
-                    _wt_swizzle(b, b_row, b_col, r_tile),
-                    dtype=dtype,
-                    n=4,
-                )
-                for mt in range(m_tiles):
-                    if out_transposed:
-                        # outᵀ = W_UVᵀ · accᵀ: the same two fragments, swapped,
-                        # so the C fragment is (m = v, n = query).
-                        acc[mt][t] = _mfma_16x16x16(b, dtype, b_v, a_vs[mt], acc[mt][t])
-                    else:
-                        acc[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
-    return acc
-
-
-def _absorb_query(
-    b: IRBuilder,
-    *,
-    w_uk,
-    q_frags,
-    wq_lds,
-    qa_lds,
-    tid,
-    lane,
-    wave,
-    lane_row,
-    lane_kq,
-    w_head_base,
-    dtype,
-    threads: int,
-    slices: range,
-    qa_col_base: int,
-    r_tile: int,
-    d_nope: int,
-    w_cols: int,
-    absorb_k_iters: int,
-    n_tiles_per_wave: int,
-    m_tiles: int,
-    active_waves: int | None = None,
-):
-    """``Qa[q, r] = sum_n Q_nope[q, n] * W_UK[head, r, n]``, written to ``qa_lds``.
-
-    ``q_frags[mt][kk]`` is the ``Q_nope`` A operand, already in registers.
-    Only the r-slices in ``slices`` are computed, and latent column ``r`` lands
-    in ``qa_lds`` column ``r - qa_col_base``. Each weight slice is staged once
-    and fed to every M tile.
-
-    The W_UK absorption of the query side. Because
-    ``S[q,k] = Q_nope[q] . K_nope[k] = Q_nope[q] . (C[k] @ W_UK_nope)``
-    equals ``Qa[q] . C[k]``, folding ``W_UK`` into ``Q`` once per workgroup lets
-    the whole key loop run in the 512-wide latent space.
-
-    Unlike :func:`_expand_latent` this needs **no** store-path transpose: MFMA
-    reads the B operand as ``[n][k]``, here ``[r][nope]``, which is exactly how
-    ``w_uk[head, r, :d_nope]`` is already laid out. The weight slice therefore
-    goes to LDS with contiguous 8-wide stores.
-
-    Walks ``r`` in ``r_tile`` slices. Each slice's accumulator is complete after
-    the full ``K = d_nope`` reduction, so it is written straight through to
-    ``qa_lds`` and the registers are reused by the next slice.
-    """
-    wq_chunks = (r_tile * d_nope) // (threads * 8)
-    wq_chunks_per_row = d_nope // 8
-    for s in slices:
-        r_base = s * r_tile
-        b.sync()  # WAR on wq_lds; also publishes the Q_rope staging on the first
-        for j in range(wq_chunks):
-            c = b.add(tid, b.const_i32(j * threads))
-            rl = b.div(c, b.const_i32(wq_chunks_per_row))
-            n0 = b.mul(b.mod(c, b.const_i32(wq_chunks_per_row)), b.const_i32(8))
-            idx = b.add(
-                b.add(
-                    w_head_base,
-                    b.mul(b.add(rl, b.const_i32(r_base)), b.const_i32(w_cols)),
-                ),
-                n0,
-            )
-            b.smem_store_vN(wq_lds, [rl, n0], b.global_load_vN(w_uk, idx, dtype, 8), 8)
-        b.sync()
-
-        # With fewer n-tiles than waves (``active_waves``), only the first
-        # ``active_waves`` waves compute; the rest skip to the next slice's
-        # barrier. The gated region holds no barrier and its only outputs are
-        # qa_lds stores, so carrying no results out of the ``scf.if`` is fine.
-        def _slice_compute(r_base: int):
-            acc = [
-                [b.zero_vec_f32(4) for _ in range(n_tiles_per_wave)]
-                for _ in range(m_tiles)
-            ]
-            for kk in range(absorb_k_iters):
-                col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-                a_vs = [q_frags[mt][kk] for mt in range(m_tiles)]
-                for t in range(n_tiles_per_wave):
-                    n_tile = b.add(
-                        b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
-                    )
-                    b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                    b_v = b.smem_load_vN(wq_lds, b_row, col, dtype=dtype, n=4)
-                    for mt in range(m_tiles):
-                        acc[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
-            # C decodes as [m = q][n = r - r_base]; scatter it into the latent query.
-            for t in range(n_tiles_per_wave):
-                n_tile = b.add(
-                    b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
-                )
-                col = _shift(
-                    b,
-                    r_base - qa_col_base,
-                    b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row),
-                )
-                for mt in range(m_tiles):
-                    packed = b.vec_trunc_f32_to_bf16(acc[mt][t])
-                    for reg in range(C_PER_LANE):
-                        row = _shift(b, mt * MFMA_M, _mfma_16x16_c_row(b, lane, reg))
-                        b.smem_store_vN(
-                            qa_lds, [row, col], b.vec_extract(packed, reg), 1
-                        )
-
-        if active_waves is None:
-            _slice_compute(r_base)
-        else:
-            with b.scf_if(b.cmp_lt(wave, b.const_i32(active_waves))):
-                _slice_compute(r_base)
+    return kernel_signature(fwd_kernel_args(spec))
 
 
 def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> KernelDef:
@@ -1635,112 +1279,25 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         ABSORB_ACTIVE_WAVES = ABSORB_N_TILES
     ABSORB_K_ITERS = D_NOPE // MFMA_K
 
-    LOG2E = math.log2(math.e)
-    LN2 = math.log(2.0)
-
-    b = IRBuilder(spec.fwd_kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
     # No AGPRs. Left free, the backend parks the PV accumulators in AGPRs, and
     # the online-softmax rescale of those accumulators then costs a
     # v_accvgpr_read / v_accvgpr_write pair per register on every key tile.
     # gfx942 MFMAs read and write arch VGPRs directly, and the whole register
     # budget still fits the 256 that two waves per SIMD allow.
-    b.kernel.attrs["agpr_alloc"] = (0, 0)
-
-    out = b.param(
-        "out_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
+    b, args = open_kernel(
+        spec.fwd_kernel_name(), THREADS, fwd_kernel_args(spec), agpr_alloc=(0, 0)
     )
-    lse = b.param(
-        "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
-    )
-    q_ptr = b.param(
-        "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    c_kv = b.param(
-        "c_kv_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    k_rope = b.param(
-        "k_rope_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    w_uk = b.param(
-        "w_uk_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    cu_q = b.param("cu_seqlens_q_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    cu_k = b.param("cu_seqlens_k_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    block_table = b.param(
-        "block_table_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    scale_p = b.param("scale", F32)
-    num_seqs_p = b.param("num_seqs", I32)
-    bt_stride_p = b.param("block_table_stride", I32)
-    b.param("max_k", I32)  # unused here; keeps one 13-argument pack with the probe
 
     # ---- prologue: identify (sequence, query tile, head) ---------------------
-    # Block ids are walked in reverse. With the causal loop bound a query tile's
-    # work grows with its position in the sequence, and workgroups launch in
-    # block-id order, so reversing puts the heaviest tiles first and leaves the
-    # light ones to fill the tail. The grid's x extent is the AITER count
-    # ``total_q // BQ + num_seqs`` (``mla_prefill_fwd_grid``), and
-    # ``total_q == cu_seqlens_q[num_seqs]``.
-    total_q = b.global_load_i32(cu_q, num_seqs_p)
-    num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ)), num_seqs_p)
-    # A grid wider than num_q_blocks would walk the reversed index below 0
-    # (seq_idx -1, negative token offsets). Uniform, so no partial workgroup.
-    with b.scf_if(b.cmp_ge(b.block_id_x(), num_q_blocks)):
-        b.ret()
-    q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
-    head = b.block_id_y()
-    tid = b.thread_id_x()
-    lane = b.mod(tid, b.const_i32(WAVE_SIZE))
-    wave = b.div(tid, b.const_i32(WAVE_SIZE))
-    lane_row = b.mod(lane, b.const_i32(16))
-    lane_kq = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4))
-
-    seq_idx = _binary_search_seq_idx(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BQ,
-        iterations=spec.binary_search_iters,
+    q_block_global_idx, head = reversed_q_block(b, args, block_q=BQ)
+    lanes = lane_ids(b)
+    wave, lane_row, lane_kq = lanes.wave, lanes.lane_row, lanes.lane_kq
+    tile = varlen_tile(
+        b, args, q_block_global_idx, block_q=BQ, iters=spec.binary_search_iters
     )
-    cu_q_start = b.global_load_i32(cu_q, seq_idx)
-    cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    s_q = b.sub(cu_q_stop, cu_q_start)
-
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BQ)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
-    qb_start = b.mul(q_block_local_idx, b.const_i32(BQ))
-
-    # Uniform across the workgroup (block ids only), so no barrier below is
-    # reached by a partial workgroup.
-    with b.scf_if(b.cmp_ge(qb_start, s_q)):
-        b.ret()
-
-    cu_k_start = b.global_load_i32(cu_k, seq_idx)
-    cu_k_stop = b.global_load_i32(cu_k, b.add(seq_idx, b.const_i32(1)))
-    s_k = b.sub(cu_k_stop, cu_k_start)
-    # Bottom-right causal alignment: query row ``i`` of this sequence attends to
-    # keys ``0 .. i + context_off``. ``context_off`` is negative when S_k < S_q,
-    # which is exactly what produces the fully masked leading rows the driver
-    # checks for exact zeros / exact -inf.
-    context_off = b.sub(s_k, s_q)
-
-    # Causal loop bound: no row of this tile sees a key at or past
-    # ``q_end + context_off``, where ``q_end`` is the tile's last real row + 1,
-    # so the tiles beyond it are fully masked and are skipped rather than
-    # computed and discarded. ``q_end <= s_q`` keeps the bound within ``s_k``;
-    # the clamp at 0 covers tiles whose rows are all fully masked, which then run
-    # zero iterations and finish with ``l == 0`` exactly as masking would leave
-    # them. The per-element masks below still handle the ragged edge tiles.
-    q_end = b.select(
-        b.cmp_lt(b.add(qb_start, b.const_i32(BQ)), s_q),
-        b.add(qb_start, b.const_i32(BQ)),
-        s_q,
-    )
-    k_end = b.add(q_end, context_off)
-    k_end = b.select(b.cmp_gt(k_end, b.const_i32(0)), k_end, b.const_i32(0))
-    n_k_tiles = b.div(b.add(k_end, b.const_i32(BK - 1)), b.const_i32(BK))
+    qb_start = tile.qb_start
+    keys = causal_keys(b, args, tile)
+    n_k_tiles = causal_k_tiles(b, qb_start, tile, keys, block_q=BQ, block_k=BK)
 
     # ---- LDS ---------------------------------------------------------------
     # No allocation is exclusive, so the lowerer pools them by liveness. The
@@ -1823,58 +1380,34 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     qa_lds = b.smem_alloc(dtype, [BQ, QA_WIN + WT_PAD], name_hint="qa_lds")  # 18688 B
 
     # ---- load Q once (loop-invariant) --------------------------------------
-    # Rows past S_q are clamped onto the last valid token; their results are
-    # dropped by the store predicates. Q_nope is read as the absorb's A
-    # fragment (row = lane % 16, four consecutive columns at lane_kq). Q_rope
-    # rides along in the absorbed query, at the qa_lds columns of [R_KV,
-    # R_KV + D_ROPE), so the score GEMM is one K = R_KV + D_ROPE reduction.
-    q_last_row = b.sub(s_q, b.const_i32(1))
-    q_frags = []
-    for mt in range(M_TILES):
-        q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-        token = b.add(cu_q_start, q_local)
-        q_base = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)),
-            lane_kq,
+    # Q_nope is read as the absorb's A fragment (row = lane % 16, four
+    # consecutive columns at lane_kq). Q_rope rides along in the absorbed
+    # query, at the qa_lds columns of [R_KV, R_KV + D_ROPE), so the score GEMM
+    # is one K = R_KV + D_ROPE reduction.
+    qrows = query_rows(b, tile, head, H)
+    q_frags = [
+        load_q_frags(
+            b,
+            args.q,
+            qrows.lane_q_offset(qb_start, lane_row, mt, HDQK, lane_kq),
+            n=ABSORB_K_ITERS,
+            dtype=dtype,
         )
-        q_frags.append(
-            [
-                b.global_load_vN(q_ptr, _shift(b, kk * MFMA_K, q_base), dtype, 4)
-                for kk in range(ABSORB_K_ITERS)
-            ]
-        )
-
-    def _stage_q_rope(dst_col: int):
-        chunks = (BQ * D_ROPE) // (THREADS * 4)
-        per_row = D_ROPE // 4
-        for j in range(chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            m = b.div(c, b.const_i32(per_row))
-            d0 = b.mul(b.mod(c, b.const_i32(per_row)), b.const_i32(4))
-            q_local = b.add(qb_start, m)
-            q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-            token = b.add(cu_q_start, q_local)
-            idx = b.add(
-                b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)),
-                _shift(b, D_NOPE, d0),
-            )
-            v = b.global_load_vN(q_ptr, idx, dtype, 4)
-            b.smem_store_vN(qa_lds, [m, _shift(b, dst_col, d0)], v, 4)
-
-    w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
+        for mt in range(M_TILES)
+    ]
+    w_base = w_head_base(b, head, R_KV, W_COLS)
 
     # Each wave's score A operand is its own SCORE_K_PER_WAVE-step slice of the
     # absorbed query, and it is loop-invariant: it is read into registers once
     # (one bf16x4 per k-step and M tile) instead of from qa_lds every key tile.
     # qa_lds is then dead before the loop, so the loop's buffers can reuse its
     # bytes. The column inside the window is the wave's rank in its window.
-    wave_in_win = wave if QA_PARTS == 1 else b.mod(wave, b.const_i32(WAVES_PER_QA))
-    score_col = b.add(b.mul(wave, b.const_i32(SCORE_K_PER_WAVE * MFMA_K)), lane_kq)
+    wave_in_win = window_rank(b, wave, WAVES_PER_QA, QA_PARTS)
+    score_col = wave_k_col(b, wave, SCORE_K_PER_WAVE, lane_kq)
     win_col = (
         score_col
         if QA_PARTS == 1
-        else b.add(b.mul(wave_in_win, b.const_i32(SCORE_K_PER_WAVE * MFMA_K)), lane_kq)
+        else wave_k_col(b, wave_in_win, SCORE_K_PER_WAVE, lane_kq)
     )
     qa_frags = [[None] * M_TILES for _ in range(SCORE_K_PER_WAVE)]
     rope_win = R_KV // QA_WIN
@@ -1886,21 +1419,34 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
             # before this window's writes.
             b.sync_lds_only()
         if p == rope_win:
-            _stage_q_rope(R_KV - lo)
+            stage_q_cols(
+                b,
+                args.q,
+                qa_lds,
+                qrows,
+                tid=lanes.tid,
+                threads=THREADS,
+                rows=BQ,
+                cols=D_ROPE,
+                row_cols=HDQK,
+                src_col=D_NOPE,
+                dst_col=R_KV - lo,
+                dtype=dtype,
+            )
 
         # ---- absorb W_UK into this window of Q, every M tile at once --------
-        _absorb_query(
+        absorb_query(
             b,
-            w_uk=w_uk,
+            w_uk=args.w_uk,
             q_frags=q_frags,
             wq_lds=wq_lds,
             qa_lds=qa_lds,
-            tid=tid,
-            lane=lane,
+            tid=lanes.tid,
+            lane=lanes.lane,
             wave=wave,
             lane_row=lane_row,
             lane_kq=lane_kq,
-            w_head_base=w_head_base,
+            w_head_base=w_base,
             dtype=dtype,
             threads=THREADS,
             slices=range(lo // R_TILE, hi // R_TILE),
@@ -1917,42 +1463,20 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         # Publish the window. Every wave reads it -- scf.if carries no
         # results -- and keeps the value only if the window is its own.
         b.sync()
-        in_win = (
-            None
-            if QA_PARTS == 1
-            else b.cmp_eq(b.div(wave, b.const_i32(WAVES_PER_QA)), b.const_i32(p))
+        take_window_frags(
+            b,
+            qa_lds,
+            qa_frags,
+            lane_row,
+            win_col,
+            in_win=in_window(b, wave, WAVES_PER_QA, QA_PARTS, p),
+            first=p == 0,
+            dtype=dtype,
         )
-        for kk in range(SCORE_K_PER_WAVE):
-            for mt in range(M_TILES):
-                v = b.smem_load_vN(
-                    qa_lds,
-                    _shift(b, mt * MFMA_M, lane_row),
-                    _shift(b, kk * MFMA_K, win_col),
-                    dtype=dtype,
-                    n=4,
-                )
-                qa_frags[kk][mt] = (
-                    v
-                    if in_win is None or p == 0
-                    else b.select(in_win, v, qa_frags[kk][mt])
-                )
 
-    # Fold log2(e) here, next to the exp2 that consumes it: the ABI stays raw.
-    scale_log2 = b.fmul(scale_p, b.const_f32(LOG2E))
-    neg_inf = b.const_f32(-1e30)
-    zero_f = b.const_f32(0.0)
-
-    # The loop works in the transposed frame: it computes Sᵀ (key x query) and
-    # accᵀ (latent x query), so each lane owns one query of each M tile --
-    # ``lane % 16`` -- and its softmax state is one (m, l) pair per M tile.
-    iter_args = [(f"m{mt}", neg_inf) for mt in range(M_TILES)]
-    iter_args += [(f"l{mt}", zero_f) for mt in range(M_TILES)]
-    iter_args += [
-        (f"acc{mt}_{t}", b.zero_vec_f32(4))
-        for mt in range(M_TILES)
-        for t in range(N_R_PER_WAVE)
-    ]
-    n_ml = M_TILES
+    consts = softmax_consts(b, args.scale)
+    iter_args = softmax_iter_args(consts, M_TILES)
+    iter_args += acc_iter_args(b, M_TILES, N_R_PER_WAVE)
 
     # Loop-phase buffers: allocated here so they pool onto wq_lds / qa_lds,
     # whose last readers are the prologue above and are fenced by the loop's
@@ -1969,8 +1493,9 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         F32, [NUM_WARPS * N_SCORE_TILES, WAVE_SIZE * C_PER_LANE], name_hint="s_part"
     )  # 8192 B
     kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + WT_PAD], name_hint="kv_lds")  # 18560 B
-    part_row = b.mul(wave, b.const_i32(N_SCORE_TILES))
-    lane_part = b.mul(lane, b.const_i32(C_PER_LANE))
+    partials = ScorePartials(
+        b, s_part, lanes, num_warps=NUM_WARPS, n_tiles=N_SCORE_TILES
+    )
 
     # ---- k-loop staging, split so the loads can run ahead ------------------
     # Splitting the stage into a load half and a store half lets tile ``i+1``'s
@@ -1984,100 +1509,42 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # iteration boundary. When this was built the pool was near the 64 KB limit
     # and a second slot did not fit, so the stage is carried in ``iter_args``
     # instead.
-    c_chunks = (BK * R_KV) // (THREADS * C_STAGE_W)
-    c_chunks_per_row = R_KV // C_STAGE_W
-    kr_chunks = (BK * D_ROPE) // (THREADS * 4)
-    kr_chunks_per_row = D_ROPE // 4
-
+    #
     # The tile loads are buffer loads. Each thread's byte offset inside a page
-    # is loop-invariant and computed once here; the page base is
-    # workgroup-uniform and rides in the SGPR soffset. Each k-tile then costs
-    # no VALU address math -- a 64-bit global address per load otherwise. The
-    # rsrc range check applies to voffset alone, which stays inside one page.
-    big_bytes = b.const_i32(KV_RSRC_BYTES)
-    c_rsrc = b.buffer_rsrc(c_kv, big_bytes)
-    kr_rsrc = b.buffer_rsrc(k_rope, big_bytes)
-    c_voffs = []
-    for j in range(c_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(c_chunks_per_row))
-        r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
-        c_voffs.append(b.mul(b.add(b.mul(m, b.const_i32(R_KV)), r0), b.const_i32(2)))
-    kr_voffs = []
-    for j in range(kr_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(kr_chunks_per_row))
-        d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
-        kr_voffs.append(b.mul(b.add(b.mul(m, b.const_i32(D_ROPE)), d0), b.const_i32(2)))
-
-    def _load_page(tile, *, guard=None):
-        """The block-table entry for ``tile``, raw (per lane, not yet uniform)."""
-        page = b.global_load_i32(block_table, b.add(b.mul(seq_idx, bt_stride_p), tile))
-        if guard is not None:
-            # Zero-trip loop: the block-table slot may be uninitialised. Page 0
-            # is always mapped, so the load stays in bounds; a zero-trip loop
-            # never consumes the value.
-            page = b.select(guard, page, b.const_i32(0))
-        return page
-
-    def _stage_loads(page):
-        """Issue one tile's global loads into registers. Touches no LDS.
-
-        ``page`` is the tile's raw block-table entry from :func:`_load_page`.
-        """
-        page = b.readfirstlane(page)
-        c_soff = b.mul(page, b.const_i32(PAGE * R_KV * 2))
-        kr_soff = b.mul(page, b.const_i32(PAGE * D_ROPE * 2))
-        staged = [
-            b.buffer_load_vN(c_rsrc, voff, c_soff, dtype, C_STAGE_W) for voff in c_voffs
-        ]
-        staged += [
-            b.buffer_load_vN(kr_rsrc, voff, kr_soff, dtype, 4) for voff in kr_voffs
-        ]
-        return staged
-
-    def _stage_store(staged):
-        """Drain a staged tile into ``kv_lds``, ``[key][r]``.
-
-        That is the natural layout for the score GEMM's B operand. The latent
-        PV reads the same buffer transposed, one bf16 per key.
-        """
-        for j in range(c_chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            m = b.div(c, b.const_i32(c_chunks_per_row))
-            r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
-            b.smem_store_vN(kv_lds, [m, r0], staged[j], C_STAGE_W)
-        for j in range(kr_chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            m = b.div(c, b.const_i32(kr_chunks_per_row))
-            d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
-            b.smem_store_vN(
-                kv_lds, [m, b.add(d0, b.const_i32(R_KV))], staged[c_chunks + j], 4
-            )
+    # is loop-invariant and computed once; the page base is workgroup-uniform
+    # and rides in the SGPR soffset. Each k-tile then costs no VALU address
+    # math -- a 64-bit global address per load otherwise. The rsrc range check
+    # applies to voffset alone, which stays inside one page.
+    stager = KvRegStager(
+        b,
+        args,
+        kv_lds,
+        lanes,
+        threads=THREADS,
+        block_k=BK,
+        r_kv=R_KV,
+        d_rope=D_ROPE,
+        page_size=PAGE,
+        c_width=C_STAGE_W,
+        num_records=KV_RSRC_BYTES,
+        dtype=dtype,
+    )
+    pages = PageTable(b, args.block_table, tile.seq_idx, args.bt_stride)
 
     # Prime the pipeline with tile 0.
     has_tiles = b.cmp_gt(n_k_tiles, b.const_i32(0))
-    prologue = _stage_loads(_load_page(b.const_i32(0), guard=has_tiles))
+    prologue = stager.loads(pages.load(b.const_i32(0), guard=has_tiles))
     n_stage = len(prologue)
     iter_args += [(f"stg{j}", v) for j, v in enumerate(prologue)]
     # The page the first iteration's run-ahead stages (tile 1, clamped to the
     # last tile), looked up a tile early -- see the run-ahead in the body.
     last_tile = b.sub(n_k_tiles, b.const_i32(1))
-    pg1_idx = b.select(b.cmp_lt(b.const_i32(1), last_tile), b.const_i32(1), last_tile)
-    pg1_idx = b.select(b.cmp_gt(pg1_idx, b.const_i32(0)), pg1_idx, b.const_i32(0))
-    iter_args += [("pgn", _load_page(pg1_idx, guard=has_tiles))]
+    iter_args += [("pgn", pages.load(clamp_tile(b, 1, last_tile), guard=has_tiles))]
 
-    def _k_tile_body(k_tile, state, *, masked: bool):
+    def _k_tile_body(k_tile, state, masked: bool):
         """One key tile. ``masked=False`` drops the per-element causal and
         ragged masks, for tiles every query row of this tile can fully see."""
-        ms = list(state[:M_TILES])
-        ls = list(state[M_TILES : 2 * M_TILES])
-        accs = [
-            list(
-                state[2 * n_ml + mt * N_R_PER_WAVE : 2 * n_ml + (mt + 1) * N_R_PER_WAVE]
-            )
-            for mt in range(M_TILES)
-        ]
+        ms, ls, accs = split_softmax_state(state, M_TILES, N_R_PER_WAVE)
         staged = list(state[-(n_stage + 1) : -1])
         pg_next = state[-1]
         kb_start = b.mul(k_tile, b.const_i32(BK))
@@ -2086,11 +1553,11 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         # before this iteration overwrites them.
         b.sync()
 
-        # ---- drain this tile's stage into LDS, in both orientations --------
+        # ---- drain this tile's stage into LDS ------------------------------
         # The data is already in registers: it was loaded either by the
         # prologue (tile 0) or by the previous iteration, under that
         # iteration's compute.
-        _stage_store(staged)
+        stager.store(staged)
         b.sync()
 
         # ---- run ahead: issue the next tile's global loads -----------------
@@ -2103,211 +1570,82 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         # retires under this whole iteration. Indices are clamped rather than
         # predicated: past the end they re-read the last tile's page, which is
         # known to be mapped, and the value is never consumed.
-        staged_next = _stage_loads(pg_next)
-        nxt2 = b.add(k_tile, b.const_i32(2))
-        nxt2 = b.select(
-            b.cmp_lt(nxt2, n_k_tiles), nxt2, b.sub(n_k_tiles, b.const_i32(1))
-        )
-        pg_after = _load_page(nxt2)
+        staged_next = stager.loads(pg_next)
+        pg_after = pages.load(tile_ahead(b, k_tile, 2, n_k_tiles))
 
         # ---- S = scale * (Qa @ [C | K_rope]ᵀ); C decodes as (query, key) ---
         # The K reduction is split across waves: wave w sums k-steps
         # [w * SCORE_K_PER_WAVE, (w + 1) * SCORE_K_PER_WAVE) and the partials
         # are combined through s_part below.
-        s_acc = [[b.zero_vec_f32(4) for _ in range(K_TILES)] for _ in range(M_TILES)]
-        for kk in range(SCORE_K_PER_WAVE):
-            col = _shift(b, kk * MFMA_K, score_col)
-            a_vs = qa_frags[kk]
-            for kt in range(K_TILES):
-                b_v = b.smem_load_vN(
-                    kv_lds, _shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=4
-                )
-                # Sᵀ: kv_lds is the A operand (m = key), the query fragment the
-                # B operand (n = query) -- the same two fragments, swapped.
-                for mt in range(M_TILES):
-                    s_acc[mt][kt] = _mfma_16x16x16(
-                        b, dtype, b_v, a_vs[mt], s_acc[mt][kt]
-                    )
-            # Hoist the next ``SCORE_SGB_GROUP`` steps' LDS reads above the
-            # MFMAs they feed. Skipped when the group does not divide the trip
-            # count -- a partial trailing block measured worse than no hint.
-            if (
-                SCORE_K_PER_WAVE % SCORE_SGB_GROUP == 0
-                and (kk + 1) % SCORE_SGB_GROUP == 0
-            ):
-                b.sched_group_barrier(_SGB_DS_READ, SCORE_SGB_GROUP * K_TILES, 0)
-                b.sched_group_barrier(_SGB_MFMA, SCORE_SGB_GROUP * M_TILES * K_TILES, 0)
-
-        # Combine the partials. Every wave sums them in the same order, so the
-        # full S -- and with it the softmax state below -- stays bit-identical
-        # across waves. The partial rows' previous readers retired before this
-        # iteration's opening barrier, so only the RAW side needs fencing.
-        for mt in range(M_TILES):
-            for kt in range(K_TILES):
-                row = _shift(b, mt * K_TILES + kt, part_row)
-                b.smem_store_vN(s_part, [row, lane_part], s_acc[mt][kt], C_PER_LANE)
-        b.sync_lds_only()
-        for mt in range(M_TILES):
-            for kt in range(K_TILES):
-                total = None
-                for w in range(NUM_WARPS):
-                    part = b.smem_load_vN(
-                        s_part,
-                        b.const_i32(w * N_SCORE_TILES + mt * K_TILES + kt),
-                        lane_part,
-                        dtype=F32,
-                        n=C_PER_LANE,
-                    )
-                    total = part if total is None else b.fadd(total, part)
-                s_acc[mt][kt] = total
+        s_acc = split_k_scores(
+            b,
+            kv_lds,
+            qa_frags,
+            lane_row,
+            score_col,
+            k_steps=SCORE_K_PER_WAVE,
+            m_tiles=M_TILES,
+            k_tiles=K_TILES,
+            sgb_group=SCORE_SGB_GROUP,
+            dtype=dtype,
+        )
+        # Every wave sums the partials in the same order, so the full S -- and
+        # with it the softmax state below -- stays bit-identical across waves.
+        s_acc = partials.combine(s_acc)
 
         # ---- online softmax, one query per lane ----------------------------
-        # In the Sᵀ fragment a lane holds query ``lane % 16`` of its M tile and
-        # keys ``kt*16 + 4*(lane/16) + r``. A query's row reduce is therefore
-        # in-lane over its 4*K_TILES keys plus two cross-lane stages over the
-        # four 16-lane groups.
-        #
-        # Two bounds, and both land on ``p`` rather than only on ``s``: the
-        # ragged key bound (the last tile overhangs S_k, where page-granular
-        # staging supplies real but meaningless bytes) and the bottom-right
-        # causal bound. Masking ``s`` alone is not enough -- with the -1e30
-        # sentinel a fully masked row gets m_new == -1e30, so every element
-        # would yield exp2(s - m_new) == 1 and ``l`` would come out BK, not 0.
-        # l == 0 is what makes ``safe_inv_l`` store exact zeros and the LSE
-        # collapse to a true -inf.
-        if masked:
-            k_abs = [
-                [
-                    b.add(kb_start, _shift(b, kt * MFMA_N + r, lane_kq))
-                    for r in range(C_PER_LANE)
-                ]
-                for kt in range(K_TILES)
-            ]
-            in_k = [[b.cmp_lt(k, s_k) for k in row] for row in k_abs]
+        mask = (
+            key_mask(b, kb_start, lane_kq, keys.s_k, keys.context_off, k_tiles=K_TILES)
+            if masked
+            else None
+        )
         new_ms = []
         new_ls = []
-        p_frags = [[None] * K_TILES for _ in range(M_TILES)]
+        p_frags = []
         for mt in range(M_TILES):
-            keep = []
-            s_v = []
-            if masked:
-                q_abs = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-                causal_hi = b.add(q_abs, context_off)
-            for kt in range(K_TILES):
-                for r in range(C_PER_LANE):
-                    s_scaled = b.fmul(b.vec_extract(s_acc[mt][kt], r), scale_log2)
-                    if masked:
-                        keep.append(
-                            b.land(in_k[kt][r], b.cmp_le(k_abs[kt][r], causal_hi))
-                        )
-                        s_v.append(b.select(keep[-1], s_scaled, neg_inf))
-                    else:
-                        s_v.append(s_scaled)
-            local_max = s_v[0]
-            for v in s_v[1:]:
-                local_max = b.fmax(local_max, v)
-            m_new = b.fmax(ms[mt], _query_reduce(b, local_max, combine="max"))
-            # exp2_fast: one v_exp_f32, no range-reduction guard. Both
-            # arguments here are <= 0 (m_new is a max over m and s), so there
-            # is no overflow, and an underflow to 0 is the right answer for a
-            # softmax weight.
-            alpha = b.exp2_fast(b.fsub(ms[mt], m_new))
-            if masked:
-                p_v = [
-                    b.select(k, b.exp2_fast(b.fsub(v, m_new)), zero_f)
-                    for k, v in zip(keep, s_v)
-                ]
-            else:
-                p_v = [b.exp2_fast(b.fsub(v, m_new)) for v in s_v]
-            local_sum = p_v[0]
-            for v in p_v[1:]:
-                local_sum = b.fadd(local_sum, v)
-            new_ms.append(m_new)
-            new_ls.append(
-                b.fadd(
-                    b.fmul(ls[mt], alpha), _query_reduce(b, local_sum, combine="sum")
-                )
+            row = online_softmax_row(
+                b,
+                s_acc[mt],
+                ms[mt],
+                ls[mt],
+                consts,
+                mask=mask,
+                q_abs=row_of(b, qb_start, lane_row, mt) if masked else None,
             )
+            new_ms.append(row.m)
+            new_ls.append(row.l)
             # accᵀ holds this lane's query in every register, so the rescale is
             # one lane-local alpha for all of them.
-            for t in range(N_R_PER_WAVE):
-                for r in range(C_PER_LANE):
-                    old = b.vec_extract(accs[mt][t], r)
-                    accs[mt][t] = b.vec_insert(accs[mt][t], b.fmul(old, alpha), r)
-            # The Sᵀ fragment is already the PV GEMM's B operand layout
-            # (k = key, n = query), so P never leaves registers.
-            for kt in range(K_TILES):
-                p_frags[mt][kt] = b.vec_trunc_f32_to_bf16(
-                    b.vec_pack(p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE], F32)
-                )
+            accs[mt] = [scale_frag(b, a, row.alpha) for a in accs[mt]]
+            p_frags.append(pack_p(b, row.p, K_TILES, rne=False))
 
         # ---- accᵀ += Cᵀ · Pᵀ ------------------------------------------------
         for kt in range(K_TILES):
-            a_col = _shift(b, kt * MFMA_N, lane_kq)
+            a_col = shift(b, kt * MFMA_N, lane_kq)
             for t in range(N_R_PER_WAVE):
-                n_tile = b.add(b.mul(wave, b.const_i32(N_R_PER_WAVE)), b.const_i32(t))
-                b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                # A[m][k] = Cᵀ[r][key], gathered from kv_lds four keys at a time:
-                # the transpose happens on the read path, one bf16 per key.
-                c_t = b.vec_pack(
-                    [
-                        b.vec_extract(
-                            b.smem_load_vN(
-                                kv_lds, _shift(b, i, a_col), b_row, dtype=dtype, n=1
-                            ),
-                            0,
-                        )
-                        for i in range(4)
-                    ],
-                    dtype,
-                )
+                b_row = wave_tile_row(b, wave, N_R_PER_WAVE, t, lane_row)
+                c_t = gather_keys_t(b, kv_lds, a_col, b_row, dtype)
                 for mt in range(M_TILES):
-                    accs[mt][t] = _mfma_16x16x16(
+                    accs[mt][t] = mfma_16x16x16(
                         b, dtype, c_t, p_frags[mt][kt], accs[mt][t]
                     )
 
-        flat_acc = [accs[mt][t] for mt in range(M_TILES) for t in range(N_R_PER_WAVE)]
-        b.scf_yield(*new_ms, *new_ls, *flat_acc, *staged_next, pg_after)
+        flat_acc = [a for row in accs for a in row]
+        return [*new_ms, *new_ls, *flat_acc, *staged_next, pg_after]
 
-    # Only the last tile or two of a query tile can be partially masked: a key
-    # tile is fully visible when its last key is below s_k and at or below the
-    # causal bound of the tile's first query row. Those run first without any
-    # per-element masking; the rest run masked. The run-ahead stage and the
-    # softmax state flow from the first loop into the second through the loop
-    # results.
-    n_full = b.div(b.add(qb_start, b.add(context_off, b.const_i32(1))), b.const_i32(BK))
-    k_whole = b.div(s_k, b.const_i32(BK))
-    n_full = b.select(b.cmp_lt(n_full, k_whole), n_full, k_whole)
-    n_full = b.select(b.cmp_gt(n_full, b.const_i32(0)), n_full, b.const_i32(0))
-    n_full = b.select(b.cmp_lt(n_full, n_k_tiles), n_full, n_k_tiles)
-
-    main_loop = b.scf_for_iter(
-        b.const_i32(0), n_full, b.const_i32(1), iter_args=iter_args, iv_name="k_main"
+    n_full = full_k_tiles(b, qb_start, keys, n_k_tiles, block_k=BK)
+    res = run_k_loops(
+        b,
+        iter_args,
+        n_full=n_full,
+        tail=(n_full, n_k_tiles),
+        step=1,
+        body=_k_tile_body,
     )
-    with main_loop as (k_tile, state):
-        _k_tile_body(k_tile, state, masked=False)
-    tail_loop = b.scf_for_iter(
-        n_full,
-        n_k_tiles,
-        b.const_i32(1),
-        iter_args=[
-            (f"{name}_t", v) for (name, _), v in zip(iter_args, main_loop.results)
-        ],
-        iv_name="k_tail",
-    )
-    with tail_loop as (k_tile, state):
-        _k_tile_body(k_tile, state, masked=True)
-    k_loop = tail_loop
 
     # ---- epilogue: normalize, then project the latent out with W_UV -------
-    res = k_loop.results
-    ms = list(res[:M_TILES])
-    ls = list(res[M_TILES : 2 * M_TILES])
-    accs = [
-        list(res[2 * n_ml + mt * N_R_PER_WAVE : 2 * n_ml + (mt + 1) * N_R_PER_WAVE])
-        for mt in range(M_TILES)
-    ]
-    inv = [_safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
+    ms, ls, accs = split_softmax_state(res, M_TILES, N_R_PER_WAVE)
+    inv = [safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
 
     # Epilogue buffers: allocated after the loop so they pool onto the loop's
     # slots. That aliasing is why the barrier below is mandatory -- the loop's
@@ -2333,37 +1671,24 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         # WAR: the loop's last kv_lds readers (p == 0), or the previous part's
         # accl_lds / wt_lds readers, must retire before the stores.
         b.sync()
-        # Wave p owns this part. accᵀ puts one query and four consecutive
-        # latent columns in each lane, so each fragment goes back to accl_lds
-        # ([query][r]) as a single 8 B store. Stores only, no barrier: safe in
-        # a wave-gated region.
-        with b.scf_if(b.cmp_eq(wave, b.const_i32(p))):
-            for t in range(N_R_PER_WAVE):
-                col = _shift(b, t * MFMA_N, lane_kq)
-                for mt in range(M_TILES):
-                    row = _shift(b, mt * MFMA_M, lane_row)
-                    b.smem_store_vN(
-                        accl_lds,
-                        [row, col],
-                        b.vec_trunc_f32_to_bf16(accs[mt][t]),
-                        C_PER_LANE,
-                    )
+        # Wave p owns this part.
+        store_acc_t(b, accl_lds, accs, lanes, owner=p)
 
         # out_raw[q, v] = sum_r acc_latent[q, r] * W_UV[r, v],
         # W_UV = w_uk[.., D_NOPE:]. 1/l is linear and commutes with this
-        # projection, so it is applied after. ``_expand_latent`` opens each
+        # projection, so it is applied after. ``expand_latent`` opens each
         # slice with its own barrier, which fences both the accl_lds stores
         # above and the WAR on wt_lds.
-        out_acc = _expand_latent(
+        out_acc = expand_latent(
             b,
-            w_uk=w_uk,
+            w_uk=args.w_uk,
             c_lds=accl_lds,
             wt_lds=wt_lds,
-            tid=tid,
+            tid=lanes.tid,
             wave=wave,
             lane_row=lane_row,
             lane_kq=lane_kq,
-            w_head_base=w_head_base,
+            w_head_base=w_base,
             col_offset=D_NOPE,
             dtype=dtype,
             threads=THREADS,
@@ -2382,149 +1707,33 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # outᵀ: lane holds query ``lane % 16`` and four consecutive ``v``, so it
     # normalizes by its own 1/l and writes them as one 8 B store.
     for t in range(N_V_PER_WAVE):
-        n_tile = b.add(b.mul(wave, b.const_i32(N_V_PER_WAVE)), b.const_i32(t))
-        col = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_kq)
+        col = wave_tile_row(b, wave, N_V_PER_WAVE, t, lane_kq)
         for mt in range(M_TILES):
-            q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-            vals = b.vec_pack(
-                [
-                    b.fmul(b.vec_extract(out_acc[mt][t], r), inv[mt])
-                    for r in range(C_PER_LANE)
-                ],
-                F32,
+            store_out_frag(
+                b,
+                args.out,
+                out_acc[mt][t],
+                inv[mt],
+                qrows,
+                q_local=row_of(b, qb_start, lane_row, mt),
+                col=col,
+                d_v=D_V,
             )
-            with b.scf_if(b.cmp_lt(q_local, s_q)):
-                token = b.add(cu_q_start, q_local)
-                idx = b.add(b.mul(token, b.const_i32(H * D_V)), col)
-                idx = b.add(idx, b.mul(head, b.const_i32(D_V)))
-                b.global_store_vN(
-                    out, idx, b.vec_trunc_f32_to_bf16(vals), C_PER_LANE, align=8
-                )
 
     # One writer per query: wave 0's first 16-lane group holds every query of
     # each M tile once.
-    with b.scf_if(b.cmp_eq(wave, b.const_i32(0))):
-        with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
-            for mt in range(M_TILES):
-                q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-                value = b.fmul(b.fadd(ms[mt], b.log2(ls[mt])), b.const_f32(LN2))
-                with b.scf_if(b.cmp_lt(q_local, s_q)):
-                    token = b.add(cu_q_start, q_local)
-                    idx = b.add(b.mul(token, b.const_i32(H)), head)
-                    b.global_store(lse, idx, value, align=4)
-
+    store_lse(
+        b,
+        args.lse,
+        ms,
+        ls,
+        qrows,
+        q_start=qb_start,
+        lane_row=lane_row,
+        lane=lanes.lane,
+        wave=wave,
+    )
     return b.kernel
-
-
-def _bf16x4_rne_finite(b: IRBuilder, vals) -> Value:
-    """Four finite f32 -> ``<4 x bf16>``, round-to-nearest-even, no NaN path.
-
-    gfx942 has no f32 -> bf16 convert, and ``fptrunc`` lowers to five VALU per
-    element because it must preserve NaN. Softmax probabilities are finite,
-    so the rounding is two integer ops per element and one ``v_perm`` per pair.
-    """
-    rounded = []
-    for v in vals:
-        bits = b.bitcast(v, I32)
-        lsb = b.land(b.lshr(bits, b.const_i32(16)), b.const_i32(1))
-        rounded.append(b.add(b.add(bits, b.const_i32(0x7FFF)), lsb))
-    sel = b.const_i32(0x07060302)  # high halves: [lo = src1, hi = src0]
-    words = [b.perm_b32(rounded[2 * j + 1], rounded[2 * j], sel) for j in range(2)]
-    return b.vec_bitcast(b.vec_pack(words, I32), VectorType(BF16, 4))
-
-
-def _agpr_clobbers(base: int, n: int) -> str:
-    return ",".join(f"~{{a{base + i}}}" for i in range(n))
-
-
-class _AgprAcc:
-    """Latent accumulator held in fixed AGPRs that LLVM never sees as values.
-
-    With 32 rows per wave the accumulator is 256 registers. Carried as IR
-    values -- loop iteration arguments -- the conditional lazy rescale makes
-    LLVM hoist AGPR-to-VGPR copies of it to the top of the loop body and spill
-    the absorbed query; no register-class hint avoids that. So the
-    accumulator lives in ``a[0:N)`` and is only touched by inline asm: the PV
-    MFMA reads and writes it in place, the rescale scales it in place under a
-    wave-uniform branch, and the epilogue reads it out once. The kernel runs
-    with ``agpr_alloc = (0, 0)`` so the backend allocates no AGPRs of its own
-    (on llvm22 and later; llvm20 ignores it, which is why admission refuses
-    llvm20). The asm is opaque to the hazard recognizer, so the helper pads
-    its own hazards: one ``s_nop`` before each MFMA (VALU-written operands)
-    and a fence before the first read after the MFMAs.
-    """
-
-    def __init__(self, b: IRBuilder, n_tiles: int):
-        self.b = b
-        self.n = 4 * n_tiles
-        b.inline_asm(
-            "\n\t".join(f"v_accvgpr_write_b32 a{i}, 0" for i in range(self.n)),
-            _agpr_clobbers(0, self.n),
-            [],
-            sideeffect=True,
-        )
-
-    def mfma(self, tile: int, a_v: Value, b_v: Value) -> None:
-        """``acc[tile] += a_v · b_v`` (``v_mfma_f32_16x16x16_bf16``)."""
-        b = self.b
-        ta = 4 * tile
-        v2 = VectorType(I32, 2)
-        b.inline_asm(
-            f"s_nop 1\n\tv_mfma_f32_16x16x16_bf16 a[{ta}:{ta + 3}], $0, $1, "
-            f"a[{ta}:{ta + 3}]",
-            "v,v," + _agpr_clobbers(ta, 4),
-            [b.vec_bitcast(a_v, v2), b.vec_bitcast(b_v, v2)],
-            sideeffect=True,
-        )
-
-    def scale(self, tile: int, alpha: Value) -> None:
-        """``acc[tile] *= alpha`` in place."""
-        ta = 4 * tile
-        lines = []
-        for r in range(4):
-            lines += [
-                f"v_accvgpr_read_b32 $0, a{ta + r}",
-                "v_mul_f32 $0, $0, $1",
-                f"v_accvgpr_write_b32 a{ta + r}, $0",
-            ]
-        self.b.inline_asm(
-            "\n\t".join(lines),
-            "=&v,v," + _agpr_clobbers(ta, 4),
-            [alpha],
-            result_type=F32,
-            sideeffect=True,
-        )
-
-    def fence(self) -> None:
-        """Wait states between the last MFMA write and a VALU read of it."""
-        self.b.inline_asm("s_nop 7\n\ts_nop 7", "", [], sideeffect=True)
-
-    def read(self, tile: int) -> Value:
-        b = self.b
-        ta = 4 * tile
-        return b.vec_pack(
-            [
-                b.inline_asm(
-                    f"v_accvgpr_read_b32 $0, a{ta + r}",
-                    "=v",
-                    [],
-                    result_type=F32,
-                    sideeffect=True,
-                )
-                for r in range(4)
-            ],
-            F32,
-        )
-
-
-def _pick4(b: IRBuilder, xs, e: int, dtype) -> Value:
-    """Element ``e`` of each of four vectors, packed into one four-wide vector."""
-    return b.vec_pack([b.vec_extract(x, e) for x in xs], dtype)
-
-
-def _half4(b: IRBuilder, v8: Value, h: int, dtype) -> Value:
-    """Elements ``[4 h, 4 h + 4)`` of an eight-wide vector, as a four-wide one."""
-    return b.vec_pack([b.vec_extract(v8, 4 * h + i) for i in range(4)], dtype)
 
 
 def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
@@ -2561,7 +1770,6 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     D_NOPE = spec.d_nope
     D_ROPE = spec.d_rope
     D_V = spec.d_v
-    HDQK = spec.head_dim_qk
     R_KV = spec.r_kv
     W_COLS = spec.w_uk_cols
     PAGE = spec.page_block_size
@@ -2573,145 +1781,54 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     K_TILES = BK // MFMA_N
     QA_COLS = R_KV + D_ROPE
     SCORE_K_ITERS = QA_COLS // MFMA_K
-    NOPE_K_ITERS = D_NOPE // MFMA_K
     ROPE_K_ITERS = D_ROPE // MFMA_K
     N_R_TILES = R_KV // MFMA_N
     N_V_TILES = D_V // MFMA_N
-
-    LOG2E = math.log2(math.e)
-    LN2 = math.log(2.0)
-
-    b = IRBuilder(spec.fwd_kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-    if HPW_AGPR_ALLOC is not None:
-        b.kernel.attrs["agpr_alloc"] = HPW_AGPR_ALLOC
-
-    out = b.param(
-        "out_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
-    )
-    lse = b.param(
-        "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
-    )
     # Unfused: the query arrives absorbed (qa_ptr, QA_COLS wide), there is no
     # W_UK, and out_ptr receives the normalized latent output (R_KV wide).
     UNFUSED = spec.absorbed_query
-    q_ptr = b.param(
-        "qa_ptr" if UNFUSED else "q_ptr",
-        PtrType(dtype, "global"),
-        noalias=True,
-        readonly=True,
-        align=16,
+
+    # With agpr_acc the index tables are declared noalias, so the backend
+    # fetches them with scalar loads: a vector load would share the in-order
+    # vmcnt with the key-tile DMA and make the page lookup wait for it.
+    b, args = open_kernel(
+        spec.fwd_kernel_name(),
+        THREADS,
+        fwd_kernel_args(spec),
+        agpr_alloc=HPW_AGPR_ALLOC,
+        index_noalias=spec.agpr_acc,
     )
-    c_kv = b.param(
-        "c_kv_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    k_rope = b.param(
-        "k_rope_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    w_uk = None
-    if not UNFUSED:
-        w_uk = b.param(
-            "w_uk_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-        )
-    # With agpr_acc the index tables are declared noalias (they are never
-    # written), which lets the backend fetch them with scalar loads: a vector
-    # load would share the in-order vmcnt with the key-tile DMA and make the
-    # page lookup wait for it.
-    NA = {"noalias": True} if spec.agpr_acc else {}
-    cu_q = b.param(
-        "cu_seqlens_q_ptr", PtrType(I32, "global"), readonly=True, align=4, **NA
-    )
-    cu_k = b.param(
-        "cu_seqlens_k_ptr", PtrType(I32, "global"), readonly=True, align=4, **NA
-    )
-    block_table = b.param(
-        "block_table_ptr", PtrType(I32, "global"), readonly=True, align=4, **NA
-    )
-    scale_p = b.param("scale", F32)
-    num_seqs_p = b.param("num_seqs", I32)
-    bt_stride_p = b.param("block_table_stride", I32)
-    b.param("max_k", I32)  # unused here; keeps one 13-argument pack with the probe
 
     # ---- prologue: identify (sequence, query tile, head group) --------------
-    # Same reversed, heaviest-first block walk as the one-head kernel.
-    total_q = b.global_load_i32(cu_q, num_seqs_p)
-    num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ_WG)), num_seqs_p)
-    # A grid wider than num_q_blocks would walk the reversed index below 0
-    # (seq_idx -1, negative token offsets), or past the last head group through
-    # the chiplet remap. Uniform, so no partial workgroup.
-    with b.scf_if(b.cmp_ge(b.block_id_x(), num_q_blocks)):
-        b.ret()
-    if spec.num_xcds > 1:
-        # Chiplet-aware order: the dispatcher deals workgroups round-robin
-        # across XCDs, so in launch order every XCD would see every head group
-        # and its L2 would hold all of their weights. Remapped, each XCD walks
-        # XCD_CHUNK-long runs of a head-group-major order.
-        n_grp = b.const_i32(H // HPW)
-        hw_id = b.add(b.block_id_x(), b.mul(b.block_id_y(), num_q_blocks))
-        logical = _chiplet_chunked(
-            b,
-            hw_id,
-            num_wgs=b.mul(num_q_blocks, n_grp),
-            num_xcds=spec.num_xcds,
-            chunk_size=XCD_CHUNK,
-        )
-        head_grp = b.div(logical, num_q_blocks)
-        q_block_global_idx = b.sub(
-            b.sub(num_q_blocks, b.const_i32(1)), b.mod(logical, num_q_blocks)
-        )
-    else:
-        q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
-        head_grp = b.block_id_y()
-    tid = b.thread_id_x()
-    lane = b.mod(tid, b.const_i32(WAVE_SIZE))
-    wave = b.div(tid, b.const_i32(WAVE_SIZE))
-    lane_row = b.mod(lane, b.const_i32(16))
-    lane_kq = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4))
+    # Same reversed, heaviest-first block walk as the one-head kernel, made
+    # chiplet-aware when the spec carries the XCD count.
+    q_block_global_idx, head_grp = reversed_q_block(
+        b,
+        args,
+        block_q=BQ_WG,
+        num_groups=H // HPW,
+        num_xcds=spec.num_xcds,
+        xcd_chunk=XCD_CHUNK,
+    )
+    lanes = lane_ids(b)
+    lane, wave, lane_row, lane_kq = (
+        lanes.lane,
+        lanes.wave,
+        lanes.lane_row,
+        lanes.lane_kq,
+    )
     # The wave's head. Wave-uniform, so it goes to an SGPR and every per-head
     # address below is scalar math.
-    head_local = wave if QPW == 1 else b.div(wave, b.const_i32(QPW))
-    head = b.readfirstlane(b.add(b.mul(head_grp, b.const_i32(HPW)), head_local))
-
-    seq_idx = _binary_search_seq_idx(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BQ_WG,
-        iterations=spec.binary_search_iters,
+    head_local, head = wave_head(b, head_grp, wave, heads_per_wg=HPW, q_tiles=QPW)
+    tile = varlen_tile(
+        b, args, q_block_global_idx, block_q=BQ_WG, iters=spec.binary_search_iters
     )
-    cu_q_start = b.global_load_i32(cu_q, seq_idx)
-    cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    s_q = b.sub(cu_q_stop, cu_q_start)
-
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BQ_WG)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
-    qb_start_wg = b.mul(q_block_local_idx, b.const_i32(BQ_WG))
-
-    with b.scf_if(b.cmp_ge(qb_start_wg, s_q)):
-        b.ret()
     # The wave's own rows. A wave whose rows all lie past S_q still runs the
     # loop -- the staging and barriers are workgroup-wide -- on rows clamped
     # onto the last token, and its stores are masked off.
-    if QPW == 1:
-        qb_start = qb_start_wg
-    else:
-        q_sub = b.readfirstlane(b.mod(wave, b.const_i32(QPW)))
-        qb_start = b.add(qb_start_wg, b.mul(q_sub, b.const_i32(BQ)))
-
-    cu_k_start = b.global_load_i32(cu_k, seq_idx)
-    cu_k_stop = b.global_load_i32(cu_k, b.add(seq_idx, b.const_i32(1)))
-    s_k = b.sub(cu_k_stop, cu_k_start)
-    context_off = b.sub(s_k, s_q)
-
-    q_end = b.select(
-        b.cmp_lt(b.add(qb_start_wg, b.const_i32(BQ_WG)), s_q),
-        b.add(qb_start_wg, b.const_i32(BQ_WG)),
-        s_q,
-    )
-    k_end = b.add(q_end, context_off)
-    k_end = b.select(b.cmp_gt(k_end, b.const_i32(0)), k_end, b.const_i32(0))
-    n_k_tiles = b.div(b.add(k_end, b.const_i32(BK - 1)), b.const_i32(BK))
+    qb_start = wave_q_start(b, tile, wave, q_tiles=QPW, rows=BQ)
+    keys = causal_keys(b, args, tile)
+    n_k_tiles = causal_k_tiles(b, tile.qb_start, tile, keys, block_q=BQ_WG, block_k=BK)
 
     # ---- absorbed query, entirely in registers -------------------------------
     # Q is read as an MFMA B fragment (n = query = lane % 16, four columns per
@@ -2724,98 +1841,56 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     # columns in -- and each operand costs half the loads of an 8 B read.
     # Q_rope is the score GEMM's operand, whose k layout is fixed by kv_lds, so
     # it keeps the plain four-columns-at-lane_kq read.
-    q_last_row = b.sub(s_q, b.const_i32(1))
+    qrows = query_rows(b, tile, head, H)
     q_frags = []
     rope_frags = []
     # Unfused: Qa is read in exactly the score B layout -- four columns at
     # 16 t + lane_kq for query lane % 16 -- so there is no absorb at all.
-    q_cols = QA_COLS if UNFUSED else HDQK
-    rope_col0 = R_KV if UNFUSED else D_NOPE
     qa_frags = [[None] * M_TILES for _ in range(N_R_TILES)]
     for mt in range(M_TILES if UNFUSED else 0):
-        q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-        token = b.add(cu_q_start, q_local)
-        q_base = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(q_cols)),
-            lane_kq,
-        )
-        for t in range(N_R_TILES):
-            qa_frags[t][mt] = b.global_load_vN(
-                q_ptr, _shift(b, t * MFMA_K, q_base), dtype, 4
-            )
+        q_base = qrows.lane_q_offset(qb_start, lane_row, mt, QA_COLS, lane_kq)
+        for t, frag in enumerate(
+            load_q_frags(b, args.q, q_base, n=N_R_TILES, dtype=dtype)
+        ):
+            qa_frags[t][mt] = frag
         rope_frags.append(
-            [
-                b.global_load_vN(
-                    q_ptr, _shift(b, rope_col0 + j * MFMA_K, q_base), dtype, 4
-                )
-                for j in range(ROPE_K_ITERS)
-            ]
+            load_q_frags(b, args.q, q_base, n=ROPE_K_ITERS, dtype=dtype, col0=R_KV)
         )
     for mt in range(0 if UNFUSED else M_TILES):
-        q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-        token = b.add(cu_q_start, q_local)
-        q_base = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)),
-            lane_kq,
+        q_nope, q_rope = load_q_nope_rope(
+            b,
+            args.q,
+            qrows,
+            qb_start,
+            lanes,
+            mt,
+            d_nope=D_NOPE,
+            d_rope=D_ROPE,
+            dtype=dtype,
         )
-        q_base8 = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)),
-            b.add(lane_kq, lane_kq),
-        )
-        frags = []
-        for pp in range(NOPE_K_ITERS // 2):
-            v8 = b.global_load_vN(q_ptr, _shift(b, pp * 2 * MFMA_K, q_base8), dtype, 8)
-            frags += [_half4(b, v8, h, dtype) for h in range(2)]
-        q_frags.append(frags)
-        rope_frags.append(
-            [
-                b.global_load_vN(
-                    q_ptr, _shift(b, D_NOPE + j * MFMA_K, q_base), dtype, 4
-                )
-                for j in range(ROPE_K_ITERS)
-            ]
-        )
+        q_frags.append(q_nope)
+        rope_frags.append(q_rope)
 
     # Qaᵀ[r, q] = sum_n W_UK[head, r, n] * Q_nope[q, n]. The A operand
     # (m = r = lane % 16) is a plain 16 B read of a W_UK row, split as above.
     # The C fragment holds r = 16 t + lane_kq + reg for query lane % 16 -- the
     # score GEMM's B layout for k-step t -- so it is used as is. Q_rope rides
-    # in the last D_ROPE / 16 k-steps of the same reduction.
+    # in the last D_ROPE / 16 k-steps of the same reduction. The W_UK loads
+    # run HPW_ABSORB_PREFETCH r-tiles ahead of the MFMAs.
     if not UNFUSED:
-        w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
-        w_lane = b.add(
-            b.add(w_head_base, b.mul(lane_row, b.const_i32(W_COLS))),
-            b.add(lane_kq, lane_kq),
+        absorb_query_t(
+            b,
+            args.w_uk,
+            q_frags,
+            qa_frags,
+            lanes,
+            head,
+            r_kv=R_KV,
+            d_nope=D_NOPE,
+            w_cols=W_COLS,
+            prefetch=HPW_ABSORB_PREFETCH,
+            dtype=dtype,
         )
-
-    def _absorb_loads(t):
-        w_row = _shift(b, t * MFMA_N * W_COLS, w_lane)
-        return [
-            b.global_load_vN(w_uk, _shift(b, pp * 2 * MFMA_K, w_row), dtype, 8)
-            for pp in range(NOPE_K_ITERS // 2)
-        ]
-
-    # The W_UK loads run HPW_ABSORB_PREFETCH r-tiles ahead of the MFMAs.
-    n_absorb = 0 if UNFUSED else N_R_TILES
-    absorb_pre = {
-        t: _absorb_loads(t) for t in range(min(HPW_ABSORB_PREFETCH, n_absorb))
-    }
-    for t in range(n_absorb):
-        acc = [b.zero_vec_f32(4) for _ in range(M_TILES)]
-        if t + HPW_ABSORB_PREFETCH < n_absorb:
-            absorb_pre[t + HPW_ABSORB_PREFETCH] = _absorb_loads(t + HPW_ABSORB_PREFETCH)
-        v8s = absorb_pre.pop(t)
-        a_vs = []
-        for v8 in v8s:
-            a_vs += [_half4(b, v8, h, dtype) for h in range(2)]
-        for kk in range(NOPE_K_ITERS):
-            a_v = a_vs[kk]
-            for mt in range(M_TILES):
-                acc[mt] = _mfma_16x16x16(b, dtype, a_v, q_frags[mt][kk], acc[mt])
-        for mt in range(M_TILES):
-            qa_frags[t][mt] = b.vec_trunc_f32_to_bf16(acc[mt])
     # Q_rope is parked in LDS and re-read every key tile rather than held in
     # registers: the eight VGPRs it would pin are what keeps the kernel inside
     # 256. Each lane reads back exactly what it wrote, so no barrier is
@@ -2823,31 +1898,14 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     qr_lds = b.smem_alloc(
         dtype, [spec.num_warps * BQ, D_ROPE + WT_PAD], name_hint="qr_lds"
     )
-    qr_row = b.add(b.mul(wave, b.const_i32(BQ)), lane_row)
-    for j in range(ROPE_K_ITERS):
-        for mt in range(M_TILES):
-            b.smem_store_vN(
-                qr_lds,
-                [_shift(b, mt * MFMA_M, qr_row), _shift(b, j * MFMA_K, lane_kq)],
-                rope_frags[mt][j],
-                4,
-            )
+    qr_row = park_q_rope(b, qr_lds, rope_frags, lanes, rows=BQ)
 
-    scale_log2 = b.fmul(scale_p, b.const_f32(LOG2E))
-    neg_inf = b.const_f32(-1e30)
-    zero_f = b.const_f32(0.0)
-
-    iter_args = [(f"m{mt}", neg_inf) for mt in range(M_TILES)]
-    iter_args += [(f"l{mt}", zero_f) for mt in range(M_TILES)]
+    consts = softmax_consts(b, args.scale)
+    iter_args = softmax_iter_args(consts, M_TILES)
     if AGPR_ACC:
-        acc_file = _AgprAcc(b, M_TILES * N_R_TILES)
+        acc_file = AgprAcc(b, M_TILES * N_R_TILES)
     else:
-        iter_args += [
-            (f"acc{mt}_{t}", b.zero_vec_f32(4))
-            for mt in range(M_TILES)
-            for t in range(N_R_TILES)
-        ]
-    n_ml = M_TILES
+        iter_args += acc_iter_args(b, M_TILES, N_R_TILES)
 
     lane_row4 = b.mul(lane_row, b.const_i32(4))
     # The key tile, shared by every head.
@@ -2868,316 +1926,134 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         kr_slots = [
             b.smem_alloc(dtype, [BK * D_ROPE], name_hint=f"kr_lds{i}") for i in range(2)
         ]
+        kv_slots = [
+            kv_lds,
+            b.smem_alloc(dtype, [BK, R_KV + WT_PAD], name_hint="kv_lds1"),
+        ]
     else:
         kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + WT_PAD], name_hint="kv_lds")
-    KV_DOUBLE = KV_ASYNC
-    kv_slots = [kv_lds]
-    if KV_DOUBLE:
-        kv_slots.append(b.smem_alloc(dtype, [BK, R_KV + WT_PAD], name_hint="kv_lds1"))
-    cur_kv = [kv_lds]
-    cur_kr = [kr_slots[0] if KV_ASYNC else None]
+        kr_slots = [None]
+        kv_slots = [kv_lds]
 
-    c_chunks = (BK * R_KV) // (THREADS * C_STAGE_W)
-    c_chunks_per_row = R_KV // C_STAGE_W
     # k_rope is a quarter of the c_kv tile; at eight waves a 4-wide chunk per
     # thread would over-cover it, so the chunk narrows to 2.
     KR_W = 4 if (BK * D_ROPE) % (THREADS * 4) == 0 else 2
-    kr_chunks = (BK * D_ROPE) // (THREADS * KR_W)
-    kr_chunks_per_row = D_ROPE // KR_W
-
-    # Chunk j of a thread is chunk 0 shifted by a whole number of rows
-    # (THREADS is a multiple of the chunks per row, checked below), so every
-    # chunk shares one per-thread offset and the shift is a constant: in the
-    # SGPR soffset for the loads, in the immediate for the LDS stores. That
-    # keeps the per-chunk offsets out of the register budget.
-    assert THREADS % c_chunks_per_row == 0 and THREADS % kr_chunks_per_row == 0
-    C_ROWS_PER_CHUNK = THREADS // c_chunks_per_row
-    KR_ROWS_PER_CHUNK = THREADS // kr_chunks_per_row
-    big_bytes = b.const_i32(KV_RSRC_BYTES)
-    c_rsrc = b.buffer_rsrc(c_kv, big_bytes)
-    kr_rsrc = b.buffer_rsrc(k_rope, big_bytes)
-    c_m0 = b.div(tid, b.const_i32(c_chunks_per_row))
-    c_r0 = b.mul(b.mod(tid, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
-    c_voff = b.mul(b.add(b.mul(c_m0, b.const_i32(R_KV)), c_r0), b.const_i32(2))
-    kr_m0 = b.div(tid, b.const_i32(kr_chunks_per_row))
-    kr_d0 = b.mul(b.mod(tid, b.const_i32(kr_chunks_per_row)), b.const_i32(KR_W))
-    kr_voff = b.mul(b.add(b.mul(kr_m0, b.const_i32(D_ROPE)), kr_d0), b.const_i32(2))
-
+    stager = KvSharedStager(
+        b,
+        args,
+        kv_lds,
+        lanes,
+        threads=THREADS,
+        block_k=BK,
+        r_kv=R_KV,
+        d_rope=D_ROPE,
+        page_size=PAGE,
+        c_width=C_STAGE_W,
+        kr_width=KR_W,
+        num_records=KV_RSRC_BYTES,
+        dtype=dtype,
+    )
+    pages = PageTable(b, args.block_table, tile.seq_idx, args.bt_stride)
     if KV_ASYNC:
-        # gfx942 buffer_load ... lds writes one dword per lane to
-        # M0 + 4 * lane: 256 contiguous bytes per wave instruction. Latent row r
-        # is R_KV * 2 / 256 such chunks at r * row_bytes + 256 j (the row pad
-        # lies outside them). RoPE rows are 128 B, so one chunk covers two rows
-        # of the unpadded RoPE buffer; its 8 B units are XOR-swizzled by the
-        # row (unit u of row a sits at u ^ (a & 15)) through the per-lane
-        # source address, so the score's RoPE reads stay conflict-free.
-        NW = spec.num_warps
-        ROWS_W = BK // NW
-        C_CHUNKS_ROW = (R_KV * 2) // 256
-        KR_ROWS_CHUNK = 256 // (D_ROPE * 2)
-        ROW_BYTES = (R_KV + WT_PAD) * 2
-        kr_units = (D_ROPE * 2) // 8
-        wave_u = b.readfirstlane(wave)
-        kvc_addr = [b.smem_addr_of(x) for x in kv_slots]
-        kr_addr = [b.smem_addr_of(x) for x in kr_slots]
-
-        def _kr_voff(cp):
-            # Recomputed at issue time rather than held: with the DMA spread
-            # through the score loop, loop-invariant offsets held in VGPRs
-            # spill.
-            row = b.add(
-                b.mul(wave, b.const_i32(ROWS_W)),
-                b.add(
-                    b.const_i32(cp * KR_ROWS_CHUNK),
-                    b.div(lane, b.const_i32(32)),
-                ),
-            )
-            d = b.mod(lane, b.const_i32(32))
-            u = b.xor(b.div(d, b.const_i32(2)), b.land(row, b.const_i32(kr_units - 1)))
-            return b.add(
-                b.mul(row, b.const_i32(D_ROPE * 2)),
-                b.add(
-                    b.mul(u, b.const_i32(8)),
-                    b.mul(b.mod(d, b.const_i32(2)), b.const_i32(4)),
-                ),
-            )
-
-        def _issue_async(page, slot):
-            for op in _async_ops(page, slot):
-                op()
-
-        def _async_ops(page, slot):
-            """The tile's DMA as one thunk per instruction, so the caller can
-            spread them between MFMAs instead of issuing one burst."""
-            ops = []
-            page = b.readfirstlane(page)
-            c_base = b.mul(page, b.const_i32(PAGE * R_KV * 2))
-            r_base = b.mul(page, b.const_i32(PAGE * D_ROPE * 2))
-            row0 = b.mul(wave_u, b.const_i32(ROWS_W))
-            for jr in range(ROWS_W):
-                for j in range(C_CHUNKS_ROW):
-
-                    def _c(jr=jr, j=j):
-                        row = _shift(b, jr, row0)
-                        b.async_buffer_load_lds_addr(
-                            c_rsrc,
-                            b.smem_ptr_add(
-                                kvc_addr[slot],
-                                b.zext(
-                                    _shift(
-                                        b, j * 256, b.mul(row, b.const_i32(ROW_BYTES))
-                                    ),
-                                    I64,
-                                ),
-                            ),
-                            b.mul(lane, b.const_i32(4)),
-                            b.add(
-                                c_base,
-                                _shift(b, j * 256, b.mul(row, b.const_i32(R_KV * 2))),
-                            ),
-                            1,
-                        )
-
-                    ops.append(_c)
-            for cp in range(ROWS_W // KR_ROWS_CHUNK):
-
-                def _r(cp=cp):
-                    voff = _kr_voff(cp)
-                    b.async_buffer_load_lds_addr(
-                        kr_rsrc,
-                        b.smem_ptr_add(
-                            kr_addr[slot],
-                            b.zext(
-                                b.mul(
-                                    _shift(b, cp * KR_ROWS_CHUNK, row0),
-                                    b.const_i32(D_ROPE * 2),
-                                ),
-                                I64,
-                            ),
-                        ),
-                        voff,
-                        r_base,
-                        1,
-                    )
-
-                ops.append(_r)
-            return ops
-
-    def _load_page(tile, *, guard=None):
-        page = b.global_load_i32(block_table, b.add(b.mul(seq_idx, bt_stride_p), tile))
-        if guard is not None:
-            page = b.select(guard, page, b.const_i32(0))
-        return page
-
-    def _stage_loads(page):
-        page = b.readfirstlane(page)
-        c_soff = b.mul(page, b.const_i32(PAGE * R_KV * 2))
-        kr_soff = b.mul(page, b.const_i32(PAGE * D_ROPE * 2))
-        staged = [
-            b.buffer_load_vN(
-                c_rsrc,
-                c_voff,
-                _shift(b, j * C_ROWS_PER_CHUNK * R_KV * 2, c_soff),
-                dtype,
-                C_STAGE_W,
-            )
-            for j in range(c_chunks)
-        ]
-        staged += [
-            b.buffer_load_vN(
-                kr_rsrc,
-                kr_voff,
-                _shift(b, j * KR_ROWS_PER_CHUNK * D_ROPE * 2, kr_soff),
-                dtype,
-                KR_W,
-            )
-            for j in range(kr_chunks)
-        ]
-        return staged
-
-    def _stage_store(staged):
-        dst = kv_lds
-        for j in range(c_chunks):
-            m = _shift(b, j * C_ROWS_PER_CHUNK, c_m0)
-            b.smem_store_vN(dst, [m, c_r0], staged[j], C_STAGE_W)
-        kr_col = b.add(kr_d0, b.const_i32(R_KV))
-        for j in range(kr_chunks):
-            m = _shift(b, j * KR_ROWS_PER_CHUNK, kr_m0)
-            b.smem_store_vN(dst, [m, kr_col], staged[c_chunks + j], KR_W)
+        dma = KvTileDma(
+            b,
+            stager,
+            lanes,
+            kv_slots,
+            kr_slots,
+            num_warps=spec.num_warps,
+            block_k=BK,
+            r_kv=R_KV,
+            d_rope=D_ROPE,
+            page_size=PAGE,
+            row_pad=WT_PAD,
+        )
 
     has_tiles = b.cmp_gt(n_k_tiles, b.const_i32(0))
     last_tile = b.sub(n_k_tiles, b.const_i32(1))
-
-    def _clamped(t: int):
-        idx = b.select(b.cmp_lt(b.const_i32(t), last_tile), b.const_i32(t), last_tile)
-        return b.select(b.cmp_gt(idx, b.const_i32(0)), idx, b.const_i32(0))
-
     if KV_ASYNC:
         # Tile 0 is DMA'd into slot 0; the loop carries tile 1's page.
-        _issue_async(_load_page(b.const_i32(0), guard=has_tiles), 0)
+        for op in dma.ops(pages.load(b.const_i32(0), guard=has_tiles), 0):
+            op()
         n_stage = 0
-        iter_args += [("pgn", _load_page(_clamped(1), guard=has_tiles))]
     else:
-        prologue = _stage_loads(_load_page(b.const_i32(0), guard=has_tiles))
+        prologue = stager.loads(pages.load(b.const_i32(0), guard=has_tiles))
         n_stage = len(prologue)
         iter_args += [(f"stg{j}", v) for j, v in enumerate(prologue)]
-        pg1_idx = b.select(
-            b.cmp_lt(b.const_i32(1), last_tile), b.const_i32(1), last_tile
-        )
-        pg1_idx = b.select(b.cmp_gt(pg1_idx, b.const_i32(0)), pg1_idx, b.const_i32(0))
-        iter_args += [("pgn", _load_page(pg1_idx, guard=has_tiles))]
+    iter_args += [("pgn", pages.load(clamp_tile(b, 1, last_tile), guard=has_tiles))]
 
     def _k_tile_body(k_tile, state, *, masked: bool, slot: int = 0):
-        dma_ops = []
-        ms = list(state[:M_TILES])
-        ls = list(state[M_TILES : 2 * M_TILES])
-        accs = (
-            None
-            if AGPR_ACC
-            else [
-                list(state[2 * n_ml + mt * N_R_TILES : 2 * n_ml + (mt + 1) * N_R_TILES])
-                for mt in range(M_TILES)
-            ]
-        )
+        ms, ls, accs = split_softmax_state(state, M_TILES, 0 if AGPR_ACC else N_R_TILES)
         staged = list(state[-(n_stage + 1) : -1])
         pg_next = state[-1]
         kb_start = b.mul(k_tile, b.const_i32(BK))
 
+        dma_ops = []
         if KV_ASYNC:
             # One barrier: the barrier's vmcnt(0) lands this tile's DMA, and
             # every reader of the other slot is done, so the next tile's DMA
             # can go there now.
             b.sync()
-            cur_kv[0] = kv_slots[slot]
-            cur_kr[0] = kr_slots[slot]
-            dma_ops = _async_ops(pg_next, 1 - slot)
+            dma_ops = dma.ops(pg_next, 1 - slot)
         else:
             b.sync()  # WAR: every head's readers of the previous tile
-            _stage_store(staged)
+            stager.store(staged)
             b.sync()
-
-        nxt2 = b.add(k_tile, b.const_i32(2))
-        nxt2 = b.select(
-            b.cmp_lt(nxt2, n_k_tiles), nxt2, b.sub(n_k_tiles, b.const_i32(1))
-        )
-        pg_after = _load_page(nxt2)
+        cur_kv, cur_kr = kv_slots[slot], kr_slots[slot]
+        pg_after = pages.load(tile_ahead(b, k_tile, 2, n_k_tiles))
 
         # ---- Sᵀ = [C | K_rope] · Qaᵀ, the wave's whole K reduction ------------
         # Software-pipelined (see HPW_SCORE_PREFETCH): k-step kk + D's LDS
         # reads are emitted before k-step kk's MFMA, and the fences keep the
-        # scheduler from sinking them back.
-        s_acc = [[b.zero_vec_f32(4) for _ in range(K_TILES)] for _ in range(M_TILES)]
+        # scheduler from sinking them back. With the DMA'd tile, the next
+        # tile's DMA is spread over the fence points, AGPR_DMA_PER_FENCE
+        # instructions at a time.
+        s_acc = zero_tiles(b, M_TILES, K_TILES)
 
         def _score_operands(kk):
-            col = _shift(b, kk * MFMA_K, lane_kq)
+            col = shift(b, kk * MFMA_K, lane_kq)
             if kk < N_R_TILES:
                 q_vs = qa_frags[kk]
             else:
-                q_vs = [
-                    b.smem_load_vN(
-                        qr_lds,
-                        _shift(b, mt * MFMA_M, qr_row),
-                        _shift(b, (kk - N_R_TILES) * MFMA_K, lane_kq),
-                        dtype=dtype,
-                        n=4,
-                    )
-                    for mt in range(M_TILES)
-                ]
+                q_vs = read_q_rope(
+                    b, qr_lds, qr_row, lane_kq, kk - N_R_TILES, M_TILES, dtype
+                )
             if KV_ASYNC and kk >= N_R_TILES:
-                # Unit (4 (kk - N_R) + g) of row a, XOR-swizzled by a & 15.
-                b_vs = []
-                for kt in range(K_TILES):
-                    row = _shift(b, kt * MFMA_N, lane_row)
-                    unit = b.xor(
-                        _shift(b, 4 * (kk - N_R_TILES), b.div(lane_kq, b.const_i32(4))),
-                        b.land(row, b.const_i32((D_ROPE * 2) // 8 - 1)),
-                    )
-                    idx = b.add(
-                        b.mul(row, b.const_i32(D_ROPE)), b.mul(unit, b.const_i32(4))
-                    )
-                    b_vs.append(b.smem_load_vN(cur_kr[0], idx, dtype=dtype, n=4))
+                b_vs = read_k_rope_swizzled(
+                    b,
+                    cur_kr,
+                    lanes,
+                    kk - N_R_TILES,
+                    k_tiles=K_TILES,
+                    d_rope=D_ROPE,
+                    dtype=dtype,
+                )
             else:
-                b_vs = [
-                    b.smem_load_vN(
-                        cur_kv[0],
-                        _shift(b, kt * MFMA_N, lane_row),
-                        col,
-                        dtype=dtype,
-                        n=4,
-                    )
-                    for kt in range(K_TILES)
-                ]
+                b_vs = read_kv_rows(
+                    b, cur_kv, lane_row, col, k_tiles=K_TILES, dtype=dtype
+                )
             return q_vs, b_vs
 
-        score_pre = {
-            kk: _score_operands(kk)
-            for kk in range(min(HPW_SCORE_PREFETCH, SCORE_K_ITERS))
-        }
+        take = read_ahead(SCORE_K_ITERS, HPW_SCORE_PREFETCH, _score_operands)
         for kk in range(SCORE_K_ITERS):
-            if kk + HPW_SCORE_PREFETCH < SCORE_K_ITERS:
-                score_pre[kk + HPW_SCORE_PREFETCH] = _score_operands(
-                    kk + HPW_SCORE_PREFETCH
-                )
-            q_vs, b_vs = score_pre.pop(kk)
+            q_vs, b_vs = take(kk)
             for kt in range(K_TILES):
                 for mt in range(M_TILES):
-                    s_acc[mt][kt] = _mfma_16x16x16(
+                    s_acc[mt][kt] = mfma_16x16x16(
                         b, dtype, b_vs[kt], q_vs[mt], s_acc[mt][kt]
                     )
             if (kk + 1) % HPW_SCORE_FENCE_EVERY == 0:
-                if KV_ASYNC:
-                    for _ in range(AGPR_DMA_PER_FENCE):
-                        if dma_ops:
-                            dma_ops.pop(0)()
+                for _ in range(AGPR_DMA_PER_FENCE if KV_ASYNC else 0):
+                    if dma_ops:
+                        dma_ops.pop(0)()
                 b.sched_barrier(0)
 
         # The next tile's staging loads go out only now: issued before the
         # score, their registers would be live across it and crowd out the
         # score read-ahead.
-        if KV_ASYNC:
-            while dma_ops:
-                dma_ops.pop(0)()
-        staged_next = [] if KV_ASYNC else _stage_loads(pg_next)
+        while dma_ops:
+            dma_ops.pop(0)()
+        staged_next = [] if KV_ASYNC else stager.loads(pg_next)
 
         # ---- PV read groups ---------------------------------------------------
         # The A operand wants four consecutive keys of one latent column, and
@@ -3190,363 +2066,148 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         # AGPR_PV_PREFETCH with agpr_acc) are read here, ahead
         # of the softmax, which hides their latency behind it.
         pv_groups = [(kt, w) for kt in range(K_TILES) for w in range(N_R_TILES // 4)]
-
-        def _pv_reads(kt, w):
-            a_col = _shift(b, kt * MFMA_N, lane_kq)
-            return [
-                b.smem_load_vN(
-                    cur_kv[0],
-                    _shift(b, i, a_col),
-                    _shift(b, 64 * w, lane_row4),
-                    dtype=dtype,
-                    n=4,
-                )
-                for i in range(4)
-            ]
-
-        pv_pre = {
-            gi: _pv_reads(*pv_groups[gi]) for gi in range(min(PV_PF, len(pv_groups)))
-        }
+        take_pv = read_ahead(
+            len(pv_groups),
+            PV_PF,
+            lambda gi: read_pv_group(
+                b, cur_kv, lane_kq, lane_row4, *pv_groups[gi], dtype=dtype
+            ),
+        )
 
         # ---- online softmax, one query per lane (as in the one-head kernel) ---
-        if masked:
-            k_abs = [
-                [
-                    b.add(kb_start, _shift(b, kt * MFMA_N + r, lane_kq))
-                    for r in range(C_PER_LANE)
-                ]
-                for kt in range(K_TILES)
-            ]
-            in_k = [[b.cmp_lt(k, s_k) for k in row] for row in k_abs]
+        mask = (
+            key_mask(b, kb_start, lane_kq, keys.s_k, keys.context_off, k_tiles=K_TILES)
+            if masked
+            else None
+        )
         new_ms = []
         new_ls = []
-        p_frags = [[None] * K_TILES for _ in range(M_TILES)]
+        p_frags = []
         for mt in range(M_TILES):
-            keep = []
-            s_v = []
-            if masked:
-                q_abs = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row))
-                causal_hi = b.add(q_abs, context_off)
-            for kt in range(K_TILES):
-                for r in range(C_PER_LANE):
-                    s_scaled = b.fmul(b.vec_extract(s_acc[mt][kt], r), scale_log2)
-                    if masked:
-                        keep.append(
-                            b.land(in_k[kt][r], b.cmp_le(k_abs[kt][r], causal_hi))
-                        )
-                        s_v.append(b.select(keep[-1], s_scaled, neg_inf))
-                    else:
-                        s_v.append(s_scaled)
-            local_max = s_v[0]
-            for v in s_v[1:]:
-                local_max = b.fmax(local_max, v)
-            m_new = b.fmax(ms[mt], _query_reduce(b, local_max, combine="max"))
             # Lazy rescale (HPW_LAZY_TAU): keep the max in use unless the new
             # one is far enough above it.
-            need = b.fcmp("ogt", m_new, b.fadd(ms[mt], b.const_f32(HPW_LAZY_TAU)))
-            m_new = b.select(need, m_new, ms[mt])
-            alpha = b.exp2_fast(b.fsub(ms[mt], m_new))
-            if masked:
-                p_v = [
-                    b.select(k, b.exp2_fast(b.fsub(v, m_new)), zero_f)
-                    for k, v in zip(keep, s_v)
-                ]
-            else:
-                p_v = [b.exp2_fast(b.fsub(v, m_new)) for v in s_v]
-            local_sum = p_v[0]
-            for v in p_v[1:]:
-                local_sum = b.fadd(local_sum, v)
-            new_ms.append(m_new)
-            new_ls.append(
-                b.fadd(
-                    b.fmul(ls[mt], alpha), _query_reduce(b, local_sum, combine="sum")
-                )
+            row = online_softmax_row(
+                b,
+                s_acc[mt],
+                ms[mt],
+                ls[mt],
+                consts,
+                mask=mask,
+                q_abs=row_of(b, qb_start, lane_row, mt) if masked else None,
+                lazy_tau=HPW_LAZY_TAU,
             )
+            new_ms.append(row.m)
+            new_ls.append(row.l)
             # The accumulator rescale runs only when some lane of the wave moved
-            # its max: a zero- or one-trip loop on a wave-uniform count, which
-            # carries the accumulator through as its iteration arguments. Lanes
-            # that did not move have alpha == 1.
-            any_need = b.wave_any(b.select(need, b.const_i32(1), b.const_i32(0)))
+            # its max.
             if AGPR_ACC:
-                # In place, under a wave-uniform branch: nothing is carried.
-                with b.scf_if(b.cmp_ne(any_need, b.const_i32(0))):
-                    for t in range(N_R_TILES):
-                        acc_file.scale(mt * N_R_TILES + t, alpha)
-                for kt in range(K_TILES):
-                    p_frags[mt][kt] = _bf16x4_rne_finite(
-                        b, p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE]
-                    )
-                continue
-            rs_loop = b.scf_for_iter(
-                b.const_i32(0),
-                b.select(
-                    b.cmp_ne(any_need, b.const_i32(0)),
-                    b.const_i32(1),
-                    b.const_i32(0),
-                ),
-                b.const_i32(1),
-                iter_args=[
-                    (f"rs{int(masked)}{slot}{mt}_{t}", accs[mt][t])
-                    for t in range(N_R_TILES)
-                ],
-                iv_name=f"rescale{int(masked)}{slot}{mt}",
-            )
-            with rs_loop as (_, rs_state):
-                scaled = []
-                for t in range(N_R_TILES):
-                    v = rs_state[t]
-                    for r in range(C_PER_LANE):
-                        v = b.vec_insert(v, b.fmul(b.vec_extract(v, r), alpha), r)
-                    scaled.append(v)
-                b.scf_yield(*scaled)
-            accs[mt] = list(rs_loop.results)
-            for kt in range(K_TILES):
-                p_frags[mt][kt] = _bf16x4_rne_finite(
-                    b, p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE]
+                acc_file.scale_if(
+                    row.any_need, range(mt * N_R_TILES, (mt + 1) * N_R_TILES), row.alpha
                 )
+            else:
+                accs[mt] = rescale_if_any(
+                    b, accs[mt], row.alpha, row.any_need, tag=f"{int(masked)}{slot}{mt}"
+                )
+            p_frags.append(pack_p(b, row.p, K_TILES, rne=True))
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile -------------------------
         for gi, (kt, w) in enumerate(pv_groups):
-            if gi + PV_PF < len(pv_groups):
-                pv_pre[gi + PV_PF] = _pv_reads(*pv_groups[gi + PV_PF])
-            xs = pv_pre.pop(gi)
+            xs = take_pv(gi)
             for e in range(4):
-                c_t = _pick4(b, xs, e, dtype)
+                c_t = pick4(b, xs, e, dtype)
                 for mt in range(M_TILES):
                     if AGPR_ACC:
                         acc_file.mfma(mt * N_R_TILES + 4 * w + e, c_t, p_frags[mt][kt])
                     else:
-                        accs[mt][4 * w + e] = _mfma_16x16x16(
+                        accs[mt][4 * w + e] = mfma_16x16x16(
                             b, dtype, c_t, p_frags[mt][kt], accs[mt][4 * w + e]
                         )
             b.sched_barrier(0)
 
-        flat_acc = (
-            []
-            if AGPR_ACC
-            else [accs[mt][t] for mt in range(M_TILES) for t in range(N_R_TILES)]
-        )
+        flat_acc = [a for row in accs for a in row]
         return [*new_ms, *new_ls, *flat_acc, *staged_next, pg_after]
 
-    n_full = b.div(
-        b.add(qb_start_wg, b.add(context_off, b.const_i32(1))), b.const_i32(BK)
-    )
-    k_whole = b.div(s_k, b.const_i32(BK))
-    n_full = b.select(b.cmp_lt(n_full, k_whole), n_full, k_whole)
-    n_full = b.select(b.cmp_gt(n_full, b.const_i32(0)), n_full, b.const_i32(0))
-    n_full = b.select(b.cmp_lt(n_full, n_k_tiles), n_full, n_k_tiles)
-
-    if KV_DOUBLE:
+    n_full = full_k_tiles(b, tile.qb_start, keys, n_k_tiles, block_k=BK)
+    if KV_ASYNC:
         # Pairs of tiles, slot 0 then slot 1. The unmasked run is rounded down
         # to even; the masked tail is rounded up to even, and its padding tile
         # (index n_k_tiles, past every key) masks to nothing.
-        n_full = b.land(n_full, b.const_i32(-2))
-        n_pad = b.add(
-            n_full,
-            b.land(b.add(b.sub(n_k_tiles, n_full), b.const_i32(1)), b.const_i32(-2)),
-        )
-        step, lo_tail, hi_tail = 2, n_full, n_pad
+        n_full, n_pad = tile_pairs(b, n_full, n_k_tiles)
+        step, tail = 2, (n_full, n_pad)
     else:
-        step, lo_tail, hi_tail = 1, n_full, n_k_tiles
+        step, tail = 1, (n_full, n_k_tiles)
 
     def _drive(k_tile, state, masked):
-        if not KV_DOUBLE:
+        if not KV_ASYNC:
             return _k_tile_body(k_tile, state, masked=masked)
         state = _k_tile_body(k_tile, state, masked=masked, slot=0)
         return _k_tile_body(b.add(k_tile, b.const_i32(1)), state, masked=masked, slot=1)
 
-    main_loop = b.scf_for_iter(
-        b.const_i32(0), n_full, b.const_i32(step), iter_args=iter_args, iv_name="k_main"
-    )
-    with main_loop as (k_tile, state):
-        b.scf_yield(*_drive(k_tile, state, False))
-    tail_loop = b.scf_for_iter(
-        lo_tail,
-        hi_tail,
-        b.const_i32(step),
-        iter_args=[
-            (f"{name}_t", v) for (name, _), v in zip(iter_args, main_loop.results)
-        ],
-        iv_name="k_tail",
-    )
-    with tail_loop as (k_tile, state):
-        b.scf_yield(*_drive(k_tile, state, True))
+    res = run_k_loops(b, iter_args, n_full=n_full, tail=tail, step=step, body=_drive)
 
     # ---- epilogue: project the latent out with W_UV, every head at once ------
-    res = tail_loop.results
-    # The epilogue's query rows. With agpr_acc they are rederived from the
-    # lane id (v_mbcnt), which the backend cannot merge with the prologue's
-    # thread-id form; holding those across the loop spills at 32 rows a wave.
-    lane_row_ep = b.mod(b.lane_id(), b.const_i32(16)) if AGPR_ACC else lane_row
-    ms = list(res[:M_TILES])
-    ls = list(res[M_TILES : 2 * M_TILES])
+    # The epilogue's query rows, rederived from the lane id with agpr_acc.
+    lane_row_ep = epilogue_lane_row(b, lanes, rederive=AGPR_ACC)
+    ms, ls, accs = split_softmax_state(res, M_TILES, 0 if AGPR_ACC else N_R_TILES)
     if AGPR_ACC:
         acc_file.fence()
-
-        class _AccView:
-            # accs[mt][t] reads the tile out of the AGPR file on first use.
-            def __init__(self, mt):
-                self.mt, self.cache = mt, {}
-
-            def __getitem__(self, t):
-                if t not in self.cache:
-                    self.cache[t] = acc_file.read(self.mt * N_R_TILES + t)
-                return self.cache[t]
-
-        accs = [_AccView(mt) for mt in range(M_TILES)]
-    else:
-        accs = [
-            list(res[2 * n_ml + mt * N_R_TILES : 2 * n_ml + (mt + 1) * N_R_TILES])
-            for mt in range(M_TILES)
-        ]
-    inv = [_safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
+        accs = acc_file.view(M_TILES, N_R_TILES)
+    inv = [safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
 
     if UNFUSED:
-        # The normalized latent goes straight from registers to global. With
-        # the PV's row permutation, register reg of tile 4 w + e holds
-        # r = 64 w + 16 g + 4 reg + e in lane group g, so the four tiles of one
-        # w hand a lane four consecutive r: one 8 B store per (w, reg).
-        r_lane = b.mul(lane_kq, b.const_i32(4))
-        for mt in range(M_TILES):
-            q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row_ep))
-            with b.scf_if(b.cmp_lt(q_local, s_q)):
-                token = b.add(cu_q_start, q_local)
-                row = b.mul(
-                    b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(R_KV)
-                )
-                row = b.add(row, r_lane)
-                for w in range(N_R_TILES // 4):
-                    for reg in range(C_PER_LANE):
-                        vals = b.vec_pack(
-                            [
-                                b.fmul(b.vec_extract(accs[mt][4 * w + e], reg), inv[mt])
-                                for e in range(4)
-                            ],
-                            F32,
-                        )
-                        b.global_store_vN(
-                            out,
-                            _shift(b, 64 * w + 4 * reg, row),
-                            b.vec_trunc_f32_to_bf16(vals),
-                            4,
-                            align=8,
-                        )
-
-    if not UNFUSED:
+        # The normalized latent goes straight from registers to global.
+        store_latent_out(
+            b,
+            args.out,
+            accs,
+            inv,
+            qrows,
+            lanes,
+            q_start=qb_start,
+            lane_row=lane_row_ep,
+            r_kv=R_KV,
+        )
+    else:
         # outᵀ = W_UVᵀ · accᵀ. accᵀ tile t is already the B fragment for its
-        # latent k-step; only the A side needs LDS, because MFMA reads W_UVᵀ with r
-        # contiguous and global memory has v contiguous.
-        #
-        # With the PV's row permutation, tile 4 w + e holds r = 64 w + 16 g +
-        # 4 reg + e in lane group g, so a lane's W_UVᵀ fragment for that k-step is
-        # the four r of one 16-row block that share r % 4 == e. Each round stages
-        # a 64-row latent block w and a VQ-wide v window for every head (row =
-        # head-in-group * VQ + v), with block column p = 16 g + 4 e + i holding
-        # r = 64 w + 16 g + 4 i + e, so the fragment is one contiguous 8 B read.
-        # A staging thread loads those four W_UV rows (stride 4) for eight v and
-        # transposes the 4 x 8 block in registers into eight 8 B stores. Allocated
-        # after the loop so it pools onto the loop's buffers; each round's opening
+        # latent k-step; only the A side needs LDS, because MFMA reads W_UVᵀ
+        # with r contiguous and global memory has v contiguous. Allocated after
+        # the loop so it pools onto the loop's buffers; each round's opening
         # barrier fences their last readers.
         wt_lds = b.smem_alloc(dtype, [HPW * EVQ, 64 + WT_PAD], name_hint="wt_lds")
-        out_acc = [
-            [b.zero_vec_f32(4) for _ in range(N_V_TILES)] for _ in range(M_TILES)
-        ]
-        acc_bf = [[None] * N_R_TILES for _ in range(M_TILES)]
-        grp_base = b.mul(b.mul(head_grp, b.const_i32(HPW * R_KV)), b.const_i32(W_COLS))
-        per_head = 16 * (EVQ // 8)
-        stagers = []
-        for j in range((HPW * 64 * EVQ) // (THREADS * 32)):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            hh = b.div(c, b.const_i32(per_head))
-            rem = b.mod(c, b.const_i32(per_head))
-            g = b.div(b.mod(rem, b.const_i32(16)), b.const_i32(4))
-            e = b.mod(rem, b.const_i32(4))
-            n0 = b.mul(b.div(rem, b.const_i32(16)), b.const_i32(8))
-            # W_UK[head_grp * HPW + hh, 16 g + 4 i + e (+ 64 w), D_NOPE + n0 (+ vq)]
-            src = b.add(
-                grp_base,
-                b.add(
-                    b.mul(
-                        b.add(
-                            b.mul(hh, b.const_i32(R_KV)),
-                            b.add(b.mul(g, b.const_i32(16)), e),
-                        ),
-                        b.const_i32(W_COLS),
-                    ),
-                    _shift(b, D_NOPE, n0),
-                ),
-            )
-            row0 = b.add(b.mul(hh, b.const_i32(EVQ)), n0)
-            p_col = b.add(b.mul(g, b.const_i32(16)), b.mul(e, b.const_i32(4)))
-            stagers.append((src, row0, p_col))
-        a_rows = [
-            b.add(b.mul(head_local, b.const_i32(EVQ)), _shift(b, vl * MFMA_N, lane_row))
-            for vl in range(EVQ // MFMA_N)
-        ]
-        a_cols = [_shift(b, 4 * e, b.mul(lane_kq, b.const_i32(4))) for e in range(4)]
-        for w in range(N_R_TILES // 4):
-            for vq in range(D_V // EVQ):
-                b.sync()
-                for src, row0, p_col in stagers:
-                    rows8 = [
-                        b.global_load_vN(
-                            w_uk,
-                            _shift(b, (64 * w + 4 * i) * W_COLS + vq * EVQ, src),
-                            dtype,
-                            8,
-                        )
-                        for i in range(4)
-                    ]
-                    for e8 in range(8):
-                        b.smem_store_vN(
-                            wt_lds,
-                            [_shift(b, e8, row0), p_col],
-                            b.vec_pack([b.vec_extract(r8, e8) for r8 in rows8], dtype),
-                            4,
-                        )
-                b.sync()
-                for e in range(4):
-                    t = 4 * w + e
-                    for mt in range(M_TILES):
-                        if acc_bf[mt][t] is None:
-                            acc_bf[mt][t] = b.vec_trunc_f32_to_bf16(accs[mt][t])
-                    for vl in range(EVQ // MFMA_N):
-                        a_v = b.smem_load_vN(
-                            wt_lds, a_rows[vl], a_cols[e], dtype=dtype, n=4
-                        )
-                        vt = vq * (EVQ // MFMA_N) + vl
-                        for mt in range(M_TILES):
-                            out_acc[mt][vt] = _mfma_16x16x16(
-                                b, dtype, a_v, acc_bf[mt][t], out_acc[mt][vt]
-                            )
-
+        out_acc = project_wuv_heads(
+            b,
+            args.w_uk,
+            wt_lds,
+            accs,
+            lanes,
+            head_grp,
+            head_local,
+            threads=THREADS,
+            heads_per_wg=HPW,
+            vq=EVQ,
+            m_tiles=M_TILES,
+            r_kv=R_KV,
+            d_nope=D_NOPE,
+            d_v=D_V,
+            w_cols=W_COLS,
+            dtype=dtype,
+        )
         for vt in range(N_V_TILES):
-            col = _shift(b, vt * MFMA_N, lane_kq)
+            col = shift(b, vt * MFMA_N, lane_kq)
             for mt in range(M_TILES):
-                q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row_ep))
-                vals = b.vec_pack(
-                    [
-                        b.fmul(b.vec_extract(out_acc[mt][vt], r), inv[mt])
-                        for r in range(C_PER_LANE)
-                    ],
-                    F32,
+                store_out_frag(
+                    b,
+                    args.out,
+                    out_acc[mt][vt],
+                    inv[mt],
+                    qrows,
+                    q_local=row_of(b, qb_start, lane_row_ep, mt),
+                    col=col,
+                    d_v=D_V,
                 )
-                with b.scf_if(b.cmp_lt(q_local, s_q)):
-                    token = b.add(cu_q_start, q_local)
-                    idx = b.add(b.mul(token, b.const_i32(H * D_V)), col)
-                    idx = b.add(idx, b.mul(head, b.const_i32(D_V)))
-                    b.global_store_vN(
-                        out, idx, b.vec_trunc_f32_to_bf16(vals), C_PER_LANE, align=8
-                    )
 
     # One writer per (query, head): the wave's first 16-lane group.
-    with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
-        for mt in range(M_TILES):
-            q_local = b.add(qb_start, _shift(b, mt * MFMA_M, lane_row_ep))
-            value = b.fmul(b.fadd(ms[mt], b.log2(ls[mt])), b.const_f32(LN2))
-            with b.scf_if(b.cmp_lt(q_local, s_q)):
-                token = b.add(cu_q_start, q_local)
-                idx = b.add(b.mul(token, b.const_i32(H)), head)
-                b.global_store(lse, idx, value, align=4)
-
+    store_lse(
+        b, args.lse, ms, ls, qrows, q_start=qb_start, lane_row=lane_row_ep, lane=lane
+    )
     return b.kernel

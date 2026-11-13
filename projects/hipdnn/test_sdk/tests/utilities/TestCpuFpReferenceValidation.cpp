@@ -1060,3 +1060,26 @@ TEST(TestCpuIntReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
 }
 
 /* ================================================= */
+
+// fp8 outputs (cuDNN sdpa_fp8 O) get a validator from the data-type factory, which compares
+// decoded values: one fp8 step apart fails a tight tolerance and passes a loose one.
+TEST(TestCpuFpReferenceValidationFp8, FactoryComparesDecodedValues)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto check = [](DataType dataType, auto tag) {
+        using Fp8 = decltype(tag);
+        Tensor<Fp8> a({4});
+        Tensor<Fp8> b({4});
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            a.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+            b.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+        }
+        EXPECT_TRUE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        b.setHostValue(Fp8(4.5f), 3); // the next E4M3 value after 4
+        EXPECT_FALSE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        EXPECT_TRUE(createAllCloseValidator(dataType, 0.0f, 0.13f)->allClose(a, b));
+    };
+    check(DataType::FP8_E4M3, fp8_e4m3{});
+    check(DataType::FP8_E4M3_FNUZ, fp8_e4m3_fnuz{});
+}

@@ -299,7 +299,8 @@ protected:
         plan.executionPlanDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
 
-        // A deserialized compiled plan is finalized by construction and can be re-serialized.
+        // A deserialized compiled plan is finalized by construction. Saving it again returns the
+        // plan bytes the backend kept at load; the plan is not serialized again.
         auto engineId = detail::getNullableAttrScalar<int64_t>(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
@@ -2118,6 +2119,24 @@ private:
         }
         setActivePlanState(winnerPlanIndex, detail::ActivePlanFinalization::FINALIZED);
 
+        // --- Run the winner last ---
+        // The timed sweep leaves the last timed plan's output in the caller's buffers.
+        // Executing the winner after the sweep (and after any stalled restart) makes those
+        // buffers hold the winner's output on success. The sync makes that output complete
+        // on return, as the event-synchronized timed runs were, and reports a device fault
+        // in this run as the error of this call.
+        auto winnerExecErr = detail::executeWithPlan(
+            handle, *_compiledPlans[winnerPlanIndex].executionPlanDesc, variantPackDesc);
+        if(winnerExecErr.is_bad())
+        {
+            return winnerExecErr;
+        }
+        auto winnerSyncErr = autotune::detail::syncDevice();
+        if(winnerSyncErr.is_bad())
+        {
+            return winnerSyncErr;
+        }
+
         // --- Persist results ---
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         if(!storageConfig.filePath.empty())
@@ -2596,6 +2615,112 @@ public:
     }
 
     /**
+     * @brief Get numerical notes for an engine applicable to this graph.
+     *
+     * @param engineId Backend global engine ID to query
+     * @param notes Output numerical notes; cleared on entry. A backend that
+     *        answers NOT_SUPPORTED yields {NONDETERMINISTIC}.
+     * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
+     *         has not been built; ErrorCode::HIPDNN_BACKEND_ERROR on other failure
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_numerical_notes_for_engine(int64_t engineId, std::vector<NumericalNote>& notes) const
+    {
+        notes.clear();
+
+        if(!hasReadyGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get "
+                    "numerical notes for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        // A backend that predates numerical notes answers NOT_SUPPORTED. Its
+        // engines are treated as nondeterministic, the conservative default; the
+        // backend error it recorded is drained so it does not outlive the query.
+        const auto reportNondeterministic = [&notes]() {
+            std::array<char, 1024> drained{};
+            detail::hipdnnBackend()->getLastErrorString(drained.data(), drained.size());
+            notes = {NumericalNote::NONDETERMINISTIC};
+            return Error{ErrorCode::OK, ""};
+        };
+
+        int64_t noteCount = 0;
+        const auto countStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           0,
+                                                           &noteCount,
+                                                           nullptr);
+        if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(countStatus,
+                                         "Failed to get numerical note count from engine "
+                                         "descriptor.");
+
+        if(noteCount < 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a negative numerical note count: "
+                        + std::to_string(noteCount)};
+        }
+
+        if(noteCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        const auto expectedNoteCount = noteCount;
+        std::vector<hipdnnBackendNumericalNote_t> backendNotes(static_cast<size_t>(noteCount));
+        const auto readStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           noteCount,
+                                                           &noteCount,
+                                                           backendNotes.data());
+        if(readStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(readStatus,
+                                         "Failed to get numerical notes from engine descriptor.");
+
+        if(noteCount != expectedNoteCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a numerical note count of " + std::to_string(noteCount)
+                        + " after reporting " + std::to_string(expectedNoteCount) + "."};
+        }
+
+        notes.reserve(backendNotes.size());
+        for(auto note : backendNotes)
+        {
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnNumericalNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping numerical note unknown to this frontend: " << static_cast<int>(note));
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /**
      * @brief Create execution plans using heuristics
      *
      * Queries the backend for available engines and selects based on the
@@ -2766,6 +2891,11 @@ public:
      * If the graph has not been lowered to a backend descriptor, it will be
      * auto-lowered before serialization.
      *
+     * When the graph holds a finalized execution plan whose engine supports plan
+     * serialization, the plan is saved with the graph in one graph-and-plan container.
+     * Otherwise only the graph is saved. A plan loaded from bytes is saved as the plan
+     * bytes it was loaded from, unchanged; see serialize_compiled_plan().
+     *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
      */
@@ -2778,6 +2908,7 @@ public:
     /** @brief Serialize a previously built graph to a binary byte vector.
      *
      * Requires a valid backend descriptor (call build_operation_graph() first).
+     * Embeds the execution plan as the non-const serialize() overload does.
      *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
@@ -2788,6 +2919,8 @@ public:
     }
 
     /** @brief Serialize the graph to a binary byte vector, auto-lowering if needed.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2800,6 +2933,8 @@ public:
     }
 
     /** @brief Serialize a previously built graph to a binary byte vector.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2832,7 +2967,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use from_binary(handle, data) to restore it.
+     * it needs a handle. Use from_binary(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2846,7 +2983,9 @@ public:
     /** @brief Deserialize a graph from a binary byte vector with handle.
      *
      * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
-     * and finalizes the backend descriptor with the given handle.
+     * and finalizes the backend descriptor with the given handle. An embedded
+     * execution plan is restored too, and keeps a copy of its plan bytes, which
+     * include any GPU code object, for as long as the plan lives.
      *
      * An embedded execution plan is restored bound to the device of @p handle's
      * stream, and executes only on handles whose stream is on that device.
@@ -2911,7 +3050,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use deserialize(handle, data) to restore it.
+     * it needs a handle. Use deserialize(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2923,7 +3064,16 @@ public:
 
     /** @brief Serialize the compiled backend execution plan to a byte vector.
      *
-     * Requires build_plans() or build() to have finalized the execution plan.
+     * Requires build_plans() or build() to have finalized the execution plan, or a plan loaded
+     * from bytes with deserialize(handle, data) or from_compiled_plan_binary().
+     *
+     * A loaded plan is not rebuilt when it is saved. It returns the exact plan bytes it was
+     * loaded from, which still hold the original kernel and the provider and format versions.
+     * Upgrading the provider does not change what a re-save writes. To pick up a newer kernel,
+     * build a new plan from the graph and save that; for a saved graph, from_binary(data)
+     * loads the graph alone. A plan loaded from a graph-and-plan container returns only its
+     * plan part, not the container.
+     *
      * The returned data is intended for from_compiled_plan_binary().
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -2934,7 +3084,7 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "Graph has no finalized compiled execution plan. Call build() or "
-                    "build_plans() first."};
+                    "build_plans(), or load one with from_compiled_plan_binary()."};
         }
 
         size_t planByteSize = 0;
@@ -2958,7 +3108,11 @@ public:
         return {};
     }
 
-    /** @brief Serialize the compiled backend execution plan to a byte vector. */
+    /** @brief Serialize the compiled backend execution plan to a byte vector.
+     *
+     * Same rules as serialize_compiled_plan(): a loaded plan returns the plan bytes it was
+     * loaded from, unchanged.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::vector<uint8_t>, Error> to_compiled_plan_binary() const
     {
@@ -2975,6 +3129,9 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
      *
      * The plan is bound to the device of @p handle's stream and executes only on
      * handles whose stream is on that device. To run it on another device,
@@ -3010,6 +3167,9 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -4000,6 +4160,13 @@ public:
      * Ranks plans by performance and sets the winner as the active plan.
      * Optionally persists results to a JSON config file.
      *
+     * The winner executes last, after every timed pass, and this call waits for that run to
+     * finish. On success the caller's output buffers therefore hold the winner's output,
+     * unless the graph writes one of its own inputs: every run then reads what the previous
+     * one wrote. A failure of that final run, including a device fault, is returned as the
+     * error of this call; the winner then stays the active plan, no results are persisted,
+     * and @c results is not filled.
+     *
      * Requires build_operation_graph() and at least one add_engine_*() call
      * or a prior build_plans(BuildPlanPolicy::ALL) call.
      *
@@ -4082,6 +4249,10 @@ public:
      * Filters plans whose compiled workspace exceeds @c workspaceSize
      * before benchmarking. Filtered plans appear in @c results (if requested)
      * with succeeded=false and an explanatory errorMessage.
+     *
+     * As with the overload above, the winner executes last and this call waits for it, so on
+     * success the caller's output buffers hold the winner's output unless the graph writes
+     * one of its own inputs; a failure of that final run is returned.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4222,6 +4393,10 @@ public:
      * graph, so recording them keeps a permanently broken engine from making later
      * lookups reject the entry. A cache-write failure is logged and does not fail this
      * call.
+     *
+     * The winner executes last and this call waits for it, so on success the caller's output
+     * buffers hold the winner's output unless the graph writes one of its own inputs. A
+     * failure of that final run is returned, and nothing is cached.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers

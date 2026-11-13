@@ -83,7 +83,22 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 /// reading one archive would answer each other's lookups.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
+compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
+compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaRdnaDecodeKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaAiwKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDualwaveKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
+
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
+compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache();
+compilation::KpackModuleCache& gfx1250ConvDgradAotKpackModuleCache();
+compilation::KpackModuleCache& gfx942AttentionUnified3dKpackModuleCache();
+compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache();
+compilation::KpackModuleCache& gfx950AttentionUnified3DKpackModuleCache();
+compilation::KpackModuleCache& gfx942AttentionDenseKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device, or read again for a
 /// save: the archive it was resolved to, the entry inside it, and the declared digest the

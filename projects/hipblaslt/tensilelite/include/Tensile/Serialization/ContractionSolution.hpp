@@ -70,7 +70,12 @@ namespace TensileLite
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
                 iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
-                s.validatePersistentLoopArgs();
+                // Read path only: this throws, and a throw out of a trait on the
+                // write path leaves the output half-built and bypasses the error
+                // list that finish() reports through. Re-encoding a solution that
+                // already loaded must not fail for a reason unrelated to encoding.
+                if(!iot::outputting(io))
+                    s.validatePersistentLoopArgs();
                 iot::mapRequired(io, "problemType", s.problemType);
             }
 
@@ -92,6 +97,7 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
                 iot::mapOptional(io, "generated", s.generated);
+                iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
             }
 
             const static bool flow = false;
@@ -105,8 +111,8 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "type", s.type);
                 iot::mapRequired(io, "semantic", s.semantic);
-                iot::mapOptional(io, "padding", s.padding);
-                iot::mapOptional(io, "index", s.index);
+                iot::mapOptional(io, "padding", s.padding, size_t(0));
+                iot::mapOptional(io, "index", s.index, size_t(0));
             }
             const static bool flow = true;
         };
@@ -138,15 +144,15 @@ namespace TensileLite
                 iot::mapRequired(io, "workGroupMapping", s.workGroupMapping);
 
                 iot::mapOptional(io, "packBatchDims", s.packBatchDims);
-                iot::mapOptional(io, "packSummationDims", s.packSummationDims);
+                iot::mapOptional(io, "packSummationDims", s.packSummationDims, 0);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
                 bool hasStrategy = !iot::outputting(io) && iot::hasKey(io, "tileProcessingStrategy");
                 bool hasAssignment = !iot::outputting(io) && iot::hasKey(io, "workAssignment");
                 std::string strategy = iot::outputting(io) ? toString(s.tileProcessingStrategy) : "None";
                 std::string assignment = iot::outputting(io) ? toString(s.workAssignment) : "StaticGrid";
-                iot::mapOptional(io, "tileProcessingStrategy", strategy);
-                iot::mapOptional(io, "workAssignment", assignment);
+                iot::mapOptional(io, "tileProcessingStrategy", strategy, std::string("None"));
+                iot::mapOptional(io, "workAssignment", assignment, std::string("StaticGrid"));
                 if(!iot::outputting(io))
                 {
                     // Validate names before ignoring inactive assignments or
@@ -189,8 +195,8 @@ namespace TensileLite
                     s.validateExecutionPolicy();
                 }
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
-                iot::mapOptional(io, "persistentKernel", s.persistentKernel);
-                iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);
+                iot::mapOptional(io, "persistentKernel", s.persistentKernel, 0);
+                iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch, false);
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
 
                 iot::mapRequired(io, "globalAccumulation", s.globalAccumulation);
@@ -216,10 +222,11 @@ namespace TensileLite
                 iot::mapOptional(io, "temporalHintA", s.temporalHintA);
                 iot::mapOptional(io, "temporalHintB", s.temporalHintB);
                 iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
+                iot::mapOptional(io, "adaptiveGemm", s.adaptiveGemm);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
-                iot::mapOptional(io, "SourceSwap", s.SourceSwap);
+                iot::mapOptional(io, "SourceSwap", s.SourceSwap, false);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
                 iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);
@@ -243,6 +250,12 @@ namespace TensileLite
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "BufferLoad", s.BufferLoad);
                 iot::mapOptional(io, "BufferStore", s.BufferStore);
+                iot::mapOptional(io, "temporalHintD", s.temporalHintD);
+                iot::mapOptional(io, "PrefetchLocalRead", s.PrefetchLocalRead);
+                iot::mapOptional(io, "HalfPLR", s.HalfPLR);
+                iot::mapOptional(io, "PrefetchGL2", s.PrefetchGL2);
+                iot::mapOptional(io, "TDMInst", s.TDMInst);
+                iot::mapOptional(io, "Multicast", s.Multicast);
             }
 
             const static bool flow = false;
@@ -255,7 +268,7 @@ namespace TensileLite
             static void mapping(IO& io, ContractionSolution::InternalArgsSupport& s)
             {
                 iot::mapRequired(io, "version", s.version);
-                iot::mapOptional(io, "persistentLoopArgsVersion", s.persistentLoopArgsVersion);
+                iot::mapOptional(io, "persistentLoopArgsVersion", s.persistentLoopArgsVersion, 0);
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
@@ -337,9 +350,11 @@ namespace TensileLite
             using iot = IOTraits<IO>;
             static void mapping(IO& io, ContractionSolution::LinearModel& s)
             {
-                iot::mapOptional(io, "slope", s.slope);
+                iot::mapOptional(io, "slope", s.slope, 1.0);
+                // Not defaulted: -0.0 compares equal to the 0.0 an absent key
+                // means, so omitting it would drop the sign.
                 iot::mapOptional(io, "intercept", s.intercept);
-                iot::mapOptional(io, "max", s.max);
+                iot::mapOptional(io, "max", s.max, 1000.0);
             }
 
             const static bool flow = false;
@@ -355,6 +370,33 @@ namespace TensileLite
                 iot::mapRequired(io, "ShiftPtrElemB", s.shiftPtrElemB);
                 iot::mapRequired(io, "DUorMT0", s.depthUorMT0);
                 iot::mapRequired(io, "DUorMT1", s.depthUorMT1);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<GL2PrefetchSAddrCheckPacket, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, GL2PrefetchSAddrCheckPacket& s)
+            {
+                iot::mapRequired(io, "TLUA", s.tluA);
+                iot::mapRequired(io, "TLUB", s.tluB);
+                iot::mapRequired(io, "DepthUA", s.depthUA);
+                iot::mapRequired(io, "DepthUB", s.depthUB);
+                iot::mapRequired(io, "ClusterMT0", s.clusterMT0);
+                iot::mapRequired(io, "ClusterMT1", s.clusterMT1);
+                iot::mapRequired(io, "DepthU", s.depthU);
+                iot::mapRequired(io, "MatrixInstK", s.matrixInstK);
+                iot::mapRequired(io, "MXBlockA", s.mxBlockA);
+                iot::mapRequired(io, "MXBlockB", s.mxBlockB);
+                iot::mapRequired(io, "MXBlockFreeA", s.mxBlockFreeA);
+                iot::mapRequired(io, "MXBlockFreeB", s.mxBlockFreeB);
+                iot::mapRequired(io, "Metadata", s.metadata);
+                iot::mapRequired(io, "TLUMetadata", s.tluMetadata);
+                iot::mapRequired(io, "DepthUMetadata", s.depthUMetadata);
+                iot::mapRequired(io, "ClusterMTMetadata", s.clusterMTMetadata);
             }
 
             const static bool flow = false;

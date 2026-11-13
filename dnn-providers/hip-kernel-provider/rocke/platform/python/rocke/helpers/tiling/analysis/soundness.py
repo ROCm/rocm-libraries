@@ -18,10 +18,12 @@ class MmaSoundnessError(RuntimeError):
 
 def verify_mma_soundness(pipeline: Any) -> int:
     """Gate 2: every recorded MMA's CONSUMED operand encodings must be sound MMA operands against the
-    canonical machine (``mma_operand_layout_sound``) AND share a K-distribution (``mma_pair_k_aligned``) -- bundled
-    as ``mma_pair_compatible``. This is the operand-correctness the addressing round-trip is BLIND to: a
+    canonical machine (``mma_operand_layout_sound``) AND hold the same K wherever the instruction
+    multiplies them (``mma_pair_k_aligned``, read off the canonical layouts) -- bundled as
+    ``mma_pair_compatible``. This is the operand-correctness the addressing round-trip is BLIND to: a
     scrambled/duplicated operand K passes the address gate but is caught here. ``a_canon``/``b_canon`` are
-    the trusted canonical layouts from the MMA definition; ``a_enc``/``b_enc`` are the kernel's own
+    the trusted canonical layouts from the MMA definition (they also define which A and B values the
+    instruction multiplies); ``a_enc``/``b_enc`` are the kernel's own
     (interleaved) operands. Returns the count verified; raises on the first unsound MMA. Correctness SOT:
     ``docs/mma_is_machinery.md`` (the three-condition sound MAC).
     """
@@ -36,8 +38,6 @@ def verify_mma_soundness(pipeline: Any) -> int:
             op.b_enc,
             a_canon=op.a_canon,
             b_canon=op.b_canon,
-            a_free_atoms=op.a_free_atoms,
-            b_free_atoms=op.b_free_atoms,
         )
         if d.severity == "error":
             raise MmaSoundnessError(f"MMA op seq {op.seq}: {d.message}")

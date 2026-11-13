@@ -32,6 +32,7 @@ from ..core import (
 from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
+    RDNA_WMMA_GEMM_ARCHES,
     GemmRequest,
     apply_split_k,
     rcr_request_errors,
@@ -227,10 +228,11 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 
 # Explicit gfx targets rather than a cdna/rdna family label. Family does not
 # imply wave size -- gfx1250 is cdna at wave32 -- so a family gate would admit a
-# wave32 target into these wave64 MFMA candidates. An arch absent from a list is
-# a target the candidate was never built or run against.
+# wave32 target into these wave64 MFMA candidates. A candidate admits a target
+# when its list names the target or its generic (the row arch_specs.json points
+# the target at); any other target is one the candidate was never built or run
+# against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
-_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
@@ -252,7 +254,7 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_fp16_cdna_mem",
@@ -266,7 +268,7 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
     )
 )

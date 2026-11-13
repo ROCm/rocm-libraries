@@ -14,9 +14,9 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (auto) | Select a qualified compiler lane for emitted LLVM IR. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, 23 to `llvm23`, and 24 to `llvm24`. A newer compiler or unavailable evidence raises instead of silently inheriting the latest lane. Explicit selection supports offline emission but does not bypass runtime compiler validation. LLVM23 and LLVM24 currently share one structural emission profile. |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (auto) | Select a qualified compiler lane for emitted LLVM IR. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, 23 to `llvm23`, and 24 to `llvm24`. A newer compiler or unavailable evidence raises instead of silently inheriting the latest lane. Explicit selection supports offline emission but does not bypass runtime compiler validation. LLVM24 retains LLVM23's datalayout and target-op surface but uses addrspace(15) for named-barrier pointer declarations and calls. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
-| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` \| `off` (**warn**) | What both engines do when a kernel demands an intrinsic the committed arch-domain table (`python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`) says the target cannot lower. Until it has its own measured column, the `llvm24` lane enforces the `llvm23` column that applied before the lanes were split; that column has not been measured on LLVM24, and a committed `llvm24` column automatically takes precedence. `error` refuses the lowering with `ArchDomainError` unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it as `ArchDomainWarning` and keeps lowering; `off` skips the lookup. Case and surrounding whitespace are ignored; any other value raises. The C++ engine reads it too, and refuses in `error` mode with the same message. See [`../../../TESTING.md`](../../../TESTING.md), the arch-domain gate. |
+| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` \| `off` (**warn**) | What both engines do when a kernel demands an intrinsic the committed arch-domain table (`python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`) says the target cannot lower. Each qualified lane has its own measured column; the LLVM24 column was produced by its matching compiler toolchain. `error` refuses the lowering with `ArchDomainError` unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it as `ArchDomainWarning` and keeps lowering; `off` skips the lookup. Case and surrounding whitespace are ignored; any other value raises. The C++ engine reads it too, and refuses in `error` mode with the same message. See [`../../../TESTING.md`](../../../TESTING.md), the arch-domain gate. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
 | `ROCKE_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
@@ -32,7 +32,7 @@ For setup and the most common flags in context, see
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`rocke.helpers.split_k_planner`) on arches that have one and the CK-formula heuristic elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
+| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`library/kernels/conv/split_k_planner.py`) on arches that have one and the CK-formula heuristic (`select_split_k_wgrad`, same module as the resolver) elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
 
 ## hipDNN provider
 
@@ -53,6 +53,10 @@ For setup and the most common flags in context, see
 | `ROCKE_PARITY_BUILD` / `ROCKE_PARITY_EMIT` | The binding-parity harness's `.so` dir and prebuilt-emitter dir — **must be the same fresh build** (mixing reports false mismatches). |
 | `ROCKE_PARITY_ALLOW_STALE` | Allow the parity harness to run with a build-id mismatch (debug only). |
 | `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
+| `ROCKE_EXPLICIT_GATE_RUN` / `ROCKE_EXPLICIT_GATE_PARTIAL` | Internal explicit-gate launcher contract. The source runner and installed CTest entries set these to attest that a non-discovered gate was selected intentionally and whether it is a focused diagnostic rather than a complete verdict. Do not set them to make an ordinary pytest invocation report complete coverage. |
+| `ROCKE_EXPLICIT_GATE_PREFLIGHT` / `ROCKE_EXPLICIT_GATE_SENTINEL` | Internal explicit-gate process contract. Preflight uses the first only in its isolated probe; the launcher supplies the second as a temporary pytest-session attestation path. They are not user-facing gate selectors. |
+| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` lets a developer run report `INCOMPLETE` when the qualified reference toolchain is unavailable; installed required coverage sets `0`. |
+| `ROCKE_ISA_INSPECT_PROBE` | Explicit path to the staged ISA inspection helper used by installed counted-compiler tests. CTest supplies it so relocated tests do not reach back into the source tree. |
 | `ROCKE_ROOT` | Override the detected repository root. |
 | `ROCKE_REMOTE_HOST` / `ROCKE_REMOTE_USER` / `ROCKE_REMOTE_KEY` / `ROCKE_REMOTE_STAGE` | Multi-arch remote-test orchestrator: SSH host/user/key and the staging dir. |
 | `ROCKE_SLURM_EXTRA` | Extra SLURM flags appended by the multi-arch submitter. |
@@ -108,7 +112,7 @@ are diagnostics that intentionally change emission. None affect the default buil
 | Warp-specialized pipeline | `CK_WSP3_ASYNC`, `CK_WSP3_DEPTH`, `CK_WSP3_DRAIN`, `CK_WSP3_SCHED` | producer/consumer GEMM pipeline params |
 | Swizzle study | `CK_SWZ_L`, `CK_SWZ_R`, `CK_SWZ_W` | LDS swizzle levels (left/right/write) |
 | Attention | `ROCKE_ATTENTION_COMPILE_BACKEND`, `ROCKE_ATTENTION_AGPR_ALLOC_ZERO` | attention compile backend / AGPR alloc |
-| gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE` | experimental gfx942 FMHA levers |
+| gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE`, `HIPDNN_GFX942_3D_WKV` | experimental gfx942 FMHA levers; `HIPDNN_GFX942_3D_WKV` is the exception, an off switch for a default-on lever: `=0` turns off the gfx942 3D wide K/V feed (on by default for fp16/bf16 K/V up to head size 128, decode or not) and with it the default K/V LDS swizzle and wave page-id window at head size 64 and 128 |
 | gfx942 V-transpose-store diagnostics | `HIPDNN_GFX942_CFV`, `HIPDNN_GFX942_CFV_CK_VLDS`, `HIPDNN_GFX942_CFV_SCALAR_READ`, `HIPDNN_GFX942_CFV_STORE`, `HIPDNN_GFX942_CFV_STORE_PREZERO`, `HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD`, `HIPDNN_GFX942_CFV_STORE_SCATTER`, `HIPDNN_GFX942_CFV_STORE_SEPOFF`, `HIPDNN_GFX942_CFV_STORE_SPLIT` | gfx942 cfv-store debug toggles (some intentionally change emission) |
 
 For an unlisted variable, check its reader and documentation before assuming its
@@ -170,6 +174,16 @@ requires an explicit flavor. COMGR compilation requires a known compiler version
 even with an emission override or an unrecognised input datalayout.
 
 The detected LLVM version selects a qualified compiler lane, which then selects
-an emission profile. LLVM23 and LLVM24 currently share one profile. That does not
-prove every build of either major has an identical DataLayout or intrinsic
-catalog; toolchain-specific compilation and drift tests remain necessary.
+an emission profile. LLVM24 retains LLVM23's datalayout and target-op surface but
+has a distinct named-barrier declaration and call ABI. That does not prove every
+build of either major has an identical DataLayout or intrinsic catalog;
+toolchain-specific compilation and drift tests remain necessary.
+
+The detected LLVM version also decides which `-mllvm` backend options a compile
+may pass. LLVM's option parser exits the whole process on an option it does not
+know, so every one is checked against a measured table before COMGR is called,
+and a kernel that needs an option the loaded compiler lacks raises
+`CompilerOptionNotAccepted` (a `ValueError`, exported from `rocke.runtime`). The
+contract and the table are in `rocke.runtime.compiler_options`;
+`tools/gen_compiler_options.py` measures it, and the CTest
+`rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.

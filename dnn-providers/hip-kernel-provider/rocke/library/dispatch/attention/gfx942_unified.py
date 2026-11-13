@@ -27,7 +27,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -96,6 +96,11 @@ def _variants():
 
 GFX942_TUNING_VARIANTS = tuple(_variants())
 
+# The gfx942 dense_pipe candidate's algorithm (see
+# _make_gfx942_dense_pipe_candidate), named so a caller outside this package
+# (the SDPA gate) does not have to reconstruct the literal.
+GFX942_DENSE_PIPE_ALGORITHM = "dense_pipe"
+
 
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     """Fast gfx942 fp16 prefill kernel — transposed-x8 flash with ring-sliced K.
@@ -124,11 +129,11 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != "2d":
+        if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
         if not problem.default_mask:
             return False, "gfx942 tiled 2D implements only bottom-right causal"
@@ -143,7 +148,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
@@ -157,7 +162,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="dense_pipe",
+        algorithm=GFX942_DENSE_PIPE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

@@ -471,13 +471,14 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
     return {ErrorCode::OK, ""};
 }
 
-// Validates an SDPA left diagonal-band bound. hipDNN follows cuDNN: left_bound = L
-// keeps the L keys ending at the diagonal, diagonal included. 0 keeps no key at or before
-// the diagonal and is rejected: a provider's L - 1 would turn it into -1, which kernels read
-// as unbounded (cuDNN rejects it in the backward pass, and in the forward pass before
-// backend 9.10). -1 is accepted as "unbounded".
-inline Error validateSdpaLeftBound(const std::optional<int64_t>& leftBound,
-                                   const std::string& nodeName)
+// Validates an SDPA diagonal band (forward and backward share the domain). hipDNN follows
+// cuDNN: left_bound = L keeps the L keys ending at the diagonal, diagonal included, and
+// right_bound = R keeps R keys past it; -1 is unbounded for either. hipDNN rejects
+// left_bound = 0 in both directions (cuDNN's backward does too) and either bound below -1
+// (SdpaSemanticsRegister SEM-005).
+inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
+                                      const std::optional<int64_t>& rightBound,
+                                      const std::string& nodeName)
 {
     HIPDNN_RETURN_IF_TRUE(leftBound.has_value()
                               && (leftBound.value() == 0 || leftBound.value() < -1),
@@ -486,6 +487,10 @@ inline Error validateSdpaLeftBound(const std::optional<int64_t>& leftBound,
                               + std::to_string(leftBound.value_or(0))
                               + ". left_bound = L keeps the L keys ending at the diagonal, "
                                 "diagonal included");
+    HIPDNN_RETURN_IF_TRUE(rightBound.has_value() && rightBound.value() < -1,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": right_bound must be >= -1, got "
+                              + std::to_string(rightBound.value_or(0)));
     return {};
 }
 

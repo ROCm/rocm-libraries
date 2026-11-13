@@ -70,25 +70,45 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
- * different decl text. */
+/* Per-generation overrides: each array holds only the entries whose text
+ * changed AT that declaration ABI generation (same keys as the base table,
+ * different decl text). A generation inherits every older generation's array
+ * in rocke_ll_declaration_abi_t order. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
- * set plus declarations whose ABI changed again. */
-extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
-extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
+/* LLVM24's own overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES):
+ * the named-barrier declarations with addrspace(15) pointers. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+/* One declaration ABI generation's own override array (NULL/0 for LLVM20,
+ * which is the base, and for a generation with no text of its own). */
+const rocke_ll_decl_t* rocke_ll_declaration_abi_own_overrides(rocke_ll_declaration_abi_t abi,
+                                                              int* out_count);
+
+/* The resolved declaration table of one flavor (Python _decls_for_flavor):
+ * rocke_ll_decl_text gives one key's text -- the newest override at or below
+ * the generation `flavor`'s emission profile selects, else the base text, else
+ * a matrix call's derived declaration; NULL for an unknown key or a flavor
+ * without a profile. rocke_ll_decl_at gives entry `index` in emit order, which
+ * is the base table's order, index in [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key);
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index);
+
+/* The keys the matrix-call table adds after the base table, in emit order
+ * (Python _decls_for_flavor's last rung): the first call per key, in table
+ * order, skipping keys the base table holds. NULL past the end;
+ * rocke_ll_decl_text resolves each key's text. */
+const char* rocke_ll_matrix_decl_key_at(int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 
-/* One accepted address space of an llvm_anyptr_ty intrinsic, with the LLVM
- * pointer text that names it. Mirrors one entry of the Python
- * _S_PREFETCH_INST_PTR_TYPES / _AV_B128_PTR_TYPES dicts; every entry needs a
- * matching "<key>.p<space>" row in ROCKE_LL_INTRINSIC_DECLS. */
+/* One accepted address space of a pointer operand, with the LLVM pointer text
+ * that names it. Mirrors one entry of the Python _S_PREFETCH_INST_PTR_TYPES /
+ * _AV_B128_PTR_TYPES / _GLOBAL_LOAD_PTR_TYPES dicts; an entry of an
+ * llvm_anyptr_ty intrinsic's table needs a matching "<key>.p<space>" row in
+ * ROCKE_LL_INTRINSIC_DECLS. */
 typedef struct rocke_ll_anyptr_space
 {
     int space;
@@ -101,6 +121,8 @@ extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[];
+extern const int ROCKE_LL_GLOBAL_LOAD_PTR_TYPES_COUNT;
 
 /* The resolver that consumes these tables is rocke_ll_anyptr_space, declared
  * with the other rocke_lower_t helpers below. */
@@ -407,6 +429,9 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_lds_prov_t) lds_prov; /* i64 LDS address value -> gname */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
+    /* The GPU-check word's symbol once a tile.gpu_check_failed stores to it
+     * (Python _gpu_check_word); NULL until then. */
+    const char* gpu_check_word;
     ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
 
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
@@ -416,6 +441,10 @@ struct rocke_lower
     /* unroll trailing-sync elision marker (Python _unroll_elide_sync_op):
      * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
+
+    /* The names the headers of the rolled scf.for loops lowered so far define
+     * (Python _loop_header_names; see ll_claim_loop_header_names). */
+    ROCKE_VEC(const char*) loop_header_names;
 
     /* DWARF line-table metadata, or NULL when the kernel was built without
      * location capture (Python self._debug). */
@@ -566,11 +595,38 @@ const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p);
  * _Lowerer._ptr_llvm_type). */
 const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v);
 
-/* Address space of an llvm_anyptr_ty operand, validated against `allowed`
- * (Python _Lowerer._anyptr_space). Also writes the matching pointer text to
- * *out_ptr_ty when non-NULL. Fails (does not return) for a space the intrinsic
- * does not accept: the space is part of the overload, so the mangled name, the
- * declare, and the call site all have to agree with the pointer's real type. */
+/* The kernel parameter `v` names, or NULL for any other value (Python
+ * _Lowerer._param_of). */
+const rocke_param_t* rocke_ll_value_param(const rocke_lower_t* L, const rocke_value_t* v);
+
+/* Fail (ROCKE_ERR_TYPE, does not return) unless the module types `ptr` as
+ * `expected`, the LLVM pointer text of the `space` the op names (Python
+ * _Lowerer._require_header_ptr, same text). An op that names its pointer in
+ * one fixed space checks it here: a parameter's addr_space override (such as
+ * "constant") moves its header type away from the IR type the IR rules check,
+ * and the message blames the override only when it moved the header.
+ * `op_name` is the op's builder; `operand` names the pointer operand ("ptr",
+ * "src_ptr", ...). */
+void rocke_ll_require_header_ptr(rocke_lower_t* L,
+                                 const char* op_name,
+                                 const rocke_value_t* ptr,
+                                 const char* operand,
+                                 const char* space,
+                                 const char* expected);
+
+/* rocke_ll_require_header_ptr for an op that names its pointer
+ * ptr addrspace(1) (Python _Lowerer._require_global_header_ptr). */
+void rocke_ll_require_global_header_ptr(rocke_lower_t* L,
+                                        const char* op_name,
+                                        const rocke_value_t* ptr,
+                                        const char* operand);
+
+/* Address space of a pointer operand, validated against `allowed` (Python
+ * _Lowerer._anyptr_space). Also writes the matching pointer text to
+ * *out_ptr_ty when non-NULL. Fails (ROCKE_ERR_TYPE, does not return) for a
+ * space the op does not accept: the space is part of an llvm_anyptr_ty
+ * intrinsic's overload and of a plain load, so the call site has to name the
+ * pointer's real type. */
 int rocke_ll_anyptr_space(rocke_lower_t* L,
                           const char* op,
                           const rocke_value_t* ptr,

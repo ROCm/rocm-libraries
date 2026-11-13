@@ -1579,8 +1579,8 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
             = hipblaslt_backend ? "rocblas_gemm_hipblaslt_backend" : "rocblas_gemm_tensile_backend";
 
         rocblas_internal_ostream alphass, betass;
-        (void)rocblas_internal_log_trace_alpha_beta_ex(
-            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass);
+        PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass)));
 
         rocblas_internal_logger logger;
         logger.log_trace(prob.handle,

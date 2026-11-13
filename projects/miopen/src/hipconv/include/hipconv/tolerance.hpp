@@ -7,7 +7,7 @@ namespace hipconv
 //
 // The bound rests on gamma(n, u) = nu/(1 - nu), which holds only under nu < 1; past that none is
 // available from it. A bound that is available can still be too loose to check against, which the
-// caller judges; see docs/algorithms/direct/direct-wgrad-tolerance.md.
+// caller judges; see docs/algorithms/details/direct/direct-wgrad-tolerance.md.
 inline constexpr float TOLERANCE_UNAVAILABLE = -1.0f;
 
 // Whether a reported rtol is a bound.

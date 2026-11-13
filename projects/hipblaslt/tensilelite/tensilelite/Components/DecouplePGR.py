@@ -21,7 +21,7 @@ from typing import NamedTuple
 
 from ..Common.DataType import DataType
 from ..Common.Utilities import effectiveMatrixInstMN
-from .TDMFuse import liveGroups, tdmGroupingSeparatesAB, tdmSeparateABDescriptors
+from .TDMFuse import liveGroups, tdmFusePaired, tdmGroupingSeparatesAB, tdmPairOnEveryWave, tdmSeparateABDescriptors
 
 PGR_SPECIAL_AUTO = -1
 PGR_AUTO_DEFAULT_LEVEL = 2
@@ -454,6 +454,22 @@ def tdmWaveIssueOrder(ks, itemA, itemB):
     """Return A/B items in descending per-tensor LDS-block order."""
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
     return dcpThickThinIssueOrder(((numLdsBlkA, itemA), (numLdsBlkB, itemB)))
+
+
+def dcpLateFillIncrements(ks, thinTc):
+    """Increment modules the divergent-pair late fill moves with the thin tensor's set, or None.
+
+    None keeps the wave-parity split of the whole fill group, which is right only while each
+    wave carries one LDS side. The paired row advances each set in its own module. An
+    every-wave pair advances both data sets in one module, so both modules move; the loop
+    header issues every fill ahead of the increments, so the thick fill still reads the
+    address the previous iteration left.
+    """
+    if tdmFusePaired(ks):
+        return ("globalReadIncrement%s" % thinTc,)
+    if tdmPairOnEveryWave(ks, "A", "B"):
+        return ("globalReadIncrementA", "globalReadIncrementB")
+    return None
 
 
 DCP_THICK_GATE_TOKENS = "tokens"

@@ -57,7 +57,6 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
 from rocke.tests.engines import lower_with_both_engines
-from rocke.tests.gpu import current_device_arch
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 WAVE = 64
@@ -79,7 +78,7 @@ def _c(b: IRBuilder, value: int) -> Value:
 
 def _guarded(b: IRBuilder, origin: Value, length: int) -> Value:
     """The marker the tile guard emits: ``0 <= origin < length``, checked by the guard."""
-    return b._assume_range(origin, lo=0, hi=length)
+    return b._assume_range(origin, ge=0, lt=length)
 
 
 def _ops(b: IRBuilder):
@@ -451,9 +450,9 @@ def _stated(b: IRBuilder, name: str, **facts) -> Value:
 @pytest.mark.parametrize(
     "parts, aligned",
     [
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 128},), True),
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 256, "residue": 128},) * 2, True),
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 64},), False),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 128},), True),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 256, "residue": 128},) * 2, True),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 64},), False),
     ],
 )
 def test_a_uniform_side_aligned_to_the_inner_length_emits_no_scalar_remainder(
@@ -888,7 +887,9 @@ GOLDEN_CASES = {
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_emitted_ir_text_matches_its_reviewed_golden(case):
     b, _ = GOLDEN_CASES[case]()
-    assert print_ir(b.kernel) + "\n" == (GOLDEN_DIR / f"emit_{case}.txt").read_text()
+    assert print_ir(b.kernel) + "\n" == (GOLDEN_DIR / f"emit_{case}.txt").read_text(
+        encoding="utf-8"
+    )
 
 
 def _store_parts(b: IRBuilder, addresses: tuple[tt.ElementAddress, ...]) -> int:
@@ -962,8 +963,9 @@ def test_an_unguarded_block_origin_into_an_unmerge_raises_the_dividend_message()
     with _raises(
         ValueError,
         "unmerge of 'm' needs its dividend in [0, 2^31) for magic division, but its range is "
-        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)",
+        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state "
+        "its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the "
+        "GPU (b.gpu_checked_value(v, ge=0, le=...))",
     ):
         emit_addresses(b, graph, tensor, [(m, 0)])
     b = _builder()
@@ -1044,8 +1046,9 @@ def test_every_malformed_access_is_refused_before_anything_is_emitted():
 # --- GPU: each lane's parts against the golden ----------------------------------------------------
 
 
-def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
-    """Run a kernel whose lanes store each access's parts; return ``(addresses, sums)`` where
+def _lane_addresses(arch: str, build, n_blocks: int, params: dict[str, int]):
+    """Run a kernel compiled for ``arch`` (the ``any_gpu`` fixture's value) whose lanes store
+    each access's parts; return ``(addresses, sums)`` where
     ``sums[block][tid][i]`` is access ``i``'s address that lane computed (its parts summed on
     the host in Python integers, plus the constant)."""
     import numpy as np
@@ -1066,7 +1069,7 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
         b.param(name, I32)
     addresses = build(b)
     slots = _store_parts(b, addresses)
-    artifact = compile_kernel(b.kernel, arch=current_device_arch())
+    artifact = compile_kernel(b.kernel, arch=arch)
     signature = SignatureBuilder()
     for name in params:
         signature = signature.scalar(name, "i32")
@@ -1101,10 +1104,9 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
     return addresses, sums
 
 
-def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
+def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile(any_gpu: str):
     """Block 0 is the tile at the image corner (negative halo constants, origin 0); blocks 1
     and 2 are interior tiles."""
-    current_device_arch()
     graph, tensor = _conv(2, 6, 6, 3)
     constants = (0, 1, 26)
 
@@ -1116,15 +1118,16 @@ def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
         ]
         return emit_addresses(b, graph, tensor, accesses)
 
-    _, sums = _lane_addresses(build, 3, {})
+    _, sums = _lane_addresses(any_gpu, build, 3, {})
     for blk, t in itertools.product(range(3), range(WAVE)):
         m, k = blk * 16 + t // 4, (t % 4) * 8
         for i, c in enumerate(constants):
             assert sums[blk][t][i] == transform_address_of(graph, tensor, (m, k + c))
 
 
-def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term():
-    current_device_arch()
+def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term(
+    any_gpu: str,
+):
     rows, cols = 1 << 20, 4096
     tensor = TensorDesc((rows, cols), (cols, 1), F16)
     graph = identity_graph((rows, cols))
@@ -1139,7 +1142,7 @@ def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term()
         )
         return emit_addresses(b, graph, tensor, [(row, col)])
 
-    (address,), sums = _lane_addresses(build, 2, {"row0": start})
+    (address,), sums = _lane_addresses(any_gpu, build, 2, {"row0": start})
     assert address.uniform[0].value.type == I64
     for blk, t in itertools.product(range(2), range(WAVE)):
         coords = (start + t // 4, blk * 32 + (t % 4) * 8)
@@ -1147,11 +1150,12 @@ def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term()
         assert expected >= 2**31 and sums[blk][t][0] == expected
 
 
-def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_one_image():
+def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_one_image(
+    any_gpu: str,
+):
     """The input holds more than 2^31 elements but one image far fewer: only n's quotient
     reaches a uniform term, and the per-lane part stays below one image plus the carry.
     """
-    current_device_arch()
     n, h, w, c = 131080, 16, 16, 64
     y_len = x_len = 3
     graph, tensor = _conv(n, h, w, c, y=y_len, x=x_len)
@@ -1168,7 +1172,7 @@ def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_o
         return emit_addresses(b, graph, tensor, accesses)
 
     m0 = m_length - 32
-    addresses, sums = _lane_addresses(build, 2, {"m0": m0})
+    addresses, sums = _lane_addresses(any_gpu, build, 2, {"m0": m0})
     # The bound re-derived from the pieces: n's per-lane part is at most the carry 1, ho and wo
     # at most H - 1 and W - 1 (inner pieces), y at most its carry 1, x at most X - 1 and c at
     # most C - 1; each times its stride.

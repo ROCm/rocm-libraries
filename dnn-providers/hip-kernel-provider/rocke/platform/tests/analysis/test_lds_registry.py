@@ -22,7 +22,17 @@ def test_registry_selects_explicit_profile(target):
 
 
 @pytest.mark.parametrize(
-    "target", ["gfx9999", "GFX90A", " gfx90a ", "GFX942", " gfx942 ", ""]
+    "target",
+    [
+        "gfx9999",
+        "GFX90A",
+        " gfx90a ",
+        "GFX942",
+        " gfx942 ",
+        "GFX950",
+        " gfx950 ",
+        "",
+    ],
 )
 def test_registry_rejects_unknown_targets_without_fallback(target):
     with pytest.raises(UnsupportedLdsTargetError, match="unsupported LDS target"):

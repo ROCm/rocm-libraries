@@ -1,19 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// GPU reference SDPA forward for ragged tensors (RFC-0014: packed BSHD + ragged_offset).
-// Compiled via HipRTC with -DQ_TYPE, -DK_TYPE, -DV_TYPE, -DO_TYPE and -DCOMPUTE_TYPE.
+// GPU reference SDPA forward for ragged tensors (RFC-0014: ragged_offset origins + per-batch
+// lengths). Compiled via HipRTC with -DQ_TYPE, -DK_TYPE, -DV_TYPE, -DO_TYPE and -DCOMPUTE_TYPE.
 //
-// Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
+// Tensors are logical [B, H, S, D] with arbitrary non-aliasing strides:
 // q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
-// raggedOffsetQ/raggedOffsetKv are cumulative offsets; times their multiplier they are element
-// offsets, and dividing by the seq stride gives token boundaries. One thread per output element
-// (tokenGlobalQ, h, dv). Each thread finds its batch and uses that batch's own seqQ/seqKv for
-// the key loop and mask alignment.
+// Each of Q, K, V, O (and a ragged LSE) has its own offset table, so batch b of each tensor
+// starts at its own origin; RaggedBatchMapping.hpp gives the origin and live row count per
+// (tensor, batch). One thread per output element (b, sq, h, dv); threads past the batch's
+// query length exit. Each thread uses its batch's own seqQ/seqKv for the key loop and mask
+// alignment.
 // Numerics match GpuRefSdpaFwd.cpp.
 
 #include "GpuRefSdpaArgs.h"
 #include "GpuRefTypes.h"
+#include "RaggedBatchMapping.hpp"
 
 using namespace gpu_ref;
 
@@ -52,62 +54,64 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 #endif
 }
 
-// Per-batch Q and K/V token ranges. All per-batch addressing goes through the helpers below,
-// so paged KV only has to add seq_len_kv and a page-table lookup here.
+// Per-batch Q and K/V rows. All per-batch addressing goes through the helpers below, so
+// paged KV only has to add a page-table lookup here.
 struct BatchRange
 {
     long long b;
-    long long qBase; // first Q token of the batch (global token index)
-    long long seqQ;
-    long long kvBase; // first K/V token of the batch
-    long long seqKv;
+    hipdnn_gpu_ref::RaggedBatchRows q;
+    hipdnn_gpu_ref::RaggedBatchRows k;
+    hipdnn_gpu_ref::RaggedBatchRows v;
+    hipdnn_gpu_ref::RaggedBatchRows o;
 };
-
-// Token boundary i of an offset table: element offset (stored * multiplier) / seq stride.
-__device__ inline long long
-    tokenAt(const int* offsets, long long i, long long multiplier, long long seqStride)
-{
-    return static_cast<long long>(offsets[i]) * multiplier / seqStride;
-}
-
-__device__ inline long long qTokenAt(const SdpaRaggedFwdArgs& args, long long i)
-{
-    return tokenAt(args.raggedOffsetQ, i, args.offsetMultiplierQ, args.seqStrideQ);
-}
-
-__device__ inline long long kvTokenAt(const SdpaRaggedFwdArgs& args, long long i)
-{
-    return tokenAt(args.raggedOffsetKv, i, args.offsetMultiplierKv, args.seqStrideKv);
-}
-
-// Batch that owns a global Q token. A linear scan is fine for a reference. Empty batches own
-// no tokens, so they are never returned.
-__device__ inline long long findBatch(const SdpaRaggedFwdArgs& args, long long tokenGlobalQ)
-{
-    long long b = 0;
-    while(b + 1 < args.batch && tokenGlobalQ >= qTokenAt(args, b + 1))
-    {
-        ++b;
-    }
-    return b;
-}
 
 __device__ inline BatchRange batchRange(const SdpaRaggedFwdArgs& args, long long b)
 {
-    const long long qBase = qTokenAt(args, b);
-    const long long kvBase = kvTokenAt(args, b);
-    return {b, qBase, qTokenAt(args, b + 1) - qBase, kvBase, kvTokenAt(args, b + 1) - kvBase};
+    using hipdnn_gpu_ref::raggedBatchRows;
+    return {b,
+            raggedBatchRows(args.raggedOffsetQ,
+                            args.offsetStrideQ,
+                            args.seqLenQ,
+                            args.seqLenQStride,
+                            b,
+                            args.offsetMultiplierQ,
+                            args.qStr.s[2],
+                            args.seqMaxQ),
+            raggedBatchRows(args.raggedOffsetK,
+                            args.offsetStrideK,
+                            args.seqLenKv,
+                            args.seqLenKvStride,
+                            b,
+                            args.offsetMultiplierK,
+                            args.kStr.s[2],
+                            args.seqMaxKv),
+            raggedBatchRows(args.raggedOffsetV,
+                            args.offsetStrideV,
+                            args.seqLenKv,
+                            args.seqLenKvStride,
+                            b,
+                            args.offsetMultiplierV,
+                            args.vStr.s[2],
+                            args.seqMaxKv),
+            raggedBatchRows(args.raggedOffsetO,
+                            args.offsetStrideO,
+                            args.seqLenQ,
+                            args.seqLenQStride,
+                            b,
+                            args.offsetMultiplierO,
+                            args.oStr.s[2],
+                            args.seqMaxQ)};
 }
 
 // Element offset of key/value row skv (batch-relative) in the K and V buffers.
 __device__ inline long long kRow(const SdpaRaggedFwdArgs& args, const BatchRange& r, long long skv)
 {
-    return (r.kvBase + skv) * args.kStr.s[2];
+    return r.k.origin + skv * args.kStr.s[2];
 }
 
 __device__ inline long long vRow(const SdpaRaggedFwdArgs& args, const BatchRange& r, long long skv)
 {
-    return (r.kvBase + skv) * args.vStr.s[2];
+    return r.v.origin + skv * args.vStr.s[2];
 }
 
 } // namespace
@@ -121,7 +125,7 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
     // LSE is float, [B, H, Sq, 1]. nullptr disables it.
     auto* lse = static_cast<float*>(args.lse);
 
-    long long totalOutputElements = args.totalQ * args.numHeads * args.headDimV;
+    long long totalOutputElements = args.batch * args.seqMaxQ * args.numHeads * args.headDimV;
     long long idx = static_cast<long long>(blockIdx.x) * static_cast<long long>(blockDim.x)
                     + static_cast<long long>(threadIdx.x);
     if(idx >= totalOutputElements)
@@ -129,17 +133,21 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         return;
     }
 
-    // Linear index -> (tokenGlobalQ, h, dv) in the packed [total_q, H, Dv] output.
+    // Linear index -> (b, sq, h, dv).
     long long dv = idx % args.headDimV;
     long long tmp = idx / args.headDimV;
     long long h = tmp % args.numHeads;
-    long long tokenGlobalQ = tmp / args.numHeads;
+    tmp /= args.numHeads;
+    const long long sq = tmp % args.seqMaxQ; // query position within the batch
+    const long long b = tmp / args.seqMaxQ;
 
-    const BatchRange range = batchRange(args, findBatch(args, tokenGlobalQ));
-    const long long b = range.b;
-    const long long seqQ = range.seqQ;
-    const long long seqKv = range.seqKv;
-    const long long sq = tokenGlobalQ - range.qBase; // query position within the batch
+    const BatchRange range = batchRange(args, b);
+    const long long seqQ = range.q.length;
+    const long long seqKv = range.k.length;
+    if(sq >= seqQ)
+    {
+        return; // not a live row of this batch
+    }
 
     // GQA/MQA: K and V head counts are independent.
     long long kvHeadK = h / (args.numHeads / args.numHeadsK);
@@ -175,15 +183,15 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         for(long long d = 0; d < args.headDim; ++d)
         {
             long long qIdx
-                = tokenGlobalQ * args.qStr.s[2] + h * args.qStr.s[1] + d * args.qStr.s[3];
+                = range.q.origin + sq * args.qStr.s[2] + h * args.qStr.s[1] + d * args.qStr.s[3];
             long long kIdx = kRowBase + kvHeadK * args.kStr.s[1] + d * args.kStr.s[3];
             dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
         }
         // Fold in the fp8 Q/K descale.
         COMPUTE_TYPE s = dot * descaleQK * static_cast<COMPUTE_TYPE>(args.scale);
 
-        // Sliding-window mask, aligned per batch, cuDNN semantics: keeps skv in
-        // [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound].
+        // Diagonal band, aligned per batch: keep keys in (sq + off - leftBound, sq + off + rightBound],
+        // so leftBound = L keeps L keys including the diagonal (cuDNN).
         // No additive bias: it is gated off on the ASM v3 path.
         if(args.rightBound >= 0)
         {
@@ -207,6 +215,13 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         return s;
     };
 
+    // Whether the band removes key skv (the rule score() applies). A removed key's V is never
+    // read: 0 * NaN would leak whatever it holds (SEM-027).
+    auto bandRemoves = [&](long long skv) -> bool {
+        return (args.rightBound >= 0 && skv >= sq + 1 + windowOffset + args.rightBound)
+               || (args.leftBound >= 0 && skv <= sq + windowOffset - args.leftBound);
+    };
+
     // Pass 1: row max for a stable softmax.
     COMPUTE_TYPE maxVal = negInf;
     for(long long skv = 0; skv < seqKv; ++skv)
@@ -218,16 +233,23 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         }
     }
 
-    long long oIdx = tokenGlobalQ * args.oStr.s[2] + h * args.oStr.s[1] + dv * args.oStr.s[3];
+    long long oIdx
+        = range.o.origin + sq * args.oStr.s[2] + h * args.oStr.s[1] + dv * args.oStr.s[3];
     O_TYPE* tag = nullptr;
 
     // Only the dv == 0 thread writes LSE, so each (token, h) has one writer. A ragged LSE
-    // starts batch b at element raggedOffsetLse[b] * offsetMultiplierLse, a dense one at
-    // b * lseStr.s[0].
-    const long long lseBatchBase
-        = args.raggedOffsetLse != nullptr
-              ? static_cast<long long>(args.raggedOffsetLse[b]) * args.offsetMultiplierLse
-              : b * args.lseStr.s[0];
+    // starts batch b at its own origin, a dense one at b * lseStr.s[0].
+    const long long lseBatchBase = args.raggedOffsetLse != nullptr
+                                       ? hipdnn_gpu_ref::raggedBatchRows(args.raggedOffsetLse,
+                                                                         args.offsetStrideLse,
+                                                                         args.seqLenQ,
+                                                                         args.seqLenQStride,
+                                                                         b,
+                                                                         args.offsetMultiplierLse,
+                                                                         args.lseStr.s[2],
+                                                                         args.seqMaxQ)
+                                             .origin
+                                       : b * args.lseStr.s[0];
     long long lseIdx = lseBatchBase + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
 
     // Fully masked row, including seqKv == 0: write zero to match CpuFpReferenceSdpa and
@@ -257,6 +279,10 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < seqKv; ++skv)
     {
+        if(bandRemoves(skv))
+        {
+            continue;
+        }
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
         probability = storeSoftmaxProbability(probability);

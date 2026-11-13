@@ -161,7 +161,7 @@ inline std::string requireLaunchString(const hipdnn_plugin_sdk::ingestor::SavedL
 
 /// Refuses the plan when it holds a launch value that is not in @p names.
 inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
-                                    std::initializer_list<std::string_view> names)
+                                    const std::vector<std::string_view>& names)
 {
     for(const auto& entry : inputs.values)
     {
@@ -173,6 +173,13 @@ inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaun
                                                   + inputs.dispatchSymbol + "'");
         }
     }
+}
+
+/// The same check for a value set that is fixed at compile time.
+inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                                    std::initializer_list<std::string_view> names)
+{
+    requireOnlyLaunchValues(inputs, std::vector<std::string_view>(names));
 }
 
 /// Runs the restore checks a pack shares, in order, and loads the saved code on

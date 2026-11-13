@@ -6,14 +6,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
-import sys
 
 import pytest
 
-import rocke
 from rocke.analysis.lds import LdsAccess, LdsPredictionError, predict_lds_conflicts
 from rocke.analysis.lds import opcodes
 from rocke.analysis.lds.model import GroupKind
@@ -21,6 +18,10 @@ from rocke.analysis.lds.profiles import Gfx1201Profile
 from rocke.analysis.lds.registry import UnsupportedLdsTargetError, resolve_profile
 from rocke.analysis.lds.serialization import dumps, loads
 from rocke.assets import dsl_docs_dir
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # Independent, explicit expected memberships rather than the profile's bit rule.
 _ALL = (tuple(range(32)),)
@@ -195,8 +196,7 @@ def test_cli_preserves_wave32_result_and_rejects_broadcast():
             / "scripts"
             / "predict.py"
         )
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(Path(rocke.__file__).resolve().parent.parent)
+    env = rocke_subprocess_env()
     request = {
         "target": "gfx1201",
         "opcode": "ds_load_b96",
@@ -207,7 +207,7 @@ def test_cli_preserves_wave32_result_and_rejects_broadcast():
         ],
     }
     run = subprocess.run(
-        [sys.executable, str(script), "-"],
+        rocke_python_command(script, "-"),
         input=json.dumps(request),
         capture_output=True,
         text=True,
@@ -219,7 +219,7 @@ def test_cli_preserves_wave32_result_and_rejects_broadcast():
     assert result.summary.maximum_multiplicity == 2
     request["accesses"][1]["lds_byte_address"] = 0
     run = subprocess.run(
-        [sys.executable, str(script), "-"],
+        rocke_python_command(script, "-"),
         input=json.dumps(request),
         capture_output=True,
         text=True,

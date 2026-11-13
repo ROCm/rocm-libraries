@@ -50,6 +50,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "DepthU": depthU,
         "_DepthUA": depthU,
         "_DepthUB": depthU,
+        "_ScalePeriodUA": depthU,
+        "_ScalePeriodUB": depthU,
         "MacroTileA": MT0,
         "MacroTileB": MT1,
         "MacroTile0": MT0,

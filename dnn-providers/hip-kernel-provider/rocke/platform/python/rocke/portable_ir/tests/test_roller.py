@@ -442,7 +442,7 @@ class TestRollGemmCShuffle(unittest.TestCase):
     parameterization (the smem buffer shape + sched-group counts scale)."""
 
     @staticmethod
-    def _gemm(tn):
+    def _gemm(tn, arch="gfx950"):
         from rocke.instances.common.gemm_universal import (
             DataSpec,
             TileSpec,
@@ -459,25 +459,29 @@ class TestRollGemmCShuffle(unittest.TestCase):
             wave_size=64,
             block_size=64,
         )
-        return build_universal_gemm(spec, arch="gfx950")
+        return build_universal_gemm(spec, arch=arch)
 
     def test_gemm_cshuffle_rolls(self):
-        r = roll(
-            self._gemm,
-            axis="TN",
-            sample_points=[32, 64],
-            holdout_points=[128, 256],
-            spec_decl=[{"name": "TN", "kind": "int"}],
-        )
-        self.assertTrue(r.ok, r.reason)
         from rocke.portable_ir.src.recording_builder import record_kernel
 
-        for tn in (96, 192):  # unsampled multiples
-            _, con = record_kernel(lambda tn=tn: self._gemm(tn))
-            exp = expand_recipe(r.recipe, {"TN": tn})
-            self.assertTrue(
-                recipes_equiv(exp, con), f"tn={tn}: {equiv_reason(exp, con)}"
-            )
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                r = roll(
+                    lambda tn, arch=arch: self._gemm(tn, arch),
+                    axis="TN",
+                    sample_points=[32, 64],
+                    holdout_points=[128, 256],
+                    spec_decl=[{"name": "TN", "kind": "int"}],
+                )
+                self.assertTrue(r.ok, r.reason)
+                for tn in (96, 192):  # unsampled multiples
+                    _, con = record_kernel(
+                        lambda tn=tn, arch=arch: self._gemm(tn, arch)
+                    )
+                    exp = expand_recipe(r.recipe, {"TN": tn})
+                    self.assertTrue(
+                        recipes_equiv(exp, con), f"tn={tn}: {equiv_reason(exp, con)}"
+                    )
 
 
 class TestLaneAnalysis(unittest.TestCase):
@@ -489,34 +493,38 @@ class TestLaneAnalysis(unittest.TestCase):
         from rocke.portable_ir.src import roller
         from rocke.portable_ir.src.recording_builder import record_kernel
 
-        _, rb = record_kernel(lambda: TestRollGemmCShuffle._gemm(64))
-        sf = next(i for i in rb["program"] if i["op"] == "scf_for")
-        body = sf["body"]
-        labels = roller.lane_label_body(body, body[-1]["in"], 4)
-        # The A-tile chain is shared; each B-tile chain is its own lane; the
-        # side-effecting B stores inherit their lane through LDS memory.
-        by_op = {}
-        for j, instr in enumerate(body):
-            op = instr.get("opcode", "")
-            if op in (
-                "memref.global_load_vN",
-                "tile.smem_store_vN",
-                "tile.smem_load_v4",
-                "tile.mma",
-            ):
-                by_op.setdefault(op, []).append(labels.get(j))
-        # 4 mma -> lanes 0..3
-        self.assertEqual(by_op["tile.mma"], [0, 1, 2, 3])
-        # smem loads: 1 shared (A) + 4 per-lane (B)
-        self.assertEqual(
-            sorted(str(x) for x in by_op["tile.smem_load_v4"]),
-            ["0", "1", "2", "3", "S"],
-        )
-        # B stores (side effects) inherit lanes via the scratchpad edge
-        self.assertEqual(
-            sorted(str(x) for x in by_op["tile.smem_store_vN"]),
-            ["0", "1", "2", "3", "S"],
-        )
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                _, rb = record_kernel(
+                    lambda arch=arch: TestRollGemmCShuffle._gemm(64, arch)
+                )
+                sf = next(i for i in rb["program"] if i["op"] == "scf_for")
+                body = sf["body"]
+                labels = roller.lane_label_body(body, body[-1]["in"], 4)
+                # The A-tile chain is shared; each B-tile chain is its own lane; the
+                # side-effecting B stores inherit their lane through LDS memory.
+                by_op = {}
+                for j, instr in enumerate(body):
+                    op = instr.get("opcode", "")
+                    if op in (
+                        "memref.global_load_vN",
+                        "tile.smem_store_vN",
+                        "tile.smem_load_v4",
+                        "tile.mma",
+                    ):
+                        by_op.setdefault(op, []).append(labels.get(j))
+                # 4 mma -> lanes 0..3
+                self.assertEqual(by_op["tile.mma"], [0, 1, 2, 3])
+                # smem loads: 1 shared (A) + 4 per-lane (B)
+                self.assertEqual(
+                    sorted(str(x) for x in by_op["tile.smem_load_v4"]),
+                    ["0", "1", "2", "3", "S"],
+                )
+                # B stores (side effects) inherit lanes via the scratchpad edge
+                self.assertEqual(
+                    sorted(str(x) for x in by_op["tile.smem_store_vN"]),
+                    ["0", "1", "2", "3", "S"],
+                )
 
 
 class TestRollCoverageTiers(unittest.TestCase):

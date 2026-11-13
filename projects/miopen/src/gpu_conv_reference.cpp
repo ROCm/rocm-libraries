@@ -75,10 +75,10 @@ std::string RefKernelName(const std::string& direction,
 }
 
 // Build compile options for the GPU reference kernel.
-std::string RefCompileOptions(miopenDataType_t data_type)
+std::string RefCompileOptions(const Handle& handle, miopenDataType_t data_type)
 {
     std::ostringstream ss;
-    ss << GetDataTypeKBP(data_type).GenerateFor(kbp::HIP{});
+    ss << GetDataTypeKBP(data_type, handle.GetDeviceName()).GenerateFor(kbp::HIP{});
     ss << " -DNAIVE_CONV_BLOCK_SIZE=" << REF_BLOCK_SIZE;
     return ss.str();
 }
@@ -265,7 +265,7 @@ void GpuConvReference::RunFwd(const Handle& handle,
 
         std::string kernel_name = RefKernelName("fwd", layout_str, data_type, yDesc.GetType());
         std::string kernel_file = "naive_conv_fwd.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         auto in_strides =
             MakeStrideArray<5>(SplitStrideCtoGC(group, xDesc.GetStrides(), G_stride_idx));
@@ -346,7 +346,7 @@ void GpuConvReference::RunFwd(const Handle& handle,
 
         std::string kernel_name = RefKernelName("fwd", layout_str, data_type, yDesc.GetType());
         std::string kernel_file = "naive_conv_fwd.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         auto in_strides =
             MakeStrideArray<6>(SplitStrideCtoGC(group, xDesc.GetStrides(), G_stride_idx));
@@ -467,7 +467,7 @@ void GpuConvReference::RunBwd(const Handle& handle,
 
         std::string kernel_name = RefKernelName("bwd", layout_str, data_type, dxDesc.GetType());
         std::string kernel_file = "naive_conv_bwd.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         // BWD strides: dy is "out", dx is "in" from the kernel's perspective
         auto out_strides =
@@ -539,7 +539,7 @@ void GpuConvReference::RunBwd(const Handle& handle,
 
         std::string kernel_name = RefKernelName("bwd", layout_str, data_type, dxDesc.GetType());
         std::string kernel_file = "naive_conv_bwd.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         auto out_strides =
             MakeStrideArray<6>(SplitStrideCtoGC(group, dyDesc.GetStrides(), G_stride_idx));
@@ -637,7 +637,7 @@ void GpuConvReference::RunWrw(const Handle& handle,
 
         std::string kernel_name = RefKernelName("wrw", layout_str, data_type, dwDesc.GetType());
         std::string kernel_file = "naive_conv_wrw.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         auto in_strides =
             MakeStrideArray<5>(SplitStrideCtoGC(group, xDesc.GetStrides(), G_stride_idx));
@@ -697,7 +697,7 @@ void GpuConvReference::RunWrw(const Handle& handle,
 
         std::string kernel_name = RefKernelName("wrw", layout_str, data_type, dwDesc.GetType());
         std::string kernel_file = "naive_conv_wrw.cpp";
-        std::string comp_opts   = RefCompileOptions(data_type);
+        std::string comp_opts   = RefCompileOptions(handle, data_type);
 
         auto in_strides =
             MakeStrideArray<6>(SplitStrideCtoGC(group, xDesc.GetStrides(), G_stride_idx));

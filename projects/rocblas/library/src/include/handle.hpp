@@ -47,12 +47,6 @@ typedef void* hipblasLtHandle_t;
 // forcing early cleanup
 extern "C" ROCBLAS_EXPORT void rocblas_shutdown();
 
-// Whether rocBLAS can reallocate device memory on demand, at the cost of only
-// allowing one allocation at a time, and at the cost of potential synchronization.
-// If this is 0, then stack-like allocation is allowed, but reallocation on demand
-// does not occur.
-#define ROCBLAS_REALLOC_ON_DEMAND 1
-
 // Round up size to the nearest MIN_CHUNK_SIZE
 constexpr size_t roundup_device_memory_size(size_t size)
 {
@@ -602,10 +596,8 @@ private:
 
     rocblas_status set_stream(hipStream_t new_stream);
 
-#if ROCBLAS_REALLOC_ON_DEMAND
     // Helper for device memory allocator
     bool ROCBLAS_EXPORT device_allocator(size_t size);
-#endif
 
 public:
     hipDeviceProp_t device_properties;
@@ -630,7 +622,6 @@ private:
     Processor getActiveArch();
 
     // Opaque smart allocator class to perform device memory allocations
-    // clang-format off
     class [[nodiscard]] _device_malloc : public rocblas_device_malloc_base
     {
     protected:
@@ -653,16 +644,14 @@ private:
             // arrays. The sizes are rounded up to the next multiple of MIN_CHUNK_SIZE.
             // size contains the total of all sizes at the end of the calculation of offsets.
             size = 0;
-            size_t old;
-            const size_t offsets[] = {(old = size, size += roundup_device_memory_size(sizes), old)...};
+            size_t       old;
+            const size_t offsets[]
+                = {(old = size, size += roundup_device_memory_size(sizes), old)...};
             char* addr = nullptr;
 
-            if(handle->stream_order_alloc &&
-                handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+            if(handle->stream_order_alloc
+               && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
             {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
                 if(!size)
                     return decltype(pointers)(sizeof...(sizes));
 
@@ -670,19 +659,16 @@ private:
                 if(hipStatus != hipSuccess)
                 {
                     success = false;
-                    rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate memory of size : " << size << std::endl;
+                    rocblas_cerr << " rocBLAS internal error: hipMallocAsync() failed to allocate "
+                                    "memory of size : "
+                                 << size << std::endl;
                     return decltype(pointers)(sizeof...(sizes));
                 }
                 addr = static_cast<char*>(dev_mem);
-#endif
             }
             else
             {
-#if ROCBLAS_REALLOC_ON_DEMAND
                 success = handle->device_allocator(size);
-#else
-                success = size <= handle->device_memory_size - handle->device_memory_in_use;
-#endif
                 // If allocation failed, return an array of nullptr's
                 // If total size is 0, return an array of nullptr's, but leave it marked as successful
                 if(!success || !size)
@@ -710,7 +696,6 @@ private:
             , success(true)
             , pointers(allocate_pointers(size_t(sizes)...))
         {
-
         }
 
         // Constructor for allocating count pointers of a certain total size
@@ -721,32 +706,26 @@ private:
             , stream_in_use(handle->stream)
             , success(true)
         {
-            if(handle->stream_order_alloc &&
-                handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+            if(handle->stream_order_alloc
+               && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
             {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
-                bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess ;
+                bool status = hipMallocAsync(&dev_mem, size, stream_in_use) == hipSuccess;
 
-                for(auto i= 0 ; i < count ; i++)
+                for(auto i = 0; i < count; i++)
                     pointers.push_back(status ? dev_mem : nullptr);
-#endif
             }
             else
             {
-#if ROCBLAS_REALLOC_ON_DEMAND
-            success = handle->device_allocator(size);
-#else
-            success = size <= handle->device_memory_size - handle->device_memory_in_use;
-#endif
-            for(auto i= 0 ; i < count ; i++)
-            {    pointers.push_back(success ? static_cast<char*>(handle->device_memory)
-                                         + handle->device_memory_in_use : nullptr);
-            }
+                success = handle->device_allocator(size);
+                for(auto i = 0; i < count; i++)
+                {
+                    pointers.push_back(success ? static_cast<char*>(handle->device_memory)
+                                                     + handle->device_memory_in_use
+                                               : nullptr);
+                }
 
-            if(success)
-                handle->device_memory_in_use += size;
+                if(success)
+                    handle->device_memory_in_use += size;
             }
         }
 
@@ -787,25 +766,24 @@ private:
             // If success == false or size == 0, the destructor is a no-op
             if(success && size)
             {
-                if(handle->stream_order_alloc &&
-                    handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed)
+                if(handle->stream_order_alloc
+                   && handle->device_memory_owner
+                          == rocblas_device_memory_ownership::rocblas_managed)
                 {
-// hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
-// Support for default stream added in hip version 5.3.0
-#if HIP_VERSION >= 50300000
-                        if(dev_mem)
-                        {
+                    if(dev_mem)
+                    {
 
-                            bool status = hipFreeAsync(dev_mem, stream_in_use) == hipSuccess ;
-                            if(!status)
-                            {
-                                rocblas_cerr << " rocBLAS internal error: hipFreeAsync() Failed, "
-                                "device memory could not be released to default memory pool" << std::endl;
-                                rocblas_abort();
-                            }
-                            dev_mem = nullptr;
+                        bool status = hipFreeAsync(dev_mem, stream_in_use) == hipSuccess;
+                        if(!status)
+                        {
+                            rocblas_cerr
+                                << " rocBLAS internal error: hipFreeAsync() Failed, "
+                                   "device memory could not be released to default memory pool"
+                                << std::endl;
+                            rocblas_abort();
                         }
-#endif
+                        dev_mem = nullptr;
+                    }
                 }
                 else
                 {
@@ -813,15 +791,15 @@ private:
                     // it matches the device_memory_in_use when this object was created.
                     if((handle->device_memory_in_use -= size) != prev_device_memory_in_use)
                     {
-                        rocblas_cerr
-                            << "rocBLAS internal error: device_malloc() RAII object not "
-                            "destroyed in LIFO order.\n"
-                            "Objects returned by device_malloc() must be 0-sized, "
-                            "unsuccessfully allocated,\n"
-                            "or destroyed in the reverse order that they are created.\n"
-                            "device_malloc() objects cannot be assigned to unless they are 0-sized\n"
-                            "or they were unsuccessfully allocated previously."
-                            << std::endl;
+                        rocblas_cerr << "rocBLAS internal error: device_malloc() RAII object not "
+                                        "destroyed in LIFO order.\n"
+                                        "Objects returned by device_malloc() must be 0-sized, "
+                                        "unsuccessfully allocated,\n"
+                                        "or destroyed in the reverse order that they are created.\n"
+                                        "device_malloc() objects cannot be assigned to unless they "
+                                        "are 0-sized\n"
+                                        "or they were unsuccessfully allocated previously."
+                                     << std::endl;
                         rocblas_abort();
                     }
                 }
@@ -857,24 +835,20 @@ private:
         }
     };
 
-    // clang-format on
-
     // Allocate workspace for GSU based on the needs.
-    // clang-format off
     class [[nodiscard]] _gsu_malloc_by_size final : public _device_malloc
     {
     public:
         explicit _gsu_malloc_by_size(rocblas_handle handle, size_t requested_Workspace_Size)
-        : _device_malloc(handle, requested_Workspace_Size)
+            : _device_malloc(handle, requested_Workspace_Size)
         {
             handle->gsu_workspace_size = success ? size : 0;
-            handle->gsu_workspace = static_cast<void*>(*this);
+            handle->gsu_workspace      = static_cast<void*>(*this);
         }
 
         _gsu_malloc_by_size(rocblas_handle handle)
-        : _device_malloc(handle, 0)
+            : _device_malloc(handle, 0)
         {
-
         }
 
         ~_gsu_malloc_by_size()
@@ -889,7 +863,6 @@ private:
         // Move constructor allows initialization by rvalues and returns from functions
         _gsu_malloc_by_size(_gsu_malloc_by_size&&) = default;
     };
-    // clang-format on
 
 public:
     // Allocate one or more sizes

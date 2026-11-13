@@ -19,6 +19,7 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
   Architecture: gfx1250
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   #######################################

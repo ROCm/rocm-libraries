@@ -572,6 +572,22 @@ Tests:
   activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
   sparse_b: [true, false]
 
+# Negative test for a zero-sized matrix.
+- name: aux_plan_assign_stream_cleanup
+  category: smoke
+  function:
+    aux_plan_assign: *hpa_half_precision
+  M: 0
+  N: 128
+  K: 128
+  lda: 128
+  ldb: 128
+  ldc: 128
+  ldd: 128
+  transA: N
+  transB: N
+  sparse_b: false
+
 - name: aux_plan_assign
   category: smoke
   function:

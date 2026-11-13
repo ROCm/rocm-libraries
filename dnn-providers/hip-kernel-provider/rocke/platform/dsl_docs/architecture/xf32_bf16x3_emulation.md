@@ -120,4 +120,4 @@ reads the ISA, which must show exactly three `v_mfma_*_bf16` instructions and th
 convert. A differential test shows that every query that predates XF32 answers the same
 with and without the emulated rows. On a gfx950 device, a harness compares the emulated
 atom bit for bit against a hand-written three-MFMA kernel. The byte-identity gate is GREEN
-for every family at llvm20, llvm22, and llvm23.
+for every family at llvm20, llvm22, llvm23, and llvm24.

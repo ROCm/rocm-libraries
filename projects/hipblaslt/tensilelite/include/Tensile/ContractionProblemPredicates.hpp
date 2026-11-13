@@ -31,6 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -40,6 +41,8 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <mutex>
+#include <numeric>
 #include <sstream>
 #include <vector>
 
@@ -1534,6 +1537,213 @@ namespace TensileLite
                 }
             };
 
+            // PrefetchGL2SAddr holds each lane's offset into the GL2 prefetch
+            // footprint in one VGPR, computed in elements before the bpe scaling,
+            // so the element and the byte offset must both fit in 32 bits. MX
+            // scales and TLU metadata step by the whole free size per row, so for a
+            // K-contiguous A or B they can overflow while the data offset fits.
+            struct GL2PrefetchSAddrOffsetLimitCheck
+                : public Predicate_CRTP<GL2PrefetchSAddrOffsetLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GL2PrefetchSAddrCheckPacket value;
+
+                GL2PrefetchSAddrOffsetLimitCheck() = default;
+                GL2PrefetchSAddrOffsetLimitCheck(GL2PrefetchSAddrCheckPacket value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "GL2PrefetchSAddrOffsetLimitCheck";
+                }
+
+                // Last row of the perpendicular extent plus the last coalesced
+                // element. The kernel clamps both extents to the tensor edge along
+                // a free dimension, but not the perpendicular one along K.
+                static size_t maxOffsetElements(TensorDescriptor const& tensor,
+                                                bool                    tlu,
+                                                size_t                  depthU,
+                                                size_t                  clusterMT)
+                {
+                    size_t perp = tlu ? depthU : std::min(clusterMT, tensor.sizes()[1]);
+                    size_t coal = tlu ? std::min(clusterMT, tensor.sizes()[0]) : depthU;
+                    if(perp == 0 || coal == 0)
+                        return 0;
+                    return (perp - 1) * tensor.strides()[1] + (coal - 1);
+                }
+
+                // Scales are stored K-block-major whatever the data layout: a row
+                // holds mxUnit scales for each of the ceil(Size / MXBlockFree)
+                // scale rows, and the tile spans DepthU / MatrixInstK rows. The
+                // coalesced index stops at the cluster's scale rows and the edge.
+                static size_t maxScaleOffsetElements(size_t freeSize,
+                                                     size_t depthU,
+                                                     size_t matrixInstK,
+                                                     size_t mxBlock,
+                                                     size_t mxBlockFree,
+                                                     size_t clusterMT)
+                {
+                    if(mxBlock == 0 || matrixInstK == 0 || freeSize == 0 || clusterMT == 0)
+                        return 0;
+                    size_t perp = depthU / matrixInstK;
+                    if(perp == 0)
+                        return 0;
+                    size_t mxTile = std::max<size_t>(1, mxBlockFree);
+                    size_t mxUnit = std::max<size_t>(1, matrixInstK / mxBlock);
+                    size_t pitch  = (freeSize + mxTile - 1) / mxTile * mxUnit;
+                    // Scale rows one cluster can touch, including a tile that
+                    // starts partway through a row (see mxTdmTileM).
+                    size_t maxPhase = mxTile - std::gcd(clusterMT, mxTile);
+                    size_t cluster  = (maxPhase + clusterMT + mxTile - 1) / mxTile * mxUnit;
+                    size_t coal     = std::min(cluster, pitch - mxUnit + 1);
+                    return (perp - 1) * pitch + (coal - 1);
+                }
+
+                static bool fits32(size_t elements, float elementBytes)
+                {
+                    const uint64_t TWO_POW_32 = 4294967296;
+                    return elements < TWO_POW_32
+                           && multiplyElementSize(elements, elementBytes) < TWO_POW_32;
+                }
+
+                // The kernel walks the sparse operand with the compressed strides.
+                static TensorDescriptor const& tensorA(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 1 ? problem.compressed() : problem.a();
+                }
+
+                static TensorDescriptor const& tensorB(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 2 ? problem.compressed() : problem.b();
+                }
+
+                size_t maxOffsetA(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorA(problem), value.tluA, value.depthUA, value.clusterMT0);
+                }
+
+                size_t maxOffsetB(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorB(problem), value.tluB, value.depthUB, value.clusterMT1);
+                }
+
+                size_t maxOffsetMXSA(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeA(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockA,
+                                                  value.mxBlockFreeA,
+                                                  value.clusterMT0);
+                }
+
+                size_t maxOffsetMXSB(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeB(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockB,
+                                                  value.mxBlockFreeB,
+                                                  value.clusterMT1);
+                }
+
+                bool checksMetadata(ContractionProblemGemm const& problem) const
+                {
+                    return value.metadata && problem.sparse() != 0;
+                }
+
+                size_t maxOffsetMetadata(ContractionProblemGemm const& problem) const
+                {
+                    if(!checksMetadata(problem))
+                        return 0;
+                    return maxOffsetElements(problem.metadata(),
+                                             value.tluMetadata,
+                                             value.depthUMetadata,
+                                             value.clusterMTMetadata);
+                }
+
+                // A problem without scales has no scale tensor; E8M0 is one byte.
+                static float scaleBytes(TensorDescriptor const& scales)
+                {
+                    return scales.dimensions() > 0 ? scales.elementBytes() : 1.0f;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return fits32(maxOffsetA(problem), problem.a().elementBytes())
+                           && fits32(maxOffsetB(problem), problem.b().elementBytes())
+                           && fits32(maxOffsetMXSA(problem), scaleBytes(problem.mxsa()))
+                           && fits32(maxOffsetMXSB(problem), scaleBytes(problem.mxsb()))
+                           && (!checksMetadata(problem)
+                               || fits32(maxOffsetMetadata(problem),
+                                         problem.metadata().elementBytes()));
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(),
+                                       "(TLUA:",
+                                       value.tluA,
+                                       ", TLUB:",
+                                       value.tluB,
+                                       ", DUA:",
+                                       value.depthUA,
+                                       ", DUB:",
+                                       value.depthUB,
+                                       ", ClusterMT0:",
+                                       value.clusterMT0,
+                                       ", ClusterMT1:",
+                                       value.clusterMT1,
+                                       ", DU:",
+                                       value.depthU,
+                                       ", MIK:",
+                                       value.matrixInstK,
+                                       ", MXBlockA:",
+                                       value.mxBlockA,
+                                       ", MXBlockB:",
+                                       value.mxBlockB,
+                                       ", MXBlockFreeA:",
+                                       value.mxBlockFreeA,
+                                       ", MXBlockFreeB:",
+                                       value.mxBlockFreeB,
+                                       ", Metadata:",
+                                       value.metadata,
+                                       ", TLUMetadata:",
+                                       value.tluMetadata,
+                                       ", DUMetadata:",
+                                       value.depthUMetadata,
+                                       ", ClusterMTMetadata:",
+                                       value.clusterMTMetadata,
+                                       ")");
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "A:" << maxOffsetA(problem) << "*" << problem.a().elementBytes()
+                            << "<2^32, B:" << maxOffsetB(problem) << "*"
+                            << problem.b().elementBytes()
+                            << "<2^32, MXSA:" << maxOffsetMXSA(problem) << "*"
+                            << scaleBytes(problem.mxsa())
+                            << "<2^32, MXSB:" << maxOffsetMXSB(problem) << "*"
+                            << scaleBytes(problem.mxsb()) << "<2^32";
+                    if(checksMetadata(problem))
+                        details << ", Metadata:" << maxOffsetMetadata(problem) << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct BufferStoreOffsetLimitCheck
                 : public Predicate_CRTP<BufferStoreOffsetLimitCheck, ContractionProblemGemm>
             {
@@ -2704,8 +2914,9 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    if(problem.useBias() && problem.useScaleAlphaVec()
-                       && problem.useBias() != problem.useScaleAlphaVec())
+                    const int vectorAlphaMode = scaleAlphaVectorMode(problem.useScaleAlphaVec());
+                    if(problem.useBias() && vectorAlphaMode
+                       && problem.useBias() != vectorAlphaMode)
                         return false;
 
                     int factorDim = (problem.useBias() == 1) ? 0
@@ -2879,6 +3090,50 @@ namespace TensileLite
                 }
             };
 
+            // MX scale layout of the solution. The host does not tell formats below
+            // kFirstExactFormat apart, so they match each other; a later format on
+            // either side must equal the other side.
+            struct MXScaleFormatEquals
+                : public Predicate_CRTP<MXScaleFormatEquals, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                static constexpr int kFirstExactFormat = 3;
+
+                int value = 0;
+
+                MXScaleFormatEquals() = default;
+                MXScaleFormatEquals(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXScaleFormatEquals";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(value < kFirstExactFormat && problem.mxScaleFormat() < kFirstExactFormat)
+                        return true;
+                    return problem.mxScaleFormat() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.mxScaleFormat() << " matches sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
             {
                 enum
@@ -2913,8 +3168,7 @@ namespace TensileLite
             };
 
             // value is the solution's MacroTile0.
-            struct FusedA2ATileDivisible
-                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2923,38 +3177,66 @@ namespace TensileLite
                 };
                 int64_t value;
 
-                FusedA2ATileDivisible() = default;
-                FusedA2ATileDivisible(int64_t value)
+                GemmA2AShape() = default;
+                GemmA2AShape(int64_t value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedA2ATileDivisible";
+                    return "GemmA2AShape";
                 }
 
-                bool divisible(ContractionProblemGemm const& problem) const
+                bool fits(ContractionProblemGemm const& problem) const
                 {
                     if(!problem.fusedGemmA2A())
                         return true;
-                    if(value <= 0 || problem.fusedA2AWorld() == 0)
-                        return false;
+                    const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
-                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
-                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                    if(value <= 0 || world == 0 || am <= 0)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    const int64_t m       = problem.freeSizeA(0);
+                    const auto&   d       = problem.d();
+                    if(d.elementBytes() != 2)
+                        return false;
+                    const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
+                    const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
+                    return am % (value * world) == 0 && m % value == 0 && am <= m
+                           && ((am / world) >> 3) < (1 << 14) && mStride == 1 && ldd % 8 == 0
+                           && (ldd >> 3) < (1 << 19);
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return divisible(problem);
+                    return fits(problem);
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", divisible(problem), "==", "sol", true);
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    if(problem.fusedGemmA2A())
+                    {
+                        const auto& d = problem.d();
+                        details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
+                                << " dBytes=" << d.elementBytes() << " m=" << problem.freeSizeA(0)
+                                << " MT0=" << value
+                                << " mStride=" << d.strides()[problem.freeIndices()[0].d]
+                                << " ldd=" << d.strides()[problem.freeIndices()[1].d];
+                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                            details << " batch=" << problem.batchSize(i);
+                        details
+                            << " (need dBytes == 2, am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
+                               " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
+                               " ldd>>3 < 2^19, batch == 1)";
+                    }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -3045,10 +3327,26 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                // value = [XCC, XCCG]
-                std::array<int, 2> value;
-                size_t             cuCount;
-                AMDGPU::Processor  processor;
+                // value = [XCC, XCCG]. This is the only serialized field.
+                //
+                // cuCount and processor are the device the predicate is evaluated
+                // against. They are not written. They are captured on the first
+                // evaluation that reads them, not when the predicate is constructed.
+                // Loading or writing a library parses predicates and does not
+                // evaluate them, so that path does not need a GPU. Evaluating this
+                // predicate does, unless value[0] is -1, in which case the check
+                // is skipped and no device is queried.
+                //
+                // The library object is shared by every handle. CachingLibrary
+                // evaluates predicates outside its lock, so two threads can enter
+                // here together. call_once runs the query on one thread and
+                // publishes cuCount and processor to the others. A plain flag
+                // let a second thread observe the flag before cuCount was stored
+                // and then accept the kernel, because 0 % XCC == 0.
+                std::array<int, 2>        value{};
+                mutable size_t            cuCount = 0;
+                mutable AMDGPU::Processor processor{};
+                mutable std::once_flag    deviceQueryOnce;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3068,34 +3366,23 @@ namespace TensileLite
                     return problem.getParams().fallbackStatus() || isMI300A();
                 }
 
-                WorkgroupMappingXCCCheck()
-                {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
-                }
-                WorkgroupMappingXCCCheck(std::array<int, 2> value)
+                WorkgroupMappingXCCCheck() = default;
+                explicit WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
                 /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
+                /// Completes deviceQueryOnce so a later evaluation does not replace
+                /// the injected count with the machine's GPU.
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
                     , cuCount(cuCountForTest)
                     , processor(AMDGPU::Processor::gfx942)
                 {
+                    std::call_once(deviceQueryOnce, [] {});
                 }
 
                 static std::string Type()
@@ -3103,12 +3390,43 @@ namespace TensileLite
                     return "WorkgroupMappingXCCCheck";
                 }
 
+            private:
+                /// Current device, queried only when an evaluation needs it.
+                /// value[0] == -1 never reaches here.
+                void captureCuCount() const
+                {
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    Hardware const& hardware = *pHardware;
+                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
+                    cuCount   = pAMDGPU->computeUnitCount;
+                    processor = pAMDGPU->processor;
+                }
+
+                void ensureDeviceState() const
+                {
+                    std::call_once(deviceQueryOnce, [this] { captureCuCount(); });
+                }
+
+                /// A count of 0 is not a device this check can accept. 0 % XCC == 0,
+                /// so running the modulo would select a kernel the predicate is
+                /// there to reject. The caller skips the solution instead.
+                bool deviceHasNoComputeUnits() const
+                {
+                    return cuCount == 0;
+                }
+
+            public:
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     // If XCC == -1, we automatically set it to the number XCCs.
-                    // In this case, no predicate is needed.
+                    // In this case, no predicate is needed and no device is read.
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                        return false;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
@@ -3123,6 +3441,12 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                    {
+                        PredicateDebugger::printRow(stream, false, Type(), "cuCount == 0");
+                        return false;
+                    }
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,

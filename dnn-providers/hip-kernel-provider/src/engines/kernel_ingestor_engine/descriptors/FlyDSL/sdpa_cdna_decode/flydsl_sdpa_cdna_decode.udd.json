@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a0b78a8b-ac21-5251-a05f-25aed50be1a7",
+  "name": "flydsl sdpa_cdna_decode dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_cdna_decode.dispatch"
+}

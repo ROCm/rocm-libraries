@@ -304,6 +304,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                                   const tensor<ScaleDataType>& bnBias,
                                   tensor<RefDataType>& dscale,
                                   tensor<RefDataType>& dbias,
+                                  double epsilon,
                                   const tensor<AccDataType>& savedMean,
                                   const tensor<AccDataType>& savedInvVar,
                                   miopenActivationMode_t activ_mode,
@@ -349,7 +350,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                 variance_accum /= nhw;
                 variance_accum += (-mean_accum * mean_accum);
                 mean   = mean_accum;
-                invVar = 1.0 / sqrt(variance_accum);
+                invVar = 1.0 / sqrt(variance_accum + epsilon);
             }
             for(int row = 0; row < height; row++)
             { // via rows
@@ -417,7 +418,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
             mean_accum /= nhw;
             variance_accum /= nhw;
             variance_accum += (-mean_accum * mean_accum);
-            inv_Var = 1.0 / sqrt(variance_accum);
+            inv_Var = 1.0 / sqrt(variance_accum + epsilon);
 
             mean   = mean_accum;
             invVar = inv_Var;

@@ -95,6 +95,8 @@ namespace TensileLite
                      Base::template Pair<
                          Predicates::Contraction::BufferLoadOffsetLimitCheck_Beta>(),
                      Base::template Pair<Predicates::Contraction::BufferStoreOffsetLimitCheck>(),
+                     Base::template Pair<
+                         Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupNumberCheck>(),
                      Base::template Pair<Predicates::Contraction::PersistentKernelCheck>(),
                      Base::template Pair<Predicates::Contraction::GlobalSplitUCheckMinK>(),
@@ -132,7 +134,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
                      Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
-                     Base::template Pair<Predicates::Contraction::FusedA2ATileDivisible>(),
+                     Base::template Pair<Predicates::Contraction::GemmA2AShape>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
@@ -141,7 +143,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
-                     Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
+                     Base::template Pair<Predicates::Contraction::Int4EncodingA>(),
+                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -370,6 +373,13 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck,
+                                       IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::WorkgroupNumberCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::WorkgroupNumberCheck, IO>
         {
@@ -587,14 +597,20 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
             : public AutoMappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
         {
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
-            : public AutoMappingTraits<Predicates::Contraction::FusedA2ATileDivisible, IO>
+        struct MappingTraits<Predicates::Contraction::GemmA2AShape, IO>
+            : public AutoMappingTraits<Predicates::Contraction::GemmA2AShape, IO>
         {
         };
 

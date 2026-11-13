@@ -727,7 +727,7 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
 /// @brief Publishes the device and graph features fixed by (graph, device) alone.
 ///
 /// Must not read the engine configuration: `sort_kernel_catalog` rankings are cached per
-/// (graph, device, engine version, ranking metric). Work features, absent (never 0) when
+/// (graph, device, engine version, ranking metric, slot). Work features, absent (never 0) when
 /// unknown, and all graph-level ones absent when the graph allows execute-time shapes:
 ///   graph.nodes[i].flops         detail::logicalFlops
 ///   graph.flops                  sum over all nodes, virtual intermediates included

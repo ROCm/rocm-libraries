@@ -300,7 +300,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
-    // Compatible optional input tensors; attention scale is set as a scalar below.
+    // Compatible optional input tensors; attention scale is set as a scalar below. The page
+    // tables make K and V paged containers, which max_seq_len_kv requires.
 
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
@@ -313,15 +314,29 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID)
         .set_name("SEQ_LEN_Q")
         .set_data_type(DataType::INT32);
-    seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS))
-        .set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+    seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
+        .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
     auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID)
         .set_name("SEQ_LEN_KV")
         .set_data_type(DataType::INT32);
-    seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS))
-        .set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+    seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
+        .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
+
+    auto pageTableK = std::make_shared<TensorAttributes>();
+    pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID)
+        .set_name("PAGE_TABLE_K")
+        .set_data_type(DataType::INT32);
+    pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
+        .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
+
+    auto pageTableV = std::make_shared<TensorAttributes>();
+    pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID)
+        .set_name("PAGE_TABLE_V")
+        .set_data_type(DataType::INT32);
+    pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
+        .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
     auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED");
@@ -344,6 +359,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     sdpaNode->attributes.set_bias(attnMask)
         .set_seq_len_q(seqLenQ)
         .set_seq_len_kv(seqLenKv)
+        .set_paged_attention_k_table(pageTableK)
+        .set_paged_attention_v_table(pageTableV)
         .set_dropout(0.1f, seed, offset)
         .set_dropout_mask(dropoutMask)
         .set_dropout_scale(dropoutScale)
@@ -353,7 +370,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
         .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
-        .set_paged_attention_max_seq_len_kv(256)
+        .set_paged_attention_max_seq_len_kv(K_SDPA_PAGED_MAX_SEQ_LEN_KV)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
         .set_mma_core_mode(DataType::HALF);
     sdpaNode->attributes.causal_mask = true;
@@ -395,15 +412,29 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     EXPECT_EQ(attrs.get_seq_len_q()->get_uid(), K_SDPA_TENSOR_SEQ_LEN_Q_UID);
     EXPECT_EQ(attrs.get_seq_len_q()->get_name(), "SEQ_LEN_Q");
     EXPECT_EQ(attrs.get_seq_len_q()->get_data_type(), DataType::INT32);
-    EXPECT_EQ(attrs.get_seq_len_q()->get_dim(), toVec(K_SDPA_TENSOR_SCALAR_DIMS));
-    EXPECT_EQ(attrs.get_seq_len_q()->get_stride(), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+    EXPECT_EQ(attrs.get_seq_len_q()->get_dim(), toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
+    EXPECT_EQ(attrs.get_seq_len_q()->get_stride(), toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
     ASSERT_NE(attrs.get_seq_len_kv(), nullptr);
     EXPECT_EQ(attrs.get_seq_len_kv()->get_uid(), K_SDPA_TENSOR_SEQ_LEN_KV_UID);
     EXPECT_EQ(attrs.get_seq_len_kv()->get_name(), "SEQ_LEN_KV");
     EXPECT_EQ(attrs.get_seq_len_kv()->get_data_type(), DataType::INT32);
-    EXPECT_EQ(attrs.get_seq_len_kv()->get_dim(), toVec(K_SDPA_TENSOR_SCALAR_DIMS));
-    EXPECT_EQ(attrs.get_seq_len_kv()->get_stride(), toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+    EXPECT_EQ(attrs.get_seq_len_kv()->get_dim(), toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS));
+    EXPECT_EQ(attrs.get_seq_len_kv()->get_stride(), toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
+
+    ASSERT_NE(attrs.get_page_table_k(), nullptr);
+    EXPECT_EQ(attrs.get_page_table_k()->get_uid(), K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    EXPECT_EQ(attrs.get_page_table_k()->get_name(), "PAGE_TABLE_K");
+    EXPECT_EQ(attrs.get_page_table_k()->get_data_type(), DataType::INT32);
+    EXPECT_EQ(attrs.get_page_table_k()->get_dim(), toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));
+    EXPECT_EQ(attrs.get_page_table_k()->get_stride(), toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
+
+    ASSERT_NE(attrs.get_page_table_v(), nullptr);
+    EXPECT_EQ(attrs.get_page_table_v()->get_uid(), K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    EXPECT_EQ(attrs.get_page_table_v()->get_name(), "PAGE_TABLE_V");
+    EXPECT_EQ(attrs.get_page_table_v()->get_data_type(), DataType::INT32);
+    EXPECT_EQ(attrs.get_page_table_v()->get_dim(), toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS));
+    EXPECT_EQ(attrs.get_page_table_v()->get_stride(), toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
     ASSERT_NE(attrs.get_seed(), nullptr);
     EXPECT_EQ(attrs.get_seed()->get_uid(), K_SDPA_TENSOR_SEED_UID);
@@ -453,7 +484,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     ASSERT_TRUE(attrs.right_bound.has_value());
     EXPECT_EQ(attrs.right_bound.value(), 1);
     ASSERT_TRUE(attrs.max_seq_len_kv.has_value());
-    EXPECT_EQ(attrs.max_seq_len_kv.value(), 256);
+    EXPECT_EQ(attrs.max_seq_len_kv.value(), K_SDPA_PAGED_MAX_SEQ_LEN_KV);
 
     // Diagonal alignment (direct member)
     EXPECT_EQ(attrs.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);

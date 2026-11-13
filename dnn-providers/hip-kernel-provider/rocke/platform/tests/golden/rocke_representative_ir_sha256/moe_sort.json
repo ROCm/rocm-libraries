@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -110,6 +108,59 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 3026,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "ca098934f5d5bb42747a95934aa821a693360b6ed1b57ffea2db8723855cdce2",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2954,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "afcd65e526827b62538fe963e47f0cf11908ad079e3a810fe2d7098767040824",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",

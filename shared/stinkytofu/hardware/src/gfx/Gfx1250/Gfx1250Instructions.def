@@ -399,6 +399,10 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {D0, sdst, sdst, 32, RW}, {S0, ssrc0, ssrc, 32} },
     SCmovB64Inst, "s_cmov_b64", .flags = {ImplicitReadSCC}, .logical = "SCMovB64",
         .operand_fields = { {D0, sdst, sdst, 64, RW}, {S0, ssrc0, ssrc, 64} },
+    SBitset0B32Inst, "s_bitset0_b32",
+        .operand_fields = { {D0, sdst, sdst, 32, RW}, {S0, ssrc0, ssrc, 32} },
+    SBitset1B32Inst, "s_bitset1_b32",
+        .operand_fields = { {D0, sdst, sdst, 32, RW}, {S0, ssrc0, ssrc, 32} },
     SMovB32Inst, "s_mov_b32", .logical = {"SMovB32", "SSetMask"},
     SMovB64Inst, "s_mov_b64", .logical = "SMovB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64} },
@@ -414,6 +418,8 @@ DEF_BATCH(.format = SOP1,
 
 // Scalar ALU — SOPP
 DEF_T(SEndpgmInst, "s_endpgm", .format = SOPP, .flags = {HasSideEffect}, .logical = "SEndpgm")
+DEF_T(SCodeEndInst, "s_code_end", .format = SOPP, .flags = {HasSideEffect})
+DEF_T(SWaitIdleInst, "s_wait_idle", .format = SOPP, .flags = {HasSideEffect})
 DEF_T(STtraceDataInst, "s_ttracedata", .format = SOPP, .flags = {HasSideEffect}, .logical = "STtraceData")
 DEF_T(SNopInst, "s_nop", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SNop")
 DEF_T(SSetprioInst, "s_setprio", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SSetPrior")
@@ -448,10 +454,12 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
 // so reordering it affects performance but not correctness.
 // Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
+// vaddr is declared 32-bit (saddr form): a 64-bit declaration makes the verifier reject
+// that form, and the width cannot depend on saddr, so the null-saddr width goes unchecked.
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
     .logical = "GlobalPrefetchB8",
-    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
 // FLAT-addressed form of the same prefetch: identical operands and semantics, including
 // both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
@@ -496,6 +504,8 @@ DEF_BATCH(.format = SOP2,
     SAddF32Inst, "s_add_f32", .logical = "SAddF32",
     SAddI32Inst, "s_add_i32", .flags = {ImplicitWriteSCC}, .logical = "SAddI32",
     SAddU32Inst, "s_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SAddU32",
+    SAddCoI32Inst, "s_add_co_i32", .flags = {ImplicitWriteSCC},
+    SAddCoU32Inst, "s_add_co_u32", .flags = {ImplicitWriteSCC},
 
     // Canonical AMD ISA mnemonic is s_add_nc_u64; s_add_u64 is the
     // historical alias and is still emitted by some assemblers.
@@ -505,6 +515,7 @@ DEF_BATCH(.format = SOP2,
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
 
     SAddcU32Inst, "s_addc_u32", .flags = {ImplicitReadSCC, ImplicitWriteSCC}, .logical = "SAddCU32",
+    SAddCoCIU32Inst, "s_add_co_ci_u32", .flags = {ImplicitReadSCC, ImplicitWriteSCC},
     SAndB32Inst, "s_and_b32", .flags = {ImplicitWriteSCC}, .logical = "SAndB32",
     SAndB64Inst, "s_and_b64", .flags = {ImplicitWriteSCC}, .logical = "SAndB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
@@ -553,6 +564,7 @@ DEF_BATCH(.format = SOP2,
     SOrB64Inst, "s_or_b64", .flags = {ImplicitWriteSCC}, .logical = "SOrB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SSubI32Inst, "s_sub_i32", .flags = {ImplicitWriteSCC}, .logical = "SSubI32",
+    SSubCoI32Inst, "s_sub_co_i32", .flags = {ImplicitWriteSCC},
     SSubU32Inst, "s_sub_u32", .flags = {ImplicitWriteSCC}, .logical = "SSubU32",
     SSubU64Inst, "s_sub_u64", .logical = "SSubU64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
@@ -565,6 +577,10 @@ DEF_BATCH(.format = SOP2,
 // Scalar ALU — SOPK (continued)
 DEF_T(SMovkI32Inst, "s_movk_i32", .format = SOPK, .logical = "SMovkI32",
     .operand_fields = { {D0, sdst, sdst, 32}, {S0, simm16, simm16, 16} })
+DEF_T(SAddkCoI32Inst, "s_addk_co_i32", .format = SOPK, .flags = {ImplicitWriteSCC},
+    .operand_fields = { {D0, sdst, sdst, 32, RW}, {S0, simm16, simm16, 16} })
+DEF_T(SVersionInst, "s_version", .format = SOPK, .flags = {HasSideEffect},
+    .operand_fields = { {S0, simm16, simm16, 16} })
 
 DEF_BATCH(.format = SMRD_LOAD,
     SLoadB32Inst, "s_load_b32", .logical = "SLoadB32",
@@ -650,6 +666,8 @@ DEF_BATCH(.format = SOPC,
 
 // Tensor Operations
 DEF_T(TensorLoadToLdsInst, "tensor_load_to_lds", .format = TENSOR, .logical = "TensorLoadToLds")
+DEF_T(TensorStoreFromLdsInst, "tensor_store_from_lds", .format = TENSOR_STORE,
+    .flags = {HasSideEffect})
 
 // Vector ALU — dual VOP2/VOP3 encoding (primary = VOP2, promoted = VOP3)
 DEF_BATCH(.format = VOP2_COMMUTATIVE,
@@ -718,6 +736,7 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
     VMaxF16Inst, "v_max_f16", .logical = "VMaxF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VMaxF32Inst, "v_max_f32", .logical = "VMaxF32",
+    VMaxNumF32Inst, "v_max_num_f32",
     VMaxF64Inst, "v_max_f64", .logical = "VMaxF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VMaxI32Inst, "v_max_i32", .logical = "VMaxI32",
@@ -739,7 +758,7 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
 )
 
 // Vector ALU — VOP1 (no operands)
-DEF_T(VNopInst, "v_nop", .format = VOP1, .flags = {HasSideEffect}, .logical = "VNop")
+DEF_T(VNopInst, "v_nop", .format = VOP1_NO_OPERANDS, .flags = {HasSideEffect}, .logical = "VNop")
 
 // Vector ALU — VOP2 non-commutative (dual VOP2/VOP3 encoding)
 DEF_BATCH(.format = VOP2,
@@ -828,6 +847,7 @@ DEF_BATCH(.format = VOP3_2SRC,
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VLshrrevB64Inst, "v_lshrrev_b64", .logical = "VLShiftRightB64",
         .operand_fields = { {D0, .size=64}, {S1, .size=64} },
+    VSubNcI32Inst, "v_sub_nc_i32",
 )
 
 // Vector ALU — VOP1 (dual VOP1/VOP3 encoding)
@@ -896,6 +916,7 @@ DEF_BATCH(.format = VOP2,
     // Dual VOP2/VOP3 encoding: allow src1 to be generic src in promoted VOP3 form.
     VSubNcU32Inst, "v_sub_nc_u32", .logical = "VSubU32",
         .operand_fields = { {S1, .type=src} },
+    VSubrevNcU32Inst, "v_subrev_nc_u32",
     VSubU32Inst, "v_sub_u32", .logical = "VSubU32",
         .operand_fields = { {S1, .type=src} },
 )
@@ -920,6 +941,14 @@ DEF_T(VSubI32Inst, "v_sub_i32", .format = VOP3, .logical = "VSubI32",
 
 // Vector ALU — VOP3 only (non-commutative)
 DEF_BATCH(.format = VOP3,
+    VMax3NumF32Inst, "v_max3_num_f32",
+    VPermlanex16B32Inst, "v_permlanex16_b32",
+        .operand_fields = {
+            {D0, vdst, vgpr, 32},
+            {S0, src0, vgpr, 32},
+            {S1, src1, ssrc, 32},
+            {S2, src2, ssrc, 32},
+        },
     VMed3F32Inst, "v_med3_f32", .logical = "VMed3F32",
     VMaximumMinimumF32Inst, "v_maximumminimum_f32", .logical = "VMaximumMinimumF32",
     VMed3I32Inst, "v_med3_i32", .logical = "VMed3I32",

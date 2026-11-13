@@ -167,11 +167,11 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(miopen::config::layout_nhwc)
         {
-            if constexpr(config::c % 2 == 0)
+            if constexpr((config::c / config::vec_size_x) % 2 == 0)
             {
                 // xgrp_sz values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_sz is that they
-                // must be even.
+                // odd threads - at odd rows. The only restriction for C / vec_size_x and xgrp_sz is
+                // that they must be even.
                 return zgroupoffset * (config::c / config::vec_size_x * config::hw) +
                        (vindex * 2 + xlid % 2) * nstride + ygroupoffset * ystride +
                        (xgrp_sz * xgrp_id + xlid / 2 * 2) * xstride;

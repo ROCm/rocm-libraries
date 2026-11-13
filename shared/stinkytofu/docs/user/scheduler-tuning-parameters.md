@@ -9,7 +9,7 @@ For the placement mechanisms behind the prefetch and filler knobs, see
 
 | Entry point | How |
 |---|---|
-| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueCoverCycles: 32, WmmaBatchSize: 2}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
+| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueCoverCycles: 32, WmmaBatchSize: 2}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
 | `stinkytofu-opt` | the `--flag=N` listed per parameter |
 | C++ pass pipeline | `PassFeatureConfig::dagFeatures.<field>` |
 
@@ -20,8 +20,8 @@ Defaults below are the production (TensileLite → `Gfx1250Backend`) defaults.
 `stinkytofu-opt` and a hand-built pipeline start from the `dagFeatures`
 defaults instead, where `EvenSpreadFillers`, the prefetch lead,
 the wait-alu hold and the knob heuristic are off, `DsSpread` is on, and the WMMA queue model is
-off (`WmmaQueueDepth` 1, `WmmaQueueCoverCycles` 0, `DsReadCyclesPerLoad` 0). The production defaults
-turn the queue on (8, 56, 6), so `stinkytofu-opt` output matches TensileLite only with those three
+off (`WmmaQueueCoverCycles` 0, `DsReadCyclesPerLoad` 0). The production defaults
+turn the queue on (-1, 6), where -1 is the automatic refill line, so `stinkytofu-opt` output matches TensileLite only with those two
 set.
 
 ### How an unset value is resolved
@@ -42,11 +42,13 @@ Each parameter resolves independently, first match wins:
   `latencyCycles`, `I` = its `issueCycles`; `{I, L} = {1, 8}` for most gfx1250
   WMMAs). VALU may co-issue only in the window's `coIssueWindow` slots, and
   nothing may issue in a scale WMMA's blocked (LD_SCALE) slot.
-- **WMMA queue**: the matrix pipe buffers about 8 WMMAs (measured on gfx1250 with
-  `DISABLE_XDL_ARB_STALL` set), so a WMMA can issue while earlier ones are still
-  outstanding. Queued WMMAs run one after another in the pipe, each taking its full
-  `L`, and the pipe window is their segments end to end. With depth 1 a WMMA waits for
-  the previous one to finish: the single-window model.
+- **WMMA queue**: the matrix pipe buffers 8 WMMAs, or 5 `v_wmma_scale*` pairs (measured on
+  gfx1250 with `DISABLE_XDL_ARB_STALL` set), so a WMMA can issue while earlier ones are still
+  outstanding. The depth is per-opcode hardware metadata generated from the architecture
+  `.def`, not an option: `v_wmma_scale*` uses 5, other matrix opcodes use 8. Queued WMMAs run
+  one after another in the pipe, each taking its full `L`, and the pipe window is their
+  segments end to end. With depth 1 a WMMA waits for the previous one to finish: the
+  single-window model.
 - **WMMA clock**: knobs measured "in WMMAs" count issued WMMAs, so they do not
   change meaning with the queue.
 
@@ -54,11 +56,16 @@ Each parameter resolves independently, first match wins:
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | Max WMMAs outstanding in the pipe. A WMMA is appended whenever fewer than N are outstanding; it waits only when the queue is full. 1 = one WMMA at a time (queue model off). |
-| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
+| `WmmaQueueCoverCycles` | -1 = automatic, (queue depth - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers 8 WMMAs of 8 cycles). 0 = queue model off: one WMMA at a time. |
 
-The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles > 0`, which
-is the production default. With either one off, the schedule is the original single-window one.
+The queue model runs only with `WmmaQueueCoverCycles != 0`, which is the production default.
+With 0, the schedule is the original single-window one. While it is on, a queue reset (the loop
+header's first WMMA region, a region cut by an `s_barrier_wait`, a movable `s_barrier_wait`
+issuing) puts ready WMMAs ahead of ds_loads and fillers until the queue depth is outstanding,
+even when a ds_load's stage falls behind its even line. A ds_load whose stage has reached its
+end (the last load its barrier waits for) is not held. The `DsSpread` stages that were held
+count their batches from where the fill ended. Barriers, prefetches and `tensor_load_to_lds`
+keep their own schedule, and the loop-head deferral wins.
 
 ```
 cover = cycles until the pipe has run everything queued
@@ -85,7 +92,7 @@ the queue is kept busy and covers the small stalls of the ds_loads and barriers 
 |---|---|---|---|
 | `WmmaRefillMode` | 0 (`Fixed`) | `--wmma-refill-mode=fixed\|dynamic` | `0` / `fixed`: each refill issues `WmmaBatchSize` WMMAs. `1` / `dynamic`: each refill issues WMMAs until the queued cover reaches `WmmaRefillToCycles`; the count follows the live timeline and the WMMA latency. |
 | `WmmaBatchSize` | 1 | `--wmma-batch-size=N` | Fixed mode: WMMAs per refill. 1 is the one-WMMA-at-a-time refill. |
-| `WmmaRefillToCycles` | 0 → full queue | `--wmma-refill-to-cycles=N` | Dynamic mode: the queued cover (cycles) a refill fills up to. 0 = `WmmaQueueDepth` × the WMMA latency. |
+| `WmmaRefillToCycles` | 0 → full queue | `--wmma-refill-to-cycles=N` | Dynamic mode: the queued cover (cycles) a refill fills up to. 0 = the queue depth × the WMMA latency. |
 
 A refill also ends when the queue is full. A dependent WMMA that needs coexec padding is held as
 before.
@@ -97,10 +104,9 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Pace the region's ds_loads by WMMA batch (`DsBatchWmmas` WMMAs). Each batch takes the region's even share `ceil(ds_loads / usable batches)`, where the WMMAs before a barrier that the barrier planned for its drain (its threshold is `N = last ds + drain`) are kept free for the last load to return; a barrier with no planned drain keeps `ceil(LDS credit lifetime / WMMA window)`. A sparse region therefore spreads its loads, a dense one gets a share above what the LDS rate fits (the credits throttle it), and a batch that began behind the even line takes `DsCatchUpPace` more. Nothing is held once the region's last WMMA has issued; a held ds_load never holds a WMMA. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Pace the region's ds_loads by WMMA batch (`DsBatchWmmas` WMMAs). Each batch takes the region's even share `ceil(ds_loads / usable batches)`, where the WMMAs before a barrier that the barrier planned for its drain (its threshold is `N = last ds + drain`) are kept free for the last load to return; a barrier with no planned drain keeps `ceil(LDS credit lifetime / WMMA window)`. A sparse region therefore spreads its loads, a dense one gets a share above what the LDS rate fits (the credits throttle it), and a batch that began behind the even line takes `DsCatchUpPace` more. A stage whose loads were all held, by a late opening barrier or by the queue-reset fill, starts its batches where they were released. Nothing is held once the region's last WMMA has issued; a held ds_load never holds a WMMA. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
 | `DsBatchWmmas` | 4 | `--ds-batch-wmmas=N` | WMMAs per ds_load pacing batch (independent of the queue refill batch `WmmaBatchSize`). |
-| `DsReadCyclesPerLoad` | 6 (`stinkytofu-opt`: 0 = off) | `--ds-read-cycles-per-load=N` | LDS return rate: cycles per ds_load. Capped at the region's even spread (`WMMAs x WMMA latency / ds_loads`). Decides how long the stage's ds_loads take to issue: `ceil(ds_loads x N / WMMA window)` WMMA windows from the region start. The barrier is placed after the last of them; the gap from the last ds_load to the barrier is the drain, set by the barrier cover. Replaces the old throttle latency T (one ds_load per `T / DsReadQueueDepth` cycles). Used only with `DsSpread`. |
-| `WmmaBarrierCoverCycles` | -1 (automatic) | `--wmma-barrier-cover-cycles=N` | Queued WMMA cover a ready barrier waits for before it issues. -1 = a tail of 4 WMMAs (needs `DsSpread`); 0 = off; always capped at a full queue. Needs the queue model on. |
+| `DsReadCyclesPerLoad` | 6 (`stinkytofu-opt`: 0 = off) | `--ds-read-cycles-per-load=N` | LDS return rate: cycles per ds_load. Capped at the region's even spread (`WMMAs x WMMA latency / ds_loads`). Decides how long the stage's ds_loads take to issue: `ceil(ds_loads x N / WMMA window)` WMMA windows from the region start. The barrier is placed after the last of them; the gap from the last ds_load to the barrier is the drain already inside the barrier threshold. Replaces the old throttle latency T (one ds_load per `T / DsReadQueueDepth` cycles). Used only with `DsSpread`. |
 | `DsCatchUpPace` | 2 | `--ds-catch-up-pace=N` | ds_loads a batch may take above the even share when it began behind the even line. 0 = no catching up. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
 | `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
@@ -122,9 +128,11 @@ loses its tuning unless it is translated:
 | `DsReadPerCap` A, `DsIssueCapSpanCycles` X, `DsIssueCapMode` | burst cap: at most A ds_loads per span X (default one WMMA window) | no equivalent: the per-batch share (`DsBatchWmmas`, `DsCatchUpPace`) replaces it |
 | `DsReadPerWmma`, `DsReadThrottleTransitionFactor`, `DsReadThrottleTransitionEntries`, `DsSlotFirst` | per-WMMA ds count, loads past the queue depth, ds before fillers | removed |
 | `BarrierHalfSlack` | WMMA windows kept inside a barrier signal/wait pair (0 = together) | removed: the separation slack is the constant 1 |
+| `WmmaBarrierCoverCycles` | extra WMMAs a ready barrier waited for after its threshold (`-1` = 4) | removed: the threshold already includes the last WMMA to ds dependency and its drain |
+| `WmmaQueueDepth` | max WMMAs outstanding in the pipe (8; 1 = queue model off) | removed: the hardware depth, 5 for `v_wmma_scale*` and 8 otherwise. `WmmaQueueCoverCycles: 0` turns the queue model off |
 | `DsReadDrainLatency` | barrier timing only | unchanged |
 
-The matching `stinkytofu-opt` flags and `--enable-wmma-hide-budget-prescan` are gone too.
+The matching `stinkytofu-opt` flags, `--enable-wmma-hide-budget-prescan`, `--wmma-barrier-cover-cycles` and `--wmma-queue-depth` are gone too. The last two are still accepted and ignored.
 TensileLite's `StinkyTofuDsIssueCapMode` and `StinkyTofuDsIssueCapSpanCycles` global parameters are
 gone.
 
@@ -159,7 +167,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | `ReduceClusterBarrierPerLoop` | -1 → heuristic | – | `1`: first Rule 3 handshake of each enclosing loop, then another after each 2000 estimated cycles. Nearby HalfPLR / ExpandPointerSwap copies still share one handshake. `0`: every loop trigger handshakes. Unset turns on when the main loop's WMMA latency sum > 2500 and that sum / ds_load count >= 5. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
-| *CLI only* `mergeBarrierThreshold` | 0 → 11 | `--merge-barrier-threshold=N` | Max cycle distance for `StinkyMergeBarrierPass` to merge adjacent barrier groups. |
+| *CLI only* `mergeBarrierThreshold` | unused | `--merge-barrier-threshold=N` | Parsed but ignored. `StinkyMergeBarrierPass` merges adjacent groups only when no matrix instruction is issued between them. |
 
 ## Arch defaults and hardware facts
 
@@ -179,7 +187,7 @@ dependences allow.
 | Pattern | Options |
 |---|---|
 | Default: ds_loads spread evenly over the WMMAs | none |
-| WMMA queue kept covered, refilled in batches of 4 | `WmmaQueueDepth=8, WmmaQueueCoverCycles=32, WmmaBatchSize=4` |
+| WMMA queue kept covered, refilled in batches of 4 | `WmmaQueueCoverCycles=32, WmmaBatchSize=4` |
 | ds_loads as soon as they are ready and a credit is free | `DsSpread=false` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
