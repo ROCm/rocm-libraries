@@ -827,16 +827,19 @@ bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t 
 /* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
  * quoted with ' -- or with " when `s` contains ' and no " -- with the
  * backslash and the quote character escaped, \t \n \r named and every other
- * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex); NULL
- * gives "None", Python's repr(None). The IR printer quotes str attrs inside
- * lists and region labels with it, so this is the engine's one port. Writes
- * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
- * / 0 writes nothing) and returns its full length, like snprintf.
+ * ASCII control character (0x00-0x1f, 0x7f) and every Latin-1 character
+ * str.isprintable() rejects (U+0080..U+00A0, U+00AD) as \xNN (lowercase hex);
+ * NULL gives "None", Python's repr(None). The IR printer quotes str attrs
+ * inside lists and region labels with it, so this is the engine's one port.
+ * Writes the NUL-terminated text into `out` (truncated to `cap` - 1
+ * characters; NULL / 0 writes nothing) and returns its full length, like
+ * snprintf.
  *
- * Supported subset: every ASCII string exactly. Bytes >= 0x80 are copied
- * unchanged, which is Python's repr for printable non-ASCII characters
- * (letters, CJK, ...) but not for the non-printable ones Python escapes as
- * \xNN / \uNNNN / \UNNNNNNNN (e.g. U+00A0, U+0085) or for invalid UTF-8. */
+ * Supported subset: every string of U+0001..U+00FF exactly. Other bytes
+ * >= 0x80 are copied unchanged, which is Python's repr for printable
+ * characters beyond U+00FF (letters, CJK, ...) but not for the non-printable
+ * ones Python escapes as \uNNNN / \UNNNNNNNN (e.g. U+2028) or for invalid
+ * UTF-8. */
 size_t rocke_py_str_repr(const char* s, char* out, size_t cap);
 
 /* ============================ OPCODE TABLE ============================== */
