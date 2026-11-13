@@ -242,3 +242,86 @@ TEST_F(TestGpuMiopenReductionPlan, ExecuteAcceptsInputDirectlyAfterOutput)
     EXPECT_NO_THROW(execute(bufferAt(Y_SPAN_BYTES), bufferAt(0)));
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
+
+// The overlap guard sizes each buffer by its strides, not by its element count. Both placements
+// put the other tensor where a dense span ends and the strided span does not, so a guard that
+// sized either tensor as dense would launch MIOpen on overlapping buffers.
+class TestGpuMiopenReductionPlanStridedSpans : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
+        _buffers = std::make_unique<Workspace<>>(BUFFER_BYTES);
+        ASSERT_EQ(hipMemset(_buffers->get(), 0, BUFFER_BYTES), hipSuccess);
+    }
+
+    void* bufferAt(size_t offsetBytes) const
+    {
+        return static_cast<char*>(_buffers->get()) + offsetBytes;
+    }
+
+    void execute(const ReductionGraphSpec& spec, void* xPtr, void* yPtr) const
+    {
+        const ReductionPlanUnderTest underTest(*_handle, spec);
+        const Workspace workspace(underTest.plan().getWorkspaceSize(*_handle));
+        const std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers{
+            {ReductionGraphSpec::X_UID, xPtr}, {ReductionGraphSpec::Y_UID, yPtr}};
+        underTest.plan().execute(*_handle,
+                                 deviceBuffers.data(),
+                                 static_cast<uint32_t>(deviceBuffers.size()),
+                                 workspace.get());
+    }
+
+    // x [2, 3] packed spans 24 bytes. y [2, 1] with strides {3, 1} holds its elements at bytes 0
+    // and 12, so it spans 16 bytes where a dense y would span 8.
+    static ReductionGraphSpec paddedOutputSpec()
+    {
+        ReductionGraphSpec spec;
+        spec.x = ReductionTensorSpec::dense(ReductionGraphSpec::X_UID, {2, 3}, {3, 1});
+        spec.y = ReductionTensorSpec::dense(ReductionGraphSpec::Y_UID, {2, 1}, {3, 1});
+        return spec;
+    }
+
+    // x [2, 3] with strides {5, 1} holds its last element at byte 28, so it spans 32 bytes where a
+    // dense x would span 24. y [2, 1] packed spans 8 bytes.
+    static ReductionGraphSpec paddedInputSpec()
+    {
+        ReductionGraphSpec spec;
+        spec.x = ReductionTensorSpec::dense(ReductionGraphSpec::X_UID, {2, 3}, {5, 1});
+        spec.y = ReductionTensorSpec::dense(ReductionGraphSpec::Y_UID, {2, 1}, {1, 1});
+        return spec;
+    }
+
+    static constexpr size_t BUFFER_BYTES = 64;
+
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
+    std::unique_ptr<Workspace<>> _buffers;
+};
+
+TEST_F(TestGpuMiopenReductionPlanStridedSpans, ThrowsWhenInputStartsInsidePaddedOutputSpan)
+{
+    EXPECT_TRUE(
+        throwsPluginException([&] { execute(paddedOutputSpec(), bufferAt(8), bufferAt(0)); },
+                              HIPDNN_PLUGIN_STATUS_BAD_PARAM));
+}
+
+TEST_F(TestGpuMiopenReductionPlanStridedSpans, AcceptsInputDirectlyAfterPaddedOutputSpan)
+{
+    EXPECT_NO_THROW(execute(paddedOutputSpec(), bufferAt(16), bufferAt(0)));
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
+TEST_F(TestGpuMiopenReductionPlanStridedSpans, ThrowsWhenOutputStartsInsidePaddedInputSpan)
+{
+    EXPECT_TRUE(
+        throwsPluginException([&] { execute(paddedInputSpec(), bufferAt(0), bufferAt(24)); },
+                              HIPDNN_PLUGIN_STATUS_BAD_PARAM));
+}
+
+TEST_F(TestGpuMiopenReductionPlanStridedSpans, AcceptsOutputDirectlyAfterPaddedInputSpan)
+{
+    EXPECT_NO_THROW(execute(paddedInputSpec(), bufferAt(0), bufferAt(32)));
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
