@@ -49,6 +49,7 @@ from codegen_common import (
 
 from codegen_common import (
     CommonTypeMappings,
+    TDM_EPILOGUES,
     gfx1250_fp32_tile_reject_reason,
     gfx1250_lds_operand_bytes,
     gfx1250_lds_operand_transposed,
@@ -864,18 +865,18 @@ class ArchFilter:
         self, config: KernelConfig, result: ValidationResult
     ):
         """Validate the gfx1250 pipelines (comp_async, comp_tdm*)
-        and the TDM epilogue.
+        and the TDM epilogues (tdm, tdmstaged).
 
         The rules come from codegen_common.gfx1250_pipeline_reject_reason, the
         single source of truth shared with unified_gemm_codegen and
         python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
         instructions compile to no-ops and the kernel silently writes zeros),
-        need the TDM epilogue (and vice versa; plain GEMM may also pair
-        codegen_common.GEMM_TDM_CSHUFFLE_PIPELINES with cshuffle), intrawave,
-        unpadded tiles and, for comp_tdm_v2, exactly four waves, for
-        comp_tdm_pc, at most 256 fp32 accumulators per lane; only the plain and
-        preshuffle GEMM operators can use them (comp_tdm_pc is plain only, apart
-        from Stream-K GEMM).
+        need a TDM epilogue (and vice versa; tdmstaged also needs a row-major C,
+        and plain GEMM may also pair codegen_common.GEMM_TDM_CSHUFFLE_PIPELINES
+        with cshuffle), intrawave, unpadded tiles and, for comp_tdm_v2, exactly
+        four waves, for comp_tdm_pc, at most 256 fp32 accumulators per lane; only
+        the plain and preshuffle GEMM operators can use them (comp_tdm_pc is plain
+        only, apart from Stream-K GEMM).
         Non-MX comp_async GEMM on gfx1250 needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
         warp_tile_k >= 128 and a 16x16 warp tile (32x32 does not compile).
@@ -896,7 +897,7 @@ class ArchFilter:
         is_streamk = config.operator == OperatorType.GEMM_STREAMK
         if (
             config.pipeline == "comp_async"
-            and config.epilogue != "tdm"
+            and config.epilogue not in TDM_EPILOGUES
             and (self.gpu_arch.split(":")[0] != TDM_ARCH or not (is_gemm or is_streamk))
         ):
             return
@@ -981,6 +982,8 @@ class ArchFilter:
         if is_gfx1250_tdm:
             # TdmEpilogue stages the full output tile in the shared LDS
             # allocation, so it must fit the whole LDS (the "default" budget).
+            # tdmstaged needs at most that (its slab buffers never exceed the
+            # full tile), so the same bound covers it, as in the Tile Engine.
             c_dtype = CommonTypeMappings.get_output_dtype(config.datatype_a)
             c_tile_bytes = (
                 config.tile_m * config.tile_n * ELEMENT_SIZE_MAP.get(c_dtype, 2)
