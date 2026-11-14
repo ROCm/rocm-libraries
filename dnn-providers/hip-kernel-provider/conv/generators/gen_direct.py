@@ -218,6 +218,23 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
         ],
     )
+    # gfx908 rows, dword LDS DMA; bf16 on the 16x16x8 atom. Eight-wave blocks run two waves per
+    # SIMD at 128 VGPRs + 128 AGPRs, so the tiles keep 8-12 accumulator sets a wave; the four-wave
+    # tiles (one wave per SIMD) take the 20- and 24-row tiles.
+    a908 = "mfma16_f16" if dt == "HALF" else "mfma16_bf16_908"
+    add(
+        dt,
+        ["gfx908"],
+        [
+            RW(a908, F33, 8, 2, 2, 2, 2, 16, 8),
+            RW(a908, F33, 6, 2, 2, 2, 2, 32, 8),
+            RW(a908, F33, 4, 4, 2, 2, 2, 32, 8),
+            RW(a908, F33, 8, 3, 2, 2, 2, 16, 8),
+            RW(a908, F33, 8, 3, 2, 1, 2, 16, 8),
+            RW(a908, F33, 5, 4, 4, 1, 2, 16, 8),
+            RW(a908, F33, 6, 2, 4, 1, 2, 16, 8),
+        ],
+    )
     # gfx942
     add(
         dt,

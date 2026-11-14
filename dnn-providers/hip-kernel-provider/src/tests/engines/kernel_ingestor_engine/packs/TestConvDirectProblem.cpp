@@ -643,6 +643,33 @@ TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx90aWithinItsLds)
     EXPECT_TRUE(admits(exact, "gfx90a", baseShape(), "FLOAT"));
 }
 
+TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx908OnItsAtoms)
+{
+    auto f = rowsGfx9Fields();
+    f.archs = "gfx908";
+    f.pp = 0;
+    f.fn = 2;
+    f.bn = 64;
+    f.epi = 1;
+    EXPECT_TRUE(admits(f, "gfx908:sramecc+:xnack-"));
+    EXPECT_FALSE(admits(f, "gfx90a"));
+    // bf16 runs on the 16x16x8 atom gfx908 has (8-channel slices); the gfx90a+ 16x16x16 bf16
+    // atom does not run there.
+    auto bf = f;
+    bf.atom = "mfma16_bf16_908";
+    EXPECT_TRUE(admits(bf, "gfx908", baseShape(), "BFLOAT16"));
+    bf.atom = "mfma16_bf16";
+    EXPECT_FALSE(admits(bf, "gfx908", baseShape(), "BFLOAT16"));
+    // 32-channel chunks fit the 64 KiB part at 8 rows of 4 waves.
+    auto wide = f;
+    wide.bc = 32;
+    wide.pw = 4;
+    wide.bm = 8;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(wide, "HALF"))),
+              2 * (2 * 4 + 2) * (2 * 16 + 2) * 32 * 2);
+    EXPECT_TRUE(admits(wide, "gfx908"));
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
 {
     EXPECT_EQ(conv_direct::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
