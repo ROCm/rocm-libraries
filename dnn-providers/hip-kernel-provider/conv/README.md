@@ -157,7 +157,7 @@ These stay exact fp32 with or without the switch:
 
 - VALU and FMA configs;
 - the depthwise VALU engines;
-- the naive reference engine;
+- the naive engines;
 - every engine on gfx906, and every engine on gfx908 other than K1 and K2.
 
 These have no three-bf16 form: one measures slower than their exact configs on every arch:

@@ -36,7 +36,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
 | `CONV_DEPTHWISE_VALU_FWD/BWD` | General VALU depthwise, plus the strided bwd `phase` variant | fwd, bwd-data | all | 342 (162 fwd, 180 bwd) |
 | `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights (register strips; NHWC and NCHW) | wrw | all | 222 |
-| `CONV_NAIVE_FWD/BWD/WRW` | Correctness floor: serves every graph | all | all | 9 |
+| `CONV_NAIVE_FWD/BWD/WRW` | Coverage-first production kernels: serve graphs no faster engine serves, within a workload budget | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 
 The config counts are the full catalog: every dtype and arch pack, the TF32 forms (registered only under `HIP_KERNEL_PROVIDER_CONV_TF32`) included. A graph admits only the configs whose gates accept it. For example, K7 admits about 28-50 per graph and `CONV_STEM_BWD` about 4-9 (at most 21).

@@ -20,7 +20,7 @@ One document per engine family. Each opens with an **At a glance** summary and t
 | [SMALLC](SMALLC.md) | `CONV_SMALLC_FWD/BWD` | Few-channel stems forward, and stride-1 backward data into few channels. |
 | [STEM_BWD](STEM_BWD.md) | `CONV_STEM_BWD` | Backward data for stems (up to 4 input channels) using stride-phase super-pixels. |
 | [FFT](FFT.md) | `CONV_FFT_FWD/BWD/WRW` | Tiled overlap-save FFT convolution for large filters and large-kernel depthwise. |
-| [NAIVE](NAIVE.md) | `CONV_NAIVE_FWD/BWD/WRW` | The coverage floor, admitted only within its workload budget. |
+| [NAIVE](NAIVE.md) | `CONV_NAIVE_FWD/BWD/WRW` | Coverage-first production kernels for graphs no faster engine serves, admitted within a workload budget. |
 
 The explicit-GEMM engines (`ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` and their siblings) live in the hipblaslt-provider: [EXPLICIT_GEMM](../../../../hipblaslt-provider/docs/engines/EXPLICIT_GEMM.md).
 

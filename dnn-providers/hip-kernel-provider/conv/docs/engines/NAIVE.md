@@ -3,7 +3,7 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier:  MIT
 -->
 
-# CONV_NAIVE_FWD / BWD / WRW — the coverage floor, admitted only where its speed does not matter
+# CONV_NAIVE_FWD / BWD / WRW — coverage-first production kernels for any convolution the faster engines do not serve
 
 > Engine ids: `hipkernel:CONV_NAIVE_FWD`, `hipkernel:CONV_NAIVE_BWD`, `hipkernel:CONV_NAIVE_WRW` · Generator: none (the three `conv_naive_*.kdp.json` catalogs are hand-written and kept in git) · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/naive/kernels/` · Pack: `packs/ConvNaiveProblem.cpp`, `packs/ConvNaiveNative.cpp`
 
@@ -13,14 +13,15 @@ SPDX-License-Identifier:  MIT
 - **Covers:** fwd · bwd-data · wrw; fp32, fp16, bf16 (all three tensors one type); any element strides (NCHW, NHWC, sliced or padded views); 1-D, 2-D, 3-D; any groups (depthwise included); any padding (asymmetric), stride and dilation; both convolution modes. No TF32 sibling. Admitted only within the workload budget: at most `NAIVE_MACS_PER_LANE_BUDGET` = 5000 multiply-accumulates per SIMD lane (about 1 ms at 1 GHz), so the admitted size scales with the device's compute units.
 - **Arches:** every architecture HIPRTC targets; plain VALU code, no matrix cores.
 - **Wins when:** almost never on time. It is the best engine on 0-4 of the 1998 graphs per GPU (tiny reductions: 1x1 layers with few channels, small 3-D depthwise layers).
-- **Loses when:** everywhere else. Its job is to be correct where nothing else applies.
+- **Loses when:** everywhere a performance-first engine applies. It is a production engine designed for coverage first, not speed first: it runs real workloads wherever no faster engine serves the graph. It is not a test reference; hipDNN's GPU reference kernel and CPU reference cover that.
 - **Precision:** fp32 sums in a fixed order, one rounding at the store; padding taps are skipped. Deterministic. No numerical notes.
 - **Instances:** 9 configs (3 directions x 3 dtypes), one HIPRTC compile per (direction, dtype) serving every shape.
 - **vs MIOpen:** the counterpart of `ConvDirectNaiveConv{Fwd,Bwd,Wrw}`. MIOpen admits those everywhere and lets Find reject them; this engine refuses poor fits up front.
 
 ## Why it exists
 
-- Every convolution graph a caller can build must have at least one engine without the MIOpen provider loaded. The naive engines are that structural floor: they read every field of the graph and accept any shape the convolution defines, as long as it fits the workload budget.
+- Every convolution graph a caller can build must have at least one engine without the MIOpen provider loaded. The naive engines are that floor for real workloads: they read every field of the graph and accept any shape the convolution defines, as long as it fits the workload budget.
+- Coverage first, performance second: the other engines are designed around performance and cover the shapes where that pays; naive guarantees that the remaining shapes still run, at a predictable cost.
 - Correctness first, at minimal code: about 300 lines of kernel, no workspace, no configuration space, nothing to tune.
 - The poor-fit problem MIOpen has with its naive solvers (applicable to almost everything, so selection must keep them out of slow picks) is solved here inside applicability, by the workload budget. hipDNN selection is unchanged.
 
@@ -112,7 +113,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
 1. **Calibrate the budget per architecture.** 5000 is a single starting value. Cross-arch timing of the three kernels would let the budget follow measured lane throughput (VALU rate differs between CDNA and RDNA, and wrw differs from fwd). Payoff: fewer slow admissions on small parts, more coverage on large ones.
 2. **Make the device dependence explicit in coverage tooling.** The budget counts compute units, so parts of one architecture with fewer CUs decline graphs a larger part admits (seen on gfx906, 60 vs 64 CUs). The coverage census already treats naive-only rows as device-dependent; record each architecture's map on its smallest part.
-3. **A budget-free reference mode for testing.** Large-graph correctness checks cannot use naive as a GPU reference because the budget declines them; they use sampled fp64 checks instead. A test-only switch would give a full-output device reference.
+3. **Cheap speedups that keep the coverage-first design.** Vectorized loads along the contiguous dimension and per-thread register blocking over a few output channels, without adding a configuration space; raising lane throughput lets the budget admit more shapes.
 4. **Mixed types and integer types.** If hipDNN takes on mixed-type convolution, the naive kernels are the natural first engine for it (separate element types for x, w and y).
 
 ## Tests
