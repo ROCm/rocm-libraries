@@ -14,6 +14,12 @@ The following client executables are available for use with hipBLASLt:
 
 *  ``hipblaslt-bench``
 
+*  ``hipblaslt-bench-partitioned``, which benchmarks ``hipblaslt_ext::PartitionedGemm`` on the
+   devices of a partitioned GPU. For example, ``./hipblaslt-bench-partitioned -m 4096 -n 4096 -k 4096
+   --partitions 2 --split_dim N --verify true --single true`` splits one GEMM over devices 0 and 1,
+   compares every slice with the same GEMM on device 0, and also times that single-device run.
+   See ``--help`` for the placement options.
+
 To build these clients, follow the instructions in :doc:`Building and installing hipBLASLt <../install/building-installing-hipblaslt>`.
 After building the hipBLASLt clients, you can find them in the ``hipBLASLt/build/release/clients`` directory.
 

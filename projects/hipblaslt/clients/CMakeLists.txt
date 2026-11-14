@@ -148,6 +148,10 @@ target_include_directories(hipblaslt-api-overhead PRIVATE "${CMAKE_CURRENT_SOURC
 add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
 target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
 
+add_executable(hipblaslt-bench-partitioned "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_partitioned.cpp")
+target_link_libraries(hipblaslt-bench-partitioned PRIVATE hipblaslt-clients-common hip::device)
+target_include_directories(hipblaslt-bench-partitioned PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include")
+
 add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
 target_link_libraries(hipblaslt-bench-extop-layernorm PRIVATE hipblaslt-clients-common hip::device)
 

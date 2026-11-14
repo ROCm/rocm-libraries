@@ -104,6 +104,31 @@ GroupedGemm
     :protected-members:
     :private-members:
 
+PartitionedGemm
+-------------------------------------
+``PartitionedGemm`` runs one GEMM as slices on the devices of a partitioned GPU, for example the
+two partitions of a DPX card, where each partition is a separate HIP device. The caller passes
+one hipBLASLt handle per partition (created with that partition's device current), and one
+stream, workspace and event per partition when it initializes and runs. ``SplitDim`` picks the
+dimension to split, and the first ``N - 1`` partitions take ``size / N`` while the last takes
+the remainder. hipBLASLt does not allocate or copy any matrix. A ``Placement`` hint per matrix
+tells the library how to read the pointers that the caller passes. See
+``clients/samples/31_hipblaslt_gemm_partitioned_ext`` for an example and
+``hipblaslt-bench-partitioned`` to benchmark it. This version supports plain GEMM; the device
+user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+
+.. doxygenclass:: hipblaslt_ext::PartitionedGemm
+    :members:
+    :protected-members:
+    :private-members:
+
+.. doxygenenum:: hipblaslt_ext::SplitDim
+
+.. doxygenenum:: hipblaslt_ext::Placement
+
+.. doxygenstruct:: hipblaslt_ext::PartitionedGemmInputs
+    :members:
+
 hipBLASLtExt API reference
 ================================
 
