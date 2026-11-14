@@ -44,6 +44,7 @@ from tensilelite.AddCustomConfig import (
     inject_custom_config,
 )
 from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Contractions import CustomKernel as ContractionsCustomKernel
 from tensilelite.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
@@ -1691,3 +1692,141 @@ def test_metadata_loader_matches_pure_python_safe_loader():
     expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
 
     assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected
+
+
+_POST_KERNEL_CONFIG = """\
+    InternalSupportParams:
+      KernArgsVersion: 3
+      PersistentLoopArgsVersion: 3
+    TileProcessingStrategy: StreamK
+    CustomKernel:
+      args:
+        - {type: address, semantic: AddressD}
+      macrotile: [256, 256, 64]
+      threads: [256, 1, 1]
+      grid: [StreamKNoBatch, One, One]
+      reductions: [tree, parallel]
+      postKernels:
+        - kind: streamKReduce
+          name: sk_main_streamKReduce
+          args:
+            - {type: address, semantic: AddressWorkspace}
+            - {type: uint32, semantic: SKSplitFactor}
+            - {type: uint32, semantic: NumTiles}
+            - {type: uint32, semantic: WorkspaceOffsetPartials}
+          threads: [256, 1, 1]
+          grid: [TilesBands, One, One]
+"""
+
+
+def write_multi_kernel(path, config, symbols, descriptors=None):
+    """A .s whose metadata lists `symbols` and whose descriptors appear in `descriptors` order."""
+    path.write_text(
+        "".join(f".amdhsa_kernel {s}\n.end_amdhsa_kernel\n" for s in (descriptors or symbols))
+        + ".amdgpu_metadata\n---\ncustom.config:\n"
+        + indent(dedent(config).strip(), "  ") + "\n"
+        + "amdhsa.kernels:\n"
+        + "".join(f"  - .name: {s}\n    .max_flat_workgroup_size: 256\n" for s in symbols)
+        + "...\n"
+    )
+
+
+def _post_kernel_config():
+    config = yaml.safe_load(dedent(_POST_KERNEL_CONFIG))
+    config["CustomKernel"]["name"] = "sk_main"
+    return config
+
+
+def test_post_kernels_parse(tmp_path):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, ["sk_main", "sk_main_streamKReduce"])
+    config = getCustomKernelConfig("sk_main", {}, str(tmp_path))
+    descriptor = config["CustomKernel"]
+    assert descriptor["reductions"] == ["tree", "parallel"]
+    (post,) = descriptor["postKernels"]
+    assert post["kind"] == "streamKReduce"
+    assert post["bands"] == 1
+    assert [a["semantic"] for a in post["args"]][1:] == ["SKSplitFactor", "NumTiles", "WorkspaceOffsetPartials"]
+
+    state = ContractionsCustomKernel.FromOriginalState(descriptor).state()
+    assert state["reductions"] == ["tree", "parallel"]
+    assert state["postKernels"][0]["grid"] == ["TilesBands", "One", "One"]
+
+
+def test_kernel_without_post_kernels_serializes_unchanged():
+    descriptor = {"name": "k", "args": [], "macrotile": [16, 16, 16], "threads": [64, 1, 1],
+                  "grid": ["TilesX", "TilesY", "Batch"]}
+    state = ContractionsCustomKernel.FromOriginalState(descriptor).state()
+    assert "reductions" not in state and "postKernels" not in state
+    ck_mod.validateCustomPostKernels({"CustomKernel": descriptor})
+
+
+def _setPost(key, value):
+    def mutate(config):
+        config["CustomKernel"]["postKernels"][0][key] = value
+    return mutate
+
+
+def _setDescriptor(key, value):
+    def mutate(config):
+        config["CustomKernel"][key] = value
+    return mutate
+
+
+def _setVersion(value):
+    def mutate(config):
+        config["InternalSupportParams"]["PersistentLoopArgsVersion"] = value
+    return mutate
+
+
+def _duplicatePost(config):
+    config["CustomKernel"]["postKernels"].append(deepcopy(config["CustomKernel"]["postKernels"][0]))
+
+
+def _dropPostKernels(config):
+    config["CustomKernel"].pop("postKernels")
+    config["CustomKernel"]["reductions"] = ["tree"]
+
+
+@pytest.mark.parametrize("mutate,match", [
+    (_setPost("kind", "splitKReduce"), "Unknown post kernel kind"),
+    (_setPost("name", "other_streamKReduce"), "must be named 'sk_main_streamKReduce'"),
+    (_setPost("bands", 0), "bands must be a positive integer"),
+    (_setPost("threads", [256, 1]), "three-element threads"),
+    (_setPost("threads", [0, 1, 1]), "threads must be positive"),
+    (_setPost("grid", "TilesBands"), "three-element grid"),
+    (_setPost("args", [{"type": "uint32"}]), "type/semantic"),
+    (_setPost("workspace", 1), "keys from"),
+    (_duplicatePost, "Duplicate post kernel kind"),
+    (_setDescriptor("postKernels", {}), "must be a list"),
+    (_setDescriptor("reductions", []), "non-empty list"),
+    (_setDescriptor("reductions", ["tree", "tree", "parallel"]), "distinct"),
+    (_setDescriptor("reductions", ["tree", "kernelPartition"]), "distinct modes"),
+    (_setDescriptor("reductions", ["tree"]), "parallel if and only if"),
+    (_setDescriptor("postKernels", []), "parallel if and only if"),
+    (_setVersion(0), "postKernels requires PersistentLoopArgsVersion=3"),
+    (_dropPostKernels, "PersistentLoopArgsVersion=3 requires CustomKernel.postKernels"),
+])
+def test_post_kernel_validation_errors(mutate, match):
+    config = _post_kernel_config()
+    ck_mod.validateCustomPostKernels(deepcopy(config))
+    mutate(config)
+    with pytest.raises(ValueError, match=match):
+        ck_mod.validateCustomPostKernels(config)
+
+
+def test_post_kernels_require_kern_args_version_3(tmp_path):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG.replace("KernArgsVersion: 3", "KernArgsVersion: 2"),
+                       ["sk_main", "sk_main_streamKReduce"])
+    with pytest.raises(ValueError, match="requires KernArgsVersion=3"):
+        getCustomKernelConfig("sk_main", {}, str(tmp_path))
+
+
+@pytest.mark.parametrize("symbols,descriptors,match", [
+    (["sk_main"], None, "not in the amdhsa.kernels"),
+    (["sk_main_streamKReduce", "sk_main"], None, "first .amdhsa_kernel"),
+    (["sk_main_streamKReduce", "sk_main"], ["sk_main", "sk_main_streamKReduce"], "first amdhsa.kernels entry"),
+])
+def test_post_kernel_symbols_checked_against_metadata(tmp_path, symbols, descriptors, match):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, symbols, descriptors)
+    with pytest.raises(RuntimeError, match=match):
+        getCustomKernelConfig("sk_main", {}, str(tmp_path))

@@ -874,6 +874,26 @@ namespace TensileLite
             }
         };
 
+        template <>
+        struct EnumTraits<CustomReductionMode, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomReductionMode& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomReductionMode::Count),
+                    [](int i) { return TensileLite::toString(static_cast<CustomReductionMode>(i)); });
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomPostKernelKind, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomPostKernelKind& value)
+            {
+                hashmapEnumeration(io, value, static_cast<int>(CustomPostKernelKind::Count),
+                    [](int i) { return TensileLite::toString(static_cast<CustomPostKernelKind>(i)); });
+            }
+        };
+
         template <typename T, typename IO>
         struct SequenceTraits<std::vector<T>, IO>
         {

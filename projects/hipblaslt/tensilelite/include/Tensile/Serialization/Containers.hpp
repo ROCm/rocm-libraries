@@ -219,6 +219,18 @@ namespace TensileLite
         {
         };
 
+        template <typename IO>
+        struct SequenceTraits<std::vector<TensileLite::CustomReductionMode>, IO>
+            : public DefaultSequenceTraits<std::vector<TensileLite::CustomReductionMode>, IO, true>
+        {
+        };
+
+        template <typename IO>
+        struct SequenceTraits<std::vector<TensileLite::CustomPostKernel>, IO>
+            : public DefaultSequenceTraits<std::vector<TensileLite::CustomPostKernel>, IO, false>
+        {
+        };
+
         template <typename Value, typename IO>
         struct SequenceTraits<std::vector<TensileLite::FreeSizeEntry<Value>>, IO>
             : public DefaultSequenceTraits<std::vector<TensileLite::FreeSizeEntry<Value>>, IO, false>
