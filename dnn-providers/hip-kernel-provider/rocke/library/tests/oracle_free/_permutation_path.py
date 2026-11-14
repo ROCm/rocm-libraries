@@ -615,8 +615,7 @@ def expected_path_counts(block_n: int, head_size: int) -> dict[str, int]:
         "cast_probability": lane_keys,
         "output_product": output_elements,
         "cast_output": output_elements,
-        "mfma": (block_n // 32) * (head_size // 8)
-        + (head_size // 32) * (block_n // 8),
+        "mfma": (block_n // 32) * (head_size // 8) + (head_size // 32) * (block_n // 8),
     }
 
 
@@ -719,9 +718,7 @@ def kernel_descriptor_words(code_object: bytes) -> dict[str, int]:
             if not name.endswith(".kd") or not 0 < section < count:
                 continue
             _kind, base, start, *_ = sections[section]
-            (word,) = struct.unpack_from(
-                "<I", code_object, start + value - base + 48
-            )
+            (word,) = struct.unpack_from("<I", code_object, start + value - base + 48)
             words[name] = word
     return words
 
