@@ -226,7 +226,7 @@ RppStatus rain_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* d
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -334,7 +334,7 @@ RppStatus rain_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* d
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
@@ -375,7 +375,7 @@ RppStatus rain_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* d
                     srcPtr2Temp++;
                 }
                 srcPtr1Row += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -518,7 +518,7 @@ RppStatus rain_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -621,7 +621,7 @@ RppStatus rain_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
@@ -662,7 +662,7 @@ RppStatus rain_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
                     srcPtr2Temp++;
                 }
                 srcPtr1Row += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -806,7 +806,7 @@ RppStatus rain_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -909,7 +909,7 @@ RppStatus rain_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
@@ -950,7 +950,7 @@ RppStatus rain_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16
                     srcPtr2Temp++;
                 }
                 srcPtr1Row += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -1098,7 +1098,7 @@ RppStatus rain_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* d
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
@@ -1206,7 +1206,7 @@ RppStatus rain_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* d
                 srcPtr1RowR += srcDescPtr->strides.hStride;
                 srcPtr1RowG += srcDescPtr->strides.hStride;
                 srcPtr1RowB += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRowR += dstDescPtr->strides.hStride;
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
@@ -1247,7 +1247,7 @@ RppStatus rain_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* d
                     srcPtr2Temp++;
                 }
                 srcPtr1Row += srcDescPtr->strides.hStride;
-                srcPtr2Row += srcDescPtr->strides.hStride;
+                srcPtr2Row += srcDescPtr->w;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
         }
