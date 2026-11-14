@@ -723,6 +723,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 SUITES ${_hkp_suite}
                 EXPECTED_CASES ${_hkp_cases}
             )
+            # The prefill engine's page sizes and architectures, stated once in
+            # Gfx1151WmmaAttentionCatalog.hpp for the matcher and the GPU suites, are
+            # checked against the loaded objects. The suite is registered at every wired
+            # arch the header lists, read from the header itself, not only where the
+            # engine ships: a listed arch the catalog drops then loads no set and fails, as
+            # an object shipped outside the list does.
+            if(_hkp_engine STREQUAL "hipkernel:Gfx1151WmmaAttention")
+                set(_hkp_catalog_hpp
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionCatalog.hpp")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hkp_catalog_hpp}")
+                file(READ "${_hkp_catalog_hpp}" _hkp_stated_arches)
+                string(REGEX MATCH "GFX1151_WMMA_ATTENTION_ARCHS\\{[^}]*\\}" _hkp_stated_arches
+                       "${_hkp_stated_arches}")
+                string(REGEX MATCHALL "gfx[0-9a-f]+" _hkp_stated_arches "${_hkp_stated_arches}")
+                if(NOT _hkp_stated_arches)
+                    message(FATAL_ERROR
+                        "hkp: no GFX1151_WMMA_ATTENTION_ARCHS list found in ${_hkp_catalog_hpp}")
+                endif()
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_hkp_stated_arches}
+                    SUITES TestGfx1151WmmaAttentionCatalog
+                    EXPECTED_CASES
+                        ShipsPagedObjectsForExactlyTheMatchersPageSizes
+                        ShipsForNoArchitectureOutsideTheStatedList
+                )
+            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship ${_hkp_engine} for any RDNA arch, "
