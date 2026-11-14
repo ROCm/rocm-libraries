@@ -397,10 +397,8 @@ size_t adaptiveReselectionCount(std::shared_ptr<void> gemmData);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
-// Push the GemmPreference-supplied StreamK tile scheduling mode onto every
-// contraction problem currently carried by gemmData. Defined in
-// tensile_host.cpp because gemmData's concrete type
-// (TensileDataGemm / TensileDataGroupedGemm) only exists there.
+// Apply a C++ instance or preference scheduling mode to every contraction problem.
+// A negative mode leaves the existing problem setting unchanged.
 void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode);

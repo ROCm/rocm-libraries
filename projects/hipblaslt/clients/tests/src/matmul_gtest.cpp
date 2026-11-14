@@ -39,7 +39,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1111,3 +1114,337 @@ namespace
 #endif
 
 } // namespace
+
+extern "C" bool hipblaslt_gemm_scheduling_for_test(
+    std::shared_ptr<void> gemmData, bool grouped, size_t index, int32_t* smCount, int32_t* mode);
+
+namespace
+{
+    // A pointer to the protected base member can also inspect the client's base reference.
+    struct GemmDataAccess : hipblaslt_ext::GemmInstance
+    {
+        static const std::shared_ptr<void>& data(hipblaslt_ext::GemmInstance& gemm)
+        {
+            return gemm.*(&GemmDataAccess::m_data);
+        }
+    };
+
+    void expectScheduling(hipblaslt_ext::GemmInstance& gemm, int32_t sm, int32_t mode)
+    {
+        const bool grouped = gemm.getGemmType() == hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+        ASSERT_EQ(gemm.getGemmCount(), grouped ? 2u : 1u);
+        for(size_t i = 0; i < gemm.getGemmCount(); ++i)
+        {
+            SCOPED_TRACE(i);
+            int32_t actualSm = -42, actualMode = -42;
+            ASSERT_TRUE(hipblaslt_gemm_scheduling_for_test(
+                GemmDataAccess::data(gemm), grouped, i, &actualSm, &actualMode));
+            EXPECT_EQ(actualSm, sm);
+            EXPECT_EQ(actualMode, mode);
+        }
+    }
+
+    struct SchedulingProblem
+    {
+        hipblaslt_local_handle       handle;
+        hipblaslt_local_matmul_descr desc{
+            HIPBLAS_OP_T, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F};
+        hipblaslt_local_matrix_layout layout{64, 64, 64, HIP_R_16F};
+        device_vector<unsigned char>  storage{4 * 64 * 64 * 2};
+        float                         alpha = 1, beta = 0;
+
+        std::unique_ptr<hipblaslt_ext::GemmInstance> make(bool grouped, bool sizes = true)
+        {
+            std::unique_ptr<hipblaslt_ext::GemmInstance> gemm;
+            if(grouped)
+                gemm = std::make_unique<hipblaslt_ext::GroupedGemm>(handle,
+                                                                    HIPBLAS_OP_T,
+                                                                    HIPBLAS_OP_N,
+                                                                    HIP_R_16F,
+                                                                    HIP_R_16F,
+                                                                    HIP_R_16F,
+                                                                    HIP_R_16F,
+                                                                    HIPBLAS_COMPUTE_32F);
+            else
+                gemm = std::make_unique<hipblaslt_ext::Gemm>(handle,
+                                                             HIPBLAS_OP_T,
+                                                             HIPBLAS_OP_N,
+                                                             HIP_R_16F,
+                                                             HIP_R_16F,
+                                                             HIP_R_16F,
+                                                             HIP_R_16F,
+                                                             HIPBLAS_COMPUTE_32F);
+            set(*gemm, sizes);
+            return gemm;
+        }
+
+        void set(hipblaslt_ext::GemmInstance& gemm, bool sizes)
+        {
+            ASSERT_EQ(storage.memcheck(), hipSuccess);
+            const bool grouped
+                = gemm.getGemmType() == hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+            auto* bytes = static_cast<unsigned char*>(storage);
+            void* a     = bytes;
+            void* b     = bytes + 64 * 64 * 2;
+            void* c     = bytes + 2 * 64 * 64 * 2;
+            void* d     = bytes + 3 * 64 * 64 * 2;
+            if(sizes)
+            {
+                hipblaslt_ext::GemmInputs inputs;
+                inputs.setA(a);
+                inputs.setB(b);
+                inputs.setC(c);
+                inputs.setD(d);
+                inputs.setAlpha(&alpha);
+                inputs.setBeta(&beta);
+                hipblaslt_ext::GemmEpilogue epilogue;
+                epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+                epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+                if(grouped)
+                {
+                    std::vector<int64_t>                     dimensions(2, 64), batches(2, 1);
+                    std::vector<hipblaslt_ext::GemmInputs>   in(2, inputs);
+                    std::vector<hipblaslt_ext::GemmEpilogue> ep(2, epilogue);
+                    ASSERT_EQ(static_cast<hipblaslt_ext::GroupedGemm&>(gemm).setProblem(
+                                  dimensions, dimensions, dimensions, batches, ep, in),
+                              HIPBLAS_STATUS_SUCCESS);
+                }
+                else
+                    ASSERT_EQ(static_cast<hipblaslt_ext::Gemm&>(gemm).setProblem(
+                                  64, 64, 64, 1, epilogue, inputs),
+                              HIPBLAS_STATUS_SUCCESS);
+            }
+            else if(grouped)
+            {
+                std::vector<hipblasLtMatmulDesc_t>   descriptors(2, desc);
+                std::vector<hipblasLtMatrixLayout_t> layouts(2, layout);
+                std::vector<void*>                   alphas(2, &alpha), betas(2, &beta);
+                std::vector<void*>                   as(2, a), bs(2, b), cs(2, c), ds(2, d);
+                ASSERT_EQ(static_cast<hipblaslt_ext::GroupedGemm&>(gemm).setProblem(descriptors,
+                                                                                    alphas,
+                                                                                    as,
+                                                                                    layouts,
+                                                                                    bs,
+                                                                                    layouts,
+                                                                                    betas,
+                                                                                    cs,
+                                                                                    layouts,
+                                                                                    ds,
+                                                                                    layouts),
+                          HIPBLAS_STATUS_SUCCESS);
+            }
+            else
+                ASSERT_EQ(static_cast<hipblaslt_ext::Gemm&>(gemm).setProblem(
+                              desc, &alpha, a, layout, b, layout, &beta, c, layout, d, layout),
+                          HIPBLAS_STATUS_SUCCESS);
+        }
+
+        int selectIndex(hipblaslt_ext::GemmInstance& gemm)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> algorithms;
+            EXPECT_EQ(hipblaslt_ext::getAllAlgos(handle,
+                                                 gemm.getGemmType(),
+                                                 HIPBLAS_OP_T,
+                                                 HIPBLAS_OP_N,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIPBLAS_COMPUTE_32F,
+                                                 algorithms),
+                      HIPBLAS_STATUS_SUCCESS);
+            for(auto& result : algorithms)
+            {
+                size_t workspace = 0;
+                if(gemm.isAlgoSupported(result.algo, workspace) == HIPBLAS_STATUS_SUCCESS
+                   && workspace <= 32 * 1024 * 1024)
+                    return hipblaslt_ext::getIndexFromAlgo(result.algo);
+            }
+            // A refused candidate still exercises scheduling propagation on devices
+            // whose library has no grouped kernel for this problem.
+            return algorithms.empty() ? -1 : hipblaslt_ext::getIndexFromAlgo(algorithms[0].algo);
+        }
+    };
+
+    class ClientScheduling : public ::testing::TestWithParam<bool>
+    {
+    };
+
+    TEST_P(ClientScheduling, smoke_SetterPersistsAndRejectsInvalidModes)
+    {
+        SchedulingProblem problem;
+        ASSERT_EQ(hipblasLtSetSmCountTarget(problem.handle, 7), HIPBLAS_STATUS_SUCCESS);
+        auto                      gemm = problem.make(GetParam());
+        hipblasLtMatmulAlgo_t     algo{};
+        size_t                    workspace = 0;
+        hipblaslt_ext::GemmTuning tuning;
+        for(auto mode : {HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+                         HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO,
+                         HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF})
+        {
+            SCOPED_TRACE(mode);
+            gemm->setStreamKTileSchedulingMode(mode);
+            problem.set(*gemm, true);
+            // Support applies the request even when this candidate is refused.
+            static_cast<void>(gemm->isAlgoSupported(algo, workspace));
+            expectScheduling(*gemm, 7, mode);
+            // 3 is representable by the enum but is not a supported mode.
+            EXPECT_THROW(gemm->setStreamKTileSchedulingMode(
+                             static_cast<hipblasLtStreamKTileSchedulingMode_t>(3)),
+                         std::invalid_argument);
+            static_cast<void>(gemm->isAlgoSupported(algo, tuning, workspace));
+            expectScheduling(*gemm, 7, mode);
+        }
+    }
+
+    TEST_P(ClientScheduling, smoke_DescriptorModeSurvivesSupportChecks)
+    {
+        SchedulingProblem problem;
+        int32_t           mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_ON;
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(problem.desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &mode,
+                                                  sizeof(mode)),
+                  HIPBLAS_STATUS_SUCCESS);
+        auto                  gemm = problem.make(GetParam(), false);
+        hipblasLtMatmulAlgo_t algo{};
+        size_t                workspace = 0;
+        static_cast<void>(gemm->isAlgoSupported(algo, workspace));
+        expectScheduling(*gemm, 0, mode);
+        hipblaslt_ext::GemmTuning tuning;
+        static_cast<void>(gemm->isAlgoSupported(algo, tuning, workspace));
+        expectScheduling(*gemm, 0, mode);
+        gemm->setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+        static_cast<void>(gemm->isAlgoSupported(algo, workspace));
+        expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+    }
+
+    TEST_P(ClientScheduling, smoke_HeuristicPreferenceReplacesInstanceMode)
+    {
+        SchedulingProblem problem;
+        auto              gemm = problem.make(GetParam());
+        gemm->setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
+        hipblaslt_ext::GemmPreference pref;
+        pref.setMaxWorkspaceBytes(32 * 1024 * 1024);
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        ASSERT_EQ(gemm->algoGetHeuristic(1, pref, results), HIPBLAS_STATUS_SUCCESS);
+        expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+
+        pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+        ASSERT_EQ(gemm->algoGetHeuristic(1, pref, results), HIPBLAS_STATUS_SUCCESS);
+        expectScheduling(*gemm, 0, HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+    }
+
+    TEST_P(ClientScheduling, smoke_InitializeAppliesModeBeforePreparingArguments)
+    {
+        SchedulingProblem problem;
+        auto              gemm  = problem.make(GetParam());
+        const int         index = problem.selectIndex(*gemm);
+        ASSERT_GE(index, 0);
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        std::vector<int>                              indices{index};
+        ASSERT_EQ(hipblaslt_ext::getAlgosFromIndex(problem.handle, indices, results),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(results.size(), 1u);
+        device_vector<unsigned char> workspace(32 * 1024 * 1024);
+        ASSERT_EQ(workspace.memcheck(), hipSuccess);
+        gemm->setMaxWorkspaceBytes(32 * 1024 * 1024);
+        hipblaslt_ext::GemmTuning tuning;
+        for(bool tuned : {false, true})
+        {
+            SCOPED_TRACE(tuned ? "tuned initialize" : "initialize");
+            const auto mode = tuned ? HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
+                                    : HIPBLASLT_STREAMK_TILE_SCHEDULING_ON;
+            gemm->setStreamKTileSchedulingMode(mode);
+            problem.set(*gemm, true);
+            // The setting is applied before argument preparation can refuse a candidate.
+            if(tuned)
+                static_cast<void>(gemm->initialize(results[0].algo, tuning, workspace, false));
+            else
+                static_cast<void>(gemm->initialize(results[0].algo, workspace, false));
+            expectScheduling(*gemm, 0, mode);
+        }
+    }
+
+    INSTANTIATE_TEST_SUITE_P(SingleAndGrouped, ClientScheduling, ::testing::Bool());
+
+    using BenchCase = std::tuple<bool, bool, int, hipblasLtStreamKTileSchedulingMode_t>;
+    class BenchScheduling : public ::testing::TestWithParam<BenchCase>
+    {
+    };
+
+    TEST_P(BenchScheduling, smoke_OptionsReachAlgorithmSelection)
+    {
+        const auto [grouped, sizes, method, mode] = GetParam();
+        struct Restore
+        {
+            int32_t sm   = hipblaslt_bench_options::sm_count_target();
+            int32_t mode = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+            ~Restore()
+            {
+                hipblaslt_bench_options::sm_count_target()              = sm;
+                hipblaslt_bench_options::streamk_tile_scheduling_mode() = mode;
+                hipblaslt_bench::gemm_selection_observer_for_test       = {};
+            }
+        } restore;
+        hipblaslt_bench_options::sm_count_target()              = 7;
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = mode;
+
+        Arguments arg{};
+        arg.init();
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_16F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA                                                       = 'T';
+        arg.transB                                                       = 'N';
+        arg.grouped_gemm                                                 = grouped ? 2 : 0;
+        for(int i = 0; i < (grouped ? 2 : 1); ++i)
+        {
+            arg.M[i] = arg.N[i] = arg.K[i] = 64;
+            arg.lda[i] = arg.ldb[i] = arg.ldc[i] = arg.ldd[i] = arg.lde[i] = 64;
+            arg.stride_a[i] = arg.stride_b[i] = arg.stride_c[i] = arg.stride_d[i] = arg.stride_e[i]
+                = 64 * 64;
+        }
+        arg.alpha                    = 1;
+        arg.beta                     = 0;
+        arg.use_ext                  = true;
+        arg.use_ext_setproblem       = sizes;
+        arg.algo_method              = method;
+        arg.requested_solution_num   = 1;
+        arg.user_allocated_workspace = 32 * 1024 * 1024;
+        arg.unit_check               = 0;
+        arg.fast_check               = 0;
+        arg.timing                   = 0;
+        if(method == 2)
+        {
+            SchedulingProblem probe;
+            ASSERT_EQ(hipblasLtSetSmCountTarget(probe.handle, 7), HIPBLAS_STATUS_SUCCESS);
+            auto gemm = probe.make(grouped, sizes);
+            gemm->setStreamKTileSchedulingMode(mode);
+            arg.solution_index = probe.selectIndex(*gemm);
+            ASSERT_GE(arg.solution_index, 0) << "no explicit-index candidate";
+        }
+
+        int observed = 0;
+        struct SelectionObserved
+        {
+        };
+        hipblaslt_bench::gemm_selection_observer_for_test = [&](auto& gemm) {
+            ++observed;
+            expectScheduling(gemm, 7, mode);
+            // Check forwarding even without a matching grouped kernel, before
+            // launch or the no-solution diagnostic.
+            throw SelectionObserved{};
+        };
+        EXPECT_THROW(testing_matmul(arg), SelectionObserved);
+        EXPECT_EQ(observed, 1);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        SelectionPaths,
+        BenchScheduling,
+        ::testing::Combine(::testing::Bool(),
+                           ::testing::Bool(),
+                           ::testing::Values(0, 1, 2),
+                           ::testing::Values(HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+                                             HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO)));
+}

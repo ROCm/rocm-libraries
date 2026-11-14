@@ -32,7 +32,10 @@
 #pragma once
 #include "hipblaslt/hipblaslt.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
@@ -56,7 +59,7 @@ namespace hipblaslt_ext
     /*! \ingroup types_module
      *  \brief hipBLASLt extension for the preference for GEMM problems.
      *
-     * \details Currently only supports setting the maximum workspace size.
+     * \details Controls workspace limits and algorithm-selection preferences.
      */
     class GemmPreference
     {
@@ -84,10 +87,9 @@ namespace hipblaslt_ext
          *  tile scheduling for StreamK=5 kernels).
          *
          *  \details
-         *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
-         *  hipBLASLt-internal scheduler with no equivalent in the base
-         *  ``hipblasLt`` C API. The ``mode`` argument is one of
-         *  ``hipblasLtStreamKTileSchedulingMode_t``:
+         *  Controls the Hybrid kernel's static or dynamic tile assignment, like
+         *  ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT`` in the C API.
+         *  The ``mode`` argument is one of ``hipblasLtStreamKTileSchedulingMode_t``:
          *
          *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` (default) — SK3 static
          *      sub-path; when ``sm_count_target`` > 0 the library heuristic
@@ -100,11 +102,15 @@ namespace hipblaslt_ext
          *  or always defer to the library heuristic (``AUTO``)
          *  for the chosen kernel.
          *
+         *  algoGetHeuristic() copies this mode to its GemmInstance for later support
+         *  checks and initialization. For algorithm selection without a heuristic
+         *  query, use GemmInstance::setStreamKTileSchedulingMode().
+         *
          *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
          *  cuBLAS-compatible hint on the number of compute units to target.
          *
          *  @param[in]
-         *  mode  Tri-state mode selector.
+         *  mode  Tri-state mode selector. Other values select OFF.
          */
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
@@ -446,6 +452,23 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT GemmInstance& operator=(GemmInstance&& rhs) noexcept;
 
         /*! \ingroup library_module
+         *  \brief Set the StreamK tile scheduling mode for this GEMM instance.
+         *
+         *  Applies to subsequent isAlgoSupported() and initialize() calls, including
+         *  problems supplied through the sizes-and-strides setProblem() overloads.
+         *  The setting persists across setProblem() calls. An algoGetHeuristic()
+         *  call replaces it with the mode from its GemmPreference.
+         *  Without either setting, the problem retains its descriptor or library default.
+         *  Changing the mode does not change an already initialized launch; check
+         *  support and initialize again before running with the new mode.
+         *
+         *  @param[in] mode OFF, ON, or AUTO from hipblasLtStreamKTileSchedulingMode_t.
+         *  \throws std::invalid_argument for any other value; the setting is unchanged.
+         */
+        HIPBLASLT_EXPORT void
+            setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
+
+        /*! \ingroup library_module
         *  \brief Retrieve the possible algorithms.
         *
         *  \details
@@ -641,7 +664,7 @@ namespace hipblaslt_ext
         std::shared_ptr<void> m_data;
 
         size_t  m_workspace_bytes        = 0;
-        int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        int32_t m_streamk_tile_scheduling_mode = -1;
         int32_t m_uniform_summation_order = -1;
     };
 
