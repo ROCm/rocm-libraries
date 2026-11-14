@@ -18,10 +18,11 @@
 //                    1 = register tile: compile-time CONV_DW_KD x CONV_DW_KH x CONV_DW_KW (KD 1
 //                        for 1-D and 2-D), every tap's sum in registers, dy read once per
 //                        position
-//                    2 = matrix core (ConvDepthwiseHankelWrw.h): 16-bit channels-last, unit
-//                        stride and dilation, compile-time CONV_DW_KH x CONV_DW_KW, on 4x4x4
+//                    2 = matrix core (ConvDepthwiseHankelWrw.h): 16-bit channels-last, stride
+//                        CONV_DW_S (1 or 2, both axes), unit dilation, compile-time
+//                        CONV_DW_KH x CONV_DW_KW, on 4x4x4
 //                        MFMA; CONV_DW_Q columns a tile, CONV_DW_G rows a step, CONV_DW_NWG
-//                        16-channel groups a wave
+//                        16-channel groups a wave, CONV_DW_FORM the kernel body (0 or 1)
 //                    3 = vector tile (channels-last, unit width stride and dilation, compile-time
 //                        CONV_DW_KH x CONV_DW_KW, multiplier 1): a thread owns CONV_DW_CV
 //                        consecutive channels (one vector load a column) and every tap's sum of

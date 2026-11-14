@@ -511,7 +511,8 @@ struct RowPlan
         }
     }
 
-    /// The step's loads: task it's row (step row t / CH) through rsrcOf(row) when rowOk(row).
+    /// The step's loads: each task's row (row t / CH of the step) through the descriptor
+    /// rowRsrc(row) returns (zero records for a row that is not staged).
     template <typename Rsrc>
     __device__ void load(u4 (&v)[PER_WAVE][4], int wave, Rsrc rowRsrc) const
     {
@@ -560,7 +561,7 @@ __device__ inline void storeUnitPhases(const u4 (&v)[4], u16* dst, int pitch, in
     }
 }
 
-/// Floor division and the matching non-negative remainder.
+/// Division rounding toward negative infinity (d > 0).
 __device__ inline int floorDiv(int n, int d)
 {
     return (n >= 0 ? n : n - d + 1) / d;
