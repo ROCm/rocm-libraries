@@ -90,8 +90,8 @@ HipblasltContainer::HipblasltContainer()
     };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     const auto hipblasltGemm = [](const HipdnnEnginePluginHandle& handle,
-                                  std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
-        return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
+                                  const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
+        return std::make_unique<HipblasltGemmPlan>(handle, calls);
     };
     // hipBLASLt on gfx11 may round the parts of a long reduction to a 16-bit output.
     constexpr auto HIPBLASLT_NARROW = ConvGemmPlanBuilder::NarrowPartials::ON_GFX11;
@@ -117,8 +117,8 @@ HipblasltContainer::HipblasltContainer()
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     const auto rocblasGemm = [](const HipdnnEnginePluginHandle& /*handle*/,
-                                std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
-        return std::make_unique<RocblasGemmPlan>(std::move(calls));
+                                const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
+        return std::make_unique<RocblasGemmPlan>(calls);
     };
     constexpr auto ROCBLAS_NARROW = ConvGemmPlanBuilder::NarrowPartials::NEVER;
     addConvEngine(

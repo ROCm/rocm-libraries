@@ -18,8 +18,8 @@
 namespace hipblaslt_plugin
 {
 
-RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls, const std::string& gcnArchName)
-    : _calls(fitLibraryLimits(std::move(calls)))
+RocblasGemmPlan::RocblasGemmPlan(const std::vector<GemmCall>& calls, const std::string& gcnArchName)
+    : _calls(fitLibraryLimits(calls))
 {
     // A reduction rocBLAS would chunk into a half or bf16 output rounds once per chunk:
     // declined, so the result is summed in fp32 and rounded once, or not computed here.

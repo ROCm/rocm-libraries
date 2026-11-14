@@ -46,7 +46,7 @@ HipblasltMatrixLayout
 } // namespace
 
 HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
-                                     std::vector<GemmCall> calls)
+                                     const std::vector<GemmCall>& calls)
 {
     hipblasLtMatmulPreference_t preferenceHandle = nullptr;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&preferenceHandle));
@@ -61,7 +61,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                               &maxWorkspace,
                                               sizeof(maxWorkspace)));
 
-    for(auto& call : fitLibraryLimits(std::move(calls)))
+    for(auto& call : fitLibraryLimits(calls))
     {
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,

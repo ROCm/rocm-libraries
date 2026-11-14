@@ -78,16 +78,16 @@ ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     if(backend == Backend::HIPBLASLT)
     {
-        return [](const HipdnnEnginePluginHandle& handle, std::vector<GemmCall> calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
+        return [](const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls);
         };
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
-        return [](const HipdnnEnginePluginHandle& /*handle*/, std::vector<GemmCall> calls) {
-            return std::make_unique<RocblasGemmPlan>(std::move(calls));
+        return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
+            return std::make_unique<RocblasGemmPlan>(calls);
         };
     }
 #endif

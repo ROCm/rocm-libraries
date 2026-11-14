@@ -1025,8 +1025,8 @@ void runWrwInfCase(const InfCase& infCase)
         const auto* actual = static_cast<const T*>(w.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const bool ok = std::isfinite(want)
                                 ? std::fabs(got - want) <= accumulationBound
                                                                + 2.0f * storageEpsilon<T>()
