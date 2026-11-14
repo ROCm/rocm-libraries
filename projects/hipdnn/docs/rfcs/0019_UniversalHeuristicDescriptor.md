@@ -1982,10 +1982,14 @@ input = [z..., isnan(x[slot])...]   the standardized inputs, then one 0/1 missin
 score = target_mean + target_scale * (mean over networks of network(input))
 ```
 
+The inputs are log1p-compressed and standardized but not clamped, so a row outside the training range
+gets an extrapolated score. `uhd_gen evaluate` on graphs larger than the training corpus is how to
+check that.
+
 Every layer of a network but the last is followed by SiLU, `x / (1 + exp(-x))`; the last has one output.
 The networks run in float32 with the ensemble mean in double. An estimate costs a few small matrix
-products: about 2 us for three networks of two 64-wide layers, against 6-15 us for a 500-tree
-`tree_data` model, whose cost rises as more engines' models compete for the CPU cache. One estimate is
+products: about 2 us in the portable build for three networks of two 64-wide layers, against 6-15 us
+for a 500-tree `tree_data` model, whose cost rises as more engines' models compete for the CPU cache. One estimate is
 made per applicable engine and graph, so that cost grows with the number of engines.
 Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
 loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be

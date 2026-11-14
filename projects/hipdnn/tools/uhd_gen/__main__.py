@@ -1225,8 +1225,8 @@ def _fit_mlp(
     groups: list | None = None,
 ):
     """The ensemble fit of mlp_data on log(target). Returns the ensemble and what the
-    manifest records. `groups` are the columns identifying a catalog problem (None for an
-    L1 corpus or one without problem identity)."""
+    manifest records. `groups` are the columns identifying a problem (None for a corpus
+    without problem identity)."""
     from .mlp import (
         DEFAULT_EPOCHS,
         DEFAULT_HIDDEN,
@@ -1244,10 +1244,10 @@ def _fit_mlp(
         raise ValueError(
             f"target {args.target!r} must contain finite, strictly positive values"
         )
-    # A catalog's rows are candidates of a problem: hold out whole problems for early
-    # stopping, keyed as the tree trainer's GroupKFold keys them (shape first, so every
-    # device's measurements of one shape fall on one side). Rows without problem identity,
-    # and an L1 corpus (one row per graph), split by row.
+    # Rows are candidates of a problem (a catalog) or one engine's measurement of a graph on
+    # a device (an L1 corpus): hold out whole problems for early stopping, keyed as the tree
+    # trainer's GroupKFold keys them (benchmark first, so every device's measurements of one
+    # graph or shape fall on one side). Only rows without problem identity split by row.
     problems = None
     if groups:
         if groups[0] not in df.columns:
@@ -1407,9 +1407,7 @@ def _run_train(args: argparse.Namespace) -> int:
             model, group_index, group_models = None, -1, []
             early_exit, early_exit_record = [], None
         elif args.adapter == "mlp_data":
-            ensemble, mlp_fit = _fit_mlp(
-                args, df, matrix, None if immediate else groups
-            )
+            ensemble, mlp_fit = _fit_mlp(args, df, matrix, groups)
             model, group_index, group_models = None, -1, []
             early_exit, early_exit_record = [], None
         else:

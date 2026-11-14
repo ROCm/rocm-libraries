@@ -1255,14 +1255,13 @@ python -m uhd_gen train --adapter linear_data \
 `python -m uhd_gen train --adapter mlp_data --metric tflops ...` fits an ensemble of small
 fully connected networks to the log of one metric (`MlpDataAdapter`, `mlp_model.fbs`,
 identifier `HMLP`). It serves both roles. With `--role predict_engine` it is one engine's L1
-estimate: the same job a `tree_data` L1 model does, at similar accuracy on the corpora it was
-developed on, for about 2 us per engine at run time where a 500-tree model takes 6-15 us,
-more as engines' models crowd the CPU cache. Pick it when the cost of scoring every engine
-of a graph matters; compare the two with `evaluate` on a held-out corpus first, since
-accuracy is the corpus's to decide. With `--role sort_kernel_catalog` it is a catalog
-ranker, an ungrouped one like a single-layer `tree_data` model (see the end of this
-section). `--group-by-feature` is refused: there is one ensemble per model and no grouped
-artifact.
+estimate: the same job a `tree_data` L1 model does, for about 2 us per engine at run time
+(the portable build; about 1.3 us with the opt-in AVX2 path) where a 500-tree model takes
+6-15 us, more as engines' models crowd the CPU cache. Pick it when the cost of scoring every
+engine of a graph matters; compare the two with `evaluate` on a held-out corpus first: that
+evaluation, not this adapter, decides between `mlp_data` and `tree_data`. With `--role sort_kernel_catalog` it is a catalog ranker, an ungrouped one
+like a single-layer `tree_data` model (see the end of this section). `--group-by-feature` is
+refused: there is one ensemble per model and no grouped artifact.
 
 What it predicts. The network estimates the **log** of the registered ranking metric
 (`--metric`, default `tflops` as for any L1 model; a non-default `--target` needs `--metric`
@@ -1279,12 +1278,15 @@ How it fits (`mlp.py`, numpy only: no new dependency, deterministic given its se
 - Inputs: `t = sign(x) * log1p(|x|)` with a missing value at 0, standardized by the column's
   mean and spread over the training rows. A column that never varies is not an input; a
   column missing in some but not all rows also contributes a 0/1 missing flag.
+  The inputs are not clamped, so a row outside the training range gets an extrapolated
+  score; run `evaluate` on graphs larger than the training corpus to check how the model
+  extrapolates there.
 - The target is `log(metric)`, standardized (`target_mean`, `target_scale = std + 1e-9`).
 - Each network is `input -> 64 -> SiLU -> 64 -> SiLU -> 1` (`--mlp-hidden`), initialised as
   PyTorch's `nn.Linear` is, trained on L1 loss by AdamW (rate `3e-3`, weight decay `1e-4`)
-  under cosine annealing over `--mlp-epochs`, in minibatches of 256. A seeded 15% of the rows
-  (of the problems, for a catalog) validate; a member stops after 25 epochs without a better
-  validation loss and keeps its best weights.
+  under cosine annealing over `--mlp-epochs`, in minibatches of 256. A seeded 15% of the
+  rows (of the problems, when the corpus has problem identity) validate; a member stops
+  after 25 epochs without a better validation loss and keeps its best weights.
 - The score is the mean of `--mlp-members` such networks (member `k` seeded `--mlp-seed + k`
   for its weights, split and shuffles), mapped back by `target_mean + target_scale * mean`.
   `train_manifest.json` records the fit (`mlp_fit`): widths, seeds, rows, epochs run and each
@@ -1312,8 +1314,11 @@ corpus. `sort_kernel_catalog` ranks the candidates of one problem, so its rows c
 problems; the early-stopping split therefore holds out whole problems (15% of them, seeded),
 keyed by the first `--group-by` column (the `benchmark` column by default) as the
 `tree_data` trainer's `GroupKFold` keys them, so a candidate is never validated against
-siblings it trained next to. A corpus with no problem identity, and an L1 corpus (one row per
-graph), split by row. `mlp_fit.validation_split` records `group` or `row`.
+siblings it trained next to. An L1 corpus holds out whole graphs the same way, keyed by its
+`benchmark` column: it has one row per graph and device, so a graph measured on two
+devices never has one device's row train the network and the other's validate it. Only a
+corpus with no problem identity splits by row. `mlp_fit.validation_split` records `group` or
+`row`.
 
 ```bash
 python -m uhd_gen train --adapter mlp_data --role predict_engine --metric time \

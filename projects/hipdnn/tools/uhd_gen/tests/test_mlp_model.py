@@ -727,18 +727,21 @@ def test_the_offline_scorer_is_the_direct_evaluation_in_the_metrics_units(tmp_pa
 TRAIN_OPTIONS = ["--mlp-epochs", "150", "--mlp-members", "2", "--mlp-hidden", "16,16"]
 
 
-def _l1_corpus(path, count=60, metric="tflops"):
-    """Rows of an engine whose time grows smoothly with the graph's flops and nodes."""
+def _l1_corpus(path, count=60, metric="tflops", devices=("board",)):
+    """Rows of an engine whose time grows smoothly with the graph's flops and nodes, one per
+    graph and device."""
     from uhd_gen.tests.test_immediate import measurement
 
     rows = []
     for index in range(count):
-        row = measurement(graph=f"graph-{index}", metric=metric)
-        flops = float(2e9 * (index + 1))
-        nodes = float(1 + index % 5)
-        row["features"].update({"graph.flops": flops, "graph.nodes": nodes})
-        row["avgTimeMs"] = (index + 1) ** 0.8 * (1 + 0.1 * nodes)
-        rows.append(row)
+        for device in devices:
+            row = measurement(graph=f"graph-{index}", metric=metric)
+            row["device_id"] = device
+            flops = float(2e9 * (index + 1))
+            nodes = float(1 + index % 5)
+            row["features"].update({"graph.flops": flops, "graph.nodes": nodes})
+            row["avgTimeMs"] = (index + 1) ** 0.8 * (1 + 0.1 * nodes)
+            rows.append(row)
     path.write_text(json.dumps(rows), encoding="utf-8")
     return path
 
@@ -826,6 +829,24 @@ def test_train_emits_a_valid_mlp_data_uhd(tmp_path, evaluator, metric, objective
     truth = frame["tflops"] if metric == "tflops" else frame["avgTimeMs"]
     error = np.abs(np.log(bundle.scorer(frame)) - np.log(truth.to_numpy(dtype=float)))
     assert np.median(error) < 0.15
+
+
+def test_an_l1_corpus_holds_out_whole_graphs_not_rows(tmp_path, evaluator):
+    """One L1 row per (graph, device): a graph measured on two boards must not have one
+    board's row train the network and the other validate it."""
+    from uhd_gen.mlp import VALIDATION_FRACTION
+
+    _l1_corpus(tmp_path / "corpus.json", count=30, devices=("board-a", "board-b"))
+    code, output = _train(tmp_path, evaluator)
+    assert code == 0
+    manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
+    fit = manifest["mlp_fit"]
+    assert fit["validation_split"] == "group" and fit["validation_groups"] == 30
+    held = round(VALIDATION_FRACTION * 30)
+    for member in fit["member_fits"]:
+        # Every held-out graph takes both its boards' rows with it.
+        assert member["validation_rows"] == 2 * held
+        assert member["train_rows"] == 2 * (30 - held)
 
 
 def test_train_is_deterministic_in_its_seed(tmp_path, evaluator, monkeypatch):

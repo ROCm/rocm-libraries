@@ -24,9 +24,12 @@
 #include <string>
 #include <vector>
 
-// Accumulators held in registers with fused multiply-adds, where the build allows. MSVC defines
-// __AVX2__ for /arch:AVX2 but never __FMA__; every AVX2 CPU it can target has FMA.
-#if defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
+// Opt-in: accumulators held in registers with fused multiply-adds, built only when the
+// compiler targets both AVX2 and FMA (`-mavx2 -mfma`). No in-tree build or CI configuration
+// sets those flags, so the portable path is what ships and what CI tests. MSVC never defines
+// __FMA__ and clang targeting the MSVC ABI defines __AVX2__ without it for `-mavx2` alone,
+// so neither is taken to imply FMA.
+#if defined(__AVX2__) && defined(__FMA__)
 #define HIPDNN_MLP_AVX2 1
 #include <immintrin.h>
 #endif
@@ -53,10 +56,12 @@ namespace hipdnn_plugin_sdk::uhd
 ///
 /// Members run in float32 with the ensemble mean taken in double. The kernels are plain C++
 /// written for the compiler's auto-vectorizer (input-major weights, fixed-width accumulator
-/// blocks, a branch-free polynomial exp). A build that enables AVX2 and FMA (`-mavx2 -mfma`,
-/// `/arch:AVX2`) switches the layer product to register-resident intrinsics, about 1.6x faster;
-/// results agree with the portable path to float rounding. Scoring allocates nothing: scratch
-/// lives on the stack, so concurrent score() calls are safe.
+/// blocks, a branch-free polynomial exp). Building with `-mavx2 -mfma` opts in to
+/// register-resident intrinsics for the layer product, about 1.6x faster, with results that
+/// agree with the portable path to float rounding. No in-tree build or CI configuration sets
+/// those flags: the portable path is what ships and what CI tests, and the double-precision
+/// reference tests in TestMlpDataAdapter cover whichever path a build compiles. Scoring
+/// allocates nothing: scratch lives on the stack, so concurrent score() calls are safe.
 class MlpDataAdapter : public IUhdAdapter
 {
 public:
@@ -141,8 +146,10 @@ private:
     static std::string build(const hipdnn_flatbuffers_sdk::data_objects::MlpModel& model,
                              MlpDataAdapter& adapter);
 
-    /// x[0, n) = SiLU(x[0, n)) in place, `x / (1 + exp(-x))`, exp accurate to about 1e-6
-    /// relative. @p n is at most MAX_WIDTH.
+    /// x[0, n) = SiLU(x[0, n)) in place, `x / (1 + exp(-x))`, exp accurate to about 3e-6
+    /// relative: the degree-5 polynomial's truncation, r^6 / 720 = 2.4e-6 absolute at the edge
+    /// of the reduced range |r| = ln(2) / 2, where exp(r) is as small as 0.71. @p n is at most
+    /// MAX_WIDTH.
     static void silu(float* x, size_t n);
 
     /// y[0, outPadded) = bias + x[0, in) * weights, @p outPadded a multiple of BLOCK.
