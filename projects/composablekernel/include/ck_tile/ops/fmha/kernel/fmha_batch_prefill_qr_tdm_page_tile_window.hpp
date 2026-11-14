@@ -325,7 +325,65 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
-    // ---- P>=64 scalar page-id queue ----
+    // ---- P>=64 page ids in VGPR lanes (see UsePageIdBatch of the page-tile policy) ----
+    // Without sink tokens the tiles of the loop are contiguous from first_origin, so the ids of 32
+    // tiles come with one vector load instead of one LDS publication per tile: lane j holds the
+    // queue id of tile tile0 + j (this wave's page for P64, the tile's page for P>=128), 0 past
+    // the loop or where the wave's page holds no valid row (the queue's dummy id), and no table
+    // entry past the sequence is read: a tile below num_total_loop (derived from seqlen_k_ through
+    // the mask tile range) lies inside seqlen_k_, and the table holds a valid id for every page an
+    // attended key falls in (the launch contract). A tile's id is one readlane into an SGPR, which
+    // keeps the page address of the TDM issue on the scalar unit (see load_fragment_id). The load
+    // goes through the global address space: a flat load would also count in DScnt, on which the
+    // loop's partial LDS waits rely.
+    CK_TILE_DEVICE int32_t load_page_id_batch(index_t tile0,
+                                              index_t num_total_loop,
+                                              index_t first_origin) const
+    {
+        static_assert(PageSize_ >= 64);
+        const index_t tile = tile0 + static_cast<index_t>(get_lane_id());
+        if(tile >= num_total_loop)
+            return 0;
+        const long_index_t logical_origin =
+            static_cast<long_index_t>(first_origin) + static_cast<long_index_t>(tile) * 128;
+        const index_t valid_tokens =
+            min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
+        index_t page_in_tile = 0;
+        if constexpr(kQueuePages > 1)
+            page_in_tile = kSliceRows * get_warp_id() / PageSize_;
+        if(valid_tokens <= page_in_tile * PageSize_)
+            return 0;
+        const index_t logical_page =
+            static_cast<index_t>(logical_origin / PageSize_) + page_in_tile;
+        return reinterpret_cast<const CK_TILE_GLOBAL_ADDR int32_t*>(page_row_)[logical_page];
+    }
+
+    // The valid rows of tile tile_index of the contiguous loop, 0 past it.
+    CK_TILE_DEVICE index_t tile_valid_tokens(index_t tile_index,
+                                             index_t num_total_loop,
+                                             index_t first_origin) const
+    {
+        if(tile_index < 0 || tile_index >= num_total_loop)
+            return 0;
+        const long_index_t logical_origin =
+            static_cast<long_index_t>(first_origin) + static_cast<long_index_t>(tile_index) * 128;
+        return min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
+    }
+
+    // The queue value of tile tile0 + lane from a batch of load_page_id_batch.
+    CK_TILE_DEVICE PageIds page_id_from_batch(int32_t batch,
+                                              index_t lane,
+                                              index_t valid_tokens) const
+    {
+        PageIds result{};
+        if(valid_tokens <= 0)
+            return result;
+        result.owned[0].physical_page = __builtin_amdgcn_readlane(batch, lane);
+        result.owned[0].valid_rows    = valid_tokens;
+        return result;
+    }
+
+    // ---- P>=64 scalar page-id queue (the other P>=64 tiles) ----
     // P>=128: one shared physical page per logical tile. P64: the tile's two page ids, one
     // per slot; each wave reads the one holding its 32-row slice. publish returns the tile's
     // valid rows; read returns this wave's raw slot id; complete makes it the queue value.

@@ -202,6 +202,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
                !Problem::kHasLogitsSoftCap;
     }
 
+    // P>=64 page ids in VGPR lanes (load_page_id_batch of the page-tile window: one vector load
+    // per 32 tiles instead of one LDS publication per tile) for the tiles without sink tokens, KV
+    // split or logits soft cap. Sink tiles are not contiguous; the two batch VGPRs made the
+    // KV-split partial P64 D128 M128 tiles spill (their inline-asm operands fill the low 256 VGPRs)
+    // and took the soft-cap linear P128 D128 M128 tiles past 512 VGPRs (one wave per SIMD).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UsePageIdBatch()
+    {
+        return Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
+               !detail::fmha_tdm_is_split_partial_v<Problem> && !Problem::kHasLogitsSoftCap;
+    }
+
     static constexpr float kGuardedRowSumBound = 256.0f;
 
     // Guarded row max, max path: the row max (Part01), then the output and the row sums rescaled
