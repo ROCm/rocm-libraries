@@ -1323,10 +1323,10 @@ class Solution(collections.abc.Mapping):
           or state["MacroTile1"] != state["MacroTile"][1]:
         reject(state, printRejectionReason, "MacroTile mismatch")
 
-    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950/gfx11
+    # gfx1030 supports fp16 dot2 but has no matrix instructions.
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
-      and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
+      and ((state["ISA"] in (IsaVersion(9,4,2), IsaVersion(10,3,0)) and state["ProblemType"]["DataType"].isHalf()) \
       or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11) \
           and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
@@ -3113,6 +3113,13 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"]:
         state["MIWaveTileA"] = state["MIWaveTile"][1]
         state["MIWaveTileB"] = state["MIWaveTile"][0]
+
+    if not state["EnableMatrixInstruction"]:
+      state["MIWaveTileA"] = 1
+      state["MIWaveTileB"] = 1
+      state["MIInputPerThread"] = state["ThreadTileA"]
+      state["MIInputPerThreadA"] = state["ThreadTileA"]
+      state["MIInputPerThreadB"] = state["ThreadTileB"]
 
     if state["ProblemType"]["Sparse"] == 2 and state["DirectToVgprSparseMetadata"]:
       reject(state, printRejectionReason, "Sparse B does not supprot DirectToVgprSparseMetadata")
@@ -7894,7 +7901,7 @@ class Solution(collections.abc.Mapping):
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work.
       # gfx11 dot2 with K-contiguous operands reads along K and never shifts pointers.
-      gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
+      gfx11Dot = state["UseDotInstruction"] and (state["ISA"][0] == 11 or state["ISA"] == IsaVersion(10,3,0))
       dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
       dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
       if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \
