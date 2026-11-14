@@ -433,6 +433,7 @@ namespace TensileLite
 
     struct SizeMapping
     {
+        int                    a2aSubRounds     = 1;
         bool                   activationFused  = true;
         int                    adaptiveGemm     = 0;
         int                    adaptiveGemmGSUA = 0;
@@ -1533,7 +1534,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
-            bool fusedGemmA2A               = false;
+            FusedA2A fusedA2A                   = FusedA2A::Disabled;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.
