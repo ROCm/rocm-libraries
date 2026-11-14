@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -749,11 +750,14 @@ namespace
 
         // MX grouped GEMM, D = alpha * (sA . A)^T (sB . B) + beta * C, with A K x M and B K x N
         // per group, against a host reference. The values make every product and sum exact
-        // in FP32, so D must equal the reference rounded to outType.
-        void runMX(hipDataType                    elemType,
-                   hipDataType                    outType,
-                   hipblasLtMatmulMatrixScale_t   mode,
-                   const std::vector<GroupShape>& shapes)
+        // in FP32, so D must equal the reference rounded to outType. With launchAs set, the
+        // algo found for mode is launched with the descriptor switched to launchAs, and
+        // hipblasLtMatmul must refuse it.
+        void runMX(hipDataType                                 elemType,
+                   hipDataType                                 outType,
+                   hipblasLtMatmulMatrixScale_t                mode,
+                   const std::vector<GroupShape>&              shapes,
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
         {
             const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             const MXScaleMode scale = mxScaleMode(mode);
@@ -831,23 +835,35 @@ namespace
             ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
             keep(ws);
             const float alpha = 2.f, beta = 1.f;
-            ASSERT_EQ(hipblasLtMatmul(handle,
-                                      desc,
-                                      &alpha,
-                                      A.ptrArray,
-                                      layA,
-                                      B.ptrArray,
-                                      layB,
-                                      &beta,
-                                      C.ptrArray,
-                                      layC,
-                                      D.ptrArray,
-                                      layD,
-                                      &result.algo,
-                                      ws,
-                                      kWorkspace,
-                                      nullptr),
-                      HIPBLAS_STATUS_SUCCESS);
+            auto        launch = [&] {
+                return hipblasLtMatmul(handle,
+                                       desc,
+                                       &alpha,
+                                       A.ptrArray,
+                                       layA,
+                                       B.ptrArray,
+                                       layB,
+                                       &beta,
+                                       C.ptrArray,
+                                       layC,
+                                       D.ptrArray,
+                                       layD,
+                                       &result.algo,
+                                       ws,
+                                       kWorkspace,
+                                       nullptr);
+            };
+            if(launchAs)
+            {
+                for(auto attr :
+                    {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+                    ASSERT_EQ(
+                        hipblasLtMatmulDescSetAttribute(desc, attr, &*launchAs, sizeof(*launchAs)),
+                        HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(launch(), HIPBLAS_STATUS_INVALID_VALUE);
+                return;
+            }
+            ASSERT_EQ(launch(), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
             std::vector<uint16_t> out(D.hostData.size());
@@ -1033,6 +1049,17 @@ namespace
               HIP_R_16F,
               HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
               kMXShapes);
+    }
+
+    // A pre-swizzled algo reads its scales in the 32x8 layout, so packed scales must
+    // not launch it.
+    TEST_F(GroupedMatmul, smoke_MXPackedScalesRefuseAPreSwizzledAlgo)
+    {
+        runMX(HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     }
 
     // MXFP4 with a UE4M3 or UE5M3 scale for every 16 values; skips where the library has no

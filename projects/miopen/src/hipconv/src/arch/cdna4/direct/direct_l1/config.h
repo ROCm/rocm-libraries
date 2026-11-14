@@ -48,6 +48,12 @@ struct Config
     // Width of the convolution filter.
     int kw = 3;
 
+    // Depth of the convolution filter; 1 is a conv2d.
+    //
+    // kd > 1 unrolls the depth taps as an outer loop around the channel main
+    // loop, accumulating across taps. See docs/algorithms/direct/direct-3d.md.
+    int kd = 1;
+
     hipconv::Direction direction = hipconv::Direction::Fprop;
 
     // When true, K is an exact multiple of block_k: the writer takes the fast path.
@@ -77,7 +83,32 @@ struct Config
     // configs keep byte-for-byte identical addressing (the fold risks a K128 spill).
     bool large_tensor = false;
 
+    // When true, split each tile's reduction across workgroups (split-K).
+    //
+    // The host picks the split count S per shape so the launch fills the machine in one
+    // round; each workgroup runs a contiguous range of the tile's (depth tap, C(64))
+    // steps, writes fp32 partials to the workspace, and a second launch sums them into
+    // the output. See docs/algorithms/direct/direct-3d.md.
+    bool split_k = false;
+
+    // Unfold slots hold w_unfold()-column chunks of image rows; a group may straddle two images.
+    //
+    // Last, so existing configs' mangled names, which omit trailing zero members, are
+    // unchanged. See docs/algorithms/direct/direct-l1-chunked-unfold.md.
+    bool unfold_chunks = false;
+
+    // When true, a main-loop step covers C(64) of one filter column: Kw steps per C(64).
+    //
+    // Doubles the MFMAs per step against a C(32) step, so a block_k() == 64 tile's compute
+    // phase lasts as long as the other wavegroup's memory phase. See
+    // docs/algorithms/details/direct/direct-l1-c64-step.md.
+    bool c64_step = false;
+
     constexpr int wave_k() const { return wave_k16 * 16; }
+
+    // Main-loop steps per C(64) iteration, and C(32) halves per step.
+    constexpr int num_steps() const { return c64_step ? kw : kw * 2; }
+    constexpr int c32_per_step() const { return c64_step ? 2 : 1; }
 
     constexpr int block_k() const { return waves_k * wave_k(); }
     constexpr int block_p() const { return waves_p * wave_p; }
@@ -97,6 +128,8 @@ struct Config
 
     constexpr int num_waves() const { return waves_p * waves_q * waves_k; }
     constexpr int num_threads() const { return WAVE_SIZE * num_waves(); }
+
+    constexpr bool operator==(const Config&) const = default;
 };
 
 } // namespace hipconv::cdna4::direct_l1

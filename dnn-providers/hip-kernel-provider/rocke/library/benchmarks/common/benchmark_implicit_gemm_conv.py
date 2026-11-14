@@ -178,7 +178,7 @@ _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 # physical unit -- only ratios between degrees are compared -- so a constant's
 # absolute magnitude says nothing about its influence. Scope: gfx950, forward;
 # refit before relying on it elsewhere. Method and fitting tooling are described
-# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+# in library/builders/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
 _FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
 _FWD_MERGE_CONSTS = (
     # Cost of issuing the A load per K step, divided by the achieved vector
@@ -5547,7 +5547,9 @@ def _fast_rank_candidates(
             # A stream-K binary partitions K over its CTA pool itself; the
             # split-K kernarg is not its knob, so it ranks once.
             degrees = (None,)
-        elif direction == "wgrad" and ident.split_k > 1:
+        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
+            # A split-K forward binary takes its degree as a kernarg too, so
+            # it ranks once per degree like wgrad's.
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
@@ -6142,7 +6144,7 @@ def _split_k_degrees(
 
     ``direction="fwd"`` serves the split-K forward binary: the resolver's
     degree is the forward policy's
-    (:func:`rocke.helpers.split_k.select_split_k_fwd`), added only where it
+    (:func:`kernels.common.conv_split_k.select_split_k_fwd`), added only where it
     splits -- where it does not, the plain forward binary is the one to time --
     and a degree is also dropped when its grid exceeds
     ``_FWD_SPLIT_K_MAX_CTAS`` workgroups or its fp32 workspace passes the i32

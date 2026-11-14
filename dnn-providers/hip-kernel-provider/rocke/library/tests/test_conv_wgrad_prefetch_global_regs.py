@@ -4,7 +4,7 @@
 
 No GPU and no comgr: spec construction, the validity gates, the lowered IR,
 the kernel identity and the AOT grid, plus the C++ engine's IR where the
-``rocke_engine`` binding is importable. The numerical counterpart is
+``rocke_library_engine`` binding is importable. The numerical counterpart is
 ``TestWgradPrefetchGlobalRegsNumerics`` in ``test_conv_wgrad_correctness.py``; the
 two-engine counterpart is configs 89-105 of the wgrad parity emitters.
 """
@@ -396,13 +396,12 @@ class TestPrefetchGlobalRegsCrossEngine(unittest.TestCase):
     """The C++ engine emits the Python IR byte for byte and rejects alike."""
 
     def setUp(self):
-        try:
-            from rocke.core.backend import BackendError, _import_engine
-        except ImportError as e:
-            self.skipTest(f"C++ engine loader not available: {e}")
+        from rocke.core import BackendError, import_engine
+
+        from kernels.conv.engine_bridge import ENGINE_MODULE
 
         try:
-            self.eng = _import_engine()
+            self.eng = import_engine(ENGINE_MODULE)
         except BackendError as e:
             self.skipTest(f"C++ engine not importable: {e}")
 

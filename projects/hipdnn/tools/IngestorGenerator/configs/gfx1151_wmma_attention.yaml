@@ -29,7 +29,14 @@ engine:
   # native matcher declines override-shape graphs (1.1.0).
   sdk_version: 1.2.0
   behavior_notes: [supports_graph_capture]
-  knobs: []
+  # The prefill matcher admits every object of the graph's dtype and bias whose
+  # buckets cover the graph's widths (mask, decode routing and arch gate further),
+  # so one graph can admit several objects. The catalog lists them only if each has
+  # a distinct knob tuple (GenericPlanBuilder enumerateCandidates). Within one
+  # (arch, dtype, bias) the (head_size, head_size_v) bucket pair is unique per
+  # object, so those two knobs are enough. The tile (block_m) is a function of the
+  # arch and the bucket pair here, so it is not enrolled.
+  knobs: [head_size, head_size_v]
   heuristic: native
 
 kmd_fields:

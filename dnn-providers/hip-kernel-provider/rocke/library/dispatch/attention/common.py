@@ -818,13 +818,13 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     use). Only the split-rule segment count and the dispatcher's K/V layout
     knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
-    from rocke.helpers.split_k import _ARCH_NUM_CUS
+    from rocke.helpers.split_k import ARCH_NUM_CUS
 
     num_cus = int(req.num_cus)
     if num_cus <= 0:
-        if req.arch not in _ARCH_NUM_CUS:
+        if req.arch not in ARCH_NUM_CUS:
             raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
-        num_cus = _ARCH_NUM_CUS[req.arch]
+        num_cus = ARCH_NUM_CUS[req.arch]
     return _problem_with_num_cus(req, num_cus)
 
 
@@ -1004,12 +1004,14 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
-            # spec_hash taken over it) is the one stored before the field existed.
+            # LSE fields at their defaults are left out (emit_lse off, lse_layout
+            # token-major), so those keys and the spec_hash taken over them are the
+            # ones stored before the fields existed.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (f.name == "emit_lse" and not spec.emit_lse)
+                and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
             )
 
         return (

@@ -87,12 +87,12 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
-from rocke.helpers.layouts import ConvKOuterFragmentReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -5940,7 +5940,7 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
 
 # The C++ engine stores the per-tap accumulators and the delta ring in
 # fixed-size arrays sized by ``ROCKE_DCONV_WGRAD_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
 # part of the spec contract rather than a C-side implementation detail: both
 # engines reject above it, or a KH=9 spec would build here and fail there.
 _WGRAD_MAX_KH = 8
@@ -11009,12 +11009,19 @@ def _depthwise_dgrad_win_mfma_check(
     if spec.dot2 or spec.ch_per_lane != 1:
         return False, "mfma excludes dot2 and ch_per_lane > 1"
     if spec.fwd and _dw_toeplitz_lanes(spec.wave_size).k_chunks != 1:
-        # The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
-        # the grouped form's dense A row as one 8-channel K chunk per lane
-        # (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
-        # would hold the wrong taps. The depthwise forward is validated only
-        # at wave64 (the gfx950 forward AOT variant).
-        return False, "fwd needs the wave64 MFMA form (got wave_size=32)"
+        # The wave32 WMMA runs the depthwise forward (its tap index is
+        # computed per K chunk). The grouped form loads its dense A row as
+        # one 8-channel K chunk per lane (k_chunks == 1); at k_chunks == 2
+        # that A operand would hold the wrong taps. The stride-2 output is
+        # validated only on the wave64 MFMA (the gfx950 forward AOT variant).
+        if spec.grouped:
+            return False, (
+                "the grouped fwd form needs the wave64 MFMA (got wave_size=32)"
+            )
+        if spec.out_stride != 1:
+            return False, (
+                f"fwd at wave_size=32 needs out_stride=1 (got {spec.out_stride})"
+            )
     if spec.w_fold not in DW_DGRAD_MFMA_W_FOLDS:
         return False, f"w_fold must be 1, 2 or 4 (got {spec.w_fold})"
     if spec.prefetch_rows > DW_DGRAD_MFMA_MAX_PREFETCH_ROWS:
@@ -11163,18 +11170,11 @@ def is_valid_depthwise_dgrad_win_spec(
     return _depthwise_dgrad_win_check(spec)
 
 
-def _dw_win_byte_strides(
-    b: IRBuilder,
-    params: Dict[str, Value],
-    fwd: bool = False,
-    c2: Optional[Value] = None,
-):
+def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value], fwd: bool = False):
     """Byte strides of the dgrad tensors from the element-stride kernargs:
     ``(dy_img, dy_row, dy_px, dx_img, dx_row, dx_px)``. Under the forward
-    ABI (``fwd``) dY is the forward input A and dX the forward output D.
-    ``c2`` is the caller's i32 constant 2 (made here when ``None``)."""
-    if c2 is None:
-        c2 = b.const_i32(2)
+    ABI (``fwd``) dY is the forward input A and dX the forward output D."""
+    c2 = b.const_i32(2)
     names = (
         (
             "p_A_stride_n",
@@ -11558,7 +11558,9 @@ def _dw_toeplitz_atom(
 
 
 def _build_dw_dgrad_win_toeplitz(
-    spec: DirectDepthwiseDgradWindowedSpec, arch: str
+    spec: DirectDepthwiseDgradWindowedSpec,
+    arch: str,
+    kernel_name: Optional[str] = None,
 ) -> KernelDef:
     """Toeplitz form of the windowed depthwise dgrad kernel (``spec.mfma``):
     the 16x16x32 MFMA at wave64 (gfx950) or the 16x16x32 WMMA at wave32
@@ -11595,9 +11597,16 @@ def _build_dw_dgrad_win_toeplitz(
     and drop their stores through the lane sentinel; rows outside the image
     through the uniform one.
 
-    ``fwd`` (the rotated filter, its ``out_stride`` and the grouped form) is
-    a wave64 MFMA mode: the grouped A row below is one K chunk per lane, and
-    the validator rejects ``fwd`` at wave32.
+    ``fwd`` reads the rotated filter. Its grouped form and ``out_stride=2``
+    are wave64 MFMA modes (the grouped A row below is one K chunk per lane);
+    the depthwise ``fwd`` at stride 1 also runs on the wave32 WMMA, where it
+    serves the gfx1250 depthwise forward (:mod:`conv_direct_dw_fwd_wmma`,
+    which builds through ``kernel_name``). In ``fwd`` the window columns are
+    offset by the row padding (the forward ``-pad`` on both axes), so a
+    rectangular filter keeps one forward ``PAD``.
+
+    ``kernel_name`` overrides ``spec.kernel_name()`` (no validation here:
+    the caller has validated ``spec``).
     """
     p = spec.problem
     KH, KW, PAD = p.KH, p.KW, p.PAD
@@ -11615,8 +11624,11 @@ def _build_dw_dgrad_win_toeplitz(
 
     FWD = spec.fwd
     S = spec.out_stride
+    # First window column relative to the tile: the forward pads both axes
+    # by the same amount, the row's (equal to the dgrad's for a square filter).
+    COL0 = PAD - (KH - 1) if FWD else PAD - (KW - 1)
 
-    b = IRBuilder(spec.kernel_name())
+    b = IRBuilder(kernel_name or spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
     params = emit_direct_params(b, direction="fwd" if FWD else "dgrad", io_type=io_type)
     p_N = params["p_N"]
@@ -11794,7 +11806,7 @@ def _build_dw_dgrad_win_toeplitz(
         px = b.div(idx, c_per_px)
         ch8 = b.mul(b.mod(idx, c_per_px), c8)
         img_i = b.add(img0, b.div(px, c_U))
-        wo = b.add(x0, b.add(b.mod(px, c_U), b.const_i32(PAD - (KW - 1))))
+        wo = b.add(x0, b.add(b.mod(px, c_U), b.const_i32(COL0)))
         ch_i = b.add(ch_blk, ch8)
         ok = b.land(
             b.land(b.cmp_lt(idx, b.const_i32(n_in)), b.cmp_lt(img_i, p_N)),
@@ -12027,7 +12039,7 @@ class DirectDepthwiseSpec:
 
 # The C++ engine holds the KH x KW depthwise weights (regular and spatial
 # forward) in fixed-size register tables sized by ``ROCKE_DCONV_DW_MAX_K{H,W}``
-# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
+# (``library/cpp/include/rocke/instance_conv_direct_grouped.h``): both engines'
 # validators reject above it, so a spec that validates builds in either.
 _DW_MAX_KH = 32
 _DW_MAX_KW = 32

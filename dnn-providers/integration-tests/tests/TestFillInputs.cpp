@@ -696,6 +696,11 @@ struct SdpaBwdOptions
     bool causal = false;
     bool attnMask = false;
     std::optional<float> dropoutProbability;
+    bool seed = false;
+    bool offset = false;
+    bool dropoutMask = false;
+    bool dropoutScale = false;
+    bool dropoutScaleInv = false;
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -746,6 +751,32 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         tensors.push_back(
             CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
     }
+    if(opts.seed)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 12, "seed", DataType::INT64, &scalarDims, &scalarDims));
+    }
+    if(opts.offset)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 13, "offset", DataType::INT64, &scalarDims, &scalarDims));
+    }
+
+    if(opts.dropoutMask)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 14, "dropout_mask", DataType::FLOAT, &maskStrides, &maskDims));
+    }
+    if(opts.dropoutScale)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 15, "dropout_scale", DataType::FLOAT, &scalarDims, &scalarDims));
+    }
+    if(opts.dropoutScaleInv)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 16, "dropout_scale_inv", DataType::FLOAT, &scalarDims, &scalarDims));
+    }
 
     SdpaBackwardAttributesBuilder attrs(b);
     attrs.add_q_tensor_uid(1);
@@ -776,6 +807,26 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     if(opts.dropoutProbability.has_value())
     {
         attrs.add_dropout_probability(*opts.dropoutProbability);
+    }
+    if(opts.seed)
+    {
+        attrs.add_seed_tensor_uid(12);
+    }
+    if(opts.offset)
+    {
+        attrs.add_offset_tensor_uid(13);
+    }
+    if(opts.dropoutMask)
+    {
+        attrs.add_dropout_mask_tensor_uid(14);
+    }
+    if(opts.dropoutScale)
+    {
+        attrs.add_dropout_scale_tensor_uid(15);
+    }
+    if(opts.dropoutScaleInv)
+    {
+        attrs.add_dropout_scale_inv_tensor_uid(16);
     }
     auto bwd = attrs.Finish();
 
@@ -1041,6 +1092,93 @@ TEST(TestFillInputs, SdpaBwdWithZeroDropoutIsDerived)
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
     expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// A seed and offset the zero-probability node names are not read, so O and stats are still derived.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndSeedOffsetIsDerived)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.0f;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// Either of a seed and an offset alone is not read at probability zero either.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndOneOfSeedOrOffsetIsDerived)
+{
+    for(const bool seed : {true, false})
+    {
+        SCOPED_TRACE(seed ? "seed only" : "offset only");
+        SdpaBwdOptions opts;
+        opts.dropoutProbability = 0.0f;
+        opts.seed = seed;
+        opts.offset = !seed;
+        const auto gr = buildSdpaBwdGraph(opts);
+        auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+        expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+    }
+}
+
+// Probability zero excuses the probability, seed and offset only: a dropout mask, scale or
+// scale-inverse tensor the node names still means dropout, which the fill does not model.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndADropoutMaskOrScaleIsRefused)
+{
+    for(const std::string tensor : {"dropout mask", "dropout scale", "dropout scale inverse"})
+    {
+        SCOPED_TRACE(tensor);
+        SdpaBwdOptions opts;
+        opts.dropoutProbability = 0.0f;
+        opts.dropoutMask = tensor == "dropout mask";
+        opts.dropoutScale = tensor == "dropout scale";
+        opts.dropoutScaleInv = tensor == "dropout scale inverse";
+        const auto gr = buildSdpaBwdGraph(opts);
+        const auto leafUids = gr.leafInputUids({7, 8, 9});
+        auto inputs = makeTensorsFromGraph(gr, leafUids);
+
+        const auto result = fillSdpaBwd(gr, inputs, leafUids);
+
+        EXPECT_FALSE(result.filled);
+        EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+    }
+}
+
+// A seed and offset without a probability keep the dropout refusal.
+TEST(TestFillInputs, SdpaBwdWithSeedOffsetAndNoProbabilityIsRefused)
+{
+    SdpaBwdOptions opts;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = makeTensorsFromGraph(gr, gr.leafInputUids({7, 8, 9}));
+
+    const auto result = fillSdpaBwd(gr, inputs, gr.leafInputUids({7, 8, 9}));
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+}
+
+// Each of a seed and an offset alone keeps the dropout refusal when there is no probability.
+TEST(TestFillInputs, SdpaBwdWithOneOfSeedOrOffsetAndNoProbabilityIsRefused)
+{
+    for(const bool seed : {true, false})
+    {
+        SCOPED_TRACE(seed ? "seed only" : "offset only");
+        SdpaBwdOptions opts;
+        opts.seed = seed;
+        opts.offset = !seed;
+        const auto gr = buildSdpaBwdGraph(opts);
+        auto inputs = makeTensorsFromGraph(gr, gr.leafInputUids({7, 8, 9}));
+
+        const auto result = fillSdpaBwd(gr, inputs, gr.leafInputUids({7, 8, 9}));
+
+        EXPECT_FALSE(result.filled);
+        EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+    }
 }
 
 // Unlike a fused graph, where neither O nor stats is an input, owning O and stats
@@ -2066,17 +2204,36 @@ struct ResampleBwdOptions
     ResampleMode mode = ResampleMode::MAXPOOL;
     PaddingMode paddingMode = PaddingMode::ZERO_PAD;
     DataType indexType = DataType::INT32;
+    // Bundles may lay dy, index and dx out NHWC/NDHWC rather than packed in dims
+    // order. Keep in sync between buildResampleBwdGraph() and
+    // expectIndexIsForwardArgmax(), which must build its own scratch x with the
+    // same strides the derivation builds dx's scratch x with.
+    bool nhwcStrides = false;
 };
+
+// Packed-in-dims-order strides when nhwcStrides is false, matching every test
+// below until this field is set; channel-last strides (NHWC for 4D, NDHWC for 5D)
+// when it is true.
+std::vector<int64_t> resampleBwdStrides(const std::vector<int64_t>& dims, bool nhwcStrides)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_data_sdk::utilities::TensorLayout;
+
+    if(!nhwcStrides)
+    {
+        return generateStrides(dims);
+    }
+    return generateStrides(
+        dims, dims.size() == 5 ? TensorLayout::NDHWC.strideOrder : TensorLayout::NHWC.strideOrder);
+}
 
 GraphResult buildResampleBwdGraph(const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
     GraphResult r;
     auto& b = r.builder;
 
-    const auto dyStrides = generateStrides(opts.dyDims);
-    const auto dxStrides = generateStrides(opts.dxDims);
+    const auto dyStrides = resampleBwdStrides(opts.dyDims, opts.nhwcStrides);
+    const auto dxStrides = resampleBwdStrides(opts.dxDims, opts.nhwcStrides);
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
     tensors.push_back(
@@ -2136,9 +2293,8 @@ InputTensorMap fillResampleBwdInputs(const GraphResult& gr)
 // NEG_INF_PAD only in-bounds elements competing.
 void expectIndexIsForwardArgmax(InputTensorMap& inputs, const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
-    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims, generateStrides(opts.dxDims));
+    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims,
+                                                resampleBwdStrides(opts.dxDims, opts.nhwcStrides));
     x.fillWithRandomValues(-1.0f, 1.0f, kResampleIndexSeed);
     auto& index = typedTensor<int32_t>(inputs, 2);
 
@@ -2238,6 +2394,77 @@ TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3d)
     opts.postPadding = {0, 0, 0};
     opts.stride = {1, 2, 2};
     opts.window = {2, 2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+// Unlike the default shape above, dy(0, 0)'s window has exactly one in-bounds
+// element (x(0, 0, 0, 0)), and with the pinned seed that element's fill is
+// negative. Zero-padding's implicit 0 outranks it, so the derived index is -1
+// there; a hard-coded NEG_INF_PAD would instead pick the lone in-bounds element
+// (index 0) and fail expectIndexIsForwardArgmax's per-element check.
+TEST(TestFillInputs, ResampleBwdZeroPadIndexIsMinusOneWhenPaddingOutranksSoleValidElement)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), -1);
+}
+
+// Same shape and seed as above, under NEG_INF_PAD: the sole in-bounds element at
+// dy(0, 0) is the only candidate, so its index wins regardless of its sign. A
+// hard-coded ZERO_PAD would instead yield -1 there and fail the same check.
+TEST(TestFillInputs, ResampleBwdNegInfPadPicksSoleValidElementOverPadding)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    opts.paddingMode = PaddingMode::NEG_INF_PAD;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), 0);
+}
+
+// 15 of the 39 shipped Default bundle cases lay dy, index and dx out NHWC/NDHWC.
+// The derivation's indexView must be built from the index tensor's own strides;
+// a mutant that rebuilt it from dims-only (packed) strides instead would pass
+// every test above, which stays packed throughout.
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax2dNhwc)
+{
+    ResampleBwdOptions opts;
+    opts.nhwcStrides = true;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3dNdhwc)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 2, 3, 4, 4};
+    opts.dyDims = {1, 2, 2, 2, 2};
+    opts.prePadding = {0, 0, 0};
+    opts.postPadding = {0, 0, 0};
+    opts.stride = {1, 2, 2};
+    opts.window = {2, 2, 2};
+    opts.nhwcStrides = true;
     const auto gr = buildResampleBwdGraph(opts);
     auto inputs = fillResampleBwdInputs(gr);
     expectIndexIsForwardArgmax(inputs, opts);

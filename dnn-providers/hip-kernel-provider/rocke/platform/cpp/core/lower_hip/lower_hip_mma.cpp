@@ -1593,11 +1593,7 @@ static rocke_status_t rocke_h_op_vector_lshr(rocke_h_lowerer_t* lw, const rocke_
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);
     const rocke_type_t* elem = r->type->kind == ROCKE_TYPE_VECTOR ? r->type->elem : r->type;
-    const char* unsigned_t = rocke_h_unsigned_int_type(elem);
-    if(!unsigned_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", elem->name);
-    }
+    const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "vector.lshr", elem->name);
     const char* nice = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
