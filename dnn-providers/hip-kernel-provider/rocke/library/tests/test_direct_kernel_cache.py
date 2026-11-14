@@ -27,6 +27,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_WMMA,
     DIRECT_DW_FWD_WMMA,
     DIRECT_FWD_GSTREAM_WMMA,
+    DIRECT_FWD_PP_MFMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_TAPOUTER_WMMA,
@@ -310,15 +311,16 @@ def test_padding_zero_is_a_baked_value(cache):
 def test_group_count_is_runtime(cache, groups):
     """Any group count is served; only tiles that do not divide it drop out.
 
-    The LDS-halo kernels (dense, and grouped through merging) have shape rules
-    of their own -- merge degree, chunk and tile fits -- so they are left out.
+    The LDS-halo kernels (dense, and grouped through merging) and the dense
+    LDS-DMA forward have shape rules of their own -- merge degree, chunk and
+    tile fits, groups == 1 -- so they are left out.
     """
     plans, rejected = dks.direct_plans(cache, _problem(groups=groups), "fwd", _ARCH)
     assert plans
     assert all(
         "block_groups" in why
         for ident, why in rejected
-        if ident.algorithm not in dks._HALO_VARIANTS
+        if ident.algorithm not in (*dks._HALO_VARIANTS, DIRECT_FWD_PP_MFMA)
     )
 
 

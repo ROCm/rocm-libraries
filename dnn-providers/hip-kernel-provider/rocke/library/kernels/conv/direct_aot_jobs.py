@@ -34,6 +34,7 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
     DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
+    DIRECT_FWD_PP_MFMA as _FWD_PP_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -1219,6 +1220,9 @@ FWD_SMALLC_MFMA_KNOBS = (
     (2, 2, 2, 2, 8, 8, 1, False),
     (2, 4, 2, 2, 2, 64, 1, False),
 )
+# LDS-DMA ping-pong MFMA forward (direct_fwd_pp_mfma, gfx950): "same"-padded
+# square filters (the output-channel blocks are the kernel module's BLOCK_K).
+FWD_PP_MFMA_FILTERS = (3,)
 # fwd_smallk_mfma (gfx950): (waves, out_h, out_w); a first grid of 4 / 8 waves
 # over 8..32-pixel square-ish output tiles and full-width 1-row strips.
 FWD_SMALLK_MFMA_KNOBS = tuple(
@@ -1881,6 +1885,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
+    # LDS-DMA ping-pong forward on wave64 MFMA (gfx950): dense, stride 1, odd
+    # square filters with "same" padding; C and K runtime.
+    _FWD_PP_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            for k in FWD_PP_MFMA_FILTERS
+        ),
+    ),
     _FWD_SMALLK: (
         "fwd",
         tuple(
@@ -2529,6 +2542,13 @@ def _knob_grid(
             return
         for waves, oh, ow in FWD_SMALLK_MFMA_KNOBS:
             yield dict(waves=waves, out_h=oh, out_w=ow)
+    elif variant == _FWD_PP_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA: gfx950 only
+        from kernels.common.conv_direct_fwd_pp_mfma import BLOCK_K
+
+        for bk in BLOCK_K:
+            yield dict(block_k=bk)
     elif variant == _FWD_SMALLC_MFMA:
         from rocke.core.arch import ArchTarget
 
