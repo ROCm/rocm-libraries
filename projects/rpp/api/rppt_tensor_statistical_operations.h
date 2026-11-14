@@ -133,7 +133,11 @@ RppStatus rppt_tensor_max(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t maxA
  * axisMask axis along which normalization needs to be done \param [in] meanTensor values to be
  * subtracted from input (in pinned / HIP memory (for HIP backend) or HOST memory (for HOST
  * backend)) \param [in] stdDevTensor standard deviation values to scale the input (in pinned / HIP
- * memory (for HIP backend) or HOST memory (for HOST backend)) \param [in] computeMeanStddev flag to
+ * memory (for HIP backend) or HOST memory (for HOST backend)). meanTensor and stdDevTensor each
+ * hold one parameter block per sample in every computeMeanStddev mode: batchSize * maxParamVolume
+ * floats, where maxParamVolume is the largest per-sample count of non-reduced elements (the
+ * product of the ROI lengths along the axes not in axisMask) across the batch. Sample i reads its
+ * parameters from offset i * maxParamVolume. \param [in] computeMeanStddev flag to
  * represent internal computation of mean, stddev (Wherein 0th bit used to represent computeMean and
  * 1st bit for computeStddev, 0- Externally provided) \param [in] scale value to be multiplied with
  * data after subtracting from mean \param [in] shift value to be added finally \param [in]
