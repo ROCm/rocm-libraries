@@ -197,7 +197,9 @@ RppStatus rppt_resize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
  * and/or normalize, for a batch of RGB(3 channel) / greyscale(1 channel) images with an NHWC/NCHW
  * tensor layout.<br>
  * - srcPtr depth ranges - Rpp8u (0 to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127).
- * - dstPtr depth ranges - Will be same depth as srcPtr.
+ * - dstPtr depth ranges - Will be same depth as srcPtr. Rpp8u and Rpp8s outputs saturate to their
+ *   storage range; Rpp16f and Rpp32f outputs are not clamped, so a normalized value may be negative
+ *   or exceed 1.
  * \image html img150x150.png Sample Input
  * \image html geometric_augmentations_resize_mirror_normalize_img115x115.png Sample Output
  * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for HOST

@@ -207,7 +207,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Geometric/ResizeCropMirrorTest.Correctness/*",
     "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HIP_*",
     "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HOST_*_IdentityNN",
-    "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HOST_F16toF16_*_MeanPerChannelStd",
     "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HOST_F32toF32_*",
     "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HOST_U8toU8_*",
     "Image_Geometric/ResizeMirrorNormalizeTest.Correctness/HOST_U8toU8_PKD3_*_MeanPerChannelStd",
