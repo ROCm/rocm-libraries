@@ -80,7 +80,7 @@ struct K4ExpandArgs
 /// plane); the grid is (16 CB-channel tiles) x (depth taps) x splits, a split a contiguous run of
 /// `tiles` / `splits` tiles. A workgroup writes its fp32 partials to its split's slot:
 /// [split][g][k][c][tap], taps (t, r, s) flattened; ConvGroupWrwReduce adds the slots in a fixed
-/// order into dw (deterministic, no atomics).
+/// order into dw (deterministic, no atomics). At one split the workgroups write dw directly.
 struct K4WrwArgs
 {
     const void* x;
@@ -95,6 +95,13 @@ struct K4WrwArgs
     int splits;
     long long tiles; // images x output planes x row tiles x column tiles
     long long partialElems; // dw elements: one slot of the partials
+    /// One split (`direct`): the kernel writes dw itself, as the reduce would (the sum from +0,
+    /// rounded once to the element type; element (k, c, t, r, s) at k sK + c sC + t sT + r sR +
+    /// s sS, taps reflected under `reflect`), and no reduce runs; `partial` is unused.
+    void* dw;
+    long long sK, sC, sT, sR, sS;
+    int direct;
+    int reflect;
 };
 
 /// The fixed-order sum of the partial slots into dw (element (k, c, t, r, s) at k sK + c sC +

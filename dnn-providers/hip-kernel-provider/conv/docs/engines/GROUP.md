@@ -40,7 +40,7 @@ store acc (fp32 -> T)
 
 - **Filter expansion.** A small kernel writes each phase's expanded filter into the workspace. Small groups get block-diagonal [block][tap][16][16]. Wide groups get dense per group, padded to `nbi` blocks each way. For true convolution, the expansion reflects the filter. For backward data it also swaps the K/C roles.
 - **Backward data.** dy is gathered into dx with the filter rotated. At stride 2 the work splits by stride phase: dx[st*j + p] sums the ceil(F/st) compact taps that reach phase p. Each phase is a unit-stride gather with its own padding and expanded filter, and runs as one launch. With `pf` (row/column stride 2), one launch per depth phase runs all four row/column phases from one staged dy halo into an LDS output tile, then writes whole dx lines.
-- **Backward weights.** Per 16-channel block, D[k][c] += dy[k][q] x[c][q + tap], keeping the cg x cg diagonal blocks. A workgroup owns `cb` blocks, one depth tap, and a split's run of `th` x `tw` dy tiles. The tile's positions are flattened into the atom's k-steps, so 56-, 28-, 14- and 7-wide planes waste no lanes. Positions past the plane read a zero pixel in both operands. Partials [split][g][k][c][tap] go to an fp32 workspace, and `ConvGroupWrwReduce` sums them in a fixed order into dw.
+- **Backward weights.** Per 16-channel block, D[k][c] += dy[k][q] x[c][q + tap], keeping the cg x cg diagonal blocks. A workgroup owns `cb` blocks, one depth tap, and a split's run of `th` x `tw` dy tiles. The tile's positions are flattened into the atom's k-steps, so 56-, 28-, 14- and 7-wide planes waste no lanes. Positions past the plane read a zero pixel in both operands. Partials [split][g][k][c][tap] go to an fp32 workspace, and `ConvGroupWrwReduce` sums them in a fixed order into dw. At one split the workgroups write dw themselves, with the reduce's rounding of one slot, and the plan has no workspace and no reduce launch.
 - **FMA kernel (fp32).** The kernel has the same grid, halo and expansion layout, but multiplies only the group's own inputs (no block-diagonal zeros). Output pixels run fastest across threads, so a wave reads its filter with wave-uniform scalar loads.
 
 ## Implementation design
@@ -69,7 +69,7 @@ store acc (fp32 -> T)
   - unit dilation;
   - row stride == column stride.
 - **Wrw planner.** `groupWrwLaunch` sizes the splits with K3's `splitsWanted`, targeting `bpu` workgroups per dispatch unit, at least 4 tiles per split, and partials within 1 GiB. The reduce groups slots in powers of two (G = slot count rounded up), and its association depends only on the slot count. Below 4 blocks per workgroup, 4 / `cb` waves share a block and add their sums in LDS in wave order. On gfx950, 16-bit atoms read LDS fragments with `ds_read_b64_tr_b16` transpose reads.
-- **Workspace.** fwd/bwd: staged activations (unless `cf`), then each phase's expanded filter, then the three-bf16 split copies. wrw: fp32 partials only, capped at 1 GiB.
+- **Workspace.** fwd/bwd: staged activations (unless `cf`), then each phase's expanded filter, then the three-bf16 split copies. wrw: fp32 partials only, capped at 1 GiB; none at one split.
 - **Catalog knobs:**
 
   | Knob | Meaning |
@@ -143,6 +143,7 @@ K4 reuses K1's atoms and staging. No CK or hipconv code was copied.
 - `src/tests/engines/kernel_ingestor_engine/packs/TestGpuConvGroup.cpp`:
   - Device test (`TestGpuConvGroup` Float/Half/BFloat16): runs every shipped config admitted for 2-D and 3-D, NCHW and NHWC, small and wide, stride 1/2 and depth-stride cases, in all three directions, against the CPU reference, with a bitwise relaunch check.
   - `TestGpuConvGroupThreeBf16`: the bound and inf propagation.
+  - `TestGpuConvGroupWrwOneSplit`: wrw planned for one dispatch unit, so configs run at one split and write dw themselves, against the reference and the relaunch check.
   - Opt-in timing test: exact against three-bf16.
 - Host tests in the same file:
   - one decline per gated graph field (`DeclinesEveryUnservedGraph`, fwd/bwd and wrw);
@@ -150,6 +151,6 @@ K4 reuses K1's atoms and staging. No CK or hipconv code was copied.
   - every config fits its LDS, and the knobs tell configs apart;
   - three-bf16 is admitted only under TF32 permission;
   - launches past one dispatch are declined;
-  - wrw splits fill the device and size the workspace;
+  - wrw splits fill the device and size the workspace, and one split writes dw directly (no workspace);
   - cuDNN compute types per element type.
 - End to end, the conv engine group's integration suites run with `HIP_KERNEL_PROVIDER_ENABLE_CONV`.

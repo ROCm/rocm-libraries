@@ -557,9 +557,19 @@ std::optional<GroupWrwLaunch>
     {
         return std::nullopt;
     }
+    // One split: the kernel writes dw itself (the reduce's rounding of one slot), with no
+    // workspace and no reduce launch.
+    k.direct = splits == 1 ? 1 : 0;
+    k.reflect = r.reflect;
+    k.sK = r.sK;
+    k.sC = r.sC;
+    k.sT = r.sT;
+    k.sR = r.sR;
+    k.sS = r.sS;
     launch.grid = static_cast<unsigned int>(grid);
     launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
-    launch.workspaceBytes = alignUp(static_cast<size_t>(slots * k.partialElems) * sizeof(float));
+    launch.workspaceBytes
+        = k.direct != 0 ? 0 : alignUp(static_cast<size_t>(slots * k.partialElems) * sizeof(float));
     return launch;
 }
 
@@ -1638,25 +1648,31 @@ private:
                           void* workspace)
     {
         const auto& problem = dispatch.problem().wrw;
-        if(workspace == nullptr)
+        K4WrwArgs args = dispatch.wrwLaunch().args;
+        if(workspace == nullptr && args.direct == 0)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "conv_group wrw needs its workspace");
         }
         const auto stream = handle.getStream();
-        K4WrwArgs args = dispatch.wrwLaunch().args;
+        void* dw
+            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
+                  .ptr;
         args.x = hipdnn_plugin_sdk::findDeviceBuffer(problem.xUid, deviceBuffers, numDeviceBuffers)
                      .ptr;
         args.dy
             = hipdnn_plugin_sdk::findDeviceBuffer(problem.dyUid, deviceBuffers, numDeviceBuffers)
                   .ptr;
         args.partial = static_cast<float*>(workspace);
+        args.dw = dw;
         dispatch.convForStream(stream).launch(stream, args);
+        if(args.direct != 0)
+        {
+            return;
+        }
         K4WrwReduceArgs reduce = dispatch.wrwLaunch().reduce;
         reduce.partial = static_cast<const float*>(workspace);
-        reduce.dw
-            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        reduce.dw = dw;
         dispatch.reduceForStream(stream).launch(stream, reduce);
     }
 
