@@ -12,19 +12,13 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "core/Container.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 
 /**
  * @file TestConvDescriptorShards.cpp
@@ -33,8 +27,8 @@
  *        engine's state manager built, which is the step that drops a whole engine whose
  *        packs declare one kernel id twice on an arch (or otherwise fail validation), and
  *        each conv engine's numerical notes (RFC 0025) read. No device is used: every shard
- *        the build packed is checked, whatever the GPU. One device case reads the notes back
- *        from each engine's details, the field hipDNN serves as HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE.
+ *        the build packed is checked, whatever the GPU. What hipDNN serves from those notes
+ *        (HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE) is checked by IntegrationConvCoverageCensus.
  *
  * The per-kernel tests (TestGpuConv*) read the packs directly and match kernels one by one, so
  * an engine the loader drops would still pass them while serving nothing.
@@ -173,40 +167,6 @@ TEST(TestConvDescriptorShards, EveryConvEngineDeclaresItsNumericalNotesOnEverySh
         }
         EXPECT_GT(convEngines, 0) << "no conv engine in the shard";
     }
-}
-
-TEST(TestGpuConvDescriptorNotes, EveryConvEngineReportsItsNumericalNotesInItsDetails)
-{
-    SKIP_IF_NO_DEVICES();
-
-    namespace conv_test = hip_kernel_provider::kernel_ingestor_engine::testing::conv_naive_test;
-    hip_kernel_provider::core::Container container;
-    auto& engineManager = container.getEngineManager();
-    Handle handle;
-    // Notes describe the engine, not the graph: any graph serves the query.
-    const auto graph = conv_test::buildGraph(
-        conv_test::specFor(conv_test::ConvShape{}, conv_test::ConvDirection::FORWARD));
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapped(
-        graph.GetBufferPointer(), graph.GetSize());
-    int convEngines = 0;
-    for(const auto& set : hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets())
-    {
-        if(set.engine.name.rfind("hipkernel:CONV", 0) != 0)
-        {
-            continue;
-        }
-        SCOPED_TRACE(set.engine.name);
-        ++convEngines;
-        hipdnnPluginConstData_t details{};
-        engineManager.getEngineDetails(
-            handle, wrapped, hipdnn_data_sdk::utilities::engineNameToId(set.engine.name), details);
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(
-            details.ptr, details.size);
-        const auto notes = wrapper.numericalNotes();
-        ASSERT_TRUE(notes.has_value()) << "the details carry no numerical_notes field";
-        EXPECT_EQ(*notes, expectedNumericalNotes(set.engine.name));
-    }
-    EXPECT_GT(convEngines, 0) << "no conv engine loaded for this device";
 }
 
 } // namespace

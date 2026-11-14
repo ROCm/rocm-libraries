@@ -75,7 +75,7 @@ that claim (a UED without the key is reported `NONDETERMINISTIC`), and RFC 0025 
 with a test: each family's device suite (`TestGpuConv<Family>`) launches every config it runs a
 second time, over a re-filled workspace, and compares the output bits
 (`ConvDeterminismTestSupport.hpp`). `TestConvDescriptorShards` checks the authored notes on
-every shipped shard and in each engine's details, and the coverage census checks what the
+every shipped shard, and the coverage census checks what the
 frontend reports for every engine a graph is offered. The cuDNN v9 compatibility layer's
 `deselect_numeric_notes({NONDETERMINISTIC})` therefore keeps these engines.
 
