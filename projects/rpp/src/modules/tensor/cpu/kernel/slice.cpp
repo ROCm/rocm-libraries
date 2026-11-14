@@ -101,7 +101,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
                         dstPtrDepth += dstGenericDescPtr->strides[2];
                     }
                     srcPtrChannel += srcGenericDescPtr->strides[1];
-                    dstPtrChannel += srcGenericDescPtr->strides[1];
+                    dstPtrChannel += dstGenericDescPtr->strides[1];
                 }
             }
 
@@ -165,7 +165,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
                         dstPtrRow += dstGenericDescPtr->strides[2];
                     }
                     srcPtrChannel += srcGenericDescPtr->strides[1];
-                    dstPtrChannel += srcGenericDescPtr->strides[1];
+                    dstPtrChannel += dstGenericDescPtr->strides[1];
                 }
             }
 
