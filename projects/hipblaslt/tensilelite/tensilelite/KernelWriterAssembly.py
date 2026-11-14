@@ -21157,7 +21157,11 @@ class KernelWriterAssembly(KernelWriter):
                                              overrideAfterPrimerRows=overrideAfterPrimerRows))
 
     if dataType.isHalf():
-      hi16 = 0 if (self.states.HHH_WMMA or tc == 'Gate') else (vc0 % 2)
+      packedHalfBeta = (tc == 'C' and kernel["ISA"][0] == 10 and gwvw == 1
+                        and not kernel["ProblemType"]["HighPrecisionAccumulate"]
+                        and elementIdx is not None)
+      hi16 = (elementIdx % 2 if packedHalfBeta else
+              0 if (self.states.HHH_WMMA or tc == 'Gate') else (vc0 % 2))
       module.add(self.chooseGlobalRead(useBuffer, bps, data, \
           addr0, addr1, soffset=soffset, offset=globalOffset, \
           glc=isGlc, slc=isSlc, nt=isNT, lds=False, hi16=hi16, \

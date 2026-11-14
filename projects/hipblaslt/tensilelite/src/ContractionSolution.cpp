@@ -1481,14 +1481,16 @@ namespace TensileLite
 
         if(internalArgsSupport.version < 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
+            args.append(problem.alphaType() == rocisa::DataType::Half ? "alpha_1" : "alpha",
+                        inputs.alpha, problem.alphaType());
 
             if(problem.alphaType() == rocisa::DataType::Half)
                 args.append("alpha_2", inputs.alpha, problem.alphaType());
 
             if(problemType.useBeta)
             {
-                args.append("beta", inputs.beta, problem.betaType());
+                args.append(problem.betaType() == rocisa::DataType::Half ? "beta_1" : "beta",
+                            inputs.beta, problem.betaType());
 
                 if(problem.betaType() == rocisa::DataType::Half)
                     args.append("beta_2", inputs.beta, problem.betaType());
@@ -1755,25 +1757,26 @@ namespace TensileLite
 
         if(internalArgsSupport.version >= 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
+            args.append(problem.alphaType() == rocisa::DataType::Half ? "alpha_1" : "alpha",
+                        inputs.alpha, problem.alphaType());
 
             if(problem.alphaType() == rocisa::DataType::Half)
                 args.append("alpha_2", inputs.alpha, problem.alphaType());
 
-            // The beta slot is always emitted so the layout does not depend on UseBeta;
-            // the kernel gates the beta math separately. Keep the "beta" name: append()
-            // promotes small types to 32-bit only for names "alpha"/"beta", so a
-            // differently named pad would be written at the wrong size.
+            // Half scalars occupy two packed 16-bit slots. Other small scalars
+            // use the promoted 32-bit beta slot.
             if(problemType.useBeta)
             {
-                args.append("beta", inputs.beta, problem.betaType());
+                args.append(problem.betaType() == rocisa::DataType::Half ? "beta_1" : "beta",
+                            inputs.beta, problem.betaType());
 
                 if(problem.betaType() == rocisa::DataType::Half)
                     args.append("beta_2", inputs.beta, problem.betaType());
             }
             else
             {
-                args.append("beta", 0.0f, problem.betaType());
+                args.append(problem.betaType() == rocisa::DataType::Half ? "beta_1" : "beta",
+                            0.0f, problem.betaType());
 
                 if(problem.betaType() == rocisa::DataType::Half)
                     args.append("beta_2", 0.0f, problem.betaType());
@@ -4621,15 +4624,17 @@ namespace TensileLite
         // In MultipleBuffer the GEMM kernel writes unscaled partials and this
         // kernel applies alpha and beta*C, so it needs the real values. The mode
         // is the resolved one: AdaptiveGemmGSUA can pick it per launch.
+        const auto alphaName = problem.alphaType() == rocisa::DataType::Half ? "alpha_1" : "alpha";
+        const auto betaName = problem.betaType() == rocisa::DataType::Half ? "beta_1" : "beta";
         if(resolvedGlobalAccumulation == 2 || sizeMapping.isStreamK())
-            args.append("alpha", inputs.alpha, problem.alphaType());
+            args.append(alphaName, inputs.alpha, problem.alphaType());
         else
-            args.append("alpha", 1.0f, problem.betaType());
+            args.append(alphaName, 1.0f, problem.betaType());
 
         if((resolvedGlobalAccumulation == 2 || sizeMapping.isStreamK()) and problemType.useBeta)
-            args.append("beta", inputs.beta, problem.betaType());
+            args.append(betaName, inputs.beta, problem.betaType());
         else
-            args.append("beta", 0.0f, problem.betaType());
+            args.append(betaName, 0.0f, problem.betaType());
 
         if(scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
             args.template append<uint32_t>(
