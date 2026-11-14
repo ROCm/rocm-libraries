@@ -455,10 +455,11 @@ const Census& census()
             c.skip = "no device";
             return c;
         }
-        if(!convEngineGroupEnabled())
+        namespace gate = hip_kernel_provider::kernel_ingestor_engine;
+        if(!gate::convEngineGroupEnabled())
         {
-            c.skip = std::string("the conv engine group is not enabled (set ") + CONV_ENABLE_ENV
-                     + "=1)";
+            c.skip = std::string("the conv engine group is not enabled (set ")
+                     + gate::CONV_ENABLE_ENV + "=1)";
             return c;
         }
         c.computeUnits = deviceComputeUnits(c.arch);
