@@ -216,15 +216,16 @@ int64_t hankelLdsBytes(const WrwConfig& config, bool staged)
         = [](int64_t dwords) { return 2 * ((dwords + 2) / 2 % 2 == 1 ? dwords + 2 : dwords + 4); };
     const int64_t channels = 64 * config.nwg;
     const int64_t xPitch = pitchOf(2 * xg), dyPitch = pitchOf(2 * (config.q / 4));
-    // Plus 32 halves a buffer for the rows' skews (and the odd phase's shift).
-    const int64_t slot = divUp(channels * dyPitch + 32, 64) * 64 + 16;
+    // Plus half a row's halves for every 8 rows' skew (skewOf).
+    const int64_t slot = divUp(channels * dyPitch + channels / 2, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
     // gfx950 stages each row in LDS as it lies in memory: whole 64-lane chunks of 8-channel
     // vectors (512 halves a chunk) of the row's x and dy columns.
     const int64_t xChunks = divUp(4 * xg * stride * (channels / 8), 64);
     const int64_t dyChunks = divUp(config.q * (channels / 8), 64);
     const int64_t stage = staged ? config.g * (xChunks + dyChunks) * 512 : 0;
-    return (config.g * (stride * channels * xPitch + 32) + (slots + 1) * slot + stage) * 2;
+    return (config.g * stride * (channels * xPitch + channels / 2) + (slots + 1) * slot + stage)
+           * 2;
 }
 
 bool hankelAdmits(const WrwProblem& problem,

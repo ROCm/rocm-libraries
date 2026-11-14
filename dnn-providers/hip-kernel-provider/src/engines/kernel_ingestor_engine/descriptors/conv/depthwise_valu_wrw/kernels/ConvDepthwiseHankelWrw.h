@@ -82,17 +82,18 @@ constexpr int pitchOf(int dwords)
     return 2 * (((dwords + 2) / 2) % 2 == 1 ? dwords + 2 : dwords + 4);
 }
 constexpr int XP = pitchOf(2 * XG), DP = pitchOf(2 * DG);
-/// A row's skew (halves): rows 8 apart (a staging thread's channel vectors) start two dwords
-/// further along, so they land on distinct banks; rows stay contiguous for the window reads.
+/// A row's skew (halves): every 8 rows (a staging thread's channel vectors) start two dwords
+/// further along, so rows 8 apart land on distinct banks. The skew only grows with the row, so
+/// rows never overlap and stay contiguous for the window reads.
 constexpr int skewOf(int row)
 {
-    return 4 * ((row >> 3) & 7);
+    return 4 * (row >> 3);
 }
-constexpr int SKEW = 32; // halves past a buffer's rows the skews (and the phase shift) reach
-/// The stride-2 odd phase rows start a dword past the even ones (another bank).
-constexpr int PHASE = CB * XP + 2;
-constexpr int XB = S * CB * XP + SKEW; // an x row buffer (halves)
-constexpr int SS = (CB * DP + SKEW + 63) / 64 * 64 + 16; // ring slot stride (halves)
+/// The stride-2 odd phase rows continue the even ones: row CB + c (CB / 2 halves of skew on, a
+/// bank offset of 16 dwords from the even row).
+constexpr int PHASE = CB * XP + CB / 2;
+constexpr int XB = S * CB * XP + S * CB / 2; // an x row buffer (halves)
+constexpr int SS = (CB * DP + CB / 2 + 63) / 64 * 64 + 16; // ring slot stride (halves)
 constexpr int SLOTS = KH + G - 1; // ring slots; slot SLOTS is zeros
 // Staging units: 4 x columns x 8 channels. At stride 2 a phase row's XG words take 2 XG units.
 constexpr int XU = S * XG * (CB / 8), DU = DG * (CB / 8);
@@ -467,7 +468,7 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                         // The lane's channel row as dwords, from its window's first dword.
                         const unsigned* aRow = reinterpret_cast<const unsigned*>(
                                                    xs[g] + (S == 1 ? 0 : (i & 1) * PHASE)
-                                                   + (b + 64 * cg) * XP + skewOf(b))
+                                                   + (b + 64 * cg) * XP + skewOf(b + 64 * cg))
                                                + laneDword;
 #pragma unroll
                         for(int qq = 0; qq < Q; qq += 4)
@@ -510,8 +511,8 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
 #pragma unroll
                             for(int rg = 0; rg < RG; ++rg)
                             {
-                                bv[rg]
-                                    = *reinterpret_cast<const u64*>(bSlot[rg] + 64 * cg * DP + qq);
+                                bv[rg] = *reinterpret_cast<const u64*>(bSlot[rg] + 64 * cg * DP
+                                                                       + 32 * cg + qq);
                             }
 #pragma unroll
                             for(int rg = 0; rg < RG; ++rg)
