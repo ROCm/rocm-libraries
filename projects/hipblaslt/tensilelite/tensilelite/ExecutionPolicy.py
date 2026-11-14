@@ -275,11 +275,13 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     support = dict(result.get("InternalSupportParams", {}))
     version = support.get("PersistentLoopArgsVersion", 0)
     outer_version = support.get("KernArgsVersion", 3)
-    if type(version) is not int or version not in (0, 1, 2):
+    custom = result.get("CustomKernel")
+    # Layout 3 is layout 0 plus CustomKernel.postKernels.
+    if (type(version) is not int or version not in (0, 1, 2, 3)
+            or (version == 3 and not (isinstance(custom, dict) and custom.get("postKernels")))):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    custom = result.get("CustomKernel")
     handwritten = (not custom.get("generated", False)
                    if isinstance(custom, dict) and custom.get("name")
                    else bool(result.get("CustomKernelName")))
@@ -296,6 +298,8 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
         raise ValueError("PersistentLoopArgsVersion=2 requires KernArgsVersion=3")
     if version == 1 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if version == 3 and outer_version != 3:
+        raise ValueError("PersistentLoopArgsVersion=3 requires KernArgsVersion=3")
     if regenerate and not handwritten:
         # Persistent tile traversal and its argument layout are
         # generator capabilities. Regenerating known older logic upgrades both;
