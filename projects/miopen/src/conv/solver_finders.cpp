@@ -451,7 +451,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             MIOPEN_LOG_I("Skipped naive solver "
                          << algorithm_name.ToString() << ":" << sol.solver_id
                          << ": run time lower bound " << core_result.naive_floor_ms
-                         << " ms exceeds " << env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)
+                         << " ms exceeds " << std::dec << env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)
                          << "% of best non-naive time (" << core_result.find_search_best_time
                          << " ms)");
             continue;
@@ -646,8 +646,8 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
     if(env::value(MIOPEN_NAIVE_TIMEOUT))
     {
         const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
-        bool has_naive          = false;
-        bool has_non_naive      = false;
+        bool has_naive           = false;
+        bool has_non_naive       = false;
         for(const auto& ss : solutions)
             for(const auto& s : ss.second)
             {
