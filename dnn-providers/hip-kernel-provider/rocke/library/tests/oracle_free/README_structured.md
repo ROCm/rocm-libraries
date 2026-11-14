@@ -1,0 +1,330 @@
+# Structured-logit oracle-free tests
+
+This check launches the shipped gfx942 dense attention kernel with structured Q
+and K and verifies every stored output bit without a reference attention
+implementation and without a tolerance. Every row has two logit classes, the
+distinguished keys with logit `c` and the background keys with logit 0, so the
+QK contraction, the `1/sqrt(D)` scale, the K orientation, the softmax, the
+mask, the online rescale and the per-head Q and K reads all reach the output.
+
+For a row with `n_c` legal distinguished and `n_0` legal background keys, an
+exposed coordinate that selects `m_c` and `m_0` of them has the exact value
+
+`y* = 2^h (m_c e^c + m_0) / (n_c e^c + n_0)`.
+
+The stored value is not required to equal the rounding of `y*`. It is required
+to lie in the set of values the kernel's pinned floating-point path can store,
+derived on the CPU without evaluating attention (see "Prediction: Tier B").
+
+| File | Role |
+|---|---|
+| `_structured_analytical.py` | fixtures, exact FP32 interval arithmetic, the prediction, the analyzer, calibration |
+| `test_structured_contracts.py` | CPU contracts: primitives, fixtures, soundness of the prediction, mutation separation, IR and code-object path contracts, policy |
+| `test_structured_analytical_gfx942.py` | the launches on gfx942 |
+| `_structured_capture_audit.py` | replayable audit of saved raw outputs |
+| `_structured_shapes.py` | shapes and masks, exact FP16/BF16 encoding, the V exposures, the raw-bit observation |
+| `_structured_subject.py` | the raw-bit subject adapter: dispatch resolution and the launch |
+
+The check is self-contained: it imports nothing from the uniform-probability
+check in this directory ([README.md](README.md)), which covers the zero-Q case.
+
+## Cases
+
+Each head carries its own logit, so the check needs `Hq == Hkv`. It runs two
+shapes with four heads:
+
+| Dtype | Case | Resolved tile |
+|---|---|---|
+| FP16 | `B1,Sq256,Sk256,H4/4,D64`, top-left causal | `128x64` |
+| BF16 | `B1,Sq256,Sk256,H4/4,D64`, sliding window 64 | `64x64` |
+
+Every shape runs the four fixtures below under five V exposures, with V scaled
+by `2^h` for head `h`:
+
+| Exposure | V for head `h` | What an output dimension shows |
+|---|---|---|
+| `basis@o`, `o in {0, 64, 128, 192}` | `V[k,h,d] = 2^h` iff `k = o + d` | one probability column |
+| `folded` | `V[k,h,d] = 2^h` iff `d = k mod 64` | the sum of one residue class of keys |
+
+The basis launches expose each probability once. The folded launch observes
+sums, which catches errors that cancel across the basis launches and is the
+only place where the PV accumulation adds two nonzero values.
+
+## Fixtures
+
+All inputs are zero or signed powers of two, so `encode_bits` accepts them
+exactly. `D = 64` is also the period `P`; key `k` is distinguished for row `q`
+when `k + r = q (mod 64)`.
+
+| Fixture | Q[q,h,:] | K[k,h,:] | `r` | Logit `c` |
+|---|---|---|---:|---|
+| `identity` | `a_h` one-hot at `q mod 64` | `b_h` one-hot at `k mod 64` | 0 | `a_h b_h / 8` |
+| `cyclic` | as `identity` | one-hot at `(k + 37) mod 64` | 37 | `a_h b_h / 8` |
+| `walsh` | `a_h` times Walsh row `q mod 64` | `b_h (-1)^k` times Walsh row `(k + 1) mod 64` | 1 | `8 a_h b_h`, signed by row parity |
+| `late_max` | as `identity` | as `identity`, rows `k < 64` zeroed | 0 | as `identity`, keys `k >= 64` only |
+
+The head scales `(a_h, b_h)` give each head its own logit (periodic fixtures
+`8, -8, 2, -1/2`; Walsh magnitudes `8, 2, 1/2, 4`). They were chosen by a
+maximin search so that every wrong Q-head or K-head read changes some stored
+value; a CPU contract recomputes the committed margin. Causal rows contain
+masked distinguished keys (`k = q + 64j`), so any mask leak is visible.
+Window-64 rows straddle two KV tiles, and `late_max` moves the row maximum
+into a later tile; both exercise the online rescale.
+
+## Prediction: Tier B
+
+For each coordinate the analyzer computes **Tier B**, the set of FP16/BF16
+values the kernel's pinned floating-point path can store. Closed intervals of
+FP32 values are propagated, with exact rational arithmetic, through the score
+scale, `v_exp_f32`, the FP32 denominator sum in any order, the single P cast,
+the PV MFMA, the reciprocal `fdiv 1.0, l` and the output cast. Rounding, `+`,
+`*` and the casts are monotone on nonnegative arguments, so the endpoint images
+enclose every reachable state.
+
+The denominator sum uses the `gamma` bound only on a tile with normal-scale
+terms. A fully masked tile after a legal one holds only weights of at most
+`2^-149` and is enclosed explicitly by `[0, 2^-143]`. A fully masked leading
+tile (rows 127, 191 and 255 of the window kernel) sums 64 values near one; the
+first legal tile rescales that state by at most `2^-149`, which leaves the
+denominator unchanged and a residue of at most `2^(h-149)` in the numerator. A
+row with more than one fully masked leading tile, with no legal tile, or with a
+denominator outside `[1/2, 2^9)` has no enclosure: it raises `StructuredScopeError`
+instead of being widened.
+
+The path itself is pinned twice on the CPU. An IR contract lowers both quick
+specs and classifies every floating-point instruction, follows each MFMA
+operand back to a stored value or the probability cast, and requires eight
+chained calls per accumulator, from zero for a score and from the rescaled
+accumulator for PV. Every exponent must subtract the row maximum, which is
+itself traced: a chain over the tile's masked scores, the shuffle partner's
+chain and the maximum carried from the previous tiles. An instruction on a
+floating-point type that is neither a modeled step nor a move of bits (a
+conversion, a comparison, a negation) is outside the model. The contract also
+evaluates the KV loop limits and the mask selects of the lowered IR for every
+row: the kernel must visit exactly the modeled tiles and keep exactly the keys
+with `q - W < k <= q`.
+
+The compiled code objects are checked in two parts. The kernel descriptor,
+read from the ELF itself, must start every wave in round-to-nearest-even with
+FP16 and FP32 denormals kept; this needs COMGR but no disassembler. An ISA
+contract then disassembles the code objects: one division with every FP32 FMA
+inside it, that division being one pinned instruction sequence (see A-DIV
+below), the FP16 epilogue as the only fused site anywhere in the kernel,
+no write to the MODE register, and the round-to-nearest-even sequence at every
+BF16 conversion. Any instruction outside the model fails with "re-derive the
+path model": Tier B is re-derived for the new path, never widened to absorb
+it.
+
+Tier B rests on eight named assumptions, each versioned in the calibration
+entry. A-QK, A-DIV and the three rounding and conversion assumptions name
+premises the enclosure has always used; they add no value to any set.
+
+| Assumption | Statement |
+|---|---|
+| A-E v1 | `v_exp_f32` returns an FP32 value within `ulp32(2^x)` of `2^x`, where `ulp32(r)` is the spacing of the FP32 cell `[2^e, 2^(e+1))` that holds the real number `r` (at a power of two, the spacing above it) |
+| A-MFMA v1 | an MFMA call whose products are all zero returns its accumulator `c` unchanged (`+0` stays `+0`); with one nonzero product `p` it returns `c + p` rounded down or up (exact when `c = 0`) |
+| A-QK v1 | an MFMA call whose accumulator and eight products are multiples of `2^e`, `-4 <= e <= 0`, with total magnitude at most `64 * 2^e` returns their exact sum (the Walsh scores, and no wider range) |
+| A-DIV v1 | the executed `fdiv 1.0, l` returns `RN(1/l)` for every FP32 `l` in `[1/2, 2^9)` |
+| A-F v1 | each FP16 output store is `q(RN32(o R))` or `q(o R)`; every other operation, BF16 stores included, follows the IR |
+| A-MODE32 v1 | each FP32 add, subtract and multiply rounds its exact result to nearest even |
+| A-CVT-F16 v1 | the FP32-to-FP16 conversion, standalone or as the final rounding of a mixed-precision FMA, rounds to nearest even and keeps subnormals |
+| A-CVT-BF16 v1 | the instruction sequence the compiler selects for the FP32-to-BF16 conversion rounds to nearest even and keeps subnormals |
+
+The rounding and conversion assumptions are separate because they rest on
+different mechanisms: a hardware rounding mode, a hardware conversion, and an
+integer sequence the compiler generates. A compiler that changes one lowering
+changes one version, and a failure is attributed to one of them.
+
+A-DIV is the assumption every nonzero output depends on, and the stored bits
+cannot test it: a reciprocal one FP32 step from `RN(1/l)` leaves Tier B at no
+coordinate. gfx942 has no FP32 divide instruction, so the compiler expands
+`fdiv 1.0, l` into a sequence of instructions, and A-DIV is a statement about
+that sequence. The ISA contract therefore pins it: the expansion of each
+compiled quick kernel is reduced to its dataflow, independent of register
+allocation, and must be the one sequence the assumption is stated for, in a
+kernel that starts with FP32 denormals kept. A compiler that expands the
+division differently fails the contract; A-DIV says nothing about another
+sequence. Structural zeros do not depend on A-DIV at all: they store `+0` for
+any reciprocal below `2^11`.
+
+A-F covers an AMDGPU backend behaviour: affected compilers select some
+unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
+rounds the exact product once. LLVM PR
+[#236759](https://github.com/llvm/llvm-project/pull/236759), still open, proposes
+to make that fold require `contract`. The ISA contract accepts a compiler that
+folds and one that does not, and checks that the denominator combine is never
+fused.
+
+**Tier A**, the certified correctly rounded target `q(y*)` with a small ULP
+radius, is diagnostic: it names the failure class, never the verdict. A
+rational target is rounded by exact comparison with the rounding boundaries.
+An irrational one is certified by a rational interval that contains it and
+lies inside one rounding cell; `e^c` and `2^x` are enclosed by series with
+explicit tail bounds, so no count of decimal digits and no library function
+is part of the argument.
+
+Tier B is an outer enclosure, not a list of reachable outputs: numerator and
+denominator are propagated as independent intervals although they share
+choices. A stored value inside Tier B need not correspond to one consistent
+realization.
+
+## Policy and failure labels
+
+`analyze_structured_policy` compares raw output bits. A coordinate passes if and only
+if its bits lie in Tier B. Structural coordinates (masked keys, basis
+coordinates past the last key, rows without a legal key) have Tier B `{+0}`
+and must store exactly `+0`; `-0` fails. A failing
+value that equals what the IR-exact path stores with one assumption violated
+carries that assumption's label; the other assumption labels are heuristics:
+
+| Label | Meaning |
+|---|---|
+| `invalid` | NaN (including the unwritten prefill) or Inf |
+| `negative` | sign bit set, `-0` included |
+| `structural` | a required `+0` coordinate stores another value |
+| `assumption A-MODE32` | the store of FP32 arithmetic rounded toward zero |
+| `assumption A-CVT-F16` | the store of a truncating FP16 conversion; or an FP16-subnormal target stored near it or flushed to `+0` |
+| `assumption A-CVT-BF16` | the store of a truncating BF16 conversion |
+| `assumption A-F` | an FP16 store of the exact product truncated toward zero |
+| `assumption A-DIV` | the store of a reciprocal one FP32 step from `RN(1/l)` |
+| `assumption A-QK` | the store of a Walsh score one FP32 step from exact |
+| `assumption A-MFMA` | a folded addition near the target, with the basis exposures clean |
+| `assumption A-E` | explained only by a looser (2-ULP) `v_exp_f32` |
+| `path model` | outside Tier B, inside Tier A: re-pin the path, never widen |
+| `numerical` | outside Tier A |
+
+A CPU contract replaces one primitive at a time by a value its assumption
+excludes and requires every coordinate that leaves Tier B to fail with a named
+label. Only the conversions are visible in the stored bits: a truncating cast
+and a truncated FP16 store move about 6 to 9 percent of the coordinates out of
+Tier B. An exponential two FP32 steps outside its candidate set, a folded
+addition two steps outside the faithful pair, a Walsh score one step off, a
+reciprocal one step off and round-toward-zero FP32 arithmetic leave Tier B at
+no coordinate of the quick matrix (`STRUCTURED_UNOBSERVED_VIOLATIONS`). That is a
+limit of what the stored bits can show, not evidence for those assumptions.
+
+## Mutation self-checks
+
+On every run the analyzer is re-applied to the same real output under wrong
+semantics, on block, tile and window edge rows. Each mutation must be
+rejected:
+
+| Applies to | Mutations |
+|---|---|
+| every fixture | `omit_sqrt_d`, `exp_encoding`, `k_row_plus_one`, `k_row_minus_one`, `q_head_rotate`, `k_head_rotate`, `omit_rescale`, `denominator_plus_one` |
+| `cyclic` | `inverse_shift` |
+| `walsh` | `omit_walsh_block_{0,1,3}`, `walsh_sign` |
+| causal | `include_future_key`, `exclude_last_key` |
+| window | `include_old_window_key`, `exclude_oldest_window_key` |
+
+A CPU contract proves, for every applicable pair, that the correct and mutated
+Tier B are disjoint at some coordinate and records the gap. Disjoint
+enclosures certify that the mutation is caught; overlapping ones decide
+nothing, because both are outer enclosures. The exception is
+`omit_rescale` on the causal `identity`, `cyclic` and `walsh` cases: their row
+maximum is always in the first visited tile, so the omitted rescale lies inside
+the correct Tier B. `late_max` separates it on the same kernel.
+
+Two mutated rows have no derived enclosure and are left out of the comparison:
+row 0 under `exclude_last_key` (no legal key remains) and row 0 of `identity`
+under `denominator_plus_one` (the phantom key takes the denominator to about
+`e^8`, outside the A-DIV range). Both mutations stay separated on other rows.
+
+The kernel is also launched once with scale `1` instead of `1/sqrt(D)` on the
+`identity` fixture (`basis@0`); that output must fail Tier B.
+
+## Calibration and scope
+
+`STRUCTURED_CALIBRATION` has one entry per dtype, keyed by
+`(arch, candidate_name, dtype)`. A `StructuredCalibrationEntry` names the policy
+(`tier_b`), the eight assumption versions, the literal case IDs and a fingerprint
+of the dispatch-resolved spec (`STRUCTURED_QUICK_SPECS`: path, persistence,
+runtime shape, head size, `block_m`, `block_n`, fast exp2, sinks, LSE). It has no width, ULP or tolerance
+field, so no measurement can enlarge Tier B. A CPU contract requires the
+calibrated case set to equal `STRUCTURED_QUICK_CASES`, split by dtype. Changing a
+fixture, a head scale or a quick shape changes the case IDs, and the gate fails
+closed with the re-ratification remedy.
+
+The GPU cases skip only when the visible device is not gfx942, through the
+shared `rocke.tests.gpu.current_device_arch_in` gate; a lane that sets
+`ROCKE_REQUIRE_GFX942=1` fails instead of skipping, and then the code-object
+contracts also fail, instead of skipping, for want of a tool. Only three
+things count as a missing tool: COMGR does not load a compiler of known
+version, `ROCKE_LLVM_FLAVOR` lowers the IR for another compiler than the
+loaded one, or (for the ISA contract alone) no `llvm-objdump` with the AMDGPU
+backend can decode the code object. A quick kernel that the loaded compiler
+rejects is a failure everywhere. On gfx942 a missing entry, a case outside the
+entry, a fingerprint mismatch or a run that compared nothing is a failure,
+never a skip. The adapter launches the spec dispatch resolves by default and
+pins no knob, so a retune that changes a fingerprint field reaches this gate.
+Mutation self-checks and record capture run before any assertion, so a failing
+run, one with an unrejected mutation included, still writes its records.
+
+Each case runs the five exposures twice, and the two runs must be
+bit-identical. With `ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>` set, each case
+writes `<case_id>.jsonl` with three record types:
+
+- `rocke_structured_group`: per mutation, exposure, legal count and head, the label
+  counts, exact hits on the target and two-value Tier B outcomes;
+- `rocke_structured_summary`: per mutation, whether it was rejected and the CPU gap;
+- `rocke_structured_diagnostics`: determinism, the assumption versions, the compiler
+  and HSACO digest, agreement with the IR-exact emulation and with the named
+  compiler artifact, folded MFMA realizations and the Tier B width histogram.
+  None of these enters the verdict.
+
+It also writes `<case_id>.npz`, the raw output bits of every exposure. The
+replayable audit `_structured_capture_audit.py` explains every saved coordinate by the
+exact union of the IR-exact and the single-rounded epilogue, checks the named
+artifact's per-site rule and Tier B membership, and compares further captures
+bit for bit. Unexplained coordinates are reported, never absorbed:
+
+```bash
+# From rocke/library.
+PYTHONPATH=.:../platform/python python -m tests.oracle_free._structured_capture_audit \
+  --artifact rocm-7.13.0 <capture dir> [<capture dir> ...]
+```
+
+To re-ratify, run the complete suite on gfx942 with records enabled, confirm
+zero coordinates outside Tier B, every mutation rejected and determinism, run
+the audit on the captures, then update `STRUCTURED_CALIBRATION` (`spec`, `case_ids`)
+and, when the code objects changed, the digests in `STRUCTURED_EPILOGUE_ARTIFACTS`, in
+one reviewed change that names the develop revision and the gfx942 run. A
+digest names one kernel revision under one compiler, so any change to the
+dense builder's IR leaves the recorded ones behind; the ISA contract raises a
+warning when a compiler version an artifact was recorded under produces a
+digest that no artifact names.
+
+## Oracle prohibition
+
+Verdicts use no Torch, no rocKE numeric reference, no SDPA reference helper and
+no pinned-reference bundle.
+The predictor's inputs are closed-form scalars, the logit of each key class and
+the legal counts of each row, and it propagates FP32 intervals through the
+pinned per-row arithmetic. It never forms `Q K^T` from input tensors or
+evaluates a softmax over data.
+
+## Running the suite
+
+From the `rocke/library` directory (NumPy and pytest only; Torch is not needed):
+
+```bash
+# CPU contracts. About three minutes: the prediction is exact rational
+# arithmetic over every coordinate of the eight cases.
+python -m pytest tests/oracle_free/test_structured_contracts.py -vv
+
+# Launches on a visible gfx942 device.
+HIP_VISIBLE_DEVICES=0 python -m pytest \
+  tests/oracle_free/test_structured_analytical_gfx942.py -vv -rs
+
+# The same, capturing calibration records and raw outputs.
+ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir> HIP_VISIBLE_DEVICES=0 \
+  python -m pytest tests/oracle_free/test_structured_analytical_gfx942.py -vv -rs
+```
+
+From the installed `bin/hip_kernel_provider` directory, the launches and the
+CPU contracts are separate standard-tier entries:
+
+```bash
+ctest -R '^rocke_oracle_free_structured_logit_pytest$' --output-on-failure --no-tests=error
+ctest -R '^rocke_oracle_free_structured_logit_cpu_pytest$' --output-on-failure --no-tests=error
+```

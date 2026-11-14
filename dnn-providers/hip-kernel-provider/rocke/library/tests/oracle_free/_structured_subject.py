@@ -1,0 +1,336 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Narrow subject adapter of the structured-logit check for the shipped gfx942
+dense kernel.
+
+Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
+device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
+the kernel's public ``run_attention_dense_torch``. That entry accepts device
+buffers whenever the spec has no sinks, no LSE and no KV split, which is the
+scope the adapter admits, so the check launches what the shipped entry
+launches. Dispatch, the runner and the HIP runtime are imported only inside the
+functions that use them, so CPU collection and the analytical contracts need
+neither a GPU nor ROCm.
+
+It accepts only the two four-head quick shapes the check's predictions are
+derived for.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Protocol
+
+import numpy as np
+
+from ._structured_shapes import SpecFingerprint
+
+_POINTER_ALIGNMENT = 16
+# Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
+# invalid instead of passing as a stale zero.
+_NAN_BITS = {"fp16": 0x7E00, "bf16": 0x7FC0}
+
+
+class DenseCase(Protocol):
+    """What the adapter reads from a case: a bare ``DenseShape`` and a
+    ``StructuredCase`` both provide it."""
+
+    output_shape: tuple[int, int, int, int]  # [B, Sq, Hq, D]
+    key_shape: tuple[int, int, int, int]  # [B, Sk, Hkv, D]
+    dtype: str
+    mask: str
+    window: int
+    case_id: str
+
+
+@dataclass(frozen=True)
+class _Shape:
+    batch: int
+    seqlen_q: int
+    seqlen_k: int
+    nhead_q: int
+    nhead_k: int
+    head_dim: int
+
+
+def _shape(case: DenseCase) -> _Shape:
+    batch, seqlen_q, nhead_q, head_dim = case.output_shape
+    key_batch, seqlen_k, nhead_k, key_dim = case.key_shape
+    if (key_batch, key_dim) != (batch, head_dim):
+        raise ValueError(
+            f"inconsistent Q/K shapes {case.output_shape}, {case.key_shape}"
+        )
+    return _Shape(batch, seqlen_q, seqlen_k, nhead_q, nhead_k, head_dim)
+
+
+@dataclass(frozen=True)
+class ResolvedDenseSubject:
+    """Dispatch-resolved dense subject plus its proof-relevant fingerprint."""
+
+    case_id: str
+    tuning_spec: object
+    candidate_name: str
+    fingerprint: SpecFingerprint
+
+
+def _validate_host_bits(case: DenseCase, q, k, v) -> None:
+    """Validate the dense ABI on the raw-bit host inputs."""
+    expected_shapes = {
+        "q": case.output_shape,
+        "k": case.key_shape,
+        "v": case.key_shape,
+    }
+    for name, array in (("q", q), ("k", k), ("v", v)):
+        if not isinstance(array, np.ndarray):
+            raise TypeError(f"{name} must be a numpy array of raw bits")
+        if array.shape != expected_shapes[name]:
+            raise ValueError(f"{name} shape {array.shape} != {expected_shapes[name]}")
+        if array.dtype != np.uint16:
+            raise ValueError(f"{name} dtype {array.dtype} != uint16 raw bits")
+        if not array.flags.c_contiguous:
+            raise ValueError(f"{name} must be C-contiguous")
+
+
+def _validate_device_buffers(
+    buffers: Mapping[str, object], nbytes: Mapping[str, int]
+) -> None:
+    """Check each device buffer's size, alignment and separation.
+
+    Duck-typed on ``ptr()`` / ``nbytes()`` so the contract is CPU-testable with
+    small fakes; ``run_dense_case`` passes real ``DeviceMem`` objects."""
+    spans: dict[str, tuple[int, int]] = {}
+    for name, buffer in buffers.items():
+        size = int(buffer.nbytes())
+        if size != nbytes[name]:
+            raise ValueError(f"{name} device size {size} != host size {nbytes[name]}")
+        pointer = int(buffer.ptr())
+        if pointer == 0:
+            raise ValueError(f"{name} device pointer is null")
+        if pointer % _POINTER_ALIGNMENT:
+            raise ValueError(
+                f"{name} pointer must be {_POINTER_ALIGNMENT}-byte aligned"
+            )
+        spans[name] = (pointer, pointer + size)
+
+    names = tuple(spans)
+    for index, left_name in enumerate(names):
+        left_start, left_end = spans[left_name]
+        for right_name in names[index + 1 :]:
+            right_start, right_end = spans[right_name]
+            if left_start < right_end and right_start < left_end:
+                raise ValueError(f"{left_name} overlaps {right_name}")
+
+
+def _validate_supported_case(case: DenseCase) -> None:
+    """Reject shapes outside the two quick shapes of the structured-logit check."""
+    shape = _shape(case)
+    if shape.batch != 1:
+        raise ValueError("structured-logit cases require batch 1")
+    if shape.nhead_q != 4 or shape.nhead_k != 4:
+        raise ValueError("structured-logit cases require Hq=Hkv=4")
+    if shape.head_dim != 64:
+        raise ValueError("structured-logit cases require D64")
+    if shape.seqlen_q != 256:
+        raise ValueError("structured-logit cases require query length 256")
+    if shape.seqlen_k != 256:
+        raise ValueError("structured-logit cases require key length 256")
+    if case.mask == "window" and case.window != 64:
+        raise ValueError("structured-logit cases require window 64")
+
+
+def _verify_resolved_spec(case: DenseCase, tuning_spec) -> SpecFingerprint:
+    """Check what the adapter needs to launch safely and return the fingerprint.
+
+    Only preconditions of the launch itself are asserted here: dispatch identity,
+    the request-shape echo the host buffers are sized from, the buffers the
+    adapter does not supply (sinks, LSE), and scope the fingerprint does not
+    record. Every other fingerprint field (persistence, runtime shape, tile, fast
+    exp2) is left to ``require_structured_calibration``, so a drift there still
+    launches, writes calibration records, and fails with the re-ratification
+    remedy."""
+    if tuning_spec.path != "dense":
+        raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
+    if tuning_spec.arch != "gfx942":
+        raise AssertionError(f"dispatch returned arch={tuning_spec.arch!r}")
+    if tuning_spec.candidate_name != "attention_gfx942_dense":
+        raise AssertionError(
+            f"dispatch returned candidate={tuning_spec.candidate_name!r}"
+        )
+    spec = tuning_spec.kernel_spec
+    shape = _shape(case)
+    expected = {
+        "batch": shape.batch,
+        "seqlen_q": shape.seqlen_q,
+        "seqlen_kv": shape.seqlen_k,
+        "num_query_heads": shape.nhead_q,
+        "num_kv_heads": shape.nhead_k,
+        "head_size": shape.head_dim,
+        "dtype": case.dtype,
+        "causal": True,
+        "sliding_window": case.window if case.mask == "window" else 0,
+    }
+    for field, value in expected.items():
+        actual = getattr(spec, field)
+        if actual != value:
+            raise AssertionError(
+                f"resolved spec {field}={actual!r}, expected {value!r}"
+            )
+    # The adapter allocates only Q, K, V and O, so a spec that needs a sink or
+    # LSE buffer is outside what it can launch, not a recalibration.
+    if spec.use_sinks:
+        raise AssertionError(
+            "the structured-logit check requires attention sinks to be disabled"
+        )
+    if spec.emit_lse:
+        raise AssertionError(
+            "the structured-logit check requires the direct non-LSE epilogue"
+        )
+    # A KV-segment split combines partial softmax states, ragged padding adds
+    # masked tail tiles, and bottom-right shifts the band; the single-pass
+    # top-left argument behind the calibration covers none of them.
+    if spec.kv_segments != 1:
+        raise AssertionError(
+            "the structured-logit check requires single-pass KV, "
+            f"kv_segments={spec.kv_segments}"
+        )
+    if spec.ragged:
+        raise AssertionError("the structured-logit check requires a non-ragged shape")
+    if spec.causal_bottom_right:
+        raise AssertionError(
+            "the structured-logit check requires the top-left causal band"
+        )
+    return SpecFingerprint(
+        path=tuning_spec.path,
+        persistent=bool(spec.persistent),
+        runtime_shape=bool(spec.runtime_shape),
+        head_dim=int(spec.head_size),
+        block_m=int(spec.block_m),
+        block_n=int(spec.block_n),
+        use_exp2_fast=bool(spec.resolved_use_exp2_fast()),
+        use_sinks=bool(spec.use_sinks),
+        emit_lse=bool(spec.emit_lse),
+    )
+
+
+def _resolve_tuning_spec(case: DenseCase):
+    """Resolve ``gfx942_dense`` at its default configuration: the spec dispatch
+    ships for the request, with no knob pinned. A retune that moves a
+    fingerprint field (onto the persistent grid, say) then reaches the
+    calibration gate instead of being overridden here."""
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
+
+    shape = _shape(case)
+    request = AttentionRequest(
+        batch=shape.batch,
+        nhead_q=shape.nhead_q,
+        nhead_k=shape.nhead_k,
+        seqlen_q=shape.seqlen_q,
+        seqlen_k=shape.seqlen_k,
+        hdim_q=shape.head_dim,
+        hdim_v=shape.head_dim,
+        arch="gfx942",
+        mask_type=1,
+        sliding_window=case.window if case.mask == "window" else 0,
+        dtype=case.dtype,
+    )
+    tuning_spec = attention_tuning_spec(request, "gfx942_dense")
+    _verify_resolved_spec(case, tuning_spec)
+    return tuning_spec
+
+
+def resolve_dense_subject(case: DenseCase) -> ResolvedDenseSubject:
+    """Resolve one supported quick case and expose its calibration identity."""
+    _validate_supported_case(case)
+    tuning_spec = _resolve_tuning_spec(case)
+    return ResolvedDenseSubject(
+        case_id=case.case_id,
+        tuning_spec=tuning_spec,
+        candidate_name=str(tuning_spec.candidate_name),
+        fingerprint=_verify_resolved_spec(case, tuning_spec),
+    )
+
+
+def run_dense_case(
+    case: DenseCase,
+    q: np.ndarray,
+    k: np.ndarray,
+    v: np.ndarray,
+    *,
+    subject: ResolvedDenseSubject | None = None,
+    scale_override: float | None = None,
+) -> np.ndarray:
+    """Launch one validated subject on raw input bits and return raw output bits.
+
+    ``q``/``k``/``v`` are ``uint16`` FP16/BF16 bit arrays in the runner layout
+    (``[B, Sq, Hq, D]`` and ``[B, Sk, Hkv, D]``). The output is NaN-prefilled and
+    read back without any float conversion, so the analyzer judges exactly the
+    stored bits. Numerical judgment is left to the analyzer.
+
+    ``scale_override`` replaces the softmax scale ``1/sqrt(D)``; it exists only
+    for the subject-side wrong-scale mutation, whose output must be rejected."""
+    from kernels.gfx942 import attention_dense as runner
+    from rocke.runtime import DeviceMem, Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
+
+    _validate_supported_case(case)
+    _validate_host_bits(case, q, k, v)
+    resolved = resolve_dense_subject(case) if subject is None else subject
+    if resolved.case_id != case.case_id:
+        raise ValueError(
+            f"resolved subject case {resolved.case_id!r} != {case.case_id!r}"
+        )
+    tuning_spec = resolved.tuning_spec
+    fingerprint = _verify_resolved_spec(case, tuning_spec)
+    if fingerprint != resolved.fingerprint:
+        raise AssertionError("resolved subject fingerprint changed before launch")
+
+    # Private writable copies: ``as_u8_buffer`` views storage via ``from_buffer``,
+    # which refuses read-only arrays.
+    host = {
+        "q": q.copy(),
+        "k": k.copy(),
+        "v": v.copy(),
+        "out": np.full(case.output_shape, _NAN_BITS[case.dtype], dtype=np.uint16),
+    }
+    runtime = Runtime()
+    device = {name: DeviceMem(array.nbytes) for name, array in host.items()}
+    _validate_device_buffers(
+        device, {name: int(array.nbytes) for name, array in host.items()}
+    )
+    for name, array in host.items():
+        runtime.memcpy_h2d(device[name].ptr(), as_u8_buffer(array), array.nbytes)
+    # Fenced launch (LaunchConfig default): the output is complete on return.
+    runner.run_attention_dense_torch(
+        spec=tuning_spec.kernel_spec,
+        q=device["q"],
+        k=device["k"],
+        v=device["v"],
+        out=device["out"],
+        scale=(
+            1.0 / math.sqrt(_shape(case).head_dim)
+            if scale_override is None
+            else float(scale_override)
+        ),
+    )
+    out = host["out"]
+    runtime.memcpy_d2h(as_u8_buffer(out), device["out"].ptr(), out.nbytes)
+    return out
+
+
+def launched_code_object(subject: ResolvedDenseSubject) -> tuple[str, bytes]:
+    """The kernel name and HSACO of the launcher that ran ``subject``.
+
+    ``run_attention_dense_torch`` keeps its compiled launcher in the kernel
+    module's cache and exposes no accessor, so this reads that cache through
+    the production key function, as the pinned SDPA lane does. Raises
+    ``KeyError`` when the subject has not been launched in this process."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942 import attention_dense as runner
+
+    launcher = runner._DENSE_LAUNCHER_CACHE[
+        attention_dense_cache_key(subject.tuning_spec.kernel_spec, arch="gfx942")
+    ]
+    return str(launcher.kernel_name), bytes(launcher._hsaco)
