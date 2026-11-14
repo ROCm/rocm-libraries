@@ -68,6 +68,7 @@ sys.path.insert(0, str(_HERE))
 
 from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets  # noqa: E402
 from hkp_pack.descriptors import (  # noqa: E402
+    UHD_ROLES,
     HkpPackError,
     load_flat_input,
     type_from_filename,
@@ -229,12 +230,12 @@ ENGINE_ESTIMATE_METRIC = "tflops"
 # slot stay the fallback everywhere else.
 #
 # `uhd_gen promote` is the reference for every binding: the roles it accepts, where it
-# installs, and the form it writes (uhd_gen/promote.py `_rebind`). Every role binds a list per
-# arch key, one UHD per ranking metric -- `predict_applicable_kernels`, the candidate
-# generators for future JIT spaces, included. The IngestorGenerator emits the same form from
-# its `engine.heuristics` config (#15101).
+# installs, and the form it writes (uhd_gen/promote.py `_rebind`). A key a trained model is
+# bound under holds a list, one UHD per ranking metric, for every role --
+# `predict_applicable_kernels`, the candidate generators for future JIT spaces, included; a
+# key only this generator fills (the native ranker, the estimate's slot) stays a bare id.
+# The IngestorGenerator emits the same form from its `engine.heuristics` config (#15101).
 HEURISTICS_DIR = "heuristics"
-_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
 
 
@@ -258,10 +259,10 @@ def installed_models(
             )
         role, arch = parts[1], parts[2]
         folder_metric = parts[3] if len(parts) == 5 else None
-        if role not in _ROLES or not _ARCH_KEY.fullmatch(arch):
+        if role not in UHD_ROLES or not _ARCH_KEY.fullmatch(arch):
             raise HkpPackError(
                 f"{path}: '{role}/{arch}' is not a role and arch key uhd_gen promote "
-                f"binds ({', '.join(_ROLES)}; default or gfx<id>)"
+                f"binds ({', '.join(UHD_ROLES)}; default or gfx<id>)"
             )
         doc = json.loads(path.read_text(encoding="utf-8"))
         metric = (doc.get("score") or {}).get("metric")
@@ -497,9 +498,10 @@ class OpDescriptors:
             )
         # Each value as `uhd_gen promote` writes it, so promoting into this UED and
         # regenerating bind the same values (promote appends a new arch key; this sorts): a
-        # key a trained model is bound under is a list (one UHD per metric), as promote's
-        # rebinding leaves it; a key only the generator fills (the native ranker, the
-        # estimate's slot) stays the bare id it writes.
+        # key a trained model is bound under is a list (one UHD per metric) in promote's
+        # order, the metric-less UHD first and then by metric name (promote.binding_order);
+        # a key only the generator fills (the native ranker, the estimate's slot) stays the
+        # bare id it writes.
         trained = {
             model
             for by_arch in self.installed.values()
@@ -508,7 +510,10 @@ class OpDescriptors:
         }
 
         def bound(ids: list[tuple[str | None, str]]) -> str | list[str]:
-            models = [model for _, model in ids]
+            ordered = sorted(
+                ids, key=lambda entry: (entry[0] is not None, entry[0] or "")
+            )
+            models = [model for _, model in ordered]
             if trained.intersection(models):
                 return models
             return models[0] if len(models) == 1 else models

@@ -3532,15 +3532,24 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         {
             continue;
         }
-        // Validated for its diagnostics only; nothing consumes a candidate generator yet.
+        // Validated for its diagnostics only; nothing consumes a candidate generator yet. Every
+        // listed id is checked, and RFC 0019 §3.1's one UHD per (arch key, metric) holds here
+        // too: a metric-less generator counts as its own metric.
         for(const auto& [arch, ids] : engine.predictApplicableKernels)
         {
+            std::set<std::string> metrics;
             for(const auto& id : ids)
             {
                 const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                const auto reason = model == nullptr
-                                        ? std::string("missing or invalid UHD descriptor")
-                                        : provenanceError(*model, arch, nullptr);
+                auto reason = model == nullptr ? std::string("missing or invalid UHD descriptor")
+                                               : provenanceError(*model, arch, nullptr);
+                if(reason.empty() && !metrics.insert(model->score.metric).second)
+                {
+                    reason
+                        = model->score.metric.empty()
+                              ? std::string("a second metric-less UHD on this key")
+                              : "a second UHD for metric '" + model->score.metric + "' on this key";
+                }
                 if(!reason.empty())
                 {
                     disabled("predict_applicable_kernels", arch, id, reason);

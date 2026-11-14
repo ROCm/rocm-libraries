@@ -1048,6 +1048,57 @@ TEST(TestDescriptorLoader, ReadsTheCandidateGeneratorRoleAsAList)
     }
 }
 
+/// Every id a candidate-generator key lists is checked on its own: a missing UHD, a second
+/// metric-less one (RFC 0019 §3.1: one per arch key and metric) and a model trained for other
+/// descriptors are each reported, and the engine still loads. Nothing consumes the role yet,
+/// so these diagnostics are all it does.
+TEST(TestDescriptorLoader, ReportsEachCandidateGeneratorAKeyCannotUse)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("candidate_checks"));
+    auto documents = makeSetDocuments('1', "test:candidates");
+    const auto staleProvenance = [&] {
+        auto provenance = provenanceOf(documents);
+        provenance["ued"]["revision"] = "1.7";
+        return provenance;
+    }();
+    const auto usable = testUuid('1', ROLE_HEURISTIC);
+    const auto missing = testUuid('1', 'e');
+    auto duplicate = documentOfType(documents, ".uhd.json");
+    duplicate["id"] = testUuid('1', 'c');
+    auto stale = documentOfType(documents, ".uhd.json");
+    stale["id"] = testUuid('1', 'f');
+    stale["trained_against"] = staleProvenance;
+    documentOfType(documents, ".ued.json")["predict_applicable_kernels"]
+        = {{"gfx942", nlohmann::json::array({usable, missing, duplicate["id"]})},
+           {"gfx950", nlohmann::json::array({stale["id"]})}};
+    documents.push_back({".uhd.json", duplicate});
+    documents.push_back({".uhd.json", stale});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(sets.front().engine.predictApplicableKernels.at("gfx942").size(), 3u);
+    const auto reported = [&](const std::string& arch, const std::string& id) {
+        return "role=predict_applicable_kernels arch='" + arch + "' model=" + id + " disabled: ";
+    };
+    EXPECT_EQ(countLogsContaining(
+                  recorder, reported("gfx942", missing) + "missing or invalid UHD descriptor"),
+              1u)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(countLogsContaining(recorder,
+                                  reported("gfx942", duplicate["id"].get<std::string>())
+                                      + "a second metric-less UHD on this key"),
+              1u)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(countLogsContaining(recorder, reported("gfx950", stale["id"].get<std::string>())), 1u)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(countLogsContaining(recorder, reported("gfx942", usable)), 0u)
+        << recorder.getRecordedLogsAsString();
+}
+
 /// A metric-suffixed L1 role key (`predict_engine_tflops`) is refused as unknown, not loaded
 /// with its model silently unbound.
 TEST(TestDescriptorLoader, RejectsAnEngineSpellingAMetricSuffixedPredictionRole)

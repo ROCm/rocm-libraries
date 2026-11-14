@@ -1148,6 +1148,27 @@ def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture)
     load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
+@pytest.mark.parametrize(
+    "roles",
+    [
+        # The metric-less native ranker beside a tflops ranker on one key.
+        {
+            "sort_kernel_catalog": {
+                "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _TFLOPS_ID]
+            }
+        },
+        # Candidate generators: a metric-less one beside a tflops one, and two metrics.
+        {"predict_applicable_kernels": {"gfx942": [_ORDERING_ID, _TFLOPS_ID]}},
+        {"predict_applicable_kernels": {"default": [_TFLOPS_ID, _TIME_ID]}},
+    ],
+)
+def test_one_key_may_bind_one_model_per_metric(tmp_path, main_fixture, roles):
+    """RFC 0019 §3.1: a key lists one UHD per metric, the metric-less one counting as its
+    own; distinct metrics on one key pack."""
+    root = _root_with_roles(tmp_path, main_fixture, **roles)
+    load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+
 def test_references_resolve_in_any_letter_case(tmp_path, main_fixture):
     """The loader parses a reference to its UUID bytes, so letter case is not
     part of the match, and pruning must keep what the reference names."""

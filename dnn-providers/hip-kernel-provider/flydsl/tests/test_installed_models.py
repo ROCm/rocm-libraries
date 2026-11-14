@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -157,9 +156,11 @@ def test_two_metric_less_models_on_one_key_are_refused(tmp_path: Path) -> None:
 def _promote():
     """uhd_gen's promote module, so a binding is checked against promote rather than a copy
     of its rules. Skips without uhd_gen's requirements, as uhd_gen's suites do, unless the
-    build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS)."""
+    build requires them: uhd_gen's own `prerequisites_required()` reads that setting."""
     sys.path.insert(0, str(FLYDSL.parents[2] / "projects" / "hipdnn" / "tools"))
-    if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+    from uhd_gen.conftest import prerequisites_required
+
+    if prerequisites_required():
         from uhd_gen import promote
 
         return promote
@@ -177,6 +178,10 @@ def _promote():
             "default",
             "tflops",
         ),  # joins the metric-less native ranker
+        # Joins the estimate slot's tflops UHD and sorts before it: the generator lists
+        # its own entries first, so only the fixed order puts a new metric (RFC 0019 §4.4
+        # anticipates more than tflops and time) where promote does.
+        ("predict_engine", "default", "accuracy"),
         ("sort_kernel_catalog", "default", None),  # replaces the native ranker
         ("predict_applicable_kernels", "gfx950", None),  # the candidate generators
     ],
@@ -186,15 +191,48 @@ def test_a_binding_is_what_promote_writes(
 ) -> None:
     promote = _promote()
     before = _ued(tmp_path)
-    # promote reads the metric of every UHD a key already binds from its installed file.
-    installed_ids = {}
-    for name, doc in gen_descriptors.OpDescriptors(OP, FIELDS).documents().items():
-        if name.endswith(".uhd.json"):
-            path = tmp_path / name
-            path.write_text(json.dumps(doc), encoding="utf-8")
-            installed_ids[doc["id"]] = path
+    installed_ids = _generated_uhds(tmp_path)
     model = str(uuid.uuid4())
     installed_ids[model] = _install(tmp_path, role, arch, model, metric=metric)
     holder = copy.deepcopy(before)
     written, _ = promote._rebind(holder, role, arch, model, metric, installed_ids)
     assert _ued(tmp_path)[role][arch] == written
+
+
+def _generated_uhds(op_dir: Path) -> dict[str, Path]:
+    """The generator's own UHDs written out: promote reads the metric of every UHD a key
+    already binds from its installed file."""
+    installed_ids = {}
+    for name, doc in gen_descriptors.OpDescriptors(OP, FIELDS).documents().items():
+        if name.endswith(".uhd.json"):
+            path = op_dir / name
+            path.write_text(json.dumps(doc), encoding="utf-8")
+            installed_ids[doc["id"]] = path
+    return installed_ids
+
+
+@pytest.mark.parametrize(
+    ("role", "arch", "first", "second"),
+    [
+        ("sort_kernel_catalog", "gfx942", "time", "tflops"),
+        ("predict_engine", "gfx950", "time", "tflops"),
+        ("predict_applicable_kernels", "gfx950", "tflops", None),
+    ],
+)
+def test_two_metrics_on_one_key_bind_as_promote_writes(
+    tmp_path: Path, role: str, arch: str, first: str, second: str | None
+) -> None:
+    """A key gains a second metric: the generator lists both, in the order promote writes
+    (metric-less first, then by metric name) whichever was promoted first."""
+    promote = _promote()
+    installed_ids = _generated_uhds(tmp_path)
+    earlier = str(uuid.uuid4())
+    installed_ids[earlier] = _install(tmp_path, role, arch, earlier, metric=first)
+    holder = copy.deepcopy(_ued(tmp_path))
+    later = str(uuid.uuid4())
+    installed_ids[later] = _install(tmp_path, role, arch, later, metric=second)
+    written, replaced = promote._rebind(
+        holder, role, arch, later, second, installed_ids
+    )
+    assert replaced == []
+    assert _ued(tmp_path)[role][arch] == written == [later, earlier]

@@ -267,7 +267,9 @@ if(_flydsl_product_root)
                 "FLYDSL_PRODUCT_OUT_ROOT=${_flydsl_product_root};FLYDSL_SHARD_ARCH=${_flydsl_shard_arch};HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON=${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON};PYTHONDONTWRITEBYTECODE=1")
         # test_installed_models.py checks the generator against uhd_gen promote itself, which
         # needs uhd_gen's requirements; like uhd_gen's own suites it skips without them,
-        # unless the build requires those suites to run.
+        # unless the build requires those suites to run. HIPDNN_REQUIRE_UHD_GEN_TESTS is a
+        # hipDNN option: a superbuild shares it, a provider-only configure must pass
+        # -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON itself or this test skips silently.
         if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
             set_property(TEST hip-kernel-provider-flydsl-drift-guards APPEND PROPERTY
                 ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")

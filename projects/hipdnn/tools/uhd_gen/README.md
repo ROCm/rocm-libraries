@@ -224,7 +224,10 @@ arch (RFC 0019 §3.1): `sort_kernel_catalog` and `predict_engine` hold one UHD p
 spaces, follows the same rule. The incoming UHD replaces only the bound UHD of its own
 metric (a metric-less one replaces the metric-less one; the metric is read from the bound
 UHD itself, which must therefore be installed in the tree) and otherwise joins the list; a
-single id is converted to a list. It preserves other model references and authored knobs.
+single id is converted to a list. The list is written in one fixed order, the metric-less
+UHD first and then by metric name, so a descriptor generator that derives the binding (the
+FlyDSL generator) or records it (the IngestorGenerator's `engine.heuristics`) writes the
+same value. It preserves other model references and authored knobs.
 
 **One UUID is one model, under every arch key that binds it.** Promoting a model already
 installed elsewhere in the tree for another arch binds the installed copy (no second

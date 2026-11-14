@@ -716,7 +716,7 @@ def _validate_ued(desc):
             raise HkpPackError(
                 f"key 'shared_workspace' in {where} requires a native graph_match"
             )
-    for role in _UHD_ROLES:
+    for role in UHD_ROLES:
         if role in doc:
             _validate_role_map(doc[role], role, where)
 
@@ -799,7 +799,7 @@ def _sdk_version_fits(text):
 
 
 def _role_references(doc, role):
-    """Every UHD id a UED role names, flattening the list form of a scoring role."""
+    """Every UHD id a UED role names: each role takes one id or a list, one per metric."""
     for value in doc.get(role, {}).values():
         if isinstance(value, list):
             yield from value
@@ -838,14 +838,14 @@ _NUMERICAL_NOTES = (
 )
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
-_UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
+UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _UED_KEYS = (
     "version",
     "revision",
     "id",
     "name",
     "sdk_version",
-    *_UHD_ROLES,
+    *UHD_ROLES,
     "slots",
     "shared_workspace",
     "metadata",
@@ -1795,7 +1795,7 @@ def _ued_references(doc):
         yield slot["metadata"], "kmd"
         for ref in _role_references(slot, "sort_kernel_catalog"):
             yield ref, "uhd"
-    for role in _UHD_ROLES:
+    for role in UHD_ROLES:
         for ref in _role_references(doc, role):
             yield ref, "uhd"
 
@@ -1841,7 +1841,7 @@ def _validate_role_metrics(ued, uhd_by_id):
     model must declare a metric. A slot ranker must not (RFC 0021 §7): a slot has
     no time of its own, so the loader rejects an engine whose slot ranker names one.
     """
-    scopes = [(f"UED {ued.path.name}", ued.doc, _UHD_ROLES, False)]
+    scopes = [(f"UED {ued.path.name}", ued.doc, UHD_ROLES, False)]
     scopes += [
         (who, slot, ("sort_kernel_catalog",), True)
         for who, slot in _selection_scopes(ued)
@@ -1920,7 +1920,7 @@ def _require_descriptor_set(trained, where):
 def _refuse_slot_provenance(ued, uhd_by_id):
     """An engine that declares no slots cannot satisfy a model naming slot
     provenance (`slot` or `kmds`); the loader disables that model."""
-    for role in _UHD_ROLES:
+    for role in UHD_ROLES:
         for ref in _role_references(ued.doc, role):
             uhd = uhd_by_id[canonical_id(ref)]
             trained = uhd.doc.get("trained_against")
