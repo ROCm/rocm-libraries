@@ -69,6 +69,7 @@ namespace TensileLite
 
             std::vector<rocisa::DataType> m_constantTypes;
             std::vector<double>           m_constantValues;
+            std::vector<bool>             m_constantRandom;
 
             bool        m_stridedBatched;
             int         m_batchMode;

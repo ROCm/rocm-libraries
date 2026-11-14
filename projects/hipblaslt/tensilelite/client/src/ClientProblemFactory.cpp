@@ -214,6 +214,7 @@ namespace TensileLite
             m_tensorStrides.resize(tensors.size());
             m_constantTypes.resize(constants.size());
             m_constantValues.resize(constants.size());
+            m_constantRandom.assign(constants.size(), false);
             // Get types and values from the information from ContractionProblem
             // May contain useless information for ClientProblemFactory
             // Get tensor types
@@ -262,8 +263,9 @@ namespace TensileLite
                 std::string valueName = "init-" + constants[i].name;
                 if(args.count(valueName))
                 {
-                    m_constantValues[i]
-                        = DataInitialization::getValue<double>(args[valueName].as<InitMode>());
+                    auto mode           = args[valueName].as<InitMode>();
+                    m_constantValues[i] = DataInitialization::getValue<double>(mode);
+                    m_constantRandom[i] = IsRandomLike(mode);
                 }
                 else
                 {
@@ -483,13 +485,18 @@ namespace TensileLite
                                 rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                 rv.back().setComputeInputTypeB(m_computeInputTypeB);
                                 // A device scalar replaces the inline alpha, but its value is not
-                                // available while constructing the problem. Do not select an
-                                // AlphaValue-specialized solution from the ignored inline value.
+                                // available while constructing the problem. A random alpha or beta
+                                // is drawn again for the launch (DataInitialization), so the value
+                                // drawn here can differ from it. Do not select an AlphaValue- or
+                                // BetaValue-specialized solution from either.
+                                constexpr auto alphaIdx = ContractionProblemGemm::CONST::ALPHA;
+                                constexpr auto betaIdx  = ContractionProblemGemm::CONST::BETA;
                                 rv.back().setAlphaRestriction(
-                                    m_deviceScalarAlpha
+                                    m_deviceScalarAlpha || m_constantRandom[alphaIdx]
                                         ? ScalarValue::Any
-                                        : toScalarValueEnum(m_constantValues[
-                                              ContractionProblemGemm::CONST::ALPHA]));
+                                        : toScalarValueEnum(m_constantValues[alphaIdx]));
+                                if(m_constantRandom[betaIdx])
+                                    rv.back().setBetaRestriction(ScalarValue::Any);
                                 rv.back().setCEqualsD(m_cEqualsD);
                                 rv.back().setAlphaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::ALPHA]);
