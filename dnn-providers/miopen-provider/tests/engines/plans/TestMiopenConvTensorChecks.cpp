@@ -1117,6 +1117,116 @@ TEST(TestMiopenConvTensorChecks, SizeLimitIsNotPartOfTheIoTensorRules)
 }
 
 // ---------------------------------------------------------------------------------------------
+// Dims that overflow: every io validator declines them before packing or strides are computed
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+
+// Dims whose element count reaches INT64_MAX: the product, the packing extent and the canonical
+// strides of such dims overflow a signed 64-bit integer.
+std::vector<std::vector<int64_t>> overflowingDims()
+{
+    return {
+        {std::numeric_limits<int64_t>::max(), 2, 1, 1},
+        {2, 1, 1, std::numeric_limits<int64_t>::max()},
+        {std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max(), 2, 2},
+        {4294967296, 4294967296, 1, 1},
+        {std::numeric_limits<int64_t>::max(), 1, 1, 1},
+    };
+}
+
+std::string overflowReason(const char* name)
+{
+    return std::string("tensor ") + name + " has dims whose element count reaches the 64-bit limit";
+}
+
+std::string describeDims(const std::vector<int64_t>& dims)
+{
+    std::string text;
+    for(const int64_t dim : dims)
+    {
+        text += std::to_string(dim) + "x";
+    }
+    return text;
+}
+
+// Strides that no canonical computation could produce for the dims: the validators must decline
+// on the dims alone.
+TensorSpec withUnitStrides(const std::vector<int64_t>& dims)
+{
+    return withStrides(dims, std::vector<int64_t>(dims.size(), 1));
+}
+
+} // namespace
+
+TEST(TestMiopenConvTensorChecks, DeclinesDimsWhoseElementCountOverflows)
+{
+    for(const auto& dims : overflowingDims())
+    {
+        SCOPED_TRACE(describeDims(dims));
+        const TensorSpec huge = withUnitStrides(dims);
+
+        EXPECT_THAT(declineReason(huge, channelsFirst(W_DIMS), channelsFirst(Y_DIMS)),
+                    ::testing::HasSubstr(overflowReason("x")));
+        EXPECT_THAT(declineReason(channelsFirst(X_DIMS), huge, channelsFirst(Y_DIMS)),
+                    ::testing::HasSubstr(overflowReason("w")));
+        EXPECT_THAT(declineReason(channelsFirst(X_DIMS), channelsFirst(W_DIMS), huge),
+                    ::testing::HasSubstr(overflowReason("y")));
+    }
+}
+
+// Both backward operations, every tensor in turn, under the tensor's name in the operation.
+TEST(TestMiopenConvTensorChecks, BackwardDeclinesDimsWhoseElementCountOverflows)
+{
+    const BackwardCase packed = uniformBackwardCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+
+    for(const auto& dims : overflowingDims())
+    {
+        SCOPED_TRACE(describeDims(dims));
+        const TensorSpec huge = withUnitStrides(dims);
+
+        for(const Role role : ROLES)
+        {
+            for(const BackwardOp op : BACKWARD_OPS)
+            {
+                SCOPED_TRACE(operationName(op));
+                SCOPED_TRACE(roleName(op, role));
+                const std::string actual
+                    = backwardDeclineReason(op, withTensorAt(packed, role, huge));
+                EXPECT_THAT(actual, ::testing::HasSubstr(overflowReason(roleName(op, role))));
+                EXPECT_THAT(actual, ::testing::HasSubstr(operationName(op)));
+            }
+        }
+    }
+}
+
+// A negative dim has no element count: declined by name, not left to the stride arithmetic.
+TEST(TestMiopenConvTensorChecks, DeclinesNegativeDims)
+{
+    const TensorSpec negative = withUnitStrides({4, -2, 3, 3});
+
+    EXPECT_THAT(declineReason(negative, channelsFirst(W_DIMS), channelsFirst(Y_DIMS)),
+                ::testing::HasSubstr("tensor x has a negative dim"));
+    EXPECT_THAT(declineReason(channelsFirst(X_DIMS), negative, channelsFirst(Y_DIMS)),
+                ::testing::HasSubstr("tensor w has a negative dim"));
+    EXPECT_THAT(declineReason(channelsFirst(X_DIMS), channelsFirst(W_DIMS), negative),
+                ::testing::HasSubstr("tensor y has a negative dim"));
+
+    const BackwardCase packed = uniformBackwardCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+    for(const Role role : ROLES)
+    {
+        for(const BackwardOp op : BACKWARD_OPS)
+        {
+            SCOPED_TRACE(operationName(op));
+            EXPECT_THAT(backwardDeclineReason(op, withTensorAt(packed, role, negative)),
+                        ::testing::HasSubstr(std::string("tensor ") + roleName(op, role)
+                                             + " has a negative dim"));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Fused convolution + bias + activation: the bias operand
 // ---------------------------------------------------------------------------------------------
 

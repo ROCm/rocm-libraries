@@ -34,9 +34,11 @@ namespace miopen_plugin::conv_applicability
 //
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
 // tensors must be declined; `reason` names the operation, the offending tensor and the rule. Also
-// throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, or rank
-// below 3 (the size check only needs non-null, non-negative dims()). The tensors are the graph's
-// own (unpadded rank 3, 4 or 5), not the padded MIOpen descriptors.
+// throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, rank
+// below 3, a negative dim, or dims whose element count (saturating product) reaches INT64_MAX, so
+// no check computes strides or extents from dims that could overflow (the size check only needs
+// non-null, non-negative dims()). The tensors are the graph's own (unpadded rank 3, 4 or 5), not
+// the padded MIOpen descriptors.
 
 // Forward convolution: data type, layout and packing rules above.
 void validateConvFwdIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,
@@ -54,8 +56,9 @@ void validateConvWrwIoTensors(const hipdnn_flatbuffers_sdk::data_objects::Tensor
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dw);
 
 // Backward data size limit: dy and dx must each have at most 2^31 - 1 elements. Reads only dims(),
-// with an overflow-safe product, so it is safe on any dims and must run before the io-tensor
-// validators when the dims are not yet known to be sane.
+// with an overflow-safe product, so it is safe on any dims. It runs before the io-tensor
+// validators because it enforces the 2^31 - 1 limit, which the io validators' overflow guard (a
+// far larger bound) does not.
 void validateConvBwdDataSize(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dx);
 

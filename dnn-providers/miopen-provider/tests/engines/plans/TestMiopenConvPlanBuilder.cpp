@@ -258,6 +258,11 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
     const std::vector<int64_t> wDims = {4, 4, 3, 3};
     const std::vector<int64_t> yDims = {2, 4, 6, 6};
 
+    // MIOpen offers no solution for some of these combinations on some architectures; such a
+    // combination says nothing about the provider and is left out (the test is skipped only when
+    // every combination is).
+    size_t checkedCount = 0;
+
     for(const bool channelsLast : {false, true})
     {
         const auto strides = [channelsLast](const std::vector<int64_t>& dims) {
@@ -288,8 +293,19 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
 
+            if(!miopenReportsForwardSolution(*_handle, graph))
+            {
+                continue;
+            }
+
+            ++checkedCount;
             EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
         }
+    }
+
+    if(checkedCount == 0)
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for any uniform packed forward graph";
     }
 }
 
@@ -581,6 +597,11 @@ static void expectBackwardApplicable(const MiopenConvPlanBuilder& planBuilder,
 // all channels-last) stays applicable, for backward data and backward weights.
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedBackwardTensors)
 {
+    // MIOpen offers no solution for some of these combinations on some architectures; such a
+    // combination says nothing about the provider and is left out (the test is skipped only when
+    // every combination is).
+    size_t checkedCount = 0;
+
     for(const auto kind : {BackwardKind::DATA, BackwardKind::WEIGHTS})
     {
         for(const bool channelsLastLayout : {false, true})
@@ -598,9 +619,20 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedBack
                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                     builder.GetBufferPointer(), builder.GetSize());
 
+                if(!miopenReportsBackwardSolution(kind, *_handle, graph))
+                {
+                    continue;
+                }
+
+                ++checkedCount;
                 EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
             }
         }
+    }
+
+    if(checkedCount == 0)
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for any uniform packed backward graph";
     }
 }
 

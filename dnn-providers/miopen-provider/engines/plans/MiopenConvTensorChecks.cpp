@@ -169,6 +169,36 @@ std::string layoutName(unsigned mask)
     return "other";
 }
 
+// Number of elements (product of the dims) of a tensor, saturating at INT64_MAX so that absurd dims
+// cannot overflow. Rejects null and negative dims, which have no element count.
+int64_t
+    saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
+{
+    const auto* dims = attr.dims();
+    const std::string prefix = std::string(operation) + ": tensor " + name;
+
+    if(dims == nullptr)
+    {
+        decline(prefix + " has null dims");
+    }
+
+    constexpr int64_t MAX_COUNT = std::numeric_limits<int64_t>::max();
+    int64_t count = 1;
+    for(const int64_t dim : *dims)
+    {
+        if(dim < 0)
+        {
+            decline(prefix + " has a negative dim");
+        }
+        if(dim > 0 && count > MAX_COUNT / dim)
+        {
+            return MAX_COUNT;
+        }
+        count *= dim;
+    }
+    return count;
+}
+
 // Reads one tensor and rejects shapes the checks cannot judge. `operation` prefixes every reason
 // ("Convolution forward", ...) and `name` is the tensor's role in that operation ("x", "dy", ...).
 TensorInfo readTensor(const char* operation, const char* name, const TensorAttributes& attr)
@@ -188,6 +218,14 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
     if(dims->size() < MIN_RANK)
     {
         decline(prefix + " has rank below 3");
+    }
+
+    // The packing and layout checks below multiply dims and strides in int64_t; dims whose element
+    // count does not fit would overflow there (signed overflow is undefined behaviour). No real
+    // tensor has that many elements, so decline before computing anything.
+    if(saturatingElementCount(operation, name, attr) == std::numeric_limits<int64_t>::max())
+    {
+        decline(prefix + " has dims whose element count reaches the 64-bit limit");
     }
 
     TensorInfo info;
@@ -280,36 +318,6 @@ void checkBackwardTensors(const char* operation,
                     + " must not be channels-last with padded strides");
         }
     }
-}
-
-// Number of elements (product of the dims) of a tensor, saturating at INT64_MAX so that absurd dims
-// cannot overflow. Rejects null and negative dims, which have no element count.
-int64_t
-    saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
-{
-    const auto* dims = attr.dims();
-    const std::string prefix = std::string(operation) + ": tensor " + name;
-
-    if(dims == nullptr)
-    {
-        decline(prefix + " has null dims");
-    }
-
-    constexpr int64_t MAX_COUNT = std::numeric_limits<int64_t>::max();
-    int64_t count = 1;
-    for(const int64_t dim : *dims)
-    {
-        if(dim < 0)
-        {
-            decline(prefix + " has a negative dim");
-        }
-        if(dim > 0 && count > MAX_COUNT / dim)
-        {
-            return MAX_COUNT;
-        }
-        count *= dim;
-    }
-    return count;
 }
 
 void checkBwdDataElementCount(const char* name, const TensorAttributes& attr)
