@@ -273,5 +273,30 @@ Tests:
   unit_check: 0
   norm_check: 1
   gpu_arch: '950'
+# rocRoller-off build only. rocRoller fails to build its first ranked tile for
+# this problem (16x16x256), the second does not divide N, and it runs the third,
+# a 16x16x128 Stream-K tile. The walk passes over the first because
+# unbuildable_configs.def records it, so both APIs serve the checked-in Stream-K
+# kernel (rocRoller's rr_16x16x128_sk) under the default uniform summation
+# order, as rocRoller does, and get the right answer.
+- name: rocroller_streamk_under_uniform_summation_order
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [96]
+  N: [32]
+  K: [2816]
+  transA: T
+  transB: N
+  use_ext: [0, 1]
+  requires_streamk: 1
+  expected_kernel: RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_16x16x128_UR_2
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
 
 ...

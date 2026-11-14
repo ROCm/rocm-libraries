@@ -102,17 +102,19 @@ struct RocRollerWalkResult
 // the checked-in rocRoller kernels that accept the problem.
 //
 // A tile is passed over where rocRoller passes over it: the tile does not
-// divide the problem, or the kernel needs more workspace than `fits` allows.
-// A tile whose kernel was already kept is passed over too; it differs from
-// the earlier one only in non-temporal hints. Any other tile without exactly
-// one kernel ends the walk, so the result never holds a kernel rocRoller
-// would not have picked at that rank.
+// divide the problem, rocRoller fails to build it (tile.unbuildable), or the
+// kernel needs more workspace than `fits` allows. A tile whose kernel was
+// already kept is passed over too; it differs from the earlier one only in
+// non-temporal hints. Any other tile without exactly one kernel ends the walk,
+// so the result never holds a kernel rocRoller would not have picked at that
+// rank.
 //
 // Where the two differ the walk is the more conservative: a tile rocRoller
-// passes over because it cannot build the kernel, or because its own
-// predicates reject the problem, ends the walk here. rocRoller also skips a
-// tile that does not divide the problem only on a solution-cache miss, so a
-// rocRoller process that already built that tile can still run it.
+// passes over because its own predicates reject the problem, or because it
+// fails to build a configuration the record does not hold, ends the walk
+// here. rocRoller also skips a tile that does not divide the problem only on
+// a solution-cache miss, so a rocRoller process that already built that tile
+// can still run it.
 //
 // refuses(i) is true when kernel i must not launch on the problem.
 template <typename Fits, typename Refuses>
@@ -141,6 +143,8 @@ RocRollerWalkResult walkRocRollerTiles(const std::vector<RocRollerSelectedTile>&
         const RocRollerSelectedTile& tile = ranked[t];
         if(tile.m > 0 && tile.n > 0 && tile.k > 0
            && (m % tile.m != 0 || n % tile.n != 0 || k % tile.k != 0))
+            continue;
+        if(tile.unbuildable)
             continue;
 
         size_t match   = kernels.size();

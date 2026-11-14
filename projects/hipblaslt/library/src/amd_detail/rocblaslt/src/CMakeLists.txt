@@ -32,7 +32,11 @@ if(WIN32)
 else()
     add_library(hipblaslt-rocroller-selection STATIC
         "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_selected.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_unbuildable.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocroller/solution_selection.cpp")
+    # unbuildable_configs.def sits with the checked-in rocRoller kernels.
+    target_include_directories(hipblaslt-rocroller-selection
+        PRIVATE "${PROJECT_SOURCE_DIR}/tensilelite/tensilelite/CustomKernels/rocroller")
 endif()
 target_compile_features(hipblaslt-rocroller-selection PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller-selection PROPERTIES POSITION_INDEPENDENT_CODE ON)
