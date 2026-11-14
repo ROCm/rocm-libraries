@@ -18,8 +18,9 @@ code-object builder, a TensileLite source bundle reader and the JIT solution
 library are implemented. They build generated kernel sources into code objects
 and publish them as TensileLite solutions into a persistent library on disk,
 whose solutions a later process loads without building again. A JIT backend
-is the generator that turns a request into kernel sources; the replay backend,
-which replays pre-generated TensileLite kernels, is the one implemented.
+is the generator that turns a request into kernel sources. Two are implemented:
+the replay backend, which replays pre-generated TensileLite kernels, and the
+HipKittens backend, which compiles HipKittens kernels for gfx950.
 `hipblasLtMatmulAlgoGetHeuristic` and `Gemm::algoGetHeuristic` consult the JIT
 library when hipBLASLt is built with JIT support and `HIPBLASLT_JIT` is `1` or
 `2`.
@@ -38,11 +39,12 @@ leaves the mode off.
 
 A miss asks each backend added with `jit::addHeuristicBackend`, in order, for
 the slots still open, and publishes what it builds; a later query reuses the
-published index, also from another process. The library adds no backend; the
-JIT tests add the replay backend. A process with no backend warns once: mode
-`1` leaves the query unchanged, and mode `2` returns no algorithms. Grouped
-GEMM is not filled from the JIT library: mode `1` leaves that query on its
-existing path, and mode `2` returns success with no algorithms.
+published index, also from another process. The library adds the HipKittens
+backend when it is built; the JIT tests add the replay backend. A process with
+no backend warns once: mode `1` leaves the query unchanged, and mode `2`
+returns no algorithms. Grouped GEMM is not filled from the JIT library: mode
+`1` leaves that query on its existing path, and mode `2` returns success with
+no algorithms.
 
 The returned algorithms are JIT library indices and run through the same path
 as a prebuilt index. The process library's root is `HIPBLASLT_JIT_LIBRARY_PATH`
@@ -91,6 +93,14 @@ A `Backend` generates source bundles for a `GenerationRequest`. `Jit`, built by
 accepts, builds each bundle and publishes it into the JIT solution library,
 trying the next bundle when one fails; each failure is recorded with its stage.
 
+The HipKittens backend, `hipblaslt-jit-hipkittens.cpp`, compiles a HIP template
+from `library/src/amd_detail/hipkittens` for BF16 and FP16 TN GEMMs on gfx950
+whose M and N are multiples of 256 and whose K is a multiple of 128. The
+template and the HipKittens headers it includes are compiled into the library.
+Each work-group reduces its whole tile over K in one fixed order, so the
+solutions declare uniform summation order and a handle that keeps it on, the
+default, can use them.
+
 ## Build
 
 `HIPBLASLT_ENABLE_JIT` is off by default, and a build without it compiles and
@@ -110,6 +120,12 @@ cmake --build "$project_build" --parallel
 ```
 
 `GPU_TARGETS` is `gfx942` or `gfx950`.
+
+A JIT build whose `GPU_TARGETS` include gfx950 also builds the HipKittens
+backend unless `HIPBLASLT_JIT_ENABLE_HIPKITTENS=OFF`. CMake downloads the
+pinned HipKittens archive and checks its SHA-256, unless
+`FETCHCONTENT_SOURCE_DIR_HIPKITTENS` points at an unpacked copy of it, and
+installs the HipKittens license with the library.
 
 ## Persistent solution library
 
