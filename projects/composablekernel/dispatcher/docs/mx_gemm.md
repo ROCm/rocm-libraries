@@ -163,6 +163,20 @@ python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_tuning_gfx1250.json \
 A kernel whose cluster does not divide the problem's grid, or whose shape traits do not
 cover the problem, is reported as `SKIPPED`.
 
+`mx_gemm/run_comp_tdm_scheduled_bench.sh` times the tuned instances of three problems on
+one GPU, each config with its problem file: `comp_tdm_scheduled_maf_gfx1250.json`
+(4096 × 4096 × 65536), `comp_tdm_scheduled_medium_gfx1250.json` (2048 × 2048 × 65536) and
+`comp_tdm_scheduled_mab_gfx1250.json` (65536 × 16 × 65536), the instances example 56 names
+`maf`, `medium` and `mab256`. It times them on example 56's inputs (`--init trig`), so
+the times compare with the example's:
+
+```bash
+GPU=0 CASES="maf medium mab" tile_engine/ops/gemm/mx_gemm/run_comp_tdm_scheduled_bench.sh
+```
+
+Its header lists the settings; builds and results go to `WORK_DIR`
+(default `./comp_tdm_scheduled_bench`).
+
 ## Run the bridge
 
 From `projects/composablekernel`, with NumPy installed and a matching ROCm
@@ -258,6 +272,7 @@ used as given.
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
 | `comp_tdm_scheduled_gfx1250.json` | `comp_tdm_scheduled` with a `tuning_config` product (10 FP4 kernels). |
 | `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: both epilogues and a product of the five knobs (540 FP4 kernels). |
+| `comp_tdm_scheduled_{maf,medium,mab}_gfx1250.json` | The tuned `comp_tdm_scheduled` instance of each problem (1 FP4 kernel each); `comp_tdm_scheduled_{maf,medium,mab}_problems.json` hold the problems. |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
 | `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (64 kernels per input type). |
@@ -346,7 +361,8 @@ CSV row.
 | `--arch` | detected | `gfx950` or `gfx1250`. |
 | `--problems` | `example_problems.json` | Problem shapes. |
 | `--csv` | `mx_gemm_results.csv` | Results file. |
-| `--verify` | off | Compare each result with the numpy microscaled reference, using random E8M0 scales between 2^-3 and 2^2. A mismatch is a failure. |
+| `--init grid\|trig` | `grid` | Inputs. `grid`: random values exact in both FP4 and FP8, E8M0 scales between 2^-3 and 2^2. `trig` (FP4 only): example 56's `-data=trig`, the E2M1 code of sin (A) or cos (B) of each element's linear index, scales between 2^-3 and 2^3. Random codes switch more bits and draw more power, so `grid` times slower than `trig` on the same kernel. |
+| `--verify` | off | Compare each result with the numpy microscaled reference. A mismatch is a failure. |
 | `--verify-tol` | `2e-2` | Tolerance for `max\|out - ref\| / max\|ref\|`. |
 | `--devices` | all visible | A count (`4`) or a list of IDs (`0,2,5`; `5,` selects only GPU 5). |
 | `--workers` | 8 | Parallel kernel builds. |

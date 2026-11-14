@@ -499,6 +499,32 @@ class TestDispatcher(unittest.TestCase):
         for p in problems:
             self.assertEqual(set(p), {"M", "N", "K"})
 
+    def test_tuned_instance_configs(self):
+        # Example 56's maf, medium and mab256, each with its one problem.
+        expect = {
+            "maf": ("256x256x512_2x2x1_32x16x128_c4x4_noedge_w8", (4096, 4096, 65536)),
+            "medium": (
+                "128x128x1024_2x2x1_16x16x128_c4x4_hplrnone_noedge_w4",
+                (2048, 2048, 65536),
+            ),
+            "mab": (
+                "256x16x512_4x1x1_16x16x128_c1x4_pf0_lp0_hplrnone_noedge_w1",
+                (65536, 16, 65536),
+            ),
+        }
+        for case, (suffix, mnk) in expect.items():
+            with self.subTest(case=case):
+                path = _MX / "configs" / f"comp_tdm_scheduled_{case}_gfx1250.json"
+                cfgs = mx.expand_mx_sweep(path, "gfx1250", "fp4")
+                self.assertEqual(len(cfgs), 1)
+                self.assertTrue(cfgs[0].name.endswith(suffix), cfgs[0].name)
+                problems = json.loads(
+                    (
+                        _MX / "configs" / f"comp_tdm_scheduled_{case}_problems.json"
+                    ).read_text()
+                )["problems"]
+                self.assertEqual([(p["M"], p["N"], p["K"]) for p in problems], [mnk])
+
 
 class TestCompileFlags(unittest.TestCase):
     def test_sched_flags_only_for_comp_tdm_scheduled(self):
