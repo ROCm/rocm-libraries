@@ -196,15 +196,13 @@ namespace rocalution
 
             for(int ai = 0; ai < this->nrow_; ++ai)
             {
-                int s = this->mat_.col[this->mat_.row_offset[ai]];
-
                 for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
                     ++aj)
                 {
                     int col      = this->mat_.col[aj];
                     int prev_col = (aj > this->mat_.row_offset[ai]) ? this->mat_.col[aj - 1] : -1;
 
-                    if((col < 0) || (col > this->ncol_))
+                    if((col < 0) || (col >= this->ncol_))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
@@ -223,8 +221,7 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    ValueType val = this->mat_.val[aj];
-                    if((val == std::numeric_limits<ValueType>::infinity()) || (val != val))
+                    if(!rocalution_is_finite(this->mat_.val[aj]))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
@@ -233,12 +230,10 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    if((aj > this->mat_.row_offset[ai]) && (s >= col))
+                    if(prev_col > col)
                     {
                         sorted = false;
                     }
-
-                    s = this->mat_.col[aj];
                 }
             }
         }
@@ -1615,8 +1610,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L = max_iter;
+            int max_iter_U = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1643,7 +1642,7 @@ namespace rocalution
             }
 
             // Solve U
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_U,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1806,8 +1805,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L  = max_iter;
+            int max_iter_LT = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1834,7 +1837,7 @@ namespace rocalution
             }
 
             // Solve Lt
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_LT,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_transpose,
@@ -3785,13 +3788,10 @@ namespace rocalution
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::Transpose(void)
     {
-        if(this->nnz_ > 0)
-        {
-            HostMatrixCSR<ValueType> tmp(this->local_backend_);
+        HostMatrixCSR<ValueType> tmp(this->local_backend_);
 
-            tmp.CopyFrom(*this);
-            tmp.Transpose(this);
-        }
+        tmp.CopyFrom(*this);
+        tmp.Transpose(this);
 
         return true;
     }
@@ -3805,11 +3805,11 @@ namespace rocalution
 
         assert(cast_T != NULL);
 
+        cast_T->Clear();
+        cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
+
         if(this->nnz_ > 0)
         {
-            cast_T->Clear();
-            cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
-
             for(int64_t i = 0; i < cast_T->nnz_; ++i)
             {
                 cast_T->mat_.row_offset[this->mat_.col[i] + 1] += 1;
@@ -4209,16 +4209,16 @@ namespace rocalution
             row_buffer[i + 1]            = this->mat_.row_offset[i + 1];
         }
 
-        for(int i = 0; i < nnz; ++i)
+        for(int i = 0; i < n; ++i)
         {
             if(cast_map->vec_[i] < 0)
             {
                 continue;
             }
 
-            this->mat_.col[row_buffer[cast_map->vec_[i]]] = i;
-            this->mat_.val[i]                             = static_cast<ValueType>(1);
-            row_buffer[cast_map->vec_[i]]++;
+            PtrType pos         = row_buffer[cast_map->vec_[i]]++;
+            this->mat_.col[pos] = i;
+            this->mat_.val[pos] = static_cast<ValueType>(1);
         }
 
         assert(this->mat_.row_offset[m] == nnz);

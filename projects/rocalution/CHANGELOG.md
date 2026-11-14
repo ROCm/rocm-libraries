@@ -43,6 +43,13 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::Check()` accepting CSR column indices equal to the number of columns, values of minus infinity and complex values with an infinite part, rejecting complex matrices with a stored zero, and reading past the column indices of a matrix whose last row has no entries.
+* Fixed `LocalVector::Check()` rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
+* Fixed `LocalVector::SetRandomUniform()` on the host setting every entry of an integer vector to the lower bound and of a bool vector to the upper bound. Integer and bool vectors now get values uniformly distributed from the lower to the upper bound.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the host limiting the second triangular solve to the iterations of the first one, and `LocalMatrix::ItLLSolve()` stopping the transposed solve before it reaches the tolerance.
+* Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG`.
+* Fixed `LocalMatrix::Transpose()` of a matrix without entries not swapping the sizes, and leaving the output matrix unchanged when it transposes into another matrix. `LocalMatrix::Transpose()` into a matrix that is not in CSR format no longer aborts, which made FSAI abort when it was built again with a preconditioner matrix format other than CSR. The output matrix gets the format of the transposed matrix, or CSR if the conversion to that format fails.
+* Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
 
 ## (Unreleased) rocALUTION 4.1.1
 

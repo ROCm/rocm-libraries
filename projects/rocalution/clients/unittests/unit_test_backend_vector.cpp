@@ -1091,11 +1091,6 @@ TYPED_TEST(host_vector_check, accepts_finite_values)
     EXPECT_TRUE(host_vector_of(from_ints<T>({1, 2, 3}))->Check());
     EXPECT_TRUE(host_vector_of(std::vector<T>())->Check());
 
-    if constexpr(is_complex_v<T> || std::is_same_v<T, int> || std::is_same_v<T, int64_t>)
-    {
-        KNOWN_BUG("it compares |v| with numeric_limits<T>::infinity(), which is zero for "
-                  "integers and complex numbers");
-    }
     EXPECT_TRUE(host_vector_of(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})->Check());
 }
 
@@ -1116,12 +1111,18 @@ TYPED_TEST(host_vector_check, rejects_nan_and_infinity)
         EXPECT_FALSE(
             host_vector_of(std::vector<T>{from_int<T>(1), T(nan), from_int<T>(3)})->Check());
 
-        if constexpr(is_complex_v<T>)
-        {
-            KNOWN_BUG("numeric_limits<complex>::infinity() is zero, so no entry is infinite");
-        }
         EXPECT_FALSE(
             host_vector_of(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})->Check());
+
+        if constexpr(is_complex_v<T>)
+        {
+            for(const T& bad : {T(0, inf), T(0, -inf), T(0, nan)})
+            {
+                EXPECT_FALSE(
+                    host_vector_of(std::vector<T>{from_int<T>(1), bad, from_int<T>(3)})->Check())
+                    << bad;
+            }
+        }
     }
 }
 
@@ -1146,10 +1147,56 @@ TYPED_TEST(host_vector_random, uniform_integers_cover_the_range)
     EXPECT_GE(*std::min_element(values.begin(), values.end()), 0);
     EXPECT_LE(*std::max_element(values.begin(), values.end()), 10);
 
-    KNOWN_BUG("it divides rand() by RAND_MAX in integer arithmetic, so almost every value is "
-              "the lower bound");
     std::sort(values.begin(), values.end());
-    EXPECT_GE(std::unique(values.begin(), values.end()) - values.begin(), 10);
+    EXPECT_EQ(std::unique(values.begin(), values.end()) - values.begin(), 11);
+}
+
+TYPED_TEST(host_vector_random, uniform_integers_of_wide_ranges_stay_in_the_range)
+{
+    using T     = typename TypeParam::value_type;
+    const int n = 1000;
+
+    // The width of the full range overflows T
+    auto v = this->vec(std::vector<T>(n, T(0)));
+    v->SetRandomUniform(1234, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    std::vector<T> values = values_of(*v);
+    EXPECT_LT(*std::min_element(values.begin(), values.end()), 0);
+    EXPECT_GT(*std::max_element(values.begin(), values.end()), 0);
+
+    // The range has more integers than one rand() call has values, and the lower bound is
+    // even, so an offset scaled from one call is always even
+    EXPECT_TRUE(std::any_of(values.begin(), values.end(), [](T x) { return x % 2 != 0; }));
+
+    // Bounds that a double cannot hold. 1000 draws from 602 integers give about 490
+    // distinct values, a double between the bounds only one, 2^62
+    if constexpr(std::is_same_v<T, int64_t>)
+    {
+        const T a = (T(1) << 62) - 1;
+        const T b = (T(1) << 62) + 600;
+        v->SetRandomUniform(1234, a, b);
+        values = values_of(*v);
+        EXPECT_GE(*std::min_element(values.begin(), values.end()), a);
+        EXPECT_LE(*std::max_element(values.begin(), values.end()), b);
+
+        std::sort(values.begin(), values.end());
+        EXPECT_GT(std::unique(values.begin(), values.end()) - values.begin(), 400);
+    }
+}
+
+TEST(host_vector_random_bool, uniform_values_stay_in_and_cover_the_range)
+{
+    const int n = 1000;
+
+    auto v = make_vector(Backend::Host, std::vector<bool>(n, true));
+    v->SetRandomUniform(1234, false, false);
+    const std::vector<bool> zeros = values_of(*v);
+    EXPECT_EQ(std::count(zeros.begin(), zeros.end(), true), 0);
+
+    v->SetRandomUniform(1234, false, true);
+    const std::vector<bool> values = values_of(*v);
+    const auto              ones   = std::count(values.begin(), values.end(), true);
+    EXPECT_GT(ones, 0);
+    EXPECT_LT(ones, n);
 }
 
 template <typename T>

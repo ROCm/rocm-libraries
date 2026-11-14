@@ -1676,17 +1676,7 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
         iters, scaled_tol<T>(1e-14), true, *make_local_vector(this->backend(), b), *inv, u.get());
     LU->ItLUAnalyseClear();
     LL->ItLLAnalyseClear();
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG(
-            "host ItLUSolve and ItLLSolve give the second solve the first one's iteration count");
-    }
     expect_close(ref.apply(values_of(*w)), b, loose_tol<T>(1e-10));
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("the transposed host iterative triangular solve does not keep the largest "
-                  "residual, so with a tolerance ItLLSolve may stop early");
-    }
     expect_close(s.apply(values_of(*v)), b, loose_tol<T>(1e-10));
     expect_close(s.apply(values_of(*u)), b, loose_tol<T>(1e-10));
 }
@@ -2249,8 +2239,6 @@ TYPED_TEST(local_matrix, create_from_map_gives_the_restriction)
     R->CreateFromMap(*make_local_vector(this->backend(), map), n, m);
     expect_matrix(*R, restriction, csr_format, this->backend());
 
-    KNOWN_BUG("CreateFromMap(map, n, m) leaves a matrix without entries empty");
-
     auto E = empty_local_matrix<T>(this->backend());
     E->CreateFromMap(*make_local_vector(this->backend(), map), n, m);
     expect_matrix(*E, restriction, csr_format, this->backend());
@@ -2293,9 +2281,18 @@ TEST_P(local_matrix_formats, transposes)
         A->Transpose();
         expect_kept(*A, transposed(ref));
 
-        auto transpose = empty_local_matrix<T>(backend());
+        auto transpose = empty<T>();
         make(ref)->Transpose(transpose.get());
         expect_kept(*transpose, transposed(ref));
+
+        auto into_csr = empty_local_matrix<T>(backend());
+        make(ref)->Transpose(into_csr.get());
+        expect_kept(*into_csr, transposed(ref));
+
+        // The transpose of a CSR matrix is a CSR matrix
+        auto from_csr = make(banded<T>());
+        make_local_matrix(backend(), ref)->Transpose(from_csr.get());
+        expect_matrix(*from_csr, transposed(ref), csr_format, backend());
 
         if(!is(DIA) && !is(MCSR))
         {
@@ -2304,6 +2301,34 @@ TEST_P(local_matrix_formats, transposes)
             R->Transpose();
             expect_kept(*R, transposed(rect));
         }
+    });
+}
+
+// The transpose of an n x m matrix without entries is an m x n one, also into a matrix
+// that held entries
+TEST_P(local_matrix_formats, transpose_of_a_matrix_without_entries)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        Csr<T> ref(4, 6);
+        for(int i = 0; i < ref.n; ++i)
+        {
+            ref.end_row();
+        }
+        const Csr<T> expected = transposed(ref);
+
+        auto A         = make(ref);
+        auto transpose = make(banded<T>());
+        A->Transpose(transpose.get());
+        expect_kept(*transpose, expected);
+
+        auto from_csr = make(banded<T>());
+        make_local_matrix(backend(), ref)->Transpose(from_csr.get());
+        expect_matrix(*from_csr, expected, csr_format, backend());
+
+        A->Transpose();
+        expect_kept(*A, expected);
     });
 }
 
@@ -2944,10 +2969,6 @@ TYPED_TEST(local_matrix, operations_on_a_matrix_without_entries_change_nothing)
     LocalMatrix<T>** blocks[1] = {row};
     A->ExtractSubMatrices(1, 1, offsets, offsets, blocks);
     EXPECT_EQ(block.GetNnz(), 0);
-
-    auto transpose = empty_local_matrix<T>(this->backend());
-    A->Transpose(transpose.get());
-    EXPECT_EQ(transpose->GetNnz(), 0);
 
     std::vector<PtrType> row_offset(n + 1, 0);
     A->CopyFromCSR(row_offset.data(), nullptr, nullptr);

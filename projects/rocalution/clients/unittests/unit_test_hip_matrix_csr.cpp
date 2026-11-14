@@ -661,8 +661,6 @@ TYPED_TEST(hip_matrix_csr_backend, transpose_of_a_matrix_without_entries)
     ASSERT_NE(T_A, nullptr);
     EXPECT_TRUE(A->Transpose(T_A.get()));
     EXPECT_TRUE(A->Transpose());
-
-    KNOWN_BUG("the transpose of a matrix without entries keeps the sizes");
     expect_empty(*T_A, 5, 3);
     expect_empty(*A, 5, 3);
 }
