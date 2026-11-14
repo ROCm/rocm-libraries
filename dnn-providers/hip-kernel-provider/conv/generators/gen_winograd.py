@@ -421,8 +421,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
             "metadata": kmd,
             "knobs": KNOBS,
             "behavior_notes": ["runtime_compilation"],
-            # RFC 0020 4.2 numerical notes: held as authored, not yet surfaced by hipDNN.
-            "numerical_notes": ["WINOGRAD"],
+            # RFC 0020 4.2 numerical notes, by their cuDNN names (lowercase), reported through
+            # the engine's details.
+            "numerical_notes": ["winograd"],
         },
     )
     kernels = []
