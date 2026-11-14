@@ -753,7 +753,7 @@ __device__ __forceinline__ void direct_flex_impl(const Hot hot,
         uint32_t front_old = 0;
         if(claiming())
         {
-            mail = __hip_atomic_load(
+            mail = __scoped_atomic_load_n(
                 dyn.mailbox(table.parity() ^ 1), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
             if(wave0() && !stealing())
                 front_old = dyn.add_lane0(dyn.counter(order.run_x()), 1);

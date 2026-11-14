@@ -91,10 +91,10 @@ public:
     {
         uint32_t old = 0;
         if(lane() == 0)
-            old = __hip_atomic_fetch_add(p + bunnies::pin_vgpr(0),
-                                         bunnies::pin_vgpr(v),
-                                         __ATOMIC_RELAXED,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+            old = __scoped_atomic_fetch_add(p + bunnies::pin_vgpr(0),
+                                             bunnies::pin_vgpr(v),
+                                             __ATOMIC_RELAXED,
+                                             __HIP_MEMORY_SCOPE_AGENT);
         return old;
     }
 
@@ -116,7 +116,7 @@ public:
     __device__ __forceinline__ void post(int slot, int entry) const
     {
         if(lane() == 0)
-            __hip_atomic_store(mailbox(slot), entry, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            __scoped_atomic_store_n(mailbox(slot), entry, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
 
     __device__ __forceinline__ int* mailbox(int slot) const
@@ -171,7 +171,7 @@ private:
         const int self = order_.run_x();
         for(;;)
         {
-            const uint32_t c = __hip_atomic_load(
+            const uint32_t c = __scoped_atomic_load_n(
                 counter(lane() % XCDS), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
             int best = 0;
 #pragma nounroll
