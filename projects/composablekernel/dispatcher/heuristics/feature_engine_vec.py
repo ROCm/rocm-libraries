@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
 
 from codegen_common import (
     _VEC_ELEMENT_BYTES,
+    GFX1250_ARCH,
     CommonTypeMappings,
     gemm_contiguous_dims,
     gemm_native_vector_sizes,
@@ -227,7 +228,21 @@ def _legal_widths(
 class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
     """``GemmUniversalFeatureEngine`` plus ``VEC_FEATURES``."""
 
-    ENCODING_VERSION = 1
+    #: 2: gfx1250's comp_async / comp_tdm / comp_tdm_v2 pipelines and tdm
+    #: epilogue get their own codes (GEMM_PIPELINE_MAP, GEMM_EPILOGUE_MAP);
+    #: version 1 encoded them as compv3 / default.
+    ENCODING_VERSION = 2
+
+    def accepts_encoding(self, version: int, arch=None) -> bool:
+        """Version 2, or version 1 for an arch other than gfx1250.
+
+        Codegen admits the remapped traits on gfx1250 only, so a version-1
+        model for any other arch gets identical values from version 2. A
+        version-1 spec without an arch cannot show that and is refused.
+        """
+        if version == 1 and arch:
+            return normalize_gfx_arch(str(arch)).lower() != GFX1250_ARCH
+        return version == self.ENCODING_VERSION
 
     #: Base feature count. ``super()`` results are sliced to it because the
     #: base ``extract_batch`` sizes its output from the overridden

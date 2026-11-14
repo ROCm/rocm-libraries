@@ -80,9 +80,13 @@ class Predictor:
         else:
             self._feature_engine = _engine_for_spec(self._spec)
 
+        from feature_engine import encoding_accepted
+
         spec_version = self._spec.get("feature_encoding_version", 0)
         engine_version = getattr(self._feature_engine, "ENCODING_VERSION", 0)
-        if self._spec and spec_version != engine_version:
+        if self._spec and not encoding_accepted(
+            self._feature_engine, spec_version, self._spec.get("arch")
+        ):
             raise ValueError(
                 f"{type(self._feature_engine).__name__} emits feature encoding "
                 f"version {engine_version}, but {self._model_dir.name} was "

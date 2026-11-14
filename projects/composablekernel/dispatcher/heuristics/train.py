@@ -151,9 +151,11 @@ def check_feature_compatibility(
             parts.append("  Feature order changed (names match but order differs).")
         raise ValueError("\n".join(parts))
 
+    from feature_engine import encoding_accepted
+
     prev_version = prev_spec.get("feature_encoding_version", 0)
     curr_version = getattr(feature_engine, "ENCODING_VERSION", 0)
-    if prev_version != curr_version:
+    if not encoding_accepted(feature_engine, prev_version, prev_spec.get("arch")):
         raise ValueError(
             f"Feature encoding mismatch: the previous model was written at "
             f"encoding version {prev_version}, this engine emits version "
