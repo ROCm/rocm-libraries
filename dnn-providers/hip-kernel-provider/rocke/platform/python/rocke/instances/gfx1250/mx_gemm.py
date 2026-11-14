@@ -1395,27 +1395,21 @@ class Gl2Prefetcher:
 
 class ScaleRegisters:
     """``scales`` "registers": a tile's E8M0 scale words from the swizzled
-    scales ``[K/128][MN][4]`` straight into registers, one buffer load of
+    scales ``[K/128][MN][4]`` straight into registers, one global load of
     up to 16 B per lane, operand and K-step (all 32 lanes read 512
     contiguous bytes on the large tiles). With ``r`` repeats of an operand
     (M-repeats for A, N-repeats for B) and ``h = r // 2`` (1 for one
     repeat), the lanes of half ``s`` hold the words of repeats ``s * h`` to
-    ``s * h + h - 1`` of their row; repeat ``i`` is word ``i % h`` with scale
-    selector ``i // h``. Words past the last K-step read 0; rows past M
-    (N) read words of another K-step, which only scale rows of D that are
-    not stored."""
+    ``s * h + h - 1`` of their row of the workgroup's tile; repeat ``i`` is word ``i % h`` with scale
+    selector ``i // h``. Every address stays inside the tensor: K-steps past
+    the last one read the last one, and rows past M (N) read a row of the
+    tensor; those words only scale K-steps that are not computed and rows
+    of D that are not stored. When M (N) is not a multiple of ``h`` each
+    word is its own load."""
 
     def __init__(self, k: _Kernel, rows: RowMaps):
         self.k = k
         self.rows = rows
-        b, ops, p = k.b, k.ops, k.params
-        self.rsrc = {
-            name: b.buffer_rsrc(
-                p[f"{name.upper()}_scale"],
-                ops.v(ops.mul(k.k_atoms(), ops.mul(p[extent], 4))),
-            )
-            for name, extent in (("a", "M"), ("b", "N"))
-        }
 
     @staticmethod
     def half(repeats: int) -> int:
@@ -1430,29 +1424,53 @@ class ScaleRegisters:
     def _operand(self, name: str, k_step):
         k = self.k
         b, ops, spec, p = k.b, k.ops, k.spec, k.params
-        repeats = spec.wave_repeat_m if name == "a" else spec.wave_repeat_n
+        a = name == "a"
+        repeats = spec.wave_repeat_m if a else spec.wave_repeat_n
         h = self.half(repeats)
         first = ops.mul(k.lane_half, h) if repeats >= 2 else 0
-        row = (self.rows.m_row if name == "a" else self.rows.n_row)(first, k.lane_col)
-        extent = p["M"] if name == "a" else p["N"]
-        offset = ops.mul(ops.add(ops.mul(k_step, extent), row), 4)
+        row = ops.v(
+            ops.add(
+                k.block_m if a else k.block_n,
+                (self.rows.m_row if a else self.rows.n_row)(first, k.lane_col),
+            )
+        )
+        extent = p["M"] if a else p["N"]
+        ptr = p["A_scale"] if a else p["B_scale"]
+        step_base = ops.mul(k_step, extent)
+        if (spec.M if a else spec.N) % h:
+            last = b.sub(extent, k.c1)
+            return [
+                b.global_load(
+                    ptr,
+                    ops.v(ops.add(step_base, b.smin(ops.v(ops.add(row, j)), last))),
+                    I32,
+                    align=4,
+                )
+                for j in range(h)
+            ]
+        # Groups of h rows are whole: one past the end reads the last group.
+        row = b.smin(row, b.sub(extent, b.const_i32(h)))
+        index = ops.v(ops.add(step_base, row))
         words = []
         for j in range(0, h, 4):
             n = min(4, h - j)
-            loaded = b.buffer_load_vN(
-                self.rsrc[name], ops.v(ops.add(offset, 4 * j)), k.c0, I32, n
-            )
+            at = ops.v(ops.add(index, j))
+            if n == 1:
+                words.append(b.global_load(ptr, at, I32, align=4))
+                continue
+            loaded = b.global_load_vN(ptr, at, I32, n, align=4 * n)
             words += [b.vec_extract(loaded, i) for i in range(n)]
         return words
 
     def load(self, k0) -> list:
-        """Every K-step's A then B words of the tile at ``k0`` (a tile past
-        the end reads 0)."""
-        ops = self.k.ops
+        """Every K-step's A then B words of the tile at ``k0``."""
+        k = self.k
+        b, ops = k.b, k.ops
         first = ops.div(k0, _ATOM_K)
+        last = b.sub(ops.v(k.k_atoms()), k.c1)
         out = []
-        for step in range(self.k.spec.k_steps):
-            k_step = ops.add(first, step)
+        for step in range(k.spec.k_steps):
+            k_step = b.smin(ops.v(ops.add(first, step)), last)
             out += self._operand("a", k_step) + self._operand("b", k_step)
         return out
 

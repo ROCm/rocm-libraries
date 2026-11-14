@@ -973,7 +973,8 @@ class MxGemmIrTest(unittest.TestCase):
     def test_register_scales_load_ahead_and_select_halves(self):
         """Register scales: no TDM scale loads and no LDS scale reads. Tile 0's
         words load before the loop and each tile loads the next tile's, one
-        buffer load of up to 4 words per lane, operand and K-step; each WMMA
+        global load of up to 4 words per lane, operand and K-step (one per
+        word when M or N is not a multiple of the words); each WMMA
         names the half holding its repeat, and two repeats share a word
         register exactly when they share the word. Contiguous FP6 swaps each
         word once per tile."""
@@ -981,9 +982,7 @@ class MxGemmIrTest(unittest.TestCase):
             _WMMA + r"[^\n]*i32 (\d), i32 \d, i32 (%[\w.]+), "
             r"i32 (\d), i32 \d, i32 (%[\w.]+), i1"
         )
-        buffer_load = (
-            r"call (?:<(\d) x i32>|i32) @llvm\.amdgcn\.raw\.ptr\.buffer\.load\."
-        )
+        scale_load = r"= load (?:<(\d) x i32>|i32), ptr addrspace\(1\)"
         lds_read = r"load (?:<\d+ x )?i(?:32|64)>?, ptr addrspace\(3\)"
         tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
         tile_wait = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 ([1-9])\)"
@@ -1005,6 +1004,7 @@ class MxGemmIrTest(unittest.TestCase):
                 k_reads="contiguous",
                 **direct,
             ),
+            _spec6(1001, 1024, 2048, tile_m=128, cluster_dim=(1, 1, 1), **direct),
         ):
             rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
             ha, hb = ScaleRegisters.half(rm), ScaleRegisters.half(rn)
@@ -1029,9 +1029,12 @@ class MxGemmIrTest(unittest.TestCase):
                     len(re.findall(lds_read, lds_llvm))
                     - bodies * spec.k_steps * scale_reads,
                 )
-                words = sorted(int(n or 1) for n in re.findall(buffer_load, llvm))
+                self.assertEqual(re.findall(scale_load, lds_llvm), [])
+                words = sorted(int(n or 1) for n in re.findall(scale_load, llvm))
                 per_set = [
-                    min(4, h - j) for h in (ha, hb) for j in range(0, h, 4)
+                    min(4, h - j) if extent % h == 0 else 1
+                    for h, extent in ((ha, spec.M), (hb, spec.N))
+                    for j in range(0, h, 4 if extent % h == 0 else 1)
                 ] * spec.k_steps
                 self.assertEqual(words, sorted(per_set * (bodies + 1)))
                 self.assertEqual(
