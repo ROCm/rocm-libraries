@@ -26,6 +26,7 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../../types/uninitialized_array.hpp"
 
 #include "../../functional.hpp"
 #include "../../intrinsics.hpp"
@@ -114,8 +115,10 @@ auto transform_kernel_impl(InputIterator  input,
     const unsigned int number_of_blocks    = ::rocprim::detail::grid_size<0>();
     const unsigned int valid_in_last_block = input_size - block_offset;
 
-    input_type  input_values[ItemsPerThread];
-    result_type output_values[ItemsPerThread];
+    ::rocprim::detail::thread_items_array<input_type, ItemsPerThread> input_values_storage;
+    auto& input_values = input_values_storage.get_unsafe_array();
+    ::rocprim::detail::thread_items_array<result_type, ItemsPerThread> output_values_storage;
+    auto& output_values = output_values_storage.get_unsafe_array();
 
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
@@ -186,8 +189,10 @@ auto transform_kernel_impl(InputIterator  input,
     const unsigned int number_of_blocks    = ::rocprim::detail::grid_size<0>();
     const unsigned int valid_in_last_block = input_size - block_offset;
 
-    input_type  input_values[ItemsPerThread];
-    result_type output_values[ItemsPerThread];
+    ::rocprim::detail::thread_items_array<input_type, ItemsPerThread> input_values_storage;
+    auto& input_values = input_values_storage.get_unsafe_array();
+    ::rocprim::detail::thread_items_array<result_type, ItemsPerThread> output_values_storage;
+    auto& output_values = output_values_storage.get_unsafe_array();
 
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {

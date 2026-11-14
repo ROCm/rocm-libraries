@@ -32,6 +32,7 @@
 #include <iterator>
 
 #include "../../detail/various.hpp"
+#include "../../types/uninitialized_array.hpp"
 
 #include "device_merge.hpp"
 #include "device_merge_sort.hpp"
@@ -189,7 +190,8 @@ struct block_merge_impl<
             const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
             const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
             // Load keys1 & keys2
-            Key keys[ItemsPerThread];
+            ::rocprim::detail::thread_items_array<Key, ItemsPerThread> keys_storage;
+            auto& keys = keys_storage.get_unsafe_array();
             gmem_to_reg<ItemsPerThread>(keys,
                                         keys_input + keys1_beg,
                                         keys_input + keys2_beg,
@@ -199,7 +201,8 @@ struct block_merge_impl<
             // Load keys into shared memory
             reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
 
-            Value values[ItemsPerThread];
+            ::rocprim::detail::thread_items_array<Value, ItemsPerThread> values_storage;
+            auto& values = values_storage.get_unsafe_array();
             if constexpr(with_values)
             {
                 gmem_to_reg<ItemsPerThread>(values,
@@ -358,7 +361,8 @@ struct block_merge_impl<Key,
             const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
             const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
             // Load keys1 & keys2
-            Key keys[ItemsPerThread];
+            ::rocprim::detail::thread_items_array<Key, ItemsPerThread> keys_storage;
+            auto& keys = keys_storage.get_unsafe_array();
             gmem_to_reg<ItemsPerThread>(keys,
                                         keys_input + keys1_beg,
                                         keys_input + keys2_beg,
@@ -457,7 +461,8 @@ struct block_merge_impl<Key,
             }
 
             const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
-            Value         values[ItemsPerThread];
+            ::rocprim::detail::thread_items_array<Value, ItemsPerThread> values_storage;
+            auto& values = values_storage.get_unsafe_array();
             block_store().store(offset,
                                 input_size - offset,
                                 is_incomplete_tile,

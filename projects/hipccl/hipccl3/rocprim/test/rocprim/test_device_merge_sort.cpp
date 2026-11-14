@@ -55,6 +55,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iostream>
+#include <numeric>
 #include <stdint.h>
 #include <type_traits>
 #include <utility>
@@ -682,4 +683,221 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         HIP_CHECK(hipFree(d_output));
         HIP_CHECK(hipFree(d_temp_storage));
     }
+}
+
+// Key type that is copyable and ordered, but not default constructible.
+struct non_default_constructible_key
+{
+    int value;
+
+    ROCPRIM_HOST_DEVICE
+    explicit non_default_constructible_key(int v)
+        : value(v)
+    { }
+
+    ROCPRIM_HOST_DEVICE
+    bool operator<(const non_default_constructible_key& other) const
+    {
+        return value < other.value;
+    }
+};
+static_assert(!std::is_default_constructible<non_default_constructible_key>::value,
+              "non_default_constructible_key must not be default constructible");
+
+template<class Config>
+void test_sort_non_default_constructible()
+{
+    using key_type = non_default_constructible_key;
+
+    hipStream_t stream            = 0; // default
+    const bool  debug_synchronous = false;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            test_utils::MemCheck memcheck;
+
+            // Generate data. Keys are drawn from a small range, so there are many equal keys and
+            // the values (original positions) also verify that the sort is stable.
+            MEMCHECK_OR_BREAK_ALLOC_HOST(int, size)
+            const std::vector<int> raw_keys
+                = test_utils::get_random_data_wrapped<int>(size, -100, 100, seed_value);
+
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
+            std::vector<key_type> keys_input;
+            keys_input.reserve(size);
+            MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
+            std::vector<key_type> values_input;
+            values_input.reserve(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_input.emplace_back(raw_keys[i]);
+                values_input.emplace_back(static_cast<int>(i));
+            }
+
+            // Calculate expected results on host
+            MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, size)
+            std::vector<size_t> expected_order(size);
+            std::iota(expected_order.begin(), expected_order.end(), size_t{0});
+            std::stable_sort(expected_order.begin(),
+                             expected_order.end(),
+                             [&](size_t a, size_t b) { return keys_input[a] < keys_input[b]; });
+            MEMCHECK_OR_BREAK_ALLOC_HOST(int, size)
+            std::vector<int> expected_keys(size);
+            MEMCHECK_OR_BREAK_ALLOC_HOST(int, size)
+            std::vector<int> expected_values(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected_keys[i]   = keys_input[expected_order[i]].value;
+                expected_values[i] = static_cast<int>(expected_order[i]);
+            }
+
+            common::device_ptr<key_type> d_keys_input;
+            common::device_ptr<key_type> d_keys_output;
+            common::device_ptr<key_type> d_values_input;
+            common::device_ptr<key_type> d_values_output;
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+            if(!d_keys_input.resize_with_memory_check(size)
+               || !d_keys_output.resize_with_memory_check(size)
+               || !d_values_input.resize_with_memory_check(size)
+               || !d_values_output.resize_with_memory_check(size))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+            d_keys_input.store(keys_input);
+            d_values_input.store(values_input);
+
+            rocprim::less<key_type> compare_op;
+
+            // device_ptr::load() requires a default constructible type, so copy the results
+            // into a vector that already holds size (valid) elements instead.
+            const auto copy_to_host
+                = [](const common::device_ptr<key_type>& d_data, std::vector<key_type> output)
+            {
+                HIP_CHECK(hipMemcpy(output.data(),
+                                    d_data.get(),
+                                    output.size() * sizeof(key_type),
+                                    hipMemcpyDeviceToHost));
+                std::vector<int> result(output.size());
+                for(size_t i = 0; i < output.size(); i++)
+                {
+                    result[i] = output[i].value;
+                }
+                return result;
+            };
+
+            for(const bool with_values : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "with values = " << with_values);
+
+                // Get size of d_temp_storage
+                size_t temp_storage_size_bytes;
+                if(with_values)
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(nullptr,
+                                                          temp_storage_size_bytes,
+                                                          d_keys_input.get(),
+                                                          d_keys_output.get(),
+                                                          d_values_input.get(),
+                                                          d_values_output.get(),
+                                                          size,
+                                                          compare_op,
+                                                          stream,
+                                                          debug_synchronous));
+                }
+                else
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(nullptr,
+                                                          temp_storage_size_bytes,
+                                                          d_keys_input.get(),
+                                                          d_keys_output.get(),
+                                                          size,
+                                                          compare_op,
+                                                          stream,
+                                                          debug_synchronous));
+                }
+
+                // temp_storage_size_bytes must be >0
+                ASSERT_GT(temp_storage_size_bytes, 0);
+
+                // allocate temporary storage
+                common::device_ptr<void> d_temp_storage;
+                MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
+                if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
+
+                // Run
+                if(with_values)
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(d_temp_storage.get(),
+                                                          temp_storage_size_bytes,
+                                                          d_keys_input.get(),
+                                                          d_keys_output.get(),
+                                                          d_values_input.get(),
+                                                          d_values_output.get(),
+                                                          size,
+                                                          compare_op,
+                                                          stream,
+                                                          debug_synchronous));
+                }
+                else
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(d_temp_storage.get(),
+                                                          temp_storage_size_bytes,
+                                                          d_keys_input.get(),
+                                                          d_keys_output.get(),
+                                                          size,
+                                                          compare_op,
+                                                          stream,
+                                                          debug_synchronous));
+                }
+                HIP_CHECK(hipGetLastError());
+                HIP_CHECK(hipDeviceSynchronize());
+
+                // Check if output values are as expected
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(copy_to_host(d_keys_output, keys_input), expected_keys));
+                if(with_values)
+                {
+                    ASSERT_NO_FATAL_FAILURE(
+                        test_utils::assert_eq(copy_to_host(d_values_output, values_input),
+                                              expected_values));
+                }
+            }
+        }
+    }
+}
+
+TEST(RocprimDeviceSortTests, SortNonDefaultConstructible)
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    test_sort_non_default_constructible<rocprim::default_config>();
+}
+
+TEST(RocprimDeviceSortTests, SortNonDefaultConstructibleMergepath)
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    // Use a small MinInputSizeMergepath so that the mergepath block merge is also used for the
+    // smaller input sizes.
+    test_sort_non_default_constructible<rocprim::merge_sort_config<128, 64, 2, 128, 64, 2, 2048>>();
 }
