@@ -81,6 +81,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
   gfx950 `direct_wgrad` kernel when built with clang 23. See
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
+* [Conv] Added `ConvHipDirectConv1dFwd`, a direct fp32 forward 1D convolution solver (NCHW with
+  H == 1, strided, dilated and grouped) for RDNA (`gfx101X`, `gfx103X`, `gfx110X`, `gfx115X`,
+  `gfx117X`, `gfx120X`). On these targets the CK grouped kernels do not take fp32 inputs, so
+  dilated fp32 1D convolutions previously ran on `ConvDirectNaiveConvFwd`; on gfx1151 the new
+  solver is 14x to 29x faster on those shapes and is selected through Find mode.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward

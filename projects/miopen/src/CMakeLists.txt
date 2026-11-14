@@ -312,6 +312,7 @@ set( MIOpen_Source
     solver/conv/gemm_wrw.cpp
     solver/conv/conv_ck_grouped_conv_fwd.cpp
     solver/conv/conv_3d_depthwise_fwd.cpp
+    solver/conv/conv_hip_direct_conv1d_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
     solver/conv_ck_igemm_fwd_bias_activ_fused.cpp
@@ -627,6 +628,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenBatchNormFwdInferPerAct.cpp
         kernels/MIOpenBatchNormBwdSpatial.cpp
         kernels/MIOpenBatchNormBwdPerAct.cpp
+        kernels/MIOpenConv1dFwdHip.cpp
         kernels/MIOpenConvDirUniHip.cpp
         kernels/MIOpenConvDirBatchNormActivHip.cpp
         kernels/MIOpenGLU.cpp
