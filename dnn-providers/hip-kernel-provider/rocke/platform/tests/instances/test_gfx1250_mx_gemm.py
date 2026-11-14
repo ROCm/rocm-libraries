@@ -1521,6 +1521,54 @@ class MxGemmBenchTimingTest(unittest.TestCase):
             self.assertTrue(row["check"].startswith("INVALID:"), row["check"])
 
 
+class MxGemmBenchCodeDirTest(unittest.TestCase):
+    def test_code_dir_stores_loads_and_refuses_another_comgr(self):
+        """``--host-only --code-dir`` compiles and stores each code object; a
+        second run loads them all, byte for byte; a directory stamped by
+        another COMGR library is refused."""
+        import contextlib
+        import csv
+        import io
+        import tempfile
+        from pathlib import Path
+
+        argv = ["--host-only", "--mma", "16x16", "--a-dtype", "fp6", "--b-dtype", "fp6"]
+        argv += [
+            "--tile",
+            "128x128x256",
+            "--local-prefetch",
+            "0,1",
+            "--half-plr",
+            "none",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            code = Path(tmp) / "code"
+            runs = []
+            for attempt in range(2):
+                out = Path(tmp) / f"bench{attempt}.csv"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        main([*argv, "--code-dir", str(code), "--out", str(out)]), 0
+                    )
+                with out.open(newline="") as handle:
+                    runs.append(list(csv.DictReader(handle)))
+            stored = sorted(code.glob("*.hsaco"))
+            snapshot = {path.name: path.read_bytes() for path in stored}
+            self.assertEqual([row["code"] for row in runs[0]], ["compiled"] * 2)
+            self.assertEqual([row["code"] for row in runs[1]], ["stored"] * 2)
+            self.assertEqual(len(stored), 2)
+            self.assertEqual(
+                [row["vgpr"] for row in runs[0]], [row["vgpr"] for row in runs[1]]
+            )
+            self.assertEqual({p.name: p.read_bytes() for p in stored}, snapshot)
+            (code / "COMGR_MD5").write_text("0" * 32 + "\n")
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(SystemExit, "another COMGR library"),
+            ):
+                main([*argv, "--code-dir", str(code)])
+
+
 class MxGemmSparseCheckTest(unittest.TestCase):
     """All E2M1 values in a few K-steps: exact FP32 sums at any K."""
 

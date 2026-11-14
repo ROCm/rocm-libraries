@@ -32,6 +32,13 @@ since the epoch) bound that window and ``hold_launches`` counts its launches.
 ``--host-only`` compiles and reports resources without touching a device;
 ``--check-only`` skips the timing. Absolute timings must not be committed
 to the repo; use ``--out`` with a path outside the tree.
+
+``--code-dir`` keeps code objects across runs: a configuration whose COMGR
+input (kernel name, LLVM IR, ISA, options) has a code object there loads it
+instead of compiling, and with ``--host-only`` every compiled one is stored
+there. The directory records the COMGR library that built it and is refused
+by any other. ``code`` says which configurations loaded (``stored``) and
+which compiled (``compiled``).
 """
 
 from __future__ import annotations
@@ -53,7 +60,7 @@ from typing import NamedTuple
 import numpy as np
 
 from ....examples.common.scaled_gemm_reference import decode_e8m0, pack_fp4_codes
-from ....helpers.compile import compile_kernel
+from ....helpers.compile import KernelArtifact, compile_kernel, lower_kernel_for_comgr
 from ....instances.gfx1250.mx_gemm import (
     LdsPad,
     MxGemmSpec,
@@ -140,9 +147,86 @@ FIELDS = [
     "hold_start_unix",
     "hold_end_unix",
     "hold_launches",
+    "code",
 ]
 # Target device time per synchronized group of launches in the hold window.
 _HOLD_GROUP_SECONDS = 0.02
+
+
+def _comgr_key(comgr_input) -> str:
+    """A code object is a pure function of its COMGR input and library."""
+    import hashlib
+    import json
+
+    fields = [
+        comgr_input.kernel_name,
+        comgr_input.llvm_text,
+        comgr_input.isa,
+        list(comgr_input.options),
+        comgr_input.fresh_process,
+    ]
+    return hashlib.sha256(json.dumps(fields).encode()).hexdigest()
+
+
+def _comgr_library_md5() -> str:
+    import hashlib
+
+    from ....runtime.comgr import resolved_lib_path
+
+    path = resolved_lib_path()
+    if path is None:
+        raise SystemExit("--code-dir: the COMGR library was not found")
+    return hashlib.md5(Path(path).read_bytes()).hexdigest()
+
+
+def _open_code_dir(code_dir: Path, store: bool) -> None:
+    """Record the COMGR library of a new code directory, and refuse one built
+    by another."""
+    stamp = code_dir / "COMGR_MD5"
+    md5 = _comgr_library_md5()
+    if stamp.exists():
+        if stamp.read_text().strip() != md5:
+            raise SystemExit(
+                f"--code-dir {code_dir} was built by another COMGR library "
+                f"({stamp.read_text().strip()}, this one {md5})"
+            )
+    elif store:
+        code_dir.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(md5 + "\n")
+    elif code_dir.exists():
+        raise SystemExit(f"--code-dir {code_dir} has no COMGR_MD5")
+
+
+def _code_object(kernel, *, arch: str, code_dir: Path | None, store: bool):
+    """``(artifact, how)``: the kernel's code object from ``code_dir`` when it
+    holds one for this COMGR input (``stored``), else compiled here
+    (``compiled``, and kept in ``code_dir`` when ``store``)."""
+    if code_dir is None:
+        return compile_kernel(kernel, arch=arch, backend="python"), "compiled"
+    from ....runtime.comgr import build_hsaco_from_llvm_ir
+
+    comgr_input = lower_kernel_for_comgr(kernel, arch=arch, backend="python")
+    path = code_dir / f"{comgr_input.kernel_name}-{_comgr_key(comgr_input)[:24]}.hsaco"
+    if path.exists():
+        hsaco, how = path.read_bytes(), "stored"
+    else:
+        hsaco, _ = build_hsaco_from_llvm_ir(
+            comgr_input.llvm_text,
+            isa=comgr_input.isa,
+            options=list(comgr_input.options),
+            fresh_process=comgr_input.fresh_process,
+        )
+        how = "compiled"
+        if store:
+            path.write_bytes(hsaco)
+    artifact = KernelArtifact(
+        kernel=kernel,
+        ir_text="",
+        llvm_text=comgr_input.llvm_text,
+        hsaco=hsaco,
+        isa=comgr_input.isa,
+    )
+    return artifact, how
 
 
 def _out_numpy_dtype(out_dtype: str):
@@ -910,6 +994,12 @@ def main(argv: list[str] | None = None) -> int:
         "--out", type=Path, default=None, help="CSV to create; must not exist"
     )
     parser.add_argument("--emit-dir", type=Path, default=None)
+    parser.add_argument(
+        "--code-dir",
+        type=Path,
+        default=None,
+        help="code objects to load, or with --host-only to store",
+    )
     args = parser.parse_args(argv)
     m, n, k = PROBLEMS[args.shape]
     m, n, k = args.m or m, args.n or n, args.k or k
@@ -931,8 +1021,13 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"visible HIP device 0 must be gfx1250, got {arch!r}")
         runtime = Runtime()
 
+    if args.code_dir is not None:
+        _open_code_dir(args.code_dir, store=args.host_only)
+
     def compile_and_run(config, kernel, grid, cluster, run_spec):
-        artifact = compile_kernel(kernel, arch=arch, backend="python")
+        artifact, how = _code_object(
+            kernel, arch=arch, code_dir=args.code_dir, store=args.host_only
+        )
         if args.emit_dir is not None:
             args.emit_dir.mkdir(parents=True, exist_ok=True)
             (args.emit_dir / f"{artifact.kernel_name}.hsaco").write_bytes(
@@ -947,6 +1042,7 @@ def main(argv: list[str] | None = None) -> int:
             kernel=artifact.kernel_name,
             wmma=_wmma_count(artifact.llvm_text),
             loop_scratch=_loop_scratch(artifact.hsaco),
+            code=how,
             **resources,
         )
         if args.host_only:
