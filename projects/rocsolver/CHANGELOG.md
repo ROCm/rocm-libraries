@@ -10,9 +10,16 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved performance of LANGE (the infinity-norm reads the matrix by columns).
+
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* Fixed LANGE, which did not set the norm to zero when m = 0 or n = 0, could overflow or underflow
+  in the Frobenius norm (now accumulated with scaling), and ignored complex elements with a NaN
+  real part.
+
 ### Known issues
 ### Upcoming changes
 
