@@ -109,11 +109,7 @@ void testing_check_matrix_gebsc(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle;
 
-    // init_gebsc builds the BSR arrays of the transpose, which stores the other triangle.
-    Arguments arg_bsc = arg;
-    arg_bsc.uplo      = (uplo == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                            : rocsparse_fill_mode_lower;
-    rocsparse_matrix_factory<T> matrix_factory(arg_bsc);
+    rocsparse_matrix_factory<T> matrix_factory(arg);
 
     // Allocate host memory for BSC matrix
     host_vector<rocsparse_int> hbsc_col_ptr;
