@@ -271,6 +271,41 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
     echo ""
 fi
 
+# --- quick tier: attention sink sweep (ALMIOPEN-3184) ---
+#
+# Golden/Sink holds the independent PyTorch cases of sink_token and dsink_token: the
+# sink is a softmax column without a V row and dSink = -sum(exp(sink - LSE) * D), pinned
+# by FP64 autograd at generation. Both sink dtypes the frontend accepts are covered, in
+# both IO dtypes: FLOAT, and the IO dtype (the bundle stores the rounded logits and
+# dSink in that dtype). B = 2, Hq = 4 over Hkv = 2 and Sq != Skv make dSink's sum over
+# batch and rows and its per-query-head indexing observable. The template hard-codes
+# attn_scale_value = 1/sqrt(128), so D_qk = 128 and --attn-scale matches.
+if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
+    echo "=== Generating quick tier sink sweep cases ==="
+
+    SINK_DIR="$GOLDEN_ROOT/quick/SdpaBackward/Golden/Sink"
+    SINK_SHAPE=(--q-dims 2 4 48 128 --v-dims 2 2 64 128 --attn-scale "$SCALE_D128")
+
+    python3 "$GENERATOR" --write-template "$SINK_DIR" --template-kind dense_sink \
+        --attn-scale "$SCALE_D128"
+    # An empty claims sidecar (canonical form); claims are harvested with
+    # --write-support-claims.
+    if [[ ! -f "$SINK_DIR/support.json" ]]; then
+        printf '{\n  "claims": {},\n  "version": 1\n}\n' > "$SINK_DIR/support.json"
+    fi
+
+    for DTYPE in bf16 fp16; do
+        generate_sweep_case quick Sink "golden_2_4_48_64_${DTYPE}_sinkfloat" \
+            --dtype "$DTYPE" --sink float "${SINK_SHAPE[@]}"
+
+        generate_sweep_case quick Sink "golden_2_4_48_64_${DTYPE}_sinkio_causal" \
+            --dtype "$DTYPE" --sink io --right-bound 0 \
+            --diagonal-alignment bottom_right "${SINK_SHAPE[@]}"
+    done
+
+    echo ""
+fi
+
 # --- Discriminating bundles: Sq != Skv everywhere, per-batch lengths that differ
 # (batch 1 of the padded set has Sq > Skv, so bottom-right leaves it dead rows:
 # O = 0, LSE = -inf, zero gradients), GQA, broadcast bias with dBias, and an
@@ -306,6 +341,19 @@ if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
     generate_pair quick "$T/neq_gqa_dropout_causal_br" Small "${NEQ_GQA[@]}" \
         --dropout-p 0.2 --right-bound 0 --diagonal-alignment bottom_right \
         --min 0 --max 1
+
+    # Attention sink beside the features that touch D = rowsum(dO * O) or the rows
+    # dSink sums over: padding with dead rows (their LSE is the sink, dSink gets 0), ragged
+    # operands (dSink stays dense), and dropout (dSink uses the raw rowsum, not the
+    # dropout_scale_inv-scaled one).
+    generate_pair quick "$T/padneq_sink_causal_br" Small "${PADNEQ[@]}" \
+        --sink float --right-bound 0 --diagonal-alignment bottom_right
+    generate_pair quick "$T/ragged_sink_io" Small \
+        --q-dims 2 2 32 64 --v-dims 2 2 32 64 --attn-scale 0.125 --dtype bf16 \
+        --seq-lens-q 20 32 --seq-lens-kv 25 32 --ragged-sides qkv --sink io
+    generate_pair quick "$T/neq_gqa_dropout_sink_causal_br" Small "${NEQ_GQA[@]}" \
+        --sink float --dropout-p 0.2 --right-bound 0 \
+        --diagonal-alignment bottom_right --min 0 --max 1
 
     echo ""
 fi

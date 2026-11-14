@@ -11,8 +11,9 @@ two differences:
 - The schema has no fp8 scale tensors, so ``dtype`` is bf16 and fp16 only.
 - There is no ``seq:decode``: a backward pass trains, and a single query
   position is an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
-- There is no ``layout:ragged``: no backward engine reads ragged offsets, so a
-  ragged q raises ``FeatureError`` rather than counting as its stride order.
+
+A ragged q (the tensor's ``ragged_offset_tensor_uid``) is ``layout:ragged``
+whatever its strides, as in forward.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ FEATURES = (
     Feature("heads:gqa", sdpa.QK_FIELDS, "fewer k/v heads than q heads, more than one"),
     Feature("heads:mqa", sdpa.QK_FIELDS, "one k/v head"),
     *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in sdpa.LAYOUTS.values()),
+    Feature("layout:ragged", ("q_tensor_uid",), "q packed by per-batch offsets"),
     Feature("mask:none", sdpa.MASK_FIELDS),
     Feature("mask:causal_top_left", sdpa.MASK_FIELDS),
     Feature("mask:causal_bottom_right", sdpa.MASK_FIELDS),
@@ -60,6 +62,10 @@ FEATURES = (
         ),
     ),
     Feature("out:dbias", ("dbias_tensor_uid",), "gradient of the additive bias"),
+    Feature("input:sink_token", ("sink_token_tensor_uid",)),
+    Feature("out:dsink", ("dsink_token_tensor_uid",), "gradient of the sink token"),
+    Feature("out:rng_dump", ("rng_dump_tensor_uid",), "the dropout keep-mask dump"),
+    Feature("deterministic:on", ("is_deterministic_algorithm",)),
 )
 
 NOT_FEATURES = {
@@ -69,6 +75,8 @@ NOT_FEATURES = {
     "dq_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "dk_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
     "dv_tensor_uid": "required; its shape follows v's, so it varies nothing v does not",
+    "max_total_seq_len_q": "a workspace hint, not a variant of the op",
+    "max_total_seq_len_kv": "a workspace hint, not a variant of the op",
 }
 
 
@@ -78,7 +86,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     attrs = node.get("parameters") or {}
     has = sdpa.ports(node)
     features = sdpa.core_features(
-        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=False, ragged=False
+        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=False, ragged=True
     )
 
     if (
@@ -99,4 +107,12 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         features.add("dropout:on")
     if has("dbias_tensor_uid"):
         features.add("out:dbias")
+    if has("sink_token_tensor_uid"):
+        features.add("input:sink_token")
+    if has("dsink_token_tensor_uid"):
+        features.add("out:dsink")
+    if has("rng_dump_tensor_uid"):
+        features.add("out:rng_dump")
+    if attrs.get("is_deterministic_algorithm"):
+        features.add("deterministic:on")
     return features

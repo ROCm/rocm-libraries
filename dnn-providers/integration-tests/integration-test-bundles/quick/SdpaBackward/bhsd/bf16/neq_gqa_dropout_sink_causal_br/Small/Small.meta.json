@@ -1,0 +1,50 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_bwd_golden.py",
+    "generator_version": "1.6.0",
+    "generator_sha256": "b3de9390e15acbce84bf85eb4b4a232fb2db0c2aacfe7f03b20e74e8ad8a40eb",
+    "generated_at": "2026-11-09T13:38:49Z",
+    "reference_source": "PyTorch 2.12.0+rocm7.2",
+    "reference_backend": "pytorch_explicit_fp32_backward",
+    "reference_strategy": "matched_precision",
+    "rocm_version": "7.2",
+    "direction": "backward",
+    "seed": 42,
+    "input_range": [
+        0.0,
+        1.0
+    ],
+    "deterministic": true,
+    "intermediate_rounding": "none",
+    "config": {
+        "batch": 2,
+        "num_heads_q": 4,
+        "num_heads_kv": 2,
+        "seq_q": 64,
+        "seq_kv": 96,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "layout": "bhsd",
+        "scale": 0.125,
+        "left_bound": null,
+        "right_bound": 0,
+        "diagonal_alignment": "bottom_right",
+        "additive_mask": false,
+        "dropout_p": 0.2,
+        "sink": {
+            "dtype": "float",
+            "logit_range": [
+                3.564348191467836,
+                5.564348191467836
+            ]
+        }
+    },
+    "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+    "forward_source": {
+        "method": "pytorch_math_backend",
+        "version": "2.12.0+rocm7.2",
+        "generated_at": "2026-11-09T13:38:49Z",
+        "bundle": "../../neq_gqa_dropout_sink_causal_br_fwd_pair/Small/Small.json"
+    }
+}

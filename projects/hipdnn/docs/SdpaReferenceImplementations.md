@@ -85,11 +85,11 @@ listed as an accepted hint (the last row).
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
 | Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; the dense rewrite declines what it cannot rewrite (RFC 0014 §4.10) | RFC 0014, SEM-026 |
-| Attention sink (`sink_token`) | FLOAT `[1, H_q, 1, 1]` | SEM-022 |
+| Attention sink (`sink_token`) | FLOAT or Q's data type (the graph I/O data type when Q's is unset), `[1, H_q, 1, 1]`; read in either dtype | SEM-022 |
 | ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
-| Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied) | SEM-015 |
+| Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied); seed and offset INT32 or INT64, all dims 1 | SEM-015, SEM-030 |
 | fp8 Q/K/V descales | scalar or `[B, H_kv, 1, 1]` FLOAT (a paged side needs a scalar on the GPU) | |
 | fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout, except probability 0 without an rng_dump (no dropout, SEM-015) | SEM-024 |
 | Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (ragged: any container-valid layout, e.g. `[H,T]` or `[T,H]`; `Max` and `Sum_exp` served by the dense rewrite, bound by `seq_len_q`) | SEM-011, 023 |
@@ -106,7 +106,9 @@ listed as an accepted hint (the last row).
 | Bias and `dbias` | `dbias` = unscaled dS summed over every broadcast dim (SEM-014) |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`, `dropout_scale_inv`) | cuDNN's composition (SEM-015) |
 | Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
-| Philox dropout | **No**: the backward node has no `rng_dump` (needs an API change, below) |
+| Philox dropout | With an `rng_dump` output: the engine's backward keep mask is applied as an explicit mask with `dropout_scale = 1 / (1 - p)` and `dropout_scale_inv = 1 - p` (SEM-015). Without `rng_dump` the plan declines |
+| Attention sink and `dsink` | `sink_token` and `dsink_token`, FLOAT or Q's data type (the graph I/O data type when Q's is unset), `[1, H_q, 1, 1]`, dSink dtype equal to the sink's; dSink = `-Σ exp(sink - LSE) * D` over live rows, fp32 accumulation, one rounding (SEM-022). `dsink` requires `sink_token`; the LSE passed in must include the sink |
+| `is_deterministic_algorithm`, `max_total_seq_len_q/kv` | accepted; the references are deterministic, the hints are ignored (SEM-029) |
 
 ### 2.3 Reference-only extensions
 
@@ -121,8 +123,6 @@ Everything below needs a schema or frontend change first:
 
 | Missing | cuDNN | Blocked on |
 |---|---|---|
-| Backward Philox dropout | backward `RNG_DUMP` | an `rng_dump` field on `SdpaBackwardAttributes` |
-| Backward sinks (`dsink`) | `set_sink_token` / `set_dsink_token` | backward schema fields |
 | fp8 backward | `sdpa_fp8_backward` node | a node with the fp8 descale/scale/amax fields |
 | `score_mod` (FlexAttention) | `set_score_mod` | a scope decision |
 
@@ -143,7 +143,7 @@ Inputs whose exact output is known analytically, in `TestCpuFpReferenceSdpaOracl
 - one raised score (known LSE);
 - a single live key (O copies V);
 - dead rows (O = 0, LSE = -inf);
-- sinks on uniform and fully masked rows;
+- sinks on uniform and fully masked rows, forward and backward (`SinkBackwardUniformScores`);
 - fp8 scaling with one key (catches a skipped P quantization);
 - amax_s with and without a dominating sink.
 
@@ -158,7 +158,8 @@ Two graphs that must give the same result because one feature is defined in term
 - Scale = pre-scaled Q.
 - Padding = truncated batches.
 - Paged = dense padded.
-- Sink = an extra zero-value key.
+- Sink = an extra zero-value key; in the backward the dQ, dK, dV of the sink graph equal those of the extra-key
+  graph and dSink equals the gradient of the extra key's score (`SinkEqualsExtraZeroValueKeyBackward`).
 - Ragged = per-batch dense, for the native ragged plan and for the dense rewrite (each checked against
   dense separately).
 - The deprecated causal flags = explicit bounds.
@@ -167,10 +168,12 @@ These pin how features compose. A single closed form cannot do that.
 
 ### 3.4 Finite-difference gradient checks (backward)
 
-`TestCpuFpReferenceSdpaGradCheck*` and `TestCpuFpReferenceSdpaScoreModGradCheck` check dQ, dK, dV and
-dBias against central differences of the forward. They cover plain, GQA, band, bias, dropout, softcap and
-ALiBi; the padded backward is covered by the padding = truncated batches property (§3.3). The backward is
-therefore checked against the forward, not just against another backward.
+`TestCpuFpReferenceSdpaGradCheck*` and `TestCpuFpReferenceSdpaScoreModGradCheck` check dQ, dK, dV,
+dBias and dSink against central differences of the forward. They cover plain, GQA, band, bias, dropout, sink,
+softcap and ALiBi; the padded backward is covered by the padding = truncated batches property (§3.3). The
+backward is therefore checked against the forward, not just against another backward. dSink is checked with
+explicit-mask dropout as well: it uses the raw `rowsum(dO * O)`, so scaling it by `dropout_scale_inv` fails
+(`SinkDSinkWithExplicitMaskDropout`).
 
 ### 3.5 CPU vs GPU parity
 
@@ -204,12 +207,12 @@ What the generators cover, and the gaps:
 | dtypes FP16/BF16, GQA, bands, padding, Sq != Skv, stats | yes | `F.scaled_dot_product_attention` (MATH) + additive masks |
 | bias + dBias, explicit dropout (backward) | yes | explicit FP32 backward + FP64 autograd check |
 | ragged | yes | pack/unpack around dense |
-| paged K/V, sinks | yes | gather pages; sink as an extra logit column |
+| paged K/V, sinks, backward sinks and dSink | yes | gather pages; sink as an extra logit column; dSink from FP64 autograd with the sink column |
 | fp8 descales, fp8 scaling (E4M3, E5M2) | yes | dequantize; cuDNN `fp8_ref` formula in torch |
 | block mask, ALiBi | yes | as an additive bias (cuDNN's expansion / slopes) |
 | Max / Sum_exp | no bundle; properties + CPU/GPU parity only | (simple; could be added to the forward generator) |
 | softcap | no; not in the graph API | closed forms, gradcheck, parity |
-| Philox dropout | no oracle by design | the engine's RNG stream is engine-defined; the reference applies the engine's `rng_dump` |
+| Philox dropout (forward and backward) | no oracle by design | the engine's RNG stream is engine-defined; the reference applies the engine's `rng_dump` |
 | backward ALiBi | no bundle | gradcheck + parity; the backward generator rejects it |
 | backward ragged | yes (the backward generator writes ragged bundles) | pack/unpack around dense, as forward |
 
@@ -335,5 +338,5 @@ cuDNN, so they come first.
   unpacked and decline them. Reading a packed table would let the references serve those graphs.
 - **fp8 softmax scaling over more than 128 keys** matches cuDNN only up to its per-tile quantization
   (SEM-024); modelling the tiling would make those rows exact.
-- **Not expressible in the graph API yet:** backward Philox dropout, backward sinks and dSink, the fp8
-  backward node and `score_mod` (section 2.4). Each needs reference support when the API adds it.
+- **Not expressible in the graph API yet:** the fp8 backward node and `score_mod` (section 2.4). Each needs
+  reference support when the API adds it.

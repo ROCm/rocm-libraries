@@ -2383,6 +2383,76 @@ TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
 }
 
 // ============================================================================
+// Attention sink in the graph's I/O dtype (half / bf16): the GPU kernel reads it in that dtype.
+// The CPU reference gets the same values as a FLOAT sink (the widening is exact).
+// ============================================================================
+
+template <typename T>
+static void expectFwdSinkInIoDtypeMatchesCpu()
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t HKV = 2;
+    constexpr int64_t SQ = 6;
+    constexpr int64_t SKV = 9;
+    constexpr int64_t D = 16;
+    Tensor<T> q({BATCH, H, SQ, D});
+    Tensor<T> k({BATCH, HKV, SKV, D});
+    Tensor<T> v({BATCH, HKV, SKV, D});
+    Tensor<T> sinkIo({1, H, 1, 1});
+    Tensor<float> sinkFloat({1, H, 1, 1});
+    fillWithRandomValues(q, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
+    fillWithRandomValues(k, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
+    fillWithRandomValues(v, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+    for(int64_t h = 0; h < H; ++h)
+    {
+        // Spread over [-2, 2) and held in T, so both references see exactly the same logit.
+        const T logit = static_cast<T>(-2.0f + 4.0f * static_cast<float>(h) / H);
+        sinkIo.setHostValue(logit, 0, h, 0, 0);
+        sinkFloat.setHostValue(static_cast<float>(logit), 0, h, 0, 0);
+    }
+    for(auto* t : {&q, &k, &v, &sinkIo})
+    {
+        t->memory().hostData();
+    }
+
+    Tensor<T> oCpu({BATCH, H, SQ, D});
+    Tensor<T> oGpu({BATCH, H, SQ, D});
+    Tensor<float> lseCpu({BATCH, H, SQ, 1});
+    Tensor<float> lseGpu({BATCH, H, SQ});
+    oGpu.fillWithValue(static_cast<T>(std::numeric_limits<float>::quiet_NaN()));
+    lseGpu.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    CpuFpReferenceSdpa::forward<T, T, T, T, float, float>(
+        q, k, v, oCpu, SdpaFwdOptions<float>{}.setScale(0.25f).setSink(&sinkFloat).setLse(&lseCpu));
+    GpuFpReferenceSdpa::fprop<T, T, T, T, float, float>(
+        q, k, v, oGpu, GpuSdpaFwdOptions<float>{}.setScale(0.25f).setSink(&sinkIo).setLse(&lseGpu));
+
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<T>());
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                EXPECT_NEAR(lseGpuView.getHostValue(std::vector<int64_t>{b, h, s}),
+                            lseCpuView.getHostValue(std::vector<int64_t>{b, h, s, 0}),
+                            gpuRefFwdTolerance<float>())
+                    << "b=" << b << " h=" << h << " s=" << s;
+            }
+        }
+    }
+}
+
+TEST(TestGpuSdpaFwdSinkQDtype, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    expectFwdSinkInIoDtypeMatchesCpu<HalfType>();
+    expectFwdSinkInIoDtypeMatchesCpu<BFloat16Type>();
+}
+
+// ============================================================================
 // Explicit-mask dropout (cuDNN custom dropout): GPU reference vs CPU reference,
 // mask broadcast over batch, with GQA, bias and bottom-right causal.
 // ============================================================================

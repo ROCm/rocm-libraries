@@ -258,12 +258,21 @@ public:
             }
         }
 
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sinkTensor;
+        // The sink is FLOAT or the graph I/O dtype (Q's); bind it as whichever it is.
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sinkFloat;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<QDataType>> sinkIo;
+        hipdnn_data_sdk::utilities::ITensor* sinkTensor = nullptr;
         if(_params.sinkTensor.has_value())
         {
-            sinkTensor.emplace(variantPack.at(_params.sinkTensor->uid),
-                               _params.sinkTensor->dims,
-                               _params.sinkTensor->strides);
+            const auto& sink = *_params.sinkTensor;
+            if(sink.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+            {
+                sinkTensor = &sinkFloat.emplace(variantPack.at(sink.uid), sink.dims, sink.strides);
+            }
+            else
+            {
+                sinkTensor = &sinkIo.emplace(variantPack.at(sink.uid), sink.dims, sink.strides);
+            }
         }
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> dropoutMask;
@@ -360,7 +369,7 @@ public:
                     .setPaged(pageTableK.has_value() ? &pageTableK.value() : nullptr,
                               pageTableV.has_value() ? &pageTableV.value() : nullptr,
                               _params.pagedMaxSeqKv)
-                    .setSink(sinkTensor.has_value() ? &sinkTensor.value() : nullptr)
+                    .setSink(sinkTensor)
                     .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
                                 dropoutScale)
                     .setAlibi(_params.alibi)

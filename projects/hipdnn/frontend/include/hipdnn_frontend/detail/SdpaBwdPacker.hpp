@@ -124,6 +124,11 @@ inline Error
                                       attributes.get_dropout_scale_inv(),
                                       tensorDescs,
                                       "SDPA bprop DROPOUT_SCALE_INV"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT,
+                                                     attributes.get_sink_token(),
+                                                     tensorDescs,
+                                                     "SDPA bprop SINK_TOKEN"));
 
     // Optional output tensors
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
@@ -131,6 +136,16 @@ inline Error
                                                      attributes.get_dbias(),
                                                      tensorDescs,
                                                      "SDPA bprop DBIAS"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT,
+                                                     attributes.get_dsink_token(),
+                                                     tensorDescs,
+                                                     "SDPA bprop DSINK_TOKEN"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT,
+                                                     attributes.get_rng_dump(),
+                                                     tensorDescs,
+                                                     "SDPA bprop RNG_DUMP"));
 
     // Set boolean scalar parameters
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
@@ -153,6 +168,11 @@ inline Error
                                                HIPDNN_TYPE_BOOLEAN,
                                                attributes.causal_mask_bottom_right,
                                                "SDPA bprop causal_mask_bottom_right"));
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                               HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               attributes.is_deterministic_algorithm,
+                                               "SDPA bprop is_deterministic_algorithm"));
 
     // Set optional float scalar parameters
     if(attributes.dropout_probability.has_value())
@@ -192,6 +212,24 @@ inline Error
                                                    HIPDNN_TYPE_INT64,
                                                    val,
                                                    "SDPA bprop right_bound"));
+    }
+    if(attributes.max_total_seq_len_q.has_value())
+    {
+        const int64_t val = attributes.max_total_seq_len_q.value();
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                                   HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   val,
+                                                   "SDPA bprop max_total_seq_len_q"));
+    }
+    if(attributes.max_total_seq_len_kv.has_value())
+    {
+        const int64_t val = attributes.max_total_seq_len_kv.value();
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                                   HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   val,
+                                                   "SDPA bprop max_total_seq_len_kv"));
     }
 
     // Set enum parameters using dedicated backend enum types

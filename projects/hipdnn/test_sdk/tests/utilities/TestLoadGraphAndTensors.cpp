@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -676,6 +677,128 @@ TEST(TestLoadGraphAndTensors, RejectsRaggedPayloadSizedToOffsetTail)
     {
         EXPECT_NE(std::string(e.what()).find("elementSpace=10"), std::string::npos) << e.what();
     }
+}
+
+namespace
+{
+
+constexpr int64_t BWD_SINK_UID = 20;
+constexpr int64_t BWD_DSINK_UID = 21;
+constexpr int64_t BWD_RNG_DUMP_UID = 22;
+
+std::string bwdTensorJson(int64_t uid)
+{
+    return R"({"name": "", "uid": )" + std::to_string(uid)
+           + R"(, "strides": [1, 1, 1, 1], "dims": [1, 1, 1, 1], "data_type": "float", )"
+             R"("virtual": false})";
+}
+
+// A one-node SdpaBackwardAttributes bundle over [1, 1, 1, 1] float tensors. `newKeys` is the
+// JSON the writer emits today (sink, dSink, rng dump, determinism and sequence-length hints
+// present); without it the node is a bundle written before those fields existed.
+void writeSdpaBwdBundle(const std::filesystem::path& jsonPath, bool newKeys)
+{
+    std::ofstream out(jsonPath);
+    out << R"({"nodes": [{"type": "SdpaBackwardAttributes", "compute_data_type": "float", )"
+           R"("name": "", "inputs": {"q_tensor_uid": 0, "k_tensor_uid": 1, "v_tensor_uid": 2, )"
+           R"("o_tensor_uid": 3, "do_tensor_uid": 4, "stats_tensor_uid": 5, )"
+           R"("scale_tensor_uid": null, "attn_mask_tensor_uid": null, )"
+           R"("seq_len_q_tensor_uid": null, "seq_len_kv_tensor_uid": null, )"
+           R"("seed_tensor_uid": null, "offset_tensor_uid": null, )"
+           R"("dropout_mask_tensor_uid": null, "dropout_scale_tensor_uid": null, )"
+           R"("dropout_scale_inv_tensor_uid": null)";
+    if(newKeys)
+    {
+        out << R"(, "sink_token_tensor_uid": 20)";
+    }
+    out << R"(}, "outputs": {"dq_tensor_uid": 6, "dk_tensor_uid": 7, "dv_tensor_uid": 8, )"
+           R"("dbias_tensor_uid": null)";
+    if(newKeys)
+    {
+        out << R"(, "dsink_token_tensor_uid": 21, "rng_dump_tensor_uid": 22)";
+    }
+    out << R"(}, "parameters": {"alibi_mask": false, "padding_mask": false, )"
+           R"("causal_mask": false, "causal_mask_bottom_right": false, )"
+           R"("dropout_probability": null, "attn_scale_value": 0.5, "left_bound": null, )"
+           R"("right_bound": null, "diagonal_alignment": "TOP_LEFT")";
+    if(newKeys)
+    {
+        out << R"(, "is_deterministic_algorithm": true, "max_total_seq_len_q": 4096, )"
+               R"("max_total_seq_len_kv": 8192)";
+    }
+    out << R"(}}], "tensors": [)";
+
+    std::vector<int64_t> uids{0, 1, 2, 3, 4, 5, 6, 7, 8};
+    if(newKeys)
+    {
+        uids.insert(uids.end(), {BWD_SINK_UID, BWD_DSINK_UID, BWD_RNG_DUMP_UID});
+    }
+    for(size_t i = 0; i < uids.size(); ++i)
+    {
+        out << (i == 0 ? "" : ", ") << bwdTensorJson(uids[i]);
+    }
+    out << R"(], "io_data_type": "float", "compute_data_type": "float", )"
+           R"("intermediate_data_type": "float", "name": ""})";
+    out.close();
+
+    auto basePath = jsonPath;
+    basePath.replace_extension();
+    for(const int64_t uid : uids)
+    {
+        writeVectorToFile(
+            std::filesystem::path(basePath.string() + ".tensor" + std::to_string(uid) + ".bin"),
+            std::vector<float>(1, 1.0f));
+    }
+}
+
+} // namespace
+
+TEST(TestLoadGraphAndTensors, LoadsSdpaBwdBundleWithSinkRngDumpDeterministicAndHints)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_sdpa_bwd_new_keys");
+    const auto jsonPath = dir.path() / "SdpaBwd.json";
+    writeSdpaBwdBundle(jsonPath, true);
+
+    auto res = loadGraphAndTensors(jsonPath);
+
+    const auto* attrs = res.graph().nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+    ASSERT_TRUE(attrs->sink_token_tensor_uid().has_value());
+    EXPECT_EQ(attrs->sink_token_tensor_uid().value(), BWD_SINK_UID);
+    ASSERT_TRUE(attrs->dsink_token_tensor_uid().has_value());
+    EXPECT_EQ(attrs->dsink_token_tensor_uid().value(), BWD_DSINK_UID);
+    ASSERT_TRUE(attrs->rng_dump_tensor_uid().has_value());
+    EXPECT_EQ(attrs->rng_dump_tensor_uid().value(), BWD_RNG_DUMP_UID);
+    EXPECT_TRUE(attrs->is_deterministic_algorithm());
+    ASSERT_TRUE(attrs->max_total_seq_len_q().has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_q().value(), 4096);
+    ASSERT_TRUE(attrs->max_total_seq_len_kv().has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_kv().value(), 8192);
+
+    // dSink and the rng dump are outputs the harness compares or hands off; the sink is an input.
+    const auto& outputs = res.outputTensorUids;
+    EXPECT_NE(std::find(outputs.begin(), outputs.end(), BWD_DSINK_UID), outputs.end());
+    EXPECT_NE(std::find(outputs.begin(), outputs.end(), BWD_RNG_DUMP_UID), outputs.end());
+    EXPECT_EQ(std::find(outputs.begin(), outputs.end(), BWD_SINK_UID), outputs.end());
+}
+
+TEST(TestLoadGraphAndTensors, LoadsSdpaBwdBundleWrittenBeforeTheNewKeys)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_sdpa_bwd_old_keys");
+    const auto jsonPath = dir.path() / "SdpaBwd.json";
+    writeSdpaBwdBundle(jsonPath, false);
+
+    auto res = loadGraphAndTensors(jsonPath);
+
+    const auto* attrs = res.graph().nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+    EXPECT_FALSE(attrs->sink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->dsink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->rng_dump_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->is_deterministic_algorithm());
+    EXPECT_FALSE(attrs->max_total_seq_len_q().has_value());
+    EXPECT_FALSE(attrs->max_total_seq_len_kv().has_value());
+    EXPECT_EQ(res.tensorMap.size(), 9u);
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

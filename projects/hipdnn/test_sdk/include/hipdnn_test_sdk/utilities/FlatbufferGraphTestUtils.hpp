@@ -3241,7 +3241,13 @@ inline flatbuffers::FlatBufferBuilder
                             bool alibiMask = false,
                             bool paddingMask = false,
                             bool causalMask = false,
-                            bool overrideShapeEnabled = false)
+                            bool overrideShapeEnabled = false,
+                            bool withSinkToken = false,
+                            bool withDsinkToken = false,
+                            bool withRngDump = false,
+                            bool isDeterministicAlgorithm = false,
+                            flatbuffers::Optional<int64_t> maxTotalSeqLenQ = flatbuffers::nullopt,
+                            flatbuffers::Optional<int64_t> maxTotalSeqLenKv = flatbuffers::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -3315,6 +3321,55 @@ inline flatbuffers::FlatBufferBuilder
         scaleUid = flatbuffers::Optional<int64_t>(sUid);
     }
 
+    // Sink and its gradient: [1, H_q, 1, 1] FLOAT; rng_dump: [B, H_q, S_q, S_kv] FLOAT.
+    flatbuffers::Optional<int64_t> sinkTokenUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> dsinkTokenUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> rngDumpUid = flatbuffers::nullopt;
+    const std::vector<int64_t> sinkDims = {1, qDims[1], 1, 1};
+    const std::vector<int64_t> sinkStrides = {qDims[1], 1, 1, 1};
+    if(withSinkToken)
+    {
+        const auto sUid = uid++;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                sUid,
+                "sink_token",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &sinkStrides,
+                &sinkDims));
+        sinkTokenUid = flatbuffers::Optional<int64_t>(sUid);
+    }
+    if(withDsinkToken)
+    {
+        const auto dsUid = uid++;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                dsUid,
+                "dsink_token",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &sinkStrides,
+                &sinkDims));
+        dsinkTokenUid = flatbuffers::Optional<int64_t>(dsUid);
+    }
+    if(withRngDump)
+    {
+        const std::vector<int64_t> rngDumpDims = {qDims[0], qDims[1], qDims[2], kDims[2]};
+        const std::vector<int64_t> rngDumpStrides
+            = {qDims[1] * qDims[2] * kDims[2], qDims[2] * kDims[2], kDims[2], 1};
+        const auto rUid = uid++;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                rUid,
+                "rng_dump",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &rngDumpStrides,
+                &rngDumpDims));
+        rngDumpUid = flatbuffers::Optional<int64_t>(rUid);
+    }
+
     auto sdpaBwdAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaBackwardAttributes(
         builder,
         qUid,
@@ -3338,7 +3393,19 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // dbias_tensor_uid
         alibiMask,
         paddingMask,
-        causalMask);
+        causalMask,
+        false, // causal_mask_bottom_right
+        flatbuffers::nullopt, // dropout_probability
+        flatbuffers::nullopt, // attn_scale_value
+        flatbuffers::nullopt, // left_bound
+        flatbuffers::nullopt, // right_bound
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
+        sinkTokenUid,
+        dsinkTokenUid,
+        rngDumpUid,
+        isDeterministicAlgorithm,
+        maxTotalSeqLenQ,
+        maxTotalSeqLenKv);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

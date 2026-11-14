@@ -215,6 +215,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
             key, config_tensor::DROPOUT_SCALE, sdpa.attributes.get_dropout_scale());
         appendOptionalMatchTensor(
             key, config_tensor::DROPOUT_SCALE_INV, sdpa.attributes.get_dropout_scale_inv());
+        appendOptionalMatchTensor(key, config_tensor::SINK_TOKEN, sdpa.attributes.get_sink_token());
         return PrioritizedAutotuneConfigMatchKey{match_priority::SDPA, std::move(key)};
     }
 #endif

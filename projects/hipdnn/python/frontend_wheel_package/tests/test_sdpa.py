@@ -194,6 +194,9 @@ class TestSdpaAttributeBindings:
             "dk",
             "dv",
             "dbias",
+            "sink_token",
+            "dsink_token",
+            "rng_dump",
         )
         tensors = {
             suffix: hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
@@ -234,6 +237,14 @@ class TestSdpaAttributeBindings:
                 ("set_attn_scale", (0.5,), "attn_scale_value", 0.5),
                 ("set_diagonal_band_left_bound", (1,), "left_bound", 1),
                 ("set_diagonal_band_right_bound", (2,), "right_bound", 2),
+                ("set_max_total_seq_len_q", (7,), "max_total_seq_len_q", 7),
+                ("set_max_total_seq_len_kv", (9,), "max_total_seq_len_kv", 9),
+                (
+                    "set_deterministic_algorithm",
+                    (True,),
+                    "is_deterministic_algorithm",
+                    True,
+                ),
                 (
                     "set_diagonal_alignment",
                     (hipdnn.DiagonalAlignment.TOP_LEFT,),
@@ -242,6 +253,22 @@ class TestSdpaAttributeBindings:
                 ),
             ),
         )
+
+    def test_backward_new_members_default_and_assign_directly(self):
+        attributes = hipdnn.SdpaBackwardAttributes()
+        assert attributes.is_deterministic_algorithm is False
+        assert attributes.max_total_seq_len_q is None
+        assert attributes.max_total_seq_len_kv is None
+        assert attributes.get_sink_token() is None
+        assert attributes.get_dsink_token() is None
+        assert attributes.get_rng_dump() is None
+
+        attributes.is_deterministic_algorithm = True
+        attributes.max_total_seq_len_q = 11
+        attributes.max_total_seq_len_kv = 13
+        assert attributes.is_deterministic_algorithm is True
+        assert attributes.max_total_seq_len_q == 11
+        assert attributes.max_total_seq_len_kv == 13
 
     @pytest.mark.parametrize(
         "attributes_type", [hipdnn.SdpaAttributes, hipdnn.SdpaBackwardAttributes]

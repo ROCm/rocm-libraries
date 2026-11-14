@@ -362,6 +362,108 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
 }
 
+namespace
+{
+
+// The default backward graph with the six ALMIOPEN-3184 fields set, repacked.
+flatbuffers::FlatBufferBuilder makeSdpaBwdGraphWithSinkRngDumpAndHints()
+{
+    auto source = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    const std::unique_ptr<GraphT> graphT(GetGraph(source.GetBufferPointer())->UnPack());
+    auto* attrs = graphT->nodes.at(0)->attributes.AsSdpaBackwardAttributes();
+    attrs->sink_token_tensor_uid = 110;
+    attrs->dsink_token_tensor_uid = 111;
+    attrs->rng_dump_tensor_uid = 112;
+    attrs->is_deterministic_algorithm = true;
+    attrs->max_total_seq_len_q = 4096;
+    attrs->max_total_seq_len_kv = 8192;
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder;
+}
+
+} // namespace
+
+TEST(TestJson, SdpaBackwardSinkRngDumpDeterministicAndSeqLenHintsRoundTrip)
+{
+    auto graphBuilder = makeSdpaBwdGraphWithSinkRngDumpAndHints();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_EQ(nodeJson.at("inputs").at("sink_token_tensor_uid").get<int64_t>(), 110);
+    EXPECT_EQ(nodeJson.at("outputs").at("dsink_token_tensor_uid").get<int64_t>(), 111);
+    EXPECT_EQ(nodeJson.at("outputs").at("rng_dump_tensor_uid").get<int64_t>(), 112);
+    EXPECT_TRUE(nodeJson.at("parameters").at("is_deterministic_algorithm").get<bool>());
+    EXPECT_EQ(nodeJson.at("parameters").at("max_total_seq_len_q").get<int64_t>(), 4096);
+    EXPECT_EQ(nodeJson.at("parameters").at("max_total_seq_len_kv").get<int64_t>(), 8192);
+
+    // toJsonAndBackTestSuite compares the unpacked graphs, so a dropped field fails it.
+    toJsonAndBackTestSuite(graph, "(sdpa backward with sink, rng dump, deterministic, hints)");
+}
+
+TEST(TestJson, SdpaBackwardJsonWritesAllNewKeysEvenWhenUnset)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    const nlohmann::json graphJson = *GetGraph(graphBuilder.GetBufferPointer());
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+
+    EXPECT_TRUE(nodeJson.at("inputs").at("sink_token_tensor_uid").is_null());
+    EXPECT_TRUE(nodeJson.at("outputs").at("dsink_token_tensor_uid").is_null());
+    EXPECT_TRUE(nodeJson.at("outputs").at("rng_dump_tensor_uid").is_null());
+    EXPECT_FALSE(nodeJson.at("parameters").at("is_deterministic_algorithm").get<bool>());
+    EXPECT_TRUE(nodeJson.at("parameters").at("max_total_seq_len_q").is_null());
+    EXPECT_TRUE(nodeJson.at("parameters").at("max_total_seq_len_kv").is_null());
+}
+
+TEST(TestJson, SdpaBackwardJsonWithoutNewKeysReadsAsNullAndFalse)
+{
+    // A bundle JSON written before sink, rng dump, determinism and the sequence-length hints.
+    auto graphBuilder = makeSdpaBwdGraphWithSinkRngDumpAndHints();
+    nlohmann::json graphJson = *GetGraph(graphBuilder.GetBufferPointer());
+    auto& nodeJson = graphJson.at("nodes").at(0);
+    nodeJson.at("inputs").erase("sink_token_tensor_uid");
+    nodeJson.at("outputs").erase("dsink_token_tensor_uid");
+    nodeJson.at("outputs").erase("rng_dump_tensor_uid");
+    nodeJson.at("parameters").erase("is_deterministic_algorithm");
+    nodeJson.at("parameters").erase("max_total_seq_len_q");
+    nodeJson.at("parameters").erase("max_total_seq_len_kv");
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson));
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    const auto* attrs = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_FALSE(attrs->sink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->dsink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->rng_dump_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->is_deterministic_algorithm());
+    EXPECT_FALSE(attrs->max_total_seq_len_q().has_value());
+    EXPECT_FALSE(attrs->max_total_seq_len_kv().has_value());
+}
+
+TEST(TestJson, SdpaBackwardBufferWithNewFieldsUnsetReadsAsNullAndFalse)
+{
+    // A buffer built with none of the new fields set reads them back as null / false. This
+    // checks the accessors' defaults only; it cannot detect a vtable slot shift against a buffer
+    // written by an older schema.
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    const auto* attrs = GetGraph(graphBuilder.GetBufferPointer())
+                            ->nodes()
+                            ->Get(0)
+                            ->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_FALSE(attrs->sink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->dsink_token_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->rng_dump_tensor_uid().has_value());
+    EXPECT_FALSE(attrs->is_deterministic_algorithm());
+    EXPECT_FALSE(attrs->max_total_seq_len_q().has_value());
+    EXPECT_FALSE(attrs->max_total_seq_len_kv().has_value());
+}
+
 // GraphToJsonAndBack covers one graph per node type; these cover the second
 // GDN and KDA graphs, whose flag values differ from the first ones.
 TEST(TestJson, GdnSafeGateRoundTrip)

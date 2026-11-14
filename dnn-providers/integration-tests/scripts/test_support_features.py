@@ -1474,10 +1474,11 @@ class TestSdpaBackwardExtract:
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
 
-    def test_ragged_raises(self) -> None:
-        # Not counted as its bshd stride order.
-        with pytest.raises(FeatureError, match="ragged q"):
-            self._extract(ragged=True, strides=_bshd_strides)
+    def test_ragged_q_is_layout_ragged(self) -> None:
+        # Whatever its strides, not its bshd stride order.
+        assert self._group("layout", ragged=True, strides=_bshd_strides) == (
+            "layout:ragged"
+        )
 
     def test_optional_ports(self) -> None:
         features = self._extract(
@@ -1490,11 +1491,38 @@ class TestSdpaBackwardExtract:
         features = self._extract(outputs={"dbias_tensor_uid": None})
         assert "out:dbias" not in features
 
+    def test_sink_dsink_rng_dump_ports(self) -> None:
+        features = self._extract(
+            inputs={"sink_token_tensor_uid": 15},
+            outputs={"dsink_token_tensor_uid": 21, "rng_dump_tensor_uid": 22},
+        )
+        assert {"input:sink_token", "out:dsink", "out:rng_dump"} <= features
+
+    def test_null_sink_dsink_rng_dump_ports_are_absent(self) -> None:
+        features = self._extract(
+            inputs={"sink_token_tensor_uid": None},
+            outputs={"dsink_token_tensor_uid": None, "rng_dump_tensor_uid": None},
+        )
+        assert not {"input:sink_token", "out:dsink", "out:rng_dump"} & features
+
+    @pytest.mark.parametrize(
+        "value, expected", [(True, True), (False, False), (None, False)]
+    )
+    def test_deterministic_algorithm(self, value: bool | None, expected: bool) -> None:
+        features = self._extract(is_deterministic_algorithm=value)
+        assert ("deterministic:on" in features) is expected
+
+    def test_max_total_seq_len_drives_no_feature(self) -> None:
+        assert self._extract(max_total_seq_len_q=4096, max_total_seq_len_kv=4096) == (
+            self._extract()
+        )
+
     def test_every_feature_is_reachable(self) -> None:
         """No catalogued feature is one extract() can never return."""
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
             {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
@@ -1512,7 +1540,15 @@ class TestSdpaBackwardExtract:
                 "alibi_mask": True,
                 "dropout_probability": 0.1,
                 "inputs": {"attn_mask_tensor_uid": 11},
-                "outputs": {"dbias_tensor_uid": 20},
+                "outputs": {
+                    "dbias_tensor_uid": 20,
+                    "dsink_token_tensor_uid": 21,
+                    "rng_dump_tensor_uid": 22,
+                },
+            },
+            {
+                "inputs": {"sink_token_tensor_uid": 15},
+                "is_deterministic_algorithm": True,
             },
         ):
             reached |= self._extract(**kwargs)

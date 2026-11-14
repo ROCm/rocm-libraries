@@ -211,11 +211,35 @@ void SdpaBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                                     arrayOfElements,
                                     "SdpaBwdOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT:
+        setOptionalTensorDescriptor(_sinkTokenDesc,
+                                    _data.sink_token_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
 
     // Optional output tensors
     case HIPDNN_ATTR_OPERATION_SDPA_BWD_DBIAS_EXT:
         setOptionalTensorDescriptor(_dbiasDesc,
                                     _data.dbias_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT:
+        setOptionalTensorDescriptor(_dsinkTokenDesc,
+                                    _data.dsink_token_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT:
+        setOptionalTensorDescriptor(_rngDumpDesc,
+                                    _data.rng_dump_tensor_uid,
                                     attributeType,
                                     elementCount,
                                     arrayOfElements,
@@ -255,6 +279,14 @@ void SdpaBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                   arrayOfElements,
                   "SdpaBwdOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT:
+        setScalar(_data.is_deterministic_algorithm,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
 
     // Optional scalar parameters
     case HIPDNN_ATTR_SDPA_BWD_DROPOUT_PROBABILITY_EXT:
@@ -280,6 +312,20 @@ void SdpaBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
         break;
     case HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT:
         setOptionalScalar<HIPDNN_TYPE_INT64>(_data.right_bound,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT:
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.max_total_seq_len_q,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaBwdOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT:
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.max_total_seq_len_kv,
                                              attributeType,
                                              elementCount,
                                              arrayOfElements,
@@ -482,8 +528,32 @@ void SdpaBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                                     arrayOfElements,
                                     "SdpaBwdOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT:
+        getOptionalTensorDescriptor(_sinkTokenDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATION_SDPA_BWD_DBIAS_EXT:
         getOptionalTensorDescriptor(_dbiasDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT:
+        getOptionalTensorDescriptor(_dsinkTokenDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT:
+        getOptionalTensorDescriptor(_rngDumpDesc,
                                     attributeType,
                                     requestedElementCount,
                                     elementCount,
@@ -528,6 +598,15 @@ void SdpaBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                   arrayOfElements,
                   "SdpaBwdOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT:
+        getScalar(_data.is_deterministic_algorithm,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
 
     // Optional scalars
     case HIPDNN_ATTR_SDPA_BWD_DROPOUT_PROBABILITY_EXT:
@@ -556,6 +635,22 @@ void SdpaBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
         break;
     case HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT:
         getOptionalScalar<HIPDNN_TYPE_INT64>(_data.right_bound,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT:
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.max_total_seq_len_q,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaBwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT:
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.max_total_seq_len_kv,
                                              attributeType,
                                              requestedElementCount,
                                              elementCount,
@@ -634,6 +729,9 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     addIfSet(tensors, _dropoutScaleDesc);
     addIfSet(tensors, _dropoutScaleInvDesc);
     addIfSet(tensors, _dbiasDesc);
+    addIfSet(tensors, _sinkTokenDesc);
+    addIfSet(tensors, _dsinkTokenDesc);
+    addIfSet(tensors, _rngDumpDesc);
     return tensors;
 }
 
@@ -692,6 +790,9 @@ std::shared_ptr<SdpaBwdOperationDescriptor> SdpaBwdOperationDescriptor::fromNode
     desc->_dropoutScaleDesc = findOptionalTensor(tensorMap, attrs->dropout_scale_tensor_uid);
     desc->_dropoutScaleInvDesc = findOptionalTensor(tensorMap, attrs->dropout_scale_inv_tensor_uid);
     desc->_dbiasDesc = findOptionalTensor(tensorMap, attrs->dbias_tensor_uid);
+    desc->_sinkTokenDesc = findOptionalTensor(tensorMap, attrs->sink_token_tensor_uid);
+    desc->_dsinkTokenDesc = findOptionalTensor(tensorMap, attrs->dsink_token_tensor_uid);
+    desc->_rngDumpDesc = findOptionalTensor(tensorMap, attrs->rng_dump_tensor_uid);
 
     desc->finalize();
     return desc;
@@ -725,6 +826,9 @@ std::string SdpaBwdOperationDescriptor::toString() const
     str += ", dropout_scale_uid=" + optionalToString(_data.dropout_scale_tensor_uid);
     str += ", dropout_scale_inv_uid=" + optionalToString(_data.dropout_scale_inv_tensor_uid);
     str += ", dbias_uid=" + optionalToString(_data.dbias_tensor_uid);
+    str += ", sink_token_uid=" + optionalToString(_data.sink_token_tensor_uid);
+    str += ", dsink_token_uid=" + optionalToString(_data.dsink_token_tensor_uid);
+    str += ", rng_dump_uid=" + optionalToString(_data.rng_dump_tensor_uid);
     str += ", alibi_mask=";
     str += _data.alibi_mask ? "true" : "false";
     str += ", padding_mask=";
@@ -733,10 +837,14 @@ std::string SdpaBwdOperationDescriptor::toString() const
     str += _data.causal_mask ? "true" : "false";
     str += ", causal_mask_bottom_right=";
     str += _data.causal_mask_bottom_right ? "true" : "false";
+    str += ", is_deterministic_algorithm=";
+    str += _data.is_deterministic_algorithm ? "true" : "false";
     str += ", dropout_probability=" + optionalToString(_data.dropout_probability);
     str += ", attn_scale_value=" + optionalToString(_data.attn_scale_value);
     str += ", left_bound=" + optionalToString(_data.left_bound);
     str += ", right_bound=" + optionalToString(_data.right_bound);
+    str += ", max_total_seq_len_q=" + optionalToString(_data.max_total_seq_len_q);
+    str += ", max_total_seq_len_kv=" + optionalToString(_data.max_total_seq_len_kv);
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);

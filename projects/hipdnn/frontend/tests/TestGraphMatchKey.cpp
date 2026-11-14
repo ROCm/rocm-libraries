@@ -294,3 +294,31 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
     expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
 }
+
+#ifdef HIPDNN_ENABLE_SDPA
+TEST_F(TestGraphMatchKey, SdpaBackwardSinkTokenAppearsInMatchKey)
+{
+    SelectorUnitGraph unitGraph(OperationType::SDPA_BACKWARD);
+    auto sink = std::make_shared<graph::TensorAttributes>();
+    sink->set_uid(777777).set_dim({1, 8, 1, 1}).set_stride({8, 1, 1, 1});
+    unitGraph.graph().visit([&](graph::INode& node) {
+        if(node.getNodeType() == graph::NodeType::SDPA_BWD)
+        {
+            static_cast<graph::SdpaBwdNode&>(node).attributes.set_sink_token(sink);
+        }
+    });
+
+    const auto key = detail::getAutotuneConfigMatchKey(unitGraph.graph());
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(key->opName, config_op::SDPA_BWD);
+    expectTensorIdOrder(*key,
+                        {config_tensor::Q,
+                         config_tensor::K,
+                         config_tensor::V,
+                         config_tensor::O,
+                         config_tensor::DO,
+                         config_tensor::STATS,
+                         config_tensor::SINK_TOKEN});
+    EXPECT_EQ(key->tensors.back()->get_uid(), 777777);
+}
+#endif

@@ -323,8 +323,10 @@ inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& op)
 {
-    // A bias gradient's reduction and inverse-scaled dropout have no convention yet.
-    if(op.dbias_tensor_uid() || op.dropout_scale_inv_tensor_uid())
+    // A bias gradient's reduction, inverse-scaled dropout and the sink token with its
+    // gradient have no convention yet.
+    if(op.dbias_tensor_uid() || op.dropout_scale_inv_tensor_uid() || op.sink_token_tensor_uid()
+       || op.dsink_token_tensor_uid())
     {
         return std::nullopt;
     }

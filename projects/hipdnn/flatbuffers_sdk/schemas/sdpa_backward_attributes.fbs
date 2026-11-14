@@ -54,4 +54,14 @@ table SdpaBackwardAttributes {
 
     // Enum attributes
     diagonal_alignment:        DiagonalAlignment = TOP_LEFT;
+
+    // Fields below: introduced in hipdnn_flatbuffers_sdk 0.3.0.
+    // Attention sink (cuDNN set_sink_token / set_dsink_token) and the Philox keep-mask dump (set_rng_dump).
+    sink_token_tensor_uid:     long = null (cache_uid);   // input: FLOAT or Q's type [1, H_q, 1, 1]
+    dsink_token_tensor_uid:    long = null (cache_uid);   // output: the sink's type [1, H_q, 1, 1]
+    rng_dump_tensor_uid:       long = null (cache_uid);   // output: FLOAT [B, H_q, S_q, S_kv]
+    // cuDNN set_deterministic_algorithm / set_max_total_seq_len_q/kv.
+    is_deterministic_algorithm: bool = false;
+    max_total_seq_len_q:       long = null;
+    max_total_seq_len_kv:      long = null;
 }

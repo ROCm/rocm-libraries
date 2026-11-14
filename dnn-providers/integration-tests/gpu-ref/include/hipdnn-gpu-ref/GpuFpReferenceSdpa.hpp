@@ -97,7 +97,8 @@ struct GpuSdpaFwdOptions
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr;
     int64_t pagedMaxSeqKv = 0;
-    hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr;
+    /// Attention sink [1, H, 1, 1]: FLOAT or the Q dtype (read to fp32 either way).
+    hipdnn_data_sdk::utilities::ITensor* sinkToken = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr;
     std::optional<float> dropoutScale;
     std::optional<float> softcap;
@@ -157,7 +158,7 @@ struct GpuSdpaFwdOptions
         pagedMaxSeqKv = maxSeqKv;
         return *this;
     }
-    GpuSdpaFwdOptions& setSink(hipdnn_data_sdk::utilities::TensorBase<float>* value)
+    GpuSdpaFwdOptions& setSink(hipdnn_data_sdk::utilities::ITensor* value)
     {
         sinkToken = value;
         return *this;
@@ -245,6 +246,10 @@ struct GpuSdpaBwdOptions
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr;
+    /// Attention sink [1, H, 1, 1], FLOAT or the Q dtype, and its gradient (same dtype and shape).
+    /// The LSE must then be the sink-inclusive forward LSE.
+    hipdnn_data_sdk::utilities::ITensor* sinkToken = nullptr;
+    hipdnn_data_sdk::utilities::ITensor* dSink = nullptr;
     std::optional<float> dropoutScale;
     std::optional<float> dropoutScaleInv;
     std::optional<float> softcap;
@@ -291,6 +296,13 @@ struct GpuSdpaBwdOptions
         dropoutMask = mask;
         dropoutScale = scale;
         dropoutScaleInv = scaleInv;
+        return *this;
+    }
+    GpuSdpaBwdOptions& setSink(hipdnn_data_sdk::utilities::ITensor* sink,
+                               hipdnn_data_sdk::utilities::ITensor* dSinkOut)
+    {
+        sinkToken = sink;
+        dSink = dSinkOut;
         return *this;
     }
     GpuSdpaBwdOptions& setSoftcap(std::optional<float> value)
@@ -541,19 +553,8 @@ public:
             seqLenKvStride = options.seqLenKv->strides()[0];
         }
 
-        // Attention sink (cuDNN): FLOAT [1, H, 1, 1], one logit per query head.
-        const float* sinkPtr = nullptr;
-        int64_t sinkStride = 0;
-        if(options.sinkToken != nullptr)
-        {
-            if(options.sinkToken->dims().size() != 4 || options.sinkToken->dims()[1] != numHeads
-               || static_cast<int64_t>(options.sinkToken->elementCount()) != numHeads)
-            {
-                throw std::invalid_argument("GpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
-            }
-            sinkPtr = static_cast<const float*>(options.sinkToken->memory().deviceData());
-            sinkStride = options.sinkToken->strides()[1];
-        }
+        // Attention sink (cuDNN): [1, H, 1, 1], one logit per query head, FLOAT or the Q dtype.
+        const auto sink = sinkOperand(options.sinkToken, numHeads, sizeof(QDataType), "sinkToken");
 
         launchSdpaFwd(
             q.memory().deviceData(),
@@ -588,8 +589,9 @@ public:
             seqLenKvStride,
             pagedKSide,
             pagedVSide,
-            sinkPtr,
-            sinkStride,
+            sink.data,
+            sink.stride,
+            sink.isFloat,
             dropoutMaskPointer(options.dropoutMask, batch, numHeads, seqQ, seqKv),
             dropoutMaskStrides(options.dropoutMask),
             options.dropoutScale.value_or(1.0F),
@@ -684,6 +686,13 @@ public:
         expect(options.dBias == nullptr
                    || (options.attnMask != nullptr && options.dBias->dims() == maskDims),
                "dBias requires an attention mask of the same shape");
+        expect(options.sinkToken == nullptr || options.lse != nullptr,
+               "a sink needs the sink-inclusive forward LSE");
+        expect(options.dSink == nullptr || options.sinkToken != nullptr, "dSink requires a sink");
+        const auto sink = sinkOperand(options.sinkToken, numHeads, sizeof(QDataType), "sinkToken");
+        const auto dSink = sinkOperand(options.dSink, numHeads, sizeof(QDataType), "dSink");
+        expect(options.dSink == nullptr || dSink.isFloat == sink.isFloat,
+               "dSink must have the sink's dtype");
         expect((options.seqLenQ == nullptr) == (options.seqLenKv == nullptr),
                "seqLenQ and seqLenKv must be given together");
         for(auto* len : {options.seqLenQ, options.seqLenKv})
@@ -760,6 +769,12 @@ public:
         launch.dropoutScaleInv = options.dropoutScaleInv.value_or(1.0F);
         launch.softcap = options.softcap.value_or(0.0F);
         launch.alibi = options.alibi;
+        launch.sink = sink.data;
+        launch.sinkStride = sink.stride;
+        launch.sinkIsFloat = sink.isFloat;
+        launch.dSink = dSink.data;
+        launch.dSinkStride = dSink.stride;
+        launch.dSinkIsFloat = dSink.isFloat;
         launchSdpaBwd(launch, defines);
 
         dQ.memory().markDeviceModified();
@@ -768,6 +783,10 @@ public:
         if(options.dBias != nullptr)
         {
             options.dBias->memory().markDeviceModified();
+        }
+        if(options.dSink != nullptr)
+        {
+            options.dSink->markDeviceModified();
         }
     }
 
@@ -807,12 +826,54 @@ private:
         std::vector<int64_t> dropoutMaskStrides;
         float dropoutScale = 1.0F;
         float dropoutScaleInv = 1.0F;
+        // Attention sink and dSink: device pointer, per-head stride, and whether it is FLOAT
+        // (else the Q dtype).
+        void* sink = nullptr;
+        int64_t sinkStride = 0;
+        bool sinkIsFloat = true;
+        void* dSink = nullptr;
+        int64_t dSinkStride = 0;
+        bool dSinkIsFloat = true;
         float softcap = 0.0F; // 0 = no softcap
         bool alibi = false; // cuDNN ALiBi (SEM-021)
         int64_t leftBound = -1;
         int64_t rightBound = -1;
         bool topLeftAlignment = true;
     };
+
+    /// A sink-shaped operand ([1, H, 1, 1]) on the device: pointer, per-head stride, and whether
+    /// its elements are FLOAT (otherwise the Q dtype). Absent (nullptr) yields an empty operand.
+    struct SdpaSinkOperand
+    {
+        void* data = nullptr;
+        int64_t stride = 0;
+        bool isFloat = true;
+    };
+
+    static SdpaSinkOperand sinkOperand(hipdnn_data_sdk::utilities::ITensor* tensor,
+                                       int64_t numHeads,
+                                       size_t ioElementSize,
+                                       const char* name)
+    {
+        if(tensor == nullptr)
+        {
+            return {};
+        }
+        const auto& d = tensor->dims();
+        if(d.size() != 4 || d[0] != 1 || d[1] != numHeads || d[2] != 1 || d[3] != 1)
+        {
+            throw std::invalid_argument(std::string("GpuFpReferenceSdpa: ") + name
+                                        + " must be [1, H, 1, 1]");
+        }
+        // FLOAT or the Q dtype (when Q is float they coincide).
+        const bool isFloat = tensor->elementSize() == sizeof(float);
+        if(!isFloat && tensor->elementSize() != ioElementSize)
+        {
+            throw std::invalid_argument(std::string("GpuFpReferenceSdpa: ") + name
+                                        + " must be FLOAT or the Q dtype");
+        }
+        return {tensor->rawDeviceData(), tensor->strides()[1], isFloat};
+    }
 
     static void launchSdpaBwd(const SdpaBwdLaunch& launch, const std::vector<std::string>& defines);
 
@@ -1018,8 +1079,9 @@ private:
                               int64_t seqLenKvStride = 0,
                               const SdpaPagedSide& pagedK = {},
                               const SdpaPagedSide& pagedV = {},
-                              const float* sinkPtr = nullptr,
+                              const void* sinkPtr = nullptr,
                               int64_t sinkStride = 0,
+                              bool sinkIsFloat = true,
                               const float* dropoutMaskPtr = nullptr,
                               const std::vector<int64_t>& dropoutMaskStrides = {},
                               float dropoutScale = 1.0F,

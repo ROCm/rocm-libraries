@@ -588,12 +588,13 @@ host under `auto` and `cpu`. The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
-forward graph with `dropout_probability` is verified through its `rng_dump` output
+forward or backward graph with `dropout_probability` is verified through its `rng_dump` output
 ([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md)). An engine that
 claims Philox dropout must write its keep mask (FLOAT, 1 = keep, 0 = drop) to
 `rng_dump`. The harness checks that every value is 0 or 1 and that the keep rate is
 within a 6-sigma binomial bound of `1 − p`. It then copies the mask into the reference
-run, which applies it as an explicit dropout mask, and compares every output except
+run, which applies it as an explicit dropout mask (scale `1 / (1 − p)`; the backward also
+scale_inv `1 − p`), and compares every output except
 `rng_dump`. Without `rng_dump` the references decline the graph. Golden data cannot
 verify Philox dropout.
 

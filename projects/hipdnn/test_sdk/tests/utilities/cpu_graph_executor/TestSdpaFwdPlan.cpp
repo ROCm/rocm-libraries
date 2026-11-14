@@ -210,7 +210,8 @@ flatbuffers::FlatBufferBuilder
                         std::optional<DataType> maskDataType = std::nullopt,
                         const std::optional<RawSeqLenSpec>& seqLens = std::nullopt,
                         const std::optional<RawSinkSpec>& sink = std::nullopt,
-                        const std::vector<RawExtraTensor>& extras = {})
+                        const std::vector<RawExtraTensor>& extras = {},
+                        DataType ioDataType = DataType::FLOAT)
 {
     constexpr int64_t SEQ_LEN_Q_UID = 6;
     constexpr int64_t SEQ_LEN_KV_UID = 7;
@@ -236,13 +237,13 @@ flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, Q_UID, "Q", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, Q_UID, "Q", ioDataType, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, K_UID, "K", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, K_UID, "K", ioDataType, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, V_UID, "V", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, V_UID, "V", ioDataType, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, O_UID, "O", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, O_UID, "O", ioDataType, &strides, &dims));
     if(maskDataType.has_value())
     {
         tensors.push_back(CreateTensorAttributesDirect(
@@ -1244,6 +1245,80 @@ TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
     EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1}));
     EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1}));
     EXPECT_FALSE(applicable(DataType::FLOAT, {2}));
+}
+
+// The sink is FLOAT (cuDNN) or the Q dtype: both are applicable with Q = HALF and give the same O,
+// the reference's with the sink; another dtype is declined.
+TEST(TestSdpaFwdPlanSink, BothDtypes)
+{
+    using hipdnn_data_sdk::types::half;
+
+    const auto graphFor = [](DataType sinkType, DataType ioType) {
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = 10;
+        return makeRawSdpaFwdGraph(
+            attrs, std::nullopt, std::nullopt, RawSinkSpec{sinkType, {1, 2, 1, 1}}, {}, ioType);
+    };
+    CpuReferenceGraphExecutor executor;
+    const auto applicable = [&](DataType sinkType, DataType ioType) {
+        auto graphBuilder = graphFor(sinkType, ioType);
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    EXPECT_TRUE(applicable(DataType::FLOAT, DataType::HALF));
+    EXPECT_TRUE(applicable(DataType::HALF, DataType::HALF));
+    EXPECT_FALSE(applicable(DataType::BFLOAT16, DataType::HALF));
+    EXPECT_FALSE(applicable(DataType::HALF, DataType::FLOAT));
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    Tensor<half> q(dims);
+    Tensor<half> k(dims);
+    Tensor<half> v(dims);
+    for(auto* tensor : {&q, &k, &v})
+    {
+        Tensor<float> source(dims);
+        source.fillWithRandomValues(-1.0F, 1.0F, 91 + static_cast<unsigned int>(tensor == &k));
+        for(size_t i = 0; i < tensor->elementCount(); ++i)
+        {
+            tensor->memory().hostData()[i] = safeConvert<half>(source.memory().hostData()[i]);
+        }
+    }
+    Tensor<float> sinkFloat({1, 2, 1, 1});
+    Tensor<half> sinkHalf({1, 2, 1, 1});
+    sinkFloat.setHostValue(0.5F, 0, 0, 0, 0);
+    sinkFloat.setHostValue(-0.25F, 0, 1, 0, 0);
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        sinkHalf.setHostValue(safeConvert<half>(sinkFloat.getHostValue(0, h, 0, 0)), 0, h, 0, 0);
+    }
+
+    Tensor<half> oFloatSink(dims);
+    Tensor<half> oHalfSink(dims);
+    const auto run = [&](DataType sinkType, void* sink, Tensor<half>& o) {
+        auto graphBuilder = graphFor(sinkType, DataType::HALF);
+        executor.execute(graphBuilder.GetBufferPointer(),
+                         graphBuilder.GetSize(),
+                         {{1, q.memory().hostData()},
+                          {2, k.memory().hostData()},
+                          {3, v.memory().hostData()},
+                          {4, o.memory().hostData()},
+                          {10, sink}});
+    };
+    run(DataType::FLOAT, sinkFloat.memory().hostData(), oFloatSink);
+    run(DataType::HALF, sinkHalf.memory().hostData(), oHalfSink);
+
+    Tensor<half> oRef(dims);
+    Tensor<half> oNoSink(dims);
+    CpuFpReferenceSdpa::forward(q, k, v, oRef, SdpaFwdOptions<float>{}.setSink(&sinkFloat));
+    CpuFpReferenceSdpa::forward(q, k, v, oNoSink);
+    bool sinkMatters = false;
+    for(size_t i = 0; i < oRef.elementCount(); ++i)
+    {
+        const auto expected = static_cast<float>(oRef.memory().hostData()[i]);
+        EXPECT_EQ(static_cast<float>(oFloatSink.memory().hostData()[i]), expected) << i;
+        EXPECT_EQ(static_cast<float>(oHalfSink.memory().hostData()[i]), expected) << i;
+        sinkMatters |= expected != static_cast<float>(oNoSink.memory().hostData()[i]);
+    }
+    EXPECT_TRUE(sinkMatters);
 }
 
 // A sink uid with no tensor behind it is not applicable.

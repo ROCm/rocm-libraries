@@ -82,4 +82,18 @@ constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_DROPOUT_MASK_STRIDES = {65536
 constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_DBIAS_DIMS = {2, 4, 128, 128};
 constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_DBIAS_STRIDES = {65536, 16384, 128, 1};
 
+// Sink token (input) and its gradient (output): [1, num_heads=4, 1, 1]
+constexpr int64_t K_SDPA_BWD_TENSOR_SINK_TOKEN_UID = 110;
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_SINK_TOKEN_DIMS = {1, 4, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_SINK_TOKEN_STRIDES = {4, 1, 1, 1};
+
+constexpr int64_t K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID = 111;
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_DSINK_TOKEN_DIMS = {1, 4, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_DSINK_TOKEN_STRIDES = {4, 1, 1, 1};
+
+// RNG dump output: [batch=2, num_heads=4, seq_q=128, seq_kv=128]
+constexpr int64_t K_SDPA_BWD_TENSOR_RNG_DUMP_UID = 112;
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_RNG_DUMP_DIMS = {2, 4, 128, 128};
+constexpr std::array<int64_t, 4> K_SDPA_BWD_TENSOR_RNG_DUMP_STRIDES = {65536, 16384, 128, 1};
+
 } // namespace hipdnn_tests::constants

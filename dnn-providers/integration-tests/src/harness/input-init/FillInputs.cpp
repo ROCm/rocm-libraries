@@ -418,6 +418,10 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
+    // The sink is an attention logit, so it is drawn from the scale of the scores; the sink
+    // gradient is an output and needs no fill.
+    recipes.setDefault(a->sink_token_tensor_uid(), FillRecipe::free(-1.0f, 1.0f));
+
     // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
     // where the CPU forward rejects the shapes, and the backward reference fails those.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));

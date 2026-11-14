@@ -54,6 +54,13 @@ namespace hipdnn_frontend::graph
  * - Dropout (probability + seed/offset tensors, or explicit mask)
  * - ALiBi positional encoding
  * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
+ * - Attention sink (SINK_TOKEN input, DSINK_TOKEN output)
+ * - Dropout keep-mask dump (RNG_DUMP output)
+ * - Deterministic-algorithm request and max_total_seq_len_q/kv workspace hints
+ *
+ * The sink, dSink and RNG-dump inputs and outputs, their getters, and the
+ * is_deterministic_algorithm and max_total_seq_len_q/kv members were introduced in
+ * hipdnn_frontend 0.5.0; before it, their setters recorded the graph as unsupported.
  *
  * @code{.cpp}
  * SdpaBackwardAttributes attr;
@@ -88,6 +95,7 @@ public:
         Dropout_mask = 12,
         Dropout_scale = 13,
         Dropout_scale_inv = 14,
+        SINK_TOKEN = 15, // Attention sink (optional)
     };
     typedef InputNames input_names;
 
@@ -97,6 +105,8 @@ public:
         dK = 1, // Gradient w.r.t. key
         dV = 2, // Gradient w.r.t. value
         dBias = 3, // Gradient w.r.t. additive attention bias (optional)
+        DSINK_TOKEN = 4, // Gradient w.r.t. the attention sink (optional)
+        RNG_DUMP = 5, // Dropout keep-mask written by the engine (optional)
     };
     typedef OutputNames output_names;
     // NOLINTEND(readability-identifier-naming)
@@ -129,6 +139,15 @@ public:
 
     // Enum attributes
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
+
+    // Backward-only hints and requests (cuDNN set_deterministic_algorithm / set_max_total_seq_len_*)
+    /// Request a deterministic backward pass; engines that cannot guarantee it decline the graph.
+    bool is_deterministic_algorithm = false;
+    /// Total packed Q length in tokens (sum of all sequence lengths); a workspace hint no hipDNN
+    /// engine consumes. validate() requires a ragged Q, K, V or O when it is set.
+    std::optional<int64_t> max_total_seq_len_q;
+    /// Total packed K/V length in tokens; same contract as max_total_seq_len_q.
+    std::optional<int64_t> max_total_seq_len_kv;
 
     // NOLINTEND(readability-identifier-naming)
 
@@ -209,6 +228,12 @@ public:
     {
         return getInput(InputNames::Dropout_scale_inv);
     }
+    /// Attention-sink input; see docs/KNOWN_DIVERGENCES.md for the hipDNN differences.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_sink_token() const
+    {
+        return getInput(InputNames::SINK_TOKEN);
+    }
 
     // -- Output tensor getters --
 
@@ -231,6 +256,19 @@ public:
     std::shared_ptr<TensorAttributes> get_dbias() const
     {
         return getOutput(OutputNames::dBias);
+    }
+    /// Sink-token gradient output; requires the sink token. See docs/KNOWN_DIVERGENCES.md.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_dsink_token() const
+    {
+        return getOutput(OutputNames::DSINK_TOKEN);
+    }
+    /// Optional dropout keep-mask output; used only when dropout_probability is set with seed and
+    /// offset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_rng_dump() const
+    {
+        return getOutput(OutputNames::RNG_DUMP);
     }
 
     // -- Input tensor setters --
@@ -341,6 +379,8 @@ public:
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
     }
+    /// Philox seed (INT32 or INT64, one element); see docs/KNOWN_DIVERGENCES.md for the hipDNN
+    /// differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_seed(const std::shared_ptr<TensorAttributes>& value)
     {
@@ -391,6 +431,20 @@ public:
     {
         return setInput(InputNames::Dropout_scale_inv, std::move(value));
     }
+    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT, or Q's data type set on
+    ///        the sink itself (an untyped sink takes the graph I/O type and must then be FLOAT).
+    ///        The Stats input must be sink-inclusive. See docs/KNOWN_DIVERGENCES.md for the
+    ///        hipDNN differences.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::SINK_TOKEN, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_sink_token(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::SINK_TOKEN, std::move(value));
+    }
 
     // -- Output tensor setters --
 
@@ -433,6 +487,31 @@ public:
     SdpaBackwardAttributes& set_dbias(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::dBias, std::move(value));
+    }
+    /// @brief Set the output tensor receiving the sink-token gradient, [1, H_q, 1, 1]. Requires
+    ///        the sink token; its data type must equal the sink token's.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_dsink_token(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setOutput(OutputNames::DSINK_TOKEN, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_dsink_token(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setOutput(OutputNames::DSINK_TOKEN, std::move(value));
+    }
+    /// @brief Set the optional output tensor receiving the dropout keep-mask the engine
+    ///        generated, [B, H_q, S_q, S_kv] FLOAT. Consumed only when dropout_probability is
+    ///        set with seed and offset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_rng_dump(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setOutput(OutputNames::RNG_DUMP, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_rng_dump(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setOutput(OutputNames::RNG_DUMP, std::move(value));
     }
 
     // -- Scalar/flag setters --
@@ -557,8 +636,10 @@ public:
                && causal_mask_bottom_right == other.causal_mask_bottom_right
                && dropout_probability == other.dropout_probability
                && attn_scale_value == other.attn_scale_value && left_bound == other.left_bound
-               && right_bound == other.right_bound
-               && diagonal_alignment == other.diagonal_alignment;
+               && right_bound == other.right_bound && diagonal_alignment == other.diagonal_alignment
+               && is_deterministic_algorithm == other.is_deterministic_algorithm
+               && max_total_seq_len_q == other.max_total_seq_len_q
+               && max_total_seq_len_kv == other.max_total_seq_len_kv;
     }
 
     /// @brief Strict equality delegates to logical equality; no layout-only
@@ -616,52 +697,36 @@ public:
         static_cast<void>(value);
         return recordUnsupported("SDPA score-modifier backprop is unsupported by hipDNN");
     }
-    // cuDNN nested-tensor / ragged-batch max-total-seq-len hints have no hipDNN
-    // equivalent yet.
+    /**
+     * @brief Set the total packed Q length hint (cuDNN set_max_total_seq_len_q).
+     *
+     * A workspace-size hint only. validate() requires a ragged (packed) Q, K, V or O when it
+     * is set, as cuDNN does; no positivity check is made.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_max_total_seq_len_q(int64_t value)
     {
-        static_cast<void>(value);
-        return recordUnsupported("SDPA max_total_seq_len_q is unsupported by hipDNN");
+        max_total_seq_len_q = value;
+        return *this;
     }
+    /// @brief Set the total packed K/V length hint (cuDNN set_max_total_seq_len_kv); see
+    ///        set_max_total_seq_len_q().
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_max_total_seq_len_kv(int64_t value)
     {
-        static_cast<void>(value);
-        return recordUnsupported("SDPA max_total_seq_len_kv is unsupported by hipDNN");
+        max_total_seq_len_kv = value;
+        return *this;
     }
-    // Determinism is correctness-critical; hipDNN cannot guarantee it, so a true
-    // request fails loudly rather than silently running a non-deterministic
-    // kernel. Ignoring false is safe.
+    /**
+     * @brief Request a deterministic backward pass (cuDNN set_deterministic_algorithm).
+     *
+     * Engines that cannot guarantee run-to-run determinism decline the graph.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_deterministic_algorithm(bool value)
     {
-        if(value)
-        {
-            return recordUnsupported("Deterministic SDPA backward is unsupported by hipDNN");
-        }
+        is_deterministic_algorithm = value;
         return *this;
-    }
-    // cuDNN backward exposes rng_dump; hipDNN's backward attributes do not.
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaBackwardAttributes& set_rng_dump(const std::shared_ptr<TensorAttributes>& value)
-    {
-        static_cast<void>(value);
-        return recordUnsupported("SDPA backward RNG dump is unsupported by hipDNN");
-    }
-    // Attention-sink tokens (fwd input + bwd gradient) have no hipDNN backward
-    // equivalent.
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaBackwardAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
-    {
-        static_cast<void>(value);
-        return recordUnsupported("SDPA backward sink token is unsupported by hipDNN");
-    }
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaBackwardAttributes& set_dsink_token(const std::shared_ptr<TensorAttributes>& value)
-    {
-        static_cast<void>(value);
-        return recordUnsupported("SDPA backward sink-token gradient is unsupported by hipDNN");
     }
 };
 

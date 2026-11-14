@@ -92,8 +92,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        int64_t seqLenKvStride,
                                        const SdpaPagedSide& pagedK,
                                        const SdpaPagedSide& pagedV,
-                                       const float* sinkPtr,
+                                       const void* sinkPtr,
                                        int64_t sinkStride,
+                                       bool sinkIsFloat,
                                        const float* dropoutMaskPtr,
                                        const std::vector<int64_t>& dropoutMaskStrides,
                                        float dropoutScale,
@@ -154,6 +155,7 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.blockSizeV = static_cast<long long>(pagedV.blockSize);
     args.sink = sinkPtr;
     args.sinkStride = static_cast<long long>(sinkStride);
+    args.sinkIsFloat = sinkIsFloat ? 1 : 0;
     args.dropoutMask = dropoutMaskPtr;
     args.dropoutMaskStr = toSdpaStrides(dropoutMaskStrides);
     args.dropoutScale = dropoutScale;
@@ -188,6 +190,7 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     const auto rows = launch.batch * launch.numHeads * launch.seqQ;
     // Row-stats scratch: D, and the LSE or the recomputed max and exp-sum (fp32 [B, H, Sq]).
     const DeviceScratch rowD(rows);
+    const DeviceScratch rowDRaw(rows);
     const DeviceScratch rowM(rows);
     const DeviceScratch rowL(rows);
 
@@ -204,6 +207,7 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.dV = launch.dV;
     args.dBias = launch.dBias;
     args.rowD = rowD.data;
+    args.rowDRaw = rowDRaw.data;
     args.rowM = rowM.data;
     args.rowL = rowL.data;
     const auto& st = launch.strides;
@@ -243,6 +247,12 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     args.dropoutMaskStr = toSdpaStrides(launch.dropoutMaskStrides);
     args.dropoutScale = launch.dropoutScale;
     args.dropoutScaleInv = launch.dropoutScaleInv;
+    args.sink = launch.sink;
+    args.sinkStride = static_cast<long long>(launch.sinkStride);
+    args.sinkIsFloat = launch.sinkIsFloat ? 1 : 0;
+    args.dSink = launch.dSink;
+    args.dSinkStride = static_cast<long long>(launch.dSinkStride);
+    args.dSinkIsFloat = launch.dSinkIsFloat ? 1 : 0;
     args.score.softcap = launch.softcap;
     args.score.alibi = launch.alibi ? 1 : 0;
 
@@ -254,6 +264,11 @@ void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
     run("sdpaBwdDqRef", rows * launch.headDim);
     run("sdpaBwdDkRef", launch.batch * launch.numHeadsK * launch.seqKv * launch.headDim);
     run("sdpaBwdDvRef", launch.batch * launch.numHeadsV * launch.seqKv * launch.headDimV);
+    if(launch.dSink != nullptr)
+    {
+        // One thread per query head; reads the row stats, so it runs after them.
+        run("sdpaBwdDSinkRef", launch.numHeads);
+    }
     if(launch.dBias != nullptr)
     {
         int64_t count = 1;

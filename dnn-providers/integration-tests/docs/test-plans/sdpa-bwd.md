@@ -78,7 +78,8 @@ stay because the plan and the generator cite them.
 | Item | Where it belongs |
 |---|---|
 | The forward op | `sdpa-fwd.md` (ALMIOPEN-2893) |
-| cuDNN backward features with no schema field: sinks and dSink (ALMIOPEN-3020), `rng_dump`, `score_mod`, `max_total_seq_len_q/kv`, `deterministic_algorithm(true)`, the FP8 backward node, paged K/V, block-sparse masks | frontend unit tests of rule R0 (`SdpaBackwardAttributes.hpp:565-629`) |
+| cuDNN backward features with no schema field: `score_mod`, the FP8 backward node, paged K/V, block-sparse masks | frontend unit tests of rule R0 (`SdpaBackwardAttributes.hpp`, `hasUnsupportedUsage()`) |
+| Sinks and dSink (ALMIOPEN-3020), `rng_dump`, `max_total_seq_len_q/kv`, `is_deterministic_algorithm`: schema fields since ALMIOPEN-3184 | frontend unit tests (`TestSdpaBwdNode`, `TestSdpaBackwardAttributes`); reference tests (`TestCpuFpReferenceSdpa*`, `TestGpuSdpaBwdSink*`); engine declines in the provider unit tests |
 | Engine knobs (accumulator type, rounding mode); kernel-internal tests | provider unit tests; the kernel project |
 | Exhaustive generation and fuzzing; release-train testing | the separate tool (§7); release readiness |
 | The provider-local C++ test `IntegrationGpuSdpaBackward.cpp` | retired by the bundle PR that lands this plan |
@@ -127,7 +128,7 @@ round once (SEM-012); the API sets no accumulation rule. Sources: `SdpaBwdNode.h
 | Scale | `scale_tensor_uid` | in, optional | one element | FLOAT | one element, pass-by-value, not with `attn_scale_value` (R11, R12) |
 | seq_len_q, seq_len_kv | `seq_len_*_tensor_uid` | in, optional | [B,1,1,1] | INT32 | checked only with `padding_mask` (R10) |
 | Dropout mask | `dropout_mask_tensor_uid` | in, optional | [{B,1},{Hq,1},Sq,Skv] | FP16, BF16 (references: FLOAT) | rank 4, dims (R9) |
-| Seed, Offset; dropout scale, scale_inv | `seed`, `offset`, `dropout_scale(_inv)_tensor_uid` | in, optional | one element | INT32 or INT64; FLOAT | none |
+| Seed, Offset; dropout scale, scale_inv | `seed`, `offset`, `dropout_scale(_inv)_tensor_uid` | in, optional | seed, offset: every dim 1; scales: one element | INT32 or INT64; FLOAT | seed and offset: dtype and dims (SEM-030) |
 | Ragged offsets | `ragged_offset_tensor_uid` on a primary tensor | in, optional | (B+1,1,1,1) | INT32 | tensor rules only |
 
 Every tensor has a declared `alignment` (default 16). `TensorAttributes::validate()` requires a
@@ -191,7 +192,9 @@ hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360
 | SEM-010 dead rows | O = 0, Stats = −inf, no contribution | aligned |
 | SEM-011 Stats | natural log, FP32, [B,Hq,Sq,1] | rank 3 or 4 |
 | SEM-014 dBias | sum of unscaled dS over broadcast dims | aligned |
-| SEM-015 dropout | explicit mask form; Philox needs `rng_dump` | explicit mask modelled; Philox declined |
+| SEM-015 dropout | explicit mask form; Philox needs `rng_dump` | explicit mask modelled; Philox served only with a backward `rng_dump` |
+| SEM-022 sinks | dSink = −Σ exp(sink − LSE) · D over live rows; sink and dSink FLOAT or Q's data type | modelled in both dtypes |
+| SEM-029 determinism, `max_total_seq_len` | `is_deterministic_algorithm` reaches engines; the hints need a ragged tensor | accepted; hints ignored |
 | SEM-021 ALiBi | cuDNN form, TOP_LEFT causal only | aligned |
 
 Open points: dQ, dK and dV at padded positions are expected to be 0 until a SEM entry decides (the
@@ -224,7 +227,7 @@ rejection probe.
 | T11 | dBias | dims and dtype = Bias; sum of the unscaled dS over the broadcast dims (SEM-014); explicit dims; packed and padded row pitch | ready | PR |
 | T12 | Scale tensor | one FLOAT element, compile-time constant or runtime pass-by-value (RFC 0016; the backend applies the plugin API 1.2.0 floor itself, so bundles keep `min_required_engine_api_version` 1.0.0), value 0.5 (neither 1.0 nor 1/√Dqk); a device-memory scale is illegal (R12); exclusive with `attn_scale_value` (R11) | ready | Q |
 | T13 | seq_len_q, seq_len_kv | INT32 [B,1,1,1], per-batch values (G13); both required with `padding_mask` (R10) | I6 + HG4 | PR (rejection probe); gated → PR |
-| T14 | Seed, Offset | one INT32 or INT64 element (Philox dropout) | none: the backward schema has no `rng_dump` | — |
+| T14 | Seed, Offset | one INT32 or INT64 element, every dim 1, host or device (Philox dropout, SEM-030) | none: no engine writes a backward `rng_dump`; the references apply one when given | — |
 | T15, T16 | Dropout mask, scale, scale_inv | mask [{B,1},{Hq,1},Sq,Skv] (R9) with values {0,1} (the references need FLOAT); s = 1/(1−p) with scale_inv = 1−p; scale_inv absent; scale_inv without a mask is U | I6 + HG4 | PR (rejection probe); gated → PR |
 | T17 | Ragged offsets | INT32 (B+1,1,1,1) on each ragged tensor; multiplier ≥ 1; THD packing (G14) | I6 + HG20 | gated → N |
 | T18 | Layout family (innermost stride 1) | packed BHSD; packed BSHD (every corpus graph); sequence stride D + 8; interleaved QKV (BS3HD); each tensor on its own (B,H,S) permutation; random 0–8 element gaps per axis; B = H = 1 (BHSD equals BSHD) | ready | Q |
@@ -248,7 +251,7 @@ rejection probe.
 | A9, AW6 | `padding_mask` | true with both seq_len tensors; false with both is padding (SEM-008 extension, cuDNN rejects); true without seq_len is illegal (R10) | I6 + HG4 | gated → PR |
 | A10 | `dropout_probability` | unset; 0 (probe until a SEM entry defines it); 0 < p < 1 with seed and offset (Philox); p without RNG state, p ≥ 1, p < 0, NaN, or p with a mask is U (IVP7) | 0: gated (p0: ALMIOPEN-3149 or ALMIOPEN-3150); Philox: none | Q (gated) |
 | A11 | Node `compute_data_type` | FLOAT; HALF, BFLOAT16, DOUBLE (listed: each needs its own tolerance class); unset on node and graph is illegal | ready (FLOAT) | Q (FLOAT) |
-| A12, A13 | Node name; cuDNN-parity setters with no schema field | no semantic effect, not swept; rejected by R0 | — | unit tests |
+| A12, A13 | Node name; `score_mod` setters (recorded unsupported) | no semantic effect, not swept; rejected by R0 | — | unit tests |
 
 ### 2.3 Geometry
 
@@ -384,7 +387,7 @@ of IVP3 (explicit gradient dims); the rest is to file.
 | IVP5 | rank-4 bias: dim 0 ∈ {B,1}, dim 1 ∈ {Hq,1} | PRB-U05 |
 | IVP6 | not `causal_mask` with `causal_mask_bottom_right` | PRB-M01, PRB-M01n |
 | IVP7 | 0 ≤ p < 1; p > 0 needs seed and offset; p not with a mask | PRB-R02, PRB-R02f |
-| IVP8 | dropout scale, scale_inv, seed, offset have one element; scale_inv needs a mask | PRB-R05 |
+| IVP8 | dropout scale and scale_inv have one element; seed and offset are INT32 or INT64 with every dim 1 (SEM-030); scale_inv needs a mask | PRB-R05 |
 | IVP9 | seq_len tensors both or neither, INT32 [B,1,1,1] whenever present | PRB-U09 |
 | IVP10 | `alibi_mask` needs R_eff = 0 and TOP_LEFT | PRB-M05, PRB-M06 |
 | IVP11 | IO dtypes ∈ {HALF, BFLOAT16, FLOAT} | PRB-U11 |
@@ -945,7 +948,7 @@ to 1708× its seed tolerance; GL-10 pins SEM-001. GQA is G-C: the CPU reference 
 | MQA, Hk ≠ Hv, model GQA ratios | GL-12; the live CPU reference | a grouping defect escapes |
 | ALiBi | nothing live yet: PRB-M04 and X10 wait for I6 | the generator writes backward ALiBi and PRB-M04's gate opens |
 | Ragged (THD) | nothing live yet: PRB-P06 waits for I6 and HG20 | the generator writes ragged backward and PRB-P06's gate opens |
-| Philox dropout | nothing: no reference models it | the API gains `rng_dump` |
+| Philox dropout | nothing live: the references apply a backward `rng_dump` when given one, but no engine writes it | an engine emits a backward `rng_dump` |
 | #14358's `padneq_window_br`, `padneq_dbias_batch`; a row dead by a −inf bias | GL-16a, GL-14; REG-14 and #14358 unit tests | a padding defect with a window or dBias escapes; never for −inf in a bias |
 
 **Dead rows.** RFC 0022 §12.2 treats −inf in an SDPA stats tensor, on exactly the rows the case
@@ -1057,9 +1060,11 @@ output is finite and its class holds.
   an unwritten element fails; the gradients are finite by contract (SEM-010).
 - **Exact zeros** of dead rows, unattended keys and padded positions need HG9: allclose proves only
   |x| ≤ atol. **Output slack:** a write into the gaps of a strided output passes until HG19.
-- **Determinism** is not promised (R0 rejects `deterministic_algorithm(true)`); every run must pass
-  its class, and repeat-and-compare (I5) fails a run-to-run difference above the class atol. Until
-  I5, DEF-02a runs three times in its own level-YAML category (`extra_args: ['--gtest_repeat=3']`).
+- **Determinism** is promised only for a graph with `is_deterministic_algorithm` set (SEM-029): an engine
+  that cannot guarantee it declines the graph, and one that accepts it is expected to repeat bitwise. For every
+  other graph every run must pass its class, and repeat-and-compare (I5) fails a run-to-run difference above
+  the class atol. Until I5, DEF-02a runs three times in its own level-YAML category
+  (`extra_args: ['--gtest_repeat=3']`).
 
 ### 6.4 Reference and harness prerequisites
 

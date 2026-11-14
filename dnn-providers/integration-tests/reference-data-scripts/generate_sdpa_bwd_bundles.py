@@ -18,6 +18,7 @@ sweep per topology under ``integration-test-bundles/<level>/SdpaBackward/``:
     Philox              + Seed, Offset
     Padding             + SeqLenQ, SeqLenKv
     Ragged              + ragged offsets of Q, K, V, O
+    Sink                + Sink, dSink (attention sink in FLOAT or the IO dtype, and its gradient)
     FwdBwdChained       SdpaFwd -> SdpaBackward (O and Stats virtual)
 
 A directory is written only for a topology with a runnable case. Each gets
@@ -92,6 +93,7 @@ TENSOR_NAME = {
     "DropoutScaleInv": "dropout_scale_inv", "dBias": "SdpaBwd_0::dBias", "Scale": "attn_scale",
     "Seed": "seed", "Offset": "offset", "RaggedOffsetQ": "ragged_offset_q", "RaggedOffsetK": "ragged_offset_k",
     "RaggedOffsetV": "ragged_offset_v", "RaggedOffsetO": "ragged_offset_o",
+    "Sink": "sink", "dSink": "SdpaBwd_0::dSink",
 }
 # fmt: on
 RAGGED_OF = {
@@ -159,6 +161,11 @@ def _bwd_node(names, topo):
         "dq_tensor_uid": P.UID["dQ"],
         "dv_tensor_uid": P.UID["dV"],
     }
+    if "Sink" in names:  # only the Sink topology writes the sink keys
+        inputs["sink_token_tensor_uid"] = P.UID["Sink"]
+        outputs["dsink_token_tensor_uid"] = P.UID["dSink"]
+        inputs = dict(sorted(inputs.items()))
+        outputs = dict(sorted(outputs.items()))
     return {
         "compute_data_type": attr("compute_data_type"),
         "inputs": inputs,
@@ -457,6 +464,8 @@ def extras(c):
         )
     if c.get("dbias"):
         ex.append("dbias")
+    if c.get("sink"):
+        ex.append("sink" + c["sink"]["dtype"])
     at = c.get("attrs") or {}
     if at.get("alibi_mask"):
         ex.append("alibi")
@@ -708,6 +717,39 @@ def quick_variant_items():
             )
         )
     return out
+
+
+def sink_items():
+    """Quick: the attention sink and its gradient (T25, T26) on the Sink topology, with
+    the sink in FLOAT and in the IO dtype, MHA and GQA. Graph-only cases whose oracle is the
+    CPU and GPU references; no in-tree engine serves a sink yet, so they are probes. They
+    are small on purpose: the quick budget (§3) has little room, and Sq, Skv, B and Hq all
+    exceed 1 so dSink's sum over batch and rows and its per-query-head indexing are live.
+    Ragged and dropout are not Sink-topology cases (the Ragged and Philox topologies have
+    no sink); the golden generator covers a ragged sink bundle."""
+    base = dict(B=2, Hq=2, Hk=2, Hv=2, Sq=16, Skv=24, Dqk=64, Dv=64)
+    gqa = dict(base, Hq=4)
+    rows = (
+        ("SK01", base, "bf16", "float", {}, []),
+        ("SK02", base, "fp16", "io", {}, []),
+        ("SK03", gqa, "fp16", "float", dict(R=0), ["G3"]),
+        ("SK04", gqa, "bf16", "io", dict(R=0, align="BR"), ["G3"]),
+    )
+    return [
+        P.new(
+            id=id_,
+            level="quick",
+            purpose="probe",
+            items=["T25", "T26"] + extra,
+            dtypes=(dt,),
+            topology="Sink",
+            sink={"dtype": sink},
+            inputs={"sink": P.sink_logit_range(geom["Skv"])},
+            **geom,
+            **band,
+        )
+        for id_, geom, dt, sink, band, extra in rows
+    ]
 
 
 # fmt: off
@@ -1225,6 +1267,7 @@ def plan_items():
     items = (
         core_items()
         + quick_variant_items()
+        + sink_items()
         + catalog_items()
         + model_items()
         + l_items()
@@ -1541,6 +1584,7 @@ def record(c):
         "dropout",
         "padding",
         "ragged",
+        "sink",
         "dtype_over",
         "dims_over",
     ):

@@ -68,7 +68,7 @@ The following table lists the operations currently executable through the GPU gr
 | Resample Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL requires INT32 indices |
 | SDPA Forward (dense) | FP16, BFP16, FP32, FP8 (E4M3, E5M2 and their FNUZ forms) | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | Native: BFP16, FP8 E4M3; other dtypes through the dense rewrite | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
-| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, ALiBi; ragged through the dense rewrite. No Philox dropout (the backward node has no `rng_dump`) or sinks (no `dsink` output) |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout, Philox dropout with an `rng_dump` output, sink with `dsink` (FLOAT or Q's data type, fp32 accumulation), ALiBi; `is_deterministic_algorithm` accepted (fixed-order kernels), `max_total_seq_len_q/kv` ignored; ragged through the dense rewrite |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 
@@ -183,10 +183,10 @@ Design, the full feature table for both references, and how they are tested:
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V read in place through INT32 page tables, as the CPU reference (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) |
 | ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
-| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite |
+| Attention sink (`sink_token`, FLOAT or Q's data type (the graph I/O data type when Q's is unset), [1, H, 1, 1]; backward `dsink_token` with the sink's dtype) | Supported | Through the dense rewrite |
 | Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Through the dense rewrite |
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
-| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference; the backward has no Philox dropout | Through the dense rewrite (same rule) |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference; the backward takes its own `rng_dump` output under the same rule | Through the dense rewrite (same rule) |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Additive attention bias (`attn_mask`) | Supported, as in the CPU reference | Through the dense rewrite |

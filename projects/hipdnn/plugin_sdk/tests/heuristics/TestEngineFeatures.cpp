@@ -1259,6 +1259,51 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
     }
 }
 
+TEST(TestEngineFeatures, SdpaBackwardSinkOrDsinkRefusesACount)
+{
+    const auto backwardGraph = [](void (*adjust)(SdpaBackwardAttributesT&)) {
+        SdpaBackwardAttributesT sdpa;
+        sdpa.q_tensor_uid = 1;
+        sdpa.k_tensor_uid = 2;
+        sdpa.v_tensor_uid = 3;
+        sdpa.o_tensor_uid = 4;
+        sdpa.do_tensor_uid = 5;
+        sdpa.stats_tensor_uid = 6;
+        sdpa.dq_tensor_uid = 7;
+        sdpa.dk_tensor_uid = 8;
+        sdpa.dv_tensor_uid = 9;
+        sdpa.causal_mask = true;
+        adjust(sdpa);
+        return single({{2, 8, 3, 16},
+                       {2, 2, 7, 16},
+                       {2, 2, 7, 32},
+                       {2, 8, 3, 32},
+                       {2, 8, 3, 32},
+                       {2, 8, 3, 1},
+                       {2, 8, 3, 16},
+                       {2, 2, 7, 16},
+                       {2, 2, 7, 32}},
+                      sdpa);
+    };
+
+    // The same graph without either operand is counted (2.5x the forward's 9216).
+    const auto plain = features(backwardGraph([](SdpaBackwardAttributesT&) {}));
+    EXPECT_DOUBLE_EQ(plain.at("graph.flops").get<double>(), 23040.0);
+
+    using Refusal = void (*)(SdpaBackwardAttributesT&);
+    const std::vector<std::pair<const char*, Refusal>> refusals = {
+        {"sink_token", [](SdpaBackwardAttributesT& op) { op.sink_token_tensor_uid = 5; }},
+        {"dsink_token", [](SdpaBackwardAttributesT& op) { op.dsink_token_tensor_uid = 5; }},
+    };
+    for(const auto& [name, refuse] : refusals)
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(backwardGraph(refuse));
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+    }
+}
+
 // Every NodeAttributes member is either counted, with an entry here whose representative
 // graph publishes its declared work, or listed in NO_COUNTING_CONVENTION. A new member with
 // neither fails, so a new op cannot silently leave every graph holding it without FLOPs.

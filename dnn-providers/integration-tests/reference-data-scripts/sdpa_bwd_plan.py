@@ -100,6 +100,7 @@ UID = {
     "Bias": 9, "SeqLenQ": 10, "SeqLenKv": 11, "DropoutMask": 12, "DropoutScale": 13,
     "DropoutScaleInv": 14, "dBias": 15, "Scale": 16, "Seed": 17, "Offset": 18,
     "RaggedOffsetQ": 19, "RaggedOffsetK": 20, "RaggedOffsetV": 21, "RaggedOffsetO": 22,
+    "Sink": 23, "dSink": 24,
 }
 
 # Template directories under <level>/SdpaBackward/ (plan §4) and the
@@ -116,6 +117,7 @@ TOPOLOGIES = OrderedDict([
     ("Philox", ("Seed", "Offset")),
     ("Padding", ("SeqLenQ", "SeqLenKv")),
     ("Ragged", ("RaggedOffsetQ", "RaggedOffsetK", "RaggedOffsetV", "RaggedOffsetO")),
+    ("Sink", ("Sink", "dSink")),  # attention sink (FLOAT or IO dtype) and its gradient
     ("FwdBwdChained", ()),  # SdpaFwd -> SdpaBackward; O and Stats are virtual
 ])
 # fmt: on
@@ -161,6 +163,7 @@ CASE_DEFAULTS = dict(
     defect=None,  # open engine defect the probe pins (§4.2)
     regression_of=None,  # escaped bug the case pins
     golden=None,  # GL row
+    sink=None,  # {dtype: float | io}: sink_token and dsink_token, both [1, Hq, 1, 1] in that dtype
     seed=0,
     repeat=None,
 )
@@ -438,6 +441,12 @@ def tensor_table(c, dt):
     if c.get("ragged"):
         for n in ("RaggedOffsetQ", "RaggedOffsetK", "RaggedOffsetV", "RaggedOffsetO"):
             out[n] = _tensor(n, [B + 1, 1, 1, 1], one, "packed", "int32")
+    snk = c.get("sink")
+    if snk:
+        sd = [1, Hq, 1, 1]
+        sdt = "float" if snk["dtype"] == "float" else io
+        out["Sink"] = _tensor("Sink", sd, packed(sd), "packed", sdt)
+        out["dSink"] = _tensor("dSink", sd, packed(sd), "packed", sdt)
     for t in out.values():
         t["alignment"] = c.get("alignment", 16)
     return out
@@ -607,6 +616,7 @@ WF_RULES = [
     ("right_bound < 0 when set", "right_bound >= 0 when set", "sdpa_node.h:1514-1516"),
     ("head dim not a multiple of 8", "Dqk and Dv are multiples of 8", "Attention.md:123"),
     ("FLOAT dropout mask", "dropout mask is HALF or BFLOAT16", "Attention.md:455-459"),
+    ("sink dtype", "sink and dSink are FLOAT", "cuDNN fp16.py:176-178, 422-423"),
 ]
 
 # (reason, when hipDNN defines it, source). A WF failure whose reason is not
@@ -628,6 +638,8 @@ EXT_RULES = [
     ("FLOAT dropout mask", "always: the references need FLOAT", "SEM-015"),
     ("dropout_probability without RNG state", "dropout_probability = 0",
      "the fill and engines read it as no dropout; the references decline it (ALMIOPEN-3149, ALMIOPEN-3150)"),
+    ("sink dtype", "sink and dSink in Q's dtype, both the same dtype",
+     "SEM-022: a superset of cuDNN's FLOAT sink, so a kernel that reads the sink in the IO dtype needs no cast"),
 ]
 # fmt: on
 
@@ -692,6 +704,14 @@ def frontend_legal(r, semantics="develop"):
             t = T.get(n)
             if not t or t["dims"] != [B, 1, 1, 1] or t["data_type"] != "int32":
                 return False, "R10"
+    snk, dsnk = T.get("Sink"), T.get("dSink")
+    if snk or dsnk:
+        want = [1, Hq, 1, 1]
+        io_t = T["Q"]["data_type"]
+        if not snk or snk["dims"] != want or snk["data_type"] not in ("float", io_t):
+            return False, "R-sink"
+        if dsnk and (dsnk["dims"] != want or dsnk["data_type"] != snk["data_type"]):
+            return False, "R-sink"
     s = T.get("Scale")
     if s and (
         r["scale"]["mode"] == "attn_scale_value"
@@ -795,6 +815,9 @@ def well_formed(r):
         "FLOAT dropout mask": not (
             mask and mask["data_type"] not in ("half", "bfloat16")
         ),
+        "sink dtype": all(
+            T[n]["data_type"] == "float" for n in ("Sink", "dSink") if n in T
+        ),
     }
     for reason, _rule, _src in WF_RULES:
         if not checks[reason]:
@@ -827,6 +850,11 @@ def extension(r, why):
         "head dim not a multiple of 8": True,
         "FLOAT dropout mask": True,
         "dropout_probability without RNG state": a.get("dropout_probability") == 0,
+        "sink dtype": all(
+            T[n]["data_type"] == T["Q"]["data_type"]
+            for n in ("Sink", "dSink")
+            if n in T
+        ),
     }
     return bool(ext.get(why, False))
 
@@ -893,7 +921,7 @@ GATES = {
     "HG18": ("HG18: finite-only validator", "to file"),
     "harness: zero strides rejected": ("HG17: zero input strides (#14709 lets the data SDK Tensor hold them; "
                                        "H62 needs a GPU run to confirm)", "to file"),
-    "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
+    "none": ("no oracle (Philox: the engine's RNG stream is engine-defined)", "to file"),
     "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
            "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),
@@ -937,6 +965,7 @@ def probe_reasons(c, dt):
         or c.get("dropout")
         or c.get("padding")
         or c.get("ragged")
+        or c.get("sink")
     ):
         why.append("optional tensor")
     if (c.get("attrs") or {}).get("alibi_mask"):
@@ -991,7 +1020,17 @@ DOMAIN = {
     "bias_neg": {"bias": [-4, 0]},
 }
 # fmt: on
-INPUT_NAME = {"q": "Q", "k": "K", "v": "V", "do": "dO", "bias": "Bias"}
+INPUT_NAME = {"q": "Q", "k": "K", "v": "V", "do": "dO", "bias": "Bias", "sink": "Sink"}
+
+# Sink logits are filled U[ln(Skv) - SINK_LOGIT_SPREAD, ln(Skv) + SINK_LOGIT_SPREAD]: with
+# scores near 0 a sink at ln(Skv) holds about half the softmax mass, so dSink is not lost in
+# rounding (generate_sdpa_bwd_golden.py draws the golden sink the same way).
+SINK_LOGIT_SPREAD = 1.0
+
+
+def sink_logit_range(Skv):
+    centre = math.log(Skv)
+    return [round(centre - SINK_LOGIT_SPREAD, 2), round(centre + SINK_LOGIT_SPREAD, 2)]
 
 
 def domain(name):
@@ -1130,6 +1169,7 @@ def modellable(c):
         c.get("dropout")
         or c.get("padding")
         or c.get("ragged")
+        or c.get("sink")
         or isinstance((c.get("inputs") or {}).get("bias"), str)
         or (c.get("bias") or {}).get("dtype") == "bool"
     )
@@ -1615,7 +1655,7 @@ def axis_projection(c, dt):
 # IV: frontend rules (frontend unit tests). IVP: proposed rules (rejection
 # probes until they land).
 FEATURES = (
-    [f"T{i}" for i in range(1, 25)]
+    [f"T{i}" for i in range(1, 27)]  # T25: sink_token, T26: dsink_token (ALMIOPEN-3184)
     + [f"A{i}" for i in range(1, 14)]
     + [f"G{i}" for i in range(1, 15)]
     + [f"DT{i}" for i in range(1, 7)]

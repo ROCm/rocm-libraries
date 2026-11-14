@@ -1300,9 +1300,9 @@ IntegrationBundleVerificationHarness::RefRunResult
             useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
             refOutputs = allocateSentinelOutputs(useDevice);
             // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
-            if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
+            for(const auto& dump : bundle::findSdpaRngDumps(_bundle->graphWrapper()))
             {
-                bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
+                bundle::copyRngDump(*engineOutputs.at(dump.uid), *refOutputs.at(dump.uid));
             }
             try
             {
@@ -1535,11 +1535,11 @@ VerificationOutcome
           };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
-    const auto dump = bundle::findSdpaRngDump(wrapper);
-    if(dump.has_value())
+    const auto dumps = bundle::findSdpaRngDumps(wrapper);
+    for(const auto& dump : dumps)
     {
         const auto problem
-            = bundle::checkRngDump(*engineOutputs.at(dump->uid), dump->dropoutProbability);
+            = bundle::checkRngDump(*engineOutputs.at(dump.uid), dump.dropoutProbability);
         if(!problem.empty())
         {
             ADD_FAILURE() << "Bundle: " << _bundlePath.string() << ": " << problem;
@@ -1580,7 +1580,7 @@ VerificationOutcome
 
     const auto mismatches = bundle::compareOutputs(
         wrapper,
-        bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
+        bundle::comparedOutputUids(_bundle->outputTensorUids, dumps),
         engineOutputs,
         expectedFor,
         toleranceFor,

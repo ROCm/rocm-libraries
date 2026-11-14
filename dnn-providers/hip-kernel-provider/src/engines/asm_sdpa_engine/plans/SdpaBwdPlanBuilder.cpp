@@ -510,6 +510,21 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
 
+    // Fields the engine neither reads nor serves. Ignoring any of them would return a wrong or
+    // incomplete result with no error, so each one declines by name.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(),
+                               "sink_token tensor not supported (no sink term in the kernels)");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dsink_token_tensor_uid(),
+                               "dsink_token tensor not supported (no dSink output in the kernels)");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(),
+                               "rng_dump tensor not supported (the kernels write no dropout dump)");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        attrs.is_deterministic_algorithm(),
+        "is_deterministic_algorithm must be false (the default a32 kernels accumulate dQ with "
+        "atomic adds, so the result is not bitwise reproducible)");
+    // max_total_seq_len_q/kv are workspace-size hints that only apply to ragged graphs; ragged
+    // graphs are declined below, so they are intentionally not read here.
+
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
     // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
     if(attrs.scale_tensor_uid().has_value())

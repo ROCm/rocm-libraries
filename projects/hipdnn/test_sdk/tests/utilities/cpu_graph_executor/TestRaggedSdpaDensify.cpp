@@ -1191,3 +1191,132 @@ TEST(TestRaggedSdpaDensify, OffsetTableNamedByBackwardAttributeIsKept)
     EXPECT_TRUE(has(Q_OFFSETS));
     EXPECT_FALSE(has(KV_OFFSETS));
 }
+
+// A ragged backward graph with a sink and its gradient (no native plan) through the executor equals
+// the dense backward reference on the unpacked data: the sink [1, H, 1, 1] is not a ragged role,
+// and dSink sums over the live query rows only.
+TEST(TestRaggedSdpaDensify, RaggedBackwardWithSinkEqualsDensePaddedBackward)
+{
+    constexpr int64_t DSINK = 105;
+    auto q = packedValues(10, H * D, 31);
+    auto k = packedValues(13, H * D, 32);
+    auto v = packedValues(13, H * D, 33);
+    auto dO = packedValues(10, H * D, 34);
+    auto qOffsets = Q_TOKENS;
+    auto kvOffsets = KV_TOKENS;
+    Tensor<float> sink({1, H, 1, 1});
+    sink.setHostValue(0.3F, 0, 0, 0, 0);
+    sink.setHostValue(-0.6F, 0, 1, 0, 0);
+
+    const auto toTensor = [](const std::vector<float>& values, int64_t s, int64_t width) {
+        Tensor<float> t({B, H, s, width});
+        std::memcpy(t.memory().hostData(), values.data(), values.size() * sizeof(float));
+        return t;
+    };
+    auto qd = toTensor(unpack(q, Q_TOKENS, SQ, D), SQ, D);
+    auto kd = toTensor(unpack(k, KV_TOKENS, SKV, D), SKV, D);
+    auto vd = toTensor(unpack(v, KV_TOKENS, SKV, D), SKV, D);
+    auto dOd = toTensor(unpack(dO, Q_TOKENS, SQ, D), SQ, D);
+    Tensor<int32_t> seqQ({B, 1, 1, 1});
+    Tensor<int32_t> seqKv({B, 1, 1, 1});
+    for(int64_t b = 0; b < B; ++b)
+    {
+        seqQ.setHostValue(static_cast<int32_t>(Q_LENS[static_cast<size_t>(b)]), b, 0, 0, 0);
+        seqKv.setHostValue(static_cast<int32_t>(KV_LENS[static_cast<size_t>(b)]), b, 0, 0, 0);
+    }
+    Tensor<float> od({B, H, SQ, D});
+    Tensor<float> lse({B, H, SQ, 1});
+    CpuFpReferenceSdpa::forward(qd,
+                                kd,
+                                vd,
+                                od,
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.5F)
+                                    .setBand(-1, 0, false)
+                                    .setSeqLens(&seqQ, &seqKv)
+                                    .setSink(&sink)
+                                    .setLse(&lse));
+    Tensor<float> dQd({B, H, SQ, D});
+    Tensor<float> dKd({B, H, SKV, D});
+    Tensor<float> dVd({B, H, SKV, D});
+    Tensor<float> dSinkRef({1, H, 1, 1});
+    CpuFpReferenceSdpa::backward(qd,
+                                 kd,
+                                 vd,
+                                 od,
+                                 dOd,
+                                 dQd,
+                                 dKd,
+                                 dVd,
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(0.5F)
+                                     .setLse(&lse)
+                                     .setBand(-1, 0, false)
+                                     .setSeqLens(&seqQ, &seqKv)
+                                     .setSink(&sink, &dSinkRef));
+
+    // Pack O and the LSE the way the ragged graph expects them.
+    std::vector<float> o(10 * H * D);
+    std::vector<float> lsePacked(10 * H);
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t tok = 0; tok < Q_LENS[static_cast<size_t>(b)]; ++tok)
+        {
+            for(int64_t h = 0; h < H; ++h)
+            {
+                const auto row = (Q_TOKENS[static_cast<size_t>(b)] + tok) * H + h;
+                lsePacked[static_cast<size_t>(row)] = lse.getHostValue(b, h, tok, 0);
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    o[static_cast<size_t>(row * D + d)] = od.getHostValue(b, h, tok, d);
+                }
+            }
+        }
+    }
+
+    const auto graph = editGraph(raggedGraph(true, false), [&](GraphT& g) {
+        g.tensors.push_back(tensor(SINK, DataType::FLOAT, {1, H, 1, 1}, {H, 1, 1, 1}));
+        g.tensors.push_back(tensor(DSINK, DataType::FLOAT, {1, H, 1, 1}, {H, 1, 1, 1}));
+        auto* attrs = g.nodes.front()->attributes.AsSdpaBackwardAttributes();
+        attrs->sink_token_tensor_uid = SINK;
+        attrs->dsink_token_tensor_uid = DSINK;
+    });
+    std::vector<float> dQ(10 * H * D, std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> dK(13 * H * D, std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> dV(13 * H * D, std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> dSink(H, std::numeric_limits<float>::quiet_NaN());
+    const std::unordered_map<int64_t, void*> pack = {{Q, q.data()},
+                                                     {K, k.data()},
+                                                     {V, v.data()},
+                                                     {O, o.data()},
+                                                     {DO, dO.data()},
+                                                     {STATS, lsePacked.data()},
+                                                     {DQ, dQ.data()},
+                                                     {DK, dK.data()},
+                                                     {DV, dV.data()},
+                                                     {SINK, sink.memory().hostData()},
+                                                     {DSINK, dSink.data()},
+                                                     {Q_OFFSETS, qOffsets.data()},
+                                                     {KV_OFFSETS, kvOffsets.data()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(const_cast<uint8_t*>(graph.data()), graph.size()));
+    executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
+
+    const auto expectNear =
+        [](const std::vector<float>& got, const Tensor<float>& want, const char* name) {
+            ASSERT_EQ(got.size(), want.elementCount()) << name;
+            for(size_t i = 0; i < got.size(); ++i)
+            {
+                EXPECT_NEAR(got[i], want.memory().hostData()[i], 1e-5F) << name << " element " << i;
+            }
+        };
+    expectNear(unpack(dQ, Q_TOKENS, SQ, D), dQd, "dQ");
+    expectNear(unpack(dK, KV_TOKENS, SKV, D), dKd, "dK");
+    expectNear(unpack(dV, KV_TOKENS, SKV, D), dVd, "dV");
+    for(int64_t h = 0; h < H; ++h)
+    {
+        ASSERT_NE(dSinkRef.getHostValue(0, h, 0, 0), 0.0F) << "head " << h;
+        EXPECT_NEAR(dSink[static_cast<size_t>(h)], dSinkRef.getHostValue(0, h, 0, 0), 1e-5F)
+            << "head " << h;
+    }
+}

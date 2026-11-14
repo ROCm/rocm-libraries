@@ -20,6 +20,7 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaBwdGraphMutators.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -2510,6 +2511,66 @@ TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, defaultSettings),
               _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a32Settings));
+}
+
+// =============================================================================
+// Backward fields the engine does not serve
+// =============================================================================
+
+// Each case adds exactly one field to a graph the engine accepts and expects the decline, so
+// deleting that field's decline fails that case and no other. The unmodified graph is asserted
+// accepted first: the device check declines every graph on a non-gfx942 device, which would make
+// a bare EXPECT_FALSE pass without testing the field.
+class TestSdpaBwdUnservedFields : public TestSdpaBwdPlanBuilder
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+        {
+            GTEST_SKIP();
+        }
+
+        _base = createSdpaBwdGraph();
+        ASSERT_TRUE(isApplicable(_base));
+    }
+
+    bool isApplicable(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, graphWrapper);
+    }
+
+    flatbuffers::FlatBufferBuilder _base;
+};
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesSinkToken)
+{
+    EXPECT_FALSE(isApplicable(addBwdSinkToken(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDsinkToken)
+{
+    EXPECT_FALSE(isApplicable(addBwdDsinkToken(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesRngDump)
+{
+    EXPECT_FALSE(isApplicable(addBwdRngDump(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDeterministicAlgorithm)
+{
+    EXPECT_FALSE(isApplicable(withBwdDeterministicAlgorithm(_base)));
+}
+
+// max_total_seq_len_q/kv only size workspace for ragged graphs, which the engine already
+// declines; on a graph it accepts they must not change the decision.
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableIgnoresMaxTotalSeqLen)
+{
+    EXPECT_TRUE(isApplicable(withBwdMaxTotalSeqLen(_base, 1024, 2048)));
 }
 
 } // namespace

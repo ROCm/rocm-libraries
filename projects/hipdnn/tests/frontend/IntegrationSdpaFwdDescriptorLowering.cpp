@@ -498,12 +498,12 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     attnMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
     auto seed = std::make_shared<TensorAttributes>();
-    seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED").set_data_type(DataType::FLOAT);
+    seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED").set_data_type(DataType::INT64);
     seed->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     seed->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
     auto offset = std::make_shared<TensorAttributes>();
-    offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET").set_data_type(DataType::FLOAT);
+    offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET").set_data_type(DataType::INT64);
     offset->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     offset->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 

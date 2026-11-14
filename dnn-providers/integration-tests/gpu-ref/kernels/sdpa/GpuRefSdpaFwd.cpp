@@ -204,8 +204,14 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
     // An attention sink joins the max and the denominator but has no value row.
-    const COMPUTE_TYPE sink
-        = args.sink != nullptr ? static_cast<COMPUTE_TYPE>(args.sink[h * args.sinkStride]) : negInf;
+    // The sink is FLOAT or the graph I/O dtype (Q_TYPE); either is read to fp32.
+    COMPUTE_TYPE sink = negInf;
+    if(args.sink != nullptr)
+    {
+        sink = args.sinkIsFloat != 0
+                   ? static_cast<const float*>(args.sink)[h * args.sinkStride]
+                   : toAccum(static_cast<const Q_TYPE*>(args.sink)[h * args.sinkStride]);
+    }
     COMPUTE_TYPE maxVal = sink;
     for(long long skv = 0; skv < liveKv; ++skv)
     {

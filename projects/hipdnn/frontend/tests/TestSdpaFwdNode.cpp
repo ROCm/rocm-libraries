@@ -803,7 +803,8 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     }
 }
 
-// cuDNN's sink: FLOAT [1, H_q, 1, 1] (an unset dtype takes the graph io type).
+// Sink: [1, H_q, 1, 1], FLOAT (cuDNN), or Q's data type set on the sink itself; an untyped sink
+// takes the io type and must then be FLOAT.
 TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
 {
     auto q = makeTensor4D(2, 8, 16, 64);
@@ -824,19 +825,119 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
         << "one logit per query head";
     for(const auto& dims : {std::vector<int64_t>{2, 8, 1, 1},
                             std::vector<int64_t>{1, 8, 2, 1},
-                            std::vector<int64_t>{1, 8, 1, 2}})
+                            std::vector<int64_t>{1, 8, 1, 2},
+                            std::vector<int64_t>{1, 8, 1, 1, 1},
+                            std::vector<int64_t>{1, 8, 1}})
     {
         EXPECT_EQ(validate(dims, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
-            << "dims other than H_q are 1, got " << dims[0] << ", " << dims[2] << ", " << dims[3];
+            << "dims other than H_q are 1, rank 4, got rank " << dims.size();
     }
     EXPECT_EQ(validate({8}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "rank 4";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::INVALID_VALUE)
-        << "FLOAT only, as cuDNN";
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::OK)
+        << "the io dtype is accepted";
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::BFLOAT16, DataType::HALF),
+              error_code_t::INVALID_VALUE)
+        << "neither FLOAT nor the io dtype";
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::INT32, DataType::HALF), error_code_t::INVALID_VALUE);
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::BFLOAT16),
               error_code_t::INVALID_VALUE)
-        << "an unset dtype becomes the io type";
+        << "an untyped sink takes the io type, which must be FLOAT";
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FLOAT), error_code_t::OK);
+}
+
+// The non-FLOAT sink type is compared with Q's effective type, not the graph io type.
+TEST(TestSdpaFwdNode, PreValidateSinkDataTypeReferentIsQ)
+{
+    const auto validate = [](DataType qType, DataType sinkType, DataType io) {
+        auto q = makeTensor4D(2, 8, 16, 64);
+        q->set_data_type(qType);
+        auto attrs = makeMinimalAttrs(q, makeTensor4D(2, 2, 32, 64), makeTensor4D(2, 2, 32, 64));
+        auto sink = std::make_shared<TensorAttributes>();
+        sink->set_dim({1, 8, 1, 1}).set_data_type(sinkType);
+        attrs.set_sink_token(sink);
+        GraphAttributes graphAttrs;
+        graphAttrs.set_io_data_type(io);
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::BFLOAT16, DataType::HALF), error_code_t::OK)
+        << "Q's explicit type, io type differs";
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::BFLOAT16, DataType::NOT_SET), error_code_t::OK)
+        << "Q's explicit type, io type unset";
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::HALF, DataType::HALF),
+              error_code_t::INVALID_VALUE)
+        << "equal to the io type but not to Q's explicit type";
+    EXPECT_EQ(validate(DataType::NOT_SET, DataType::NOT_SET, DataType::NOT_SET),
+              error_code_t::INVALID_VALUE)
+        << "sink and Q both unset: nothing to compare against";
+}
+
+// A sink type supplied by fill_from_context counts as untyped; set on the sink afterwards, the
+// same type is accepted.
+TEST(TestSdpaFwdNode, PreValidateSinkTypeFilledFromTheGraphIsUntyped)
+{
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::HALF);
+    const auto validate = [&](const std::shared_ptr<TensorAttributes>& sink) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 2, 32, 64), makeTensor4D(2, 2, 32, 64));
+        attrs.set_sink_token(sink);
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    auto sink = std::make_shared<TensorAttributes>();
+    sink->set_dim({1, 8, 1, 1});
+    sink->fill_from_context(graphAttrs);
+    ASSERT_EQ(sink->get_data_type(), DataType::HALF);
+    EXPECT_EQ(validate(sink), error_code_t::INVALID_VALUE) << "HALF came from the graph";
+    sink->set_data_type(DataType::HALF);
+    EXPECT_EQ(validate(sink), error_code_t::OK) << "HALF set on the sink";
+}
+
+// Philox seed / offset: INT32 or INT64, exactly one element (same rule as SdpaBwdNode).
+TEST(TestSdpaFwdNode, PreValidateSeedOffsetShapeAndType)
+{
+    const auto validate = [](const std::shared_ptr<TensorAttributes>& seed,
+                             const std::shared_ptr<TensorAttributes>& offset) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        attrs.set_dropout(0.1f, seed, offset);
+        GraphAttributes graphAttrs;
+        graphAttrs.set_io_data_type(DataType::HALF);
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    const auto typed = [](const std::vector<int64_t>& dims, DataType type) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_dim(dims).set_data_type(type);
+        return t;
+    };
+    auto hostSeed = std::make_shared<TensorAttributes>();
+    hostSeed->set_value(int32_t{42});
+    auto hostOffset = std::make_shared<TensorAttributes>();
+    hostOffset->set_value(int32_t{0});
+    EXPECT_EQ(validate(hostSeed, hostOffset), error_code_t::OK);
+    EXPECT_EQ(validate(typed({1, 1, 1, 1}, DataType::INT64), typed({1, 1, 1, 1}, DataType::INT64)),
+              error_code_t::OK);
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({1}, DataType::INT32)), error_code_t::OK);
+    EXPECT_EQ(validate(typed({1}, DataType::FLOAT), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1}, DataType::NOT_SET), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "an unset dtype becomes the io type";
+    EXPECT_EQ(validate(typed({2}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({1}, DataType::HALF)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1, 1, 1, 1, 1}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "empty seed dims";
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "empty offset dims";
 }
 
 // Through Graph::validate(): an untyped input takes the graph's io type before nodes are checked,
@@ -887,6 +988,32 @@ TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkInAHalfGraph)
         }
     }
 #endif // HIPDNN_ENABLE_SDPA
+}
+
+// Through Graph::validate(): a sink typed HALF on the tensor itself in a HALF graph is Q's data
+// type set explicitly, so it validates (hipDNN extension, KNOWN_DIVERGENCES.md).
+TEST(TestSdpaFwdNode, GraphValidateAcceptsASinkTypedInQsDataType)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::HALF)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+    const auto makeInput = [](int64_t uid, const std::vector<int64_t>& dims) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid).set_dim(dims).set_stride(hipdnn_data_sdk::utilities::generateStrides(dims));
+        return t;
+    };
+    auto sink = makeInput(4, {1, 8, 1, 1});
+    sink->set_data_type(DataType::HALF);
+    SdpaAttributes attrs;
+    attrs.set_sink_token(sink);
+    auto [o, stats] = graph.sdpa(makeInput(1, {2, 8, 16, 64}),
+                                 makeInput(2, {2, 8, 32, 64}),
+                                 makeInput(3, {2, 8, 32, 64}),
+                                 attrs);
+    o->set_uid(5).set_output(true);
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)

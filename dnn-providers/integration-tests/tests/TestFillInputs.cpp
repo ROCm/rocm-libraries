@@ -696,6 +696,8 @@ struct SdpaBwdOptions
     bool causal = false;
     bool attnMask = false;
     std::optional<float> dropoutProbability;
+    // Attention sink [1, H, 1, 1] (uid 12) of this dtype.
+    std::optional<DataType> sinkType;
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -746,6 +748,13 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         tensors.push_back(
             CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
     }
+    const std::vector<int64_t> sinkDims = {1, kSdpaHeads, 1, 1};
+    const auto sinkStrides = generateStrides(sinkDims);
+    if(opts.sinkType.has_value())
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 12, "sink", *opts.sinkType, &sinkStrides, &sinkDims));
+    }
 
     SdpaBackwardAttributesBuilder attrs(b);
     attrs.add_q_tensor_uid(1);
@@ -776,6 +785,10 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     if(opts.dropoutProbability.has_value())
     {
         attrs.add_dropout_probability(*opts.dropoutProbability);
+    }
+    if(opts.sinkType.has_value())
+    {
+        attrs.add_sink_token_tensor_uid(12);
     }
     auto bwd = attrs.Finish();
 
@@ -817,8 +830,12 @@ InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRec
 // unmasked keys, and O is that row's weighted sum of V. A causal graph masks keys
 // after the query (top-left aligned).
 template <class T>
-void expectOAndStatsAreForwardOfQkv(
-    InputTensorMap& inputs, float scale, bool causal, float oTolerance, const float* mask = nullptr)
+void expectOAndStatsAreForwardOfQkv(InputTensorMap& inputs,
+                                    float scale,
+                                    bool causal,
+                                    float oTolerance,
+                                    const float* mask = nullptr,
+                                    const std::vector<float>* sinkLogits = nullptr)
 {
     const auto& q = typedTensor<T>(inputs, 1);
     const auto& k = typedTensor<T>(inputs, 2);
@@ -854,6 +871,11 @@ void expectOAndStatsAreForwardOfQkv(
                     expectedO[static_cast<size_t>(d)]
                         += p * static_cast<float>(v.getHostValue(0, h, skv, d));
                 }
+            }
+            // The sink is one more logit in the softmax: the keys and the sink share the mass.
+            if(sinkLogits != nullptr)
+            {
+                rowSum += std::exp((*sinkLogits)[static_cast<size_t>(h)] - rowLse);
             }
             EXPECT_NEAR(rowSum, 1.0f, 1e-4f) << "h=" << h << " sq=" << sq;
             for(int64_t d = 0; d < kSdpaHeadDim; ++d)
@@ -892,9 +914,78 @@ void expectCausalScaledOAndStatsAreDerived(DataType ioType, float oTolerance)
     expectOAndStatsAreForwardOfQkv<T>(inputs, 0.35f, /*causal=*/true, oTolerance);
 }
 
+// The sink values as the derivation saw them, whichever dtype the sink tensor has.
+template <class T>
+std::vector<float> sinkLogitsOf(InputTensorMap& inputs, DataType sinkType)
+{
+    std::vector<float> logits;
+    for(int64_t h = 0; h < kSdpaHeads; ++h)
+    {
+        if(sinkType == DataType::FLOAT)
+        {
+            logits.push_back(typedTensor<float>(inputs, 12).getHostValue(0, h, 0, 0));
+        }
+        else
+        {
+            logits.push_back(
+                static_cast<float>(typedTensor<T>(inputs, 12).getHostValue(0, h, 0, 0)));
+        }
+    }
+    return logits;
+}
+
+template <class T>
+void expectSinkInclusiveOAndStats(DataType ioType, DataType sinkType, float oTolerance)
+{
+    SdpaBwdOptions opts;
+    opts.ioType = ioType;
+    opts.attnScale = 0.35f;
+    opts.sinkType = sinkType;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    // A sink well inside the score range, so its share of every row's mass is large.
+    recipes.set(12, FillRecipe::fixed(0.8f));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    const auto logits = sinkLogitsOf<T>(inputs, sinkType);
+    expectOAndStatsAreForwardOfQkv<T>(
+        inputs, 0.35f, /*causal=*/false, oTolerance, nullptr, &logits);
+}
+
 } // namespace
 
 // ── Test cases ──────────────────────────────────────────────────────────────
+
+// The derived O and stats include the sink: it joins every row's softmax, so the keys' probabilities
+// sum to 1 minus the sink's share. A derivation that ignored the sink leaves the keys summing to 1
+// and fails the row sum.
+TEST(TestSdpaBackwardInputs, DerivesSinkInclusiveStats)
+{
+    expectSinkInclusiveOAndStats<float>(DataType::FLOAT, DataType::FLOAT, 1e-5f);
+    // An io-dtype sink and a FLOAT sink beside bf16 or fp16 Q, K, V and O.
+    expectSinkInclusiveOAndStats<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, 1e-2f);
+    expectSinkInclusiveOAndStats<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, DataType::FLOAT, 1e-2f);
+    expectSinkInclusiveOAndStats<hipdnn_data_sdk::types::half>(
+        DataType::HALF, DataType::HALF, 1e-3f);
+}
+
+// A sink that is neither FLOAT nor the io dtype is not derived (the forward would misread it).
+TEST(TestSdpaBackwardInputs, RefusesSinkOfOtherDtype)
+{
+    SdpaBwdOptions opts;
+    opts.ioType = DataType::BFLOAT16;
+    opts.sinkType = DataType::HALF;
+    const auto gr = buildSdpaBwdGraph(opts);
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+
+    const auto result = fillSdpaBwd(gr, inputs, leafUids);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("sink"), std::string::npos) << result.reason;
+}
 
 TEST(TestFillInputs, SingleConvFwd)
 {

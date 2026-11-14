@@ -102,6 +102,21 @@ bool maskBroadcastsToScores(const ITensor& mask, const ITensor& q, const ITensor
     return true;
 }
 
+// The sink ([1, H, 1, 1], FLOAT or the I/O dtype T2) widened to a FLOAT tensor, which is what
+// the CPU forward reads. The widening is exact.
+template <typename T2>
+hipdnn_data_sdk::utilities::Tensor<float> sinkAsFloat(ITensor& sink)
+{
+    const ShallowTensor<T2> view(sink.rawHostData(), sink.dims(), sink.strides());
+    hipdnn_data_sdk::utilities::Tensor<float> out(sink.dims());
+    for(int64_t h = 0; h < sink.dims()[1]; ++h)
+    {
+        const std::vector<int64_t> index = {0, h, 0, 0};
+        out.setHostValue(static_cast<float>(view.getHostValue(index)), index);
+    }
+    return out;
+}
+
 template <typename T, typename Mask>
 void forwardInto(ITensor& q,
                  ITensor& k,
@@ -109,6 +124,7 @@ void forwardInto(ITensor& q,
                  ITensor& o,
                  ITensor& stats,
                  ITensor* mask,
+                 const hipdnn_data_sdk::utilities::TensorBase<float>* sink,
                  std::optional<float> scale,
                  const DiagonalBandParams& band)
 {
@@ -132,6 +148,7 @@ void forwardInto(ITensor& q,
             .setScale(scale)
             .setMask(maskView.has_value() ? &*maskView : nullptr)
             .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
+            .setSink(sink)
             .setLse(&lseView));
 
     // The views write the host copies; a device-resident tensor uploads them only
@@ -148,6 +165,7 @@ void forwardWithMaskType(ITensor& q,
                          ITensor& o,
                          ITensor& stats,
                          ITensor* mask,
+                         const hipdnn_data_sdk::utilities::TensorBase<float>* sink,
                          fb::DataType maskType,
                          std::optional<float> scale,
                          const DiagonalBandParams& band)
@@ -155,13 +173,14 @@ void forwardWithMaskType(ITensor& q,
     switch(maskType)
     {
     case fb::DataType::HALF:
-        forwardInto<T, hipdnn_data_sdk::types::half>(q, k, v, o, stats, mask, scale, band);
+        forwardInto<T, hipdnn_data_sdk::types::half>(q, k, v, o, stats, mask, sink, scale, band);
         break;
     case fb::DataType::BFLOAT16:
-        forwardInto<T, hipdnn_data_sdk::types::bfloat16>(q, k, v, o, stats, mask, scale, band);
+        forwardInto<T, hipdnn_data_sdk::types::bfloat16>(
+            q, k, v, o, stats, mask, sink, scale, band);
         break;
     default:
-        forwardInto<T, float>(q, k, v, o, stats, mask, scale, band);
+        forwardInto<T, float>(q, k, v, o, stats, mask, sink, scale, band);
         break;
     }
 }
@@ -205,6 +224,11 @@ std::optional<std::string>
     if(maskUid.has_value())
     {
         operands.emplace_back("the attention mask", *maskUid);
+    }
+    const auto sinkUid = attributes.sink_token_tensor_uid();
+    if(sinkUid.has_value())
+    {
+        operands.emplace_back("the sink", *sinkUid);
     }
     for(const auto& [name, uid] : operands)
     {
@@ -252,6 +276,25 @@ std::optional<std::string>
                    + " attention mask";
         }
     }
+    // The sink joins the forward's softmax, so O and stats are sink-inclusive, which is what the
+    // backward's LSE must be (SEM-022). It is FLOAT or the I/O dtype, [1, H, 1, 1].
+    auto sinkType = fb::DataType::FLOAT;
+    if(sinkUid.has_value())
+    {
+        sinkType = findTensor(graph, *sinkUid)->data_type();
+        if(sinkType != fb::DataType::FLOAT && sinkType != ioType)
+        {
+            return std::string("the sink is ") + fb::EnumNameDataType(sinkType)
+                   + ", neither FLOAT nor the I/O type";
+        }
+        const auto& qDims = findTensor(graph, attributes.q_tensor_uid())->dims();
+        const auto& sinkDims = findTensor(graph, *sinkUid)->dims();
+        if(qDims->size() != 4 || sinkDims->size() != 4 || sinkDims->Get(0) != 1
+           || sinkDims->Get(1) != qDims->Get(1) || sinkDims->Get(2) != 1 || sinkDims->Get(3) != 1)
+        {
+            return "the sink is not [1, H, 1, 1]";
+        }
+    }
 
     // A scale tensor takes precedence over attn_scale_value, as in the CPU reference's
     // plan; neither means no scaling. The reference reads a scale tensor only as a
@@ -285,6 +328,24 @@ std::optional<std::string>
     auto& v = *inputs.at(attributes.v_tensor_uid());
     auto& o = *inputs.at(attributes.o_tensor_uid());
     auto& stats = *inputs.at(attributes.stats_tensor_uid());
+    std::optional<hipdnn_data_sdk::utilities::Tensor<float>> sinkValues;
+    if(sinkUid.has_value())
+    {
+        auto& sink = *inputs.at(*sinkUid);
+        if(sinkType == fb::DataType::FLOAT)
+        {
+            sinkValues = sinkAsFloat<float>(sink);
+        }
+        else if(sinkType == fb::DataType::HALF)
+        {
+            sinkValues = sinkAsFloat<hipdnn_data_sdk::types::half>(sink);
+        }
+        else
+        {
+            sinkValues = sinkAsFloat<hipdnn_data_sdk::types::bfloat16>(sink);
+        }
+    }
+    const auto* sinkView = sinkValues.has_value() ? &*sinkValues : nullptr;
     ITensor* mask = maskUid.has_value() ? inputs.at(*maskUid).get() : nullptr;
     if(mask != nullptr && !maskBroadcastsToScores(*mask, q, k))
     {
@@ -302,14 +363,14 @@ std::optional<std::string>
         {
         case fb::DataType::HALF:
             forwardWithMaskType<hipdnn_data_sdk::types::half>(
-                q, k, v, o, stats, mask, maskType, scale, band);
+                q, k, v, o, stats, mask, sinkView, maskType, scale, band);
             break;
         case fb::DataType::BFLOAT16:
             forwardWithMaskType<hipdnn_data_sdk::types::bfloat16>(
-                q, k, v, o, stats, mask, maskType, scale, band);
+                q, k, v, o, stats, mask, sinkView, maskType, scale, band);
             break;
         default: // FLOAT, the only other type isReferenceType() lets through
-            forwardWithMaskType<float>(q, k, v, o, stats, mask, maskType, scale, band);
+            forwardWithMaskType<float>(q, k, v, o, stats, mask, sinkView, maskType, scale, band);
             break;
         }
     }

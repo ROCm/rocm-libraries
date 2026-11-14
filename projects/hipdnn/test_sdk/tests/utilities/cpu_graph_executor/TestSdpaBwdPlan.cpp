@@ -57,14 +57,16 @@ struct RawBwdExtraTensor
 };
 
 // When `dBias` is engaged, a dBias output tensor with that dtype and dims is added under uid 11
-// and attrs.dbias_tensor_uid is set to 11. `extras` are added as given.
+// and attrs.dbias_tensor_uid is set to 11. `extras` are added as given. `ioDataType` is the dtype
+// of q/k/v/o/dO/dQ/dK/dV.
 flatbuffers::FlatBufferBuilder
     makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
                         std::optional<DataType> maskDataType = std::nullopt,
                         const std::optional<RawDbiasSpec>& dBias = std::nullopt,
                         const std::vector<int64_t>& statsDims = {1, 2, 4, 1},
                         DataType statsDataType = DataType::FLOAT,
-                        const std::vector<RawBwdExtraTensor>& extras = {})
+                        const std::vector<RawBwdExtraTensor>& extras = {},
+                        DataType ioDataType = DataType::FLOAT)
 {
     constexpr int64_t DBIAS_UID = 11;
     constexpr int64_t Q_UID = 1;
@@ -107,15 +109,15 @@ flatbuffers::FlatBufferBuilder
         tensors.push_back(CreateTensorAttributesDirect(
             builder, uid, name, dataType, &tensorStrides, &tensorDims));
     };
-    addTensor(Q_UID, "Q", DataType::FLOAT, strides, dims);
-    addTensor(K_UID, "K", DataType::FLOAT, strides, dims);
-    addTensor(V_UID, "V", DataType::FLOAT, strides, dims);
-    addTensor(O_UID, "O", DataType::FLOAT, strides, dims);
-    addTensor(DO_UID, "dO", DataType::FLOAT, strides, dims);
+    addTensor(Q_UID, "Q", ioDataType, strides, dims);
+    addTensor(K_UID, "K", ioDataType, strides, dims);
+    addTensor(V_UID, "V", ioDataType, strides, dims);
+    addTensor(O_UID, "O", ioDataType, strides, dims);
+    addTensor(DO_UID, "dO", ioDataType, strides, dims);
     addTensor(STATS_UID, "Stats", statsDataType, statsStrides, statsDims);
-    addTensor(DQ_UID, "dQ", DataType::FLOAT, strides, dims);
-    addTensor(DK_UID, "dK", DataType::FLOAT, strides, dims);
-    addTensor(DV_UID, "dV", DataType::FLOAT, strides, dims);
+    addTensor(DQ_UID, "dQ", ioDataType, strides, dims);
+    addTensor(DK_UID, "dK", ioDataType, strides, dims);
+    addTensor(DV_UID, "dV", ioDataType, strides, dims);
     if(maskDataType.has_value())
     {
         addTensor(MASK_UID, "Mask", maskDataType.value(), maskStrides, maskDims);
@@ -1148,4 +1150,426 @@ TEST(TestSdpaBwdPlanMask, BuilderAcceptsOnlyMatchingMaskDtype)
         noMaskBuilder.isApplicable(halfMaskWrapper.getNode(0), halfMaskWrapper.getTensorMap()));
     EXPECT_FALSE(
         noMaskBuilder.isApplicable(floatMaskWrapper.getNode(0), floatMaskWrapper.getTensorMap()));
+}
+
+namespace
+{
+constexpr int64_t BWD_SINK_UID = 30;
+constexpr int64_t BWD_DSINK_UID = 31;
+constexpr int64_t BWD_RNG_DUMP_UID = 32;
+constexpr int64_t BWD_SEED_UID = 33;
+constexpr int64_t BWD_OFFSET_UID = 34;
+
+// Q/K/V/dO (random) and the buffers of the raw graph's [1, 2, 4, 8] problem in io type T, with the
+// uids of makeRawSdpaBwdGraph.
+template <typename T>
+struct RawBwdData
+{
+    explicit RawBwdData(unsigned int seed)
+        : q(dims())
+        , k(dims())
+        , v(dims())
+        , o(dims())
+        , dO(dims())
+        , stats({1, 2, 4, 1})
+        , dQ(dims())
+        , dK(dims())
+        , dV(dims())
+    {
+        fillRandom(q, seed);
+        fillRandom(k, seed + 1);
+        fillRandom(v, seed + 2);
+        fillRandom(dO, seed + 3);
+    }
+
+    static std::vector<int64_t> dims()
+    {
+        return {1, 2, 4, 8};
+    }
+
+    static void fillRandom(hipdnn_data_sdk::utilities::Tensor<T>& tensor, unsigned int seed)
+    {
+        hipdnn_data_sdk::utilities::Tensor<float> source(tensor.dims());
+        source.fillWithRandomValues(-1.0F, 1.0F, seed);
+        for(size_t i = 0; i < tensor.elementCount(); ++i)
+        {
+            tensor.memory().hostData()[i] = safeConvert<T>(source.memory().hostData()[i]);
+        }
+    }
+
+    std::unordered_map<int64_t, void*> pack()
+    {
+        return {{1, q.memory().hostData()},
+                {2, k.memory().hostData()},
+                {3, v.memory().hostData()},
+                {4, o.memory().hostData()},
+                {5, dO.memory().hostData()},
+                {6, stats.memory().hostData()},
+                {7, dQ.memory().hostData()},
+                {8, dK.memory().hostData()},
+                {9, dV.memory().hostData()}};
+    }
+
+    hipdnn_data_sdk::utilities::Tensor<T> q;
+    hipdnn_data_sdk::utilities::Tensor<T> k;
+    hipdnn_data_sdk::utilities::Tensor<T> v;
+    hipdnn_data_sdk::utilities::Tensor<T> o;
+    hipdnn_data_sdk::utilities::Tensor<T> dO;
+    hipdnn_data_sdk::utilities::Tensor<float> stats;
+    hipdnn_data_sdk::utilities::Tensor<T> dQ;
+    hipdnn_data_sdk::utilities::Tensor<T> dK;
+    hipdnn_data_sdk::utilities::Tensor<T> dV;
+};
+
+bool isApplicableRaw(const flatbuffers::FlatBufferBuilder& graphBuilder)
+{
+    CpuReferenceGraphExecutor executor;
+    return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+}
+
+void executeRaw(const flatbuffers::FlatBufferBuilder& graphBuilder,
+                const std::unordered_map<int64_t, void*>& variantPack)
+{
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(isApplicableRaw(graphBuilder));
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+}
+
+template <typename T>
+void expectSameValues(const hipdnn_data_sdk::utilities::Tensor<T>& expected,
+                      const hipdnn_data_sdk::utilities::Tensor<T>& actual,
+                      const char* name)
+{
+    ASSERT_EQ(expected.elementCount(), actual.elementCount()) << name;
+    for(size_t i = 0; i < expected.elementCount(); ++i)
+    {
+        EXPECT_EQ(static_cast<float>(expected.memory().hostData()[i]),
+                  static_cast<float>(actual.memory().hostData()[i]))
+            << name << " at " << i;
+    }
+}
+
+// The raw graph with a sink [1, 2, 1, 1] of sinkType and, optionally, a dSink of dSinkType.
+flatbuffers::FlatBufferBuilder sinkGraph(DataType sinkType,
+                                         std::optional<DataType> dSinkType,
+                                         DataType ioType = DataType::FLOAT,
+                                         bool withSink = true,
+                                         const std::vector<int64_t>& sinkDims = {1, 2, 1, 1},
+                                         const std::vector<int64_t>& dSinkDims = {1, 2, 1, 1})
+{
+    SdpaBackwardAttributesT attrs;
+    std::vector<RawBwdExtraTensor> extras;
+    if(withSink)
+    {
+        attrs.sink_token_tensor_uid = BWD_SINK_UID;
+        extras.push_back({BWD_SINK_UID, sinkType, sinkDims});
+    }
+    if(dSinkType.has_value())
+    {
+        attrs.dsink_token_tensor_uid = BWD_DSINK_UID;
+        extras.push_back({BWD_DSINK_UID, dSinkType.value(), dSinkDims});
+    }
+    return makeRawSdpaBwdGraph(
+        attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras, ioType);
+}
+} // namespace
+
+// The sink and its gradient are FLOAT or the Q dtype [1, H, 1, 1]; the gradient needs the sink and
+// has its dtype and shape.
+TEST(TestSdpaBwdPlanSink, Applicability)
+{
+    constexpr auto FLOAT = DataType::FLOAT;
+    constexpr auto HALF = DataType::HALF;
+    // Sink alone, and a sink with its gradient, in both dtypes (Q is FLOAT or HALF).
+    EXPECT_TRUE(isApplicableRaw(sinkGraph(FLOAT, std::nullopt)));
+    EXPECT_TRUE(isApplicableRaw(sinkGraph(FLOAT, FLOAT)));
+    EXPECT_TRUE(isApplicableRaw(sinkGraph(HALF, HALF, HALF)));
+    EXPECT_TRUE(isApplicableRaw(sinkGraph(HALF, std::nullopt, HALF)));
+    EXPECT_TRUE(isApplicableRaw(sinkGraph(FLOAT, FLOAT, HALF)));
+    // A dtype that is neither FLOAT nor Q's.
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(HALF, std::nullopt, FLOAT)));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(DataType::BFLOAT16, std::nullopt, HALF)));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(DataType::INT32, std::nullopt)));
+    // Wrong shape: head count, rank, a non-unit leading dim.
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, std::nullopt, FLOAT, true, {1, 3, 1, 1})));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, std::nullopt, FLOAT, true, {1, 2, 1})));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, std::nullopt, FLOAT, true, {2, 2, 1, 1})));
+    // dSink: another dtype than the sink's (either way round), another shape, or no sink at all.
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, HALF, HALF)));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(HALF, FLOAT, HALF)));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, FLOAT, FLOAT, true, {1, 2, 1, 1}, {1, 4, 1, 1})));
+    EXPECT_FALSE(isApplicableRaw(sinkGraph(FLOAT, FLOAT, FLOAT, false)));
+    // The sink uid must resolve to a tensor.
+    SdpaBackwardAttributesT dangling;
+    dangling.sink_token_tensor_uid = BWD_SINK_UID;
+    EXPECT_FALSE(isApplicableRaw(makeRawSdpaBwdGraph(dangling)));
+}
+
+// A FLOAT sink and a Q-dtype sink holding the same values give the same dQ, dK, dV; a Q-dtype dSink
+// is the FLOAT dSink rounded once to the Q dtype.
+TEST(TestSdpaBwdPlanSink, ComputesInBothDtypes)
+{
+    using hipdnn_data_sdk::types::half;
+    using hipdnn_data_sdk::utilities::Tensor;
+
+    Tensor<float> sinkFloat({1, 2, 1, 1});
+    sinkFloat.setHostValue(0.5F, 0, 0, 0, 0);
+    sinkFloat.setHostValue(-0.25F, 0, 1, 0, 0);
+    Tensor<half> sinkHalf({1, 2, 1, 1});
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        sinkHalf.setHostValue(safeConvert<half>(sinkFloat.getHostValue(0, h, 0, 0)), 0, h, 0, 0);
+    }
+
+    RawBwdData<half> withFloatSink(301);
+    RawBwdData<half> withHalfSink(301);
+    for(auto* data : {&withFloatSink, &withHalfSink})
+    {
+        CpuFpReferenceSdpa::forward(
+            data->q,
+            data->k,
+            data->v,
+            data->o,
+            SdpaFwdOptions<float>{}.setSink(&sinkFloat).setLse(&data->stats));
+    }
+
+    Tensor<float> dSinkFloat({1, 2, 1, 1});
+    Tensor<half> dSinkHalf({1, 2, 1, 1});
+    auto floatPack = withFloatSink.pack();
+    floatPack[BWD_SINK_UID] = sinkFloat.memory().hostData();
+    floatPack[BWD_DSINK_UID] = dSinkFloat.memory().hostData();
+    auto halfPack = withHalfSink.pack();
+    halfPack[BWD_SINK_UID] = sinkHalf.memory().hostData();
+    halfPack[BWD_DSINK_UID] = dSinkHalf.memory().hostData();
+    executeRaw(sinkGraph(DataType::FLOAT, DataType::FLOAT, DataType::HALF), floatPack);
+    executeRaw(sinkGraph(DataType::HALF, DataType::HALF, DataType::HALF), halfPack);
+
+    expectSameValues(withFloatSink.dQ, withHalfSink.dQ, "dQ");
+    expectSameValues(withFloatSink.dK, withHalfSink.dK, "dK");
+    expectSameValues(withFloatSink.dV, withHalfSink.dV, "dV");
+
+    // The reference called directly gives the FLOAT dSink, and the Q-dtype one is that rounded.
+    RawBwdData<half> direct(301);
+    CpuFpReferenceSdpa::forward(direct.q,
+                                direct.k,
+                                direct.v,
+                                direct.o,
+                                SdpaFwdOptions<float>{}.setSink(&sinkFloat).setLse(&direct.stats));
+    Tensor<float> dSinkDirect({1, 2, 1, 1});
+    CpuFpReferenceSdpa::backward(
+        direct.q,
+        direct.k,
+        direct.v,
+        direct.o,
+        direct.dO,
+        direct.dQ,
+        direct.dK,
+        direct.dV,
+        SdpaBwdOptions<float>{}.setLse(&direct.stats).setSink(&sinkFloat, &dSinkDirect));
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        const float exact = dSinkDirect.getHostValue(0, h, 0, 0);
+        ASSERT_NE(exact, 0.0F) << "head " << h;
+        EXPECT_EQ(dSinkFloat.getHostValue(0, h, 0, 0), exact) << "head " << h;
+        EXPECT_EQ(static_cast<float>(dSinkHalf.getHostValue(0, h, 0, 0)),
+                  static_cast<float>(safeConvert<half>(exact)))
+            << "head " << h;
+    }
+    expectSameValues(direct.dQ, withFloatSink.dQ, "dQ vs direct");
+}
+
+namespace
+{
+// Gradients of the raw graph with `attrs` equal those of the same graph without any attribute.
+void expectGradientsUnchangedBy(const SdpaBackwardAttributesT& attrs)
+{
+    RawBwdData<float> plain(311);
+    RawBwdData<float> withAttrs(311);
+    for(auto* data : {&plain, &withAttrs})
+    {
+        CpuFpReferenceSdpa::forward(
+            data->q, data->k, data->v, data->o, SdpaFwdOptions<float>{}.setLse(&data->stats));
+    }
+    executeRaw(makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}), plain.pack());
+    executeRaw(makeRawSdpaBwdGraph(attrs), withAttrs.pack());
+    expectSameValues(plain.dQ, withAttrs.dQ, "dQ");
+    expectSameValues(plain.dK, withAttrs.dK, "dK");
+    expectSameValues(plain.dV, withAttrs.dV, "dV");
+}
+} // namespace
+
+// The references are deterministic (sequential loops), so a determinism request is served.
+TEST(TestSdpaBwdPlan, DeterministicAccepted)
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.is_deterministic_algorithm = true;
+    EXPECT_TRUE(isApplicableRaw(makeRawSdpaBwdGraph(attrs)));
+    expectGradientsUnchangedBy(attrs);
+}
+
+// max_total_seq_len_q/kv only size an engine's workspace; the references ignore them.
+TEST(TestSdpaBwdPlan, MaxTotalSeqLenIgnored)
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.max_total_seq_len_q = 7;
+    attrs.max_total_seq_len_kv = 9;
+    EXPECT_TRUE(isApplicableRaw(makeRawSdpaBwdGraph(attrs)));
+    expectGradientsUnchangedBy(attrs);
+}
+
+namespace
+{
+constexpr float PHILOX_P = 0.4F;
+
+// Philox dropout with an rng_dump output: probability P, INT64 [1] seed and offset, and the dump
+// FLOAT [1, 2, 4, 4]; each argument can break one rule of the shared gate.
+flatbuffers::FlatBufferBuilder philoxGraph(bool withDump = true,
+                                           std::optional<float> probability = PHILOX_P,
+                                           bool withSeed = true,
+                                           bool withOffset = true,
+                                           DataType dumpType = DataType::FLOAT,
+                                           const std::vector<int64_t>& dumpDims = {1, 2, 4, 4},
+                                           bool withExplicitMask = false)
+{
+    SdpaBackwardAttributesT attrs;
+    std::vector<RawBwdExtraTensor> extras;
+    attrs.dropout_probability = probability;
+    if(withDump)
+    {
+        attrs.rng_dump_tensor_uid = BWD_RNG_DUMP_UID;
+        extras.push_back({BWD_RNG_DUMP_UID, dumpType, dumpDims});
+    }
+    if(withSeed)
+    {
+        attrs.seed_tensor_uid = BWD_SEED_UID;
+        extras.push_back({BWD_SEED_UID, DataType::INT64, {1}});
+    }
+    if(withOffset)
+    {
+        attrs.offset_tensor_uid = BWD_OFFSET_UID;
+        extras.push_back({BWD_OFFSET_UID, DataType::INT64, {1}});
+    }
+    if(withExplicitMask)
+    {
+        attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+        attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+        extras.push_back({BWD_DROPOUT_MASK_UID, DataType::FLOAT, {1, 2, 4, 4}});
+        extras.push_back({BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}});
+    }
+    return makeRawSdpaBwdGraph(
+        attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+}
+
+// A dropout_scale_inv tensor needs an explicit dropout mask, so a Philox-with-dump node that also
+// carries one is declined: the references derive scale_inv from p and would not read it.
+flatbuffers::FlatBufferBuilder philoxGraphWithScaleInv()
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.dropout_probability = PHILOX_P;
+    attrs.rng_dump_tensor_uid = BWD_RNG_DUMP_UID;
+    attrs.seed_tensor_uid = BWD_SEED_UID;
+    attrs.offset_tensor_uid = BWD_OFFSET_UID;
+    attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+    const std::vector<RawBwdExtraTensor> extras
+        = {{BWD_RNG_DUMP_UID, DataType::FLOAT, {1, 2, 4, 4}},
+           {BWD_SEED_UID, DataType::INT64, {1}},
+           {BWD_OFFSET_UID, DataType::INT64, {1}},
+           {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}};
+    return makeRawSdpaBwdGraph(
+        attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+}
+} // namespace
+
+// The references have no oracle for a kernel's random stream, so Philox dropout is served only
+// when the engine hands over the keep mask it applied (rng_dump), with p in [0, 1) and a
+// [B, H, Sq, Skv] FLOAT dump, and never together with an explicit mask.
+TEST(TestSdpaBwdPlanDropout, PhiloxNeedsRngDump)
+{
+    EXPECT_TRUE(isApplicableRaw(philoxGraph()));
+    EXPECT_TRUE(isApplicableRaw(philoxGraph(true, 0.0F)));
+
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(/*withDump=*/false)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, PHILOX_P, /*withSeed=*/false)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, PHILOX_P, true, /*withOffset=*/false)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, 1.0F)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, -0.1F)));
+    // A dump with no dropout to dump is not read by anything.
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, std::nullopt)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(true, PHILOX_P, true, true, DataType::HALF)));
+    EXPECT_FALSE(
+        isApplicableRaw(philoxGraph(true, PHILOX_P, true, true, DataType::FLOAT, {1, 2, 4, 5})));
+    EXPECT_FALSE(
+        isApplicableRaw(philoxGraph(true, PHILOX_P, true, true, DataType::FLOAT, {1, 2, 3, 4})));
+    EXPECT_FALSE(isApplicableRaw(philoxGraph(
+        true, PHILOX_P, true, true, DataType::FLOAT, {1, 2, 4, 4}, /*withExplicitMask=*/true)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraphWithScaleInv()));
+}
+
+// The engine's dumped keep mask is the explicit mask with scale 1 / (1 - p) and scale_inv 1 - p
+// (cuDNN's composition): the Philox-with-dump plan equals the explicit-mask plan fed the same mask
+// and those two scales, exactly.
+TEST(TestSdpaBwdPlanDropout, PhiloxWithRngDumpUsesDumpedMask)
+{
+    hipdnn_data_sdk::utilities::Tensor<float> keepMask({1, 2, 4, 4});
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        for(int64_t sq = 0; sq < 4; ++sq)
+        {
+            for(int64_t skv = 0; skv < 4; ++skv)
+            {
+                keepMask.setHostValue(((h + sq + skv) % 3 == 0) ? 0.0F : 1.0F, 0, h, sq, skv);
+            }
+        }
+    }
+    const float scale = 1.0F / (1.0F - PHILOX_P);
+    const float scaleInv = 1.0F - PHILOX_P;
+    hipdnn_data_sdk::utilities::Tensor<float> scaleTensor({1, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> scaleInvTensor({1, 1, 1, 1});
+    scaleTensor.fillWithValue(scale);
+    scaleInvTensor.fillWithValue(scaleInv);
+
+    // O and Stats come from the forward with the same mask and scale.
+    RawBwdData<float> philox(321);
+    RawBwdData<float> explicitMask(321);
+    RawBwdData<float> noDropout(321);
+    for(auto* data : {&philox, &explicitMask, &noDropout})
+    {
+        CpuFpReferenceSdpa::forward(
+            data->q,
+            data->k,
+            data->v,
+            data->o,
+            SdpaFwdOptions<float>{}.setDropout(&keepMask, scale).setLse(&data->stats));
+    }
+
+    auto philoxPack = philox.pack();
+    philoxPack[BWD_RNG_DUMP_UID] = keepMask.memory().hostData();
+    executeRaw(philoxGraph(), philoxPack);
+
+    SdpaBackwardAttributesT attrs;
+    attrs.dropout_mask_tensor_uid = BWD_DROPOUT_MASK_UID;
+    attrs.dropout_scale_tensor_uid = BWD_DROPOUT_SCALE_UID;
+    attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+    auto explicitPack = explicitMask.pack();
+    explicitPack[BWD_DROPOUT_MASK_UID] = keepMask.memory().hostData();
+    explicitPack[BWD_DROPOUT_SCALE_UID] = scaleTensor.memory().hostData();
+    explicitPack[BWD_DROPOUT_SCALE_INV_UID] = scaleInvTensor.memory().hostData();
+    executeRaw(makeRawSdpaBwdGraph(attrs,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   {1, 2, 4, 1},
+                                   DataType::FLOAT,
+                                   {{BWD_DROPOUT_MASK_UID, DataType::FLOAT, {1, 2, 4, 4}},
+                                    {BWD_DROPOUT_SCALE_UID, DataType::FLOAT, {1, 1, 1, 1}},
+                                    {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}}),
+               explicitPack);
+    executeRaw(makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}), noDropout.pack());
+
+    expectSameValues(explicitMask.dQ, philox.dQ, "dQ");
+    expectSameValues(explicitMask.dK, philox.dK, "dK");
+    expectSameValues(explicitMask.dV, philox.dV, "dV");
+    // The mask and scales matter: without dropout the gradients differ.
+    const CpuFpReferenceValidation<float> exact(0.0F, 0.0F);
+    EXPECT_FALSE(exact.allClose(noDropout.dV, philox.dV));
+    EXPECT_FALSE(exact.allClose(noDropout.dQ, philox.dQ));
 }

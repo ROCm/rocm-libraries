@@ -1,0 +1,100 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_bwd_golden.py",
+    "generator_version": "1.6.0",
+    "generator_sha256": "086c6fa5b1391bbc2ee387c1952ede0c44e69ebcd1d50910f6741a89e14d2da8",
+    "generated_at": "2026-11-09T14:31:07Z",
+    "reference_source": "PyTorch 2.12.0+rocm7.2",
+    "reference_backend": "pytorch_explicit_fp32_backward",
+    "reference_strategy": "matched_precision",
+    "rocm_version": "7.2",
+    "direction": "backward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "intermediate_rounding": "none",
+    "config": {
+        "batch": 2,
+        "num_heads_q": 2,
+        "num_heads_kv": 2,
+        "seq_q": 32,
+        "seq_kv": 32,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "layout": "bhsd",
+        "scale": 0.125,
+        "left_bound": null,
+        "right_bound": null,
+        "diagonal_alignment": "top_left",
+        "additive_mask": false,
+        "seq_lens_q": [
+            20,
+            32
+        ],
+        "seq_lens_kv": [
+            25,
+            32
+        ],
+        "ragged": {
+            "sides": "qkv",
+            "units": "elements",
+            "stats_layout": "th",
+            "blocks": {
+                "q": [
+                    20,
+                    32
+                ],
+                "o": [
+                    20,
+                    32
+                ],
+                "do": [
+                    20,
+                    32
+                ],
+                "dq": [
+                    20,
+                    32
+                ],
+                "stats": [
+                    20,
+                    32
+                ],
+                "k": [
+                    25,
+                    32
+                ],
+                "v": [
+                    25,
+                    32
+                ],
+                "dk": [
+                    25,
+                    32
+                ],
+                "dv": [
+                    25,
+                    32
+                ]
+            }
+        },
+        "sink": {
+            "dtype": "io",
+            "logit_range": [
+                2.4657359027997265,
+                4.465735902799727
+            ]
+        }
+    },
+    "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+    "forward_source": {
+        "method": "pytorch_math_backend",
+        "version": "2.12.0+rocm7.2",
+        "generated_at": "2026-11-09T14:31:07Z",
+        "bundle": "../../ragged_sink_io_fwd_pair/Small/Small.json"
+    }
+}

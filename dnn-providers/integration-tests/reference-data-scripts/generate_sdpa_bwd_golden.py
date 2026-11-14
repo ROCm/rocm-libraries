@@ -80,8 +80,22 @@ generator checks that the template expands to the graph it emits).
   - graph-only:   --graph-only registers a sweep case with no golden data.
   - templates:    --write-template DIR --template-kind K writes graph.template.json.
 
+  - sink:         --sink {float,io} adds an attention sink: one raw (unscaled) logit
+                  per query head that joins the softmax denominator and has no V
+                  row. The forward bundle's O and LSE include it (LSE is the
+                  log-sum-exp over the keys and the sink), and the backward bundle
+                  carries the sink input and the dSink output, both [1, H_q, 1, 1]
+                  in the sink dtype: float (FP32) or io (the bundle's IO dtype, the
+                  stored values being the IO-rounded ones). dSink[h] =
+                  -sum_{b, live rows} exp(sink[h] - LSE) * rowsum(dO * O), the raw
+                  rowsum before any dropout_scale_inv (cuDNN's sign, pinned here by
+                  FP64 autograd of the sink-column softmax). Sink logits are drawn
+                  U[ln(S_kv) - 1, ln(S_kv) + 1] so the sink takes a visible share of
+                  the softmax mass and dSink is not lost in rounding. Works with
+                  GQA, padding, ragged, bias and dropout.
+
 Not supported yet, rejected with an explicit error rather than silently
-mis-generated: FP8, BSHD layouts without ragged, Philox dropout, sinks and ALiBi,
+mis-generated: FP8, BSHD layouts without ragged, Philox dropout and ALiBi,
 ragged bias, dBias or dropout.
 
 Output:
@@ -105,12 +119,15 @@ Usage:
 import argparse
 import datetime
 import json
+import math
 import os
 import re
 import sys
 
 # Find files in utilities folder without requiring a package to be created
 sys.path.insert(1, os.path.dirname(os.path.realpath(__file__)) + "/utilities/")
+# Sibling generators (generate_sdpa_fwd_golden) when this file is loaded by path.
+sys.path.insert(1, os.path.dirname(os.path.realpath(__file__)))
 import torch
 from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
     DTYPE_MAP,
@@ -156,7 +173,11 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         --ragged-head-major, --ragged-head-pitch, --ragged-token-stride and
 #         --ragged-sides kv; [H, T] Stats may have H > 1; a block may be longer than
 #         S_max. Ragged bundles from 1.4.0 differ in payload size and gap values.
-GENERATOR_VERSION = "1.5.0"
+# 1.6.0 — --sink {float,io}: an attention sink column in the forward (O, LSE) and a
+#         dSink output in the backward, cross-checked against FP64 autograd. The
+#         sink logits are drawn after every other tensor, so bundles without
+#         --sink are byte-identical to 1.5.0.
+GENERATOR_VERSION = "1.6.0"
 
 # Backward tensor UID assignment. These match the checked-in graph-only
 # SdpaBackward template topology (integration-test-bundles/*/SdpaBackward/), so
@@ -189,13 +210,22 @@ UID_DROPOUT_MASK = 12
 UID_DROPOUT_SCALE = 13
 UID_DROPOUT_SCALE_INV = 14
 UID_DBIAS = 15
+# The attention sink and its gradient (--sink). Past the ragged offset UIDs
+# (16-24) so a ragged sink bundle keeps every UID distinct.
+UID_SINK = 25
+UID_DSINK = 26
 # Forward: the sequence lengths use the forward generator's own UIDs (5, 6); the
 # dropout tensors take the first UIDs free after FWD_UID_ATTN_MASK.
 FWD_UID_SEQ_LEN_Q = 5
 FWD_UID_SEQ_LEN_KV = 6
 FWD_UID_DROPOUT_MASK = 13
 FWD_UID_DROPOUT_SCALE = 14
+FWD_UID_SINK = 15
 
+
+# Sink logits are drawn U[ln(S_kv) - SINK_LOGIT_SPREAD, ln(S_kv) + SINK_LOGIT_SPREAD]:
+# with scores near 0 a sink at ln(S_kv) holds about half the softmax mass.
+SINK_LOGIT_SPREAD = 1.0
 # FP64 autograd must agree with the matched-precision backward to this relative
 # deviation. The backward is anchored to the bundle's IO-dtype O, autograd to the
 # exact O, so they differ by about the IO rounding of O.
@@ -260,14 +290,34 @@ def build_padded_keep_mask(
     return torch.stack(masks).unsqueeze(1)
 
 
+def padded_query_rows(s_q, seq_lens_q):
+    """[B, 1, S_q, 1] bool: query rows past their batch's seq_len_q."""
+    rows = torch.arange(s_q).view(1, 1, s_q, 1)
+    return rows >= torch.tensor(seq_lens_q).view(-1, 1, 1, 1)
+
+
 def compute_forward_explicit(
-    Q, K, V, scale, keep_mask=None, attn_bias=None, dropout_mask=None, dropout_scale=1.0
+    Q,
+    K,
+    V,
+    scale,
+    keep_mask=None,
+    attn_bias=None,
+    dropout_mask=None,
+    dropout_scale=1.0,
+    sink=None,
+    seq_lens_q=None,
 ):
     """FP32 forward for what PyTorch's SDPA cannot express.
 
     Fully-masked rows give O = 0 and LSE = -inf (cuDNN), and an explicit dropout
     mask gives O = (P * mask * dropout_scale) V with the LSE taken before
-    dropout. Returns (O in FP32, LSE in FP32 [B, H_q, S_q, 1]).
+    dropout. `sink` ([H_q] raw logits, not scaled) adds one softmax column per
+    query head that has no V row: LSE is taken over the keys and the sink, so a
+    row with no live key gives O = 0 and LSE = sink (SEM-022). `seq_lens_q`
+    ([B]) marks query rows past each batch's length as padded: they stay
+    O = 0 and LSE = -inf even with a sink. Returns (O in FP32, LSE in FP32
+    [B, H_q, S_q, 1]).
     """
     num_heads_q = Q.shape[1]
     Q_f = Q.float()
@@ -278,12 +328,67 @@ def compute_forward_explicit(
         scores = scores + attn_bias.float()
     if keep_mask is not None:
         scores = scores.masked_fill(~keep_mask, float("-inf"))
-    lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+    if sink is None:
+        lse = torch.logsumexp(scores, dim=-1, keepdim=True)
+    else:
+        sink_col = sink.float().view(1, num_heads_q, 1, 1)
+        sink_col = sink_col.expand(scores.shape[0], -1, scores.shape[2], 1)
+        lse = torch.logsumexp(
+            torch.cat([scores, sink_col], dim=-1), dim=-1, keepdim=True
+        )
+    if seq_lens_q is not None:
+        lse = torch.where(
+            padded_query_rows(scores.shape[2], seq_lens_q),
+            torch.full_like(lse, float("-inf")),
+            lse,
+        )
     # A fully-masked row computes exp(-inf - -inf) = NaN; its probabilities are 0.
     probs = torch.nan_to_num(torch.exp(scores - lse), nan=0.0)
     if dropout_mask is not None:
         probs = probs * dropout_mask * dropout_scale
     return torch.matmul(probs, V_f), lse
+
+
+def _autograd_fp64(
+    Q, K, V, dO, scale, sink, keep_mask, attn_bias, dropout_mask, dropout_scale
+):
+    num_heads_q = Q.shape[1]
+    Q_d = Q.double().requires_grad_(True)
+    K_d = K.double().requires_grad_(True)
+    V_d = V.double().requires_grad_(True)
+    bias_d = None if attn_bias is None else attn_bias.double().requires_grad_(True)
+    sink_d = None if sink is None else sink.detach().double().requires_grad_(True)
+    scores = (
+        torch.matmul(Q_d, expand_kv_heads(K_d, num_heads_q).transpose(-2, -1)) * scale
+    )
+    if bias_d is not None:
+        scores = scores + bias_d
+    if sink_d is not None:
+        # The sink is one more softmax column (raw logit, no V row), dropped from
+        # P before P @ V. Its softmax has no NaN rows, so no row needs masking out.
+        if keep_mask is not None:
+            scores = scores.masked_fill(~keep_mask, float("-inf"))
+        sink_col = sink_d.view(1, num_heads_q, 1, 1)
+        sink_col = sink_col.expand(scores.shape[0], -1, scores.shape[2], 1)
+        probs = torch.softmax(torch.cat([scores, sink_col], dim=-1), dim=-1)[..., :-1]
+    elif keep_mask is not None:
+        alive = keep_mask.any(dim=-1, keepdim=True)
+        scores = scores.masked_fill(~keep_mask, float("-inf"))
+        scores = torch.where(alive, scores, torch.zeros_like(scores))
+        probs = torch.softmax(scores, dim=-1) * alive
+    else:
+        probs = torch.softmax(scores, dim=-1)
+    if dropout_mask is not None:
+        probs = probs * dropout_mask.double() * dropout_scale
+    O = torch.matmul(probs, expand_kv_heads(V_d, num_heads_q))
+    O.backward(dO.double())
+    return (
+        Q_d.grad,
+        K_d.grad,
+        V_d.grad,
+        None if bias_d is None else bias_d.grad,
+        None if sink_d is None else sink_d.grad,
+    )
 
 
 def autograd_fp64_gradients(
@@ -305,28 +410,33 @@ def autograd_fp64_gradients(
     rows are multiplied out, so their gradients are exactly zero.
     Returns (dQ, dK, dV, dBias or None) in FP64.
     """
-    num_heads_q = Q.shape[1]
-    Q_d = Q.double().requires_grad_(True)
-    K_d = K.double().requires_grad_(True)
-    V_d = V.double().requires_grad_(True)
-    bias_d = None if attn_bias is None else attn_bias.double().requires_grad_(True)
-    scores = (
-        torch.matmul(Q_d, expand_kv_heads(K_d, num_heads_q).transpose(-2, -1)) * scale
+    return _autograd_fp64(
+        Q, K, V, dO, scale, None, keep_mask, attn_bias, dropout_mask, dropout_scale
+    )[:4]
+
+
+def autograd_fp64_sink_gradients(
+    Q,
+    K,
+    V,
+    dO,
+    scale,
+    sink,
+    keep_mask=None,
+    attn_bias=None,
+    dropout_mask=None,
+    dropout_scale=1.0,
+):
+    """autograd_fp64_gradients with an optional attention sink ([H_q] raw logits).
+
+    The sink is a softmax column without a V row, so dSink is the autograd
+    gradient of that logit: it fixes the sign and the raw-rowsum rule of
+    compute_dsink independently. Returns (dQ, dK, dV, dBias or None, dSink [H_q]
+    or None) in FP64.
+    """
+    return _autograd_fp64(
+        Q, K, V, dO, scale, sink, keep_mask, attn_bias, dropout_mask, dropout_scale
     )
-    if bias_d is not None:
-        scores = scores + bias_d
-    if keep_mask is not None:
-        alive = keep_mask.any(dim=-1, keepdim=True)
-        scores = scores.masked_fill(~keep_mask, float("-inf"))
-        scores = torch.where(alive, scores, torch.zeros_like(scores))
-        probs = torch.softmax(scores, dim=-1) * alive
-    else:
-        probs = torch.softmax(scores, dim=-1)
-    if dropout_mask is not None:
-        probs = probs * dropout_mask.double() * dropout_scale
-    O = torch.matmul(probs, expand_kv_heads(V_d, num_heads_q))
-    O.backward(dO.double())
-    return Q_d.grad, K_d.grad, V_d.grad, None if bias_d is None else bias_d.grad
 
 
 def worst_relative_deviation(pairs):
@@ -430,6 +540,26 @@ def compute_backward(
     return dQ, dK, dV, dBias
 
 
+def compute_dsink(sink, lse, O, dO):
+    """dSink [1, H_q, 1, 1] in FP32: the gradient of each query head's sink logit.
+
+    The sink column has no V row, so dP_sink = 0 and the softmax backward gives
+    dl_sink = -P_sink * D with P_sink = exp(sink - LSE) and D = rowsum(dO * O).
+    D is the raw rowsum: the sink is never dropped and O already carries the
+    dropout mask and scale, so dropout_scale_inv does not apply. Rows with
+    LSE = -inf (no sink, no key) contribute 0. Summed over batch and rows, per
+    query head (GQA does not group sinks). O and dO are the stored IO-dtype
+    tensors.
+    """
+    raw_d = (dO.float() * O.float()).sum(dim=-1, keepdim=True)
+    sink_p = torch.where(
+        torch.isfinite(lse),
+        torch.exp(sink.float().view(1, -1, 1, 1) - lse),
+        torch.zeros_like(lse),
+    )
+    return -(sink_p * raw_d).sum(dim=(0, 2, 3)).view(1, -1, 1, 1)
+
+
 def validate_against_autograd(
     Q, K, V, dO, scale, keep_mask, dQ, dK, dV, attn_bias=None
 ):
@@ -499,6 +629,19 @@ def _float_entry(uid, name, dims):
     }
 
 
+def _sink_entry(uid, name, num_heads_q, sink, dtype_str):
+    """A sink or dSink tensor: [1, H_q, 1, 1], FLOAT or the IO dtype."""
+    dims = [1, num_heads_q, 1, 1]
+    return {
+        "uid": uid,
+        "name": name,
+        "dims": dims,
+        "strides": compute_contiguous_strides(dims),
+        "data_type": "float" if sink == "float" else dtype_str,
+        "virtual": False,
+    }
+
+
 def build_backward_graph_json(
     q_dims,
     k_dims,
@@ -514,6 +657,7 @@ def build_backward_graph_json(
     dropout=False,
     dbias=False,
     ragged=None,
+    sink=None,
 ):
     """Graph JSON for a single SdpaBackwardAttributes node.
 
@@ -561,6 +705,9 @@ def build_backward_graph_json(
         tensors.append(
             _tensor_entry(UID_DBIAS, "SdpaBwd_0::dBias", attn_mask_dims, dtype_str)
         )
+    if sink is not None:
+        tensors.append(_sink_entry(UID_SINK, "sink", H_q, sink, dtype_str))
+        tensors.append(_sink_entry(UID_DSINK, "SdpaBwd_0::dSink", H_q, sink, dtype_str))
     if ragged:
         by_uid = {t["uid"]: t for t in tensors}
         for role, spec in ragged.items():
@@ -606,12 +753,14 @@ def build_backward_graph_json(
                     "dropout_scale_inv_tensor_uid": (
                         UID_DROPOUT_SCALE_INV if dropout else None
                     ),
+                    **({"sink_token_tensor_uid": UID_SINK} if sink else {}),
                 },
                 "outputs": {
                     "dq_tensor_uid": UID_DQ,
                     "dk_tensor_uid": UID_DK,
                     "dv_tensor_uid": UID_DV,
                     "dbias_tensor_uid": UID_DBIAS if dbias else None,
+                    **({"dsink_token_tensor_uid": UID_DSINK} if sink else {}),
                 },
                 "parameters": {
                     "alibi_mask": False,
@@ -649,6 +798,7 @@ def build_forward_graph_json(
     attn_mask_dims=None,
     padded=False,
     dropout=False,
+    sink=None,
 ):
     """Graph JSON for the paired forward bundle (always with the LSE output).
 
@@ -697,6 +847,10 @@ def build_forward_graph_json(
         )
         graph["nodes"][0]["inputs"]["dropout_mask_tensor_uid"] = FWD_UID_DROPOUT_MASK
         graph["nodes"][0]["inputs"]["dropout_scale_tensor_uid"] = FWD_UID_DROPOUT_SCALE
+    if sink is not None:
+        H_q = q_dims[1]
+        graph["tensors"].append(_sink_entry(FWD_UID_SINK, "sink", H_q, sink, dtype_str))
+        graph["nodes"][0]["inputs"]["sink_token_tensor_uid"] = FWD_UID_SINK
     return graph
 
 
@@ -1180,7 +1334,16 @@ def gather_ragged(flat, entry, offsets, seq_lens):
 
 
 def check_ragged_storage(
-    graph_json, stored, plan, seq_lens_q, seq_lens_kv, scale, keep_mask, lse
+    graph_json,
+    stored,
+    plan,
+    seq_lens_q,
+    seq_lens_kv,
+    scale,
+    keep_mask,
+    lse,
+    sink=None,
+    dsink=None,
 ):
     """Read every tensor back from the storage written to the bundle and check what
     the harness will see: sequences do not alias, each file holds exactly the elements
@@ -1219,16 +1382,23 @@ def check_ragged_storage(
     for b, length in enumerate(seq_lens_q):
         if not torch.equal(gathered["stats"][b, :, :length], lse[b, :, :length]):
             raise ValueError(f"stats: batch {b} read back differs from the LSE")
-    aq, ak, av, _ = autograd_fp64_gradients(
-        gathered["q"], gathered["k"], gathered["v"], gathered["do"], scale, keep_mask
+    aq, ak, av, _, asink = autograd_fp64_sink_gradients(
+        gathered["q"],
+        gathered["k"],
+        gathered["v"],
+        gathered["do"],
+        scale,
+        sink,
+        keep_mask,
     )
-    return worst_relative_deviation(
-        [
-            ("dQ", gathered["dq"], aq),
-            ("dK", gathered["dk"], ak),
-            ("dV", gathered["dv"], av),
-        ]
-    )
+    pairs = [
+        ("dQ", gathered["dq"], aq),
+        ("dK", gathered["dk"], ak),
+        ("dV", gathered["dv"], av),
+    ]
+    if dsink is not None:
+        pairs.append(("dSink", dsink.reshape(-1), asink))
+    return worst_relative_deviation(pairs)
 
 
 def _sweep_tensor_values(tensor):
@@ -1249,6 +1419,7 @@ RAGGED_TEMPLATE_SIDES = {"ragged_qkv": "qkv", "ragged_q": "q", "ragged_kv": "kv"
 TEMPLATE_KINDS = {
     "dense": "SdpaBackwardTest",
     "dense_dbias": "SdpaBackwardBroadcastDBiasTest",
+    "dense_sink": "SdpaBackwardSinkTest",
     "ragged_qkv": "SdpaBackwardRaggedTest",
     "ragged_q": "SdpaBackwardRaggedQTest",
     "ragged_kv": "SdpaBackwardRaggedKvTest",
@@ -1287,6 +1458,7 @@ def build_sweep_template(kind, scale):
         padded=ragged is not None,
         dbias=kind == "dense_dbias",
         ragged=ragged,
+        sink="float" if kind == "dense_sink" else None,
     )
     graph["io_data_type"] = "${case.io_data_type}"
     graph["name"] = TEMPLATE_KINDS[kind]
@@ -1455,6 +1627,7 @@ def generate_bundles(
     ragged_head_pitch=None,
     ragged_token_stride=None,
     graph_only=False,
+    sink=None,
 ):
     # Validated before anything else: the remaining arguments mean different
     # things in sweep mode and in single-graph mode.
@@ -1525,10 +1698,19 @@ def generate_bundles(
             errors.append(f"--bias-dims must broadcast to {full} (each dim 1 or full)")
     if dbias and not additive_mask:
         errors.append("--dbias requires --additive-mask")
+    if sink not in (None, "float", "io"):
+        errors.append(f"--sink must be float or io (got {sink!r})")
     if dropout_p is not None and not 0.0 < dropout_p < 1.0:
         errors.append(f"--dropout-p must be in (0, 1) (got {dropout_p})")
     ragged = ragged_sides is not None
-    extended = padded or ragged or H_q != H_kv or dbias or dropout_p is not None
+    extended = (
+        padded
+        or ragged
+        or H_q != H_kv
+        or dbias
+        or dropout_p is not None
+        or sink is not None
+    )
     ragged_plan = None
     if stats_layout == "ht" and not ragged:
         errors.append(
@@ -1617,6 +1799,7 @@ def generate_bundles(
                 False,
                 False,
                 dbias,
+                sink=sink,
             ),
             {
                 "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime(
@@ -1637,6 +1820,7 @@ def generate_bundles(
                     "diagonal_alignment": diagonal_alignment,
                     "additive_mask": additive_mask,
                     "dbias": dbias,
+                    "sink": sink,
                 },
             },
         )
@@ -1725,20 +1909,53 @@ def generate_bundles(
             min_val, max_val, generator=rng
         )
 
+    # Drawn after everything else, so bundles without --sink keep their draw order.
+    sink_tensor = sink_logits = sink_meta = None
+    if sink is not None:
+        center = math.log(S_kv)
+        low, high = center - SINK_LOGIT_SPREAD, center + SINK_LOGIT_SPREAD
+        drawn = torch.empty([H_q]).uniform_(low, high, generator=rng)
+        # An IO-dtype sink is stored rounded, and the references must see the
+        # rounded values the executors will read back.
+        sink_tensor = (drawn.to(torch_dtype) if sink == "io" else drawn).view(
+            1, H_q, 1, 1
+        )
+        sink_logits = sink_tensor.float().view(-1)
+        sink_meta = {"dtype": sink, "logit_range": [low, high]}
+
     # The bundles store the mask in the IO dtype, so the reference must see the
     # rounded values the executors will read back, not the FP32 draw.
     attn_bias = None if attn_mask_tensor is None else attn_mask_tensor.float()
 
     # Step 1: forward reference -> O, LSE.
-    if padded or dropout_mask is not None:
+    if padded or dropout_mask is not None or sink_logits is not None:
         O_f, lse = compute_forward_explicit(
-            Q, K, V, attn_scale, keep_mask, attn_bias, dropout_mask, dropout_scale
+            Q,
+            K,
+            V,
+            attn_scale,
+            keep_mask,
+            attn_bias,
+            dropout_mask,
+            dropout_scale,
+            sink_logits,
+            seq_lens_q,
         )
         O = O_f.to(torch_dtype)
         _check_finite("O", O)
-        # Fully-masked rows carry LSE = -inf by contract; nothing else may.
-        alive = keep_mask.any(dim=-1, keepdim=True).expand_as(lse)
-        _check_finite("LSE", lse[alive])
+        if sink_logits is not None:
+            # A row with no live key has LSE = sink (finite); padded query rows
+            # keep LSE = -inf (SEM-022).
+            live = (
+                ~padded_query_rows(S_q, seq_lens_q).expand_as(lse)
+                if padded
+                else torch.ones_like(lse, dtype=torch.bool)
+            )
+            _check_finite("LSE", lse[live])
+        else:
+            # Fully-masked rows carry LSE = -inf by contract; nothing else may.
+            alive = keep_mask.any(dim=-1, keepdim=True).expand_as(lse)
+            _check_finite("LSE", lse[alive])
     else:
         O = compute_forward(Q, K, V, attn_scale, H_q, H_kv, keep_mask, attn_bias).to(
             torch_dtype
@@ -1765,6 +1982,7 @@ def generate_bundles(
         dropout_scale_inv,
         attn_mask_dims if dbias else None,
     )
+    dSink = None if sink_logits is None else compute_dsink(sink_logits, lse, O, dO)
     if validate and not extended:
         worst = validate_against_autograd(
             Q, K, V, dO, attn_scale, keep_mask, dQ, dK, dV, attn_bias
@@ -1772,12 +1990,23 @@ def generate_bundles(
         print(f"  autograd cross-check worst relative deviation: {worst:.3e}")
     if extended:
         # The new features always get the independent FP64 check.
-        aQ, aK, aV, aBias = autograd_fp64_gradients(
-            Q, K, V, dO, attn_scale, keep_mask, attn_bias, dropout_mask, dropout_scale
+        aQ, aK, aV, aBias, aSink = autograd_fp64_sink_gradients(
+            Q,
+            K,
+            V,
+            dO,
+            attn_scale,
+            sink_logits,
+            keep_mask,
+            attn_bias,
+            dropout_mask,
+            dropout_scale,
         )
         pairs = [("dQ", dQ, aQ), ("dK", dK, aK), ("dV", dV, aV)]
         if dbias:
             pairs.append(("dBias", dBias, reduce_to_shape(aBias, attn_mask_dims)))
+        if dSink is not None:
+            pairs.append(("dSink", dSink.view(-1), aSink))
         worst = worst_relative_deviation(pairs)
         print(f"  fp64 autograd worst relative deviation: {worst:.3e}")
         if worst > AUTOGRAD_TOLERANCE:
@@ -1796,6 +2025,10 @@ def generate_bundles(
     if dbias:
         dBias = dBias.to(torch_dtype)
         _check_finite("dBias", dBias)
+    if dSink is not None:
+        # dSink is in the sink's dtype: FLOAT as computed, or rounded once to IO.
+        dSink = (dSink.to(torch_dtype) if sink == "io" else dSink).view(1, H_q, 1, 1)
+        _check_finite("dSink", dSink)
 
     generated_at = datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
@@ -1841,6 +2074,7 @@ def generate_bundles(
                 ("dbias", True if dbias else None),
                 ("dropout_p", dropout_p),
                 ("ragged", ragged_meta),
+                ("sink", sink_meta),
             ]
             if v is not None
         },
@@ -1868,6 +2102,7 @@ def generate_bundles(
             attn_mask_dims,
             padded,
             dropout_mask is not None,
+            sink,
         ),
         forward_meta,
         [
@@ -1897,7 +2132,8 @@ def generate_bundles(
                 ("dropout_mask", dropout_mask, FWD_UID_DROPOUT_MASK),
                 ("dropout_scale", scalar_tensor(dropout_scale), FWD_UID_DROPOUT_SCALE),
             ]
-        ),
+        )
+        + ([] if sink_tensor is None else [("sink", sink_tensor, FWD_UID_SINK)]),
     )
 
     backward_graph = build_backward_graph_json(
@@ -1915,6 +2151,7 @@ def generate_bundles(
         dropout_mask is not None,
         dbias,
         ragged_plan,
+        sink=sink,
     )
     backward_meta = build_backward_meta_json(config, forward_meta)
     backward_tensors = [
@@ -1949,6 +2186,11 @@ def generate_bundles(
         ]
     if dbias:
         backward_tensors.append(("dBias", dBias, UID_DBIAS))
+    if sink_tensor is not None:
+        backward_tensors += [
+            ("sink", sink_tensor, UID_SINK),
+            ("dSink", dSink, UID_DSINK),
+        ]
 
     if ragged:
         dense_by_role = {
@@ -2000,6 +2242,8 @@ def generate_bundles(
             attn_scale,
             keep_mask,
             lse,
+            sink_logits,
+            dSink,
         )
         print(
             f"  ragged storage vs fp64 autograd worst relative deviation: {worst:.3e}"
@@ -2166,6 +2410,15 @@ def main():
         "[B, H_q, S_q, S_kv], dropout_scale = 1/(1-p), dropout_scale_inv = 1-p",
     )
     parser.add_argument(
+        "--sink",
+        choices=["float", "io"],
+        default=None,
+        help="Attention sink: one raw logit per query head in the softmax "
+        "denominator (no V row). float = FP32 [1, H_q, 1, 1]; io = the IO dtype. "
+        "dSink is emitted in the same dtype. Logits are drawn "
+        "U[ln(S_kv) - 1, ln(S_kv) + 1].",
+    )
+    parser.add_argument(
         "--ragged-sides",
         choices=["q", "kv", "qkv"],
         default=None,
@@ -2312,6 +2565,7 @@ def main():
         ragged_units=args.ragged_units,
         stats_layout=args.stats_layout,
         graph_only=args.graph_only,
+        sink=args.sink,
     )
     print("\nDone.")
 

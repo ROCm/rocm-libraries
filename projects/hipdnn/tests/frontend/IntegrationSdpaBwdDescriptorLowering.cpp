@@ -291,6 +291,12 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdTensorScaleRoundTrip)
     EXPECT_FALSE(sdpa->attn_scale_value.has_value());
     EXPECT_FALSE(sdpa->left_bound.has_value());
     EXPECT_FALSE(sdpa->right_bound.has_value());
+    EXPECT_FALSE(sdpa->sink_token_tensor_uid.has_value());
+    EXPECT_FALSE(sdpa->dsink_token_tensor_uid.has_value());
+    EXPECT_FALSE(sdpa->rng_dump_tensor_uid.has_value());
+    EXPECT_FALSE(sdpa->is_deterministic_algorithm);
+    EXPECT_FALSE(sdpa->max_total_seq_len_q.has_value());
+    EXPECT_FALSE(sdpa->max_total_seq_len_kv.has_value());
 }
 
 // Sets all compatible optional tensors and non-default scalar/boolean/enum values,
@@ -403,6 +409,34 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
 
+    auto sinkToken = std::make_shared<TensorAttributes>();
+    sinkToken->set_uid(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID)
+        .set_name("SINK_TOKEN")
+        .set_data_type(DataType::FLOAT);
+    sinkToken->set_dim(toVec(K_SDPA_BWD_TENSOR_SINK_TOKEN_DIMS));
+    sinkToken->set_stride(toVec(K_SDPA_BWD_TENSOR_SINK_TOKEN_STRIDES));
+
+    auto dsinkToken = std::make_shared<TensorAttributes>();
+    dsinkToken->set_uid(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID)
+        .set_name("DSINK_TOKEN")
+        .set_data_type(DataType::FLOAT)
+        .set_output(true);
+    dsinkToken->set_dim(toVec(K_SDPA_BWD_TENSOR_DSINK_TOKEN_DIMS));
+    dsinkToken->set_stride(toVec(K_SDPA_BWD_TENSOR_DSINK_TOKEN_STRIDES));
+
+    auto rngDump = std::make_shared<TensorAttributes>();
+    rngDump->set_uid(K_SDPA_BWD_TENSOR_RNG_DUMP_UID)
+        .set_name("RNG_DUMP")
+        .set_data_type(DataType::FLOAT)
+        .set_output(true);
+    rngDump->set_dim(toVec(K_SDPA_BWD_TENSOR_RNG_DUMP_DIMS));
+    rngDump->set_stride(toVec(K_SDPA_BWD_TENSOR_RNG_DUMP_STRIDES));
+
+    sdpaAttrs.set_sink_token(sinkToken);
+    sdpaAttrs.set_dsink_token(dsinkToken);
+    sdpaAttrs.set_rng_dump(rngDump);
+    sdpaAttrs.set_deterministic_algorithm(true);
+
     auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, statsTensor, std::move(sdpaAttrs));
     dq->set_uid(K_SDPA_BWD_TENSOR_DQ_UID).set_output(true).set_name("dQ");
     dk->set_uid(K_SDPA_BWD_TENSOR_DK_UID).set_output(true).set_name("dK");
@@ -433,8 +467,8 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
 
-    // 9 required + 9 compatible optional input/output tensors = 18
-    ASSERT_EQ(graphT.tensors.size(), 18u);
+    // 9 required + 12 compatible optional input/output tensors = 21
+    ASSERT_EQ(graphT.tensors.size(), 21u);
 
     std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
         tensorMap;
@@ -464,6 +498,9 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DBIAS_UID), 0u);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID), 0u);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID), 0u);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_RNG_DUMP_UID), 0u);
 
     // -- Verify optional tensor properties --
 
@@ -521,6 +558,24 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     EXPECT_EQ(dbiasT->dims, toVec(K_SDPA_BWD_TENSOR_DBIAS_DIMS));
     EXPECT_EQ(dbiasT->strides, toVec(K_SDPA_BWD_TENSOR_DBIAS_STRIDES));
 
+    auto* sinkT = tensorMap[K_SDPA_BWD_TENSOR_SINK_TOKEN_UID];
+    EXPECT_EQ(sinkT->name, "SINK_TOKEN");
+    EXPECT_EQ(sinkT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(sinkT->dims, toVec(K_SDPA_BWD_TENSOR_SINK_TOKEN_DIMS));
+    EXPECT_EQ(sinkT->strides, toVec(K_SDPA_BWD_TENSOR_SINK_TOKEN_STRIDES));
+
+    auto* dsinkT = tensorMap[K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID];
+    EXPECT_EQ(dsinkT->name, "DSINK_TOKEN");
+    EXPECT_EQ(dsinkT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(dsinkT->dims, toVec(K_SDPA_BWD_TENSOR_DSINK_TOKEN_DIMS));
+    EXPECT_EQ(dsinkT->strides, toVec(K_SDPA_BWD_TENSOR_DSINK_TOKEN_STRIDES));
+
+    auto* rngDumpT = tensorMap[K_SDPA_BWD_TENSOR_RNG_DUMP_UID];
+    EXPECT_EQ(rngDumpT->name, "RNG_DUMP");
+    EXPECT_EQ(rngDumpT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(rngDumpT->dims, toVec(K_SDPA_BWD_TENSOR_RNG_DUMP_DIMS));
+    EXPECT_EQ(rngDumpT->strides, toVec(K_SDPA_BWD_TENSOR_RNG_DUMP_STRIDES));
+
     // -- Verify SDPA bprop node attributes --
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto& node = graphT.nodes[0];
@@ -572,6 +627,19 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     ASSERT_TRUE(sdpa->dbias_tensor_uid.has_value());
     EXPECT_EQ(sdpa->dbias_tensor_uid.value(), K_SDPA_BWD_TENSOR_DBIAS_UID);
 
+    ASSERT_TRUE(sdpa->sink_token_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->sink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+
+    ASSERT_TRUE(sdpa->dsink_token_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->dsink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+
+    ASSERT_TRUE(sdpa->rng_dump_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->rng_dump_tensor_uid.value(), K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
+
+    EXPECT_TRUE(sdpa->is_deterministic_algorithm);
+    EXPECT_FALSE(sdpa->max_total_seq_len_q.has_value());
+    EXPECT_FALSE(sdpa->max_total_seq_len_kv.has_value());
+
     // ALL boolean attributes set to true
     EXPECT_TRUE(sdpa->alibi_mask);
     EXPECT_TRUE(sdpa->padding_mask);
@@ -594,6 +662,83 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
 
     // Enum values
     EXPECT_EQ(sdpa->diagonal_alignment, DiagonalAlignmentSdk::BOTTOM_RIGHT);
+}
+
+// max_total_seq_len_q/kv (valid with a ragged Q) lower into the flatbuffer; an engine-visible
+// hint, so every graph that sets one must carry a packed tensor.
+TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdMaxTotalSeqLenLowersWithRaggedQ)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("MaxTotalSdpaBwdGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    const auto makeTensor = [](int64_t uid,
+                               const char* name,
+                               const std::array<int64_t, 4>& dims,
+                               const std::array<int64_t, 4>& strides) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid).set_name(name).set_data_type(DataType::FLOAT);
+        t->set_dim(toVec(dims)).set_stride(toVec(strides));
+        return t;
+    };
+    auto q = makeTensor(
+        K_SDPA_BWD_TENSOR_Q_UID, "Q", K_SDPA_BWD_TENSOR_Q_DIMS, K_SDPA_BWD_TENSOR_Q_STRIDES);
+    auto k = makeTensor(
+        K_SDPA_BWD_TENSOR_K_UID, "K", K_SDPA_BWD_TENSOR_K_DIMS, K_SDPA_BWD_TENSOR_K_STRIDES);
+    auto v = makeTensor(
+        K_SDPA_BWD_TENSOR_V_UID, "V", K_SDPA_BWD_TENSOR_V_DIMS, K_SDPA_BWD_TENSOR_V_STRIDES);
+    auto o = makeTensor(
+        K_SDPA_BWD_TENSOR_O_UID, "O", K_SDPA_BWD_TENSOR_O_DIMS, K_SDPA_BWD_TENSOR_O_STRIDES);
+    auto dO = makeTensor(
+        K_SDPA_BWD_TENSOR_DO_UID, "dO", K_SDPA_BWD_TENSOR_DO_DIMS, K_SDPA_BWD_TENSOR_DO_STRIDES);
+    auto stats = makeTensor(K_SDPA_BWD_TENSOR_STATS_UID,
+                            "Stats",
+                            K_SDPA_BWD_TENSOR_STATS_DIMS,
+                            K_SDPA_BWD_TENSOR_STATS_STRIDES);
+
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(120)
+        .set_name("RAGGED_OFFSET_Q")
+        .set_data_type(DataType::INT64)
+        .set_dim({3, 1, 1, 1})
+        .set_stride({1, 1, 1, 1});
+    q->set_ragged_offset(raggedOffset);
+
+    SdpaBackwardAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_bwd_max_total");
+    sdpaAttrs.set_max_total_seq_len_q(512).set_max_total_seq_len_kv(1024);
+
+    auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, std::move(sdpaAttrs));
+    dq->set_uid(K_SDPA_BWD_TENSOR_DQ_UID).set_output(true).set_name("dQ");
+    dk->set_uid(K_SDPA_BWD_TENSOR_DK_UID).set_output(true).set_name("dK");
+    dv->set_uid(K_SDPA_BWD_TENSOR_DV_UID).set_output(true).set_name("dV");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* sdpa = graphT.nodes[0]->attributes.AsSdpaBackwardAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    ASSERT_TRUE(sdpa->max_total_seq_len_q.has_value());
+    EXPECT_EQ(sdpa->max_total_seq_len_q.value(), 512);
+    ASSERT_TRUE(sdpa->max_total_seq_len_kv.has_value());
+    EXPECT_EQ(sdpa->max_total_seq_len_kv.value(), 1024);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved

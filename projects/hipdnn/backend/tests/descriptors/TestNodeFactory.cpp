@@ -220,6 +220,89 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
     EXPECT_EQ(desc->getData().dv_tensor_uid, K_SDPA_BWD_TENSOR_DV_UID);
 }
 
+TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwdSinkRngDumpAndHints)
+{
+    constexpr int64_t SINK_UID = 110;
+    constexpr int64_t DSINK_UID = 111;
+    constexpr int64_t RNG_DUMP_UID = 112;
+
+    auto makeTensor = [](int64_t uid, const std::array<int64_t, 4>& dims) {
+        TensorAttributesT t;
+        t.uid = uid;
+        t.data_type = DataType::FLOAT;
+        t.dims = toVec(dims);
+        t.strides = {1, 1, 1, 1};
+        return TensorDescriptor::fromFlatBuffer(t);
+    };
+
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorMap;
+    auto addRequired = [&](int64_t uid,
+                           const std::array<int64_t, 4>& dims,
+                           const std::array<int64_t, 4>& strides) {
+        TensorAttributesT t;
+        t.uid = uid;
+        t.data_type = DataType::FLOAT;
+        t.dims = toVec(dims);
+        t.strides = toVec(strides);
+        tensorMap[uid] = TensorDescriptor::fromFlatBuffer(t);
+    };
+    addRequired(K_SDPA_BWD_TENSOR_Q_UID, K_SDPA_BWD_TENSOR_Q_DIMS, K_SDPA_BWD_TENSOR_Q_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_K_UID, K_SDPA_BWD_TENSOR_K_DIMS, K_SDPA_BWD_TENSOR_K_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_V_UID, K_SDPA_BWD_TENSOR_V_DIMS, K_SDPA_BWD_TENSOR_V_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_O_UID, K_SDPA_BWD_TENSOR_O_DIMS, K_SDPA_BWD_TENSOR_O_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_DO_UID, K_SDPA_BWD_TENSOR_DO_DIMS, K_SDPA_BWD_TENSOR_DO_STRIDES);
+    addRequired(
+        K_SDPA_BWD_TENSOR_STATS_UID, K_SDPA_BWD_TENSOR_STATS_DIMS, K_SDPA_BWD_TENSOR_STATS_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_DQ_UID, K_SDPA_BWD_TENSOR_DQ_DIMS, K_SDPA_BWD_TENSOR_DQ_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_DK_UID, K_SDPA_BWD_TENSOR_DK_DIMS, K_SDPA_BWD_TENSOR_DK_STRIDES);
+    addRequired(K_SDPA_BWD_TENSOR_DV_UID, K_SDPA_BWD_TENSOR_DV_DIMS, K_SDPA_BWD_TENSOR_DV_STRIDES);
+    tensorMap[SINK_UID] = makeTensor(SINK_UID, {1, 4, 1, 1});
+    tensorMap[DSINK_UID] = makeTensor(DSINK_UID, {1, 4, 1, 1});
+    tensorMap[RNG_DUMP_UID] = makeTensor(RNG_DUMP_UID, {1, 1, 1, 1});
+
+    SdpaBackwardAttributesT attrs;
+    attrs.q_tensor_uid = K_SDPA_BWD_TENSOR_Q_UID;
+    attrs.k_tensor_uid = K_SDPA_BWD_TENSOR_K_UID;
+    attrs.v_tensor_uid = K_SDPA_BWD_TENSOR_V_UID;
+    attrs.o_tensor_uid = K_SDPA_BWD_TENSOR_O_UID;
+    attrs.do_tensor_uid = K_SDPA_BWD_TENSOR_DO_UID;
+    attrs.stats_tensor_uid = K_SDPA_BWD_TENSOR_STATS_UID;
+    attrs.dq_tensor_uid = K_SDPA_BWD_TENSOR_DQ_UID;
+    attrs.dk_tensor_uid = K_SDPA_BWD_TENSOR_DK_UID;
+    attrs.dv_tensor_uid = K_SDPA_BWD_TENSOR_DV_UID;
+    attrs.sink_token_tensor_uid = SINK_UID;
+    attrs.dsink_token_tensor_uid = DSINK_UID;
+    attrs.rng_dump_tensor_uid = RNG_DUMP_UID;
+    attrs.is_deterministic_algorithm = true;
+    attrs.max_total_seq_len_q = 4096;
+    attrs.max_total_seq_len_kv = 8192;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto graphOp = NodeFactory::createOperationFromNode(node, tensorMap);
+    ASSERT_NE(graphOp, nullptr);
+
+    auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
+    ASSERT_NE(desc->getSinkTokenDesc(), nullptr);
+    ASSERT_NE(desc->getDsinkTokenDesc(), nullptr);
+    ASSERT_NE(desc->getRngDumpDesc(), nullptr);
+    EXPECT_EQ(desc->getSinkTokenDesc()->getData().uid, SINK_UID);
+    EXPECT_EQ(desc->getDsinkTokenDesc()->getData().uid, DSINK_UID);
+    EXPECT_EQ(desc->getRngDumpDesc()->getData().uid, RNG_DUMP_UID);
+
+    auto rebuilt = graphOp->asGraphOperation()->buildNode();
+    const auto* rebuiltAttrs = rebuilt->attributes.AsSdpaBackwardAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    EXPECT_EQ(rebuiltAttrs->sink_token_tensor_uid, SINK_UID);
+    EXPECT_EQ(rebuiltAttrs->dsink_token_tensor_uid, DSINK_UID);
+    EXPECT_EQ(rebuiltAttrs->rng_dump_tensor_uid, RNG_DUMP_UID);
+    EXPECT_TRUE(rebuiltAttrs->is_deterministic_algorithm);
+    EXPECT_EQ(rebuiltAttrs->max_total_seq_len_q, 4096);
+    EXPECT_EQ(rebuiltAttrs->max_total_seq_len_kv, 8192);
+}
+
 TEST_F(TestNodeFactory, CreateOperationFromNodeUnsupportedType)
 {
     NodeT node;

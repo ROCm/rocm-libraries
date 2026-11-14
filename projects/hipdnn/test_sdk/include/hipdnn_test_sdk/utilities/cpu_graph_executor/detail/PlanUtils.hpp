@@ -297,11 +297,11 @@ int64_t sdpaPagedMaxSeqKv(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttrib
     return maxSeqKv;
 }
 
-/// Whether an SDPA forward node's attention sink is one the references implement: absent, or a
-/// FLOAT tensor [1, H, 1, 1] with H the query head count (cuDNN's shape).
-template <typename TensorMap>
-bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
-                         const TensorMap& tensorMap)
+/// Whether an SDPA node's attention sink is one the references implement: absent, or a tensor
+/// [1, H, 1, 1] with H the query head count (cuDNN's shape), FLOAT (cuDNN's dtype) or the Q dtype
+/// (hipDNN extension). Works for forward and backward attributes.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isSupportedSdpaSink(const SdpaAttributesType& attrs, const TensorMap& tensorMap)
 {
     if(!attrs.sink_token_tensor_uid().has_value())
     {
@@ -310,13 +310,46 @@ bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttribu
     const auto sinkIt = tensorMap.find(attrs.sink_token_tensor_uid().value());
     const auto qIt = tensorMap.find(attrs.q_tensor_uid());
     if(sinkIt == tensorMap.end() || qIt == tensorMap.end() || sinkIt->second->dims() == nullptr
-       || qIt->second->dims() == nullptr || qIt->second->dims()->size() != 4
-       || sinkIt->second->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+       || qIt->second->dims() == nullptr || qIt->second->dims()->size() != 4)
+    {
+        return false;
+    }
+    const auto sinkType = sinkIt->second->data_type();
+    if(sinkType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && sinkType != qIt->second->data_type())
     {
         return false;
     }
     const std::vector<int64_t> dims(sinkIt->second->dims()->begin(), sinkIt->second->dims()->end());
     return dims == std::vector<int64_t>{1, qIt->second->dims()->Get(1), 1, 1};
+}
+
+/// Whether an SDPA backward node's sink gradient is one the references implement: absent, or
+/// with the sink present, a tensor of the sink's shape and dtype.
+template <typename TensorMap>
+bool isSupportedSdpaDSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+                          const TensorMap& tensorMap)
+{
+    if(!attrs.dsink_token_tensor_uid().has_value())
+    {
+        return true;
+    }
+    if(!attrs.sink_token_tensor_uid().has_value())
+    {
+        return false;
+    }
+    const auto dSinkIt = tensorMap.find(attrs.dsink_token_tensor_uid().value());
+    const auto sinkIt = tensorMap.find(attrs.sink_token_tensor_uid().value());
+    if(dSinkIt == tensorMap.end() || sinkIt == tensorMap.end() || dSinkIt->second->dims() == nullptr
+       || sinkIt->second->dims() == nullptr)
+    {
+        return false;
+    }
+    return dSinkIt->second->data_type() == sinkIt->second->data_type()
+           && std::equal(dSinkIt->second->dims()->begin(),
+                         dSinkIt->second->dims()->end(),
+                         sinkIt->second->dims()->begin(),
+                         sinkIt->second->dims()->end());
 }
 
 /// Whether an SDPA node's attention scale is one the references can read: a finite baked
@@ -522,13 +555,9 @@ inline float
     return *static_cast<const float*>(it->second);
 }
 
-/// Whether an SDPA forward node is Philox dropout that the references can check through
-/// RNG_DUMP: dropout_probability in [0, 1), seed and offset given, no explicit mask, and an
-/// rng_dump output FLOAT [B, H_q, Sq, Skv]. The engine writes its keep mask to rng_dump; the
-/// references read it back as the explicit mask with scale 1 / (1 - p) (cuDNN's composition).
-template <typename TensorMap>
-bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
-                                 const TensorMap& tensorMap)
+/// The Philox-with-RNG_DUMP dropout test shared by forward and backward attributes.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isPhiloxDropoutWithDump(const SdpaAttributesType& attrs, const TensorMap& tensorMap)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     if(!attrs.dropout_probability().has_value() || !attrs.seed_tensor_uid().has_value()
@@ -557,6 +586,28 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
     const auto* k = kIt->second->dims();
     return d->size() == 4 && q->size() == 4 && k->size() == 4 && d->Get(0) == q->Get(0)
            && d->Get(1) == q->Get(1) && d->Get(2) == q->Get(2) && d->Get(3) == k->Get(2);
+}
+
+/// Whether an SDPA forward node is Philox dropout that the references can check through
+/// RNG_DUMP: dropout_probability in [0, 1), seed and offset given, no explicit mask, and an
+/// rng_dump output FLOAT [B, H_q, Sq, Skv]. The engine writes its keep mask to rng_dump; the
+/// references read it back as the explicit mask with scale 1 / (1 - p) (cuDNN's composition).
+template <typename TensorMap>
+bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                 const TensorMap& tensorMap)
+{
+    return isPhiloxDropoutWithDump(attrs, tensorMap);
+}
+
+/// The backward counterpart: the engine's backward rng_dump holds the keep mask it applied, and
+/// the references read it as the explicit mask with scale 1 / (1 - p) and scale_inv (1 - p).
+/// Philox without an rng_dump has no oracle and is not this case.
+template <typename TensorMap>
+bool isSdpaBwdPhiloxDropoutWithDump(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+    const TensorMap& tensorMap)
+{
+    return isPhiloxDropoutWithDump(attrs, tensorMap);
 }
 
 /// Whether an SDPA forward node's dropout is probability 0 with nothing to check or apply: no
@@ -729,7 +780,7 @@ bool isSupportedSdpaFwdNode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttr
         return false;
     }
 
-    // Attention sink: FLOAT [1, H, 1, 1].
+    // Attention sink: FLOAT or the Q dtype, [1, H, 1, 1].
     if(!isSupportedSdpaSink(attrs, tensorMap))
     {
         return false;
@@ -883,8 +934,17 @@ bool isSupportedSdpaBwdNode(
         }
     }
 
-    // Dropout: only cuDNN's explicit-mask form; dropout_scale_inv must be one FLOAT element.
-    if(!isSupportedSdpaDropout(attrs, tensorMap))
+    // Dropout: cuDNN's explicit-mask form, or Philox dropout checked through the engine's backward
+    // RNG_DUMP keep mask. Philox without RNG_DUMP has no exact oracle and is declined; an
+    // rng_dump alongside anything else is declined (it would be read as nothing).
+    if(!isSdpaBwdPhiloxDropoutWithDump(attrs, tensorMap)
+       && (!isSupportedSdpaDropout(attrs, tensorMap) || attrs.rng_dump_tensor_uid().has_value()))
+    {
+        return false;
+    }
+
+    // Attention sink and its gradient: FLOAT or the Q dtype [1, H, 1, 1], dSink as the sink.
+    if(!isSupportedSdpaSink(attrs, tensorMap) || !isSupportedSdpaDSink(attrs, tensorMap))
     {
         return false;
     }
