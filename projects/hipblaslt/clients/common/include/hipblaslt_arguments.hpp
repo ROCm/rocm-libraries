@@ -192,6 +192,8 @@ struct Arguments
     int8_t  allow_no_solution;
     // PCI chip IDs on which allow_no_solution does not apply, so no solution fails (0 = unused)
     int32_t require_solution_chip_ids[4];
+    // pass only when the library offers no solution; fail if it offers one
+    int8_t  expect_no_solution;
     int8_t  timing;
 
     char transA;
@@ -338,6 +340,7 @@ struct Arguments
     OPER(integer_exact_pattern) SEP  \
     OPER(allow_no_solution) SEP      \
     OPER(require_solution_chip_ids) SEP \
+    OPER(expect_no_solution) SEP     \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

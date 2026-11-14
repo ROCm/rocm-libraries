@@ -10334,6 +10334,7 @@ custom.config:
     macrotile: [256, 256, 128]
     threads: [256, 1, 1]
     grid: [TilesXY, One, Batch]
+    unroll: 2
   MatrixInstruction: [16, 16, 128, 1]
   StaggerU: 0
   EnableMatrixInstruction: True

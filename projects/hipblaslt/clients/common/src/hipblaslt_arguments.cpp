@@ -148,6 +148,7 @@ void Arguments::init()
     integer_exact_pattern[0] = 0;
     allow_no_solution        = 0;
     memset(require_solution_chip_ids, 0, sizeof(require_solution_chip_ids));
+    expect_no_solution       = 0;
     timing         = 0;
 
     transA = '*';

@@ -43,4 +43,23 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# rocRoller-off build only. A rocRoller-routed GEMM runs rocRoller's own pick,
+# taken from the checked-in kernels, or nothing. rocRoller picks a 256x128x128
+# tile for this problem and no such kernel is checked in, so neither API may
+# offer another kernel instead.
+- name: rocroller_pick_without_kernel_no_solution
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: bf6_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [1024]
+  N: [4096]
+  K: [512]
+  transA: T
+  transB: N
+  use_ext: [0, 1]
+  expect_no_solution: 1
+  initialization: hpl
+  gpu_arch: '950'
+
 ...

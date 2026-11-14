@@ -5621,6 +5621,19 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     returnedAlgoCount = heuristicResult.size();
 
+    if(arg.expect_no_solution)
+    {
+#ifdef GOOGLE_TEST
+        EXPECT_EQ(returnedAlgoCount, 0)
+            << "the library offers a solution for a case expecting none";
+#else
+        if(returnedAlgoCount != 0)
+            hipblaslt_cerr << "the library offers a solution for a case expecting none"
+                           << std::endl;
+#endif
+        return;
+    }
+
     // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
     // On a chip a case names in require_solution_chip_ids, a solution must exist.
     bool requireSolution = false;
