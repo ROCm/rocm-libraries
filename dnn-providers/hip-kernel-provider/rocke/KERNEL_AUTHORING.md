@@ -512,8 +512,12 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
    [test_attention_builds.py](library/tests/test_attention_builds.py) or the
    closest architecture-specific builder test under `library/tests/`.
-5. **Run** `pytest library/tests` (add `platform/tests` if platform was touched);
-   GPU numeric lanes need a HIP-visible device.
+5. **Run** `python library/tests/run_all.py --require-compiler-gate` for the
+   complete required library host verdict (`--pytest-only` is focused iteration);
+   add the platform runner if platform code was touched. Run
+   `python library/tests/run_all.py --gpu-only` for the applicable GPU-marked files,
+   or `python tools/run_checks.py --steps numeric --op <family>` for the
+   standalone differential numeric lane, on a HIP-visible device.
 
 ### F. Parity and golden re-bless
 

@@ -715,6 +715,10 @@ validParameters = { # we need to make sure this matches develop
     "AssertStrideBEqual": -1,
     "AssertStrideCEqual": -1,
     "AssertStrideDEqual": -1,
+    # Required alpha. A kernel that has no alpha argument declares 1; the runtime
+    # predicate admits only a problem whose alpha restriction is that value. Unset
+    # admits any alpha.
+    "AssertAlphaValue": [1],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1353,13 +1357,17 @@ validParameters = { # we need to make sure this matches develop
     #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
     #   "InMemorySwizzle": scales swizzled in device memory by TDM;
     #                      requires MXLoadInst="TDM".
+    #   "HostPreSwizzle128x4": scales pre-shuffled on the host in 128-row by 4-K-block
+    #                      tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+    #                      handwritten gfx950 custom kernels only.
     # Internal sentinel (do NOT use in yamls):
     #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
     #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
     #                      derivation fires; users should write one of the concrete values above.
     # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
     # archCaps["HasMXScaleSwizzle"].
-    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                      "HostPreSwizzle128x4"],
     # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
     # User-facing values:
     #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
