@@ -23,6 +23,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <nlohmann/json.hpp>
 
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 
@@ -452,6 +453,12 @@ const Census& census()
         if(c.arch.empty())
         {
             c.skip = "no device";
+            return c;
+        }
+        if(!convEngineGroupEnabled())
+        {
+            c.skip = std::string("the conv engine group is not enabled (set ") + CONV_ENABLE_ENV
+                     + "=1)";
             return c;
         }
         c.computeUnits = deviceComputeUnits(c.arch);

@@ -179,14 +179,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         if(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp)
-            # It reads the naive pack's budget constants (header only, nothing linked).
-            target_include_directories(hip_kernel_provider_integration_tests PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/..)
         else()
             message(STATUS "conv: coverage census not built -- not every conv family is "
                            "served (${HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES})")
         endif()
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
+        # The suites read the conv group's opt-in (ConvEngineGroupGate.hpp) and the naive pack's
+        # budget constants: headers only, nothing linked.
+        target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/..)
         # The coverage census reads its map beside the binary, in the build tree and the
         # install tree alike.
         set(_hkp_conv_coverage_map
@@ -270,8 +271,25 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # descriptor tree relative to the loaded module -- the staged copy in a build tree, the
 # installed copy in an install tree. Naming one explicitly would pin the build path into
 # the install-time CTest file and stop the installed descriptors from ever being read.
+# The conv engine group is opt-in at runtime (HIP_KERNEL_PROVIDER_ENABLE_CONV); a build that
+# ships it runs its suites with the group enabled.
+set(_hkp_integration_environment "")
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV)
+    list(APPEND _hkp_integration_environment "HIP_KERNEL_PROVIDER_ENABLE_CONV=1")
+endif()
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
-    LABELS slow)
+    LABELS slow ENVIRONMENT ${_hkp_integration_environment})
+
+# The same binary with the conv group not enabled: none of its engines is offered.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV
+   AND "naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+    add_test(NAME hip_kernel_provider_conv_opt_in_off
+             COMMAND hip_kernel_provider_integration_tests
+                     --gtest_filter=*IntegrationGpuConvNaive.IsOfferedOnlyWhenTheConvGroupIsEnabled*
+             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(hip_kernel_provider_conv_opt_in_off PROPERTIES
+        LABELS "slow" ENVIRONMENT "HIP_KERNEL_PROVIDER_ENABLE_CONV=0")
+endif()
 
 # Forward the merged raw-test environment (published by add_integration_test_target)
 # to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can

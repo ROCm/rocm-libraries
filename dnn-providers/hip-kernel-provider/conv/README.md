@@ -150,9 +150,36 @@ against an fp64 reference within the half tolerance widened for the per-image ro
 | Kernel embedding (`HKP_CONV_KERNEL_SOURCES`, `HKP_CONV_KERNEL_KEYS`) | `src/engines/kernel_ingestor_engine/CMakeLists.txt` |
 | Tests | `src/tests/engines/kernel_ingestor_engine/packs/TestConv<Family>*.cpp` |
 
+## Opt-in preview
+
+The group is a preview, off in two places:
+
+- **Build:** `HIPKERNELPROVIDER_ENABLE_CONV` is OFF by default, so a default build (TheRock's
+  included) ships no conv engine. The rocm-libraries superbuild presets `hipdnn-dev-all` and
+  `miopen-hipdnn-dev-all` turn it ON, so the group is built and tested there.
+- **Runtime:** a build that ships the group serves its engines only in a process with
+  `HIP_KERNEL_PROVIDER_ENABLE_CONV` set to `1` (or `true`, `on`, `yes`). Unset, or any other
+  value, the provider withdraws every `hipkernel:CONV_*` engine from its descriptor catalog
+  when it first loads it (`ConvEngineGroupGate.hpp`), and serves exactly what a build without
+  the group serves. The provider reads the variable once, when it loads its descriptors.
+
+```bash
+export HIP_KERNEL_PROVIDER_ENABLE_CONV=1
+```
+
+Enabled, every engine in the table above is offered for the graphs its gates accept, in fp32,
+fp16 and bf16, 1-D to 3-D, forward, backward data and backward weights; the explicit-GEMM
+engines live in `hipblaslt-provider` under their own build option. Selection between the
+engines is autotune's: the trained heuristics (UHD) for this group, and serving it by default,
+come later. The provider's own suites run with the group enabled (CTest sets the variable; the
+unit binary also enables it when the variable is unset), and
+`hip_kernel_provider_conv_opt_in_off` checks that none of its engines is offered when it is
+not.
+
 ## Building
 
-Off by default. Enable with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_CONV=ON`.
+Off by default. Enable with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_CONV=ON`,
+and set `HIP_KERNEL_PROVIDER_ENABLE_CONV=1` at runtime (above).
 With the option OFF, the packs are not compiled, the kernels are not embedded and the
 `conv/` descriptor folder is not packed (`HKP_DESCRIPTOR_FAMILIES` in
 `descriptor-packaging/cmake/HkpPackaging.cmake`).

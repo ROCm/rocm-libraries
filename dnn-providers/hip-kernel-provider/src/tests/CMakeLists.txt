@@ -666,7 +666,14 @@ clang_tidy_check(hip_kernel_provider_tests)
 # runs standalone and nothing machine-specific reaches the generated CTest files. The
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
-add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+# The conv engine group is opt-in at runtime (HIP_KERNEL_PROVIDER_ENABLE_CONV); its suites run
+# with it enabled (main() also defaults it on, so the binary runs standalone).
+set(_hkp_unit_environment "")
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV)
+    list(APPEND _hkp_unit_environment "HIP_KERNEL_PROVIDER_ENABLE_CONV=1")
+endif()
+add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR}
+                     ENVIRONMENT ${_hkp_unit_environment})
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hip_kernel_provider_census_tests)
