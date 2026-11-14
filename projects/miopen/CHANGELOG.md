@@ -81,6 +81,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
   gfx950 `direct_wgrad` kernel when built with clang 23. See
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
+* [Conv] Added `ConvHipDirectDepthwiseBwd1d`, a direct depthwise backward-data 1D convolution
+  solver for RDNA (`gfx101X` to `gfx120X`), which also runs depthwise `ConvTranspose1d` such as the
+  anti-aliased upsampling of BigVGAN-style vocoders. It covers fp32, fp16 and bf16, filter widths up
+  to 64 and strides up to 8, and is 9x to 56x faster than `GemmBwdRest` on gfx1151.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
