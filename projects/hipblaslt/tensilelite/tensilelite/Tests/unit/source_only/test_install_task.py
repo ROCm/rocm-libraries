@@ -1,21 +1,24 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
-import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+import importlib.util
 import shlex
 import subprocess
 import sys
-from types import SimpleNamespace
 
 import pytest
 
-import tasks
-
-
 pytestmark = pytest.mark.unit
-
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _load_tensilelite_tasks():
+    spec = importlib.util.spec_from_file_location("tensilelite_tasks", _SOURCE_ROOT / "tasks.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_hipblaslt_tasks():
@@ -28,6 +31,7 @@ def _load_hipblaslt_tasks():
     return module
 
 
+tasks = _load_tensilelite_tasks()
 hipblaslt_tasks = _load_hipblaslt_tasks()
 
 

@@ -14,9 +14,7 @@ import pytest
 
 from tensilelite import GENERATOR_VERSION
 
-
 pytestmark = pytest.mark.unit
-
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
 _SHA = "0123456789abcdef0123456789abcdef01234567"
 

@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Dict
 
-from .. import __version__
+from .. import GENERATOR_VERSION as __version__
 from ..Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx

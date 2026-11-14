@@ -56,7 +56,7 @@ To use the `tensile_config_generator.py` script, follow these steps:
 
 4. Tune GEMM kernels using the generated YAML files:
    ```
-   HIP_FORCE_DEV_KERNARG=1 ./tensilelite/tensilelite/bin/Tensile <generated yaml path> <tune result directory>
+   HIP_FORCE_DEV_KERNARG=1 python -m tensilelite run <generated yaml path> <tune result directory>
    ```
 
 5. Merge tune results:
