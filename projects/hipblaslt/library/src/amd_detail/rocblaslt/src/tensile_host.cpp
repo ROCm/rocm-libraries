@@ -5735,6 +5735,16 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
+    // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
+    // == false -- its Stream-K nature lives in customKernel, not sizeMapping --
+    // so without this it would be handed the GSU region, which is shared across
+    // streams. Its flags are one int per workgroup, zeroed before and after each
+    // launch, and must be private to the stream.
+    if(solution.customKernel.workspaceType
+           == TensileLite::CustomWorkspaceType::RocRollerStreamK
+       && solution.handwrittenCustomKernel())
+        return true;
+
     // Amax uses Synchronizer for its counter, so retain its GSU region.
     return solution.sizeMapping.isStreamK() && solution.sizeMapping.streamKAtomic == 0
            && !solution.problemType.outputAmaxD;
@@ -8337,6 +8347,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
             }
 
             log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
+        if(solution->rocRollerStreamKHasDataParallelTiles(tensile_prob, *hardware))
+        {
+            log_error(__func__,
+                      "rocRoller Stream-K solution would run data-parallel tiles for this "
+                      "problem; not supported");
             return rocblaslt_status_invalid_value;
         }
         *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
