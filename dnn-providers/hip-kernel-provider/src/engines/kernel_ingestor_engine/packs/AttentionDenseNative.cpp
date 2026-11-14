@@ -74,8 +74,6 @@ namespace
 // read here.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
-constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
-constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
@@ -940,8 +938,7 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
  * A served candidate receives batch, both sequence lengths and both head counts as
  * runtime kernel arguments, so one binary serves any valid shape for the same
  * dtype/head size/mask/window; the metadata's shape fields are canonical build inputs and
- * are not compared. An arch whose catalog lists each head configuration as its own entry
- * (matchesHeadCounts) still compares the head counts.
+ * are not compared, and no arch's catalog carries head counts to compare.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -1011,12 +1008,6 @@ bool kernelMatches(const MatchContext& context,
         = [&kernel](std::string_view field) { return kernel.getIntMetadata(std::string(field)); };
 
     if(intField(HEAD_SIZE_FIELD) != problem.headSize)
-    {
-        return false;
-    }
-    if(arch.matchesHeadCounts
-       && (intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
-           || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads))
     {
         return false;
     }

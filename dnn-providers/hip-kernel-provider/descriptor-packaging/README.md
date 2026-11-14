@@ -694,8 +694,8 @@ does not guarantee, or a variant with its own known risk.
 ```cmake
 # One integration, a chosen representative set.
 hkp_add_packaging_probe(ARCH gfx950 NAME attention_dense
-    UKDS attention_dense.fp16_d64_hq8_kv1_c1_bm128_bn64.gfx950
-         attention_dense.bf16_d64_hq8_kv1_c1_bm256_bn32.gfx950)
+    UKDS attention_dense.fp16_d64_c1_bm128_bn64.gfx950
+         attention_dense.bf16_d64_c1_bm256_bn32.gfx950)
 ```
 
 - **With `UKDS`**, the probe packs exactly the listed UKDs, selected by UKD `name`. Pick a
@@ -768,7 +768,7 @@ Greedily, the UKD covering the most uncovered pairs is kept, ties broken by sort
 until every pair is covered; the result is deterministic. A group in which no field varies,
 and every group of a kind without a sweep field (`hip`, `hsaco`, `embedded_source`), keeps
 one UKD, the first by sorted `name`. Kept UKDs keep their authored order. The gfx950 dense
-attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
+attention KDP (52 UKDs in one group, 5 varying spec fields) keeps 4.
 
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
