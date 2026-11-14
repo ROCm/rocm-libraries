@@ -286,9 +286,11 @@ bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArc
     }
     else if(gfx11 || gfx10 || cdnaGemv)
     {
-        gemv = (call.n != 1 || (!nn && !tn))
-               && (call.n != 1 || !nt || (!arch == "gfx908" && !arch == "gfx90a"))
-               && (call.n != 1 || call.b.leadingDimension <= 8) && (call.m != 1 || (!nn && !tn));
+        const bool cdna12 = arch == "gfx908" || arch == "gfx90a";
+        const bool gemmPath = (call.n == 1 && (nn || tn)) || (call.n == 1 && nt && cdna12)
+                              || (call.n == 1 && call.b.leadingDimension > 8)
+                              || (call.m == 1 && (nn || tn));
+        gemv = !gemmPath;
     }
     if(!gemv)
     {
