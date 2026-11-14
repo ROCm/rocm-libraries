@@ -50,6 +50,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -57,6 +58,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -1235,6 +1237,197 @@ TEST_F(PlaceholderIndexedShardTest, FailedLoadOfRecordedFileRegistersNoCache)
     ASSERT_EQ(fresh.solutionSources.size(), 1u);
     EXPECT_EQ(fresh.solutionSources.at(kShardPrefix)->get(index), solution)
         << "the registered cache is not the one the loaded tree resolves through";
+}
+
+// A shard that cannot be opened (missing, or on Windows a path past MAX_PATH)
+// makes LoadLibraryFile return null. Every lookup has to report that with the
+// path, instead of dereferencing it, and the master must be left untouched.
+// None of these tests use the legacy fixture, so they cannot be skipped.
+TEST_F(PlaceholderIndexedShardTest, MissingShardThrowsAndRegistersNothing)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    Master fresh;
+    Holder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    auto expectLoadFailure = [](auto&& lookup, const char* name) {
+        try
+        {
+            lookup();
+            ADD_FAILURE() << name << " returned for a shard that does not exist";
+        }
+        catch(std::runtime_error const& error)
+        {
+            EXPECT_NE(std::string(error.what()).find(kShardPrefix), std::string::npos)
+                << name << " did not name the shard: " << error.what();
+        }
+    };
+
+    expectLoadFailure([&] { cold.findBestSolution(problem, device); }, "findBestSolution");
+    expectLoadFailure([&] { cold.findTopSolutions(problem, device, 4); }, "findTopSolutions");
+    expectLoadFailure([&] { cold.findAllSolutions(problem, device); }, "findAllSolutions");
+    expectLoadFailure([&] { cold.getSolutionByIndex(problem, device, 0); }, "getSolutionByIndex");
+
+    EXPECT_EQ(cold.library, nullptr);
+    EXPECT_TRUE(fresh.loadedFiles.empty()) << "the failed load recorded its file";
+    EXPECT_TRUE(fresh.solutionSources.empty()) << "the failed load registered a cache";
+    EXPECT_TRUE(fresh.solutions.empty()) << "the failed load registered solutions";
+}
+
+// A load that faults inside call_once never finishes it, so on Windows, where
+// the test harness survives the fault, the next lookup on the shard blocked
+// forever. Each lookup here runs on its own thread so a lookup that never
+// returns fails the test instead of hanging it. The thread owns what it uses,
+// so it can be abandoned.
+TEST_F(PlaceholderIndexedShardTest, MissingShardDoesNotWedgeLaterLookups)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    auto fresh = std::make_shared<Master>();
+    auto cold  = std::make_shared<Holder>();
+    wirePlaceholder(*cold, *fresh, tmpDir);
+
+    for(int attempt = 0; attempt < 3; ++attempt)
+    {
+        std::packaged_task<std::string()> lookup([fresh, cold, device, problem] {
+            try
+            {
+                cold->findBestSolution(problem, device);
+                return std::string("returned without an error");
+            }
+            catch(std::runtime_error const& error)
+            {
+                return std::string(error.what());
+            }
+        });
+
+        auto result = lookup.get_future();
+        std::thread(std::move(lookup)).detach();
+
+        ASSERT_EQ(result.wait_for(std::chrono::seconds(30)), std::future_status::ready)
+            << "lookup " << attempt << " on a shard that failed to load did not return";
+        auto const message = result.get();
+        EXPECT_NE(message.find(kShardPrefix), std::string::npos)
+            << "lookup " << attempt << ": " << message;
+    }
+}
+
+// The failed load is not remembered: once the shard is there, the next lookup
+// loads it.
+TEST_F(PlaceholderIndexedShardTest, MissingShardLoadsAfterFileAppears)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    Master fresh;
+    Holder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.loadPlaceholderLibrary(), std::runtime_error);
+
+    writeIndexedLibrary(tmpDir / (std::string(kShardPrefix) + ".dat"), 2, {0, 0, 1}, {0x01});
+
+    EXPECT_NE(cold.loadPlaceholderLibrary(), nullptr);
+    EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    EXPECT_EQ(fresh.solutionSources.count(kShardPrefix), 1u);
+}
+
+// The master's own index path (hipBLASLt's algo-index lookup) loads shards
+// through the mapping file rather than a placeholder. A shard that will not
+// load resolves to no solution and is tried again on the next lookup.
+TEST_F(PlaceholderIndexedShardTest, MasterIndexLookupOfMissingShardReturnsNull)
+{
+    writeLazyMaster(masterPath(), kShardPrefix);
+    writeMappingFile(tmpDir / ("TensileLiteLibrary_lazy_" + std::string(kArch) + "_Mapping.dat"),
+                     {{"0", kShardPrefix}});
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    EXPECT_EQ(master->resolveSolutionByIndex(0), nullptr);
+    EXPECT_TRUE(master->loadedFiles.empty()) << "the failed load recorded its file";
+    EXPECT_TRUE(master->solutionSources.empty()) << "the failed load registered a cache";
+    EXPECT_TRUE(master->indexLoadedLibraries.empty()) << "the failed load cached a tree";
+
+    writeIndexedLibrary(tmpDir / (std::string(kShardPrefix) + ".dat"), 2, {0, 0, 1}, {0x01});
+
+    master->loadLibrary(0);
+    EXPECT_EQ(master->loadedFiles.count(kShardPrefix), 1u)
+        << "the shard was not loaded once it existed";
+}
+
+// The two tests below repeat the recovery cases with a shard built from the
+// legacy fixture, so the retry has a real solution to return. The shard is
+// moved aside for the first lookup and put back for the second.
+TEST_F(PlaceholderIndexedShardTest, MissingShardServesSolutionsAfterFileAppears)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const fs::path shard  = tmpDir / (std::string(kShardPrefix) + ".dat.zlib");
+    const fs::path hidden = tmpDir / "hidden.dat.zlib";
+    fs::rename(shard, hidden);
+
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    Master fresh;
+    Holder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.getSolutionByIndex(problem, device, index), std::runtime_error);
+
+    fs::rename(hidden, shard);
+
+    auto solution = cold.getSolutionByIndex(problem, device, index);
+    ASSERT_NE(solution, nullptr) << "the retry did not serve index " << index;
+    EXPECT_EQ(solution->index, index);
+    EXPECT_EQ(solution->codeObjectFilename.load(), std::string(kShardPrefix) + ".co");
+}
+
+TEST_F(PlaceholderIndexedShardTest, MasterIndexLookupServesSolutionAfterFileAppears)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const fs::path shard  = tmpDir / (std::string(kShardPrefix) + ".dat.zlib");
+    const fs::path hidden = tmpDir / "hidden.dat.zlib";
+    fs::rename(shard, hidden);
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    const int index = shardIndices.front();
+    EXPECT_EQ(master->resolveSolutionByIndex(index), nullptr);
+
+    fs::rename(hidden, shard);
+
+    auto solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr) << "the retry did not serve index " << index;
+    EXPECT_EQ(solution->index, index);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
