@@ -456,7 +456,7 @@ def ensure_unit_tests(
         errors.append(
             "**Error:** Source/code files changed without an accompanying unit test.\n"
             "**Expected:** add at least one test file named like "
-            "`test_<name>.py` / `test_<name>.cpp` (or `<name>_test.*`).\n"
+            "`test_<name>.py` / `test_<name>.cpp`, `unit_test_<name>.cpp` (or `<name>_test.*`).\n"
             f"**Current:** code file(s) changed: {listed}{more}; no test file found"
         )
 
