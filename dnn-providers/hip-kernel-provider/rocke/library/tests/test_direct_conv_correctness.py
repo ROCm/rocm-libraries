@@ -3646,6 +3646,45 @@ _AOT_WGRAD_CASES = [
             target_blocks=8,
         ),
     ),
+    # Ping-pong on one wave group (the two halves of the block's waves): a
+    # short last segment.
+    (
+        "tiled_pp_halves",
+        "direct_wgrad_tiled",
+        dict(N=2, H=13, W=40, groups=1, cpg=64, kpg=128),
+        dict(pingpong=True, rows_per_seg=12),
+    ),
+    # Packed images under a deeper prefetch.
+    (
+        "tiled_pp_halves_pf4_unfold4",
+        "direct_wgrad_tiled",
+        dict(N=5, H=12, W=8, groups=1, cpg=64, kpg=64),
+        dict(
+            pingpong=True,
+            waves_k=2,
+            waves_c=4,
+            wave_c16=1,
+            prefetch=4,
+            row_unroll=6,
+            rows_per_seg=6,
+            unfold_n=4,
+        ),
+    ),
+    # Two blocks walking several segments: the per-segment stagger and
+    # realignment of the two halves.
+    (
+        "tiled_pp_halves_tb2",
+        "direct_wgrad_tiled",
+        dict(N=2, H=20, W=40, groups=1, cpg=64, kpg=64),
+        dict(
+            pingpong=True,
+            waves_k=2,
+            wave_c16=1,
+            row_unroll=4,
+            rows_per_seg=8,
+            target_blocks=2,
+        ),
+    ),
     (
         "dw_c64",
         "direct_wgrad_dw",
@@ -3783,9 +3822,15 @@ _AOT_WGRAD_CASES = [
 ]
 
 
-def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
+def _run_aot_wgrad_one(
+    arch: str, variant: str, problem, knobs: dict, integer: bool = False
+) -> float:
     """Build ``variant`` on its cache probe, launch it on ``problem``, return
-    the max error relative to the largest reference dW entry."""
+    the max error relative to the largest reference dW entry.
+
+    With ``integer`` the inputs are small integers, so every partial sum is
+    exact in fp32 whatever the atomic order and a correct kernel returns 0.
+    """
     import torch
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
@@ -3833,8 +3878,12 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
     total_c, total_k = p.groups * p.cpg, p.groups * p.kpg
     if folded and p.cpg == 1 and p.kpg == 1:
         total_k = total_c = p.groups  # depthwise
-    X = torch.empty(p.N, p.H, p.W, total_c, dtype=td).uniform_(-0.5, 0.5)
-    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=td).uniform_(-0.5, 0.5)
+    if integer:
+        X = torch.randint(-2, 3, (p.N, p.H, p.W, total_c)).to(td)
+        dY = torch.randint(-2, 3, (p.N, p.Ho, p.Wo, total_k)).to(td)
+    else:
+        X = torch.empty(p.N, p.H, p.W, total_c, dtype=td).uniform_(-0.5, 0.5)
+        dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=td).uniform_(-0.5, 0.5)
     dw_elems = total_k * p.KH * p.KW * p.cpg
 
     W_ref = torch.zeros(
@@ -3944,6 +3993,23 @@ class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
 
     def test_aot_wgrad_bf16(self):
         self._check("bf16")
+
+    def test_pingpong_is_exact_on_integer_data(self):
+        """A ping-pong group that reads a row buffer before its DMA lands, or
+        after the other group refills it, changes some partial sum; on integer
+        data the result is exact, so any such race shows up as a nonzero error."""
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        for case_id, variant, shape, knobs in _AOT_WGRAD_CASES:
+            if not knobs.get("pingpong"):
+                continue
+            for dtype in ("bf16", "fp16"):
+                problem = DirectConvProblem(dtype=dtype, **shape)
+                with self.subTest(case=case_id, dtype=dtype):
+                    err = _run_aot_wgrad_one(
+                        GPU_ARCH, variant, problem, knobs, integer=True
+                    )
+                    self.assertEqual(err, 0.0, f"{case_id} {problem.short()} {dtype}")
 
 
 if __name__ == "__main__":

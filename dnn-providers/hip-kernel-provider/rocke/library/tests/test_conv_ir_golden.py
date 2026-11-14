@@ -4249,6 +4249,12 @@ def cases():
             ),
         ),
         (
+            "tiled_pingpong_halves",
+            "tiled",
+            dict(H=30),
+            dict(pingpong=True, row_unroll=4, rows_per_seg=12),
+        ),
+        (
             "tiled_fp16_unfold4",
             "tiled",
             dict(N=4, H=15, W=40, dtype="fp16"),
