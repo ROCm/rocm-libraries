@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -32,6 +33,14 @@ constexpr unsigned LAYOUT_CHANNELS_LAST = 2U;
 
 // N, C and at least one spatial dimension.
 constexpr size_t MIN_RANK = 3;
+
+// The operation that prefixes every reason.
+constexpr const char* FWD_OPERATION = "Convolution forward";
+constexpr const char* BWD_DATA_OPERATION = "Convolution backward data";
+constexpr const char* WRW_OPERATION = "Convolution backward weights";
+
+// Backward data declines a dy or dx with more elements than this (the largest 32-bit signed count).
+constexpr int64_t MAX_BWD_DATA_ELEMENTS = std::numeric_limits<int32_t>::max();
 
 struct TensorInfo
 {
@@ -144,12 +153,13 @@ std::string layoutName(unsigned mask)
     return "other";
 }
 
-// Reads one tensor and rejects shapes the checks cannot judge.
-TensorInfo readTensor(const char* name, const TensorAttributes& attr)
+// Reads one tensor and rejects shapes the checks cannot judge. `operation` prefixes every reason
+// ("Convolution forward", ...) and `name` is the tensor's role in that operation ("x", "dy", ...).
+TensorInfo readTensor(const char* operation, const char* name, const TensorAttributes& attr)
 {
     const auto* dims = attr.dims();
     const auto* strides = attr.strides();
-    const std::string prefix = std::string("Convolution forward: tensor ") + name;
+    const std::string prefix = std::string(operation) + ": tensor " + name;
 
     if(dims == nullptr || strides == nullptr)
     {
@@ -180,44 +190,133 @@ bool isSupportedDataType(DataType dataType)
            || dataType == DataType::BFLOAT16;
 }
 
+// "a, b and c" for the three tensors of one operation.
+std::string tensorNames(const TensorInfo& a, const TensorInfo& b, const TensorInfo& c)
+{
+    return std::string(a.name) + ", " + b.name + " and " + c.name;
+}
+
+// Data type. MIOpen reports a solution for mixed data types across the three tensors and then fails
+// at execution, returns garbage or, for 3D, faults the GPU; only some types are supported at all.
+// Workaround tracked by ALMIOPEN-3015 (forward) and ALMIOPEN-3303 (backward data and backward
+// weights); remove it when the MIOpen defects ALMIOPEN-3010 and ALMIOPEN-3302 are fixed.
+void checkDataType(const char* operation,
+                   const TensorInfo& a,
+                   const TensorInfo& b,
+                   const TensorInfo& c)
+{
+    const bool sameDataType = a.dataType == b.dataType && b.dataType == c.dataType;
+    if(!sameDataType)
+    {
+        decline(std::string(operation) + ": " + tensorNames(a, b, c) + " must share one data type ("
+                + a.name + "=" + hipdnn_flatbuffers_sdk::data_objects::toString(a.dataType) + ", "
+                + b.name + "=" + hipdnn_flatbuffers_sdk::data_objects::toString(b.dataType) + ", "
+                + c.name + "=" + hipdnn_flatbuffers_sdk::data_objects::toString(c.dataType) + ")");
+    }
+    if(!isSupportedDataType(a.dataType))
+    {
+        decline(std::string(operation) + ": data type "
+                + hipdnn_flatbuffers_sdk::data_objects::toString(a.dataType) + " is not supported; "
+                + tensorNames(a, b, c) + " must be FLOAT, HALF or BFLOAT16");
+    }
+}
+
+// Layout. With the three tensors in different layouts, Find can pick a naive solver that returns
+// wrong output for them (forward: ConvDirectNaiveConvFwd). Workaround tracked by ALMIOPEN-3017
+// (forward) and ALMIOPEN-3299 (backward data and backward weights); remove it when the MIOpen
+// defects ALMIOPEN-3012 and ALMIOPEN-3298 are fixed.
+void checkLayout(const char* operation,
+                 const TensorInfo& a,
+                 const TensorInfo& b,
+                 const TensorInfo& c)
+{
+    if((a.layoutMask & b.layoutMask & c.layoutMask) == 0U)
+    {
+        decline(std::string(operation) + ": " + tensorNames(a, b, c)
+                + " must all be channels-first or all channels-last (" + a.name + " is "
+                + layoutName(a.layoutMask) + ", " + b.name + " is " + layoutName(b.layoutMask)
+                + ", " + c.name + " is " + layoutName(c.layoutMask) + ")");
+    }
+}
+
+// Backward data and backward weights share every rule; they differ only in the roles of the three
+// tensors, which `operation` and the tensor names carry into the reasons.
+void checkBackwardTensors(const char* operation,
+                          const TensorInfo& a,
+                          const TensorInfo& b,
+                          const TensorInfo& c)
+{
+    checkDataType(operation, a, b, c);
+    checkLayout(operation, a, b, c);
+
+    // Packing. For channels-last tensors with padded (non-packed) strides MIOpen returns wrong
+    // output (values up to 1e38, infinities, NaN). Channels-first non-packed tensors are computed
+    // correctly, so unlike forward this declines only a tensor that is both non-packed and
+    // channels-last. A non-packed tensor is classified by stride order and so carries at most one
+    // layout bit; a packed tensor never triggers this rule. Workaround tracked by ALMIOPEN-3301;
+    // remove it when the MIOpen defect ALMIOPEN-3300 is fixed.
+    for(const TensorInfo* tensor : {&a, &b, &c})
+    {
+        if(!tensor->packed && (tensor->layoutMask & LAYOUT_CHANNELS_LAST) != 0U)
+        {
+            decline(std::string(operation) + ": tensor " + tensor->name
+                    + " is channels-last and not packed; " + tensorNames(a, b, c)
+                    + " must not be channels-last with padded strides");
+        }
+    }
+}
+
+// Number of elements (product of the dims) of a tensor, saturating at INT64_MAX so that absurd dims
+// cannot overflow. Rejects null and negative dims, which have no element count.
+int64_t
+    saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
+{
+    const auto* dims = attr.dims();
+    const std::string prefix = std::string(operation) + ": tensor " + name;
+
+    if(dims == nullptr)
+    {
+        decline(prefix + " has null dims");
+    }
+
+    constexpr int64_t MAX_COUNT = std::numeric_limits<int64_t>::max();
+    int64_t count = 1;
+    for(const int64_t dim : *dims)
+    {
+        if(dim < 0)
+        {
+            decline(prefix + " has a negative dim");
+        }
+        if(dim > 0 && count > MAX_COUNT / dim)
+        {
+            return MAX_COUNT;
+        }
+        count *= dim;
+    }
+    return count;
+}
+
+void checkBwdDataElementCount(const char* name, const TensorAttributes& attr)
+{
+    if(saturatingElementCount(BWD_DATA_OPERATION, name, attr) > MAX_BWD_DATA_ELEMENTS)
+    {
+        decline(std::string(BWD_DATA_OPERATION) + ": tensor " + name + " has more than "
+                + std::to_string(MAX_BWD_DATA_ELEMENTS) + " elements");
+    }
+}
+
 } // namespace
 
 void validateConvFwdIoTensors(const TensorAttributes& x,
                               const TensorAttributes& w,
                               const TensorAttributes& y)
 {
-    const TensorInfo xInfo = readTensor("x", x);
-    const TensorInfo wInfo = readTensor("w", w);
-    const TensorInfo yInfo = readTensor("y", y);
+    const TensorInfo xInfo = readTensor(FWD_OPERATION, "x", x);
+    const TensorInfo wInfo = readTensor(FWD_OPERATION, "w", w);
+    const TensorInfo yInfo = readTensor(FWD_OPERATION, "y", y);
 
-    // Data type. MIOpen reports a solution for mixed x/w/y types (GemmFwdRest) and then fails at
-    // execution, returns garbage or, for 3D, faults the GPU. Workaround tracked by ALMIOPEN-3015;
-    // remove it when the MIOpen defect ALMIOPEN-3010 is fixed.
-    const bool sameDataType = xInfo.dataType == wInfo.dataType && wInfo.dataType == yInfo.dataType;
-    if(!sameDataType)
-    {
-        decline(std::string("Convolution forward: x, w and y must share one data type (x=")
-                + hipdnn_flatbuffers_sdk::data_objects::toString(xInfo.dataType)
-                + ", w=" + hipdnn_flatbuffers_sdk::data_objects::toString(wInfo.dataType)
-                + ", y=" + hipdnn_flatbuffers_sdk::data_objects::toString(yInfo.dataType) + ")");
-    }
-    if(!isSupportedDataType(xInfo.dataType))
-    {
-        decline(std::string("Convolution forward: data type ")
-                + hipdnn_flatbuffers_sdk::data_objects::toString(xInfo.dataType)
-                + " is not supported; x, w and y must be FLOAT, HALF or BFLOAT16");
-    }
-
-    // Layout. With x, w and y in different layouts, Find can pick ConvDirectNaiveConvFwd, which
-    // returns wrong output for them. Workaround tracked by ALMIOPEN-3017; remove it when the
-    // MIOpen defect ALMIOPEN-3012 is fixed.
-    if((xInfo.layoutMask & wInfo.layoutMask & yInfo.layoutMask) == 0U)
-    {
-        decline("Convolution forward: x, w and y must all be channels-first or all channels-last "
-                "(x is "
-                + layoutName(xInfo.layoutMask) + ", w is " + layoutName(wInfo.layoutMask)
-                + ", y is " + layoutName(yInfo.layoutMask) + ")");
-    }
+    checkDataType(FWD_OPERATION, xInfo, wInfo, yInfo);
+    checkLayout(FWD_OPERATION, xInfo, wInfo, yInfo);
 
     // Packing. Padded (non-packed) strides make ConvDirectNaiveConvFwd and
     // ConvHipImplicitGemm3DGroupFwdXdlops return wrong output and write outside the logical
@@ -227,10 +326,45 @@ void validateConvFwdIoTensors(const TensorAttributes& x,
     {
         if(!tensor->packed)
         {
-            decline(std::string("Convolution forward: tensor ") + tensor->name
+            decline(std::string(FWD_OPERATION) + ": tensor " + tensor->name
                     + " is not packed; x, w and y must all be packed");
         }
     }
+}
+
+void validateConvBwdDataIoTensors(const TensorAttributes& dy,
+                                  const TensorAttributes& w,
+                                  const TensorAttributes& dx)
+{
+    const TensorInfo dyInfo = readTensor(BWD_DATA_OPERATION, "dy", dy);
+    const TensorInfo wInfo = readTensor(BWD_DATA_OPERATION, "w", w);
+    const TensorInfo dxInfo = readTensor(BWD_DATA_OPERATION, "dx", dx);
+
+    checkBackwardTensors(BWD_DATA_OPERATION, dyInfo, wInfo, dxInfo);
+}
+
+void validateConvWrwIoTensors(const TensorAttributes& x,
+                              const TensorAttributes& dy,
+                              const TensorAttributes& dw)
+{
+    const TensorInfo xInfo = readTensor(WRW_OPERATION, "x", x);
+    const TensorInfo dyInfo = readTensor(WRW_OPERATION, "dy", dy);
+    const TensorInfo dwInfo = readTensor(WRW_OPERATION, "dw", dw);
+
+    checkBackwardTensors(WRW_OPERATION, xInfo, dyInfo, dwInfo);
+}
+
+void validateConvBwdDataSize(const TensorAttributes& dy, const TensorAttributes& dx)
+{
+    // Size. For tensors of more than 2^31 elements MIOpen offers
+    // ConvHipImplicitGemmGroupBwdXdlops, which fails during Find: a launch error and
+    // miopenStatusUnknownError on one architecture, an illegal memory access that poisons the
+    // process on another. Backward data only; backward weights and forward are not covered by the
+    // ticket. Workaround tracked by ALMIOPEN-3306; remove it when the MIOpen defect ALMIOPEN-3305
+    // is fixed. Only the dims are read, so this is safe to call before anything that computes
+    // strides.
+    checkBwdDataElementCount("dy", dy);
+    checkBwdDataElementCount("dx", dx);
 }
 
 } // namespace miopen_plugin::conv_applicability

@@ -84,7 +84,17 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call. The
+        // size check reads only dims and runs first: the io check computes strides, which absurd
+        // dims could overflow.
+        const auto& tensorMap = opGraph.getTensorMap();
+        const auto& dy = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
+        const auto& w = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
+        const auto& dx = miopen_utils::findTensorAttributes(tensorMap, attr.dx_tensor_uid());
+        conv_applicability::validateConvBwdDataSize(dy, dx);
+        conv_applicability::validateConvBwdDataIoTensors(dy, w, dx);
+
+        const ConvBwdParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -122,7 +132,14 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call.
+        const auto& tensorMap = opGraph.getTensorMap();
+        conv_applicability::validateConvWrwIoTensors(
+            miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.dw_tensor_uid()));
+
+        const ConvWrwParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
