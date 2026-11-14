@@ -423,6 +423,30 @@ void add_device_grouped_conv2d_bwd_weight_two_stage_xdl_ngchw_gkcyx_ngkhw_bf16_p
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_large_tensors_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           BF16,
+                                                           BF16,
+                                                           BF16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_large_tensors_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           BF16,
+                                                           BF16,
+                                                           BF16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
 #endif
 #ifdef CK_ENABLE_FP16
 void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_instances(
@@ -641,18 +665,6 @@ void add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f16_la
                                                            PassThrough,
                                                            PassThrough>>>& instances);
 
-void add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_large_tensors_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NHWGC,
-                                                           GKYXC,
-                                                           NHWGK,
-                                                           BF16,
-                                                           BF16,
-                                                           BF16,
-                                                           PassThrough,
-                                                           PassThrough,
-                                                           PassThrough>>>& instances);
-
 void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_large_tensors_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
                                                            NHWGC,
@@ -661,30 +673,6 @@ void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_larg
                                                            F16,
                                                            F16,
                                                            F16,
-                                                           PassThrough,
-                                                           PassThrough,
-                                                           PassThrough>>>& instances);
-
-void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_large_tensors_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NHWGC,
-                                                           GKYXC,
-                                                           NHWGK,
-                                                           BF16,
-                                                           BF16,
-                                                           BF16,
-                                                           PassThrough,
-                                                           PassThrough,
-                                                           PassThrough>>>& instances);
-
-void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NHWGC,
-                                                           GKYXC,
-                                                           NHWGK,
-                                                           F32,
-                                                           F32,
-                                                           F32,
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
@@ -823,6 +811,18 @@ void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_pad0_pipev2_
                                                            PassThrough>>>& instances);
 
 void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_pad0_pipev5_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           F32,
+                                                           F32,
+                                                           F32,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
                                                            NHWGC,
                                                            GKYXC,
