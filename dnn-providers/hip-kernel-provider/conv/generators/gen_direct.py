@@ -204,13 +204,18 @@ for dt in ("HALF", "BFLOAT16"):
         dt,
         ROWS_GFX9,
         [
-            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1),
             RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8),
             RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8),
             # 3x3x3: the 96-wide ping-pong tile won Wan VAE's 96-channel layers (1.07-1.14x over
             # the halo tile), pw4 fn4 its 384-channel 3x62x106 (1.08x); 192+ wide stay on K2.
             RW(f"mfma16_{e}", F333, 8, 3, 2, 2, 2, 16, 8, pp=1, epi=0),
             RW(f"mfma16_{e}", F333, 4, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
+            # 4-image 8 x 8 tiles (dword DMA batch unfold), the ping-pong one and a 256-wide K
+            # one: MI210 kernel bench over 37 SD/SDXL/VAE 2-D 3x3 shapes, weighted time -5.8% vs the
+            # gfx90a catalog tiles (40^2 c1280 1.36-1.51x -> 1.10-1.17x of MIOpen's search time).
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, un=4),
+            RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
         ],
     )
     # gfx942
@@ -247,7 +252,9 @@ for dt in ("HALF", "BFLOAT16"):
         ["gfx950"],
         [
             RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 64, 8),
-            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 64, 8, pp=1, epi=0),
+            # Ping-pong with the staged epilogue (the direct-store epilogue cost it 4%): 1.05x over
+            # the single-group tile on 16-bit VAE / UNet layers (MI355X; 1.04x on > 96^2 maps).
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 64, 8, pp=1),
             RW(f"mfma16x32_{e}", F33, 8, 2, 2, 2, 2, 64, 8),
             RW(f"mfma16x32_{e}", F33, 8, 1, 2, 2, 2, 64, 8),
             RW(f"mfma16x32_{e}", F33, 4, 4, 2, 2, 2, 64, 8),

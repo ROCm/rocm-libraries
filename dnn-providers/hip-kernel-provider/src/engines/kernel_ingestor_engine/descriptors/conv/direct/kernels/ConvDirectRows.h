@@ -38,8 +38,9 @@
 // channel halves are two wave groups one barrier apart; each step is "memory phase | barrier |
 // MMAs at priority 1 | barrier". DMA goes out in steps 0..NQ-2; each wave drains it (vmcnt 0) in
 // step NQ-1's memory phase, before the barrier after which anyone may read the stage.
-// EPI 1 (16-bit output, PP 0): the epilogue transposes through LDS so 8 lanes store one pixel's
-// 16 FN channels as 16-byte pieces; EPI 0 stores each lane's 4 channels directly.
+// EPI 1 (16-bit output): the epilogue transposes through LDS so 8 lanes store one pixel's 16 FN
+// channels as 16-byte pieces (with PP 1 the two groups stage one barrier apart); EPI 0 stores each
+// lane's 4 channels directly.
 //
 // 3-D (KD > 1): a tile is one output plane's rows x columns x channels; its chunks walk the depth
 // taps whose input plane lies in the image (each staged as a 2-D halo, re-read through L2 by the
@@ -772,9 +773,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // Granule-only keying left 8 slots for 16 lanes: a two-way conflict on every write. A barrier
     // after it keeps the next tile's DMA out of the slots.
     constexpr int GP = FN * DIM * static_cast<int>(sizeof(TO)) / 16; // granules per pixel
-    constexpr bool STAGED = EPI == 1 && sizeof(TO) == 2 && PP == 0 && SPLIT == 0
-                            && (GP & (GP - 1)) == 0 && GP <= 8 && WAVE / GP <= DIM
-                            && DIM * GP * NW <= NG;
+    constexpr bool STAGED = EPI == 1 && sizeof(TO) == 2 && SPLIT == 0 && (GP & (GP - 1)) == 0
+                            && GP <= 8 && WAVE / GP <= DIM && DIM * GP * NW <= NG;
     auto storeStaged = [&](Raw16 * slotBase, const Tile& tc, int nb) __attribute__((always_inline))
     {
         constexpr int XR = GP < 8 ? 8 / GP : 1;
@@ -858,7 +858,22 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             ++cc;
             return true;
         }
-        if constexpr(STAGED)
+        if constexpr(STAGED && PP == 1)
+        {
+            // Ping-pong: a group's last post-MMA barrier pairs with the other group's pre-MMA
+            // barrier, which follows that group's last reads of stage sc, so each group stages its
+            // own slots there right away. Two barriers after it: the first pairs with the other
+            // group finishing its MMAs, the second with it finishing its epilogue (wave group 1 is
+            // one barrier behind throughout), so no wave issues the next tile's DMA into stage sc
+            // before every slot is read back, and the lag is the same afterwards.
+            if((a.k & (16 / static_cast<int>(sizeof(TO)) - 1)) == 0)
+                storeStaged(sc ? st1 : st0, tc, nb);
+            else
+                store(tc, nb);
+            k2rBarrier();
+            k2rBarrier();
+        }
+        else if constexpr(STAGED)
         {
             // 16-byte stores need whole granules of output channels. The chunk just read
             // stage sc and its end barrier passed, so that stage is free.
