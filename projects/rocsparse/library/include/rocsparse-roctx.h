@@ -39,19 +39,19 @@ extern "C" {
  * \note This routine ignores the environment variable \p ROCSPARSE_ROCTX.
  */
 ROCSPARSE_EXPORT
-void rocsparse_enable_roctx();
+void rocsparse_enable_roctx(void);
 
 /*! \ingroup aux_module
  * \details Disable rocTX instrumentation.
  * \note This routine ignores the environment variable \p ROCSPARSE_ROCTX.
  */
-ROCSPARSE_EXPORT void rocsparse_disable_roctx();
+ROCSPARSE_EXPORT void rocsparse_disable_roctx(void);
 
 /*! \ingroup aux_module
  * \details Query whether rocTX instrumentation has been enabled. See \ref rocsparse_enable_roctx.
  * \return 1 if enabled, 0 otherwise.
  */
-ROCSPARSE_EXPORT int rocsparse_state_roctx();
+ROCSPARSE_EXPORT int rocsparse_state_roctx(void);
 
 #ifdef __cplusplus
 }

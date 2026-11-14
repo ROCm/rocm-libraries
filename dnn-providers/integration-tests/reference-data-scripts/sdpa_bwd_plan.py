@@ -627,7 +627,7 @@ EXT_RULES = [
     ("head dim not a multiple of 8", "always: engines decide", "SdpaBwdNode.hpp:118-125"),
     ("FLOAT dropout mask", "always: the references need FLOAT", "SEM-015"),
     ("dropout_probability without RNG state", "dropout_probability = 0",
-     "the fill and engines read it as no dropout; the references decline it (ALMIOPEN-3149, ALMIOPEN-3150)"),
+     "the fill and engines read it as no dropout; the references accept it as the graph without dropout"),
 ]
 # fmt: on
 
@@ -894,8 +894,6 @@ GATES = {
     "harness: zero strides rejected": ("HG17: zero input strides (#14709 lets the data SDK Tensor hold them; "
                                        "H62 needs a GPU run to confirm)", "to file"),
     "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
-    "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
-           "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),
     "unit": ("descriptor-only: a unit test, not a sweep case", "#14075"),
     "frontend": ("a frontend rule (R14): TestSdpaBwdNode.PreValidateChecksDiagonalBandBounds, not a sweep case",
@@ -1022,7 +1020,7 @@ CLASSES = OrderedDict([
            "unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain")),
     ("K1", ("tolk1", {"bf16": (0.0003, 0.016), "fp16": (0.0003, 0.004)},
             "Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows")),
-    ("F32", ("tolf32", {"fp32": (1e-5, 1e-5)}, "fp32 IO (uncalibrated)")),
+    ("F32", ("tolf32", {"fp32": (1e-5, 1e-5)}, "fp32 IO; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference")),
 ])
 # fmt: on
 ASSIGNMENT_ORDER = ("F32", "K1", "U", "S", "P", "DL", "D")
