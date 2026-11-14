@@ -260,7 +260,6 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     }
     const std::string gfx_id = NormalizeArchName(device_name);
 
-
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
     // default-config path (which runs it) rather than preempting it here.
     if(TwoTowerCoversSolver(solver_name, gfx_id))
