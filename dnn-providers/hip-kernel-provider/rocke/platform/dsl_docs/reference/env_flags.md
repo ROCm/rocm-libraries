@@ -36,6 +36,8 @@ for the switches.
 | `ROCKE_DIRECT_THREADS` | integer (the machine's parallelism, at most 4) | Threads one compile may use when a large kernel spills. The output does not change. |
 | `ROCKE_DIRECT_PARSE_THREADS` | integer (by input size) | Threads that parse one input. By default, 1 below 256 KiB of text, then one per 128 KiB, at most 4 and the machine's parallelism; in a session, 1 below 128 KiB, then one per 64 KiB, at most 3 and the session's threads. The output does not change. |
 | `ROCKE_DIRECT_SCAN` | `scalar` \| `avx2` (the best level the CPU has) | A lower SIMD level for the parser's byte scanner. The output does not change. |
+| `ROCKE_DIRECT_LEVERS` | lever names, `,` or `+` joined (unset) | Code-generation levers for every kernel the process compiles. Each changes the code emitted for the same IR, and none is on unless named; `target_compile --list-levers` lists them, and an unknown name is an error. A kernel's `dlevers` attribute decides the levers it names for that kernel ([kernel attributes](../runtime/direct_compiler.md#kernel-attributes)). |
+| `ROCKE_DIRECT_FORCE_ATTRS` | pass attribute names, comma-separated (unset) | Turns those [pass attributes](../runtime/direct_compiler.md#kernel-attributes), and `m0_early`, on in every kernel compiled, whatever its IR says, so that a pass can be measured before a builder sets it. A name that is no such attribute is an error. Code objects compiled with it set are not qualified. |
 
 ## GEMM dispatch
 

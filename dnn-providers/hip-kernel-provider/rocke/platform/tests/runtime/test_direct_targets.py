@@ -120,7 +120,9 @@ def _asm_kernel():
     x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     tid = b.thread_id_x()
-    moved = b.inline_asm("v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32)
+    moved = b.inline_asm(
+        "v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32
+    )
     b.global_store(y, tid, moved, align=4)
     return b.kernel
 
@@ -147,7 +149,8 @@ def test_compile_kernel_falls_back_to_comgr_for_what_direct_refuses() -> None:
 
 
 def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
-    """``attrs["direct_levers"]`` joins ROCKE_DIRECT_LEVERS for that one compile, as setting it would."""
+    """``attrs["direct_levers"]`` turns its levers on for that one compile, as ROCKE_DIRECT_LEVERS would,
+    and leaves the environment alone."""
     import os
 
     _require_direct_library()
@@ -158,13 +161,58 @@ def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
     assert via_attr.code_object_backend == "direct", via_attr.direct_fallback
     assert "ROCKE_DIRECT_LEVERS" not in os.environ
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", "litreuse,litshare")
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert via_attr.hsaco == via_env.hsaco
     # The environment's levers stay when the kernel names its own.
     tagged = _scale_kernel()
     tagged.attrs["direct_levers"] = ["minmax"]
     compile_kernel(tagged, arch="gfx950", code_object_backend="direct")
     assert os.environ["ROCKE_DIRECT_LEVERS"] == "litreuse,litshare"
+
+
+def test_direct_levers_become_the_kernels_dlevers_on_a_copy() -> None:
+    """The compiler reads a kernel's levers from its ``dlevers`` attribute, never from a mutated environment."""
+    from rocke.core.ir import LEVER_SCOPE_ATTR
+    from rocke.core.ir_serialize import serialize
+    from rocke.helpers.compile import with_direct_levers
+
+    kernel = _scale_kernel()
+    assert with_direct_levers(kernel, []) is kernel
+    tagged = with_direct_levers(kernel, ["acqfence", "litreuse"])
+    assert LEVER_SCOPE_ATTR not in kernel.attrs
+    assert tagged.attrs[LEVER_SCOPE_ATTR] == "acqfence,litreuse"
+    assert f'{LEVER_SCOPE_ATTR}=s:"acqfence,litreuse"' in serialize(tagged).replace(
+        " = ", "="
+    )
+    # The kernel's own dlevers stay first, so its `-name` still turns that lever off.
+    kernel.attrs[LEVER_SCOPE_ATTR] = "-litreuse"
+    merged = with_direct_levers(kernel, ["litreuse", "litshare"])
+    assert merged.attrs[LEVER_SCOPE_ATTR] == "-litreuse,litreuse,litshare"
+    assert kernel.attrs[LEVER_SCOPE_ATTR] == "-litreuse"
+    # A malformed dlevers is passed through for the compiler to refuse.
+    kernel.attrs[LEVER_SCOPE_ATTR] = 1
+    assert with_direct_levers(kernel, ["litreuse"]) is kernel
+
+
+def test_a_malformed_kernel_dlevers_is_an_error_not_a_fallback() -> None:
+    """A non-string ``dlevers`` would drop the levers silently under COMGR, so the direct compiler refuses it."""
+    from rocke.core.ir import LEVER_SCOPE_ATTR
+
+    _require_direct_library()
+    kernel = _scale_kernel()
+    kernel.attrs[LEVER_SCOPE_ATTR] = 1
+    with pytest.raises(CodeObjectError, match="dlevers must be a string"):
+        compile_kernel(kernel, arch="gfx950", code_object_backend="direct")
+
+
+def test_an_unknown_environment_lever_is_an_error(monkeypatch) -> None:
+    """A misspelled ROCKE_DIRECT_LEVERS name is refused rather than building the lever-off code."""
+    _require_direct_library()
+    monkeypatch.setenv("ROCKE_DIRECT_LEVERS", "litreuse,nosuchlever")
+    with pytest.raises(CodeObjectError, match="nosuchlever"):
+        compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
 
 
 def test_strict_mode_turns_a_refusal_into_an_error(monkeypatch) -> None:
@@ -182,7 +230,9 @@ def _scoped_scale_kernel(levers):
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     with b.lever_scope(levers):
         tid = b.thread_id_x()
-        b.global_store(y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4)
+        b.global_store(
+            y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4
+        )
     return b.kernel
 
 
@@ -212,7 +262,9 @@ def test_lever_scopes_leave_the_llvm_lowering_alone() -> None:
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     plain = lower_kernel_to_llvm(_scale_kernel(), arch="gfx950", llvm_flavor="llvm22")
-    scoped = lower_kernel_to_llvm(_scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22")
+    scoped = lower_kernel_to_llvm(
+        _scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22"
+    )
     assert plain == scoped
 
 
@@ -221,13 +273,19 @@ def test_a_scope_over_every_op_is_the_kernels_levers(monkeypatch) -> None:
     _require_direct_library()
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS", raising=False)
     levers = "litreuse,litshare,minmax,vmemfirst"
-    scoped = compile_kernel(_scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct")
+    scoped = compile_kernel(
+        _scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.code_object_backend == "direct", scoped.direct_fallback
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", levers)
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.hsaco == via_env.hsaco
     off = ",".join("-" + x for x in levers.split(","))
-    undone = compile_kernel(_scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct")
+    undone = compile_kernel(
+        _scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct"
+    )
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS")
     plain = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
     assert undone.hsaco == plain.hsaco

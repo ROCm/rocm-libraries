@@ -609,6 +609,43 @@ mod tests {
         rir::compile_any_target(text, Target::Gfx950).unwrap_or_else(|e| panic!("{e}\n{text}")).listing()
     }
 
+    /// A kernel's `dlevers` attribute turns levers on (`-name`: off) for that
+    /// kernel as `ROCKE_DIRECT_LEVERS` does for every kernel; the next kernel
+    /// compiled has none, and an unknown name is refused.
+    #[test]
+    fn kernel_dlevers_are_the_kernels_own_levers() {
+        let atom = "op_id = s:\"mfma_gfx950_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32\"";
+        let plain = scaled_kernel(atom, 4, ", %sa, %sa", "");
+        let with = |levers: &str| plain.replace("attrs { max_workgroup_size", &format!("attrs {{ dlevers = s:\"{levers}\", max_workgroup_size"));
+        let off = listing_of(&plain);
+        let on = crate::rir::with_levers(&["fp6pass", "scalesep"], || listing_of(&plain));
+        assert_ne!(on, off);
+        assert_eq!(listing_of(&with("fp6pass,scalesep")), on);
+        assert_eq!(listing_of(&plain), off);
+        assert_eq!(listing_of(&with("fp6pass+scalesep,-scalesep")), listing_of(&with("fp6pass")));
+        let refused = rir::compile_any_target(&with("scalesep,nosuch"), Target::Gfx950).err().expect("an unknown lever is refused");
+        assert_eq!(refused.kind, "ROCKE_DIRECT_MALFORMED");
+        assert!(refused.message.contains("dlevers") && refused.message.contains("nosuch"), "{refused}");
+    }
+
+    /// A `dlevers` kernel attribute that is no string is malformed IR, not a
+    /// COMGR fallback that would drop the levers; so is an unknown name in
+    /// `ROCKE_DIRECT_LEVERS` (which turns levers on only).
+    #[test]
+    fn malformed_kernel_levers_are_refused() {
+        let atom = "op_id = s:\"mfma_gfx950_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32\"";
+        let plain = scaled_kernel(atom, 4, ", %sa, %sa", "");
+        for value in ["i:1", "b:true", "l:[ s:\"fp6pass\" ]"] {
+            let text = plain.replace("attrs { max_workgroup_size", &format!("attrs {{ dlevers = {value}, max_workgroup_size"));
+            let refused = rir::compile_any_target(&text, Target::Gfx950).err().expect("a non-string dlevers is refused");
+            assert_eq!(refused.kind, "ROCKE_DIRECT_MALFORMED", "{value}: {refused}");
+            assert!(refused.message.contains("dlevers must be a string"), "{value}: {refused}");
+        }
+        assert!(rir::unknown_env_lever_names("").is_empty());
+        assert!(rir::unknown_env_lever_names(" fp6pass, scalesep+litreuse ,").is_empty());
+        assert_eq!(rir::unknown_env_lever_names("fp6pass,nosuch+-scalesep"), ["nosuch", "-scalesep"]);
+    }
+
     /// The scaled 16x16x128 atom, by its block-scaled name and as the MX op
     /// with format attributes: D (4) on C, A and B of their formats' sizes,
     /// the scales, cbsz and blgp, and the scale bytes.

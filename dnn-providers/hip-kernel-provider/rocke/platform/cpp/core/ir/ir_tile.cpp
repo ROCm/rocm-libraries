@@ -603,13 +603,16 @@ void rocke_b_cooperative_global_store(rocke_ir_builder_t* b,
 /*  target-neutral MMA                                                    */
 /* ===================================================================== */
 
-rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
-                           const char* op_id,
-                           rocke_value_t* a,
-                           rocke_value_t* bb,
-                           rocke_value_t* c,
-                           rocke_value_t* const* extra,
-                           int num_extra)
+/* rocke_b_mma's body; `sel` is the scale_sel pair or NULL for none (IRBuilder.mma
+ * scale_sel=None). */
+static rocke_value_t* mma_build(rocke_ir_builder_t* b,
+                                const char* op_id,
+                                rocke_value_t* a,
+                                rocke_value_t* bb,
+                                rocke_value_t* c,
+                                rocke_value_t* const* extra,
+                                int num_extra,
+                                const int64_t* sel)
 {
     int c_frag_len;
     const rocke_type_t* vt;
@@ -645,12 +648,35 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     }
     /* Operands first, then the op_id, in IRBuilder.mma's order, so both engines
      * report the same refusal for the same call. */
+    const char* bare_id = strncmp(op_id, "tile.", 5) == 0 ? op_id + 5 : op_id;
+    if(strcmp(bare_id, ROCKE_MX16_OP_ID) == 0)
+    {
+        char mx16_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_mx16_operand_error(ops, nops, NULL, 0, mx16_error, sizeof(mx16_error)))
+            return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx16_error);
+    }
     const char* mx_error = rocke_scaled_mfma_error(op_id, ops, nops);
     if(mx_error)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx_error);
     const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
     if(tf32_error)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    if(sel)
+    {
+        if(!rocke_mma_accepts_scale_sel(op_id))
+            return (rocke_value_t*)rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "tile.mma %s: scale_sel applies only to a scaled MFMA atom",
+                op_id);
+        if(sel[0] < 0 || sel[0] > 3 || sel[1] < 0 || sel[1] > 3)
+            return (rocke_value_t*)rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "tile.mma scale_sel must be two byte indices in 0..3, got (%lld, %lld)",
+                (long long)sel[0],
+                (long long)sel[1]);
+    }
     /* C has no MmaOp object; op_id is always a bare string, so the frag length
      * and accumulator element are resolved from the arch SSOT (the Python
      * bare-string code path). A <= 0 frag length means the op_id is unknown to
@@ -671,7 +697,34 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     hint = rocke_mma_result_hint(op_id);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
+    if(sel)
+        rocke_attr_set_int_list(b, &attrs, "scale_sel", sel, 2);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
+}
+
+rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
+                           const char* op_id,
+                           rocke_value_t* a,
+                           rocke_value_t* bb,
+                           rocke_value_t* c,
+                           rocke_value_t* const* extra,
+                           int num_extra)
+{
+    return mma_build(b, op_id, a, bb, c, extra, num_extra, NULL);
+}
+
+rocke_value_t* rocke_b_mma_scale_sel(rocke_ir_builder_t* b,
+                                     const char* op_id,
+                                     rocke_value_t* a,
+                                     rocke_value_t* bb,
+                                     rocke_value_t* c,
+                                     rocke_value_t* const* extra,
+                                     int num_extra,
+                                     int sel_a,
+                                     int sel_b)
+{
+    const int64_t sel[2] = {sel_a, sel_b};
+    return mma_build(b, op_id, a, bb, c, extra, num_extra, sel);
 }
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma) ----- */
@@ -717,6 +770,22 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
     extra[0] = a_scale;
     extra[1] = b_scale;
     return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
+}
+
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_sel(rocke_ir_builder_t* b,
+                                                           rocke_value_t* a,
+                                                           rocke_value_t* bb,
+                                                           rocke_value_t* c,
+                                                           rocke_value_t* a_scale,
+                                                           rocke_value_t* b_scale,
+                                                           int sel_a,
+                                                           int sel_b)
+{
+    rocke_value_t* extra[2];
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma_scale_sel(
+        b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2, sel_a, sel_b);
 }
 
 /* ===================================================================== */

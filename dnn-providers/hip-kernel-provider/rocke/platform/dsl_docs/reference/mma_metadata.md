@@ -29,9 +29,21 @@ authoring entrypoints:
 
 | Path | Authoring entrypoint | Per-lane FP32 accumulator | Current consumer |
 |---|---|---|---|
-| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; A/B format selectors are fixed to zero in lowering |
+| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; A/B are FP8 E4M3 (format selector zero), and any other `a_format`/`b_format` is refused |
 | Existing 16x16x128 FP8 atom | `MfmaAtom.fp8_16x16x128().emit(...)` | 4 values | gfx950 FP8 fused-MoE dispatcher; the same scaled intrinsic is used with constant in-instruction scales |
 | Native 32x32x64 scaled family | `op_for_shape(family="mfma_scaled", ...)`, then `IRBuilder.mma(atom, a, b, c, a_scale, b_scale)` | 16 values | Direct packed GEMM builder and untuned examples, with independent A/B formats and K32 E8M0 scales |
+
+Both scaled paths take an optional `scale_sel=[a, b]`, passed through
+`mma(...)`, the 16x16x128 wrapper and `emit_scaled(...)`. It picks the byte
+of each 32-bit scale register that the instruction reads (the intrinsic's
+OPSEL operands), and it is serialized only when given, so the default `[0, 0]`
+kernels do not change. Each index must be an `int` from 0 to 3. The builder
+raises `ValueError` for anything else, and for `scale_sel` on an unscaled atom.
+The Python and C++ LLVM and HIP lowerings refuse the same IR when it arrives
+without the builder. The 16x16x128 operands are checked the same way: A and B
+are 256-bit payloads (`vec<i32x8>`, or a same-size vector bitcast to it), C
+and the result are `vec<f32x4>`, the two scales are `i32`, and the target must
+be gfx950.
 
 The [fused-MoE dispatcher](../../python/rocke/dispatch/families/moe.py) selects
 the 16x16x128 FP8 atom on gfx950 and the 16x16x32 FP8 atom on gfx942. Its

@@ -15,26 +15,17 @@
 //!   a + b` when a + b < 32. The second overwrites the first's result and
 //!   SCC, and the shift amounts add.
 
+use super::waitcnt::{explicit_imm, imm_fields};
 use crate::rir::mir::*;
 
 fn is_wait(inst: &MInst) -> bool {
     matches!(inst.op, Opc::SWaitcnt | Opc::SWaitcntExplicit)
 }
 
-/// gfx9's `s_waitcnt` fields: vmcnt (bits 3:0 and 15:14), expcnt (6:4) and
-/// lgkmcnt (11:8).
-fn fields(imm: i64) -> (i64, i64, i64) {
-    (imm & 0xf | (imm >> 14 & 3) << 4, imm >> 4 & 7, imm >> 8 & 0xf)
-}
-
-fn waitcnt(vm: i64, exp: i64, lgkm: i64) -> i64 {
-    (vm & 0xf) | exp << 4 | lgkm << 8 | (vm >> 4 & 3) << 14
-}
-
 /// The wait for both `a` and `b`.
 fn merged(a: i64, b: i64) -> i64 {
-    let ((va, ea, la), (vb, eb, lb)) = (fields(a), fields(b));
-    waitcnt(va.min(vb), ea.min(eb), la.min(lb))
+    let ((va, ea, la), (vb, eb, lb)) = (imm_fields(a), imm_fields(b));
+    explicit_imm(va.min(vb), ea.min(eb), la.min(lb))
 }
 
 /// `s_lshl_b32 sX, y, a`: sX, y and a.
@@ -82,7 +73,7 @@ pub fn run(f: &mut MFunc) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::super::waitcnt::{explicit_imm, waitcnt_imm};
+    use super::super::waitcnt::waitcnt_imm;
     use super::*;
     use crate::target::Target;
 
@@ -123,6 +114,8 @@ mod tests {
         assert_eq!((out[0].op, out[0].imm), (Opc::SWaitcntExplicit, explicit_imm(15, -1, 0)));
         assert_eq!(out[1].op, Opc::SBarrierBare);
         // Each counter takes the smaller count (vmcnt past 15 in bits 15:14), a compiler wait too.
+        assert_eq!(imm_fields(explicit_imm(40, 5, 9)), (40, 5, 9));
+        assert_eq!(imm_fields(waitcnt_imm(u8::MAX, u8::MAX)), (63, 7, 15));
         assert_eq!(merged(waitcnt_imm(40, 3), waitcnt_imm(18, 14)), waitcnt_imm(18, 3));
         assert_eq!(merged(explicit_imm(-1, 2, -1), waitcnt_imm(5, u8::MAX)), explicit_imm(5, 2, -1));
         let mut three = func(vec![wait(Opc::SWaitcnt, waitcnt_imm(9, u8::MAX)); 3], true, false);

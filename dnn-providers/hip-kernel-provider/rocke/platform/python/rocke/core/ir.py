@@ -659,7 +659,9 @@ def uses_python_only_ops(kernel: "KernelDef") -> "List[str]":
             if op.name in PYTHON_ONLY_OPCODES:
                 found.add(op.name)
             for v in op.operands[:1]:
-                typed = PYTHON_ONLY_TYPED_OPS.get((op.name, getattr(v.type, "name", None)))
+                typed = PYTHON_ONLY_TYPED_OPS.get(
+                    (op.name, getattr(v.type, "name", None))
+                )
                 if typed:
                     found.add(typed)
             for nested in op.regions:
@@ -738,6 +740,23 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
             f"hwreg size must be in 1..{32 - offset} for offset {offset}, got {size}"
         )
     return reg_id | (offset << 6) | ((size - 1) << 11)
+
+
+def _lds_dma_attrs(
+    name: str, dwords: int, coherency: int, offset: int
+) -> Dict[str, Any]:
+    """The attrs of a buffer LDS-DMA op. ``offset`` must be an exact int in
+    0..4095 (no bool, float or str coercion); it is recorded only when
+    nonzero, so a kernel without one serializes as before."""
+    from .arch.mfma_scale import lds_dma_offset_error
+
+    error = lds_dma_offset_error(name, offset)
+    if error:
+        raise ValueError(error)
+    attrs: Dict[str, Any] = {"dwords": int(dwords), "aux": int(coherency)}
+    if offset != 0:
+        attrs["offset"] = offset
+    return attrs
 
 
 def _mma_c_frag_len(op_id: str) -> int:
@@ -945,8 +964,11 @@ def _lever_scope_text(levers) -> Optional[str]:
     attribute's text, or None when it names nothing."""
     if isinstance(levers, (list, tuple)):
         levers = ",".join(str(x).strip() for x in levers if str(x).strip())
-    names = [x.strip() for x in (levers or "").replace("+", ",").split(",") if x.strip()]
+    names = [
+        x.strip() for x in (levers or "").replace("+", ",").split(",") if x.strip()
+    ]
     return ",".join(names) or None
+
 
 # Frames inside ``core/`` are the builder machinery itself (this file, the
 # helpers it calls, the isa backends), never the code that asked for an op.
@@ -1626,21 +1648,30 @@ class IRBuilder:
         type), zero-extended to i32: one ``ds_read_u8`` whose constant part folds into the instruction's offset.
         For byte tables packed in a word-typed pool (e.g. MX scale codes), where ``smem_load_vN`` reads whole
         elements. Python engine only."""
-        return self._op("tile.smem_load_u8", [smem, byte_index], [I32], result_name_hint="lb").result
+        return self._op(
+            "tile.smem_load_u8", [smem, byte_index], [I32], result_name_hint="lb"
+        ).result
 
     def fmaximum(self, a: Value, b: Value) -> Value:
         """``llvm.maximum.f32``: NaN-propagating, with -0 < +0 (MLIR ``arith.maximumf``;
         ``fmax`` is ``llvm.maxnum``). f32 only. Python engine only."""
-        return self._op("math.fmaximum", [a, b], [a.type], result_name_hint="fmaxi").result
+        return self._op(
+            "math.fmaximum", [a, b], [a.type], result_name_hint="fmaxi"
+        ).result
 
     def fminimum(self, a: Value, b: Value) -> Value:
         """``llvm.minimum.f32`` (MLIR ``arith.minimumf``). f32 only. Python engine only."""
-        return self._op("math.fminimum", [a, b], [a.type], result_name_hint="fmini").result
+        return self._op(
+            "math.fminimum", [a, b], [a.type], result_name_hint="fmini"
+        ).result
 
     def fma_fused(self, a: Value, b: Value, c: Value) -> Value:
         """``llvm.fma.f32``: ``a * b + c`` with one rounding, always (MLIR ``math.fma``;
-        ``fma`` is ``llvm.fmuladd``, which may be unfused). f32 only. Python engine only."""
-        return self._op("math.fma_fused", [a, b, c], [a.type], result_name_hint="ffma").result
+        ``fma`` is ``llvm.fmuladd``, which may be unfused). f32 only. Python engine only.
+        """
+        return self._op(
+            "math.fma_fused", [a, b, c], [a.type], result_name_hint="ffma"
+        ).result
 
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
@@ -3043,6 +3074,7 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
+        scale_sel: Optional[Tuple[int, int]] = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -3068,15 +3100,27 @@ class IRBuilder:
 
         ``*extra`` carries the additional operands the scaled MX atoms need
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
+
+        ``scale_sel`` (``mfma_scaled`` catalog atoms and the 16x16x128 MX atom
+        only) is the byte, 0..3, of the A and of the B scale VGPR each lane
+        reads: the intrinsic's ``opsel_a`` and ``opsel_b``. Each entry must be
+        an exact ``int``; bool, float and str are refused. ``None`` reads byte
+        0 of both and records no attribute.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
-        from .arch.mfma_scale import scaled_mfma_error
+        from .arch.mfma_scale import (
+            scale_sel_error,
+            scale_sel_refusal,
+            scaled_mfma_error,
+        )
 
         error = scaled_mfma_error(op_id, [a, b, c, *extra]) or tf32_mma_error(
             op_id, [a, b, c, *extra]
         )
+        if not error and scale_sel is not None:
+            error = scale_sel_refusal(op_id) or scale_sel_error(scale_sel)
         if error:
             raise ValueError(error)
         c_frag_len = (
@@ -3093,11 +3137,14 @@ class IRBuilder:
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
+        attrs: Dict[str, Any] = {"op_id": op_id}
+        if scale_sel is not None:
+            attrs["scale_sel"] = list(scale_sel)
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
             [VectorType(c_elem, c_frag_len)],
-            attrs={"op_id": op_id},
+            attrs=attrs,
             result_name_hint=hint,
         ).result
 
@@ -3452,19 +3499,35 @@ class IRBuilder:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        *,
+        scale_sel: Optional[Tuple[int, int]] = None,
     ) -> Value:
         """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
 
-        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
-        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
-        separate i32 scale operands; A/B format selectors are fixed to zero.
-        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        This fixed-operation wrapper delegates to ``mma``. ``a`` and ``b`` are
+        32 bytes per lane (``vec<i32x8>``, ``vec<i8x32>``, ``vec<fp8e4m3x32>``
+        or ``vec<bf8e5m2x32>``), ``c`` is ``vec<f32x4>`` and the scales are
+        i32. A and B are read as fp8e4m3 (format selectors fixed to zero) in
+        every lowering. It lowers to
+        ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (LLVM) or
+        ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` (HIP).
+
+        ``scale_sel`` is ``(opsel_a, opsel_b)``: the byte, 0..3, of each scale
+        VGPR that holds the E8M0 scale. ``None`` reads byte 0 of both.
 
         For 32x32x64 with independently selected A/B formats and K32 E8M0
         scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
         with that atom and both scales. See ``reference/mma_metadata.md``.
         """
-        return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
+        return self.mma(
+            "mfma_scale_f32_16x16x128_f8f6f4",
+            a,
+            b,
+            c,
+            a_scale,
+            b_scale,
+            scale_sel=scale_sel,
+        )
 
     def mfma_scale_mx(
         self,
@@ -4449,7 +4512,9 @@ class IRBuilder:
                 f"({src.type.name}, {scale.type.name})"
             )
         if isinstance(byte, bool) or not isinstance(byte, int) or not 0 <= byte <= 3:
-            raise ValueError(f"cvt_scalef32_pk_bf16_fp4 byte must be 0..3, got {byte!r}")
+            raise ValueError(
+                f"cvt_scalef32_pk_bf16_fp4 byte must be 0..3, got {byte!r}"
+            )
         return self._op(
             "arith.cvt_scalef32_pk_bf16_fp4",
             [src, scale],
@@ -4457,6 +4522,7 @@ class IRBuilder:
             attrs={"byte": int(byte)},
             result_name_hint="dq4",
         ).result
+
     def perm_b32(self, src0: Value, src1: Value, sel: Value) -> Value:
         """`__builtin_amdgcn_perm(src0, src1, sel)` = ``v_perm_b32`` — an
         in-lane byte-select across two source VGPRs (NO cross-lane, NO
@@ -4833,6 +4899,7 @@ class IRBuilder:
         soffset: Value,
         dwords: int,
         coherency: int = 0,
+        offset: int = 0,
     ) -> None:
         """Variant of `async_buffer_load_lds` that takes a raw i64 LDS
         address instead of a typed `smem<...>` value. This is the form
@@ -4847,6 +4914,8 @@ class IRBuilder:
         (AUX) argument of ``llvm.amdgcn.raw.ptr.buffer.load[.lds]``. ``CACHE_STREAM`` is the
         right hint for one-shot streaming loads in a
         ping-pong pipeline that won't reuse the data.
+        offset: the instruction's immediate offset, 0..4095 bytes. The
+        hardware adds it to the global address and to the LDS address.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -4857,7 +4926,9 @@ class IRBuilder:
         self._op(
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
-            attrs={"dwords": int(dwords), "aux": int(coherency)},
+            attrs=_lds_dma_attrs(
+                "tile.async_buffer_load_lds_addr", dwords, coherency, offset
+            ),
         )
 
     # ----- scheduler / synchronisation hints -----
@@ -5747,7 +5818,9 @@ class IRBuilder:
         read, ``device_ops.hw_id``). Side-effecting: never merged or hoisted.
         Python engine only."""
         if hwreg not in S_GETREG_HWREGS:
-            raise ValueError(f"s_getreg hwreg must be one of {S_GETREG_HWREGS}, got {hwreg!r}")
+            raise ValueError(
+                f"s_getreg hwreg must be one of {S_GETREG_HWREGS}, got {hwreg!r}"
+            )
         hint = {"XCC_ID": "xcc", "HW_ID": "hwid"}[hwreg]
         return self._op(
             "tile.s_getreg", [], [I32], attrs={"hwreg": hwreg}, result_name_hint=hint
@@ -6090,6 +6163,7 @@ class IRBuilder:
         soffset: Value,
         dwords: int,
         coherency: int = 0,
+        offset: int = 0,
     ) -> None:
         """Async DRAM->LDS copy via `raw_ptr_buffer_load_lds`.
 
@@ -6104,6 +6178,9 @@ class IRBuilder:
         ``coherency`` selects AUX-bit cache-coherence hints — see
         :data:`CACHE_ALL` / :data:`CACHE_GLOBAL` /
         :data:`CACHE_STREAM` / :data:`NON_TEMPORAL`.
+
+        ``offset`` is the instruction's immediate offset, 0..4095 bytes, which
+        the hardware adds to the global address and to the LDS address.
         """
         if dwords not in (1, 3, 4):
             raise ValueError(
@@ -6114,7 +6191,9 @@ class IRBuilder:
         self._op(
             "tile.async_buffer_load_lds",
             [rsrc, lds_ptr, voffset, soffset],
-            attrs={"dwords": int(dwords), "aux": int(coherency)},
+            attrs=_lds_dma_attrs(
+                "tile.async_buffer_load_lds", dwords, coherency, offset
+            ),
         )
 
     def global_load_lds(

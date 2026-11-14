@@ -460,6 +460,17 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
 /* tile.mma routing (Python _op_tile_mma -> ISABackend.emit_mma)          */
 /* ====================================================================== */
 
+/* A scaled MFMA's scale_sel: the byte, 0..3, of the A and of the B scale VGPR
+ * each lane reads (opsel_a / opsel_b); byte 0 of both when absent. Python's
+ * _scale_sel accepts the same values. */
+static void mma_scale_sel(rocke_lower_t* L, const rocke_op_t* op, int64_t* sel_a, int64_t* sel_b)
+{
+    if(!rocke_mma_scale_sel(&op->attrs, sel_a, sel_b))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
+    }
+}
+
 /* op_id -> handler. Mirrors the Python CDNA emit_mma which rebuilds the legacy
  * ``tile.<op_id>`` op and re-dispatches it to the matching _op_tile_<op_id>
  * method. We dispatch directly to the file-static handler to keep the emitted
@@ -485,25 +496,33 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        int64_t sel_a = 0;
+        int64_t sel_b = 0;
+        mma_scale_sel(L, op, &sel_a, &sel_b);
         rocke_ll_need(L, "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32");
         rocke_ll_emitf(
             L,
             "  %s = call <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32("
-            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 0, i32 %s, i32 0, "
-            "i32 %s)",
+            "<8 x i32> %s, <8 x i32> %s, <16 x float> %s, i32 %d, i32 %d, i32 %lld, i32 %s, "
+            "i32 %lld, i32 %s)",
             mma_result_name(L, op),
             rocke_ll_operand(L, op->operands[0]),
             rocke_ll_operand(L, op->operands[1]),
             rocke_ll_operand(L, op->operands[2]),
             rocke_mfma_matrix_format(atom->a_dtype),
             rocke_mfma_matrix_format(atom->b_dtype),
+            (long long)sel_a,
             rocke_ll_operand(L, op->operands[3]),
+            (long long)sel_b,
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
     char tf32_error[ROCKE_ERR_MSG_CAP];
     if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+    if(rocke_attr_get(&op->attrs, "scale_sel") && !rocke_mma_accepts_scale_sel(op_id))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "tile.mma %s: scale_sel applies only to a scaled MFMA atom", op_id);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom
@@ -1384,15 +1403,29 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         return;
     }
-    if(op->num_operands != 5)
+    /* Mirrors Python _op_tile_mfma_scale_f32_16x16x128_f8f6f4: gfx950 only,
+     * 32-byte fp8e4m3 A / B, scale_sel as opsel_a / opsel_b. */
+    if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma " ROCKE_MX16_OP_ID " requires gfx950");
+    }
+    {
+        char error[ROCKE_ERR_MSG_CAP];
+        if(rocke_mx16_operand_error(
+               op->operands, op->num_operands, op->results, op->num_results, error, sizeof error)
+           || rocke_mx16_format_error(&op->attrs, error, sizeof error))
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        }
     }
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
     a_scale = op->operands[3];
     b_scale = op->operands[4];
+    int64_t sel_a = 0;
+    int64_t sel_b = 0;
+    mma_scale_sel(L, op, &sel_a, &sel_b);
     rocke_ll_need(L, "mfma.scale.f32.16x16x128.f8f6f4");
 
     /* Normalise A / B to <8 x i32> (accept either packed or byte-vector). */
@@ -1424,12 +1457,14 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                        "  %s = call <4 x float> "
                        "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                        "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
+                       "i32 0, i32 0, i32 %lld, i32 %s, i32 %lld, i32 %s)",
                        mma_result_name(L, op),
                        a_packed,
                        b_packed,
                        rocke_ll_operand(L, c),
+                       (long long)sel_a,
                        rocke_ll_operand(L, a_scale),
+                       (long long)sel_b,
                        rocke_ll_operand(L, b_scale));
     }
     else
@@ -1438,12 +1473,14 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                        "  %s = call <4 x float> "
                        "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                        "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
+                       "i32 0, i32 0, i32 0, i32 %lld, i32 %s, i32 %lld, i32 %s, i32 0)",
                        mma_result_name(L, op),
                        a_packed,
                        b_packed,
                        rocke_ll_operand(L, c),
+                       (long long)sel_a,
                        rocke_ll_operand(L, a_scale),
+                       (long long)sel_b,
                        rocke_ll_operand(L, b_scale));
     }
 }
