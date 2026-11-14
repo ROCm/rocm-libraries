@@ -2304,6 +2304,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             numWait = kernel["PrefetchGlobalRead"] - 2
             iterCode.add(self._wait(kernel, tPA, tPB, numWait, -1, -1, "wait for previous set of global reads", \
                                     skipGlobalReadInst=self.states.scheduledGRInstCounts))
+            iterCode.add(self._waitLocalReadsBeforeDirectToLdsBarrier(kernel, tPA, tPB))
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
 
@@ -5220,6 +5221,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
                                       "wait for previous set of global reads"))
+            waitLWCode.add(self._waitLocalReadsBeforeDirectToLdsBarrier(kernel, tensorParametersA, tensorParametersB))
           elif kernel["enableTDMA"] and kernel["enableTDMB"]:
             # TDM case: tensor_load_to_lds instructions (issued in prior iter) write to LDS via the
             # tensor counter. A s_wait_tensorcnt 0 is required before the barrier to guarantee all
@@ -12002,6 +12004,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return tdmWait(self.states, kernel, tPA, tPB, skipGlobalRead, comment)
     return wait(self.states, kernel, tPA, tPB, skipGlobalRead, \
       skipLocalWrite, skipLocalRead, self.db["ConservativeWaitCnt"], comment, skipGlobalReadInst)
+
+  def _waitLocalReadsBeforeDirectToLdsBarrier(self, kernel, tPA, tPB):
+    """Wait for this iteration's local reads before the main-loop barrier.
+
+    Direct-to-LDS global reads issued after that barrier can refill the LDS
+    buffer those reads use, and s_barrier does not wait for outstanding LDS
+    reads. A separate wait: _wait drops the vmcnt part when asked for both.
+    """
+    if not (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
+      return Module("noLocalReadWait")
+    return self._wait(kernel, tPA, tPB, -1, -1, 0, "wait for local reads before direct-to-LDS refill")
 
   ##############################################################################
   # SyncThreads
