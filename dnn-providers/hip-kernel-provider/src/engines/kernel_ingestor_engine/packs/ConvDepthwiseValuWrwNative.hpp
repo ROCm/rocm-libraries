@@ -55,7 +55,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
 /// columns a tile, g input rows a step, nwg 16-channel groups a wave, bpc blocks per dispatch
 /// unit the partitions aim for, s the stride of both axes, 1 or 2), "vtile" (VALU, channels-last:
 /// cv channels a thread, read as one vector, strips of `strip` output columns, compile-time
-/// kh x kw). The hankel and vtile fields are 0 for the other variants.
+/// kh x kw). The hankel and vtile fields are 0 for the other variants, except bpc: 0 (4 blocks a
+/// unit), 1, 2 or 8 on the VALU variants.
 struct WrwConfig
 {
     std::string variant;
@@ -102,10 +103,13 @@ bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign,
 
 /// Splits @p problem's reduction rows into partitions enough to fill @p computeUnits, counted in
 /// dispatch units (device_units: CUs on gfx9, WGPs on gfx10+), at @p config's blocks per unit
-/// (4 for the VALU variants) and channels per block.
+/// (bpc; 4 for a VALU variant's bpc 0) and channels per block: at most that many partitions (and
+/// rows / 4 lanes' worth for a vector tile), and of most / 2 .. most the count whose blocks best
+/// fill their last round of units (the most on a tie). One partition sets args.direct: the
+/// partial kernel writes dw itself.
 void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& config);
 
-/// The partial sums' workspace, once partitioned.
+/// The partial sums' workspace, once partitioned; none at one partition.
 size_t workspaceBytesFor(const WrwProblem& problem);
 
 /// The two launches: the partial kernel's grid, the fold kernel's, both of `block` threads.

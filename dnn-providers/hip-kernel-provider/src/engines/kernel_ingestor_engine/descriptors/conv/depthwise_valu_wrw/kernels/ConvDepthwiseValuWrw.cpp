@@ -85,6 +85,23 @@ __device__ inline float toFloat(ElementType v)
     return static_cast<float>(v);
 }
 
+/// One (partition, output channel, tap) sum: into the fp32 partials, or under a.direct (one
+/// partition) into dw itself with the fold's rounding (the sum from +0, rounded once; taps
+/// reflected for true convolution), so no fold runs.
+__device__ inline void putPartial(
+    const ConvDepthwiseValuWrwArgs& a, int partition, long channel, int tap, int taps, float v)
+{
+    if(a.direct != 0)
+    {
+        float total = 0.0f;
+        total += v;
+        const int target = CONV_DW_FLIP != 0 ? taps - 1 - tap : tap;
+        static_cast<ElementType*>(a.dw)[channel * taps + target] = static_cast<ElementType>(total);
+        return;
+    }
+    a.partial[((long)partition * outChannels(a) + channel) * taps + tap] = v;
+}
+
 /// Element offset of (n, c, z, y, x) in a packed tensor of c channels and extents (d, h, w).
 __device__ inline long
     offsetOf(int n, int c, int z, int y, int x, int channels, int d, int h, int w)
@@ -424,7 +441,7 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                 {
                     total += lanes[(l * lanesC + tid) * CV + e];
                 }
-                a.partial[((long)partition * a.c + c + e) * TAPS + t] = total;
+                putPartial(a, partition, c + e, t, TAPS, total);
             }
         }
         __syncthreads();
@@ -495,7 +512,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
                            * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
                 }
             }
-            a.partial[((long)partition * channels + c) * a.taps + tap] = sum;
+            putPartial(a, partition, c, tap, a.taps, sum);
         }
     }
 #else
@@ -541,7 +558,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             {
                 total += lanes[l][tid % CHANNELS];
             }
-            a.partial[((long)partition * channels + c) * TAPS + t] = total;
+            putPartial(a, partition, c, t, TAPS, total);
         }
         __syncthreads();
     }
@@ -583,7 +600,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum, scratch);
         if(tid == 0)
         {
-            a.partial[((long)partition * channels + c) * a.taps + tap] = total;
+            putPartial(a, partition, c, tap, a.taps, total);
         }
     }
 #else
@@ -623,7 +640,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum[t], scratch);
         if(tid == 0)
         {
-            a.partial[((long)partition * channels + c) * TAPS + t] = total;
+            putPartial(a, partition, c, t, TAPS, total);
         }
     }
 #endif
