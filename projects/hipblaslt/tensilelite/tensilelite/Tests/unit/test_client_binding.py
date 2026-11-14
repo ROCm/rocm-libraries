@@ -123,6 +123,18 @@ def test_editable_install_computes_its_revision_from_the_checkout(tmp_path, monk
     assert seen == [(package_dir.parent, {})]
 
 
+def test_current_installation_ignores_metadata_for_another_package_tree(tmp_path, monkeypatch):
+    package_dir = _package(tmp_path, name="active")
+    stale_dir = _package(tmp_path, name="stale")
+    distributions = [_Distribution(stale_dir), _Distribution(package_dir)]
+    distributions[0].version = "5.0.0+rocm9.9.9"
+    distributions[1].version = "5.0.0+rocm7.2.4"
+    monkeypatch.setattr(binding, "_package_dir", lambda: package_dir)
+    monkeypatch.setattr(binding.metadata, "distributions", lambda **unused: distributions)
+
+    assert binding.current_installation().version == "5.0.0+rocm7.2.4"
+
+
 def test_binding_root_and_helper_cache_share_tensilelite_home(tmp_path, monkeypatch):
     monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: tmp_path))
     installation = _installation(tmp_path)
