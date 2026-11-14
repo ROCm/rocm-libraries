@@ -33,7 +33,8 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef vector<int> gehrd_tuple;
+template <typename I>
+using gehrd_tuple = vector<I>;
 
 // each matrix_size_range is a {n, lda, ilo, ihi}
 
@@ -41,7 +42,8 @@ typedef vector<int> gehrd_tuple;
 // (null handle, null pointers and invalid values)
 
 // for checkin_lapack tests
-const vector<vector<int>> matrix_size_range = {
+template <typename I>
+const vector<vector<I>> matrix_size_range = {
     // quick return
     {0, 1, 1, 1},
     // invalid
@@ -59,20 +61,22 @@ const vector<vector<int>> matrix_size_range = {
     {150, 200, 60, 150},
 };
 
-const vector<vector<int>> large_matrix_size_range = {
+template <typename I>
+const vector<vector<I>> large_matrix_size_range = {
     {152, 152, 1, 152},
     {640, 640, 85, 600},
     {1000, 1024, 1, 1000},
 };
 
-Arguments gehrd_setup_arguments(gehrd_tuple tup)
+template <typename I>
+Arguments gehrd_setup_arguments(gehrd_tuple<I> tup)
 {
     Arguments arg;
 
-    arg.set<rocblas_int>("n", tup[0]);
-    arg.set<rocblas_int>("lda", tup[1]);
-    arg.set<rocblas_int>("ilo", tup[2]);
-    arg.set<rocblas_int>("ihi", tup[3]);
+    arg.set<I>("n", tup[0]);
+    arg.set<I>("lda", tup[1]);
+    arg.set<I>("ilo", tup[2]);
+    arg.set<I>("ihi", tup[3]);
 
     // only testing standard use case/defaults for strides
 
@@ -81,8 +85,8 @@ Arguments gehrd_setup_arguments(gehrd_tuple tup)
     return arg;
 }
 
-template <bool BLOCKED>
-class GEHD2_GEHRD : public ::TestWithParam<gehrd_tuple>
+template <bool BLOCKED, typename I>
+class GEHD2_GEHRD : public ::TestWithParam<gehrd_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -93,21 +97,29 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = gehrd_setup_arguments(GetParam());
+        Arguments arg = gehrd_setup_arguments(this->GetParam());
 
-        if(arg.peek<rocblas_int>("n") == 0)
-            testing_gehd2_gehrd_bad_arg<BATCHED, STRIDED, BLOCKED, T>();
+        if(arg.peek<I>("n") == 0)
+            testing_gehd2_gehrd_bad_arg<BATCHED, STRIDED, BLOCKED, T, I>();
 
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
-        testing_gehd2_gehrd<BATCHED, STRIDED, BLOCKED, T>(arg);
+        testing_gehd2_gehrd<BATCHED, STRIDED, BLOCKED, T, I>(arg);
     }
 };
 
-class GEHD2 : public GEHD2_GEHRD<false>
+class GEHD2 : public GEHD2_GEHRD<false, rocblas_int>
 {
 };
 
-class GEHRD : public GEHD2_GEHRD<true>
+class GEHRD : public GEHD2_GEHRD<true, rocblas_int>
+{
+};
+
+class GEHD2_64 : public GEHD2_GEHRD<false, int64_t>
+{
+};
+
+class GEHRD_64 : public GEHD2_GEHRD<true, int64_t>
 {
 };
 
@@ -237,10 +249,144 @@ TEST_P(GEHRD, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHD2, ValuesIn(large_matrix_size_range));
+// non-batch tests
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHD2, ValuesIn(matrix_size_range));
+TEST_P(GEHD2_64, __float)
+{
+    run_tests<false, false, float>();
+}
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHRD, ValuesIn(large_matrix_size_range));
+TEST_P(GEHD2_64, __double)
+{
+    run_tests<false, false, double>();
+}
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHRD, ValuesIn(matrix_size_range));
+TEST_P(GEHD2_64, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(GEHD2_64, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
+TEST_P(GEHRD_64, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(GEHRD_64, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(GEHRD_64, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(GEHRD_64, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
+// batched tests
+
+TEST_P(GEHD2_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GEHD2_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GEHD2_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GEHD2_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GEHRD_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GEHRD_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GEHRD_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GEHRD_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+// strided_batched cases
+
+TEST_P(GEHD2_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GEHD2_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GEHD2_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GEHD2_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GEHRD_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GEHRD_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GEHRD_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GEHRD_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHD2, ValuesIn((large_matrix_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHD2, ValuesIn((matrix_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHRD, ValuesIn((large_matrix_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHRD, ValuesIn((matrix_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHD2_64, ValuesIn((large_matrix_size_range<int64_t>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHD2_64, ValuesIn((matrix_size_range<int64_t>)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, GEHRD_64, ValuesIn((large_matrix_size_range<int64_t>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GEHRD_64, ValuesIn((matrix_size_range<int64_t>)));
