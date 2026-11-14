@@ -24,6 +24,7 @@
 #include <cmath>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <type_traits>
 
 #include "../common.hpp"
@@ -52,9 +53,9 @@ template<class TargetConfig,
          class SampleToBinOp>
 ROCPRIM_DEVICE
 void histogram_shared_kernel_impl(SampleIterator                        samples,
-                                  unsigned int                          columns,
+                                  size_t                                columns,
                                   unsigned int                          rows,
-                                  unsigned int                          row_stride,
+                                  size_t                                row_stride,
                                   unsigned int                          rows_per_block,
                                   unsigned int                          shared_histograms,
                                   fixed_array<Counter*, ActiveChannels> histogram,
@@ -94,9 +95,9 @@ template<unsigned int Channels,
 struct HistogramSharedOp
 {
     SampleIterator                             samples;
-    unsigned int                               columns;
+    size_t                                     columns;
     unsigned int                               rows;
-    unsigned int                               row_stride;
+    size_t                                     row_stride;
     fixed_array<Counter*, ActiveChannels>      histogram;
     fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op;
     fixed_array<size_t, ActiveChannels>        bins;
@@ -134,7 +135,7 @@ template<unsigned int Channels,
 inline hipError_t histogram_impl(void*          temporary_storage,
                                  size_t&        storage_size,
                                  SampleIterator samples,
-                                 unsigned int   columns,
+                                 size_t         columns,
                                  unsigned int   rows,
                                  size_t         row_stride_bytes,
                                  Counter*       histogram[ActiveChannels],
@@ -160,8 +161,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         return hipErrorInvalidValue;
     }
 
-    const unsigned int blocks_x   = ::rocprim::detail::ceiling_div(columns, items_per_block);
-    const unsigned int row_stride = row_stride_bytes / sizeof(sample_type);
+    const size_t blocks_x   = ::rocprim::detail::ceiling_div(columns, items_per_block);
+    const size_t row_stride = row_stride_bytes / sizeof(sample_type);
 
     size_t bins[ActiveChannels];
     size_t bins_bits[ActiveChannels];
@@ -184,9 +185,13 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     const bool use_private_histogram = current_target.i == target_arch::gfx942;
 
     Counter*      private_histograms         = nullptr;
-    unsigned int* block_id_count             = nullptr;
+    size_t*       block_id_count             = nullptr;
     int           global_histogram_grid_size = 0;
-    unsigned int  virtual_max_blocks         = 0;
+    size_t        virtual_max_blocks         = 0;
+    // The private kernel hands out virtual block ids through an atomic counter and divides by
+    // `rows` for every one of them. 32-bit ids are much cheaper, so use them whenever the
+    // counter (which ends up at virtual_max_blocks + grid size) cannot wrap.
+    bool use_32bit_block_ids = false;
 
     if(use_shared_mem || !use_private_histogram)
     {
@@ -217,8 +222,11 @@ inline hipError_t histogram_impl(void*          temporary_storage,
 
         virtual_max_blocks = ::rocprim::detail::ceiling_div(columns, items_per_block) * rows;
         global_histogram_grid_size
-            = rocprim::min(static_cast<unsigned int>(global_histogram_grid_size),
-                           virtual_max_blocks);
+            = static_cast<int>(std::min<size_t>(global_histogram_grid_size, virtual_max_blocks));
+
+        use_32bit_block_ids
+            = virtual_max_blocks + static_cast<size_t>(global_histogram_grid_size)
+              <= std::numeric_limits<unsigned int>::max();
 
         const size_t     size_private_histograms = total_bins * global_histogram_grid_size;
         const hipError_t partition_result        = detail::temp_storage::partition(
@@ -349,7 +357,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             = std::min(static_cast<unsigned int>(min_grid_size), params.max_grid_size);
 
         dim3 grid_size;
-        grid_size.x = std::min(chosen_grid_size, blocks_x);
+        grid_size.x = static_cast<unsigned int>(std::min<size_t>(chosen_grid_size, blocks_x));
         grid_size.y = std::min(rows, ::rocprim::detail::ceiling_div(chosen_grid_size, grid_size.x));
         const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
 
@@ -376,45 +384,58 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 start = std::chrono::steady_clock::now();
             }
 
-            auto histogram_private_global_kernel
-                = [samples,
-                   columns,
-                   rows,
-                   row_stride,
-                   hist     = fixed_array<Counter*, ActiveChannels>(histogram),
-                   ops      = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                   bits     = fixed_array<size_t, ActiveChannels>(bins_bits),
-                   bins_fix = fixed_array<size_t, ActiveChannels>(bins),
-                   private_histograms,
-                   virtual_max_blocks,
-                   block_id_count](auto target_config)
+            // block_id_count is always allocated and initialized (by init_histogram) as a size_t.
+            // The 32-bit variant uses its low word, which holds the same value on little-endian
+            // devices.
+            auto launch_private_global = [&](auto block_id_tag) -> hipError_t
             {
-                static constexpr histogram_config_params params = decltype(target_config)::params;
+                using block_id_type = decltype(block_id_tag);
 
-                histogram_private_global<params.histogram_global_config.block_size,
-                                         params.histogram_global_config.items_per_thread,
-                                         Channels,
-                                         ActiveChannels>(samples,
-                                                         columns,
-                                                         rows,
-                                                         row_stride,
-                                                         hist,
-                                                         ops,
-                                                         bits,
-                                                         bins_fix,
-                                                         private_histograms,
-                                                         virtual_max_blocks,
-                                                         block_id_count);
-            };
+                auto histogram_private_global_kernel
+                    = [samples,
+                       columns,
+                       rows,
+                       row_stride,
+                       hist     = fixed_array<Counter*, ActiveChannels>(histogram),
+                       ops      = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                       bits     = fixed_array<size_t, ActiveChannels>(bins_bits),
+                       bins_fix = fixed_array<size_t, ActiveChannels>(bins),
+                       private_histograms,
+                       max_blocks = static_cast<block_id_type>(virtual_max_blocks),
+                       block_ids  = reinterpret_cast<block_id_type*>(block_id_count)](
+                          auto target_config)
+                {
+                    static constexpr histogram_config_params params
+                        = decltype(target_config)::params;
 
-            ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<Config, selector, histogram_global_config_static_selector>(
+                    histogram_private_global<params.histogram_global_config.block_size,
+                                             params.histogram_global_config.items_per_thread,
+                                             Channels,
+                                             ActiveChannels,
+                                             block_id_type>(samples,
+                                                            columns,
+                                                            rows,
+                                                            row_stride,
+                                                            hist,
+                                                            ops,
+                                                            bits,
+                                                            bins_fix,
+                                                            private_histograms,
+                                                            max_blocks,
+                                                            block_ids);
+                };
+
+                return execute_launch_plan<Config, selector, histogram_global_config_static_selector>(
                     current_target,
                     histogram_private_global_kernel,
                     dim3(global_histogram_grid_size),
                     dim3(params.histogram_global_config.block_size),
                     0,
-                    stream));
+                    stream);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(use_32bit_block_ids ? launch_private_global(0u)
+                                                        : launch_private_global(size_t{0}));
 
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_private_global_kernel",
                                                         blocks_x * block_size * rows,
@@ -425,6 +446,11 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             if(debug_synchronous)
             {
                 start = std::chrono::steady_clock::now();
+            }
+            if(blocks_x > std::numeric_limits<unsigned int>::max())
+            {
+                // The global kernel maps columns onto the x dimension of the grid
+                return hipErrorInvalidValue;
             }
             auto histogram_global_kernel
                 = [samples,
@@ -445,7 +471,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 execute_launch_plan<Config, selector, histogram_config_static_selector>(
                     current_target,
                     histogram_global_kernel,
-                    dim3(blocks_x, rows),
+                    dim3(static_cast<unsigned int>(blocks_x), rows),
                     dim3(block_size, 1),
                     0,
                     stream));
@@ -467,7 +493,7 @@ template<unsigned int Channels,
 inline hipError_t histogram_even_impl(void*          temporary_storage,
                                       size_t&        storage_size,
                                       SampleIterator samples,
-                                      unsigned int   columns,
+                                      size_t         columns,
                                       unsigned int   rows,
                                       size_t         row_stride_bytes,
                                       Counter*       histogram[ActiveChannels],
@@ -516,7 +542,7 @@ template<unsigned int Channels,
 inline hipError_t histogram_range_impl(void*          temporary_storage,
                                        size_t&        storage_size,
                                        SampleIterator samples,
-                                       unsigned int   columns,
+                                       size_t         columns,
                                        unsigned int   rows,
                                        size_t         row_stride_bytes,
                                        Counter*       histogram[ActiveChannels],
@@ -600,7 +626,7 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int size;        // e.g., 8
+/// size_t size;              // e.g., 8
 /// float * samples;          // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
 /// int * histogram;          // empty array of at least 5 elements
 /// unsigned int levels;      // e.g., 6 (for 5 bins)
@@ -632,7 +658,7 @@ template<class Config = default_config, class SampleIterator, class Counter, cla
 inline hipError_t histogram_even(void*          temporary_storage,
                                  size_t&        storage_size,
                                  SampleIterator samples,
-                                 unsigned int   size,
+                                 size_t         size,
                                  Counter*       histogram,
                                  unsigned int   levels,
                                  Level          lower_level,
@@ -705,7 +731,7 @@ inline hipError_t histogram_even(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int columns;     // e.g., 4
+/// size_t columns;           // e.g., 4
 /// unsigned int rows;        // e.g., 2
 /// size_t row_stride_bytes;  // e.g., 6 * sizeof(float)
 /// float * samples;          // e.g., [-10.0, 0.3, 9.5, 8.1, -, -, 1.5, 1.9, 100.0, 5.1, -, -]
@@ -739,7 +765,7 @@ template<class Config = default_config, class SampleIterator, class Counter, cla
 inline hipError_t histogram_even(void*          temporary_storage,
                                  size_t&        storage_size,
                                  SampleIterator samples,
-                                 unsigned int   columns,
+                                 size_t         columns,
                                  unsigned int   rows,
                                  size_t         row_stride_bytes,
                                  Counter*       histogram,
@@ -821,7 +847,7 @@ inline hipError_t histogram_even(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int size;        // e.g., 8
+/// size_t size;              // e.g., 8
 /// unsigned char * samples;  // e.g., [(3, 1, 5, 255), (3, 1, 5, 255), (4, 2, 6, 127), (3, 2, 6, 127),
 ///                           //        (0, 0, 0, 100), (0, 1, 0, 100), (0, 0, 1, 255), (0, 1, 1, 255)]
 /// int * histogram[3];       // 3 empty arrays of at least 256 elements each
@@ -861,7 +887,7 @@ template<unsigned int Channels,
 inline hipError_t multi_histogram_even(void*          temporary_storage,
                                        size_t&        storage_size,
                                        SampleIterator samples,
-                                       unsigned int   size,
+                                       size_t         size,
                                        Counter*       histogram[ActiveChannels],
                                        unsigned int   levels[ActiveChannels],
                                        Level          lower_level[ActiveChannels],
@@ -942,7 +968,7 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int columns;     // e.g., 4
+/// size_t columns;           // e.g., 4
 /// unsigned int rows;        // e.g., 2
 /// size_t row_stride_bytes;  // e.g., 5 * sizeof(unsigned char)
 /// unsigned char * samples;  // e.g., [(3, 1, 5, 255), (3, 1, 5, 255), (4, 2, 6, 127), (3, 2, 6, 127), (-, -, -, -),
@@ -984,7 +1010,7 @@ template<unsigned int Channels,
 inline hipError_t multi_histogram_even(void*          temporary_storage,
                                        size_t&        storage_size,
                                        SampleIterator samples,
-                                       unsigned int   columns,
+                                       size_t         columns,
                                        unsigned int   rows,
                                        size_t         row_stride_bytes,
                                        Counter*       histogram[ActiveChannels],
@@ -1046,7 +1072,7 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int size;        // e.g., 8
+/// size_t size;              // e.g., 8
 /// float * samples;          // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
 /// int * histogram;          // empty array of at least 5 elements
 /// unsigned int levels;      // e.g., 6 (for 5 bins)
@@ -1077,7 +1103,7 @@ template<class Config = default_config, class SampleIterator, class Counter, cla
 inline hipError_t histogram_range(void*          temporary_storage,
                                   size_t&        storage_size,
                                   SampleIterator samples,
-                                  unsigned int   size,
+                                  size_t         size,
                                   Counter*       histogram,
                                   unsigned int   levels,
                                   Level*         level_values,
@@ -1145,7 +1171,7 @@ inline hipError_t histogram_range(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int columns;     // e.g., 4
+/// size_t columns;           // e.g., 4
 /// unsigned int rows;        // e.g., 2
 /// size_t row_stride_bytes;  // e.g., 6 * sizeof(float)
 /// float * samples;          // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
@@ -1178,7 +1204,7 @@ template<class Config = default_config, class SampleIterator, class Counter, cla
 inline hipError_t histogram_range(void*          temporary_storage,
                                   size_t&        storage_size,
                                   SampleIterator samples,
-                                  unsigned int   columns,
+                                  size_t         columns,
                                   unsigned int   rows,
                                   size_t         row_stride_bytes,
                                   Counter*       histogram,
@@ -1256,7 +1282,7 @@ inline hipError_t histogram_range(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int size;        // e.g., 8
+/// size_t size;              // e.g., 8
 /// unsigned char * samples;  // e.g., [(0, 0, 80, 255), (120, 0, 80, 255), (123, 0, 82, 127), (10, 1, 83, 127),
 ///                           //        (51, 1, 8, 100), (52, 1, 8, 100), (53, 0, 81, 255), (54, 50, 81, 255)]
 /// int * histogram[3];       // 3 empty arrays of at least 256 elements each
@@ -1293,7 +1319,7 @@ template<unsigned int Channels,
 inline hipError_t multi_histogram_range(void*          temporary_storage,
                                         size_t&        storage_size,
                                         SampleIterator samples,
-                                        unsigned int   size,
+                                        size_t         size,
                                         Counter*       histogram[ActiveChannels],
                                         unsigned int   levels[ActiveChannels],
                                         Level*         level_values[ActiveChannels],
@@ -1372,7 +1398,7 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// unsigned int columns;     // e.g., 4
+/// size_t columns;           // e.g., 4
 /// unsigned int rows;        // e.g., 2
 /// size_t row_stride_bytes;  // e.g., 5 * sizeof(unsigned char)
 /// unsigned char * samples;  // e.g., [(0, 0, 80, 0), (120, 0, 80, 0), (123, 0, 82, 0), (10, 1, 83, 0), (-, -, -, -),
@@ -1411,7 +1437,7 @@ template<unsigned int Channels,
 inline hipError_t multi_histogram_range(void*          temporary_storage,
                                         size_t&        storage_size,
                                         SampleIterator samples,
-                                        unsigned int   columns,
+                                        size_t         columns,
                                         unsigned int   rows,
                                         size_t         row_stride_bytes,
                                         Counter*       histogram[ActiveChannels],

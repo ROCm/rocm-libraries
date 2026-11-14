@@ -9,6 +9,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
 * The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
 * Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+* `rocprim::run_length_encode`, `rocprim::run_length_encode_non_trivial_runs` and the `rocprim::histogram_*`/`rocprim::multi_histogram_*` functions now take `size_t` for the number of samples (`size`/`columns`), and the run offsets and lengths and the histogram row stride are 64-bit, so inputs with more than 2^32 elements are supported.
 
 ### Removed
 

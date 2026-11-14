@@ -98,6 +98,8 @@ hipError_t run_length_encode_impl(void*                     temporary_storage,
 }
 
 template<typename Config,
+         typename OffsetType,
+         typename CountType,
          typename InputIterator,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
@@ -113,10 +115,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                    const bool              debug_synchronous)
 {
     using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
-    using offset_type = unsigned int;
-    using count_type  = unsigned int;
     using offset_count_pair_type
-        = run_length_encode::offset_count_pair_type_t<offset_type, count_type>; // accumulator_type
+        = run_length_encode::offset_count_pair_type_t<OffsetType, CountType>; // accumulator_type
     // RLE config needs to be converted to non_trivial_runs_config.
     using non_trivial_config = typename convert_to_non_trivial_config<Config>::type;
     using Selector           = run_length_encode_non_trivial_config_selector<input_type>;
@@ -268,6 +268,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam RunsCountOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type of \p size. Types of up to 32 bits use 32-bit offsets and counts;
+/// wider types (e.g. \p size_t) use 64-bit ones and support more than 2^32 - 1 elements.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -327,19 +329,22 @@ template<typename Config = default_config,
          typename InputIterator,
          typename UniqueOutputIterator,
          typename CountsOutputIterator,
-         typename RunsCountOutputIterator>
+         typename RunsCountOutputIterator,
+         typename Size>
 inline hipError_t run_length_encode(void*                   temporary_storage,
                                     size_t&                 storage_size,
                                     InputIterator           input,
-                                    unsigned int            size,
+                                    Size                    size,
                                     UniqueOutputIterator    unique_output,
                                     CountsOutputIterator    counts_output,
                                     RunsCountOutputIterator runs_count_output,
                                     hipStream_t             stream            = 0,
                                     bool                    debug_synchronous = false)
 {
+    static_assert(::rocprim::is_integral<Size>::value, "Size must be an integral type");
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using count_type = unsigned int;
+    using count_type = detail::offset_type_t<Size>;
 
     return detail::run_length_encode::run_length_encode_impl<Config>(
         temporary_storage,
@@ -381,6 +386,8 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam RunsCountOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type of \p size. Types of up to 32 bits use 32-bit offsets and counts;
+/// wider types (e.g. \p size_t) use 64-bit ones and support more than 2^32 - 1 elements.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -442,18 +449,25 @@ template<typename Config = default_config,
          typename InputIterator,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
-         typename RunsCountOutputIterator>
+         typename RunsCountOutputIterator,
+         typename Size>
 inline hipError_t run_length_encode_non_trivial_runs(void*                   temporary_storage,
                                                      size_t&                 storage_size,
                                                      InputIterator           input,
-                                                     unsigned int            size,
+                                                     Size                    size,
                                                      OffsetsOutputIterator   offsets_output,
                                                      CountsOutputIterator    counts_output,
                                                      RunsCountOutputIterator runs_count_output,
                                                      hipStream_t             stream = 0,
                                                      bool debug_synchronous         = false)
 {
-    return detail::run_length_encode::run_length_encode_non_trivial_runs_impl<Config>(
+    static_assert(::rocprim::is_integral<Size>::value, "Size must be an integral type");
+
+    using offset_type = detail::offset_type_t<Size>;
+    using count_type  = detail::offset_type_t<Size>;
+
+    return detail::run_length_encode::
+        run_length_encode_non_trivial_runs_impl<Config, offset_type, count_type>(
         temporary_storage,
         storage_size,
         input,
