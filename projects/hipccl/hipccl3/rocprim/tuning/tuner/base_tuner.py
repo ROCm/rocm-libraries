@@ -102,6 +102,23 @@ COMMON_VALUE_TYPES = [
     "int8_t",
 ]
 
+# Mirrors `target_gpu_names[]` in config_types.hpp.
+# Keep in sync.
+TARGET_GPU_NAMES = [
+    ("MI350X",  "mi350x"),
+    ("MI325X",  "mi325x"),
+    ("MI308X",  "mi308x"),
+    ("MI300A",  "mi300a"),
+    ("MI300X",  "mi300x"),
+    ("MI210",   "mi210"),
+    ("MI100",   "mi100"),
+    ("RX 9060", "rx9060"),
+    ("RX 9070", "rx9070"),
+    ("V620",    "v620"),
+    ("RX 7900", "rx7900"),
+    ("RX 6900", "rx6900"),
+]
+
 
 @dataclass
 class TunerArgs:
@@ -136,6 +153,7 @@ class TunerArgs:
     simulation_mode: bool = False
     seed: int = -1
     arch_name: Optional[str] = None
+    target_gpu: Optional[str] = "generic"
 
     def update_with_kwargs(self, **kwargs):
         for k, v in kwargs.items():
@@ -168,11 +186,23 @@ class BaseTuner(ABC):
             self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
             (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
             self.arch_name = self.device_properties.gcnArchName.split(":")[0]
+
+            def get_gpu_name_from_string(name: str) -> str:
+                for search_str, gpu in TARGET_GPU_NAMES:
+                    if search_str in name:
+                        return gpu
+                return "generic"
+
+            self.target_gpu = get_gpu_name_from_string(self.device_properties.name.decode()) 
         else:
             assert (
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
+            assert (
+                args.target_gpu
+            ), "Simulation mode requires --target-gpu to be specified"
             self.arch_name = args.arch_name
+            self.target_gpu = args.target_gpu.lower()
         self.exclude_default_config = args.exclude_default_config
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
@@ -261,26 +291,35 @@ class BaseTuner(ABC):
             return
 
         target_arch = self.arch_name
+        target_gpu = self.target_gpu
         if self.arch_name is None:
             warnings.warn(f"Could not detect current architecture!")
             return
 
+        if target_gpu is None:
+            warnings.warn(f"Could not detect target gpu, using generic target instead.")
+            target_gpu = "generic"
+
         if self.existing_config is None:
             return
 
-        # TODO: tuner currently does not have enough information to completely
-        # derive the full target specifier. For now just assume there is only one GPU
-        # per arch.
-        targets = [
+        arch_targets = [
             t for t in self.existing_config.keys() if dict(t)["arch"] == target_arch
         ]
+        gpu_targets = [
+            t for t in arch_targets if dict(t)["gpu"] == target_gpu
+        ]
+
         target = None
-        if len(targets) > 0:
-            target = targets[0]
-        if len(targets) > 1:
+        if len(gpu_targets) > 0:
+            target = gpu_targets[0]
+        elif len(arch_targets) > 0:
+            target = arch_targets[0]
+            target_count = len(arch_targets)
             warnings.warn(
-                f"More than one default config for current target {target_arch} found, picking {targets[0]}"
+                f"No default config matching gpu and arch found, but found {target_count} config {"matches" if target_count > 1 else "match"} for arch, picking {target}"
             )
+        
         if target is None:
             warnings.warn(
                 f"No appropiate default config for current target {target_arch}!"
@@ -434,7 +473,7 @@ class BaseTuner(ABC):
 
     def _get_cache_file_name(self, types: Dict[str, Any]):
         """Return the name of the cache file based on algo name, arch name and types"""
-        parts = [self.algo_full_name, self.arch_name]
+        parts = [self.algo_full_name, self.arch_name, self.target_gpu]
         parts += [str(v).replace("rocprim::", "") for _, v in sorted(types.items())]
         return "_".join(parts) + "_cache.json"
 
@@ -460,12 +499,13 @@ class BaseTuner(ABC):
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
-        if "arch_name" not in cache_dict:
+        if "arch_name" not in cache_dict or "target_gpu" not in cache_dict:
             with open(cache_file, "r") as f:
                 content = f.read()
 
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
+            new_content += f'"target_gpu": "{self.target_gpu}",\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
             for i, (k, v) in enumerate(types.items()):
                 new_content += f'"{k}": "{v}",'
