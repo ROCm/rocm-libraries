@@ -79,9 +79,9 @@ stay because the plan and the generator cite them.
 |---|---|
 | The forward op | `sdpa-fwd.md` (ALMIOPEN-2893) |
 | cuDNN backward features with no schema field: sinks and dSink (ALMIOPEN-3020), `rng_dump`, `score_mod`, `max_total_seq_len_q/kv`, `deterministic_algorithm(true)`, the FP8 backward node, paged K/V, block-sparse masks | frontend unit tests of rule R0 (`SdpaBackwardAttributes.hpp:565-629`) |
-| Engine knobs (accumulator type, rounding mode); kernel-internal tests | provider unit tests; the kernel project |
+| Engine knobs (accumulator type, rounding mode); kernel-internal tests | provider tests: the unit tests check knob plumbing and declines; the provider GPU test `IntegrationGpuSdpaBackward.cpp` checks the A16 accumulator against the CPU reference; the kernel project |
 | Exhaustive generation and fuzzing; release-train testing | the separate tool (§7); release readiness |
-| The provider-local C++ test `IntegrationGpuSdpaBackward.cpp` | retired by the bundle PR that lands this plan |
+| The provider-local C++ test `IntegrationGpuSdpaBackward.cpp` | kept: it runs the engine knobs (A16), which no bundle sets, and gfx950 until gfx950 claims land |
 
 ---
 
@@ -887,8 +887,56 @@ fill, `--test-engine ASM_SDPA_ENGINE` with claims enforced, the engine TOML and 
 quarantine, one process instead of two shards. All 553 SdpaBackward tests ran in 43.3 s: quick
 2.4 s, PR 2.8 s, nightly 16.5 s, full 21.4 s. 289 executed and passed against the GPU reference, 15
 expected rejections were rejected, 226 were declined and 23 hit the DEF skips; no test failed and no
-claim broke. An MI355X (gfx950) run had no failure: ASM_SDPA_ENGINE declines every backward graph
-there.
+claim broke. That run predates the AITER v0.1.29 kernels (§4.6), which accept more gfx942 graphs, so
+the next run changes these counts. No gfx950 run of the bundles is recorded yet.
+
+### 4.6 ASM_SDPA_ENGINE scope
+
+*Non-normative.* What ASM_SDPA_ENGINE serves decides which cases it runs; every other case is a
+decline (a SKIP). The engine runs the prebuilt assembly backward kernels of AITER (AI Tensor Engine
+for ROCm) v0.1.29 on gfx942 (MI300X) and gfx950 (MI355X). It follows AITER's choice between those
+kernels and CK (Composable Kernel): a graph AITER sends to CK, the engine declines. Its support
+claims name gfx942 only; gfx950 claims wait for a gfx950 run.
+
+| Item | gfx942 | gfx950 |
+|---|---|---|
+| Mode | batch | batch |
+| IO dtype | BF16 or FP16, equal on the eight IO tensors; Stats FLOAT | same |
+| Heads | Hq = Hk = Hv | same |
+| Head dims | Dqk = Dv, a multiple of 8, 64 ≤ D ≤ 192 | Dqk = Dv, a multiple of 8, 64 < D ≤ 128; or Dqk 192 with Dv 128 |
+| Masks (kernel ordinals) | 0 none; 1 causal TL; 2 causal BR; 3 band (sliding window), TL or BR | 0 none; 1 causal TL; 2 causal BR; 3 band TL; 4 band BR |
+| Bands | 64 < Dqk ≤ 128 | Dqk ≤ 128 |
+| dQ accumulator | A32 (FP32, default); A16 (16-bit) by knob | same |
+
+The accumulator comes from the engine knob `hipkernel.sdpa.bwd.accumulator_type` (`a32` or `a16`).
+The bundles run the default, A32. The provider GPU test `IntegrationGpuSdpaBackward.cpp` runs A32 and
+A16 on both architectures against the CPU backward reference (Out of scope here). It fills each input
+tensor from its own seed, checks each accumulator against its own tolerance, and has Smoke and
+Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942 they need Sq = Skv, Skv a multiple
+of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV tensor within 2^32 bytes, and
+neither arch ships A16 kernels for every mask and head dim. Plan build fails with BAD_PARAM for an A16
+request those kernels cannot serve.
+
+The engine declines:
+
+- group (varlen) mode: `seq_len_q`/`seq_len_kv` tensors, `padding_mask` and ragged offsets;
+- GQA and MQA (grouped-query and multi-query attention, Hk ≠ Hq), and Hv ≠ Hk;
+- dropout: a non-zero `dropout_probability`, a dropout mask, seed and offset;
+- bias (`attn_mask_tensor_uid`) and dBias;
+- ALiBi;
+- the head dims and bands AITER sends to CK: every head-dim pair and band outside the table;
+- the graphs of DEF-01, -02, -04 and -05 (§4.2) and a non-positive scale (DEF-06).
+
+Deterministic mode has no backward schema field (Out of scope), so no graph requests it; AITER's
+assembly backward serves it on gfx1250 only. Two cases AITER sends to CK are served on purpose: Sq ≤ 16
+on gfx942 and gfx950 (AITER's choice there is for speed, not correctness), and gfx942 bands with left
+bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as windows; the band
+kernel computes them).
+
+Only the gfx942 hd128 A32 psskddv kernels (the kernels that take any sequence length and a padded
+head dim), run at D = 128, have been checked against the CPU backward reference. Every other
+configuration the engine accepts, including all of gfx950, logs a WARN on its first dispatch until
+it is calibrated on a GPU (`asm_sdpa_engine/asm/asm_kernels/README.md`, Verified Kernel Matrix).
 
 ---
 

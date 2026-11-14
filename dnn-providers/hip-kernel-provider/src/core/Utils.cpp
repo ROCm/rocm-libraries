@@ -2,10 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Utils.hpp"
+#include "Handle.hpp"
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -184,6 +188,30 @@ bool hasOnly16ByteAlignedTensors(
                || (tensor->alignment() >= REQUIRED_ALIGNMENT
                    && tensor->alignment() % REQUIRED_ALIGNMENT == 0);
     });
+}
+
+void storeEngineDetails(Handle& handle,
+                        int64_t engineId,
+                        const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
+                        const std::vector<int32_t>& behaviorNotes,
+                        hipdnnPluginConstData_t& detailsOut)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
+    knobOffsets.reserve(knobs.size());
+    for(const auto& knob : knobs)
+    {
+        knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));
+    }
+    const auto knobVector = builder.CreateVector(knobOffsets);
+    const auto notesVector = builder.CreateVector(behaviorNotes);
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, knobVector, notesVector));
+
+    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+    detailsOut.ptr = detachedBuffer->data();
+    detailsOut.size = detachedBuffer->size();
+    handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
 } // namespace hip_kernel_provider::core::utils

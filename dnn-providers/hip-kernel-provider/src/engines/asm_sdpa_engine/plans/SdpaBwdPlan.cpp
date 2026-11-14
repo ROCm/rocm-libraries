@@ -3,6 +3,7 @@
 
 #include "plans/SdpaBwdPlan.hpp"
 #include "asm/SdpaBwdKernelArgs.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cstddef>
@@ -11,8 +12,8 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <limits>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -29,9 +30,10 @@ namespace
 // updates a textual diff.
 //
 // Omitted vs AITER's full mha_bwd_args: dispatch flags (use_asm_v3 etc.),
-// bias/dbias, dropout, group-mode seq pointers, sink attention, allocators.
+// bias/dbias, dropout, group-mode seq pointers, sink attention, allocators,
+// and the mask fields (dqdkdvMaskCoordinates() reads them from SdpaBwdParams).
 //
-// AITER provenance: csrc/include/mha_bwd.h (commit 17d4a33)
+// AITER provenance: csrc/include/mha_bwd.h (AITER v0.1.29, commit a0c4b69)
 //
 // Naming convention: field names match AITER where possible.  Strides are in
 // *elements* here; they are converted to bytes in the build helpers.
@@ -47,13 +49,15 @@ struct MhaBwdArgs
     const void* lse_ptr; // stats/LSE from forward pass
     const void* do_ptr;
     void* d_ptr; // workspace: D reduction buffer [B, H_q, S_q] FP32
-    void* dq_ptr; // output dQ (BF16)
-    void* dk_ptr; // output dK (BF16)
-    void* dv_ptr; // output dV (BF16)
-    void* dq_acc_ptr; // workspace: FP32 dQ accumulator (a32 only; nullptr for a16)
+    void* dq_ptr; // output dQ
+    void* dk_ptr; // output dK
+    void* dv_ptr; // output dV
+    void* dq_acc_ptr; // workspace dq_acc; nullptr without a post stage
 
-    // Accumulator type — determines 2-kernel (a16) vs 3-kernel (a32) path
+    // Accumulator type (AITER v3_atomic_fp32) and whether a post stage reads
+    // dq_acc (AITER need_post_processing)
     asm_sdpa_engine::AccumulatorType accType;
+    bool need_post_processing;
 
     // Dimensions
     unsigned int seqlen_q;
@@ -116,21 +120,16 @@ struct MhaBwdArgs
     unsigned int nhead_stride_lsed;
     unsigned int batch_stride_lsed;
 
-    // dq_acc strides (elements, FP32 contiguous [B, H_q, S_q, D_qk])
+    // dq_acc layout (strides in elements), sdpaBwdDqAccLayout()
+    size_t dq_acc_element_size;
     unsigned int stride_dq_acc;
     int64_t nhead_stride_dq_acc;
     int64_t batch_stride_dq_acc;
-
-    // Mask parameters — matching AITER's mha_bwd_args fields.
-    // Window mask coordinates are computed inline in buildDqdkdvArgs()
-    // (matching AITER's mha_bwd.cu), not precomputed here.
-    int window_size_left = -1;
-    int window_size_right = -1;
 };
 // NOLINTEND(readability-identifier-naming)
 
 // =============================================================================
-// Build helpers — mirror AITER mha_bwd.cu (commit 17d4a33)
+// Build helpers — mirror AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() (commit a0c4b69)
 // =============================================================================
 
 constexpr unsigned int K_BF16_SIZE = 2;
@@ -138,7 +137,7 @@ constexpr unsigned int K_FP32_SIZE = 4;
 
 constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 17d4a33)
+// AITER reference: mha_bwd.cu fmha_v3_bwd(), odo_args
 asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_odo_args odo{};
@@ -155,13 +154,16 @@ asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
     odo.BAs_d = a.batch_stride_lsed * K_FP32_SIZE;
     odo.Seqs_d = 1 * K_FP32_SIZE; // contiguous along seq dim
     odo.seqlen_q = a.seqlen_q;
+    // D_qk, unpadded, as AITER passes it (mha_bwd.cu:493), although the odo row
+    // is selected by padded D_v: gfx950 D_qk = 192, D_v = 128 runs the hd128 odo
+    // kernel with head_dim = 192.
     odo.head_dim = a.hdim_q;
     odo.ptr_qseq = nullptr; // batch mode (POC)
     odo.ptr_qseq_padded = nullptr;
     return odo;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 17d4a33)
+// AITER reference: mha_bwd.cu fmha_v3_bwd(), dqdkdv_args
 //
 // `tsKv` is the K/V tile size for the resolved kernel (CSV column 'ts').  In
 // AITER it comes from the kernel-traits template parameter at the call site;
@@ -173,9 +175,9 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args
 {
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
-    // A32: write dQ to FP32 dq_acc workspace (DQ_CONVERT casts it to BF16 afterward).
-    // A16: write dQ directly to the output BF16 buffer.
-    dqdkdv.ptr_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.dq_acc_ptr : a.dq_ptr;
+    // AITER mha_bwd.cu:599: dq_acc when a post stage writes dQ from it,
+    // otherwise dQ itself.
+    dqdkdv.ptr_dq = a.need_post_processing ? a.dq_acc_ptr : a.dq_ptr;
     dqdkdv.ptr_dk = a.dk_ptr;
     dqdkdv.ptr_dv = a.dv_ptr;
 
@@ -241,43 +243,32 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args
     dqdkdv.ptr_qseq_padded = nullptr;
     dqdkdv.ptr_kseq_padded = nullptr;
 
-    // a32: max_seqlen_dq = seqlen_q (AITER: v3_atomic_fp32 path)
-    // a16: max_seqlen_dq = 0 (AITER convention: a16 path, no dq_convert)
-    dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.seqlen_q : 0;
+    // AITER mha_bwd.cu:658: S_q for A32, S_q rounded up to 16 for A16 (the rows
+    // of its 16-bit dq_acc).
+    dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32)
+                               ? a.seqlen_q
+                               : (a.seqlen_q + 15U) / 16U * 16U;
 
-    // Window attention mask coordinates — computed inline, matching AITER's
-    // mha_bwd.cu (commit 17d4a33).  Only SLIDING_WINDOW (mask=3) uses these;
-    // mask types 0-2 bake mask behavior into the kernel binary and ignore
-    // mask_y/mask_x (left at zero-init default).
-    if(p.maskOrdinal == static_cast<int32_t>(asm_sdpa_engine::plan_utils::MaskType::SLIDING_WINDOW))
-    {
-        auto [mask_y, mask_x]
-            = asm_sdpa_engine::plan_utils::computeMaskCoordinates(a.window_size_left,
-                                                                  a.window_size_right,
-                                                                  static_cast<int32_t>(a.seqlen_q),
-                                                                  static_cast<int32_t>(a.seqlen_k),
-                                                                  p.topLeftAlignment);
-        dqdkdv.mask_y = mask_y;
-        dqdkdv.mask_x = mask_x;
-    }
+    // Window attention mask coordinates. The masks other than the sliding
+    // windows are baked into the kernel binary, which ignores mask_y/mask_x.
+    std::tie(dqdkdv.mask_y, dqdkdv.mask_x) = asm_sdpa_engine::dqdkdvMaskCoordinates(p);
 
     return dqdkdv;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 17d4a33)
-// Only called for a32 accumulator kernels.
+// AITER reference: mha_bwd.cu fmha_v3_bwd(), post_args (:730-750). The same
+// arguments drive DQ_CONVERT (FP32 dq_acc) and DQ_SHUFFLE (16-bit dq_acc).
 asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_post_kernel_args post{};
 
-    // dq_acc is FP32 (4 bytes per element)
     post.ptr_dq_acc = a.dq_acc_ptr;
     post.ptr_dq = a.dq_ptr;
-    post.Hs_dq_acc = static_cast<uint32_t>(a.nhead_stride_dq_acc) * K_FP32_SIZE;
-    post.BAs_dq_acc = static_cast<uint32_t>(a.batch_stride_dq_acc) * K_FP32_SIZE;
-    post.Seqs_dq_acc = a.stride_dq_acc * K_FP32_SIZE;
-    post.Hs_dq = a.nhead_stride_dq * K_BF16_SIZE;
-    post.BAs_dq = a.batch_stride_dq * K_BF16_SIZE;
+    post.Hs_dq_acc = static_cast<uint64_t>(a.nhead_stride_dq_acc) * a.dq_acc_element_size;
+    post.BAs_dq_acc = static_cast<uint64_t>(a.batch_stride_dq_acc) * a.dq_acc_element_size;
+    post.Seqs_dq_acc = static_cast<uint32_t>(a.stride_dq_acc * a.dq_acc_element_size);
+    post.Hs_dq = static_cast<uint64_t>(a.nhead_stride_dq) * K_BF16_SIZE;
+    post.BAs_dq = static_cast<uint64_t>(a.batch_stride_dq) * K_BF16_SIZE;
     post.Seqs_dq = a.stride_dq * K_BF16_SIZE;
     post.seqlen_q = a.seqlen_q;
     post.head_dim = a.hdim_q;
@@ -300,7 +291,8 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
                            void* dkPtr,
                            void* dvPtr,
                            void* dBufPtr,
-                           void* dqAccPtr)
+                           void* dqAccPtr,
+                           bool needPostProcessing)
 {
     MhaBwdArgs a{};
 
@@ -317,6 +309,7 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.dv_ptr = dvPtr;
     a.dq_acc_ptr = dqAccPtr;
     a.accType = p.accumulatorType;
+    a.need_post_processing = needPostProcessing;
 
     // Dimensions
     a.seqlen_q = p.seqLenQ;
@@ -372,46 +365,75 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.nhead_stride_lsed = p.statsStrideHead;
     a.batch_stride_lsed = p.statsStrideBatch;
 
-    // dq_acc strides — contiguous [B, H_q, S_q, D_qk] in FP32
-    a.stride_dq_acc = p.headDimQk; // D_qk
-    a.nhead_stride_dq_acc = static_cast<int64_t>(p.seqLenQ) * p.headDimQk; // S_q * D_qk
-    a.batch_stride_dq_acc
-        = static_cast<int64_t>(p.numHeadsQ) * p.seqLenQ * p.headDimQk; // H_q * S_q * D_qk
-
-    // Window attention mask parameters (raw bounds, not yet transformed).
-    // computeMaskCoordinates() is called in buildDqdkdvArgs() for mask type 3,
-    // matching AITER's inline usage in mha_bwd.cu.
-    a.window_size_left = p.windowLeft;
-    a.window_size_right = p.windowRight;
-
-    // The kernel args structs use uint32_t for byte strides.  Verify that
-    // stride_in_elements * K_FP32_SIZE fits before we silently truncate
-    // in buildPostArgs().  Overflow would cause the DQ_CONVERT kernel to
-    // read/write the wrong memory addresses.
-    // Only relevant for a32 (a16 has no dq_acc buffer or DQ_CONVERT kernel).
-    // TODO: Move this validation to frontend graph validation or operator creation
-    // so oversized tensors are rejected before plan building.
-    if(a.accType == asm_sdpa_engine::AccumulatorType::A32)
-    {
-        constexpr auto K_U32_MAX = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
-        if(a.nhead_stride_dq_acc * K_FP32_SIZE > K_U32_MAX
-           || a.batch_stride_dq_acc * K_FP32_SIZE > K_U32_MAX)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("dq_acc byte strides overflow uint32_t "
-                                    "(nhead_stride="
-                                    << a.nhead_stride_dq_acc * K_FP32_SIZE
-                                    << ", batch_stride=" << a.batch_stride_dq_acc * K_FP32_SIZE
-                                    << ", max=" << K_U32_MAX << ")");
-        }
-    }
+    // dq_acc layout, AITER mha_bwd.cu:577-596. The DQDKDV kernels address
+    // dq_acc with 32-bit offsets within a batch, and the pssk = 0 kernels across
+    // batches too, although the post kernel strides are 64-bit. The builder
+    // declines graphs whose offsets would wrap: sdpaBwdDqAccFitsU32 (isApplicable
+    // for A32, buildPlan for A16) and the dqdkdv lookup's pssk = 0 guard.
+    const auto dqAcc = asm_sdpa_engine::sdpaBwdDqAccLayout(
+        p.batchSize, p.numHeadsQ, p.seqLenQ, p.headDimQk, p.accumulatorType);
+    a.dq_acc_element_size = dqAcc.elementBytes;
+    a.stride_dq_acc = static_cast<unsigned int>(dqAcc.stride);
+    a.nhead_stride_dq_acc = static_cast<int64_t>(dqAcc.nheadStride);
+    a.batch_stride_dq_acc = static_cast<int64_t>(dqAcc.batchStride);
 
     return a;
+}
+
+// Zeroes the tensor at `base` that `plan` describes (planBhsdZero()).
+hipError_t zeroStrided(void* base, const asm_sdpa_engine::StridedZeroPlan& plan, hipStream_t stream)
+{
+    const auto& [outer, middle, inner] = plan.loops;
+    for(size_t i = 0; i < outer.extent; ++i)
+    {
+        for(size_t j = 0; j < middle.extent; ++j)
+        {
+            for(size_t k = 0; k < inner.extent; ++k)
+            {
+                void* region = static_cast<char*>(base) + i * outer.strideBytes
+                               + j * middle.strideBytes + k * inner.strideBytes;
+                const hipError_t err = hipMemset2DAsync(
+                    region, plan.pitchBytes, 0, plan.widthBytes, plan.height, stream);
+                if(err != hipSuccess)
+                {
+                    return err;
+                }
+            }
+        }
+    }
+    return hipSuccess;
 }
 
 } // anonymous namespace
 
 namespace asm_sdpa_engine
 {
+
+std::pair<int32_t, int32_t> dqdkdvMaskCoordinates(const SdpaBwdParams& params)
+{
+    const bool isWindow
+        = params.maskOrdinal == static_cast<int32_t>(plan_utils::MaskType::SLIDING_WINDOW)
+          || params.maskOrdinal == BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW;
+    if(!isWindow)
+    {
+        return {0, 0};
+    }
+    if(params.archString == "gfx950")
+    {
+        return {params.windowLeft, params.windowRight}; // {mask_y, mask_x}
+    }
+    return plan_utils::computeMaskCoordinates(params.windowLeft,
+                                              params.windowRight,
+                                              static_cast<int32_t>(params.seqLenQ),
+                                              static_cast<int32_t>(params.seqLenKv),
+                                              params.topLeftAlignment);
+}
+
+bool halvesDqdkdvGrid(int32_t maskOrdinal)
+{
+    return maskOrdinal == static_cast<int32_t>(plan_utils::MaskType::TOP_LEFT_CAUSAL)
+           || maskOrdinal == static_cast<int32_t>(plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
 
 // =============================================================================
 // Constructors
@@ -424,15 +446,7 @@ SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
     , _postKernel(std::move(postKernel))
-    , _params(params)
-{
-}
-
-SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel, CachedModule dqdkdvKernel, SdpaBwdParams params)
-    : _odoKernel(std::move(odoKernel))
-    , _dqdkdvKernel(std::move(dqdkdvKernel))
-    , _postKernel(std::nullopt)
-    , _params(params)
+    , _params(std::move(params))
 {
 }
 
@@ -446,11 +460,12 @@ size_t SdpaBwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
                                 _params.numHeadsQ,
                                 _params.seqLenQ,
                                 _params.headDimQk,
-                                _params.accumulatorType);
+                                _params.accumulatorType,
+                                _postKernel.has_value());
 }
 
 // =============================================================================
-// execute — 3-kernel orchestration
+// execute — ODO, DQDKDV, then the post kernel when there is one
 // =============================================================================
 
 void SdpaBwdPlan::execute(const Handle& handle,
@@ -487,22 +502,13 @@ void SdpaBwdPlan::execute(const Handle& handle,
     void* dkPtr = uidToPtrMap.at(_params.dkUid);
     void* dvPtr = uidToPtrMap.at(_params.dvUid);
 
-    // 4. Carve workspace into sub-buffers.
-    // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
-    // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
-    // Layout: D buffer | dq_acc (A32 only)
+    // 4. Carve workspace into sub-buffers. Layout: D buffer | dq_acc, where
+    // dq_acc exists only when a post kernel writes dQ from it.
     auto* dBufPtr = workspace;
-    size_t wsOffset = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
-
-    // A32: dq_acc buffer follows D buffer in workspace.
-    // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
-    void* dqAccPtr = nullptr;
-    if(_params.accumulatorType == AccumulatorType::A32)
-    {
-        dqAccPtr = static_cast<char*>(workspace) + wsOffset;
-        wsOffset += sdpaBwdDqAccBufferSize(
-            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
-    }
+    const size_t wsOffset
+        = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
+    const bool needPostProcessing = _postKernel.has_value();
+    void* dqAccPtr = needPostProcessing ? static_cast<char*>(workspace) + wsOffset : nullptr;
 
     // 5. Resolve attention scale at execute time (runtime pass-by-value support).
     // Throws BAD_PARAM before the first launch for a scale the kernels mishandle.
@@ -510,7 +516,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
         _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaBwdPlan::execute");
 
     // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
-    // Byte-stride uint32 overflow was already rejected by isApplicable.
+    // Byte-stride uint32 overflow was already rejected by isApplicable (A32)
+    // or buildPlan (A16).
     const MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
                                                resolvedScale,
                                                qPtr,
@@ -523,12 +530,11 @@ void SdpaBwdPlan::execute(const Handle& handle,
                                                dkPtr,
                                                dvPtr,
                                                dBufPtr,
-                                               dqAccPtr);
+                                               dqAccPtr,
+                                               needPostProcessing);
 
-    // 7. Launch kernels on the same stream.
-    // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
-    // a16: 2 kernels — ODO → DQDKDV (dQ written directly in BF16)
-    // Launching on the same stream guarantees ordering without explicit barriers.
+    // 7. Launch kernels on the same stream, which orders them without
+    // explicit barriers.
     auto stream = handle.getStream();
 
     // 7a. Build args and launch kernel 1: ODO
@@ -554,27 +560,47 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 7b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
-    const bool isCausal = (_params.maskOrdinal == 1 || _params.maskOrdinal == 2);
-    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, isCausal);
+    const unsigned int gdxDqdkdv
+        = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, halvesDqdkdvGrid(_params.maskOrdinal));
 
-    // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
-    // dQ contributions atomically and does not pre-zero; stale residue from a
-    // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
-    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 17d4a33).
-    // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
-    if(_params.accumulatorType == AccumulatorType::A32)
+    // DQDKDV adds each K/V tile's dQ contribution atomically into what it
+    // writes and does not zero it first; stale data there would corrupt dQ.
+    // - dq_acc: AITER allocates it with workspace_alloc(..., zero_init=true)
+    //   (mha_bwd.cu:595).
+    // - dQ, when DQDKDV writes it directly (gfx942 A16): AITER's Python layer
+    //   zeroes dQ before every ASM backward (aiter/ops/mha.py:2885-2886).
+    hipError_t memsetErr = hipSuccess;
+    const char* zeroed = nullptr;
+    if(needPostProcessing)
     {
-        const size_t dqAccBytes = sdpaBwdDqAccBufferSize(
-            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
-        const hipError_t memsetErr = hipMemsetAsync(dqAccPtr, 0, dqAccBytes, stream);
-        if(memsetErr != hipSuccess)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("SdpaBwdPlan::execute: failed to zero dq_acc workspace before SDPA "
-                            "backward DQDKDV, error: ")
-                    + hipGetErrorString(memsetErr));
-        }
+        zeroed = "dq_acc workspace";
+        memsetErr = hipMemsetAsync(dqAccPtr,
+                                   0,
+                                   sdpaBwdDqAccLayout(_params.batchSize,
+                                                      _params.numHeadsQ,
+                                                      _params.seqLenQ,
+                                                      _params.headDimQk,
+                                                      _params.accumulatorType)
+                                       .bytes,
+                                   stream);
+    }
+    else
+    {
+        zeroed = "dQ output";
+        memsetErr = zeroStrided(
+            dqPtr,
+            planBhsdZero({_params.batchSize, _params.numHeadsQ, _params.seqLenQ},
+                         {_params.dqStrideBatch, _params.dqStrideHead, _params.dqStrideSeq},
+                         _params.headDimQk,
+                         K_BF16_SIZE),
+            stream);
+    }
+    if(memsetErr != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            std::string("SdpaBwdPlan::execute: failed to zero the ") + zeroed
+                + " before SDPA backward DQDKDV, error: " + hipGetErrorString(memsetErr));
     }
 
     if(!launchKernel("SDPA backward DQDKDV",
@@ -592,15 +618,15 @@ void SdpaBwdPlan::execute(const Handle& handle,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
 
-    // 7c. DQ_CONVERT (FP32 → BF16) — A32 path only.
-    // A16 wrote dQ directly to the output BF16 buffer in step 7b; no cast needed.
-    if(_params.accumulatorType == AccumulatorType::A32)
+    // 7c. Post kernel: DQ_CONVERT (A32) or DQ_SHUFFLE (gfx950 A16) writes dQ
+    // from dq_acc (AITER mha_bwd.cu:752-759).
+    if(needPostProcessing)
     {
         auto postArgs = buildPostArgs(mhaArgs);
 
-        const unsigned int gdxPost = _params.dqConvertTiles.gridDim(mhaArgs.seqlen_q);
+        const unsigned int gdxPost = _params.postTiles.gridDim(mhaArgs.seqlen_q);
 
-        if(!launchKernel("SDPA backward DQ_CONVERT",
+        if(!launchKernel("SDPA backward post",
                          (*_postKernel)->function(),
                          &postArgs,
                          sizeof(postArgs),
@@ -612,7 +638,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQ_CONVERT");
+                "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for the SDPA backward post "
+                "kernel");
         }
     }
 }

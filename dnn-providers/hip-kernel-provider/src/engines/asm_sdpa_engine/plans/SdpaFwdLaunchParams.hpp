@@ -28,7 +28,8 @@ struct SdpaFwdLaunchParams
 // group tensors are logical [B, H, S, D] with batch carried by gridDimY, so Q-tiles
 // come from the per-batch seqLen S (not a packed total_q); per-batch ragged offsets
 // locate each batch's tokens. The hd192x128 kernel uses 256-wide blocks on all
-// architectures.
+// architectures. The gfx950 bf16 hd256 kernel never merges causal Q-tiles (tgDiv=1)
+// and uses 256-wide blocks in group mode.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -42,6 +43,9 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     const bool isGroupMode = params.group.has_value();
     const bool isHd192x128 = params.headDimQk == 192 && params.headDimV == 128;
     const bool isHd192x128Gfx942 = isHd192x128 && isGfx942;
+    // inBytesPerElement is 2 only for bf16 inputs (1 for fp8).
+    const bool isHd256Bf16Gfx950 = params.archString == "gfx950" && params.headDimQk == 256
+                                   && params.inBytesPerElement == 2U;
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is
@@ -58,9 +62,10 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.tuneOpt = tuneOpt;
 
     // tgDiv=2 merges the causal head/tail Q-tiles onto shared workgroups; the
-    // group hd192x128/gfx942 kernel keeps them separate (tgDiv=1).
+    // group hd192x128/gfx942 and the bf16 hd256/gfx950 kernels keep them separate
+    // (tgDiv=1).
     unsigned int tgDiv = masked ? 2U : 1U;
-    if(isGfx942 && isGroupMode && isHd192x128)
+    if((isGfx942 && isGroupMode && isHd192x128) || isHd256Bf16Gfx950)
     {
         tgDiv = 1U;
     }
@@ -94,9 +99,9 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.gridDimY = gdy;
     lp.gridDimZ = gdz;
 
-    // hd192x128 kernels use 4 wavefronts (256 threads) on all architectures;
-    // hd128 and other kernels use 8 wavefronts (512 threads).
-    lp.blockDimX = isHd192x128 ? 256U : 512U;
+    // hd192x128 kernels use 4 wavefronts (256 threads) on all architectures, as does
+    // the group-mode bf16 hd256/gfx950 kernel; the others use 8 wavefronts (512 threads).
+    lp.blockDimX = (isHd192x128 || (isHd256Bf16Gfx950 && isGroupMode)) ? 256U : 512U;
 
     return lp;
 }

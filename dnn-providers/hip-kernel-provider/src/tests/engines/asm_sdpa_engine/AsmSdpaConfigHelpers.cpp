@@ -2,12 +2,16 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../../engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 #include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "AsmSdpaTestSupport.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+
+#include <cmath>
 
 namespace asm_sdpa_engine
 {
@@ -102,6 +106,20 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
 {
     auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
+    // Registry cases use the standard attention scale 1/sqrt(hdim_q), as AITER's own tests
+    // do. The gfx950 hd256 kernels multiply Q by scale * log2(e) and round the product to
+    // bf16 before QK^T, so their error grows with the scale: at scale 1.0 a few outputs
+    // exceed the bf16 tolerance, while at 1/sqrt(256) the error stays well inside it.
+    tc.attnScale = 1.0f / std::sqrt(static_cast<float>(config.hdim_q));
+    // Group mode gives Q and K/V a token capacity of 512, twice the largest ts_qo of any
+    // group row, so the per-batch lengths a test writes into the offset tables can span
+    // two Q-tiles of every row while keeping every K/V length at least its Q length.
+    if(config.mode == BatchMode::GROUP)
+    {
+        constexpr int64_t K_GROUP_SEQ_CAPACITY = 512;
+        tc.seqQ = K_GROUP_SEQ_CAPACITY;
+        tc.seqKv = K_GROUP_SEQ_CAPACITY;
+    }
     if(withStats)
     {
         tc.withStats = true;
@@ -154,13 +172,16 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     {
         const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
         const std::vector<int64_t> offsetStrides = generateStrides(offsetDims);
-        const auto makeOffset = [&]() {
+        const auto makeOffset = [&](const char* name) {
             auto offset = std::make_shared<TensorAttributes>();
-            offset->set_dim(offsetDims).set_stride(offsetStrides).set_data_type(DataType::INT32);
+            offset->set_name(name)
+                .set_dim(offsetDims)
+                .set_stride(offsetStrides)
+                .set_data_type(DataType::INT32);
             return offset;
         };
-        const auto qoOffset = makeOffset();
-        const auto kvOffset = makeOffset();
+        const auto qoOffset = makeOffset(K_QO_RAGGED_OFFSET_NAME);
+        const auto kvOffset = makeOffset(K_KV_RAGGED_OFFSET_NAME);
 
         q->set_ragged_offset(qoOffset).set_ragged_offset_multiplier(q->get_stride()[2]);
         k->set_ragged_offset(kvOffset).set_ragged_offset_multiplier(k->get_stride()[2]);
@@ -252,6 +273,27 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     }
 
     return {graph, testCase.withStats ? stats : nullptr};
+}
+
+std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
+{
+    std::vector<AsmKernelTocEntry> entries;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != arch)
+        {
+            continue;
+        }
+        entries.push_back(
+            {asm_kernels::getFwdKernelTocKey(config.co_name, arch, false), config.knl_name});
+        // gfx942 ships each forward object once per MI300 and MI308 variant.
+        if(arch == "gfx942")
+        {
+            entries.push_back(
+                {asm_kernels::getFwdKernelTocKey(config.co_name, arch, true), config.knl_name});
+        }
+    }
+    return entries;
 }
 
 } // namespace asm_sdpa_engine

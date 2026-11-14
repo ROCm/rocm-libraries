@@ -2,8 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 // Real kpack archive loading tests. These open the build-tree .kpack archives
-// and extract known TOC keys to verify end-to-end packing + loading for each
-// supported architecture and kernel variant.
+// and extract known TOC keys, and every TOC key the kernel registries name, to
+// verify end-to-end packing + loading for each supported architecture and
+// kernel variant.
 //
 // The tests use the kpack C API directly (not AsmKpackArchive singleton) so
 // they are independent of the plugin directory resolution and can run as unit
@@ -13,10 +14,16 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
+#include "AsmSdpaTestSupport.hpp"
+#include "asm_fmha_v3_bwd_configs.hpp"
+#include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 
 #ifndef ASM_KPACK_TEST_DIR
 #error "ASM_KPACK_TEST_DIR must be defined (set via CMake compile definition)"
@@ -152,6 +159,86 @@ TEST(TestAsmKpackLoading, Gfx950FwdHd128)
 TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
 {
     verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
+}
+
+// The A16 post stage (cfg_fmha_bwd_dq_shuffle), gfx950 only.
+TEST(TestAsmKpackLoading, Gfx950BwdDqShuffle)
+{
+    for(const char* tocKey :
+        {"fmha_v3_bwd/bwd_hd128_dq_shuffle.co", "fmha_v3_bwd/bwd_hd192_dq_shuffle.co"})
+    {
+        verifyKernelExtraction(kpackPath("gfx950"), tocKey, "gfx950");
+    }
+}
+
+// =============================================================================
+// Every registry row, both architectures
+// =============================================================================
+
+// Each row of every kernel registry names a code object that its architecture's
+// archive carries, and that object defines the row's kernel symbol. The plan
+// builders derive TOC keys the same way, so a stale co_name or knl_name would
+// otherwise surface only when a graph first selects the row on a device.
+TEST(TestAsmKpackLoading, EveryRegistryRowResolvesInItsArchive)
+{
+    size_t archivesChecked = 0;
+    for(const std::string arch : {"gfx942", "gfx950"})
+    {
+        SCOPED_TRACE("arch=" + arch);
+        const auto path = kpackPath(arch);
+        if(!std::filesystem::exists(path))
+        {
+            continue;
+        }
+
+        std::vector<AsmKernelTocEntry> entries = getFwdKernelTocEntries(arch);
+        for(const CFG* registry : {&cfg_fmha_bwd_odo,
+                                   &cfg_fmha_bwd_dqdkdv,
+                                   &cfg_fmha_bwd_dq_convert,
+                                   &cfg_fmha_bwd_dq_shuffle})
+        {
+            for(const auto& [key, config] : *registry)
+            {
+                if(config.arch == arch)
+                {
+                    entries.push_back({getAsmKernelTocKey(config.co_name), config.knl_name});
+                }
+            }
+        }
+        ASSERT_FALSE(entries.empty()) << "No registry row names " << arch;
+
+        kpack_archive_t archive = nullptr;
+        ASSERT_EQ(kpack_open(path.c_str(), &archive), KPACK_SUCCESS)
+            << "kpack_open failed for " << path;
+        for(const auto& entry : entries)
+        {
+            void* data = nullptr;
+            size_t size = 0;
+            const kpack_error_t err
+                = kpack_get_kernel(archive, entry.tocKey.c_str(), arch.c_str(), &data, &size);
+            if(err != KPACK_SUCCESS || data == nullptr)
+            {
+                ADD_FAILURE() << "The " << arch << " archive has no object '" << entry.tocKey
+                              << "'";
+            }
+            else if(std::string_view(static_cast<const char*>(data), size).find(entry.knlName)
+                    == std::string_view::npos)
+            {
+                ADD_FAILURE() << "'" << entry.tocKey << "' does not define " << entry.knlName;
+            }
+            if(data != nullptr)
+            {
+                kpack_free_kernel(data);
+            }
+        }
+        kpack_close(archive);
+        ++archivesChecked;
+    }
+
+    if(archivesChecked == 0)
+    {
+        GTEST_SKIP() << "No archive found under " << kpackDir();
+    }
 }
 
 // =============================================================================

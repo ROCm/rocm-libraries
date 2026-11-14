@@ -6,6 +6,7 @@
 #include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Utils.hpp"
 #include "plans/SdpaBwdPlan.hpp"
+#include "plans/SdpaKernelUtils.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <algorithm>
@@ -18,7 +19,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -30,6 +31,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 
 // Backward CSV columns consumed by this builder:
@@ -43,33 +45,14 @@ namespace
 
 // Dispatch enums shared with the forward path: MaskType via plan_utils;
 // RoundingMode and BatchMode via hip_kernel_provider_common (the same header the
-// forward builder consumes). AccumulatorMode stays backward-local because the
+// forward builder consumes). AccumulatorMode is bwd_dispatch's because the
 // forward dispatch has no 16/32-bit accumulator axis.
+using bwd_dispatch::AccumulatorMode;
 using hip_kernel_provider_common::BatchMode;
 using hip_kernel_provider_common::RoundingMode;
 using plan_utils::MaskType;
 
 using bwd_dispatch::BF16_CVT_FP16_SENTINEL;
-
-enum class AccumulatorMode : int
-{
-    A16 = 0, // 16-bit accumulator (atomic32 = 0)
-    A32 = 1 // 32-bit accumulator (atomic32 = 1)
-};
-
-// Per-stage CSV-row selector. Computed once from the graph and consumed by
-// both isApplicable and buildPlan, so the two sites cannot drift.
-struct BwdDispatchTuple
-{
-    int mask;
-    int atomic32;
-    int pssk;
-    int pddv;
-    int bf16Cvt;
-    // See "Verified Kernel Matrix" in asm/asm_kernels/README.md; true only for
-    // calibrated (dtype, hdim).
-    bool verified;
-};
 
 // Output of resolveStage: the TOC key (for kpack archive lookup), kernel
 // symbol name, and tile sizes for the resolved registry row.
@@ -78,14 +61,6 @@ struct ResolvedKernel
     std::string tocKey;
     std::string knlName;
     SdpaBwdParams::KernelTiles tiles;
-};
-
-// Per-pipeline-stage dispatch tuples for the three backward kernels.
-struct BwdDispatchTuples
-{
-    BwdDispatchTuple odo;
-    BwdDispatchTuple dqdkdv;
-    BwdDispatchTuple dqConvert;
 };
 
 RoundingMode
@@ -133,66 +108,182 @@ std::optional<std::string>
     return std::nullopt;
 }
 
-// Walk the chosen registry and return a copy of the row that matches the
-// requested tuple, or std::nullopt when no row matches.  The registry type
-// (CFG) is the std::unordered_map alias emitted by codegen.py; returning a
-// copy decouples the caller from the registry's storage so the result is
-// stable regardless of any subsequent mutation to the underlying map.
-std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
-                                            const std::string& archId,
-                                            const std::string& dataType,
-                                            int hdimQ,
-                                            int hdimV,
-                                            int mask,
-                                            int atomic32,
-                                            int pssk,
-                                            int pddv,
-                                            int mode,
-                                            int bf16Cvt)
+// A row stored with bf16_cvt = 3 serves every rounding mode (the fp16 rows, and
+// the bf16 rows that ship one kernel for all modes); any other row serves only
+// the mode it names. AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() (:81,
+// :121): `(cfg.bf16_cvt == 3) || (cfg.bf16_cvt == bf16_cvt)`.
+bool servesBf16Cvt(const fmha_v3_bwdConfig& cfg, int bf16Cvt)
+{
+    return cfg.bf16_cvt == BF16_CVT_FP16_SENTINEL || cfg.bf16_cvt == bf16Cvt;
+}
+
+// AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() odo loop (:58-68): the odo
+// row is keyed on dtype, padded hdim_v and mode only.
+std::optional<fmha_v3_bwdConfig> findOdoConfig(const std::string& archId,
+                                               const bwd_dispatch::KernelRequest& request,
+                                               const bwd_dispatch::HeadDims& padded)
+{
+    for(const auto& [unusedKey, cfg] : cfg_fmha_bwd_odo)
+    {
+        if(cfg.arch == archId && cfg.dtype == request.dataType && cfg.hdim_v == padded.v
+           && cfg.mode == request.mode)
+        {
+            return cfg;
+        }
+    }
+    return std::nullopt;
+}
+
+// AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() post loop (:113-133), for
+// both post registries (dq_convert and dq_shuffle): the post row is keyed on
+// padded hdim_q, mode and bf16_cvt, and on dtype only for the A32 accumulator
+// (`(cfg.dtype == data_type) || (atomic32 == 0)`, :123).
+std::optional<fmha_v3_bwdConfig> findPostConfig(const CFG& registry,
+                                                const std::string& archId,
+                                                const bwd_dispatch::KernelRequest& request,
+                                                const bwd_dispatch::HeadDims& padded)
 {
     for(const auto& [unusedKey, cfg] : registry)
     {
-        if(cfg.arch != archId)
+        if(cfg.arch == archId && cfg.hdim_q == padded.q && cfg.mode == request.mode
+           && servesBf16Cvt(cfg, request.bf16Cvt)
+           && (cfg.dtype == request.dataType || request.atomic32 == 0))
         {
-            continue;
+            return cfg;
         }
-        if(cfg.dtype != dataType)
-        {
-            continue;
-        }
-        if(cfg.hdim_q != hdimQ || cfg.hdim_v != hdimV)
-        {
-            continue;
-        }
-        if(cfg.mask != mask)
-        {
-            continue;
-        }
-        if(cfg.atomic32 != atomic32)
-        {
-            continue;
-        }
-        if(cfg.pssk != pssk || cfg.pddv != pddv)
-        {
-            continue;
-        }
-        if(cfg.mode != mode)
-        {
-            continue;
-        }
-        // gfx950 BF16/FP16 rows are emitted with `bf16_cvt = 3` (the FP16
-        // sentinel) regardless of the BF16 rounding mode the caller asked
-        // for, because gfx950 ships only one kernel per (dtype, hdim, mask,
-        // atomic, pssk, pddv, mode) tuple — there are no per-rounding-mode
-        // variants to disambiguate.  Mirrors the equivalent special case
-        // in SdpaFwdPlanBuilder.cpp::getKernelNameKey for gfx950.
-        if(archId != "gfx950" && cfg.bf16_cvt != bf16Cvt)
-        {
-            continue;
-        }
-        return cfg;
     }
     return std::nullopt;
+}
+
+// The pssk value AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() requests
+// (:84-96), from the first dqdkdv row that matches the key: the sequence needs
+// no padding only when seqlen_q == seqlen_k and seqlen_k is a multiple of the
+// row's K/V tile. A16 rows on gfx942 and *recompile* A16 rows count in 64-row
+// tiles whatever their ts. Every row of one match class shares ts and atomic32.
+int requestedPssk(const std::string& archId,
+                  const fmha_v3_bwdConfig& cfg,
+                  int64_t seqLenQ,
+                  int64_t seqLenKv)
+{
+    const bool tiles64
+        = cfg.atomic32 == 0
+          && (archId == "gfx942" || cfg.knl_name.find("recompile") != std::string::npos);
+    const int64_t tsKv = tiles64 ? 64 : cfg.ts;
+    return (tsKv <= 0 || seqLenQ != seqLenKv || seqLenKv % tsKv != 0) ? 1 : 0;
+}
+
+// AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() dqdkdv loop (:70-112). The
+// key is dtype, padded hdim_q and hdim_v, mask, atomic32, bf16_cvt and mode;
+// pddv is 1 when padding changed a head dim (:50) and pssk comes from
+// requestedPssk(). AITER takes the exact (pssk, pddv) row, or else the last
+// row its unordered_map yields with pssk and pddv both at least the requested
+// values. Here the smallest qualifying (pssk, pddv) wins, which is the exact
+// row when there is one, so the choice does not depend on map order.
+//
+// Every row shares one kernarg layout (fmha_bwd_dqdkdv_args). What the
+// pssk = 0 kernels need beyond the sequence condition is the stride layout
+// that AITER's Python gate checks before it sends a shape to them
+// (psskOffStridesMatch), and (batch, head) offsets that fit the 32 bits they
+// form them in (psskOffOffsetsFitU32), which AITER does not check; without
+// both a pssk = 0 row is skipped and the lookup falls through to a pssk = 1
+// row.
+std::optional<fmha_v3_bwdConfig> findDqdkdvConfig(const std::string& archId,
+                                                  const bwd_dispatch::KernelRequest& request,
+                                                  const bwd_dispatch::HeadDims& padded)
+{
+    const int pddv = (padded.q != request.hdimQ || padded.v != request.hdimV) ? 1 : 0;
+    const bool psskOffServes
+        = request.psskOffStridesOk && bwd_dispatch::psskOffOffsetsFitU32(request);
+    std::optional<int> pssk;
+    const fmha_v3_bwdConfig* best = nullptr;
+    for(const auto& [unusedKey, cfg] : cfg_fmha_bwd_dqdkdv)
+    {
+        if(cfg.arch != archId || cfg.dtype != request.dataType || cfg.hdim_q != padded.q
+           || cfg.hdim_v != padded.v || cfg.mask != request.mask || cfg.atomic32 != request.atomic32
+           || !servesBf16Cvt(cfg, request.bf16Cvt) || cfg.mode != request.mode)
+        {
+            continue;
+        }
+        if(!pssk)
+        {
+            pssk = requestedPssk(archId, cfg, request.seqLenQ, request.seqLenKv);
+        }
+        if(cfg.pssk < *pssk || cfg.pddv < pddv || (cfg.pssk == 0 && !psskOffServes))
+        {
+            continue;
+        }
+        if(best == nullptr
+           || std::tie(cfg.pssk, cfg.pddv, cfg.knl_name)
+                  < std::tie(best->pssk, best->pddv, best->knl_name))
+        {
+            best = &cfg;
+        }
+    }
+    if(best == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *best;
+}
+
+// The registry row for `stage` (AITER v0.1.29 get_heuristic_kernel(), plus the
+// pssk = 0 guards and the deterministic (pssk, pddv) choice of
+// findDqdkdvConfig), or std::nullopt when no row matches. Returns a copy so
+// callers do not hold references into the registry.
+std::optional<fmha_v3_bwdConfig> resolveStageConfig(bwd_dispatch::PipelineStage stage,
+                                                    const std::string& archId,
+                                                    const bwd_dispatch::KernelRequest& request)
+{
+    const auto padded = bwd_dispatch::paddedHeadDims(archId, request.hdimQ, request.hdimV);
+    switch(stage)
+    {
+    case bwd_dispatch::PipelineStage::ODO:
+        return findOdoConfig(archId, request, padded);
+    case bwd_dispatch::PipelineStage::DQDKDV:
+        return findDqdkdvConfig(archId, request, padded);
+    case bwd_dispatch::PipelineStage::DQ_CONVERT:
+        return findPostConfig(cfg_fmha_bwd_dq_convert, archId, request, padded);
+    case bwd_dispatch::PipelineStage::DQ_SHUFFLE:
+        return findPostConfig(cfg_fmha_bwd_dq_shuffle, archId, request, padded);
+    default:
+        return std::nullopt;
+    }
+}
+
+const char* stageName(bwd_dispatch::PipelineStage stage)
+{
+    switch(stage)
+    {
+    case bwd_dispatch::PipelineStage::ODO:
+        return "odo";
+    case bwd_dispatch::PipelineStage::DQDKDV:
+        return "dqdkdv";
+    case bwd_dispatch::PipelineStage::DQ_CONVERT:
+        return "dq_convert";
+    case bwd_dispatch::PipelineStage::DQ_SHUFFLE:
+        return "dq_shuffle";
+    default:
+        return "unknown";
+    }
+}
+
+// Element sizes of the 16-bit tensors (bf16 and fp16) and of the FP32 ones.
+constexpr int64_t K_BF16_BYTES = 2;
+constexpr int64_t K_FP32_BYTES = 4;
+
+bwd_dispatch::BhsStrides
+    bhsStrides(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    const auto* strides = tensor.strides();
+    return {strides->Get(0), strides->Get(1), strides->Get(2)};
+}
+
+// bwd_dispatch::bhsdSpanBytes() of a 16-bit [B, H, S, D] tensor.
+int64_t spanBytes(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    return bwd_dispatch::bhsdSpanBytes(
+        bhsStrides(tensor), dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3), K_BF16_BYTES);
 }
 
 // Backward kernels live in a flat layout under
@@ -206,9 +297,6 @@ std::string getKernelTocKey(const std::string& coName)
 {
     return asm_kernels::getAsmKernelTocKey(coName);
 }
-
-constexpr int64_t K_BF16_BYTES = 2;
-constexpr int64_t K_FP32_BYTES = 4;
 
 // Validate that every backward dimension fits the 32-bit field that carries it.
 // Batch reaches the kernels only as gridDimZ and the head counts land in uint32
@@ -247,11 +335,11 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dq,
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+                                  int64_t batch,
                                   int64_t headsQ,
                                   int64_t seqLenQ,
                                   int64_t headDimQk,
-                                  int64_t tsKv,
-                                  bool useA32)
+                                  int64_t tsKv)
 {
     auto check = [](const char* name, int64_t elements, int64_t elementBytes) {
         return plan_utils::byteStrideFitsU32(name, elements, elementBytes);
@@ -283,16 +371,15 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
     ok &= check("batch_stride_lsed", headsQ * seqLenQ, K_FP32_BYTES);
     ok &= check("nhead_stride_lsed", seqLenQ, K_FP32_BYTES);
 
-    // dq_acc: contiguous [B, H_q, S_q, D_qk] FP32, derived from dims (A32 only).
-    if(useA32)
-    {
-        const int64_t strideDqAcc = headDimQk;
-        const int64_t nheadStrideDqAcc = seqLenQ * headDimQk;
-        const int64_t batchStrideDqAcc = headsQ * nheadStrideDqAcc;
-        ok &= check("stride_dq_acc", strideDqAcc, K_FP32_BYTES);
-        ok &= check("nhead_stride_dq_acc", nheadStrideDqAcc, K_FP32_BYTES);
-        ok &= check("batch_stride_dq_acc", batchStrideDqAcc, K_FP32_BYTES);
-    }
+    // dq_acc: the A32 layout, FP32 [B, H_q, S_q, D_qk]; buildPlan checks the A16
+    // one. The post kernel takes its head and batch strides as 64-bit, but the
+    // DQDKDV kernels address dq_acc within a batch with 32-bit byte offsets.
+    ok &= sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(static_cast<size_t>(batch),
+                                                 static_cast<size_t>(headsQ),
+                                                 static_cast<size_t>(seqLenQ),
+                                                 static_cast<size_t>(headDimQk),
+                                                 AccumulatorType::A32),
+                              static_cast<size_t>(headsQ));
 
     // DQDKDV's `Ts` kernarg is the 3-way product (tsKv * stride_k * BF16). The
     // tile size folds into the element size so the product is never formed
@@ -302,38 +389,37 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
     return ok;
 }
 
-// Per-stage dispatch tuples differ. The odo (D-reduction) and dq_convert
-// (FP32 -> output dtype cast) kernels are not parameterised by mask/
-// accumulator/padding — every row in those CSVs has
-//   mask=0, atomic32=0, pssk=0, pddv=0
-// and odo additionally always uses the bf16_cvt=3 sentinel. The dqdkdv
-// (main backward) kernel carries the full dispatch axes; its atomic32 column
-// follows the resolved accumulator type (A32 → 3-kernel FP32-accumulator path,
-// A16 → 2-kernel BF16 path), while pssk=1, pddv=1 are pinned because the
-// registry rows for pssk=1, pddv=0 do not exist in batch mode and the unpadded
-// (pssk=0, pddv=0) row uses a different kernarg layout than the engine builds
-// today. TODO: lift the padding pin once the engine emits the unpadded kernarg
-// layout for shapes where seqLenKv % tsKv == 0.
-//
-// The `verified` flag records whether the resolved (dtype, hdim) kernels have a
-// CPU backward reference that has been calibrated against the in-tree kernels.
-// It is keyed on (dtype, hdim) — not on pipeline stage — so all three stages of
-// a dispatch share the same value. Today (bf16, hd128) and (fp16, hd128) are
-// calibrated.
-BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
-                                        int hdimQ,
-                                        MaskType maskType,
-                                        int bf16CvtValue,
-                                        AccumulatorMode accMode)
+// Registry rows whose dqdkdv kernel has been calibrated against the CPU
+// backward reference, by (arch, dtype, row hdim_q, row hdim_v); see "Verified
+// Kernel Matrix" in asm/asm_kernels/README.md. Calibration ran the psskddv
+// rows (pssk = 1, pddv = 1) at the row's own head dims, so isVerifiedDispatch()
+// accepts only that case.
+struct VerifiedKernel
 {
-    const bool verified = (dataType == "bf16" || dataType == "fp16") && hdimQ == 128;
+    const char* arch;
+    const char* dtype;
+    int hdimQ;
+    int hdimV;
+};
+constexpr std::array<VerifiedKernel, 2> K_VERIFIED_KERNELS{{
+    {"gfx942", "bf16", 128, 128},
+    {"gfx942", "fp16", 128, 128},
+}};
 
-    BwdDispatchTuples tuples{};
-    tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL, verified};
-    tuples.dqdkdv
-        = {static_cast<int>(maskType), static_cast<int>(accMode), 1, 1, bf16CvtValue, verified};
-    tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue, verified};
-    return tuples;
+bool isVerifiedDispatch(const std::string& archId,
+                        const bwd_dispatch::KernelRequest& request,
+                        const fmha_v3_bwdConfig& dqdkdv)
+{
+    if(dqdkdv.pssk != 1 || dqdkdv.pddv != 1 || request.hdimQ != dqdkdv.hdim_q
+       || request.hdimV != dqdkdv.hdim_v)
+    {
+        return false;
+    }
+    return std::any_of(
+        K_VERIFIED_KERNELS.begin(), K_VERIFIED_KERNELS.end(), [&](const VerifiedKernel& kernel) {
+            return archId == kernel.arch && dqdkdv.dtype == kernel.dtype
+                   && dqdkdv.hdim_q == kernel.hdimQ && dqdkdv.hdim_v == kernel.hdimV;
+        });
 }
 
 // Bridge the public AccumulatorType knob enum to the CSV-local AccumulatorMode
@@ -343,42 +429,56 @@ AccumulatorMode toAccumulatorMode(AccumulatorType accType)
     return (accType == AccumulatorType::A32) ? AccumulatorMode::A32 : AccumulatorMode::A16;
 }
 
-// One-time dispatch logging. Each (dtype, hdim, mask) combination logs exactly
-// once over the program lifetime: an INFO line for a CPU-reference-verified
-// kernel, or a WARN line for an unverified one. The flag array is sized to the
-// full enum cardinality (dtype x hdim x mask) so adding mask support later does
-// not require resizing. Static storage duration; lifetime is the program
+// One-time dispatch logging. Each (arch, dtype, row head dims, mask,
+// accumulator, verified) combination logs exactly once over the program
+// lifetime: an INFO line for a CPU-reference-verified kernel, or a WARN line
+// for an unverified one. Static storage duration; lifetime is the program
 // duration.
+constexpr size_t K_NUM_ARCHS = 2; // gfx942, gfx950
 constexpr size_t K_NUM_DTYPES = 2; // bf16, fp16
-constexpr size_t K_NUM_HDIMS = 3; // hd64, hd128, hd192
-constexpr size_t K_NUM_MASKS = 4; // plan_utils::MaskType cardinality
-constexpr size_t K_LOG_FLAGS = K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS;
+constexpr size_t K_NUM_HDIMS = 4; // 64x64, 128x128, 192x192, 192x128
+constexpr size_t K_NUM_MASKS = 5; // dqdkdv CSV mask ordinals 0-4
+constexpr size_t K_NUM_ACCUMULATORS = 2; // atomic32 0 (A16), 1 (A32)
+constexpr size_t K_NUM_VERIFIED = 2; // unverified, verified
+constexpr size_t K_LOG_FLAGS
+    = K_NUM_ARCHS * K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS * K_NUM_ACCUMULATORS * K_NUM_VERIFIED;
 std::array<std::once_flag, K_LOG_FLAGS> dispatchLogFlags;
 
-// Map a (dtype, hdim, mask) triple to a flat index into dispatchLogFlags.
-// isApplicable filters to the supported axes before buildPlan reaches this, so
-// the asserts document the contract and the clamps are a defensive guard
-// against an out-of-bounds index should an unexpected combination slip through.
-size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
+// Map a dispatch to a flat index into dispatchLogFlags. `padded` are the head
+// dims of the resolved rows (bwd_dispatch::paddedHeadDims). isApplicable
+// filters to the supported axes before buildPlan reaches this, so the asserts
+// document the contract and the clamps are a defensive guard against an
+// out-of-bounds index should an unexpected combination slip through.
+size_t dispatchLogIndex(const std::string& archId,
+                        const std::string& dtype,
+                        bwd_dispatch::HeadDims padded,
+                        int mask,
+                        int atomic32,
+                        bool verified)
 {
+    const size_t archIdx = (archId == "gfx950") ? 1U : 0U; // gfx942 -> 0, gfx950 -> 1
     const size_t dtypeIdx = (dtype == "fp16") ? 1U : 0U; // bf16 -> 0, fp16 -> 1
 
-    size_t hdimIdx = 0U; // hd64 -> 0, hd128 -> 1, hd192 -> 2
-    switch(hdim)
+    size_t hdimIdx = 0U;
+    if(padded.q == 64 && padded.v == 64)
     {
-    case 64:
         hdimIdx = 0U;
-        break;
-    case 128:
+    }
+    else if(padded.q == 128 && padded.v == 128)
+    {
         hdimIdx = 1U;
-        break;
-    case 192:
+    }
+    else if(padded.q == 192 && padded.v == 192)
+    {
         hdimIdx = 2U;
-        break;
-    default:
-        assert(false && "dispatchLogIndex: unexpected head dimension");
-        hdimIdx = 0U;
-        break;
+    }
+    else if(padded.q == 192 && padded.v == 128)
+    {
+        hdimIdx = 3U;
+    }
+    else
+    {
+        assert(false && "dispatchLogIndex: unexpected head dimensions");
     }
 
     auto maskIdx = static_cast<size_t>(mask);
@@ -388,7 +488,13 @@ size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
         maskIdx = 0U;
     }
 
-    return (dtypeIdx * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx;
+    const size_t accIdx = atomic32 == 0 ? 0U : 1U;
+    const size_t verifiedIdx = verified ? 1U : 0U;
+    return ((((archIdx * K_NUM_DTYPES + dtypeIdx) * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx)
+                * K_NUM_ACCUMULATORS
+            + accIdx)
+               * K_NUM_VERIFIED
+           + verifiedIdx;
 }
 
 } // namespace
@@ -396,70 +502,291 @@ size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
 namespace bwd_dispatch
 {
 
+bool isSupportedArch(const std::string& archId)
+{
+    return archId == "gfx942" || archId == "gfx950";
+}
+
+std::optional<PipelineStage> postStage(const std::string& archId, int atomic32, int hdimQ)
+{
+    // AITER v0.1.29 mha_bwd.cu fmha_v3_bwd(): `need_post_processing =
+    // ((arch_id == "gfx950") && (a.hdim_q != 64)) || (a.v3_atomic_fp32 == 1)`
+    // (:354-355), with post_cfgs dq_convert for A32 and, on gfx950, dq_shuffle
+    // for A16 (:327-352).
+    if(atomic32 == 1)
+    {
+        return PipelineStage::DQ_CONVERT;
+    }
+    if(archId == "gfx950" && hdimQ != 64)
+    {
+        return PipelineStage::DQ_SHUFFLE;
+    }
+    return std::nullopt;
+}
+
+int requestedMaskOrdinal(
+    const std::string& archId, int mask, int atomic32, int64_t seqLenQ, int64_t seqLenKv)
+{
+    // AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() (:374-377): `if(arch_id ==
+    // "gfx942" && !a.v3_atomic_fp32 && mt == 2 && a.seqlen_q == a.seqlen_k)
+    // mt = 1;`
+    if(archId == "gfx942" && atomic32 == 0
+       && mask == static_cast<int>(MaskType::BOTTOM_RIGHT_CAUSAL) && seqLenQ == seqLenKv)
+    {
+        return static_cast<int>(MaskType::TOP_LEFT_CAUSAL);
+    }
+    return mask;
+}
+
+bool dqSharesQStrides(
+    const BhsStrides& q, const BhsStrides& dq, int64_t batch, int64_t heads, int64_t seqLen)
+{
+    return (batch <= 1 || q.batch == dq.batch) && (heads <= 1 || q.head == dq.head)
+           && (seqLen <= 1 || q.seq == dq.seq);
+}
+
+HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV)
+{
+    // AITER v0.1.29 mha_bwd.cu get_padded_hdim() (:10-32).
+    if(hdimQ == 192 && hdimV == 128 && archId == "gfx950")
+    {
+        return {hdimQ, hdimV};
+    }
+    if(hdimQ == hdimV)
+    {
+        for(const int padded : {64, 128, 192})
+        {
+            if(hdimQ <= padded)
+            {
+                return {padded, padded};
+            }
+        }
+    }
+    return {hdimQ, hdimV};
+}
+
+bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV)
+{
+    // AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() returns -1 for `hdim_q % 8` or
+    // `hdim_v % 8` (:276-281).
+    if(headDimQk % 8 != 0 || headDimV % 8 != 0)
+    {
+        return false;
+    }
+    if(archId == "gfx942")
+    {
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731): `hdim_q ==
+        // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`.
+        return headDimQk == headDimV && headDimQk >= 64 && headDimQk <= 192;
+    }
+    if(archId == "gfx950")
+    {
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2851-2854):
+        // `(hdim_q > 64 and hdim_q <= 128 and hdim_q == hdim_v) or (hdim_q == 192
+        // and hdim_v == 128)`. gfx950 hd64 and hd192 x hd192 rows ship but go to CK.
+        return (headDimQk > 64 && headDimQk <= 128 && headDimQk == headDimV)
+               || (headDimQk == 192 && headDimV == 128);
+    }
+    return false;
+}
+
+bool isBatchWindowSupported(const std::string& archId, int64_t headDimQk)
+{
+    if(archId == "gfx950")
+    {
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2855-2856): "sliding
+        // window kernels are hd128 only", `not swa or hdim_q <= 128`, where any
+        // window counts (:2829-2830, "a left size of 0 is a window too").
+        return headDimQk <= 128;
+    }
+    // aiter/ops/mha.py can_impl_fmha_v3_bwd() serves windows through psskddv()
+    // for 64 < D <= 128 only (:2718). Its window test (:2604, `swa =
+    // (window_size_left > 0) or (window_size_right > 0)`) does not count a
+    // window with left bound 0 and right bound 0 or -1, which then falls out of
+    // every family. That is a classification artifact, not a kernel limit: the
+    // engine classifies the band itself, and the gfx942 window kernel serves it
+    // like any other window.
+    return headDimQk > 64 && headDimQk <= 128;
+}
+
+bool psskOffStridesMatch(const BhsStrides& q,
+                         const BhsStrides& k,
+                         const BhsStrides& v,
+                         const BhsStrides& dO,
+                         const BhsStrides& dk,
+                         const BhsStrides& dv,
+                         int64_t nheadQ,
+                         int64_t nheadK)
+{
+    // aiter/ops/mha.py can_impl_fmha_v3_bwd() np() (:2633-2642) and pddv()
+    // (:2684-2693), on element strides. The batch-stride ratio test
+    // `batch_stride_dk / batch_stride_k == nhead_q / nhead_k` is true division
+    // in Python, cross-multiplied here; a zero K or V batch stride, or a product
+    // that overflows, fails it.
+    const auto batchRatioMatches = [&](int64_t gradBatch, int64_t inputBatch) {
+        int64_t lhs = 0;
+        int64_t rhs = 0;
+        return inputBatch != 0 && nheadK != 0 && !__builtin_mul_overflow(gradBatch, nheadK, &lhs)
+               && !__builtin_mul_overflow(inputBatch, nheadQ, &rhs) && lhs == rhs;
+    };
+    return q.seq == dO.seq && q.head == dO.head && q.batch == dO.batch && k.seq == v.seq
+           && k.head == v.head && k.batch == v.batch && k.head == dk.head && v.head == dv.head
+           && batchRatioMatches(dk.batch, k.batch) && batchRatioMatches(dv.batch, v.batch);
+}
+
+int64_t bhsdSpanBytes(const BhsStrides& strides,
+                      int64_t batch,
+                      int64_t heads,
+                      int64_t seqLen,
+                      int64_t headDim,
+                      int64_t elementBytes)
+{
+    if(batch <= 0 || heads <= 0 || seqLen <= 0 || headDim <= 0)
+    {
+        return 0;
+    }
+    // ((B - 1) * batch + (H - 1) * head + (S - 1) * seq + D) * elementBytes
+    int64_t elements = headDim;
+    for(const auto& [extent, stride] : {std::pair{batch, strides.batch},
+                                        std::pair{heads, strides.head},
+                                        std::pair{seqLen, strides.seq}})
+    {
+        int64_t offset = 0;
+        if(__builtin_mul_overflow(extent - 1, stride, &offset)
+           || __builtin_add_overflow(elements, offset, &elements))
+        {
+            return INT64_MAX;
+        }
+    }
+    int64_t bytes = 0;
+    return __builtin_mul_overflow(elements, elementBytes, &bytes) ? INT64_MAX : bytes;
+}
+
+bool qBatchStrideMatchesDqAcc(
+    const BhsStrides& q, int64_t batch, int64_t heads, int64_t seqLen, int64_t headDim)
+{
+    // bwd_hd128_bf16_a32_rtne.co prologue, on byte strides: t = b *
+    // batch_stride_q, then t >>= 6 when batch_stride_q >= stride_q and
+    // t = (t >> 8) * S_q * 4 otherwise, and the dq_acc byte offset is
+    // (4 * S_q * h + t) * 128. That is the packed dq_acc offset
+    // (b * H_q + h) * S_q * D_qk * 4 at D_qk = 128 only for the two batch
+    // strides below.
+    if(batch <= 1)
+    {
+        return true;
+    }
+    int64_t headElems = 0;
+    int64_t batchElems = 0;
+    if(__builtin_mul_overflow(heads, headDim, &headElems)
+       || __builtin_mul_overflow(headElems, seqLen, &batchElems))
+    {
+        return false;
+    }
+    return q.batch >= q.seq ? q.batch == batchElems : q.batch == headElems;
+}
+
+bool psskOffOffsetsFitU32(const KernelRequest& request)
+{
+    constexpr auto K_U32_MAX = static_cast<int64_t>(UINT32_MAX);
+    if(request.gradKvSpanBytes > K_U32_MAX)
+    {
+        return false;
+    }
+    if(request.atomic32 == 0)
+    {
+        return request.inputSpanBytes <= K_U32_MAX;
+    }
+    // dq_acc, whose batch offset the kernels derive from Q's batch stride.
+    const auto dqAcc = sdpaBwdDqAccLayout(static_cast<size_t>(request.batch),
+                                          static_cast<size_t>(request.nheadQ),
+                                          static_cast<size_t>(request.seqLenQ),
+                                          static_cast<size_t>(request.hdimQ),
+                                          AccumulatorType::A32);
+    return request.qBatchStrideMatchesDqAcc
+           && sdpaBwdDqAccBytesFitU32(
+               dqAcc, static_cast<size_t>(request.batch), static_cast<size_t>(request.nheadQ));
+}
+
+ClassifiedRequest
+    makeKernelRequest(const std::string& archId,
+                      const std::string& dataTypeId,
+                      const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+                      AccumulatorMode accMode)
+{
+    ClassifiedRequest result{};
+    auto& request = result.request;
+    const auto* qDims = q.dims();
+    request.dataType = dataTypeId;
+    request.hdimQ = static_cast<int>(qDims->Get(3));
+    request.hdimV = static_cast<int>(v.dims()->Get(3));
+    request.seqLenQ = qDims->Get(2);
+    request.seqLenKv = k.dims()->Get(2);
+
+    result.band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(attrs), request.seqLenQ, request.seqLenKv);
+    result.maskType = plan_utils::getMaskType(
+        result.band.leftBound, result.band.rightBound, result.band.alignment);
+    request.mask
+        = requestedMaskOrdinal(archId,
+                               dqdkdvMaskOrdinal(archId, result.maskType, result.band.alignment),
+                               static_cast<int>(accMode),
+                               request.seqLenQ,
+                               request.seqLenKv);
+
+    request.atomic32 = static_cast<int>(accMode);
+    request.mode = static_cast<int>(getBatchMode(attrs));
+    request.bf16Cvt = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
+                                             : static_cast<int>(getRoundingMode(attrs));
+    request.psskOffStridesOk = psskOffStridesMatch(bhsStrides(q),
+                                                   bhsStrides(k),
+                                                   bhsStrides(v),
+                                                   bhsStrides(dO),
+                                                   bhsStrides(dk),
+                                                   bhsStrides(dv),
+                                                   qDims->Get(1),
+                                                   k.dims()->Get(1));
+    request.batch = qDims->Get(0);
+    request.nheadQ = qDims->Get(1);
+    request.gradKvSpanBytes = std::max(spanBytes(dk), spanBytes(dv));
+    request.inputSpanBytes = std::max({spanBytes(q), spanBytes(k), spanBytes(v), spanBytes(dO)});
+    request.qBatchStrideMatchesDqAcc = qBatchStrideMatchesDqAcc(
+        bhsStrides(q), request.batch, request.nheadQ, request.seqLenQ, qDims->Get(3));
+    return result;
+}
+
+int dqdkdvMaskOrdinal(const std::string& archId,
+                      MaskType maskType,
+                      hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment)
+{
+    // AITER v0.1.29 mha_bwd.cu asm_mask_type(): `else if(arch_id == "gfx950" &&
+    // a.mask_type == mask_bottom_right) return 4;` for every mask that is
+    // neither causal nor unmasked.
+    if(archId == "gfx950" && maskType == MaskType::SLIDING_WINDOW
+       && alignment == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT)
+    {
+        return BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW;
+    }
+    return static_cast<int>(maskType);
+}
+
 std::string lookupKernelNameKey(PipelineStage stage,
                                 const std::string& archId,
-                                const std::string& dataType,
-                                int hdimQ,
-                                int hdimV,
-                                int mask,
-                                int atomic32,
-                                int pssk,
-                                int pddv,
-                                int mode,
-                                int bf16Cvt)
+                                const KernelRequest& request)
 {
-    std::optional<fmha_v3_bwdConfig> cfg;
-    switch(stage)
-    {
-    case PipelineStage::ODO:
-        cfg = findConfig(cfg_fmha_bwd_odo,
-                         archId,
-                         dataType,
-                         hdimQ,
-                         hdimV,
-                         mask,
-                         atomic32,
-                         pssk,
-                         pddv,
-                         mode,
-                         bf16Cvt);
-        break;
-    case PipelineStage::DQDKDV:
-        cfg = findConfig(cfg_fmha_bwd_dqdkdv,
-                         archId,
-                         dataType,
-                         hdimQ,
-                         hdimV,
-                         mask,
-                         atomic32,
-                         pssk,
-                         pddv,
-                         mode,
-                         bf16Cvt);
-        break;
-    case PipelineStage::DQ_CONVERT:
-        cfg = findConfig(cfg_fmha_bwd_dq_convert,
-                         archId,
-                         dataType,
-                         hdimQ,
-                         hdimV,
-                         mask,
-                         atomic32,
-                         pssk,
-                         pddv,
-                         mode,
-                         bf16Cvt);
-        break;
-    default:
-        break;
-    }
+    const auto cfg = resolveStageConfig(stage, archId, request);
     return cfg.has_value() ? cfg->arch + cfg->knl_name : std::string{};
 }
 
 } // namespace bwd_dispatch
 
 // Engine knob identifier for accumulator precision (a32 vs a16)
-static constexpr const char* K_ACC_TYPE_KNOB_NAME = "sdpa.bwd.accumulator_type";
+static constexpr const char* K_ACC_TYPE_KNOB_NAME = "hipkernel.sdpa.bwd.accumulator_type";
 
 bool SdpaBwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
@@ -484,11 +811,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
     }
     const std::string& deviceString = *deviceStringOpt;
 
-    // The codegen-generated registry contains both gfx942 and gfx950 rows;
-    // only gfx942 is dispatched here.
-    HIP_KERNEL_RETURN_FALSE_IF(deviceString != "gfx942",
-                               "Device string does not match gfx942 (Actual value: " + deviceString
-                                   + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !bwd_dispatch::isSupportedArch(deviceString),
+        "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
 
     HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph has more than one node");
     HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
@@ -769,54 +1094,49 @@ bool SdpaBwdPlanBuilder::isApplicable(
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));
 
-    HIP_KERNEL_RETURN_FALSE_IF(headDimQk != headDimV,
-                               "Asymmetric head dimensions not supported (D_qk = "
-                                   + std::to_string(headDimQk)
-                                   + ", D_v = " + std::to_string(headDimV) + ")");
+    // Head dims AITER does not send to the ASM kernels on this arch, including
+    // the ones the registry has rows for (see bwd_dispatch::isBatchShapeSupported).
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
+        deviceString + " backward does not serve D_qk = " + std::to_string(headDimQk)
+            + ", D_v = " + std::to_string(headDimV));
 
-    // Registry-supported (dtype, hdim) combinations are dispatched; the one-time
-    // log in buildPlan warns when the kernel is not yet CPU-reference validated.
-    // Head dims outside the registry's {64, 128, 192} set
-    // have no row at all and are rejected here so unsupported geometries still
-    // fail fast; the per-stage checkRegistry lookups below then reject the
-    // (dtype, hdim) combinations that have no matching CSV row (e.g. hd64, whose
-    // registry carries only pddv=0 rows that the day-one dispatch tuple does not
-    // request).
-    HIP_KERNEL_RETURN_FALSE_IF(headDimQk != 64 && headDimQk != 128 && headDimQk != 192,
-                               "Head dimension must be one of {64, 128, 192} (Actual value: "
-                                   + std::to_string(headDimQk) + ")");
-
-    // Each kernel takes B, H, S_q, S_kv and D once, from Q, K and V, and addresses
-    // every tensor with them, so O, dO and dQ must have Q's dims and V, dK and dV
-    // must have K's. The frontend lets V have fewer heads than K (it checks only
-    // that both divide H_q); DQDKDV then reads V and writes dV past their last
-    // head. On gfx942, H_q = H_k = 4 with H_v = 2 or 1 gave wrong dQ, dK and dV.
-    HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->Get(0) != batchSize,
-                               "k tensor batch must equal q batch (Actual dims: k "
-                                   + toString(kTensor->dims()) + ", q " + toString(qTensor->dims())
-                                   + ")");
+    // Each kernel takes B, H, S_q, S_kv, D_qk and D_v once, from Q, K and V, and
+    // addresses every tensor with them, so O, dO and dQ must have Q's batch,
+    // heads and sequence, and V, dK and dV must have K's; dQ and dK carry D_qk,
+    // O, dO and dV carry D_v. The frontend lets V have fewer heads than K (it
+    // checks only that both divide H_q); DQDKDV then reads V and writes dV past
+    // their last head. On gfx942, H_q = H_k = 4 with H_v = 2 or 1 gave wrong dQ,
+    // dK and dV.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(0) != batchSize || kTensor->dims()->Get(3) != headDimQk,
+        "k tensor batch and head dim must equal q's (Actual dims: k " + toString(kTensor->dims())
+            + ", q " + toString(qTensor->dims()) + ")");
     struct SameDims
     {
         const char* name;
         const TensorAttributes* tensor;
         const char* refName;
+        // Batch, heads and sequence come from ref.
         const TensorAttributes* ref;
+        int64_t headDim;
     };
-    const std::array<SameDims, 6> sameDims{{{"o", oTensor, "q", qTensor},
-                                            {"do", doTensor, "q", qTensor},
-                                            {"dq", dqTensor, "q", qTensor},
-                                            {"v", vTensor, "k", kTensor},
-                                            {"dk", dkTensor, "k", kTensor},
-                                            {"dv", dvTensor, "k", kTensor}}};
+    const std::array<SameDims, 6> sameDims{{{"o", oTensor, "q", qTensor, headDimV},
+                                            {"do", doTensor, "q", qTensor, headDimV},
+                                            {"dq", dqTensor, "q", qTensor, headDimQk},
+                                            {"v", vTensor, "k", kTensor, headDimV},
+                                            {"dk", dkTensor, "k", kTensor, headDimQk},
+                                            {"dv", dvTensor, "k", kTensor, headDimV}}};
     for(const auto& match : sameDims)
     {
         const auto* dims = match.tensor->dims();
         const auto* refDims = match.ref->dims();
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !std::equal(dims->begin(), dims->end(), refDims->begin(), refDims->end()),
-            std::string(match.name) + " tensor dims must equal " + match.refName
-                + " dims (Actual: " + match.name + " " + toString(dims) + ", " + match.refName + " "
-                + toString(refDims) + ")");
+        HIP_KERNEL_RETURN_FALSE_IF(!std::equal(dims->begin(), dims->begin() + 3, refDims->begin())
+                                       || dims->Get(3) != match.headDim,
+                                   std::string(match.name) + " tensor dims must be " + match.refName
+                                       + " dims with head dim " + std::to_string(match.headDim)
+                                       + " (Actual: " + match.name + " " + toString(dims) + ", "
+                                       + match.refName + " " + toString(refDims) + ")");
     }
 
     // The odo, dqdkdv and dq_convert stages issue wide row loads/stores on every graph tensor,
@@ -836,93 +1156,75 @@ bool SdpaBwdPlanBuilder::isApplicable(
     });
     HIP_KERNEL_RETURN_FALSE_IF(underAligned.has_value(), *underAligned);
 
-    // Classify the mask; contradictory mask attributes are an invalid-input
-    // condition the engine declines rather than dispatches.
+    // Classify the mask and build the lookup request. Contradictory mask
+    // attributes are an invalid-input condition the engine declines rather than
+    // dispatches. Mask types NO_MASK (0), TOP_LEFT_CAUSAL (1),
+    // BOTTOM_RIGHT_CAUSAL (2), and SLIDING_WINDOW (3, or 4 for a bottom-right
+    // window on gfx950) are all dispatched. The DQDKDV CSV registry carries rows
+    // for each mask ordinal; ODO and DQ_CONVERT are mask-agnostic. Applicability
+    // is gated by the window rules and the registry lookup below.
+    // Applicability does not depend on the execution settings, so it validates
+    // the default A32 accumulator. buildPlan declines an A16 request the A16
+    // kernels cannot serve.
     const int64_t seqLenKv = kTensor->dims()->Get(2);
-    MaskType maskType = MaskType::NO_MASK;
+    bwd_dispatch::ClassifiedRequest classified{};
     try
     {
-        const auto band = plan_utils::makeCoveringBoundsUnbound(
-            plan_utils::resolveDiagonalBand(attrs), seqLenQ, seqLenKv);
-        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+        classified = bwd_dispatch::makeKernelRequest(deviceString,
+                                                     dataTypeId,
+                                                     attrs,
+                                                     *qTensor,
+                                                     *kTensor,
+                                                     *vTensor,
+                                                     *doTensor,
+                                                     *dkTensor,
+                                                     *dvTensor,
+                                                     AccumulatorMode::A32);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
         HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
         return false;
     }
-    // Mask types NO_MASK (0), TOP_LEFT_CAUSAL (1), BOTTOM_RIGHT_CAUSAL (2),
-    // and SLIDING_WINDOW (3) are all dispatched. The DQDKDV CSV registry
-    // carries rows for each mask ordinal; ODO and DQ_CONVERT are mask-agnostic
-    // (always mask=0). Applicability is gated by the registry lookup below.
+    const auto& request = classified.request;
 
-    const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
-                                                    : static_cast<int>(getRoundingMode(attrs));
-    // Applicability validates the default (A32) accumulator path: it is the
-    // default knob value and the most demanding (dq_acc + DQ_CONVERT). The user
-    // may still select A16 via the knob at buildPlan time.
-    auto dispatchTuples = computeDispatchTuples(
-        dataTypeId, headDimQk, maskType, bf16CvtValue, AccumulatorMode::A32);
+    // Windows AITER sends to CK (see bwd_dispatch::isBatchWindowSupported).
+    HIP_KERNEL_RETURN_FALSE_IF(
+        classified.maskType == MaskType::SLIDING_WINDOW
+            && !bwd_dispatch::isBatchWindowSupported(deviceString, headDimQk),
+        deviceString
+            + " backward does not serve a sliding window at D_qk = " + std::to_string(headDimQk));
 
-    auto checkRegistry = [&](const char* registryName,
-                             bwd_dispatch::PipelineStage stage,
-                             const BwdDispatchTuple& tuple) {
-        auto key = bwd_dispatch::lookupKernelNameKey(stage,
-                                                     deviceString,
-                                                     dataTypeId,
-                                                     headDimQk,
-                                                     headDimV,
-                                                     tuple.mask,
-                                                     tuple.atomic32,
-                                                     tuple.pssk,
-                                                     tuple.pddv,
-                                                     static_cast<int>(BatchMode::BATCH),
-                                                     tuple.bf16Cvt);
-        if(key.empty())
+    std::optional<fmha_v3_bwdConfig> dqdkdvCfg;
+    for(const auto stage : {bwd_dispatch::PipelineStage::ODO,
+                            bwd_dispatch::PipelineStage::DQDKDV,
+                            bwd_dispatch::PipelineStage::DQ_CONVERT})
+    {
+        auto cfg = resolveStageConfig(stage, deviceString, request);
+        if(!cfg)
         {
             HIPDNN_PLUGIN_LOG_INFO(
-                std::string{HIP_KERNEL_LOG_PREFIX} + "No matching " + registryName
-                + " kernel for arch=" + deviceString + " dtype=" + dataTypeId
-                + " hdim=" + std::to_string(headDimQk) + " mask=" + std::to_string(tuple.mask)
-                + " atomic32=" + std::to_string(tuple.atomic32)
-                + " pssk=" + std::to_string(tuple.pssk) + " pddv=" + std::to_string(tuple.pddv)
-                + " mode=batch bf16_cvt=" + std::to_string(tuple.bf16Cvt));
+                HIP_KERNEL_LOG_PREFIX
+                << "No matching " << stageName(stage) << " kernel for arch=" << deviceString
+                << " dtype=" << dataTypeId << " D_qk=" << headDimQk << " D_v=" << headDimV
+                << " mask=" << request.mask << " atomic32=" << request.atomic32
+                << " S_q=" << seqLenQ << " S_kv=" << seqLenKv << " pssk0_strides="
+                << static_cast<int>(request.psskOffStridesOk) << " pssk0_offsets="
+                << static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request))
+                << " mode=batch bf16_cvt=" << request.bf16Cvt);
             return false;
         }
-        return true;
-    };
-
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !checkRegistry("odo", bwd_dispatch::PipelineStage::ODO, dispatchTuples.odo),
-        "Failed odo registry lookup");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !checkRegistry("dqdkdv", bwd_dispatch::PipelineStage::DQDKDV, dispatchTuples.dqdkdv),
-        "Failed dqdkdv registry lookup");
-    HIP_KERNEL_RETURN_FALSE_IF(!checkRegistry("dq_convert",
-                                              bwd_dispatch::PipelineStage::DQ_CONVERT,
-                                              dispatchTuples.dqConvert),
-                               "Failed dq_convert registry lookup");
+        if(stage == bwd_dispatch::PipelineStage::DQDKDV)
+        {
+            dqdkdvCfg = std::move(cfg);
+        }
+    }
 
     // Reject oversized graphs whose byte strides would silently truncate when
     // packed into the kernarg uint32_t fields. Caught here rather than at
     // execute time so the engine can be excluded from heuristics for graphs it
     // cannot represent. Uses the resolved DQDKDV row's tile size for the Ts
     // product (tsKv * stride_k * BF16).
-    const auto& dqdkdvTuple = dispatchTuples.dqdkdv;
-    auto dqdkdvCfgOpt = findConfig(cfg_fmha_bwd_dqdkdv,
-                                   deviceString,
-                                   dataTypeId,
-                                   headDimQk,
-                                   headDimV,
-                                   dqdkdvTuple.mask,
-                                   dqdkdvTuple.atomic32,
-                                   dqdkdvTuple.pssk,
-                                   dqdkdvTuple.pddv,
-                                   static_cast<int>(BatchMode::BATCH),
-                                   dqdkdvTuple.bf16Cvt);
-    HIP_KERNEL_RETURN_FALSE_IF(!dqdkdvCfgOpt,
-                               "Failed to resolve dqdkdv config for byte-stride validation");
-    const bool useA32 = (dqdkdvTuple.atomic32 == static_cast<int>(AccumulatorMode::A32));
     HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
                                                              *kTensor,
                                                              *vTensor,
@@ -931,18 +1233,18 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                                              *dqTensor,
                                                              *dkTensor,
                                                              *dvTensor,
+                                                             batchSize,
                                                              numHeadsQ,
                                                              seqLenQ,
                                                              headDimQk,
-                                                             dqdkdvCfgOpt->ts,
-                                                             useA32),
+                                                             dqdkdvCfg->ts),
                                "Backward byte strides overflow uint32_t kernarg fields");
 
     return true;
 }
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
-    const Handle& /* handle */,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const Settings& executionSettings) const
 {
@@ -961,7 +1263,22 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
 
-    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType);
+    // Whether a post stage reads a dq_acc depends on the arch for A16 only.
+    // When the device cannot be queried, size for the dq_acc so the bound
+    // holds on every arch.
+    bool hasDqAcc = true;
+    if(accType == AccumulatorType::A16)
+    {
+        const auto deviceString
+            = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
+        hasDqAcc = !deviceString
+                   || bwd_dispatch::postStage(*deviceString,
+                                              static_cast<int>(AccumulatorMode::A16),
+                                              static_cast<int>(headDimQk))
+                          .has_value();
+    }
+
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType, hasDqAcc);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
@@ -1011,9 +1328,7 @@ void SdpaBwdPlanBuilder::buildPlan(
 {
     // -------------------------------------------------------------------------
     // 0. Resolve accumulator type from the user knob / execution settings.
-    // This is the single source of truth for a32 (3-kernel) vs a16 (2-kernel)
-    // selection; it drives CSV row selection, DQ_CONVERT loading, the dq_acc
-    // workspace, and params below. Defaults to A32 when the knob is unset.
+    // Defaults to A32 when the knob is unset.
     // -------------------------------------------------------------------------
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
@@ -1169,127 +1484,151 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    // Classify on the graph dims, exactly as isApplicable does. Passing the
-    // narrowed unsigned locals instead would let the two sites resolve
-    // different mask types for the same graph.
-    const auto maskBand = plan_utils::makeCoveringBoundsUnbound(
-        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kTensor->dims()->Get(2));
-    const auto maskType
-        = plan_utils::getMaskType(maskBand.leftBound, maskBand.rightBound, maskBand.alignment);
-    auto batchMode = getBatchMode(sdpaAttrs);
-    const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
-                                                    : static_cast<int>(getRoundingMode(sdpaAttrs));
-    // The resolved accumulator type (from the user knob, defaulting to A32) is
-    // authoritative: it selects the a32 vs a16 dqdkdv CSV row and gates whether
-    // the DQ_CONVERT stage is resolved and loaded below.
-    auto dispatchTuples = computeDispatchTuples(dataTypeId,
-                                                static_cast<int>(headDimQk),
-                                                maskType,
-                                                bf16CvtValue,
-                                                toAccumulatorMode(accType));
+    // The accumulator selects the atomic32 dqdkdv rows, the mask the lookup
+    // asks for (requestedMaskOrdinal) and the post stage (postStage).
+    const bool useA32 = (accType == AccumulatorType::A32);
+    const auto classified = bwd_dispatch::makeKernelRequest(deviceString,
+                                                            dataTypeId,
+                                                            sdpaAttrs,
+                                                            *qTensor,
+                                                            *kTensor,
+                                                            *vTensor,
+                                                            *doTensor,
+                                                            *dkTensor,
+                                                            *dvTensor,
+                                                            toAccumulatorMode(accType));
+    const auto& request = classified.request;
+    const auto& maskBand = classified.band;
 
-    // Surface, exactly once per (dtype, hdim, mask) over the program lifetime,
-    // whether the kernel about to be dispatched has a calibrated CPU reference.
-    // The verified flag is keyed on (dtype, hdim) so any stage is representative;
-    // the dqdkdv stage is used here. The lambda is noexcept because it only logs
-    // (a throwing call_once initializer would let the exception escape, which
-    // bugprone-exception-escape forbids).
-    std::call_once(
-        dispatchLogFlags[dispatchLogIndex(dataTypeId, static_cast<int>(headDimQk), maskType)],
-        [&]() noexcept {
-            const int maskOrdinal = static_cast<int>(maskType);
-            if(dispatchTuples.dqdkdv.verified)
-            {
-                HIPDNN_PLUGIN_LOG_INFO("SDPA bwd dispatch: verified kernel dtype="
-                                       << dataTypeId << " hd=" << headDimQk
-                                       << " mask=" << maskOrdinal);
-            }
-            else
-            {
-                HIPDNN_PLUGIN_LOG_WARN("SDPA bwd dispatch: UNVERIFIED kernel dtype="
-                                       << dataTypeId << " hd=" << headDimQk
-                                       << " mask=" << maskOrdinal
-                                       << " - results not validated against CPU reference");
-            }
-        });
-
-    auto resolveStage
-        = [&](const char* stageName, std::optional<fmha_v3_bwdConfig> cfgOpt) -> ResolvedKernel {
+    // isApplicable resolved every A32 stage, so an A32 miss here is an internal
+    // error. isApplicable does not see the accumulator knob, and the A16
+    // kernels serve fewer graphs (every gfx942 A16 row is pssk = 0, which needs
+    // S_q == S_kv, S_kv % 64 == 0, the pssk = 0 stride layout and tensors that
+    // span at most 4 GiB; neither arch ships A16 rows for every mask and head
+    // dim), so an A16 request the A16 kernels cannot serve is declined as a bad
+    // knob value. AITER's Python layer sends these graphs to CK (aiter/ops/mha.py
+    // can_impl_fmha_v3_bwd()).
+    const auto declineA16 = [&](const std::string& reason) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "SdpaBwdPlanBuilder::buildPlan: the a16 accumulator does not serve this graph on "
+                + deviceString + " (" + reason + " dtype=" + dataTypeId
+                + " D_qk=" + std::to_string(headDimQk) + " D_v=" + std::to_string(headDimV)
+                + " mask=" + std::to_string(request.mask) + " S_q=" + std::to_string(seqLenQ)
+                + " S_kv=" + std::to_string(seqLenKv) + " pssk0_strides="
+                + std::to_string(static_cast<int>(request.psskOffStridesOk)) + " pssk0_offsets="
+                + std::to_string(static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request)))
+                + "); use the a32 accumulator");
+    };
+    auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
+        auto cfgOpt = resolveStageConfig(stage, deviceString, request);
         if(!cfgOpt)
         {
+            if(!useA32)
+            {
+                declineA16(std::string("no ") + stageName(stage) + " kernel:");
+            }
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("SdpaBwdPlanBuilder::buildPlan: failed to resolve ") + stageName
-                    + " kernel for arch=" + deviceString + " dtype=" + dataTypeId + " hdim="
-                    + std::to_string(headDimQk) + " (isApplicable should have rejected)");
+                std::string("SdpaBwdPlanBuilder::buildPlan: failed to resolve ") + stageName(stage)
+                    + " kernel for arch=" + deviceString + " dtype=" + dataTypeId
+                    + " D_qk=" + std::to_string(headDimQk) + " D_v=" + std::to_string(headDimV)
+                    + " (isApplicable should have rejected)");
         }
-        return ResolvedKernel{getKernelTocKey(cfgOpt->co_name),
-                              cfgOpt->knl_name,
-                              SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfgOpt->ts)}};
+        return *cfgOpt;
+    };
+    auto toResolvedKernel = [](const fmha_v3_bwdConfig& cfg) {
+        return ResolvedKernel{getKernelTocKey(cfg.co_name),
+                              cfg.knl_name,
+                              SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfg.ts)}};
     };
 
-    const auto& odtuple = dispatchTuples.odo;
-    const auto& dqdtuple = dispatchTuples.dqdkdv;
-    const auto& dqctuple = dispatchTuples.dqConvert;
+    const auto dqdkdvCfg = resolveStage(bwd_dispatch::PipelineStage::DQDKDV);
+    const auto odoResolved = toResolvedKernel(resolveStage(bwd_dispatch::PipelineStage::ODO));
+    const auto dqdkdvResolved = toResolvedKernel(dqdkdvCfg);
 
-    auto odoResolved = resolveStage("odo",
-                                    findConfig(cfg_fmha_bwd_odo,
-                                               deviceString,
-                                               dataTypeId,
-                                               static_cast<int>(headDimQk),
-                                               static_cast<int>(headDimV),
-                                               odtuple.mask,
-                                               odtuple.atomic32,
-                                               odtuple.pssk,
-                                               odtuple.pddv,
-                                               static_cast<int>(batchMode),
-                                               odtuple.bf16Cvt));
-    auto dqdkdvResolved = resolveStage("dqdkdv",
-                                       findConfig(cfg_fmha_bwd_dqdkdv,
-                                                  deviceString,
-                                                  dataTypeId,
-                                                  static_cast<int>(headDimQk),
-                                                  static_cast<int>(headDimV),
-                                                  dqdtuple.mask,
-                                                  dqdtuple.atomic32,
-                                                  dqdtuple.pssk,
-                                                  dqdtuple.pddv,
-                                                  static_cast<int>(batchMode),
-                                                  dqdtuple.bf16Cvt));
-
-    // The DQ_CONVERT stage (FP32 dq_acc → BF16 cast) is only part of the A32
-    // 3-kernel path. For A16 the DQDKDV kernel writes dQ directly in BF16, so
-    // dq_convert is not resolved, the dq_acc workspace is skipped, and the plan
-    // is built with a nullopt post-kernel. The resolved tuple's atomic32 column
-    // already mirrors accType (see computeDispatchTuples above).
-    const bool useA32 = (accType == AccumulatorType::A32);
-
-    std::optional<ResolvedKernel> dqConvertResolved;
-    if(useA32)
+    // The post stage that writes dQ from dq_acc, if any (AITER mha_bwd.cu
+    // :327-355). For the batch-mode graphs the engine serves, every post
+    // lookup finds a row, so AITER's fallback to no post stage on a miss
+    // (:404-412) never applies.
+    const auto postStage = bwd_dispatch::postStage(deviceString, request.atomic32, request.hdimQ);
+    std::optional<ResolvedKernel> postResolved;
+    if(postStage)
     {
-        dqConvertResolved = resolveStage("dq_convert",
-                                         findConfig(cfg_fmha_bwd_dq_convert,
-                                                    deviceString,
-                                                    dataTypeId,
-                                                    static_cast<int>(headDimQk),
-                                                    static_cast<int>(headDimV),
-                                                    dqctuple.mask,
-                                                    dqctuple.atomic32,
-                                                    dqctuple.pssk,
-                                                    dqctuple.pddv,
-                                                    static_cast<int>(batchMode),
-                                                    dqctuple.bf16Cvt));
+        postResolved = toResolvedKernel(resolveStage(*postStage));
     }
+
+    if(!useA32)
+    {
+        // isApplicable checked the A32 rows' tile and dq_acc against the
+        // 32-bit kernarg fields; check the A16 ones.
+        const auto* kStridesAll = kTensor->strides();
+        if(!plan_utils::byteStrideFitsU32(
+               "Ts (tsKv * stride_k)", kStridesAll->Get(2), K_BF16_BYTES * dqdkdvCfg.ts))
+        {
+            declineA16("Ts overflows its 32-bit kernarg field:");
+        }
+        if(postStage)
+        {
+            // The DQDKDV kernels address dq_acc within a batch in 32 bits.
+            if(!sdpaBwdDqAccFitsU32(
+                   sdpaBwdDqAccLayout(
+                       batchSize, numHeadsQ, seqLenQ, headDimQk, AccumulatorType::A16),
+                   numHeadsQ))
+            {
+                declineA16("the dq_acc offsets overflow 32 bits:");
+            }
+        }
+        else if(!bwd_dispatch::dqSharesQStrides(
+                    bhsStrides(*qTensor), bhsStrides(*dqTensor), batchSize, numHeadsQ, seqLenQ))
+        {
+            // DQDKDV writes dQ itself and has no dQ strides.
+            declineA16("dQ strides differ from Q strides and the kernel writes dQ directly:");
+        }
+    }
+
+    // Surface, exactly once per (arch, dtype, row head dims, mask, accumulator,
+    // verified) over the program lifetime, whether the dqdkdv kernel about to
+    // be dispatched has a calibrated CPU reference. The lambda is noexcept
+    // because it only logs (a throwing call_once initializer would let the
+    // exception escape, which bugprone-exception-escape forbids).
+    const bool verified = isVerifiedDispatch(deviceString, request, dqdkdvCfg);
+    std::call_once(dispatchLogFlags[dispatchLogIndex(
+                       deviceString,
+                       dataTypeId,
+                       bwd_dispatch::HeadDims{dqdkdvCfg.hdim_q, dqdkdvCfg.hdim_v},
+                       request.mask,
+                       request.atomic32,
+                       verified)],
+                   [&]() noexcept {
+                       if(verified)
+                       {
+                           HIPDNN_PLUGIN_LOG_INFO("SDPA bwd dispatch: verified kernel arch="
+                                                  << deviceString << " dtype=" << dataTypeId
+                                                  << " D_qk=" << headDimQk << " D_v=" << headDimV
+                                                  << " mask=" << request.mask
+                                                  << " atomic32=" << request.atomic32);
+                       }
+                       else
+                       {
+                           HIPDNN_PLUGIN_LOG_WARN(
+                               "SDPA bwd dispatch: UNVERIFIED kernel arch="
+                               << deviceString << " dtype=" << dataTypeId << " D_qk=" << headDimQk
+                               << " D_v=" << headDimV << " mask=" << request.mask << " atomic32="
+                               << request.atomic32 << " kernel=" << dqdkdvCfg.knl_name
+                               << " - results not validated against CPU reference");
+                       }
+                   });
 
     HIPDNN_PLUGIN_LOG_INFO("Using bwd odo kernel: " << odoResolved.tocKey
                                                     << " :: " << odoResolved.knlName);
     HIPDNN_PLUGIN_LOG_INFO("Using bwd dqdkdv kernel: " << dqdkdvResolved.tocKey
                                                        << " :: " << dqdkdvResolved.knlName);
-    if(dqConvertResolved)
+    if(postResolved)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Using bwd dq_convert kernel: " << dqConvertResolved->tocKey
-                                                               << " :: "
-                                                               << dqConvertResolved->knlName);
+        HIPDNN_PLUGIN_LOG_INFO("Using bwd " << stageName(*postStage)
+                                            << " kernel: " << postResolved->tocKey
+                                            << " :: " << postResolved->knlName);
     }
 
     // -------------------------------------------------------------------------
@@ -1321,16 +1660,17 @@ void SdpaBwdPlanBuilder::buildPlan(
                                       << dqdkdvResolved.knlName);
 
     std::optional<CachedModule> postKernel;
-    if(dqConvertResolved)
+    if(postResolved)
     {
         auto loaded = moduleCache().getOrLoad(
-            dqConvertResolved->tocKey, deviceString, dqConvertResolved->knlName.c_str());
+            postResolved->tocKey, deviceString, postResolved->knlName.c_str());
         if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel tocKey='"
-                    + dqConvertResolved->tocKey + "' arch='" + deviceString + "'");
+                std::string("SdpaBwdPlanBuilder::buildPlan: failed to load ")
+                    + stageName(*postStage) + " kernel tocKey='" + postResolved->tocKey + "' arch='"
+                    + deviceString + "'");
         }
         postKernel = std::move(loaded);
     }
@@ -1341,9 +1681,9 @@ void SdpaBwdPlanBuilder::buildPlan(
     SdpaBwdParams params{};
     params.odoTiles = odoResolved.tiles;
     params.dqdkdvTiles = dqdkdvResolved.tiles;
-    if(dqConvertResolved)
+    if(postResolved)
     {
-        params.dqConvertTiles = dqConvertResolved->tiles;
+        params.postTiles = postResolved->tiles;
     }
 
     params.qUid = qUid;
@@ -1392,12 +1732,13 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
     params.accumulatorType = accType;
-    params.maskOrdinal = static_cast<int32_t>(maskType);
+    params.archString = deviceString;
+    params.maskOrdinal = request.mask;
     // A surviving bound is strictly below its sequence span (the covering ones
     // became -1), and isApplicable capped both sequence lengths at INT32_MAX, so
-    // the narrowing below and the mask coordinates computed from it in
-    // SdpaBwdPlan are exact.
-    if(maskType == MaskType::SLIDING_WINDOW)
+    // the narrowing below and the mask coordinates SdpaBwdPlan passes from it
+    // are exact.
+    if(classified.maskType == MaskType::SLIDING_WINDOW)
     {
         params.windowLeft = static_cast<int32_t>(maskBand.leftBound);
         params.windowRight = static_cast<int32_t>(maskBand.rightBound);
@@ -1406,16 +1747,8 @@ void SdpaBwdPlanBuilder::buildPlan(
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 
-    if(postKernel)
-    {
-        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-            std::move(odoKernel), std::move(dqdkdvKernel), std::move(*postKernel), params));
-    }
-    else
-    {
-        executionContext.setPlan(
-            std::make_unique<SdpaBwdPlan>(std::move(odoKernel), std::move(dqdkdvKernel), params));
-    }
+    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
@@ -1433,8 +1766,10 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
     KnobT accKnob;
     accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
     accKnob.description
-        = "Accumulator precision for backward dQ gradient: a32 (FP32, 3-kernel) or a16 (BF16, "
-          "2-kernel)";
+        = "Accumulator precision for the backward dQ gradient. a32: dQ accumulates in FP32 and a "
+          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; gfx942 writes dQ "
+          "directly, gfx950 accumulates into a 16-bit buffer that a dq_shuffle kernel writes "
+          "to dQ. a16 serves fewer graphs than a32 and fails plan building for the others";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";
