@@ -443,6 +443,12 @@ class MxGemmSpec:
         return self.scales == "registers"
 
     @property
+    def tdm_loads(self) -> int:
+        """TDM loads a wave issues per tile: its data component, then its
+        scale component unless the scales go to registers."""
+        return 1 if self.scale_regs else 2
+
+    @property
     def a_scale_reads(self) -> int:
         return 0 if self.scale_regs else max(1, self.wave_repeat_m // 4)
 
@@ -1991,8 +1997,9 @@ class Pipeline:
         )
 
     def wait_next_tile(self) -> None:
+        # The next tile's loads may stay in flight; this tile's must be done.
         b = self.k.b
-        b.s_wait_tensorcnt(2)
+        b.s_wait_tensorcnt(self.k.spec.tdm_loads)
         b.s_barrier_bare()
         b.inline_asm("", "~{memory}")
 

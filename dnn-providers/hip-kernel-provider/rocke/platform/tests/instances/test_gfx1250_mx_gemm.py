@@ -986,6 +986,7 @@ class MxGemmIrTest(unittest.TestCase):
         )
         lds_read = r"load (?:<\d+ x )?i(?:32|64)>?, ptr addrspace\(3\)"
         tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
+        tile_wait = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 ([1-9])\)"
         swap = r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)"
         direct = {**_DIRECT, "scales": "registers"}
         for spec in (
@@ -1007,7 +1008,8 @@ class MxGemmIrTest(unittest.TestCase):
         ):
             rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
             ha, hb = ScaleRegisters.half(rm), ScaleRegisters.half(rn)
-            llvm, lds_llvm = _llvm(spec), _llvm(replace(spec, scales="lds"))
+            lds_spec = replace(spec, scales="lds")
+            llvm, lds_llvm = _llvm(spec), _llvm(lds_spec)
             calls = wmma.findall(llvm)
             with self.subTest(spec.kernel_name()):
                 self.assertEqual(spec.tail_steps, 0)
@@ -1016,7 +1018,11 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual(
                     len(re.findall(tdm, llvm)) * 2, len(re.findall(tdm, lds_llvm))
                 )
-                lds_spec = replace(spec, scales="lds")
+                # Each tile waits for its own loads only: one per wave here,
+                # data and scales with LDS scales.
+                self.assertEqual((spec.tdm_loads, lds_spec.tdm_loads), (1, 2))
+                self.assertEqual(set(re.findall(tile_wait, llvm)), {"1"})
+                self.assertEqual(set(re.findall(tile_wait, lds_llvm)), {"2"})
                 scale_reads = lds_spec.a_scale_reads + lds_spec.b_scale_reads
                 self.assertEqual(
                     len(re.findall(lds_read, llvm)),
