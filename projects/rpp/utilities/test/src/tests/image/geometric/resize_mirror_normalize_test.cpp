@@ -109,7 +109,7 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, N);
+    RppHandle handle(cfg, N);
     ASSERT_EQ(rppt_resize_mirror_normalize(
                   src.ptr(), &srcDesc, dst.ptr(), &dstDesc, dstSizes.data(), op.interp, mean.data(),
                   stdDev.data(), mirror.data(), roi.data(), XYWH, handle.get(), cfg.backend),

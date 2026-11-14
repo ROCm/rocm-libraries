@@ -82,7 +82,7 @@ void run_log(const NdConfig& cfg) {
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
-    RppHandle handle(cfg.backend, dims[0]);
+    RppHandle handle(cfg, dims[0]);
     ASSERT_EQ(rppt_log(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), roi.data(), handle.get(),
                        cfg.backend),
               RPP_SUCCESS);

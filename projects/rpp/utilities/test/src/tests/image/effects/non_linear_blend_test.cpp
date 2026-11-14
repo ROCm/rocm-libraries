@@ -76,7 +76,7 @@ void run_non_linear_blend(const TestConfig& cfg, const NonLinearBlendParams& op)
     src2.write(input2.data(), bytes);
     dst.write(input1.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_non_linear_blend(src1.ptr(), src2.ptr(), &srcDesc, dst.ptr(), &dstDesc,
                                     stdDev.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

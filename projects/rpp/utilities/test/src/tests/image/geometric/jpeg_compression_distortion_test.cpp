@@ -84,7 +84,7 @@ void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     ASSERT_EQ(rppt_jpeg_compression_distortion(src.ptr(), &desc, dst.ptr(), &desc, quality.data(),
                                                roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

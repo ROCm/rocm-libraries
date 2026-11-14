@@ -47,6 +47,39 @@ inline std::string backend_name(RppBackend backend) {
     return backend == RPP_HIP_BACKEND ? "HIP" : "HOST";
 }
 
+// numThreads value that keeps rppCreate's default.
+inline constexpr Rpp32u kDefaultThreads = 0;
+
+// HOST thread counts every op is tested with: the default, a single thread, and more threads than
+// the default batch of 2. rppCreate caps the count at std::thread::hardware_concurrency(), so a
+// small machine may run the larger count with fewer.
+inline const std::vector<Rpp32u> kHostThreadCounts{kDefaultThreads, 1, 4};
+
+// A backend plus the numThreads its handle is created with. Each config type derives from this,
+// so RppHandle can be built straight from a config.
+struct BackendVariant {
+    RppBackend backend;
+    Rpp32u numThreads = kDefaultThreads;
+
+    // Label token: "HOST" for the default thread count, "HOST_T1" for an explicit one.
+    std::string name() const {
+        return numThreads == kDefaultThreads
+                   ? backend_name(backend)
+                   : backend_name(backend) + "_T" + std::to_string(numThreads);
+    }
+};
+
+inline std::vector<BackendVariant> backend_variants() {
+    std::vector<BackendVariant> variants;
+    for (RppBackend backend : available_backends()) {
+        if (backend == RPP_HOST_BACKEND)
+            for (Rpp32u n : kHostThreadCounts) variants.push_back({backend, n});
+        else
+            variants.push_back({backend, kDefaultThreads});  // HIP ignores numThreads
+    }
+    return variants;
+}
+
 }  // namespace rpptest
 
 // Every parameter is already spelled out in the test name, so print nothing instead of gtest's

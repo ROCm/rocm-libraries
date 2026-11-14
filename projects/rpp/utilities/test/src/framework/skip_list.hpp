@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <cstddef>
 #include <cstdlib>
 #include <string>
@@ -38,6 +39,7 @@ SOFTWARE.
 // Set RPP_TEST_NO_SKIP_LIST=1 to run the listed cases anyway and find entries a fix made obsolete.
 //
 // Patterns are GTest filter globs ('*' and '?') matched against "<Suite>/<Fixture>.<Test>/<Param>".
+// A HOST thread-count variant (HOST_T1_...) matches as its default case (HOST_...).
 
 namespace rpptest {
 
@@ -354,9 +356,22 @@ inline bool skip_list_enabled() {
     return enabled;
 }
 
+// Drops a HOST thread-count token ("/HOST_T4_" -> "/HOST_"), so every thread-count variant of a
+// case shares the case's entry: the listed defects do not depend on the thread count.
+inline std::string strip_thread_token(const std::string& name) {
+    const std::string prefix = "/HOST_T";
+    const std::size_t at = name.find(prefix);
+    if (at == std::string::npos) return name;
+    std::size_t end = at + prefix.size();
+    while (end < name.size() && std::isdigit(static_cast<unsigned char>(name[end]))) ++end;
+    if (end == at + prefix.size() || end >= name.size() || name[end] != '_') return name;
+    return name.substr(0, at) + "/HOST" + name.substr(end);
+}
+
 inline const char* skip_pattern_for(const std::string& testName) {
+    const std::string name = strip_thread_token(testName);
     for (const char* pattern : kSkipList)
-        if (matches_pattern(pattern, testName)) return pattern;
+        if (matches_pattern(pattern, name)) return pattern;
     return nullptr;
 }
 

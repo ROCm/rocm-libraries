@@ -71,7 +71,7 @@ void run_gaussian_noise(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_gaussian_noise(src.ptr(), &desc, dst.ptr(), &desc, mean.data(), stdDev.data(),
                                   kSeed, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -115,7 +115,7 @@ void run_gaussian_noise_negative(const TestConfig& cfg, const GaussianNoiseNegat
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     const RppStatus status =
         rppt_gaussian_noise(src.ptr(), &desc, dst.ptr(), &desc, mean.data(), stdDev.data(), kSeed,
                             roi.data(), XYWH, handle.get(), cfg.backend);

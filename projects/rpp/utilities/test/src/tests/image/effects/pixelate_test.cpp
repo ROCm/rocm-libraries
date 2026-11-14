@@ -84,7 +84,7 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     ASSERT_EQ(rppt_pixelate(src.ptr(), &desc, dst.ptr(), &desc, scratch.ptr(), op.percentage,
                             roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

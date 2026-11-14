@@ -65,7 +65,7 @@ void run_fisheye(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_fisheye(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH, handle.get(),
                            cfg.backend),
               RPP_SUCCESS);

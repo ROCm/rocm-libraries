@@ -97,7 +97,7 @@ void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
     s2.write(in2.data(), bytes);
     dst.write(in2.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     ASSERT_EQ(rppt_crop_and_patch(s1.ptr(), s2.ptr(), &desc, dst.ptr(), &desc, dstRoi.data(),
                                   cropRoi.data(), patchRoi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

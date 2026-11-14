@@ -101,7 +101,7 @@ void run_spatter_identity(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_spatter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kGreyColor, roi.data(), XYWH,
                            handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -158,7 +158,7 @@ void run_spatter_channel_band(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_spatter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kAsymmetricColor, roi.data(),
                            XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

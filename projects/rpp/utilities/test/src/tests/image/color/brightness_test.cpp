@@ -75,7 +75,7 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_brightness(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, alpha.data(), beta.data(),
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

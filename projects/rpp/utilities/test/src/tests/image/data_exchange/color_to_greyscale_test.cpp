@@ -77,7 +77,7 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_color_to_greyscale(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.subpixel,
                                       handle.get(), cfg.backend),
               RPP_SUCCESS);

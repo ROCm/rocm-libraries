@@ -65,6 +65,8 @@ Every case has a structured, greppable name:
 
 e.g. `Image_Color/BrightnessTest.Correctness/HIP_U8toU8_PKD3_FullRoi_2x36x48`.
 
+HOST cases also run with explicit thread counts (`kHostThreadCounts` in `src/framework/backend_param.hpp`), passed to `rppCreate` as `numThreads`. The count goes in the backend token, e.g. `HOST_T1_U8toU8_PKD3_FullRoi_2x36x48`; plain `HOST` is the default count (one thread per image). `rppCreate` caps the count at the number of hardware threads.
+
 Select subsets with `--gtest_filter` (wildcard `*`, `:`-separated patterns):
 
 | Goal | Filter |
@@ -72,6 +74,8 @@ Select subsets with `--gtest_filter` (wildcard `*`, `:`-separated patterns):
 | One operation | `--gtest_filter='*BrightnessTest*'` |
 | One category | `--gtest_filter='Image_Color/*'` |
 | HIP cases only | `--gtest_filter='*/HIP_*'` |
+| HOST thread-count variants only | `--gtest_filter='*/HOST_T*'` |
+| Skip HOST thread-count variants | `--gtest_filter='-*/HOST_T*'` |
 | All F32 PKD3, any op | `--gtest_filter='*F32*PKD3*'` |
 
 ## Known-defect skip list
@@ -80,6 +84,7 @@ Cases that fail against a known kernel defect (or a non-reproducible result) are
 than left red, so a normal run stays green. The list lives in `src/framework/skip_list.hpp` as
 GTest-filter-glob patterns; fixing a kernel means deleting the matching entry in the same change.
 Set `RPP_TEST_NO_SKIP_LIST=1` to run the listed cases anyway and check whether any have been fixed.
+A HOST thread-count variant is skipped whenever its default case is.
 
 ## Layout
 ```
