@@ -354,12 +354,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     // A padding spec with half-width FP8 B vectors still uses a full-width KPack.
     // Each lane reads its full K vector as two half-width vectors.
     static constexpr bool BSplitKPack =
-#if defined(__gfx125__)
-        false;
-#else
         (is_f8_type_v<remove_cvref_t<BDataType>> || is_bf8_type_v<remove_cvref_t<BDataType>>) &&
         BK1Value == FP8HalfKVec && (PadsN || PadsK) && KPerBlock % (KLane * FP8KVec) == 0;
-#endif
     static constexpr index_t KPack = math::max(
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk),
         BSplitKPack ? FP8KVec : 1);
