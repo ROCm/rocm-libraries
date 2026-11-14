@@ -44,7 +44,8 @@ organized into MPI ranks.
 
 To turn on rocFFT MPI support, enable the ``ROCFFT_MPI_ENABLE`` CMake option
 when building the library. By default, this option
-is off. To use Cray MPI, enable the ``ROCFFT_CRAY_MPI_ENABLE`` CMake option.
+is off. The rocFFT library shipped in a ROCm package is built with it off.
+To use Cray MPI, enable the ``ROCFFT_CRAY_MPI_ENABLE`` CMake option.
 
 Additionally, rocFFT MPI support requires a GPU-aware MPI library
 that supports transferring data to and from HIP devices.
@@ -63,10 +64,17 @@ Support for MPI transforms was introduced in ROCm 6.3 with rocFFT
 To distribute a transform across multiple MPI ranks, the
 following additional steps are required:
 
-#. Each rank calls :cpp:func:`rocfft_plan_description_set_comm` to
-   add an MPI communicator to an allocated plan description. rocFFT
-   distributes the computation across all ranks in the
-   communicator.
+#. Each rank calls :cpp:func:`rocfft_plan_description_set_comm` with
+   ``rocfft_comm_mpi`` and a pointer to an MPI communicator, and checks
+   the returned status. rocFFT distributes the computation across all
+   ranks in that communicator.
+
+   The function is present in every build. On a library built without
+   ``ROCFFT_MPI_ENABLE``, which includes the packaged rocFFT, it returns
+   ``rocfft_status_failure``. Check that status before calling
+   :cpp:func:`rocfft_plan_create`. With ``ROCFFT_LAYER=1``, a failed plan
+   creation writes the exception text to stderr, for example:
+   ``Inconsistent full data range detected for an input field``.
 
 #. Each rank allocates the same fields and calls
    :cpp:func:`rocfft_plan_description_add_infield` and
