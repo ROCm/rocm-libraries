@@ -438,12 +438,12 @@ suites:
     oracle: "No device race reported by rocjitsu on two small workloads"
     current:
       - system: therock
-        lane: multi-arch-ci (rocjitsu race check)
+        lane: hipblaslt-rocjitsu-race
         cadence: presubmit
         archs: [cpu-emulation]
         gates: false
-        notes: "Advisory: continue-on-error until it is reliably green. Not described in TESTING.md yet."
-        evidence: ["repo:.github/workflows/therock-rocjitsu-race-check-linux.yml"]
+        notes: "Advisory (expect_failure) TheRock test on CPU runners, gfx942 and gfx950."
+        evidence: ["repo:projects/hipblaslt/clients/scripts/rocjitsu/rocjitsu_race_smoke.py", "external:therock"]
         action: keep
     target:
       - {system: therock, cadence: presubmit}

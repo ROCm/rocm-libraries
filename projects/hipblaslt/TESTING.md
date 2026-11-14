@@ -663,6 +663,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
+| rocjitsu race checks | No | Component team | TheRock's `hipblaslt-rocjitsu-race` test runs [`rocjitsu_race_smoke.py`](clients/scripts/rocjitsu/rocjitsu_race_smoke.py), installed in `share/hipblaslt/rocjitsu`: a small hipblaslt-bench GEMM and a small TensileLite GEMM under the rocjitsu race detector, emulating gfx942 and gfx950 on CPU runners. Selected with the hipBLASLt tests; advisory (`expect_failure`). The script's unit tests run in the `Component CI: hipBLASLt rocjitsu scripts` lane |
 | rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
@@ -701,6 +702,7 @@ tracked as a gap.
   gfx94X and gfx950) runs on every pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
+- The rocjitsu race checks on gfx942 and gfx950 (TheRock's `hipblaslt-rocjitsu-race`)
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -965,7 +967,7 @@ manually dispatched runs.
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
-| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
+| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Pull requests: TheRock's `hipblaslt-rocjitsu-race` test, two small GEMMs on gfx942 and gfx950. Nightly: Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
 | **TSAN** | Host-side data races between threads | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
@@ -1828,8 +1830,9 @@ TensileLite together.
 [Target test kinds](#target-test-kinds), where it runs today with evidence for each placement, where
 the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire, or review)
 with a rationale. Every target and disposition in it is a proposal; a retirement needs the owning
-team's agreement first. Building it surfaced three lanes this document does not describe yet (the
-GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). Those are
+team's agreement first. Building it surfaced three lanes this document did not describe (the
+GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). The race
+check is now described under [PR Test Classification](#pr-test-classification); the other two are
 recorded in the inventory as `review` items rather than settled here. It also surfaced a
 disagreement between the two documents on whether Math CI measures C++ coverage. It does, as
 [Coverage](#coverage) now describes.
