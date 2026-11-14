@@ -24,8 +24,10 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <string>
 #include <utility>
@@ -692,4 +694,326 @@ TEST(CustomKernelTest, PostKernelsAreNotLaunchedYet)
     configurePostKernels(solution);
     EXPECT_THROW(solution.solve(dummyProblem(), ContractionInputs(), probeDevice()),
                  std::runtime_error);
+}
+
+namespace
+{
+    // FNV-1a over the packed arguments and the launch geometry.
+    struct CallDigest
+    {
+        uint64_t hash = 0xcbf29ce484222325ull;
+
+        void add(void const* data, size_t size)
+        {
+            auto const* bytes = static_cast<uint8_t const*>(data);
+            for(size_t i = 0; i < size; ++i)
+                hash = (hash ^ bytes[i]) * 0x100000001b3ull;
+        }
+
+        void add(TensileLite::dim3 const& d)
+        {
+            for(size_t v : {size_t(d.x), size_t(d.y), size_t(d.z)})
+                add(&v, sizeof(v));
+        }
+    };
+
+    uint64_t digest(KernelInvocation const& call)
+    {
+        CallDigest d;
+        d.add(call.args.data(), call.args.size());
+        d.add(call.workGroupSize);
+        d.add(call.numWorkGroups);
+        d.add(call.numWorkItems);
+        d.add(call.clusterDim);
+        d.add(call.kernelName.data(), call.kernelName.size());
+        return d.hash;
+    }
+
+    // Every semantic the probe problem can pack deterministically.
+    std::vector<CustomArgDefinition> representativeArgs()
+    {
+        using S = CustomArgSemantic;
+        using T = CustomArgType;
+        return {
+            {T::uint32, S::GemmInfo},
+            {T::uint32, S::NumWorkGroups},
+            {T::uint32, S::TensileInternalArg0},
+            {T::uint32, S::TensileInternalArg1},
+            {T::uint32, S::InternalArgs1},
+            {T::uint32, S::SizeFree0},
+            {T::uint32, S::SizeFree1},
+            {T::uint32, S::SizeFree2},
+            {T::uint32, S::SizeSum},
+            {T::uint32, S::SizeSumDiv2},
+            {T::uint32, S::SizeSum1},
+            {T::uint32, S::SizeSum2},
+            {T::address, S::AddressA},
+            {T::address, S::AddressB},
+            {T::address, S::AddressC},
+            {T::address, S::AddressD},
+            {T::uint32, S::StrideA0},
+            {T::uint32, S::StrideA1},
+            {T::uint32, S::StrideB0},
+            {T::uint32, S::StrideB1},
+            {T::uint32, S::StrideC0},
+            {T::uint32, S::StrideC1},
+            {T::uint32, S::StrideD0},
+            {T::uint64, S::StrideD1},
+            {T::uint32, S::StrideCK},
+            {T::uint64, S::StrideA0Bytes},
+            {T::uint64, S::StrideD0Bytes},
+            {T::float32, S::Alpha},
+            {T::float32, S::Beta},
+            {T::int32, S::ComputeUnits},
+            {T::uint32, S::SplitK},
+            {T::uint32, S::OutputBF16},
+            {T::uint32, S::Padding},
+            {T::uint32, S::ConstantZero, 4},
+            {T::uint32, S::ConstantOne},
+            {T::uint32, S::DebugPattern},
+            {T::uint32, S::DebugPattern},
+            {T::address, S::AddressWorkspace},
+            {T::address, S::AddressFlags},
+            {T::address, S::AddressSynchronizer},
+            {T::address, S::Synchronizer},
+            {T::address, S::DebugBuffer},
+            {T::uint32, S::GemmCount},
+            {T::uint32, S::ItersPerTile},
+            {T::uint32, S::MagicNumberItersPerTile},
+            {T::uint32, S::MagicShiftItersPerTile},
+            {T::uint32, S::TotalIters},
+            {T::uint32, S::SKItersPerWG},
+            {T::uint32, S::SKGrid},
+            {T::uint32, S::SKTilesAndSplit},
+            {T::uint32, S::MagicNumberSize, 0, 1},
+            {T::uint32, S::MagicShiftSize, 0, 1},
+            {T::uint32, S::FactorDim},
+            {T::uint32, S::ActivationTypeArg},
+            {T::float32, S::ActivationArg, 0, 0},
+            {T::uint32, S::ActivationArg, 0, 1},
+            {T::uint32, S::GSUSync},
+            {T::int32, S::ESMRuntimeSupported},
+            {T::int64, S::BatchOffsetD},
+            {T::int64, S::BatchOffsetA},
+            {T::int32, S::RR_WorkgroupMapping},
+            {T::uint32, S::RR_MagicMultipleWgm},
+            {T::int32, S::RR_QuotientTilesMByWgm},
+            {T::uint32, S::RR_MagicShiftAndSignWgmMainBlock},
+        };
+    }
+
+    ContractionInputs representativeInputs()
+    {
+        auto              fake = [](uintptr_t address) { return reinterpret_cast<void*>(address); };
+        ContractionInputs inputs;
+        inputs.a              = fake(0xa000);
+        inputs.b              = fake(0xb000);
+        inputs.c              = fake(0xc000);
+        inputs.d              = fake(0xd000);
+        inputs.ws             = fake(0xe000);
+        inputs.Synchronizer   = fake(0xf000);
+        inputs.alpha          = 2.5f;
+        inputs.beta           = -1.25f;
+        inputs.activationArgs = {0.5f};
+        inputs.batchOffsetA   = 0x300000005LL;
+        inputs.batchOffsetD   = 0x100000001LL;
+        return inputs;
+    }
+
+    template <typename T>
+    T namedArg(KernelInvocation const& call, std::string const& name)
+    {
+        auto it = KernelArguments::const_iterator(call.args, name);
+        if(it == call.args.end())
+            throw std::runtime_error("Missing packed argument " + name);
+        auto field = *it;
+        EXPECT_EQ(field.second, sizeof(T)) << name;
+        T result{};
+        std::memcpy(&result, field.first, std::min(sizeof(T), field.second));
+        return result;
+    }
+
+    using Configure = std::function<void(
+        ContractionSolution&, ContractionProblemGemm&, PersistentLaunchSettings&)>;
+
+    struct RepresentativeCall
+    {
+        char const*                                  name;
+        Configure                                    configure;
+        std::function<void(KernelInvocation const&)> expect;
+        size_t                                       argBytes;
+        uint64_t                                     digest;
+    };
+
+    void configureStreamK(ContractionSolution& solution, PersistentLaunchSettings& launch)
+    {
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution.customKernel.workspaceType         = CustomWorkspaceType::StreamK;
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKWithBatch, CustomGridSize::One, CustomGridSize::One};
+        launch.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    }
+
+    void* address(KernelInvocation const& call, char const* name)
+    {
+        return namedArg<void*>(call, name);
+    }
+
+    void* const inputWs   = reinterpret_cast<void*>(0xe000);
+    void* const inputSync = reinterpret_cast<void*>(0xf000);
+
+    // Golden digests pinning the byte layout of generateCustomCall's arguments
+    // and launch.
+    std::vector<RepresentativeCall> const& representativeCalls()
+    {
+        static const std::vector<RepresentativeCall> calls{
+            {"tiles",
+             [](auto& solution, auto&, auto&) {
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch};
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 8u);
+                 EXPECT_EQ(call.numWorkGroups.y, 8u);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0x77e20b50bcd2df0aull},
+            {"tilesFlattened",
+             [](auto& solution, auto&, auto&) {
+                 solution.internalArgsSupport.version = 1;
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch};
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 64u);
+                 EXPECT_EQ(call.numWorkGroups.y, 1u);
+             },
+             316,
+             0xf5ea9f5546ac715full},
+            {"splitKMultipleBuffer",
+             [](auto& solution, auto& problem, auto&) {
+                 solution.sizeMapping.globalAccumulation = 2;
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesXYBatchGSU, CustomGridSize::One, CustomGridSize::One};
+                 problem.setParams().setGSU(4);
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 256u);
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SplitK"), 2u);
+                 EXPECT_EQ(address(call, "AddressC"), inputWs);
+                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+             },
+             316,
+             0x7d33ab2fe5036458ull},
+            {"computeUnits",
+             [](auto& solution, auto& problem, auto&) {
+                 solution.customKernel.grid
+                     = {CustomGridSize::ComputeUnits, CustomGridSize::One, CustomGridSize::One};
+                 problem.setParams().setSmCountTarget(96);
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 96u);
+                 EXPECT_EQ(namedArg<int32_t>(call, "ComputeUnits"), 96);
+             },
+             316,
+             0x1841435f58750687ull},
+            {"streamKTree",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 launch.grid      = 37;
+                 launch.reduction = origami::reduction_t::tree;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 37u);
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKGrid"), 37u);
+                 EXPECT_EQ(address(call, "AddressFlags"), inputSync);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0x4f9b2824978a5ef9ull},
+            {"streamKParallel",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 launch.grid      = 128;
+                 launch.reduction = origami::reduction_t::parallel;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 2u);
+                 EXPECT_EQ(address(call, "AddressFlags"), nullptr);
+                 EXPECT_EQ(address(call, "AddressC"), inputWs);
+                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+             },
+             316,
+             0x89b5fa721fdaf378ull},
+            {"streamKParallelPostKernels",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 configurePostKernels(solution);
+                 launch.grid      = 192;
+                 launch.reduction = origami::reduction_t::parallel;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 3u);
+                 EXPECT_NE(namedArg<uint32_t>(call, "TotalIters"), 0u);
+                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+             },
+             316,
+             0x9a053eb3611e583dull},
+            {"dataParallelV1Cluster",
+             [](auto& solution, auto&, auto& launch) {
+                 solution.internalArgsSupport.version                   = 3;
+                 solution.internalArgsSupport.persistentLoopArgsVersion = 1;
+                 solution.sizeMapping.clusterDim             = TensileLite::dim3(2, 2, 1);
+                 solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+                 solution.customKernel.grid
+                     = {CustomGridSize::PersistentGrid, CustomGridSize::One, CustomGridSize::One};
+                 launch.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+                 launch.grid                   = 64;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 32u);
+                 EXPECT_EQ(call.numWorkGroups.y, 2u);
+                 EXPECT_EQ(call.clusterDim.x, 2u);
+             },
+             316,
+             0x03f7667a96fa1a6full},
+        };
+        return calls;
+    }
+
+    template <bool T_Debug>
+    KernelInvocation representativeCall(RepresentativeCall const& call)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {});
+        solution.kernelName               = "probe";
+        solution.sizeMapping.globalSplitU = 1;
+        solution.customKernel.args        = representativeArgs();
+        auto                     problem  = dummyProblem();
+        PersistentLaunchSettings launch;
+        call.configure(solution, problem, launch);
+        auto device = probeDevice();
+        return solution.generateCustomCall<T_Debug>(
+            problem, representativeInputs(), device, launch);
+    }
+}
+
+// Pins the packed arguments and launch geometry of custom kernels covering the
+// tile, split-K, persistent, DataParallel cluster and Stream-K tree/parallel paths.
+TEST(CustomKernelTest, CustomCallMatchesGoldenDigest)
+{
+    for(auto const& call : representativeCalls())
+    {
+        SCOPED_TRACE(call.name);
+        auto invocation = representativeCall<false>(call);
+        EXPECT_EQ(invocation.args.size(), call.argBytes);
+        EXPECT_EQ(digest(invocation), call.digest) << std::hex << digest(invocation);
+
+        ::testing::internal::CaptureStdout();
+        auto logged = representativeCall<true>(call);
+        ::testing::internal::GetCapturedStdout();
+        EXPECT_EQ(digest(logged), call.digest);
+        call.expect(logged);
+    }
 }
