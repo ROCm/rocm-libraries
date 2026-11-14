@@ -97,11 +97,68 @@ running in a secure execution context (set-user-ID, set-group-ID, or another cre
 such as file capabilities) ignores every variable in this section, so tuning stays off. For more
 information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
 
-``cache`` and ``tune`` mode write a few notices without any logging variable, because tuning can
-block the first call on a new shape for minutes and a silent pause looks like a hang. The notices are
-bounded: one line naming the mode and what loaded, one start and one result per shape that is
-actually tuned, and one closing summary. Replaying a cache adds no output per call. Where the notices
-go depends on logging:
+``online`` mode never waits on the GPU. It dispatches each of the top
+``HIPBLASLT_TUNING_MAX_CANDIDATES`` in turn ``HIPBLASLT_TUNING_HOT_ITERS`` times on the caller's own
+calls, reads each timing back on a later call under the same key, and records the fastest. Like
+``tune``, it tunes each cache key once and writes one row for it. Calls that share a key but differ
+in what it leaves out, such as beta, run default selection while the first of them is explored, and
+replay its row afterwards. A shape the cache file already serves is replayed, not explored. Exploring
+calls share a process-wide lock.
+
+Each key spends ``HIPBLASLT_TUNING_COLD_ITERS`` untimed calls, then ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+times ``HIPBLASLT_TUNING_HOT_ITERS`` timed calls exploring, which may run slower candidates, and holds
+memory proportional to the timed calls until it is done; values set for ``tune`` apply to ``online``
+too. The startup notice shows the values ``online`` uses as ``K``, ``R`` and ``cold``.
+
+While a key is explored, which takes about ``HIPBLASLT_TUNING_MAX_CANDIDATES`` times
+``HIPBLASLT_TUNING_HOT_ITERS`` calls, consecutive calls of a problem run different kernels, so their
+outputs can differ bitwise. Those calls are also slower: they run lower-ranked candidates, which can
+be much slower than the kernel default selection picks. The call that records a key's winner appends
+its row to the file synchronously, as ``tune`` does. For reproducible results or steady latency, run
+with a cache file that already serves the shapes.
+
+A call is not timed while its thread holds a HIP error it has not read, or when it launches on a
+stream of a device other than the thread's current device. It still runs, but a key explored only by
+such calls can end with no row.
+
+``online`` mode measures real launches. Settings that serialize or skip launches, such as
+``AMD_SERIALIZE_KERNEL``, ``HIP_LAUNCH_BLOCKING``, a profiler, or a ``TENSILE_DB`` setting that skips
+launches, distort its timings, so do not use ``online`` mode under them.
+
+Each process explores and records its own keys, so give each rank or process its own cache file, or
+share a file that already serves the shapes. Processes that share a path each explore and append
+rows of their own.
+
+``online`` mode tunes only ``hipblasLtMatmul`` calls that pass no algorithm (``algo`` is
+``nullptr``). Nothing else is tuned online:
+
+* ``hipblasLtMatmul`` with an algorithm the caller supplies launches it as given, untimed.
+* ``hipblasLtMatmulAlgoGetHeuristic`` is never handed a candidate to try. It is answered from the
+  cache file, as in ``cache`` mode, and otherwise by its usual ranking.
+* The ``hipblaslt_ext`` GEMM and grouped GEMM interfaces, and pointer-array batched problems.
+* Calls with a ``HIPBLASLT_ADAPTIVE_SM_COUNT`` hint, which run as with ``online`` off.
+* Fused GEMM and all-to-all calls, which write to their peer ranks, as in ``tune`` mode.
+* Calls dispatched to rocRoller: block-scaled (MX) problems by default, or every problem with
+  ``HIPBLASLT_USE_ROCROLLER=1``. They use rocRoller's own selection, as in ``tune`` mode.
+
+A call captured into a HIP graph is never explored or timed, and gets the measured winner if there
+is one. Exploring calls leave a capture in progress valid in every capture mode, whether it is on
+their own thread or another.
+
+The winner is appended to ``HIPBLASLT_TUNING_CACHE_PATH`` in the row format ``cache`` replays,
+marked incomplete if a candidate could not be timed. The row records the mode that measured it, and
+``tune`` never treats an ``online`` row as covering its own search. When a file holds several rows for
+a key, replay prefers a complete row to an incomplete one, and the newest within each, so a complete
+``online`` row is replayed ahead of a newer incomplete ``tune`` row. ``online`` mode does not read
+``HIPBLASLT_TUNING_ALL_KERNELS``, ``HIPBLASLT_TUNING_ROTATING_MB``, ``HIPBLASLT_TUNING_FLUSH_ICACHE``,
+``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` or ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``.
+
+``cache``, ``tune`` and ``online`` mode write a few notices without any logging variable. For
+``tune``, whose search can block the first call on a new shape for minutes, they keep a silent pause
+from looking like a hang. The notices are bounded: one line naming the mode and what loaded, one start
+and one result per shape that ``tune`` actually tunes, one result per key that ``online`` tunes (it
+prints no start line), and one closing summary. Replaying a cache adds no output per call. Where the
+notices go depends on logging:
 
 * No level or mask: stderr. ``HIPBLASLT_LOG_FILE`` alone does not open a log file.
 * ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the stream logging already opened,
@@ -122,11 +179,13 @@ go depends on logging:
       - | ``off``: Disable runtime tuning (default)
         | ``cache``: Replay valid entries from the cache file
         | ``tune``: Benchmark uncached supported problems and append winners
+        | ``online``: Time top ranked candidates on live ``hipblasLtMatmul`` calls that pass no
+          algorithm, and record the winner
 
     * - | ``HIPBLASLT_TUNING_CACHE_PATH``
         | Specifies the runtime cache file.
       - | Path to a tuning file
-        | Required for ``cache`` and ``tune`` modes
+        | Required for ``cache``, ``tune``, and ``online`` modes
 
     * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
         | Selects exhaustive or ranked-prefix candidate enumeration.
@@ -135,16 +194,29 @@ go depends on logging:
 
     * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
         | Limits the ranked prefix when exhaustive enumeration is disabled.
-      - | Positive integer (default: 128)
+      - | Positive integer (``tune`` default: 128, ``online`` default: 5)
+        | Below 2 switches ``online`` mode off
 
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
-        | Sets untimed warm-up launches per candidate.
-      - | Non-negative integer (default: 1000)
+        | Sets untimed warm-up launches per candidate (``online``: untimed calls under a key before
+          exploration starts).
+      - | Non-negative integer (``tune`` default: 1000, ``online`` default: 3)
         | 0 disables warm-up
+        | ``online`` runs default selection's pick on these calls, so clocks settle at no extra cost
 
     * - | ``HIPBLASLT_TUNING_HOT_ITERS``
         | Sets timed launches per candidate.
-      - | Positive integer (default: 1000)
+      - | Positive integer (``tune`` default: 1000, ``online`` default: 3)
+
+    * - | ``HIPBLASLT_TUNING_MAX_EVENT_PAIRS``
+        | Caps the HIP event pairs ``online`` mode keeps per device; a call that finds every pair
+          in flight runs untimed.
+      - | Positive integer (default: 4096)
+
+    * - | ``HIPBLASLT_TUNING_MIN_IMPROVEMENT_PCT``
+        | ``online`` only: how much faster than default selection's pick, in percent, another
+          candidate must measure to be recorded instead of it.
+      - | Integer from 0 to 100 (default: 0, the fastest candidate wins)
 
     * - | ``HIPBLASLT_TUNING_ROTATING_MB``
         | Sets the target rotating-buffer footprint.

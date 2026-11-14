@@ -159,6 +159,9 @@ namespace TensileLite
         // Searches that got as far as tuning-start, whatever their outcome.
         std::atomic<uint64_t> attempts{0};
 
+        // Online winners not recorded because recording threw.
+        std::atomic<uint64_t> unrecorded{0};
+
         std::string summary() const
         {
             return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="
@@ -268,9 +271,10 @@ namespace TensileLite
      * Counted by distinct key rather than by call, because the summary is read
      * against loaded=N and a hot loop over one uncached shape would otherwise
      * report thousands of fallbacks for one missing row. A key that matches
-     * once counts as matched. Does nothing in off mode.
+     * once counts as matched. Does nothing in off mode. Returns whether this
+     * is the key's first lookup.
      */
-    void recordTuningLookup(const ProblemOverride& key, bool matched);
+    bool recordTuningLookup(const ProblemOverride& key, bool matched);
 
     /**
      * True only the first time this key's entry identity is rejected. The
@@ -324,6 +328,21 @@ namespace TensileLite
      * and once per key, since replay meets the same key on every call.
      */
     bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
+
+    /// Calls online mode does not tune; see rocblaslt::OnlineTuner.
+    enum class OnlineScopeEvent : uint32_t
+    {
+        HeuristicQuery = 0,
+        CallerSuppliedAlgo,
+        AdaptiveSmCount,
+        Count,
+    };
+
+    /// Info-level, once per kind per process. Takes no tuning lock.
+    void noteOnlineScopeEvent(OnlineScopeEvent kind);
+
+    /// Info-level: a launch on device ran untimed with every pair in flight.
+    void noteOnlineEventPairCap(int device, int cap);
 
     /** Drop the announcement latch and every per-key set. Tests only. */
     void resetTuningDiagnosticsForTest();

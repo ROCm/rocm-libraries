@@ -63,6 +63,16 @@ if(NOT WIN32)
     )
 endif()
 
+# The online tuner's unit tests, against a private copy of the tuner; a shared
+# libhipblaslt exports neither. Coverage and static builds link the library's
+# own objects, where the copies would clash, so they leave these cases out.
+if(HIPBLASLT_BUILD_SHARED_LIBS AND NOT HIPBLASLT_ENABLE_COVERAGE)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
+    )
+endif()
+
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp

@@ -1,14 +1,15 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tune mode tests.
+// Tune mode tests, and online mode end to end.
 //
 // Everything here drives the public API with HIPBLASLT_TUNING_MODE and
 // HIPBLASLT_TUNING_CACHE_PATH, and asserts on the library's own counters and on
 // the rows it writes rather than on log text. Replay of existing files, in
 // cache mode and through HIPBLASLT_TUNING_OVERRIDE_FILE, is tested in
 // tuning_cache_test.cpp, and the file format and store without a device in
-// tuning_store_test.cpp.
+// tuning_store_test.cpp. The online tuner's own bookkeeping is tested in
+// online_tuner_test.cpp.
 //
 // The mode switch is latched on first use and the loaded-path set lives for the
 // process, so each test starts by calling hipblaslt_tuning_reset_for_test().
@@ -19,7 +20,11 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
+
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -28,7 +33,9 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -1373,6 +1380,8 @@ namespace
                                                 "HIPBLASLT_TUNING_FLUSH_ICACHE",
                                                 "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE",
                                                 "HIPBLASLT_TUNING_SCRATCH_MAX_BYTES",
+                                                "HIPBLASLT_TUNING_MAX_EVENT_PAIRS",
+                                                "HIPBLASLT_ADAPTIVE_SM_COUNT",
                                                 // Set by one logging case, and
                                                 // left set would make every
                                                 // later case skip itself.
@@ -2875,5 +2884,1091 @@ namespace
         ASSERT_TRUE(planFor(overflowing, &plan));
         EXPECT_FALSE(plan.usable);
         EXPECT_EQ(plan.bytesD, 0u);
+    }
+
+    // ----------------------------------------------------------------------
+    // Online mode.
+    // ----------------------------------------------------------------------
+
+    constexpr int64_t kOnlineM     = 1024;
+    constexpr int64_t kOnlineN     = 512;
+    constexpr int64_t kOnlineK     = 1024;
+    constexpr int32_t kOnlineBatch = 2;
+
+    constexpr size_t kOnlineWorkspace = 32u * 1024u * 1024u;
+
+    // Candidates online rotates through, and the repeats it takes of each.
+    // Exploration ends after K * R + 1 visits, so these decide how many
+    // dispatches a case needs to reach a winner. kOnlineVisits is that with
+    // room to spare.
+    constexpr int kOnlineTopK    = 5;
+    constexpr int kOnlineRepeats = 3;
+    constexpr int kOnlineVisits  = 3 * kOnlineTopK * kOnlineRepeats;
+
+    /**
+     * One fp16 NN batched problem, dispatched repeatedly with no algo, the call
+     * shape online tunes. Handle, buffers and descriptors are built once, since
+     * exploration takes tens of visits.
+     *
+     * pointerArray uses HIPBLASLT_BATCH_MODE_POINTER_ARRAY, the problem class
+     * the tuning cache will not key. m is the row count, so a case can make
+     * distinct shapes; ldaPad widens A's leading dimension past m, which makes a
+     * distinct key of the same shape. Every other dimension is fixed.
+     */
+    class OnlineProblem
+    {
+    public:
+        explicit OnlineProblem(bool pointerArray = false, int64_t m = kOnlineM, int64_t ldaPad = 0)
+            : m_pointerArray(pointerArray)
+            , m_m(m)
+            , m_lda(m + ldaPad)
+        {
+        }
+
+        ~OnlineProblem()
+        {
+            if(m_pref)
+                hipblasLtMatmulPreferenceDestroy(m_pref);
+            if(m_desc)
+                hipblasLtMatmulDescDestroy(m_desc);
+            for(hipblasLtMatrixLayout_t layout : {m_layoutA, m_layoutB, m_layoutC, m_layoutD})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            for(void* p : {m_ws, m_a, m_b, m_c, m_d, m_pa, m_pb, m_pc, m_pd})
+                static_cast<void>(hipFree(p));
+            if(m_handle)
+                hipblasLtDestroy(m_handle);
+        }
+
+        OnlineProblem(const OnlineProblem&)            = delete;
+        OnlineProblem& operator=(const OnlineProblem&) = delete;
+
+        bool create()
+        {
+            if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const size_t elementsA = static_cast<size_t>(m_lda * kOnlineK);
+            const size_t elementsB = static_cast<size_t>(kOnlineK * kOnlineN);
+            const size_t elementsC = static_cast<size_t>(m_m * kOnlineN);
+
+            if(!allocate(&m_a, elementsA) || !allocate(&m_b, elementsB)
+               || !allocate(&m_c, elementsC) || !allocate(&m_d, elementsC)
+               || hipMalloc(&m_ws, kOnlineWorkspace) != hipSuccess)
+                return false;
+
+            if(m_pointerArray
+               && (!pointers(&m_pa, m_a, elementsA) || !pointers(&m_pb, m_b, elementsB)
+                   || !pointers(&m_pc, m_c, elementsC) || !pointers(&m_pd, m_d, elementsC)))
+                return false;
+
+            if(hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_16F, m_m, kOnlineK, m_lda)
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_16F, kOnlineK, kOnlineN, kOnlineK)
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_16F, m_m, kOnlineN, m_m)
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_16F, m_m, kOnlineN, m_m)
+                      != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const int64_t strides[]
+                = {m_lda * kOnlineK, kOnlineK * kOnlineN, m_m * kOnlineN, m_m * kOnlineN};
+            hipblasLtMatrixLayout_t layouts[] = {m_layoutA, m_layoutB, m_layoutC, m_layoutD};
+
+            const int32_t batchMode = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+
+            for(size_t i = 0; i < 4; i++)
+            {
+                if(hipblasLtMatrixLayoutSetAttribute(layouts[i],
+                                                     HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                                                     &kOnlineBatch,
+                                                     sizeof(kOnlineBatch))
+                   != HIPBLAS_STATUS_SUCCESS)
+                    return false;
+
+                if(m_pointerArray)
+                {
+                    if(hipblasLtMatrixLayoutSetAttribute(layouts[i],
+                                                         HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                         &batchMode,
+                                                         sizeof(batchMode))
+                       != HIPBLAS_STATUS_SUCCESS)
+                        return false;
+                }
+                else if(hipblasLtMatrixLayoutSetAttribute(
+                            layouts[i],
+                            HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                            &strides[i],
+                            sizeof(strides[i]))
+                        != HIPBLAS_STATUS_SUCCESS)
+                    return false;
+            }
+
+            if(hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulPreferenceCreate(&m_pref) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const uint64_t maxWs = kOnlineWorkspace;
+            return hipblasLtMatmulPreferenceSetAttribute(
+                       m_pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                   == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        /**
+         * One matmul, reporting the solution the library launched. algo is the
+         * caller's own, or null to leave the choice to the library. Waits for
+         * the device unless asked not to, for a case that holds the stream.
+         */
+        bool dispatch(int*                         launched,
+                      const hipblasLtMatmulAlgo_t* algo        = nullptr,
+                      bool                         synchronize = true)
+        {
+            const float alpha = 1.0f;
+            const float beta  = m_beta;
+
+            if(hipblasLtMatmul(m_handle,
+                               m_desc,
+                               &alpha,
+                               operandA(),
+                               m_layoutA,
+                               operandB(),
+                               m_layoutB,
+                               &beta,
+                               operandC(),
+                               m_layoutC,
+                               operandD(),
+                               m_layoutD,
+                               algo,
+                               m_ws,
+                               kOnlineWorkspace,
+                               m_stream)
+               != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            if(synchronize && hipDeviceSynchronize() != hipSuccess)
+                return false;
+
+            if(launched)
+                *launched = hipblaslt_tuning_last_launch_for_test();
+            return true;
+        }
+
+        /** The beta dispatch() passes; zero until set. */
+        void setBeta(float beta)
+        {
+            m_beta = beta;
+        }
+
+        /** The stream dispatch() launches on; the null stream until set. */
+        void setStream(hipStream_t stream)
+        {
+            m_stream = stream;
+        }
+
+        /** The descriptor's Stream-K tile scheduling mode; OFF until set. */
+        bool setStreamKTileScheduling(int32_t mode)
+        {
+            return hipblasLtMatmulDescSetAttribute(
+                       m_desc,
+                       HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                       &mode,
+                       sizeof(mode))
+                   == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        /**
+         * A, B and C filled with one fp16 value and D cleared, so a launch
+         * writes a D whose every element is known (see outputIs()).
+         */
+        bool fillInputs(uint16_t half)
+        {
+            const size_t elementsA = static_cast<size_t>(m_lda * kOnlineK) * kOnlineBatch;
+            const size_t elementsB = static_cast<size_t>(kOnlineK * kOnlineN) * kOnlineBatch;
+            const size_t elementsC = static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch;
+
+            return hipMemsetD16(static_cast<hipDeviceptr_t>(m_a), half, elementsA) == hipSuccess
+                   && hipMemsetD16(static_cast<hipDeviceptr_t>(m_b), half, elementsB) == hipSuccess
+                   && hipMemsetD16(static_cast<hipDeviceptr_t>(m_c), half, elementsC) == hipSuccess
+                   && clearOutput();
+        }
+
+        bool clearOutput()
+        {
+            const size_t bytes
+                = static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch * sizeof(uint16_t);
+            return hipMemset(m_d, 0, bytes) == hipSuccess && hipDeviceSynchronize() == hipSuccess;
+        }
+
+        /** Whether every element of D holds the fp16 value half. */
+        bool outputIs(uint16_t half)
+        {
+            std::vector<uint16_t> host(static_cast<size_t>(m_m * kOnlineN) * kOnlineBatch);
+            if(hipMemcpy(host.data(), m_d, host.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+               != hipSuccess)
+                return false;
+
+            return std::all_of(host.begin(), host.end(), [half](uint16_t v) { return v == half; });
+        }
+
+        /** The heuristic's first want answers, kept as an application would. */
+        std::vector<hipblasLtMatmulAlgo_t> heuristic(int want)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results(want);
+            int                                           returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(m_handle,
+                                               m_desc,
+                                               m_layoutA,
+                                               m_layoutB,
+                                               m_layoutC,
+                                               m_layoutD,
+                                               m_pref,
+                                               want,
+                                               results.data(),
+                                               &returned)
+               != HIPBLAS_STATUS_SUCCESS)
+                returned = 0;
+
+            std::vector<hipblasLtMatmulAlgo_t> algos;
+            for(int i = 0; i < returned; i++)
+                algos.push_back(results[i].algo);
+            return algos;
+        }
+
+        /** Distinct solutions among the heuristic's first want answers. */
+        size_t distinctCandidates(int want = kOnlineTopK)
+        {
+            std::set<int> indices;
+            for(hipblasLtMatmulAlgo_t& algo : heuristic(want))
+                indices.insert(hipblaslt_ext::getIndexFromAlgo(algo));
+            return indices.size();
+        }
+
+    private:
+        static bool allocate(void** out, size_t elements)
+        {
+            const size_t bytes = elements * kOnlineBatch * sizeof(uint16_t);
+            return hipMalloc(out, bytes) == hipSuccess && hipMemset(*out, 0, bytes) == hipSuccess;
+        }
+
+        /** A device array of the per-batch base pointers of one operand. */
+        static bool pointers(void** out, void* base, size_t elementsPerBatch)
+        {
+            std::vector<void*> hostSide(kOnlineBatch);
+            for(int32_t b = 0; b < kOnlineBatch; b++)
+                hostSide[b] = static_cast<char*>(base)
+                              + static_cast<size_t>(b) * elementsPerBatch * sizeof(uint16_t);
+
+            return hipMalloc(out, hostSide.size() * sizeof(void*)) == hipSuccess
+                   && hipMemcpy(*out,
+                                hostSide.data(),
+                                hostSide.size() * sizeof(void*),
+                                hipMemcpyHostToDevice)
+                          == hipSuccess;
+        }
+
+        void* operandA() const
+        {
+            return m_pointerArray ? m_pa : m_a;
+        }
+        void* operandB() const
+        {
+            return m_pointerArray ? m_pb : m_b;
+        }
+        void* operandC() const
+        {
+            return m_pointerArray ? m_pc : m_c;
+        }
+        void* operandD() const
+        {
+            return m_pointerArray ? m_pd : m_d;
+        }
+
+        bool                        m_pointerArray = false;
+        int64_t                     m_m            = kOnlineM;
+        int64_t                     m_lda          = kOnlineM;
+        float                       m_beta         = 0.0f;
+        hipStream_t                 m_stream       = nullptr;
+        hipblasLtHandle_t           m_handle       = nullptr;
+        hipblasLtMatmulDesc_t       m_desc         = nullptr;
+        hipblasLtMatmulPreference_t m_pref         = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutA      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutB      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutC      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutD      = nullptr;
+        void*                       m_a            = nullptr;
+        void*                       m_b            = nullptr;
+        void*                       m_c            = nullptr;
+        void*                       m_d            = nullptr;
+        void*                       m_pa           = nullptr;
+        void*                       m_pb           = nullptr;
+        void*                       m_pc           = nullptr;
+        void*                       m_pd           = nullptr;
+        void*                       m_ws           = nullptr;
+    };
+
+    // Online cases start with tuning off and the event-pair cap at its default.
+    class TuningOnline_pre_checkin : public TuningTune_pre_checkin
+    {
+    protected:
+        void SetUp() override
+        {
+            TuningTune_pre_checkin::SetUp();
+            if(IsSkipped())
+                return;
+
+            for(const char* name : {"HIPBLASLT_TUNING_MODE",
+                                    "HIPBLASLT_TUNING_CACHE_PATH",
+                                    "HIPBLASLT_TUNING_MAX_EVENT_PAIRS"})
+                unsetenv(name);
+            hipblaslt_tuning_reset_for_test();
+        }
+
+        /**
+         * Online mode on a path, with the search depth and repeat count fixed
+         * so a case knows how many visits exploration takes.
+         */
+        void enterOnline(const std::string& path)
+        {
+            setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+            setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(kOnlineTopK).c_str(), 1);
+            setenv("HIPBLASLT_TUNING_HOT_ITERS", std::to_string(kOnlineRepeats).c_str(), 1);
+            setenv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
+            hipblaslt_tuning_reset_for_test();
+        }
+
+        /**
+         * Dispatch until exploration must have finished, returning the distinct
+         * kernels launched: one means the problem was never explored.
+         */
+        std::set<int> runToResolution(OnlineProblem& problem)
+        {
+            std::set<int> launchedIndices;
+            for(int visit = 0; visit < kOnlineVisits; visit++)
+            {
+                int launched = -1;
+                if(!problem.dispatch(&launched) || launched < 0)
+                {
+                    ADD_FAILURE() << "dispatch " << visit << " failed or reported no launch";
+                    break;
+                }
+                launchedIndices.insert(launched);
+            }
+            return launchedIndices;
+        }
+    };
+
+    // A null-algo problem is explored, its winner recorded once and stamped
+    // online, and replayed by later calls and by cache mode. Heuristic queries made
+    // first never reach the tuner, so the dispatches still explore.
+    TEST_F(TuningOnline_pre_checkin, AnOrdinaryBatchedProblemIsExploredRecordedAndReplayed)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        ASSERT_GE(problem.distinctCandidates(), 2u);
+        ASSERT_GE(problem.distinctCandidates(), 2u);
+        const uint64_t missesBefore = counters().misses;
+        const uint64_t hitsBefore   = counters().hits;
+
+        EXPECT_GT(runToResolution(problem).size(), 1u)
+            << "online launched one kernel throughout, so it never probed";
+
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(counters().tuned, 1u);
+        EXPECT_EQ(counters().misses - missesBefore + counters().hits - hitsBefore,
+                  static_cast<uint64_t>(kOnlineVisits))
+            << "a call was not counted once, as a hit or a miss";
+        EXPECT_EQ(columnValues(m_path, "tuning_mode"), std::vector<std::string>{"online"});
+
+        // Later calls launch the recorded winner, each one a replay hit.
+        const int      winner = std::stoi(columnValues(m_path, "solution_index").at(0));
+        const uint64_t hits   = counters().hits;
+        for(int call = 0; call < 5; call++)
+        {
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched));
+            EXPECT_EQ(launched, winner) << "call " << call << " after resolution";
+        }
+        EXPECT_EQ(counters().hits, hits + 5) << "calls after resolution were not replay hits";
+
+        setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        hipblaslt_tuning_reset_for_test();
+
+        int launched = -1;
+        ASSERT_TRUE(problem.dispatch(&launched));
+        EXPECT_EQ(launched, winner);
+        EXPECT_EQ(counters().hits, 1u) << "cache mode did not replay the online row";
+    }
+
+    // The startup line names the settings online explores with.
+    TEST_F(TuningOnline_pre_checkin, TheStartupLineShowsTheOnlineSettings)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        enterOnline(m_path);
+
+        std::string out;
+        {
+            CerrCapture capture;
+            ASSERT_TRUE(problem.dispatch(nullptr));
+            out = capture.str();
+        }
+
+        const std::string line     = "tuning-cache: mode=online path=" + m_path;
+        const std::string settings = " K=" + std::to_string(kOnlineTopK)
+                                     + " R=" + std::to_string(kOnlineRepeats) + " cold=0";
+        const size_t at = out.find(line);
+        ASSERT_NE(at, std::string::npos) << out;
+        EXPECT_NE(out.substr(at, out.find('\n', at) - at).find(settings), std::string::npos) << out;
+    }
+
+    // By default a key's first three calls run default selection's pick untimed,
+    // and exploration starts after them.
+    TEST_F(TuningOnline_pre_checkin, AKeysFirstCallsRunTheDefaultPickUntimed)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        std::vector<hipblasLtMatmulAlgo_t> top = problem.heuristic(1);
+        ASSERT_EQ(top.size(), 1u);
+        const int pick = hipblaslt_ext::getIndexFromAlgo(top[0]);
+
+        enterOnline(m_path);
+        unsetenv("HIPBLASLT_TUNING_COLD_ITERS");
+        hipblaslt_tuning_reset_for_test();
+
+        for(int call = 0; call < 3; call++)
+        {
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched));
+            EXPECT_EQ(launched, pick) << "cold call " << call << " ran another kernel";
+        }
+
+        EXPECT_GT(runToResolution(problem).size(), 1u)
+            << "online launched one kernel throughout, so it never probed";
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(columnValues(m_path, "cold_iters"), std::vector<std::string>{"3"})
+            << "the row does not record three cold calls";
+    }
+
+    // A shape the file already serves, here from a tune row, is replayed and not
+    // explored.
+    TEST_F(TuningOnline_pre_checkin, AnExistingRowIsReplayedNotExplored)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(problem.dispatch(nullptr));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune recorded no row";
+        const int row = std::stoi(columnValues(m_path, "solution_index").at(0));
+
+        enterOnline(m_path);
+
+        EXPECT_EQ(runToResolution(problem), std::set<int>{row})
+            << "online explored a shape the file serves";
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "online wrote a row for a shape the file serves";
+        EXPECT_EQ(counters().hits, static_cast<uint64_t>(kOnlineVisits));
+    }
+
+    // Online explores per tuning-cache key, as tune searches it. Two problems that
+    // differ only in A's leading dimension are two keys, so each is explored and
+    // recorded under its own row, even when the second first arrives while the
+    // first is exploring; a later process replays both and explores neither.
+    TEST_F(TuningOnline_pre_checkin, EachCacheKeyIsExploredAndReplayedByALaterProcess)
+    {
+        constexpr int64_t kPad = 64;
+
+        OnlineProblem narrow;
+        OnlineProblem padded(/*pointerArray=*/false, kOnlineM, kPad);
+        ASSERT_TRUE(narrow.create());
+        ASSERT_TRUE(padded.create());
+
+        // Three, so exploring shows as more kernels than default selection's pick
+        // and a winner.
+        const size_t narrowCandidates = narrow.distinctCandidates();
+        const size_t paddedCandidates = padded.distinctCandidates();
+        if(narrowCandidates < 3 || paddedCandidates < 3)
+            GTEST_SKIP() << "the heuristic offers fewer than three solutions for this problem";
+
+        enterOnline(m_path);
+
+        std::set<int> launchedNarrow;
+        std::set<int> launchedPadded;
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            int narrowIndex = -1;
+            int paddedIndex = -1;
+            ASSERT_TRUE(narrow.dispatch(&narrowIndex)) << "dispatch " << visit;
+            ASSERT_TRUE(padded.dispatch(&paddedIndex)) << "dispatch " << visit;
+            launchedNarrow.insert(narrowIndex);
+            launchedPadded.insert(paddedIndex);
+        }
+
+        EXPECT_GE(launchedNarrow.size(), narrowCandidates) << "the first layout was never explored";
+        EXPECT_GE(launchedPadded.size(), paddedCandidates)
+            << "the padded layout was never explored, only served the other layout's winner";
+        ASSERT_EQ(valueRowCount(m_path), 2u) << "each layout needs a row of its own";
+        EXPECT_EQ(counters().tuned, 2u);
+
+        // A later process: the file is all it has.
+        hipblaslt_tuning_reset_for_test();
+
+        std::map<std::string, int> rowFor;
+        const auto                 ldas    = columnValues(m_path, "lda");
+        const auto                 indices = columnValues(m_path, "solution_index");
+        for(size_t row = 0; row < ldas.size() && row < indices.size(); row++)
+            rowFor[ldas[row]] = std::stoi(indices[row]);
+        ASSERT_EQ(rowFor.size(), 2u) << "the two rows do not carry the two leading dimensions";
+
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            int narrowIndex = -1;
+            int paddedIndex = -1;
+            ASSERT_TRUE(narrow.dispatch(&narrowIndex));
+            ASSERT_TRUE(padded.dispatch(&paddedIndex));
+            ASSERT_EQ(narrowIndex, rowFor[std::to_string(kOnlineM)]) << "visit " << visit;
+            ASSERT_EQ(paddedIndex, rowFor[std::to_string(kOnlineM + kPad)]) << "visit " << visit;
+        }
+
+        EXPECT_EQ(counters().hits, 2u * kOnlineVisits) << "a layout was not replayed";
+        EXPECT_EQ(counters().tuned, 0u) << "the later process recorded a winner again";
+        EXPECT_EQ(valueRowCount(m_path), 2u) << "the later process explored again";
+    }
+
+    // Calls that share a key but differ in what it leaves out, here beta, are
+    // served one row, as in tune. The first to arrive explores; the other is never
+    // probed or timed meanwhile, runs default selection, and replays the row once
+    // it exists.
+    TEST_F(TuningOnline_pre_checkin, ACallThatDiffersOnlyInBetaIsNeverProbedAndReplaysTheRow)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        // What beta = 1 runs untuned.
+        problem.setBeta(1.0f);
+        int untuned = -1;
+        ASSERT_TRUE(problem.dispatch(&untuned));
+
+        enterOnline(m_path);
+
+        std::set<int> explored;
+        std::set<int> withBeta;
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            int index = -1;
+            problem.setBeta(0.0f);
+            ASSERT_TRUE(problem.dispatch(&index)) << "dispatch " << visit;
+            explored.insert(index);
+
+            problem.setBeta(1.0f);
+            ASSERT_TRUE(problem.dispatch(&index)) << "dispatch " << visit;
+            withBeta.insert(index);
+        }
+
+        EXPECT_GT(explored.size(), 1u) << "the first call was never explored";
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "beta is not part of the key, so one row";
+        const int winner = std::stoi(columnValues(m_path, "solution_index").at(0));
+
+        withBeta.erase(untuned);
+        withBeta.erase(winner);
+        EXPECT_TRUE(withBeta.empty()) << "the beta = 1 call was handed a probe";
+
+        const uint64_t hits  = counters().hits;
+        int            index = -1;
+        ASSERT_TRUE(problem.dispatch(&index));
+        EXPECT_EQ(index, winner);
+        EXPECT_EQ(counters().hits, hits + 1) << "the beta = 1 call did not replay the row";
+    }
+
+    // The first call to arrive under a key explores it. If it stops dispatching once
+    // every candidate is timed, the key still resolves on the other calls under it,
+    // the first of them served the winner records the row, and a later process
+    // replays it.
+    TEST_F(TuningOnline_pre_checkin, AKeyWhoseExplorerStopsIsRecordedByAnotherCallUnderIt)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        const size_t candidates = problem.heuristic(kOnlineTopK).size();
+
+        enterOnline(m_path);
+
+        // Just enough beta = 0 calls to time every candidate.
+        for(size_t visit = 0; visit < candidates * kOnlineRepeats; visit++)
+            ASSERT_TRUE(problem.dispatch(nullptr)) << "dispatch " << visit;
+        ASSERT_EQ(valueRowCount(m_path), 0u)
+            << "the explorer recorded its own row, so this case proves nothing";
+
+        problem.setBeta(1.0f);
+        for(int call = 0; call < 3; call++)
+            ASSERT_TRUE(problem.dispatch(nullptr)) << "beta = 1 call " << call;
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "a key whose explorer stopped wrote no row";
+        EXPECT_EQ(counters().tuned, 1u);
+        const int winner = std::stoi(columnValues(m_path, "solution_index").at(0));
+
+        hipblaslt_tuning_reset_for_test();
+        for(const float beta : {0.0f, 1.0f})
+        {
+            int launched = -1;
+            problem.setBeta(beta);
+            ASSERT_TRUE(problem.dispatch(&launched));
+            EXPECT_EQ(launched, winner) << "beta " << beta << " did not replay the row";
+        }
+        EXPECT_EQ(counters().hits, 2u);
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "the later process explored again";
+    }
+
+    // An application that queries the heuristic before every call and dispatches
+    // the returned algo, or that passes an algo of its own, is never handed a
+    // probe and never reaches the measurement hook, so nothing is recorded.
+    TEST_F(TuningOnline_pre_checkin, AHeuristicQueryOrSuppliedAlgoIsNeverProbedOrMeasured)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        auto ranked = problem.heuristic(2);
+        ASSERT_EQ(ranked.size(), 2u);
+        const hipblasLtMatmulAlgo_t supplied      = ranked[1];
+        const int                   suppliedIndex = hipblaslt_ext::getIndexFromAlgo(ranked[1]);
+
+        enterOnline(m_path);
+
+        std::set<int> answered;
+        for(int visit = 0; visit < kOnlineVisits; visit++)
+        {
+            auto first = problem.heuristic(1);
+            ASSERT_EQ(first.size(), 1u) << "query " << visit << " failed";
+            answered.insert(hipblaslt_ext::getIndexFromAlgo(first[0]));
+
+            int launched = -1;
+            ASSERT_TRUE(problem.dispatch(&launched, &first[0])) << "dispatch " << visit;
+            ASSERT_TRUE(problem.dispatch(&launched, &supplied)) << "dispatch " << visit;
+            ASSERT_EQ(launched, suppliedIndex)
+                << "dispatch " << visit << " did not launch the algo it was given";
+        }
+
+        EXPECT_EQ(answered.size(), 1u) << "online promoted probes into heuristic answers";
+        EXPECT_EQ(counters().tuned, 0u);
+        EXPECT_EQ(valueRowCount(m_path), 0u)
+            << "a winner was recorded from launches of caller-supplied algos";
+    }
+
+    // Online explores only problems the tuning cache can key. A pointer-array
+    // batch runs the ordinary single-GEMM path but cannot be keyed, so exploring
+    // it would reorder its kernels for rows cache mode never looks up.
+    TEST_F(TuningOnline_pre_checkin, APointerArrayBatchProblemIsNeverExplored)
+    {
+        OnlineProblem problem(/*pointerArray=*/true);
+        ASSERT_TRUE(problem.create());
+
+        // With fewer than two candidates the case could not fail.
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        EXPECT_EQ(runToResolution(problem).size(), 1u)
+            << "online probed a problem the tuning cache cannot key";
+        EXPECT_EQ(valueRowCount(m_path), 0u) << "online wrote a row cache mode will never look up";
+        EXPECT_EQ(counters().tuned, 0u);
+    }
+
+    // A hipblasLtMatmul whose CU hint comes from HIPBLASLT_ADAPTIVE_SM_COUNT is
+    // not tuned: the hint changes from call to call, some launches carry the
+    // occupancy probe, and the row key does not record the hint. With the mode
+    // on, online dispatches launch only kernels that dispatches with tuning off
+    // launched, and record nothing. Adaptive mode is read once per process, so
+    // that half runs in a child; this process, where the mode is off, is the
+    // control: the same problem under the same Stream-K mode is explored and
+    // recorded.
+    TEST_F(TuningOnline_pre_checkin, ALaunchUnderAdaptiveSmCountIsNotTuned)
+    {
+        {
+            OnlineProblem problem;
+            ASSERT_TRUE(problem.create());
+            if(problem.distinctCandidates() < 2)
+                GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        }
+
+        // Returns null, or the first check that failed.
+        static constexpr const char* kUntagged = "the heuristic's tag does not match the mode";
+        auto                         exercise  = [this](bool adaptive) -> const char* {
+            OnlineProblem problem;
+            if(!problem.create()
+               || !problem.setStreamKTileScheduling(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO))
+                return "the problem could not be set up";
+
+            // The heuristic tags its answer exactly when adaptive mode applies to
+            // the problem, which a launch decides the same way.
+            const auto first = problem.heuristic(1);
+            uint32_t   hint  = 0;
+            if(first.empty() || rocblaslt::adaptive_sm::algoTag(first[0].data, &hint) != adaptive)
+                return kUntagged;
+
+            // Tuning is off until enterOnline().
+            std::set<int> untuned;
+            for(int visit = 0; visit < kOnlineVisits; visit++)
+            {
+                int launched = -1;
+                if(!problem.dispatch(&launched) || launched < 0)
+                    return "a dispatch with tuning off failed";
+                untuned.insert(launched);
+            }
+
+            enterOnline(m_path);
+            const std::set<int> online = runToResolution(problem);
+            const size_t        rows   = valueRowCount(m_path);
+            const uint64_t      tuned  = counters().tuned;
+            std::remove(m_path.c_str());
+
+            if(!adaptive)
+                return online.size() > 1 && rows == 1 && tuned == 1
+                                                    ? nullptr
+                                                    : "the problem was not explored and recorded";
+            if(!std::includes(untuned.begin(), untuned.end(), online.begin(), online.end()))
+                return "online launched a kernel that tuning off did not";
+            return rows == 0 && tuned == 0 ? nullptr : "online recorded a row";
+        };
+
+        // The child prints why it failed, which a failed EXPECT_EXIT shows. It
+        // exits kNoAdaptive where adaptive mode could not be enabled.
+        constexpr int kNoAdaptive = 2;
+        bool          noAdaptive  = false;
+        const auto    exitedWell  = [&noAdaptive](int status) {
+            noAdaptive = ::testing::ExitedWithCode(kNoAdaptive)(status);
+            return noAdaptive || ::testing::ExitedWithCode(0)(status);
+        };
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        setenv("HIPBLASLT_ADAPTIVE_SM_COUNT", "1", 1);
+        EXPECT_EXIT(
+            {
+                const char* failed = exercise(/*adaptive=*/true);
+                if(failed)
+                    std::fputs(failed, stderr);
+                std::exit(failed == kUntagged ? kNoAdaptive : failed ? 1 : 0);
+            },
+            exitedWell,
+            "")
+            << "with adaptive mode on";
+        unsetenv("HIPBLASLT_ADAPTIVE_SM_COUNT");
+        if(noAdaptive)
+            GTEST_SKIP() << "adaptive mode could not be enabled";
+
+        const char* control = exercise(/*adaptive=*/false);
+        if(control == kUntagged)
+            GTEST_SKIP() << "adaptive mode is on for this whole process";
+        EXPECT_TRUE(control == nullptr) << "the control, with adaptive mode off: " << control;
+    }
+
+    // More shapes in rotation than a cap of one has pairs for are all explored and
+    // recorded: at the cap, the pairs of finished launches are reclaimed.
+    TEST_F(TuningOnline_pre_checkin, ShapesInRotationPastTheCapAreAllTuned)
+    {
+        // More than the visit budget would let through one pair at a time.
+        constexpr int kShapes = 10;
+
+        // Long enough for every shape to have resolved, recorded or not.
+        constexpr int kRounds = kOnlineTopK * kOnlineRepeats * 8 + 5;
+
+        std::vector<std::unique_ptr<OnlineProblem>> shapes;
+        for(int i = 0; i < kShapes; i++)
+        {
+            shapes.push_back(std::make_unique<OnlineProblem>(false, kOnlineM + 64 * i));
+            ASSERT_TRUE(shapes.back()->create());
+            if(shapes.back()->distinctCandidates() < 2)
+                GTEST_SKIP() << "the heuristic offers one solution for a shape";
+        }
+
+        setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
+        enterOnline(m_path);
+
+        for(int round = 0; round < kRounds; round++)
+            for(auto& shape : shapes)
+                ASSERT_TRUE(shape->dispatch(nullptr)) << "round " << round;
+
+        EXPECT_EQ(valueRowCount(m_path), static_cast<size_t>(kShapes))
+            << "a shape past the cap was never recorded";
+    }
+
+    // hipStreamLegacy, which hipBLASLt accepts like the null stream, is explored
+    // and recorded like any other stream.
+    TEST_F(TuningOnline_pre_checkin, AProblemOnTheLegacyStreamIsExploredAndRecorded)
+    {
+#ifdef CODE_COVERAGE
+        // clang's coverage runtime (libclang_rt.profile) intercepts HIP launches and calls
+        // hipStreamGetDevice on the launch stream, which fails for hipStreamLegacy.
+        // StreamKNullStream is excluded from coverage runs for the same reason.
+        GTEST_SKIP() << "the coverage runtime cannot launch on hipStreamLegacy";
+#endif
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        problem.setStream(hipStreamLegacy);
+        enterOnline(m_path);
+
+        EXPECT_GT(runToResolution(problem).size(), 1u)
+            << "online launched one kernel throughout, so it never probed";
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(counters().tuned, 1u);
+    }
+
+    // HIPBLASLT_TUNING_MAX_CANDIDATES below 2 leaves nothing to choose between, so
+    // online is off: every call launches default selection's kernel and nothing
+    // is written.
+    TEST_F(TuningOnline_pre_checkin, ACandidateCapBelowTwoLeavesOnlineOff)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        int untuned = -1;
+        ASSERT_TRUE(problem.dispatch(&untuned));
+
+        enterOnline(m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "1", 1);
+        hipblaslt_tuning_reset_for_test();
+
+        EXPECT_EQ(runToResolution(problem), std::set<int>{untuned})
+            << "online explored with a candidate cap of one";
+        EXPECT_EQ(valueRowCount(m_path), 0u) << "online recorded a row with a candidate cap of one";
+        EXPECT_EQ(counters().tuned, 0u);
+    }
+
+    // fp16 one, and the fp16 value every element of D holds when A and B are
+    // all ones: the length of the reduction, kOnlineK.
+    constexpr uint16_t kHalfOne       = 0x3C00;
+    constexpr uint16_t kHalfReduction = 0x6400;
+    static_assert(kOnlineK == 1024, "kHalfReduction is fp16 1024");
+
+    // Eager calls of a shape, then a global-mode capture of the same call while
+    // online is still exploring it with launches outstanding. Reading those back
+    // must not invalidate the capture: the call succeeds, the capture yields a
+    // graph, and the graph computes the GEMM. Run part way through exploration and
+    // at the visit that completes it.
+    TEST_F(TuningOnline_pre_checkin, CapturingAShapeStillBeingExploredLeavesTheGraphValid)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        hipStream_t stream = nullptr;
+        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+        problem.setStream(stream);
+        ASSERT_TRUE(problem.fillInputs(kHalfOne));
+
+        for(const int eager : {3, kOnlineTopK * kOnlineRepeats})
+        {
+            SCOPED_TRACE("eager calls before the capture: " + std::to_string(eager));
+
+            std::remove(m_path.c_str());
+            enterOnline(m_path);
+
+            for(int visit = 0; visit < eager; visit++)
+                ASSERT_TRUE(problem.dispatch(nullptr)) << "eager call " << visit;
+            ASSERT_TRUE(problem.clearOutput());
+
+            ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal), hipSuccess);
+            const bool       captured = problem.dispatch(nullptr, nullptr, /*synchronize=*/false);
+            hipGraph_t       graph    = nullptr;
+            const hipError_t ended    = hipStreamEndCapture(stream, &graph);
+            const hipError_t left     = hipGetLastError();
+
+            EXPECT_TRUE(captured) << "the captured hipblasLtMatmul failed";
+            EXPECT_EQ(ended, hipSuccess) << hipGetErrorName(ended);
+            EXPECT_EQ(left, hipSuccess) << hipGetErrorName(left);
+            ASSERT_NE(graph, nullptr) << "the capture produced no graph";
+
+            hipGraphExec_t exec = nullptr;
+            EXPECT_EQ(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), hipSuccess);
+            if(exec)
+            {
+                EXPECT_EQ(hipGraphLaunch(exec, stream), hipSuccess);
+                EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+                EXPECT_TRUE(problem.outputIs(kHalfReduction))
+                    << "the graph did not compute the GEMM it captured";
+                static_cast<void>(hipGraphExecDestroy(exec));
+            }
+            static_cast<void>(hipGraphDestroy(graph));
+        }
+
+        static_cast<void>(hipStreamDestroy(stream));
+    }
+
+    // An uncaptured exploring call on one thread while another thread holds a
+    // global-mode capture open on its own stream. Global mode is process-wide.
+    // Run on a created stream and on the null stream, which HIP will not be
+    // asked about during the capture: the call leaves this thread no HIP error.
+    TEST_F(TuningOnline_pre_checkin, AnExploringCallDoesNotInvalidateAnotherThreadsCapture)
+    {
+        OnlineProblem problem;
+        ASSERT_TRUE(problem.create());
+        if(problem.distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        // Released however the case ends.
+        hipStream_t created = nullptr;
+        hipStream_t theirs  = nullptr;
+        void*       target  = nullptr;
+        ASSERT_EQ(hipStreamCreate(&created), hipSuccess);
+        const std::unique_ptr<ihipStream_t, hipError_t (*)(hipStream_t)> createdHeld(
+            created, hipStreamDestroy);
+        ASSERT_EQ(hipStreamCreate(&theirs), hipSuccess);
+        const std::unique_ptr<ihipStream_t, hipError_t (*)(hipStream_t)> theirsHeld(
+            theirs, hipStreamDestroy);
+        ASSERT_EQ(hipMalloc(&target, 4096), hipSuccess);
+        const std::unique_ptr<void, hipError_t (*)(void*)> targetHeld(target, hipFree);
+
+        for(const hipStream_t mine : {created, hipStream_t(nullptr)})
+        {
+            SCOPED_TRACE(mine ? "on a created stream" : "on the null stream");
+            problem.setStream(mine);
+
+            std::remove(m_path.c_str());
+            enterOnline(m_path);
+
+            // Leaves a launch outstanding, so the next call reads one back.
+            for(int visit = 0; visit < 3; visit++)
+                ASSERT_TRUE(problem.dispatch(nullptr)) << "eager call " << visit;
+
+            // Both waits are bounded, so a hang fails the case instead of the suite.
+            constexpr int    kWaits = 3000;
+            std::atomic<int> phase{0};
+            hipError_t       began = hipErrorUnknown;
+            hipError_t       ended = hipErrorUnknown;
+            hipGraph_t       graph = nullptr;
+
+            std::thread capturer([&] {
+                began = hipStreamBeginCapture(theirs, hipStreamCaptureModeGlobal);
+                if(began == hipSuccess)
+                    static_cast<void>(hipMemsetAsync(target, 0, 4096, theirs));
+                phase = 1;
+                for(int wait = 0; wait < kWaits && phase.load() != 2; wait++)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                ended = hipStreamEndCapture(theirs, &graph);
+            });
+
+            for(int wait = 0; wait < kWaits && phase.load() != 1; wait++)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+            // Without the capture under way the case would prove nothing.
+            static_cast<void>(hipGetLastError());
+            const bool capturing = phase.load() == 1;
+            const bool dispatched
+                = capturing && problem.dispatch(nullptr, nullptr, /*synchronize=*/false);
+            const hipError_t left = hipGetLastError();
+            phase                 = 2;
+            capturer.join();
+
+            ASSERT_TRUE(capturing) << "the other thread never began its capture";
+            EXPECT_TRUE(dispatched) << "the uncaptured hipblasLtMatmul failed";
+            EXPECT_EQ(left, hipSuccess) << "the call left " << hipGetErrorName(left);
+            EXPECT_EQ(hipStreamSynchronize(mine), hipSuccess);
+            EXPECT_EQ(began, hipSuccess) << hipGetErrorName(began);
+            EXPECT_EQ(ended, hipSuccess)
+                << "the other thread's capture: " << hipGetErrorName(ended);
+            EXPECT_NE(graph, nullptr);
+
+            if(graph)
+            {
+                hipGraphExec_t exec = nullptr;
+                EXPECT_EQ(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0), hipSuccess);
+                if(exec)
+                {
+                    EXPECT_EQ(hipGraphLaunch(exec, theirs), hipSuccess);
+                    EXPECT_EQ(hipStreamSynchronize(theirs), hipSuccess);
+                    static_cast<void>(hipGraphExecDestroy(exec));
+                }
+                static_cast<void>(hipGraphDestroy(graph));
+            }
+        }
+    }
+
+    // Several threads, each with its own handle and stream, dispatch the same two
+    // keys at once without waiting on the device, until both resolve. Every call
+    // computes the GEMM, each key gets exactly one row, and no thread is left a
+    // HIP error.
+    TEST_F(TuningOnline_pre_checkin, ConcurrentDispatchesOfTwoKeysRecordOneRowEach)
+    {
+        constexpr int     kThreads = 4;
+        constexpr int64_t kPad     = 64;
+
+        // Per thread, one problem under each key: two leading dimensions of A.
+        std::vector<std::unique_ptr<ihipStream_t, hipError_t (*)(hipStream_t)>> streams;
+        std::vector<std::unique_ptr<OnlineProblem>>                             problems;
+        for(int thread = 0; thread < kThreads; thread++)
+        {
+            hipStream_t stream = nullptr;
+            ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+            streams.emplace_back(stream, hipStreamDestroy);
+            for(const int64_t pad : {int64_t(0), kPad})
+            {
+                problems.push_back(std::make_unique<OnlineProblem>(false, kOnlineM, pad));
+                ASSERT_TRUE(problems.back()->create());
+                ASSERT_TRUE(problems.back()->fillInputs(kHalfOne));
+                problems.back()->setStream(stream);
+            }
+        }
+        if(problems[0]->distinctCandidates() < 2 || problems[1]->distinctCandidates() < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        std::vector<std::string> failures(kThreads);
+        std::vector<std::thread> threads;
+        for(int thread = 0; thread < kThreads; thread++)
+            threads.emplace_back([&, thread] {
+                std::string& failure = failures[thread];
+                for(int visit = 0; visit < kOnlineVisits && failure.empty(); visit++)
+                    for(int key = 0; key < 2; key++)
+                        if(!problems[2 * thread + key]->dispatch(nullptr, nullptr, false))
+                            failure = "dispatch " + std::to_string(visit) + " failed";
+                if(hipStreamSynchronize(streams[thread].get()) != hipSuccess)
+                    failure += " synchronize failed;";
+                if(const hipError_t left = hipGetLastError(); left != hipSuccess)
+                    failure += std::string(" left ") + hipGetErrorName(left) + ";";
+                for(int key = 0; key < 2; key++)
+                    if(!problems[2 * thread + key]->outputIs(kHalfReduction))
+                        failure += " key " + std::to_string(key) + " computed a wrong D;";
+            });
+        for(std::thread& thread : threads)
+            thread.join();
+        for(int thread = 0; thread < kThreads; thread++)
+            EXPECT_EQ(failures[thread], "") << "thread " << thread;
+
+        // A sample still in flight when the threads stop is read by a later call.
+        for(int visit = 0; visit < kOnlineVisits && valueRowCount(m_path) < 2; visit++)
+            for(int key = 0; key < 2; key++)
+                ASSERT_TRUE(problems[key]->dispatch(nullptr)) << "settling call " << visit;
+
+        EXPECT_EQ(valueRowCount(m_path), 2u) << "each key needs exactly one row";
+        EXPECT_EQ(counters().tuned, 2u);
+        const auto ldas = columnValues(m_path, "lda");
+        EXPECT_EQ(std::set<std::string>(ldas.begin(), ldas.end()).size(), 2u)
+            << "the rows do not carry the two leading dimensions";
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
     }
 } // namespace

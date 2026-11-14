@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "OnlineTuner.hpp"
 #include "alpha_mode_logging.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
@@ -54,6 +55,8 @@
 #include "include/mx_scale_setup.hpp"
 #include "include/rocroller_selected.hpp"
 
+#include <Tensile/Comparison.hpp>
+#include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -3998,6 +4001,26 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
+// Whether the tuning cache can key on this problem: a grouped GEMM has no single
+// shape, and the key does not describe a pointer-array batch.
+inline bool tuningCacheKeyable(const RocblasltContractionProblem& prob)
+{
+    return !prob.grouped_gemm && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+}
+
+namespace
+{
+    bool isFusedAllToAll(const RocblasltContractionProblem& prob);
+}
+
+// Which problems online tuning explores, of the hipblasLtMatmul calls that pass
+// no algo (see the note on rocblaslt::OnlineTuner). A fused all-to-all call is
+// left out for the reason tune leaves it out: the ranks do not coordinate a search.
+inline bool onlineTunable(const RocblasltContractionProblem& prob)
+{
+    return tuningCacheKeyable(prob) && !prob.adaptive_sm_count && !isFusedAllToAll(prob);
+}
+
 // Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Called from
 // rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
@@ -4213,6 +4236,34 @@ namespace
             return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 128));
         }
 
+        // Online's defaults are smaller: each timed launch is a caller's call.
+        // Unclamped, so the notice for a cap below 2 shows the value given; the
+        // tuner clamps it.
+        static int onlineCandidateCap()
+        {
+            return envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 5);
+        }
+        static int onlineHotIterations()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 3));
+        }
+        // A few untimed calls let the clocks settle before timing starts. They
+        // run default selection's pick, so they cost nothing over tuning off.
+        static int onlineColdIterations()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 3));
+        }
+        static int onlineMinImprovementPercent()
+        {
+            return envInt("HIPBLASLT_TUNING_MIN_IMPROVEMENT_PCT", 0);
+        }
+        static int onlineLivePairCap()
+        {
+            return std::max(1,
+                            envInt("HIPBLASLT_TUNING_MAX_EVENT_PAIRS",
+                                   rocblaslt::OnlineTunerConfig::c_defaultLivePairCap));
+        }
+
         /**
          * Invalidate the instruction cache between timed launches, as the bench
          * client does when tuning.
@@ -4312,6 +4363,7 @@ namespace
         static TensileLite::TuningSearch search(size_t workspaceBytes)
         {
             TensileLite::TuningSearch s;
+            s.mode           = TensileLite::TuningMode::Tune;
             s.allKernels     = allKernels();
             s.maxCandidates  = s.allKernels ? 0 : candidateCap();
             s.workspaceBytes = workspaceBytes;
@@ -4319,6 +4371,22 @@ namespace
             s.hotIters       = hotIterations();
             s.flushICache    = flushICache();
             s.rotatingMb     = rotatingMegabytes();
+            return s;
+        }
+
+        /** The settings an online row was explored under, as the tuner applied them. */
+        static TensileLite::TuningSearch onlineSearch(size_t workspaceBytes)
+        {
+            const auto&               tuner = rocblaslt::OnlineTuner::getInstance();
+            TensileLite::TuningSearch s;
+            s.mode           = TensileLite::TuningMode::Online;
+            s.allKernels     = false;
+            s.maxCandidates  = tuner.topK();
+            s.workspaceBytes = workspaceBytes;
+            s.coldIters      = tuner.coldCalls();
+            s.hotIters       = tuner.repeats();
+            s.flushICache    = false;
+            s.rotatingMb     = 0;
             return s;
         }
     };
@@ -4996,6 +5064,11 @@ namespace
 
     bool streamIsCapturing(hipStream_t stream)
     {
+        // HIP cannot capture the null or legacy stream, and asking about them
+        // during another stream's capture leaves hipErrorStreamCaptureImplicit.
+        if(stream == nullptr || stream == hipStreamLegacy)
+            return false;
+
         hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
         return hipStreamIsCapturing(stream, &status) == hipSuccess
                && status != hipStreamCaptureStatusNone;
@@ -5066,6 +5139,8 @@ namespace
                                                      ranked.data(),
                                                      &returned,
                                                      prob.workspaceSize,
+                                                     SolutionLookup::Heuristic,
+                                                     nullptr,
                                                      &layoutRuledOut)
                                     == rocblaslt_status_success;
         const bool toppedUp
@@ -5733,6 +5808,54 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
     return found->size();
 }
 
+namespace rocblaslt
+{
+    namespace
+    {
+        // The tuner's per-event lines, at info level. Called under the tuner's
+        // lock from inside a matmul, so a logging failure is swallowed.
+        void traceOnlineTuner(const char* func, const std::string& message)
+        {
+            try
+            {
+                log_info(func, message);
+            }
+            catch(...)
+            {
+            }
+        }
+    }
+
+    // Here, next to the mode singleton and the secure environment accessor.
+    OnlineTunerConfig onlineTunerConfig()
+    {
+        const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+
+        OnlineTunerConfig config;
+        config.enabled
+            = tuning.mode() == TensileLite::TuningMode::Online && !tuning.cachePath().empty();
+
+        config.topK        = TuningPolicy::onlineCandidateCap();
+        config.repeats     = TuningPolicy::onlineHotIterations();
+        config.coldCalls   = TuningPolicy::onlineColdIterations();
+        config.livePairCap = TuningPolicy::onlineLivePairCap();
+
+        config.minImprovementPct = TuningPolicy::onlineMinImprovementPercent();
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            config.trace = traceOnlineTuner;
+
+        config.livePairCapReached = TensileLite::noteOnlineEventPairCap;
+
+        // The startup line still names online as the mode, so say it is off.
+        if(config.enabled && config.topK < 2)
+            log_tuning_lifecycle(__func__,
+                                 "online-off max-candidates=" + std::to_string(config.topK)
+                                     + "; online tuning needs at least 2");
+
+        return config;
+    }
+} // namespace rocblaslt
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // Amax uses Synchronizer for its counter, so retain its GSU region.
@@ -5964,10 +6087,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         const bool callerSuppliedAlgo = (algo != nullptr);
 
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
-        const bool  keyed  = tuning.reads() && !prob.grouped_gemm
-                           && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-        const bool tunes
-            = keyed && tuning.writes() && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
+        const bool  keyed  = tuning.reads() && tuningCacheKeyable(prob);
+        // Not writes(): online writes the file too but never searches here.
+        const bool tunes = keyed && tuning.mode() == TensileLite::TuningMode::Tune
+                           && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
 
         // A mode set without a path is otherwise reported by the heuristic
         // query, which a matmul-only caller never makes.
@@ -6010,8 +6133,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(algo == nullptr)
         {
             int returnAlgoCount = 0;
-            status = getBestSolutions(
-                prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
+            status              = getBestSolutions(prob,
+                                      handle,
+                                      gemmData,
+                                      1,
+                                      &heuristicResult,
+                                      &returnAlgoCount,
+                                      prob.workspaceSize,
+                                      SolutionLookup::PerDispatch,
+                                      tuningKey ? &*tuningKey : nullptr);
             if(returnAlgoCount == 0)
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
@@ -6059,6 +6189,23 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
         int* solutionIndex = (int*)algo->data;
+
+        // Online tuning's measurement half, under the key replay looked up. A
+        // replayed call has nothing to measure. Nothing here waits on the GPU.
+        auto&      onlineTuner  = rocblaslt::OnlineTuner::getInstance();
+        const bool onlineTuning = onlineTuner.enabled() && !callerSuppliedAlgo
+                                  && onlineTunable(prob) && !replayed && tuningKey.has_value();
+
+        if(onlineTuning)
+            onlineTuner.harvestPending(*tuningKey);
+        else if(onlineTuner.enabled())
+        {
+            if(callerSuppliedAlgo)
+                TensileLite::noteOnlineScopeEvent(
+                    TensileLite::OnlineScopeEvent::CallerSuppliedAlgo);
+            else if(prob.adaptive_sm_count && tuningCacheKeyable(prob))
+                TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::AdaptiveSmCount);
+        }
 
         // Tune mode: a shape no entry serves is benchmarked at its first matmul,
         // through either entry point, since a call that passes no algo never
@@ -6578,9 +6725,23 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            // Events only if the tuner offered this launch at selection, on this
+            // thread (t_offer in OnlineTuner.cpp), and never in a capture. The
+            // handle hands them back however the launch returns.
+            const auto measurement
+                = onlineTuning && !streamIsCapturing(prob.stream)
+                      ? onlineTuner.measure(*tuningKey, solution->index, prob.stream)
+                      : rocblaslt::OnlineTuner::Measurement();
+
+            // An event that cannot be recorded costs the sample, not the GEMM.
             t_lastLaunchedIndex = solution->index;
-            status = hip2RocStatus(
-                adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            status              = hip2RocStatus(
+                adapter->launchKernels(kernels,
+                                       prob.stream,
+                                       measurement.start(),
+                                       measurement.stop(),
+                                       isPreloaded,
+                                       TensileLite::hip::EventRecording::BestEffort));
             if(prob.adaptive_launch)
                 prob.adaptive_launch->probed
                     = status == rocblaslt_status_success
@@ -7568,6 +7729,157 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
            && !solution.customKernel.name.empty() && !solution.customKernel.generated;
 }
 
+// Counted, and reported once. Runs in an exception handler, so must not throw.
+inline void noteUnrecordedOnlineWinner(const char* what)
+{
+    TensileLite::TuningCounters::instance().unrecorded++;
+
+    static std::atomic<bool> reported{false};
+    if(reported.exchange(true))
+        return;
+
+    try
+    {
+        std::ostringstream msg;
+        msg << "online-winner not recorded: " << (what ? what : "unknown exception")
+            << "; nothing written to "
+            << TensileLite::TuningModeSingleton::getInstance().cachePath();
+
+        log_tuning_lifecycle("recordOnlineTuningWinner", msg.str());
+    }
+    catch(...)
+    {
+    }
+}
+
+inline void recordOnlineTuningWinner(const RocblasltContractionProblem&      prob,
+                                     const TensileLite::ProblemOverride&     key,
+                                     const TensileLite::ContractionSolution& winner,
+                                     size_t                                  requiredWorkspace,
+                                     const rocblaslt::OnlineTuner::Record&   record)
+{
+    const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+    if(!tuning.writes())
+        return;
+
+    // Must never fail the caller's matmul.
+    try
+    {
+        TensileLite::TunedEntry entry;
+        entry.solutionIndex          = winner.index;
+        entry.kernelName             = winner.kernelName;
+        entry.schemaVersion          = TensileLite::kCurrentTuningSchemaVersion;
+        entry.buildStamp             = TensileLite::currentBuildStamp();
+        entry.requiredWorkspaceBytes = requiredWorkspace;
+        entry.winnerTimeUs           = record.us;
+        entry.complete               = record.complete;
+        entry.budgetMs               = 0;
+
+        const TensileLite::TuningSearch search = TuningPolicy::onlineSearch(record.workspaceBytes);
+        entry.search                           = search;
+
+        const bool persisted = TensileLite::appendTunedEntry(tuning.cachePath(), prob, entry);
+
+        static_cast<void>(TensileLite::OverrideMap::getMap().addIfAbsent(key, entry));
+
+        // Matched whether or not the append reached the file; tuned counts
+        // the rows that did.
+        auto& counters = TensileLite::TuningCounters::instance();
+        if(persisted)
+            counters.tuned++;
+        TensileLite::recordTuningLookup(key, true);
+        TensileLite::recordTuningWinner(key);
+
+        // Under the same per-key gate as tune's terminal line.
+        if(TensileLite::shouldLogTuningTerminal(key, TensileLite::TuningAttempt::Tuned))
+        {
+            std::ostringstream msg;
+            msg << "online-winner=" << entry.solutionIndex << " us=" << std::fixed
+                << std::setprecision(2) << entry.winnerTimeUs << " candidates=" << record.candidates
+                << " repeats=" << search.hotIters << " persisted=" << (persisted ? "yes" : "no");
+            if(!persisted)
+                msg << " (could not write " << tuning.cachePath() << ")";
+
+            log_tuning_lifecycle(__func__, msg.str());
+        }
+    }
+    catch(const std::exception& e)
+    {
+        noteUnrecordedOnlineWinner(e.what());
+    }
+    catch(...)
+    {
+        noteUnrecordedOnlineWinner(nullptr);
+    }
+}
+
+// What online tuning needs from a dispatch it may serve or explore: the problem
+// and the key its row is written under.
+struct OnlineLookup
+{
+    const RocblasltContractionProblem*  prob;
+    const TensileLite::ProblemOverride* key;
+};
+
+// Move the candidate online tuning wants next to the front of the ranking and,
+// on the call that claims a resolved key, record the winner. Candidates the
+// caller's workspace cannot cover are withheld from the tuner.
+inline void
+    applyOnlineTuning(std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+                      const TensileLite::ContractionProblemGemm&                      tensile_prob,
+                      const TensileLite::Hardware&                                    hardware,
+                      const OnlineLookup&                                             online)
+{
+    const RocblasltContractionProblem&  prob = *online.prob;
+    const TensileLite::ProblemOverride& key  = *online.key;
+
+    std::vector<int>    rankedSolutionIndices;
+    std::vector<size_t> rankedPositions;
+    rankedSolutionIndices.reserve(solutions.size());
+    rankedPositions.reserve(solutions.size());
+
+    for(size_t i = 0; i < solutions.size(); ++i)
+    {
+        if(solutions[i]->requiredWorkspaceSize(tensile_prob, hardware)
+           > tensile_prob.workspaceSize())
+            continue;
+
+        rankedSolutionIndices.push_back(solutions[i]->index);
+        rankedPositions.push_back(i);
+    }
+
+    // Which problem under the key is asking. The problem's hash leaves out
+    // whether C and D alias, which can change which kernels run.
+    const size_t problemIdentity = TensileLite::hash_combine(
+        std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob), tensile_prob.cEqualsD());
+
+    const bool mayProbe = !streamIsCapturing(prob.stream);
+
+    rocblaslt::OnlineTuner::Record record;
+    const int                      promote
+        = rocblaslt::OnlineTuner::getInstance().selectCandidate(key,
+                                                                problemIdentity,
+                                                                tensile_prob.workspaceSize(),
+                                                                rankedSolutionIndices,
+                                                                mayProbe,
+                                                                &record);
+    if(promote < 0)
+        return;
+
+    const size_t position = rankedPositions[promote];
+
+    if(record.us >= 0.0f)
+        recordOnlineTuningWinner(prob,
+                                 key,
+                                 *solutions[position],
+                                 solutions[position]->requiredWorkspaceSize(tensile_prob, hardware),
+                                 record);
+
+    const auto picked = solutions.begin() + position;
+    std::rotate(solutions.begin(), picked, picked + 1);
+}
+
+// online, if not null, puts online tuning into this lookup.
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -7578,7 +7890,8 @@ inline auto getSolutions(
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount,
     rocblaslt_mx_scale_need                       mxScaleNeed,
-    bool*                                         layoutRuledOut = nullptr)
+    bool*                                         layoutRuledOut = nullptr,
+    const OnlineLookup*                           online         = nullptr)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7586,6 +7899,12 @@ inline auto getSolutions(
         = TensileLite::Debug::Instance().printNoSolutionUniformSummationOrder();
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
+
+    const bool onlineTuning = online != nullptr;
+
+    const int fetchCount
+        = onlineTuning ? std::max(requestedAlgoCount, rocblaslt::OnlineTuner::getInstance().topK())
+                       : requestedAlgoCount;
 
     // Library logic can rank a custom kernel ahead of the kernels it replaces,
     // and ranks kernels of every MX scale layout together. Drop the ones this
@@ -7604,7 +7923,7 @@ inline auto getSolutions(
     if(mxScaleNeed != rocblaslt_mx_scale_need::Conflict)
         solutions = rocblaslt_find_top_kept(
             [&](int count) { return library->findTopSolutions(tensile_prob, *hardware, count); },
-            requestedAlgoCount,
+            fetchCount,
             drop);
 
     if(solutions.empty() && layoutDropped)
@@ -7615,6 +7934,14 @@ inline auto getSolutions(
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
+
+    if(onlineTuning)
+    {
+        applyOnlineTuning(solutions, tensile_prob, *hardware, *online);
+
+        if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
+            solutions.resize(requestedAlgoCount);
+    }
 
     return solutions;
 }
@@ -7800,14 +8127,16 @@ static rocblaslt_status
     return rocblaslt_status_success;
 }
 
-rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
-                                  rocblaslt_handle                   handle,
-                                  std::shared_ptr<void>              gemmData,
-                                  int                                requestedAlgoCount,
-                                  rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
-                                  int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes,
-                                  bool*                              layoutRuledOut)
+rocblaslt_status getBestSolutions(RocblasltContractionProblem const&  prob,
+                                  rocblaslt_handle                    handle,
+                                  std::shared_ptr<void>               gemmData,
+                                  int                                 requestedAlgoCount,
+                                  rocblaslt_matmul_heuristic_result   heuristicResultsArray[],
+                                  int*                                returnAlgoCount,
+                                  size_t                              maxWorkSpaceBytes,
+                                  SolutionLookup                      lookup,
+                                  const TensileLite::ProblemOverride* tuningKey,
+                                  bool*                               layoutRuledOut)
 {
     *returnAlgoCount = 0;
     if(layoutRuledOut)
@@ -7847,6 +8176,15 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
+    // A heuristic query never reaches the tuner; see rocblaslt::OnlineTuner. Nor
+    // does a call under a settled key, which replay could not serve.
+    auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
+    const bool onlineTuning = lookup == SolutionLookup::PerDispatch && tuningKey && tuner.enabled()
+                              && onlineTunable(prob) && !tuner.settled(*tuningKey);
+
+    const OnlineLookup  onlineLookup{&prob, tuningKey};
+    const OnlineLookup* online = onlineTuning ? &onlineLookup : nullptr;
+
     bool ruledOut  = false;
     auto solutions = getSolutions(prob,
                                   library,
@@ -7855,7 +8193,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   enableEpilogue,
                                   requestedAlgoCount,
                                   data->mxScaleNeed,
-                                  &ruledOut);
+                                  &ruledOut,
+                                  online);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -7871,7 +8210,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                  enableEpilogue,
                                  requestedAlgoCount,
                                  data->mxScaleNeed,
-                                 &fallbackRuledOut);
+                                 &fallbackRuledOut,
+                                 online);
         ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
     }
     if(layoutRuledOut)

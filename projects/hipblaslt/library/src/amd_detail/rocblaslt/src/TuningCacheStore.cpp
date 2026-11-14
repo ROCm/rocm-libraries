@@ -16,18 +16,40 @@
 
 namespace TensileLite
 {
+    const char* tuningModeName(TuningMode mode)
+    {
+        switch(mode)
+        {
+        case TuningMode::Cache:
+            return "cache";
+        case TuningMode::Tune:
+            return "tune";
+        case TuningMode::Online:
+            return "online";
+        case TuningMode::Off:
+            break;
+        }
+        return "off";
+    }
+
+    std::optional<TuningMode> tuningModeFromName(const std::string& name)
+    {
+        for(const TuningMode mode :
+            {TuningMode::Off, TuningMode::Cache, TuningMode::Tune, TuningMode::Online})
+            if(name == tuningModeName(mode))
+                return mode;
+
+        return std::nullopt;
+    }
+
     TuningModeConfig TuningModeConfig::fromEnvironment(bool isPrivileged)
     {
         TuningModeConfig config;
 
+        // An unknown value leaves the mode off.
         if(const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_MODE", isPrivileged))
-        {
-            const std::string value(env);
-            if(value == "cache")
-                config.mode = TuningMode::Cache;
-            else if(value == "tune")
-                config.mode = TuningMode::Tune;
-        }
+            if(const auto mode = tuningModeFromName(env))
+                config.mode = *mode;
 
         if(const char* path
            = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_CACHE_PATH", isPrivileged))
@@ -311,10 +333,20 @@ namespace TensileLite
                    || (has(row, "solution_name") && !str(row, "solution_name").empty());
         }
 
-        // The columns version 2 adds: whether the search finished, its ceiling,
-        // and what it covered. They decide whether tune mode revisits the row.
+        // The columns version 2 adds: which mode produced the row, whether the
+        // search finished, its ceiling, and what it covered. They decide
+        // whether tune mode revisits the row.
         bool hasRequiredSearchColumns(const std::map<std::string, std::string>& row)
         {
+            // An absent tuning_mode is an older version 2 row, which reads as
+            // Tune; a present but unreadable cell is refused.
+            if(has(row, "tuning_mode"))
+            {
+                const auto mode = tuningModeFromName(str(row, "tuning_mode"));
+                if(!mode || (*mode != TuningMode::Tune && *mode != TuningMode::Online))
+                    return false;
+            }
+
             for(const char* name : {"budget_ms", "search_workspace"})
             {
                 const auto value = exactNum(row, name);
@@ -481,6 +513,9 @@ namespace TensileLite
             entry.budgetMs = *exactNum(row, "budget_ms");
 
             TuningSearch search;
+            if(has(row, "tuning_mode"))
+                search.mode = *tuningModeFromName(str(row, "tuning_mode"));
+
             search.allKernels     = *exactNum(row, "search_all_kernels") != 0;
             search.maxCandidates  = static_cast<int32_t>(*exactNum(row, "search_max_candidates"));
             search.workspaceBytes = static_cast<size_t>(*exactNum(row, "search_workspace"));
@@ -586,6 +621,7 @@ namespace TensileLite
         column("budget_ms", entry.budgetMs);
 
         const TuningSearch search = entry.search.value_or(TuningSearch{});
+        column("tuning_mode", tuningModeName(search.mode));
         column("search_all_kernels", search.allKernels ? 1 : 0);
         column("search_max_candidates", search.maxCandidates);
         column("search_workspace", search.workspaceBytes);
