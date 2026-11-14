@@ -235,7 +235,9 @@ TYPED_TEST(hip_matrix_csr_backend, set_data_ptr_without_entries)
 }
 
 // The operations on the values and the extractions leave a matrix without
-// entries as it is. The extractions zero their outputs.
+// entries as it is. The row and column extractions zero their outputs.
+// ExtractDiagonal writes only the diagonal entries it finds, as on the host, so
+// it leaves its output as it is.
 TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
 {
     using T       = typename TypeParam::value_type;
@@ -329,7 +331,6 @@ TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
          [](const BaseMatrix<T>& A, BaseVector<T>* v) { return A.ExtractRowVector(2, v); }},
     };
 
-    std::vector<std::vector<T>> extracted;
     for(const auto& extraction : extractions)
     {
         SCOPED_TRACE(extraction.first);
@@ -338,39 +339,30 @@ TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
         auto v = make_vector(Backend::Accelerator, std::vector<T>(n, from_int<T>(7)));
         EXPECT_TRUE(extraction.second(*A, v.get()));
         expect_empty(*A, n, n);
-        extracted.push_back(values_of(*v));
-    }
-
-    KNOWN_BUG("the extractions return early without entries");
-    for(size_t k = 0; k < extractions.size(); ++k)
-    {
-        SCOPED_TRACE(extractions[k].first);
-        EXPECT_EQ(extracted[k], std::vector<T>(n, static_cast<T>(0)));
+        const T expected
+            = extraction.first == "ExtractDiagonal" ? from_int<T>(7) : static_cast<T>(0);
+        EXPECT_EQ(values_of(*v), std::vector<T>(n, expected));
     }
 }
 
-// The column becomes the only entries of the matrix. The code for matrices with
-// entries has a known bug that kills the process.
+// The column becomes the only entries of the matrix
 TYPED_TEST(hip_matrix_csr_backend, replace_column_vector_of_a_matrix_without_entries)
 {
     using T     = typename TypeParam::value_type;
     const int n = 5;
 
-    KNOWN_BUG("ReplaceColumnVector returns early without entries");
-    expect_in_child([&] {
-        const std::vector<T> column = from_ints<T>({1, 2, 3, 4, 5});
-        Csr<T>               expected(n);
-        for(const T& v : column)
-        {
-            expected.add(2, v);
-            expected.end_row();
-        }
+    const std::vector<T> column = from_ints<T>({1, 2, 3, 4, 5});
+    Csr<T>               expected(n);
+    for(const T& v : column)
+    {
+        expected.add(2, v);
+        expected.end_row();
+    }
 
-        auto A = empty_accelerator<T>();
-        A->AllocateCSR(0, n, n);
-        EXPECT_TRUE(A->ReplaceColumnVector(2, *make_vector(Backend::Accelerator, column)));
-        expect_csr_near(csr_of(*A), expected, 0.0);
-    });
+    auto A = empty_accelerator<T>();
+    A->AllocateCSR(0, n, n);
+    EXPECT_TRUE(A->ReplaceColumnVector(2, *make_vector(Backend::Accelerator, column)));
+    expect_csr_near(csr_of(*A), expected, 0.0);
 }
 
 // The factorizations and solves of a 0 x 0 matrix have nothing to do. The

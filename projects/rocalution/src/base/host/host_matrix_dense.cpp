@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -720,12 +720,12 @@ namespace rocalution
             HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
             assert(cast_vec != NULL);
 
-            _set_omp_backend_threads(this->local_backend_, this->nrow_);
+            _set_omp_backend_threads(this->local_backend_, this->ncol_);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < this->nrow_; ++i)
+            for(int i = 0; i < this->ncol_; ++i)
             {
                 cast_vec->vec_[i] = this->mat_.val[DENSE_IND(idx, i, this->nrow_, this->ncol_)];
             }

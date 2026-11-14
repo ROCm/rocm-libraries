@@ -1369,38 +1369,98 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns)
         }
         const Csr<T> column_inserted = from_dense(ref.n, ref.m, D);
 
-        if(backend() == Backend::Accelerator && is(CSR))
-        {
-            KNOWN_BUG("HIP CSR ReplaceColumnVector kills the process");
-            expect_in_child([&] {
-                auto M = make(row_replaced);
-                M->ReplaceColumnVector(4, *vector_of(new_column));
-                expect_kept(*M, column_replaced);
-                M->ReplaceColumnVector(9, *vector_of(full_column));
-                expect_kept(*M, column_inserted);
-            });
-            return;
-        }
         A->ReplaceColumnVector(4, *vector_of(new_column));
         expect_kept(*A, column_replaced);
 
-        // The BCSR blocks already store the column, so only the other formats insert entries
-        if(is(DENSE) || is(BCSR))
-        {
-            A->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*A, column_inserted);
-            return;
-        }
-
-        // The slot of the dropped entry stays uninitialized, which can corrupt memory
-        // when the result is converted back
-        KNOWN_BUG("host CSR ReplaceColumnVector drops the entry after an inserted one");
-        expect_in_child([&] {
-            auto M = make(column_replaced);
-            M->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*M, column_inserted);
-        });
+        A->ReplaceColumnVector(9, *vector_of(full_column));
+        expect_kept(*A, column_inserted);
     });
+}
+
+// The rows and columns of a matrix without entries are zero, and a replaced row
+// or column becomes its only entries. Most formats go through the fallbacks.
+TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns_without_entries)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const int                  n = 4;
+        const std::vector<PtrType> no_entries(n + 1, 0);
+        const std::vector<T>       values = {1, 0, 2, 3};
+        const std::vector<T>       zeros(n, T(0));
+
+        auto without_entries = [&] {
+            auto A = empty_local_matrix<T>(backend());
+            A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
+            A->ConvertTo(format().id, format().blockdim);
+            return A;
+        };
+
+        auto A = without_entries();
+        expect_kept(*A, from_dense(n, n, std::vector<T>(n * n, T(0))));
+
+        auto x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractColumnVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractRowVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        // MCSR needs every diagonal entry, and DIA and ELL reject matrices with
+        // fewer entries than rows, so these results stay in CSR
+        const unsigned int result_format = is(MCSR) || is(DIA) || is(ELL) ? CSR : format().id;
+
+        std::vector<T> D(n * n, T(0));
+        for(int i = 0; i < n; ++i)
+        {
+            D[i * n + 1] = values[i];
+        }
+        std::string log = logged([&] { A->ReplaceColumnVector(1, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[A->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
+        expect_kept_or_csr(*A, from_dense(n, n, D), log);
+
+        auto B = without_entries();
+        std::fill(D.begin(), D.end(), T(0));
+        std::copy(values.begin(), values.end(), D.begin() + 2 * n);
+        log = logged([&] { B->ReplaceRowVector(2, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
+        expect_kept_or_csr(*B, from_dense(n, n, D), log);
+    });
+}
+
+// Column 4 of a 3 x 5 matrix is past its rows, and its rows are longer than its columns
+TYPED_TEST(local_matrix, extracts_and_replaces_rows_and_columns_of_a_wide_matrix)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref = rectangular<T>(3, 5);
+    auto         A   = make_local_matrix(this->backend(), ref);
+
+    auto c = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
+    auto r = make_local_vector(this->backend(), std::vector<T>(ref.m, 0.0));
+    A->ExtractColumnVector(4, c.get());
+    A->ExtractRowVector(2, r.get());
+    expect_vector(*c, column(ref, 4), this->backend(), 0);
+    expect_vector(*r, row(ref, 2), this->backend(), 0);
+    expect_matrix(*A, ref, csr_format, this->backend());
+
+    // Only row 2 holds column 4, so rows 0 and 1 gain an entry
+    std::vector<T>       D          = dense(ref);
+    const std::vector<T> new_column = {1, 2, 3};
+    for(int i = 0; i < ref.n; ++i)
+    {
+        D[static_cast<size_t>(i) * ref.m + 4] = new_column[i];
+    }
+    A->ReplaceColumnVector(4, *make_local_vector(this->backend(), new_column));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
+
+    const std::vector<T> new_row = {5, 0, 6, 0, 7};
+    std::copy(new_row.begin(), new_row.end(), D.begin() + 2 * ref.m);
+    A->ReplaceRowVector(2, *make_local_vector(this->backend(), new_row));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
 }
 
 // Factorizations and triangular solves
@@ -2777,44 +2837,6 @@ TEST_P(local_matrix_formats, amg_greedy_aggregate_runs_on_a_csr_copy)
 
 // Matrices without entries
 
-// The rows and columns of a matrix without entries are zero
-TYPED_TEST(local_matrix, rows_and_columns_of_a_matrix_without_entries)
-{
-    using T = typename TypeParam::value_type;
-
-    const int                  n = 4;
-    const std::vector<PtrType> no_entries(n + 1, 0);
-    const std::vector<T>       values = {1, 0, 2, 3};
-    const std::vector<T>       zeros(n, T(0));
-
-    KNOWN_BUG("rows and columns of a matrix without entries are neither extracted nor replaced");
-
-    auto A = empty_local_matrix<T>(this->backend());
-    A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    auto x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractColumnVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractRowVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    std::vector<T> D(n * n, T(0));
-    for(int i = 0; i < n; ++i)
-    {
-        D[i * n + 1] = values[i];
-    }
-    A->ReplaceColumnVector(1, *make_local_vector(this->backend(), values));
-    expect_matrix(*A, from_dense(n, n, D), csr_format, this->backend());
-
-    auto B = empty_local_matrix<T>(this->backend());
-    B->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    std::fill(D.begin(), D.end(), T(0));
-    std::copy(values.begin(), values.end(), D.begin() + 2 * n);
-    B->ReplaceRowVector(2, *make_local_vector(this->backend(), values));
-    expect_matrix(*B, from_dense(n, n, D), csr_format, this->backend());
-}
-
 // The operations skip a matrix without entries and leave their outputs as they
 // were. For the solves of this singular system, the eigenvalue bounds, the
 // Householder vector, the orderings and the iteration count that is a convention
@@ -3122,6 +3144,16 @@ TEST(local_matrix_preconditions, violations_end_the_program)
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
+    EXPECT_ASSERT_DEATH(A->ExtractColumnVector(4, y.get()), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ReplaceColumnVector(4, *y), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ExtractRowVector(4, y.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(A->ReplaceRowVector(4, *y), "idx < this->GetM");
+
+    // Row 3 of a 3 x 5 matrix is out of range, although column 3 is not
+    auto W = make_local_matrix(Backend::Host, rectangular(3, 5));
+    auto w = make_local_vector(Backend::Host, std::vector<double>(5, 1.0));
+    EXPECT_ASSERT_DEATH(W->ExtractRowVector(3, w.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(W->ReplaceRowVector(3, *w), "idx < this->GetM");
 
     LocalMatrix<double> S;
     EXPECT_ASSERT_DEATH(A->ExtractSubMatrix(5, 0, 1, 1, &S), "row_offset");

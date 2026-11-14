@@ -9,6 +9,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 
 ### Changed
 * `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* `LocalMatrix::ExtractColumnVector()`, `LocalMatrix::ExtractRowVector()`, `LocalMatrix::ReplaceColumnVector()` and `LocalMatrix::ReplaceRowVector()` now require the index of the row or column to be in range. Before, an index out of range could access memory out of bounds or create entries outside the matrix, and did nothing for a matrix without entries.
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
@@ -43,6 +44,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::ReplaceColumnVector()` on CSR matrices dropping the entry that follows an inserted one, which could corrupt memory. All other formats except DENSE fall back to the host CSR code, so they dropped the entry on both backends. On the accelerator, every call on a CSR matrix with entries also read the new number of entries from uninitialized memory, which could end the process with an illegal memory access.
+* Fixed `LocalMatrix::ExtractColumnVector()`, `LocalMatrix::ExtractRowVector()`, `LocalMatrix::ReplaceColumnVector()` and `LocalMatrix::ReplaceRowVector()` doing nothing for a matrix without entries. The extractions now return zeros, and the replacements insert the nonzero values.
+* Fixed `LocalMatrix::ExtractRowVector()` on DENSE host matrices filling only as many entries of the vector as the matrix has rows, and reading past the end of the matrix and writing past the end of the vector when the matrix has more rows than columns.
 
 ## (Unreleased) rocALUTION 4.1.1
 
