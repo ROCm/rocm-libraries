@@ -211,10 +211,11 @@ int64_t hankelLdsBytes(const WrwConfig& config)
     const int64_t sg = divUp(config.kw, 4);
     const int64_t stride = std::max<int64_t>(config.s, 1);
     const int64_t xg = stride == 1 ? config.q / 4 + sg : config.q / 4 + (sg - 1) / 2 + 1;
-    const int64_t xWords = divUp(xg, 8) * 8;
-    const int64_t dyWords = divUp(config.q / 4, 8) * 8;
+    // Row pitches: whole dwords, an odd number of dword pairs (pitchOf).
+    const auto pitchOf
+        = [](int64_t dwords) { return 2 * ((dwords + 2) / 2 % 2 == 1 ? dwords + 2 : dwords + 4); };
     const int64_t channels = 64 * config.nwg;
-    const int64_t xPitch = 4 * xWords + 4, dyPitch = 4 * dyWords + 4;
+    const int64_t xPitch = pitchOf(2 * xg), dyPitch = pitchOf(2 * (config.q / 4));
     const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
     return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;
@@ -253,6 +254,12 @@ bool hankelAdmits(const WrwProblem& problem,
         return false;
     }
     if(a.sh != config.s || a.sw != config.s || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
+    {
+        return false;
+    }
+    // The kernel addresses an image of x and of dy through a buffer descriptor: under 2 GiB.
+    const int64_t maxImage = int64_t{0x7fffffff};
+    if(int64_t{a.hi} * a.wi * a.c * 2 > maxImage || int64_t{a.ho} * a.wo * a.c * 2 > maxImage)
     {
         return false;
     }
