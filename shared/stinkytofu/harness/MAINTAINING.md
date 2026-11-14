@@ -14,6 +14,7 @@ Read this only when you are asked to change the harness. Agents verifying a chan
 | `DATABASE.md` | `$HARNESS_DB` is set, or asked to remember | 7 KB |
 | `ENTRY-FORMAT.md` | writing or changing a database entry | 5 KB |
 | `PROFILING.md` (hipBLASLt folder) | before a perf A/B | 5 KB |
+| `SETUP.md` | setting up a new machine or clone | 5 KB |
 
 A database index line stays under 200 characters, and an entry stays under 3 KB with its review card
 first. Past about 100 entries, split the index by scope: a short top-level index that lists the scopes,
