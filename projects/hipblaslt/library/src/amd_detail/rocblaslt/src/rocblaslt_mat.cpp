@@ -820,10 +820,11 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        // GSU region, per problem, shared across
-                                        // streams, null past the last slot. The
-                                        // separate Stream-K region is bound per
-                                        // stream in makeArgument().
+                                        // Create-time placeholder in stream 0's
+                                        // block. makeArgument() rebinds every
+                                        // problem onto the stream that launches
+                                        // it. Null when the group is wider than
+                                        // the per-stream slots.
                                         handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,
@@ -1619,9 +1620,11 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        // GSU region, per problem and null past
-                                        // the last slot; Stream-K is bound per
-                                        // stream in makeArgument().
+                                        // Create-time placeholder in stream 0's
+                                        // block. makeArgument() rebinds every
+                                        // problem onto the stream that launches
+                                        // it. Null when the group is wider than
+                                        // the per-stream slots.
                                         handle->gsuFlagsForProblem(i),
                                         swizzleA,
                                         swizzleB,

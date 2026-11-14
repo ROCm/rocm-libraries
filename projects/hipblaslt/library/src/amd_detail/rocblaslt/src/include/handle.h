@@ -94,8 +94,9 @@ struct _rocblaslt_handle
     // asic revision
     int asic_rev;
 
-    // GSU (MBSK) reduction flags, and the amax reduction counter. Shared across
-    // streams, indexed by problem, exactly as before.
+    // GSU (MBSK) reduction flags, and the amax reduction counter. Private to a
+    // stream: see gsuFlagsForStream. A GSU<=2 MBSK kernel busy-waits on this
+    // memory, so two streams must not be given the same address.
     void* Synchronizer = nullptr;
     // Stream-K inter-workgroup flags. Private to a (stream, problem) pair; see
     // streamKFlagsForStream below.
@@ -151,26 +152,77 @@ struct _rocblaslt_handle
     // There are two consumers and they want opposite things, so they get two
     // buffers rather than one compromise.
     //
-    // GSU reduction (MBSK) needs synchronizerSizePerWG * numTiles * batch ints,
-    // which runs into the tens of thousands on the shapes it is selected for.
-    // Shrinking that would price MBSK candidates out of selection, so this
-    // region keeps the size and the per-problem-only layout it has always had
-    // and stays shared across streams. Solution selection is therefore
-    // unchanged, and so is the cross-stream exposure of this path: no better
-    // than today, but no worse.
-    static constexpr size_t c_syncGsuSlotElements  = 409600;
-    static constexpr size_t c_syncGsuSlotBytes     = c_syncGsuSlotElements * sizeof(int);
-    static constexpr size_t c_syncGsuSlots         = 16;
-    static constexpr size_t c_syncGsuTotalElements = c_syncGsuSlots * c_syncGsuSlotElements;
+    // One slot stays 409600 ints. A non-grouped GEMM is handed the base of its
+    // stream's block and SynchronizerSizeCheck lets it use every problem slot.
+    // Shrinking a slot would drop MBSK solutions. A grouped GEMM is handed the
+    // slot at its problem index, so c_syncGsuSlots of them have to exist inside
+    // the stream. UserArgs kernels add exactly one slot (1638400 bytes) to the
+    // pointer when ArgType==2, and a non-grouped GEMM that does so can then
+    // walk one slot past the old 16; c_syncGsuGuardSlots keeps that inside the
+    // stream. Streams are claimed like Stream-K, so two concurrent GEMMs no
+    // longer share a flag.
+    static constexpr size_t c_syncGsuSlotElements   = 409600;
+    static constexpr size_t c_syncGsuSlotBytes      = c_syncGsuSlotElements * sizeof(int);
+    static constexpr size_t c_syncGsuSlots          = 16;
+    static constexpr size_t c_syncGsuGuardSlots     = 1;
+    static constexpr size_t c_syncGsuSlotsPerStream = c_syncGsuSlots + c_syncGsuGuardSlots;
+    static constexpr size_t c_syncGsuStreamSlots    = 64;
+    static constexpr size_t c_syncGsuTotalElements
+        = c_syncGsuStreamSlots * c_syncGsuSlotsPerStream * c_syncGsuSlotElements;
 
-    // GSU flag region for `problemIndex`, or null past the last slot. A group
-    // this wide must not run a solution that reads these flags;
-    // SynchronizerSizeCheck and calculateAutoGSU are what ensure that.
+    // Create-time placeholder: problem `problemIndex` inside stream 0's block.
+    // Launch paths rebind through gsuFlagsForStream once the stream is known.
     void* gsuFlagsForProblem(size_t problemIndex) const
     {
         if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
             return nullptr;
         return static_cast<char*>(Synchronizer) + problemIndex * c_syncGsuSlotBytes;
+    }
+
+    // Flag region for (`stream`, `problemIndex`). The extra guard slot is not
+    // handed out as a problem index; kernels that bump the pointer by one slot
+    // land on it instead of the next stream. A problem index past
+    // c_syncGsuSlots, or a 65th distinct stream, is refused rather than aliased
+    // onto a region another launch already owns.
+    rocblaslt_status gsuFlagsForStream(hipStream_t stream, size_t problemIndex, void** out)
+    {
+        *out = nullptr;
+        if(Synchronizer == nullptr)
+            return rocblaslt_status_success;
+        if(problemIndex >= c_syncGsuSlots)
+            return rocblaslt_status_invalid_value;
+
+        const void* key = static_cast<const void*>(stream);
+        if(stream == hipStreamPerThread)
+        {
+            static thread_local char perThreadKey;
+            key = &perThreadKey;
+        }
+        else if(stream == nullptr || stream == hipStreamLegacy)
+        {
+            static char legacyNullKey;
+            key = &legacyNullKey;
+        }
+
+        for(size_t i = 0; i < c_syncGsuStreamSlots; ++i)
+        {
+            const void* owner = m_gsuSlotOwner[i].load(std::memory_order_acquire);
+            if(owner == nullptr)
+            {
+                const void* expected = nullptr;
+                owner = m_gsuSlotOwner[i].compare_exchange_strong(
+                            expected, key, std::memory_order_acq_rel, std::memory_order_acquire)
+                            ? key
+                            : expected;
+            }
+            if(owner == key)
+            {
+                *out = static_cast<char*>(Synchronizer)
+                       + (i * c_syncGsuSlotsPerStream + problemIndex) * c_syncGsuSlotBytes;
+                return rocblaslt_status_success;
+            }
+        }
+        return rocblaslt_status_internal_error;
     }
 
     // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
@@ -267,6 +319,7 @@ struct _rocblaslt_handle
 
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
+    std::atomic<const void*> m_gsuSlotOwner[c_syncGsuStreamSlots] = {};
 
     // Adaptive sm_count_target state, per stream slot; null when the mode is
     // off or its setup failed.

@@ -5779,8 +5779,14 @@ static rocblaslt_status bindSynchronizers(rocblaslt_handle                      
         }
         // Always replace the old binding, including when Stream-K storage
         // is unavailable or the newly selected solution does not read flags.
+        // GSU flags are per stream as well as per problem: the kernel busy-waits
+        // on this address when GSU <= 2.
         if(region == nullptr)
-            region = handle->gsuFlagsForProblem(i);
+        {
+            auto status = handle->gsuFlagsForStream(stream, i, &region);
+            if(status != rocblaslt_status_success)
+                return status;
+        }
         inputs[i].Synchronizer = region;
     }
     return rocblaslt_status_success;
@@ -6400,16 +6406,26 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
 
+        // GSU reduction flags are private to this stream. Claimed here, where
+        // the stream is known, and reused for the launch below.
+        void* gsuRegion = nullptr;
+        if(auto gsuStatus = handle->gsuFlagsForStream(prob.stream, 0, &gsuRegion);
+           gsuStatus != rocblaslt_status_success)
+        {
+            log_error(__func__, "no GSU flag region left for this stream");
+            return gsuStatus;
+        }
+
         // A Stream-K solution reads these flags as one int per workgroup, and
         // needs a region nobody else is touching; everything else reads them as
-        // the GSU reduction area, which is far larger and stays shared. The two
-        // never coincide in one kernel, so a single pointer serves both and the
-        // choice is made here, where the solution is finally known.
+        // the GSU reduction area of this stream. The two never coincide in one
+        // kernel, so a single pointer serves both and the choice is made here,
+        // where the solution is finally known.
         {
             auto picked = solutionAt(*solutionIndex);
             if(picked)
                 data->inputs.Synchronizer
-                    = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
+                    = synchronizerForSolution(*picked, prob.streamKFlags, gsuRegion);
         }
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
@@ -6545,7 +6561,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // the problem's original pointer and drop the choice.
             auto skInputs = GetTensileInputs(prob);
             skInputs.Synchronizer
-                = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
+                = synchronizerForSolution(*solution, prob.streamKFlags, gsuRegion);
             auto kernels = solution->solve(data->problem, skInputs, *hardware);
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
@@ -6882,13 +6898,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // below. If this solution reads the flags as Stream-K, point them at
             // a region private to this stream so two Gemm objects initialized on
             // different streams cannot share one. Every other solution is put
-            // back on the shared GSU region: `data->inputs` survives across
+            // back on this stream's GSU region: `data->inputs` survives across
             // initialize() calls, so a Stream-K binding left in place would send
             // an MBSK reduction into the small Stream-K region.
             if(auto s = bindSynchronizers(handle, *solution, stream, &data->inputs);
                s != rocblaslt_status_success)
             {
-                log_error(__func__, "no Stream-K flag region left for this stream");
+                log_error(__func__, "no flag region left for this stream");
                 return s;
             }
 
@@ -7021,11 +7037,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
 
             // Grouped GEMM does select Stream-K solutions, so isolation has to
-            // cover the stream as well as the problem index: offsetting by index
-            // alone keeps one grouped call internally safe but still shares the
-            // region with every other stream. Every other solution is put back
-            // on the GSU region its own problem index owns, for the reason the
-            // single-GEMM branch above assigns unconditionally.
+            // cover the stream as well as the problem index. GSU solutions get
+            // the same treatment: each problem is a slot inside this stream's
+            // block, not a slot in a buffer shared with every other stream.
             if(auto s = bindSynchronizers(handle,
                                           *solution,
                                           stream,
@@ -7034,9 +7048,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                s != rocblaslt_status_success)
             {
                 if(s == rocblaslt_status_invalid_value)
-                    log_error(__func__, "a Stream-K group exceeds c_syncSkSlotsPerStream problems");
+                    log_error(__func__,
+                              "grouped GEMM exceeds the per-stream flag slots "
+                              "(Stream-K or GSU)");
                 else
-                    log_error(__func__, "no Stream-K flag region left for this stream");
+                    log_error(__func__, "no flag region left for this stream");
                 return s;
             }
 
