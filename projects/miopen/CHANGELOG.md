@@ -71,6 +71,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Pooling][BatchNorm] Fixed wrong results with a success status on gfx12
+  ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)). The Y and Z workgroup IDs are
+  16 bits wide on gfx12, so a launch with more than 65536 workgroups in either dimension wraps
+  `blockIdx` and the kernel covers only part of the problem. The 2D pooling forward and backward
+  solvers mapped N*C to Z, and the BatchNorm forward inference solver mapped H*W to Y for NHWC. The
+  pooling kernels now index all their workgroups through the X workgroup ID, and the BatchNorm
+  inference solver caps the Y workgroup count and strides over the remaining positions. Kernel
+  launches that still exceed the limit on gfx12 now fail with `miopenStatusInternalError` instead
+  of returning wrong results.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
