@@ -50,12 +50,14 @@ namespace
         rocsparse_mat_descr d = nullptr;
         MatDescr()
         {
-            (void)rocsparse_create_mat_descr(&d);
+            unit_test_throw_rocsparse_error("rocsparse_create_mat_descr",
+                                            rocsparse_create_mat_descr(&d));
         }
         ~MatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_mat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                      rocsparse_destroy_mat_descr(d));
         }
     };
 

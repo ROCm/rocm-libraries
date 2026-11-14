@@ -18,6 +18,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <Tensile/AMDGPU.hpp>
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -139,6 +141,51 @@ namespace TensileLite
             shape, pt.transA, pt.transB, pt.aType, pt.bType, pt.cType, pt.dType, pt.computeType};
     }
 
+    inline bool pinsProcessor(Predicates::Predicate<AMDGPU> const& predicate,
+                              AMDGPU::Processor                    processor)
+    {
+        if(auto const* p = dynamic_cast<Predicates::GPU::ProcessorEqual const*>(&predicate))
+            return p->value == processor;
+        if(auto const* all = dynamic_cast<Predicates::And<AMDGPU> const*>(&predicate))
+            return std::any_of(all->value.begin(), all->value.end(), [&](auto const& term) {
+                return term && pinsProcessor(*term, processor);
+            });
+        return false;
+    }
+
+    /**
+     * Restricts a kernel to devices with `processor`. The local kernel library is
+     * shared by every device in the process, so without this a kernel built
+     * for one architecture could be selected on a device of another.
+     *
+     * The root stays IsSubclass<Hardware, AMDGPU>, which
+     * ContractionSolution::isFallbackForHW casts to. Returns false, changing
+     * nothing, for any other root except TruePred.
+     */
+    template <typename MySolution>
+    bool pinToProcessor(MySolution& solution, AMDGPU::Processor processor)
+    {
+        using AMDGPUPredicate = std::shared_ptr<Predicates::Predicate<AMDGPU>>;
+
+        AMDGPUPredicate inner;
+        if(auto root = std::dynamic_pointer_cast<Predicates::IsSubclass<Hardware, AMDGPU>>(
+               solution.hardwarePredicate))
+            inner = root->value;
+        else if(!std::dynamic_pointer_cast<Predicates::True<Hardware>>(solution.hardwarePredicate))
+            return false;
+
+        if(inner && pinsProcessor(*inner, processor))
+            return true;
+
+        AMDGPUPredicate pin = std::make_shared<Predicates::GPU::ProcessorEqual>(processor);
+        if(inner)
+            pin = std::make_shared<Predicates::And<AMDGPU>>(
+                std::vector<AMDGPUPredicate>{pin, inner});
+        solution.hardwarePredicate
+            = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(pin);
+        return true;
+    }
+
     /**
      * Immutable state of the local kernel library. Each change publishes a new
      * snapshot, so readers never see a partial update.
@@ -214,7 +261,9 @@ namespace TensileLite
          * Registered kernels, mapped or not, that match the problem as far as
          * `searchType` asks, with the filters the shipped libraries apply: the
          * problem type, hardware and software predicates for DEFAULT, the GEMM
-         * type for GEMM_TYPE_ONLY, the hardware alone for HARDWARE_ONLY.
+         * type for GEMM_TYPE_ONLY and GEMM_TYPE_ONLY_NO_RANKING, the hardware
+         * alone for HARDWARE_ONLY. The no-ranking variant does not drop local
+         * kernels; ranking rows live in ExactLogicLibrary, not here.
          */
         SolutionSet<MySolution> findAll(MyProblem const&          problem,
                                         Hardware const&           hardware,
@@ -241,6 +290,7 @@ namespace TensileLite
                     }
                     break;
                 case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
+                case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
                     match = (*solution.hardwarePredicate)(hardware)
                             && isGemmTypeSame(solution, problem);
                     break;

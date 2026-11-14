@@ -11,13 +11,14 @@
 #include <thread>
 #include <vector>
 
-#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/LocalKernelLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 
 using namespace TensileLite;
 
@@ -31,9 +32,30 @@ namespace
     constexpr size_t kN = 256;
     constexpr size_t kK = 64;
 
-    AMDGPU makeGpu()
+    // Selection reads analytical hardware through hip::HipAMDGPU. The XCD count
+    // is not a power of two, so a StreamK dynamic-queue kernel stays excluded.
+    hip::HipAMDGPU makeGpu()
     {
-        return AMDGPU(AMDGPU::Processor::gfx950, 256, "gfx950");
+        using arch_t = origami::hardware_t::architecture_t;
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx950;
+        device.computeUnitCount = 256;
+        device.deviceName       = "gfx950";
+        // Analytical hardware with values selected for test purposes.
+        device.analyticalHardware
+            = std::make_shared<origami::hardware_t>(arch_t::gfx950,
+                                                    /*N_CU=*/256,
+                                                    /*lds_capacity=*/163840,
+                                                    /*rf_capacity=*/262144,
+                                                    /*NUM_XCD=*/6,
+                                                    1.0,
+                                                    1.0,
+                                                    1.0,
+                                                    /*L2_capacity=*/4000000,
+                                                    /*compute_clock_ghz=*/1.2,
+                                                    /*parallel_mi_cu=*/1,
+                                                    std::make_tuple(0.0, 0.008, 0.0));
+        return device;
     }
 
     ContractionProblemGemm
@@ -485,12 +507,14 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
               SolutionSet<ContractionSolution>({serves}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
               SolutionSet<ContractionSolution>({serves, rejects}));
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING),
+              SolutionSet<ContractionSolution>({serves, rejects}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::HARDWARE_ONLY).size(), 3u);
 }
 
 // The DEFAULT search applies the software predicate the shipped libraries do,
-// which drops StreamK dynamic-queue kernels where the XCD count is not known
-// to be a power of two. makeGpu() carries no XCD count.
+// which drops StreamK dynamic-queue kernels when the XCD count is not a power
+// of two. makeGpu() reports six XCDs.
 TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
 {
     auto         problem = makeProblem();
@@ -507,6 +531,70 @@ TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
               SolutionSet<ContractionSolution>({plain}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
               SolutionSet<ContractionSolution>({plain, dynamicQueue}));
+}
+
+// A kernel pinned to one architecture is never selected on another, which is
+// what keeps the process-wide library per architecture on a mixed node.
+TEST(LocalKernelLibrary, smoke_PinnedKernelServesOnlyItsProcessor)
+{
+    auto         problem = makeProblem();
+    auto         gfx950  = makeGpu();
+    AMDGPU       gfx942(AMDGPU::Processor::gfx942, 304, "gfx942");
+    LocalLibrary library;
+
+    auto solution = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
+    int index = library.addSolutions({solution}).at(0);
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+
+    EXPECT_EQ(library.findExact(problem, gfx950), solution);
+    EXPECT_EQ(library.findExact(problem, gfx942), nullptr);
+    EXPECT_TRUE(library.findAll(problem, gfx942).empty());
+    EXPECT_TRUE(library.findAll(problem, gfx942, SolutionLibrarySearchType::HARDWARE_ONLY).empty());
+}
+
+TEST(LocalKernelLibrary, smoke_PinToProcessorKeepsTheAMDGPURoot)
+{
+    using AMDGPUPredicate = std::shared_ptr<Predicates::Predicate<AMDGPU>>;
+    using IsAMDGPU        = Predicates::IsSubclass<Hardware, AMDGPU>;
+    auto   problem        = makeProblem();
+    auto   gfx950         = makeGpu();
+    AMDGPU gfx950Other(AMDGPU::Processor::gfx950, 128, "gfx950");
+    AMDGPU gfx942(AMDGPU::Processor::gfx942, 256, "gfx942");
+
+    // Already pinned to this processor: left as built.
+    auto pinned               = makeSolution(problem);
+    pinned->hardwarePredicate = std::make_shared<IsAMDGPU>(
+        AMDGPUPredicate(std::make_shared<Predicates::And<AMDGPU>>(std::vector<AMDGPUPredicate>{
+            std::make_shared<Predicates::GPU::ProcessorEqual>(AMDGPU::Processor::gfx950),
+            std::make_shared<Predicates::GPU::CUCountEqual>(256)})));
+    auto before = pinned->hardwarePredicate;
+    ASSERT_TRUE(pinToProcessor(*pinned, AMDGPU::Processor::gfx950));
+    EXPECT_EQ(pinned->hardwarePredicate, before);
+
+    // Constrained, but not by processor: keeps its constraint and gains one.
+    auto unpinned               = makeSolution(problem);
+    unpinned->hardwarePredicate = std::make_shared<IsAMDGPU>(
+        AMDGPUPredicate(std::make_shared<Predicates::GPU::CUCountEqual>(256)));
+    ASSERT_TRUE(pinToProcessor(*unpinned, AMDGPU::Processor::gfx950));
+    ASSERT_NE(std::dynamic_pointer_cast<IsAMDGPU>(unpinned->hardwarePredicate), nullptr);
+    EXPECT_TRUE((*unpinned->hardwarePredicate)(gfx950));
+    EXPECT_FALSE((*unpinned->hardwarePredicate)(gfx950Other)) << "the CU count still applies";
+    EXPECT_FALSE((*unpinned->hardwarePredicate)(gfx942));
+
+    // Unconstrained: gains the AMDGPU root.
+    auto open = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*open, AMDGPU::Processor::gfx950));
+    ASSERT_NE(std::dynamic_pointer_cast<IsAMDGPU>(open->hardwarePredicate), nullptr);
+    EXPECT_TRUE((*open->hardwarePredicate)(gfx950Other));
+    EXPECT_FALSE((*open->hardwarePredicate)(gfx942));
+
+    // A root of any other form is refused and left alone.
+    auto other               = makeSolution(problem);
+    other->hardwarePredicate = std::make_shared<Predicates::False<Hardware>>();
+    before                   = other->hardwarePredicate;
+    EXPECT_FALSE(pinToProcessor(*other, AMDGPU::Processor::gfx950));
+    EXPECT_EQ(other->hardwarePredicate, before);
 }
 
 // Readers run while kernels are registered and mapped.
@@ -600,7 +688,6 @@ TEST(LocalKernelMaster, smoke_TopOneSkipsShippedLibrary)
     ASSERT_EQ(top.size(), 1u);
     EXPECT_EQ(top[0], local);
     EXPECT_EQ(f.stub->lastTopRequest, -1);
-    EXPECT_FALSE(f.master.lastFindTopAlreadyRetAll());
 }
 
 TEST(LocalKernelMaster, smoke_UnmappedShapeUsesShippedLibrary)
@@ -655,4 +742,25 @@ TEST(LocalKernelMaster, smoke_ResolveLocalIndex)
 
     EXPECT_EQ(f.master.resolveSolutionByIndex(local->index), local);
     EXPECT_EQ(f.master.resolveSolutionByIndex(local->index + 1), nullptr);
+}
+
+// The index-based calls, hipblasLtMatmul among them, find a local kernel only on
+// the processor it is pinned to, as selection does.
+TEST(LocalKernelMaster, smoke_IndexServesOnlyItsProcessor)
+{
+    auto          problem = makeProblem();
+    auto          gfx950  = makeGpu();
+    AMDGPU        gfx942(AMDGPU::Processor::gfx942, 304, "gfx942");
+    MasterFixture f(problem);
+
+    auto solution = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+
+    int index = f.local->addSolutions({solution}).at(0);
+
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx942, index), nullptr);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx942, index), nullptr);
 }

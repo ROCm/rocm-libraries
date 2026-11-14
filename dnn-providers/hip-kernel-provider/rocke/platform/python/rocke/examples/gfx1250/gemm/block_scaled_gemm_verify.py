@@ -75,7 +75,27 @@ def _u8_buffer(array: np.ndarray):
     return (ctypes.c_uint8 * int(array.nbytes)).from_buffer_copy(array)
 
 
-def _launch(rt, fn, spec, inputs):
+def _tensor_factors_fp32(tensor_scales) -> np.ndarray:
+    """Validate real numeric factors before rounding them to the launch dtype."""
+    factors = np.asarray(tensor_scales)
+    if factors.shape != (2,) or factors.dtype.kind not in "iuf":
+        raise ValueError("expected two real numeric tensor factors")
+    with np.errstate(over="ignore", invalid="ignore"):
+        factors = factors.astype(np.float32)
+    if not np.isfinite(factors).all():
+        raise ValueError("expected two finite FP32 tensor factors")
+    return factors
+
+
+def _launch(rt, fn, spec, inputs, *, tensor_scales=None):
+    factor_bytes = b""
+    if spec.tensor_scale:
+        if tensor_scales is None:
+            raise ValueError("tensor-enabled specs require two FP32 tensor factors")
+        factors = _tensor_factors_fp32(tensor_scales)
+        factor_bytes = struct.pack("<ff", *factors)
+    elif tensor_scales is not None:
+        raise ValueError("tensor factors require a tensor-enabled spec")
     output_dtype = _output_dtype(spec.dtype_c)
 
     # A NaN sentinel makes missing output stores fail, including expected zeros.
@@ -87,6 +107,7 @@ def _launch(rt, fn, spec, inputs):
             allocations.append(ptr)
             rt.memcpy_h2d(ptr, _u8_buffer(array), array.nbytes)
         packed = struct.pack("<QQQQQiii", *allocations, spec.M, spec.N, spec.K)
+        packed += factor_bytes
         rt.launch(fn, block_scaled_gemm_grid(spec), (spec.block_size, 1, 1), packed)
         rt.sync()
         host_out = (ctypes.c_uint8 * int(out.nbytes))()
@@ -112,6 +133,11 @@ def run_cases(
     ok, reason = is_valid_spec(spec, arch="gfx1250")
     if not ok:
         raise ValueError(reason)
+    if spec.tensor_scale:
+        raise ValueError(
+            "tensor-enabled specs require nvfp4_gemm_verify.run_cases "
+            "for tensor factors and the tensor-aware reference"
+        )
     native = spec.resolved_matrix_path() != "wmma"
     if native and spec.K not in (128, 256):
         raise ValueError("exact native fixtures require K=128 or K=256")

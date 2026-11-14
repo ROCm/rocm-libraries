@@ -367,8 +367,9 @@ TEST_P(TestPluginSerializationKpack, RoundTripsAKpackPlanThroughTheHooks)
     }
 
     {
-        SCOPED_TRACE("re-save of the restored plan");
-        // A restored plan cannot be saved again.
+        SCOPED_TRACE("direct save hook call on the restored plan");
+        // hipDNN saves a loaded plan from its original bytes, so only a direct hook call
+        // reaches the provider with a restored plan. The hook refuses it.
         const uint8_t byte = 0;
         hipdnnPluginConstData_t resaved{&byte, 7};
         const std::string message
@@ -376,7 +377,7 @@ TEST_P(TestPluginSerializationKpack, RoundTripsAKpackPlanThroughTheHooks)
                                     loadHandle.get(), restored.context(), &resaved),
                                 HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                                 serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
-                                "loaded from a saved payload");
+                                "does not call the provider");
         EXPECT_EQ(message.find(NOT_AN_INGESTOR_ENGINE_PHRASE), std::string::npos) << message;
         EXPECT_EQ(resaved.ptr, static_cast<const void*>(&byte));
         EXPECT_EQ(resaved.size, 7U);

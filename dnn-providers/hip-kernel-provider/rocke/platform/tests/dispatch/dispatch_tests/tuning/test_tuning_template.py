@@ -33,8 +33,15 @@ from rocke.dispatch.tuning import (
     values,
 )
 from rocke.dispatch.tuning.testing import TuningContractError, assert_tuning_contract
+from rocke.tests.arch_marks import arch_specific
 
 ABI = "rocke-toy/v1"
+
+# The toy family names gfx950 as a fixed label. The tuning mechanics under test
+# do not depend on the arch, so one arch is enough.
+_toy_arch = arch_specific(
+    ("gfx950",), reason="toy family fixture: the arch is a fixed label, not behavior"
+)
 
 
 # -------------------------------------------------------------- the request
@@ -162,7 +169,7 @@ class ToySpace(KnobSpace):
 
 
 # ------------------------------------------------------------ the candidates
-def _candidate(tile: int, space_type=ToySpace, base_fn=None):
+def _candidate(tile: int, space_type=ToySpace, base_fn=None, **hooks):
     variant_id = f"tile{tile}"
     name = f"toy_gfx950_{variant_id}"
 
@@ -192,6 +199,7 @@ def _candidate(tile: int, space_type=ToySpace, base_fn=None):
         build=lambda spec, arch: spec.kernel,
         bind_torch=lambda request, spec, tensors, **kw: None,
         grid=lambda spec, req: spec.launch_grid(),
+        **hooks,
     )
 
 
@@ -206,6 +214,7 @@ def _kid(req, candidate, spec) -> KernelId:
     return make_kernel_id(req, candidate, spec, op="toy")
 
 
+@_toy_arch
 class TestToyFamily(unittest.TestCase):
     def test_every_candidate_keeps_the_contract(self):
         for candidate in _registry().candidates():
@@ -272,6 +281,7 @@ class TestToyFamily(unittest.TestCase):
         self.assertEqual(len(hashes), len(results))
 
 
+@_toy_arch
 class TestStalePins(unittest.TestCase):
     def test_a_pin_that_no_longer_resolves_raises_and_never_falls_back(self):
         registry = _registry()
@@ -341,6 +351,7 @@ class TestStalePins(unittest.TestCase):
         self.assertIn("algorithm='toy_tuned'", why)
 
 
+@_toy_arch
 class TestPinToSpec(unittest.TestCase):
     def test_an_untuned_spec_clears_a_stale_pin(self):
         candidate = _registry().get("toy_gfx950_tile64")
@@ -355,6 +366,7 @@ class TestPinToSpec(unittest.TestCase):
             pin_to_spec(ToyRequest(m=8), candidate, bad)
 
 
+@_toy_arch
 class TestSampleCount(unittest.TestCase):
     def test_a_negative_sample_is_refused(self):
         self.assertEqual(sample_count("full", 0), 0)
@@ -379,6 +391,7 @@ class _LenientSpace(ToySpace):
         return True
 
 
+@_toy_arch
 class TestFullWalk(unittest.TestCase):
     def test_the_full_walk_yields_each_config_once(self):
         space = _LenientSpace(
@@ -409,6 +422,7 @@ class _NoOuterSpace(ToySpace):
         return KnobSpace.stem_prefix(self)
 
 
+@_toy_arch
 class TestOuterKnob(unittest.TestCase):
     def test_the_outer_knob_is_optional(self):
         candidate = _registry(_NoOuterSpace).get("toy_gfx950_tile64")
@@ -434,6 +448,46 @@ class TestOuterKnob(unittest.TestCase):
         self.assertIn("takes int", why)
 
 
+class _OuterInertSpace(ToySpace):
+    """A drop rule that reads the outer knob: at the base's two waves per EU
+    the kernel unrolls by 4 anyway, so ``unroll=4`` restates it there only."""
+
+    outer_dependent_knobs = frozenset({"unroll"})
+
+    def inert(self, base, kernel):
+        inert = dict(super().inert(base, kernel))
+        if kernel.unroll == 4 and kernel.waves_per_eu == 2:
+            inert["unroll"] = "the policy at two waves per EU"
+        return inert
+
+
+class TestOuterDependentDrops(unittest.TestCase):
+    def test_a_knob_dropped_at_one_outer_value_is_listed_at_the_others(self):
+        candidate = _registry(_OuterInertSpace).get("toy_gfx950_tile64")
+        assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+        space = _OuterInertSpace(
+            abi=ABI,
+            arch="gfx950",
+            path="toy",
+            variant_id="tile64",
+            candidate_name="toy_gfx950_tile64",
+        )
+        base = ToyKernel(m=1024, tile=64)
+        for level, outers in (("production", {4}), ("full", {1, 3, 4})):
+            specs = list(space.stream(base, level))
+            ids = [s.tuning_id for s in specs]
+            self.assertEqual(len(ids), len(set(ids)), level)
+            unrolled = {s.kernel.waves_per_eu for s in specs if s.kernel.unroll == 4}
+            self.assertEqual(unrolled, outers, level)
+            # Where it is dropped, the knob set is its unroll-less twin.
+            at_two = {s.tuning_id for s in specs if s.kernel.waves_per_eu == 2}
+            restated = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 2})[0]
+            self.assertIn(restated.tuning_id, at_two, level)
+            self.assertEqual(restated.knobs, ())
+        pinned = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 3})[0]
+        self.assertEqual(dict(pinned.knobs), {"unroll": 4, "waves_per_eu": 3})
+
+
 class _IgnoresKnobs(ToySpace):
     """A broken space: pinned knobs are silently ignored."""
 
@@ -441,11 +495,136 @@ class _IgnoresKnobs(ToySpace):
         return super().canonicalize(base, {})
 
 
+@_toy_arch
 class TestTheKitCatchesBrokenSpaces(unittest.TestCase):
     def test_ignoring_pinned_knobs_is_caught(self):
         candidate = _registry(_IgnoresKnobs).get("toy_gfx950_tile64")
         with self.assertRaises(TuningContractError):
             assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+
+
+def _routed_registry(seen=None) -> CandidateRegistry:
+    """Two non-opt-in tiles: ``auto`` goes to tile128 from m=512, else tile64."""
+
+    def route(tile):
+        def route_auto(req):
+            if (tile == 128) == (req.m >= 512):
+                return True, "ok"
+            return False, f"auto takes the other tile at m={req.m}"
+
+        return route_auto
+
+    def precheck(req):
+        if seen is not None:
+            seen.append(req)
+        return True, "ok"
+
+    registry = CandidateRegistry("toy")
+    for tile in (64, 128):
+        registry.register(_candidate(tile, route_auto=route(tile), precheck=precheck))
+    return registry
+
+
+@_toy_arch
+class TestRouteAuto(unittest.TestCase):
+    def test_a_routed_candidate_answers_auto_with_its_default(self):
+        registry = _routed_registry()
+        for m, chosen in ((100, "toy_gfx950_tile64"), (1024, "toy_gfx950_tile128")):
+            with self.subTest(m=m):
+                req = ToyRequest(m=m)
+                candidate = registry.select(req)
+                self.assertEqual(candidate.name, chosen)
+                self.assertFalse(candidate.opt_in)
+                pinned = replace(req, algorithm="toy_tuned", spec_id=candidate.spec_id)
+                self.assertEqual(
+                    candidate.select_spec(req), candidate.select_spec(pinned)
+                )
+                other = next(c for c in registry.candidates() if c is not candidate)
+                ok, why = other.admits(req)
+                self.assertFalse(ok)
+                self.assertIn("auto takes the other tile", why)
+
+    def test_a_pin_bypasses_the_route_and_a_mismatched_selector_is_refused(self):
+        registry = _routed_registry()
+        tile64 = registry.get("toy_gfx950_tile64")
+        pinned = ToyRequest(m=1024, spec_id="gfx950_tile64")
+        self.assertTrue(tile64.admits(pinned)[0])
+        knobbed = replace(pinned, tuning_knobs={"unroll": 2})
+        self.assertEqual(dict(tile64.select_spec(knobbed).knobs), {"unroll": 2})
+        ok, why = tile64.admits(ToyRequest(m=100, algorithm="other"))
+        self.assertFalse(ok)
+        self.assertIn("algorithm", why)
+        with self.assertRaises(PinRefused):
+            registry.select(replace(knobbed, tuning_knobs={"unroll": 3}))
+
+    def test_sweeps_and_the_precheck_see_the_pinned_request(self):
+        seen = []
+        registry = _routed_registry(seen)
+        tile128 = registry.get("toy_gfx950_tile128")
+        req = ToyRequest(m=1024)
+        self.assertTrue(tile128.admits(req)[0])
+        self.assertEqual(
+            (seen[-1].algorithm, seen[-1].spec_id), ("toy_tuned", "gfx950_tile128")
+        )
+        swept = list(tile128.sweep_space(req))
+        self.assertEqual(swept[0], tile128.select_spec(req))
+        self.assertTrue(list(tile128.sample_space(req, 2, 0)))
+        # A sweep pins each candidate, so the route does not hide the other.
+        results = registry.dispatch_all(req, kernel_id=_kid)
+        self.assertEqual(
+            {r.candidate.name for r in results},
+            {"toy_gfx950_tile64", "toy_gfx950_tile128"},
+        )
+        for result in results:
+            self.assertEqual(result.candidate.select_spec(result.request), result.spec)
+
+    def test_without_route_auto_the_candidate_stays_opt_in(self):
+        candidate = _candidate(64)
+        self.assertTrue(candidate.opt_in)
+        ok, why = candidate.admits(ToyRequest(m=100))
+        self.assertFalse(ok)
+        self.assertIn("opt-in", why)
+
+    def _auto_knobs_candidate(self, tile, knobs):
+        return _candidate(
+            tile,
+            route_auto=lambda req: (True, "ok"),
+            auto_knobs=lambda req: knobs,
+        )
+
+    def test_auto_knobs_run_on_auto_only(self):
+        for knobs, want in (({"unroll": 2}, {"unroll": 2}), ({}, {})):
+            with self.subTest(knobs=knobs):
+                candidate = self._auto_knobs_candidate(64, knobs)
+                auto = candidate.select_spec(ToyRequest(m=1024))
+                self.assertEqual(dict(auto.knobs), want)
+                pinned = ToyRequest(m=1024, spec_id=candidate.spec_id)
+                self.assertEqual(candidate.select_spec(pinned).knobs, ())
+
+    def test_auto_knobs_that_do_not_resolve_raise_with_the_reason(self):
+        # tile128 x unroll 4 exceeds the toy register budget, while tile128's
+        # default builds: auto must not quietly run the default instead.
+        candidate = self._auto_knobs_candidate(128, {"unroll": 4})
+        with self.assertRaisesRegex(RuntimeError, "register budget"):
+            candidate.admits(ToyRequest(m=1024))
+        # A request the space cannot build at all is refused, not raised.
+        ok, why = candidate.admits(ToyRequest(m=0))
+        self.assertFalse(ok)
+        self.assertIn("m must be positive", why)
+
+    def test_auto_knobs_need_route_auto(self):
+        with self.assertRaisesRegex(ValueError, "auto_knobs needs route_auto"):
+            _candidate(64, auto_knobs=lambda req: {"unroll": 2})
+
+    def test_auto_knobs_never_replace_the_callers_tuning_pin(self):
+        # A family whose request check lets an auto request carry its own
+        # knobs: the hook's stack must not silently replace them.
+        candidate = self._auto_knobs_candidate(64, {"unroll": 2})
+        mine = candidate.select_spec(ToyRequest(m=1024, tuning_knobs={"unroll": 4}))
+        self.assertEqual(dict(mine.knobs), {"unroll": 4})
+        # A stored tuning_id alone is a pin too.
+        by_id = candidate.select_spec(ToyRequest(m=1024, tuning_id=mine.tuning_id))
+        self.assertEqual(by_id, mine)
 
 
 if __name__ == "__main__":

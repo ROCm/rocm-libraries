@@ -422,6 +422,8 @@ namespace
                                           size_t k = 129, size_t batches = 3)
     {
         auto problem = persistentProblem(m, n, k, batches);
+        // Layout tests exercise uneven K splits; USO-specific cases enable it explicitly.
+        problem.setParams().setUniformSummationOrder(0);
         // A problem built by GEMM starts with a zero workspace budget. Resolve
         // the ideal split first; fallback tests then supply an explicit budget.
         problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
@@ -777,71 +779,90 @@ TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
     EXPECT_EQ(fixed.clusterSchedule.physicalGrid, 8u);
 }
 
-TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSplits)
+TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
 {
-    hip::HipAMDGPU device;
-    device.processor = AMDGPU::Processor::gfx1250;
-    device.computeUnitCount = 256;
-    device.persistentDynamicGrid = 6;
-    device.persistentFixedGrid = 0;
-    device.analyticalHardware = std::make_shared<origami::hardware_t>(
-        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
-        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
-    for(auto [m, n, batch, k, cs, cn, whole] :
-        std::vector<std::tuple<size_t, size_t, size_t, size_t, uint32_t, uint32_t, bool>>{
-            {257, 129, 8, 4096, 4, 1, true}, {128, 128, 1, 8192, 4, 1, false},
-            // At this ragged two-axis boundary, whole blocks measured slower:
-            // 66 whole-block iterations versus 41 + 24 estimated split cost.
-            {512, 832, 1, 4161, 2, 4, false}})
+    enum Feature { Dense, Gradient, Sparse, Subtile };
+    struct Case
     {
-        SCOPED_TRACE(::testing::Message() << m << ',' << n << ',' << batch << ',' << k << ',' << cs << ',' << cn);
+        const char* name;
+        size_t m, n, k, grid;
+        int32_t uniform;
+        bool active;
+        Feature feature = Dense;
+    };
+    for(const auto& test : std::vector<Case>{
+            {"uneven", 256, 256, 4097, 8, 0, true},
+            {"exact", 256, 256, 4096, 8, 0, false},
+            {"single tile", 128, 128, 4097, 8, 0, false},
+            {"whole tiles", 256, 256, 4097, 4, 0, false},
+            {"nonintegral workers", 256, 256, 4097, 6, 0, false},
+            {"empty K", 256, 256, 0, 8, 0, false},
+            {"one iteration", 256, 256, 64, 8, 0, false},
+            {"uniform exact", 256, 256, 4096, 8, 1, true},
+            {"gradient", 256, 256, 4160, 8, 0, false, Gradient},
+            {"sparse", 256, 256, 4160, 8, 0, false, Sparse},
+            {"subtile", 256, 256, 4160, 8, 0, false, Subtile}})
+    for(bool clustered : {false, true})
+    for(bool capability : {false, true})
+    {
+        // Derivation disables the capability for these ABI2 features; test ABI0.
+        if(clustered && test.feature != Dense)
+            continue;
+        SCOPED_TRACE(::testing::Message() << test.name << " clustered=" << clustered
+                                         << " capability=" << capability);
         ContractionSolution solution;
-        configureClusterStreamK(solution, cs, cn);
-        solution.sizeMapping.macroTile = {64, 64, 1};
-        solution.sizeMapping.workGroupSize = {128, 1, 1};
-        solution.sizeMapping.CUOccupancy = 6;
-        solution.internalArgsSupport.perTileExtraIters = true;
-        auto problem = clusterProblem(m, n, k, batch);
-        const auto launch = solution.resolvePersistentSettings(problem, device);
-        EXPECT_EQ(launch.clusterSchedule.wholeBlocksOnly, whole);
-        EXPECT_EQ(launch.workspaceBytes == 0, whole);
-        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
-        if(whole)
+        configureClusterStreamK(solution, 2, 1);
+        if(!clustered)
         {
-            EXPECT_EQ(launch.clusterSchedule.fallbackReason, "whole-block-cost");
-            EXPECT_EQ(launch.grid, launch.clusterSchedule.blocks);
-            EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
-            EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+            solution.sizeMapping.clusterDim = {1, 1, 1};
+            solution.internalArgsSupport.persistentLoopArgsVersion = 0;
         }
-        // Explicit fixed grids bypass the performance policy.
-        device.persistentFixedGrid = launch.selectedGrid;
-        const auto fixed = solution.resolvePersistentSettings(problem, device);
-        EXPECT_TRUE(fixed.clusterSchedule.fixedGridUsed);
-        EXPECT_NE(fixed.clusterSchedule.fallbackReason, "whole-block-cost");
-        device.persistentFixedGrid = 0;
-        // A CU cap bounds the new whole-block candidate as well as splits.
-        problem.setParams().setSmCountTarget(32);
-        const auto capped = solution.resolvePersistentSettings(problem, device);
-        EXPECT_LE(capped.clusterSchedule.physicalGrid, 32u * 6u);
+        solution.internalArgsSupport.perTileExtraIters = capability;
+        // BF16 TN supports both sparse MFMA and the gfx950 subtile geometry.
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.useSubtileImpl = test.feature == Subtile;
+        solution.problemType.transA = true;
+        solution.problemType.aType = solution.problemType.bType = rocisa::DataType::BFloat16;
+        solution.problemType.computeInputTypeA = solution.problemType.computeInputTypeB = rocisa::DataType::BFloat16;
+        solution.problemType.highPrecisionAccumulate = true;
+        solution.problemType.sparse = test.feature == Sparse;
+        solution.problemType.useGradient = test.feature == Gradient;
+        solution.problemType.useBias = solution.problemType.useGradient;
+        auto problem = ContractionProblemGemm::FromIndexSizes(
+            "Contraction_l_Alik_Bljk_Cijk_Dijk", {test.m, test.n, 1, test.k},
+            rocisa::DataType::BFloat16, {}, rocisa::DataType::BFloat16, {},
+            rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
+        problem.setHighPrecisionAccumulate(true);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setSparse(solution.problemType.sparse, 0);
+        problem.setUseGradient(solution.problemType.useGradient);
+        problem.setUseBias(solution.problemType.useBias);
+        if(solution.problemType.useBias)
+            problem.setBias(rocisa::DataType::Float, test.m, 0, true, ContractionProblemGemm::D);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        problem.setParams().setUniformSummationOrder(test.uniform);
+        const auto device = persistentDevice(test.grid);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
+        ASSERT_EQ(active, capability && test.active);
+        if(!active)
+            continue;
+        const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;
+        const size_t iters = (test.k + 63) / 64;
+        size_t previousEnd = 0;
+        for(size_t w = 0; w < launch.grid; ++w)
+        {
+            const auto range = streamKWorkgroupIterRange(w, blocks, iters, launch.grid, true, true);
+            EXPECT_EQ(range.start, previousEnd);
+            ASSERT_GT(range.end, range.start);
+            EXPECT_EQ(range.start / iters, (range.end - 1) / iters);
+            previousEnd = range.end;
+        }
+        EXPECT_EQ(previousEnd, blocks * iters);
     }
-}
-
-TEST(PersistentArgumentLayout, ClusterFitCountsRealPeersInOutputOrder)
-{
-    ContractionSolution solution;
-    configureClusterStreamK(solution, 4, 2);
-    auto problem = clusterProblem(129, 257, 1024, 3);
-    // 2x3 tiles occupy one 4x2 block in M and two in N, per batch.
-    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 16.0);
-    problem = ContractionProblemGemm::FromIndexSizes(
-        "Contraction_l_Ajlk_Blik_Cijk_Dijk", {257, 129, 3, 1024},
-        rocisa::DataType::Float, {}, rocisa::DataType::Float, {},
-        rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
-    ASSERT_TRUE(problem.transposeC01());
-    // Transposing output gives 3x2 tiles and a single complete spatial block.
-    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 8.0);
-    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
-    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 1.0);
 }
 
 TEST(PersistentArgumentLayout, ClusterParallelEligibilityAndPackedOutputContract)
@@ -946,4 +967,115 @@ TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdge
         EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), expectedSplits);
         EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, cluster.physicalGrid);
     }
+}
+
+// The probe tail args are packed from internalArgsSupport alone, so a
+// DataParallel fixture with the probe bit set exercises the packing of
+// StreamK hybrid-assignment kernels.
+TEST(PersistentArgumentLayout, OccupancyProbeAbsentWithoutSupportOrForGroupedGemm)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+    problem.setParams().setOccupancyProbe(&probe, 41, 256);
+
+    ContractionSolution plain;
+    configurePersistentSolution(plain, 3, 1);
+    ContractionSolution grouped;
+    configurePersistentSolution(grouped, 3, 1);
+    grouped.problemType.groupedGemm            = true;
+    grouped.internalArgsSupport.occupancyProbe = true;
+    for(auto* solution : {&plain, &grouped})
+    {
+        SCOPED_TRACE(solution == &plain ? "no probe support" : "grouped gemm");
+        auto launch = solution->resolvePersistentSettings(problem, device);
+        auto call   = solution->generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        EXPECT_FALSE(hasArgument(call.args, "ProbeAddr"));
+        EXPECT_FALSE(hasArgument(call.args, "ProbeEpoch"));
+        EXPECT_FALSE(hasArgument(call.args, "ProbeGrid"));
+        EXPECT_FALSE(call.occupancyProbe);
+        EXPECT_EQ(call.numWorkGroups.x, 7u);
+    }
+}
+
+TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+
+    ContractionSolution plain;
+    configurePersistentSolution(plain, 3, 1);
+    auto plainCall
+        = plain.generateSingleCall<true>(problem,
+                                         persistentInputs(),
+                                         device,
+                                         plain.resolvePersistentSettings(problem, device),
+                                         GSUSettings{});
+
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.internalArgsSupport.occupancyProbe = true;
+    struct Case
+    {
+        void*    addr;
+        uint32_t minGrid;
+        uint32_t expectDispatch;
+    };
+    for(auto c :
+        std::vector<Case>{{&probe, 0, 7}, {&probe, 7, 7}, {&probe, 256, 256}, {nullptr, 256, 7}})
+    {
+        SCOPED_TRACE(::testing::Message() << "addr=" << (c.addr ? "set" : "null")
+                                          << " minGrid=" << c.minGrid);
+        problem.setParams().setOccupancyProbe(c.addr, 41 + c.minGrid, c.minGrid);
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        auto call   = solution.generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        auto const& args = call.args;
+        EXPECT_EQ(launch.grid, 7u);
+        EXPECT_EQ(call.numWorkGroups.x, c.expectDispatch);
+        EXPECT_EQ(call.numWorkGroups.y, 1u);
+        EXPECT_EQ(call.numWorkGroups.z, 1u);
+        EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * c.expectDispatch);
+        // Grid-derived kernargs keep the real grid.
+        EXPECT_EQ(value<uint32_t>(args, "numWorkGroups"), 7u);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeGrid"), 7u);
+        EXPECT_EQ(value<void*>(args, "ProbeAddr"), c.addr);
+        EXPECT_EQ(call.occupancyProbe, c.addr != nullptr);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeEpoch"), 41 + c.minGrid);
+        auto addrOffset = offset(args, "ProbeAddr");
+        EXPECT_EQ(addrOffset % 8, 0u);
+        EXPECT_GE(addrOffset, plainCall.args.size());
+        EXPECT_LT(addrOffset, plainCall.args.size() + 8);
+        EXPECT_EQ(offset(args, "ProbeEpoch"), addrOffset + 8);
+        EXPECT_EQ(offset(args, "ProbeGrid"), addrOffset + 12);
+        EXPECT_EQ(args.size(), addrOffset + 16);
+        // Everything before the probe args matches the plain launch.
+        EXPECT_EQ(bytes(args, 0, plainCall.args.size()),
+                  bytes(plainCall.args, 0, plainCall.args.size()));
+    }
+}
+
+TEST(PersistentArgumentLayout, OccupancyProbeDisabledForMultiDimGridBelowMinGrid)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+
+    ContractionSolution cluster;
+    configurePersistentSolution(cluster, 3, 1);
+    cluster.sizeMapping.clusterDim             = TensileLite::dim3(2, 2, 1);
+    cluster.internalArgsSupport.occupancyProbe = true;
+    problem.setParams().setOccupancyProbe(&probe, 41, 256);
+    auto launch = cluster.resolvePersistentSettings(problem, device);
+    auto call   = cluster.generateSingleCall<true>(
+        problem, persistentInputs(), device, launch, GSUSettings{});
+    ASSERT_GT(call.numWorkGroups.y, 1u);
+    EXPECT_LT(call.numWorkGroups.x * call.numWorkGroups.y, 256u);
+    EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * call.numWorkGroups.x);
+    EXPECT_EQ(value<void*>(call.args, "ProbeAddr"), nullptr);
+    EXPECT_FALSE(call.occupancyProbe);
+    EXPECT_EQ(value<uint32_t>(call.args, "ProbeGrid"),
+              call.numWorkGroups.x * call.numWorkGroups.y * call.numWorkGroups.z);
 }

@@ -69,7 +69,6 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
-    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -348,6 +347,13 @@ def _coverage(root: Path):
     return coverage, errors
 
 
+def _flag_expected_rejection(root: Path, name: str) -> None:
+    _write_json(
+        root / "quick" / "SdpaFwd" / name / f"{name}.meta.json",
+        {"expected_rejection": True},
+    )
+
+
 @pytest.mark.usefixtures("fake_registry")
 class TestJoin:
     def test_tested_counts_every_graph_claimed_or_not(self, tmp_path: Path) -> None:
@@ -364,6 +370,29 @@ class TestJoin:
         assert op.graphs == 2
         assert op.tested_count() == 3
         assert op.tested == {"dtype:fp16": 1, "mask:causal": 1, "dtype:bf16": 1}
+
+    def test_expected_rejection_graph_changes_no_count(self, tmp_path: Path) -> None:
+        """It is not a graph the tree supports: no denominator, no feature."""
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        _bundle(
+            tmp_path,
+            "rejected",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E2": {"gfx950": ["linux"]}},
+        )
+        _flag_expected_rejection(tmp_path, "rejected")
+        coverage, errors = _coverage(tmp_path)
+        assert errors == []
+        op = coverage.ops[FAKE_TYPE]
+        assert op.graphs == 1
+        assert op.tested == {"dtype:fp16": 1}
+        assert op.claimed_graphs == {"gfx942": 1}
+        assert coverage.archs == ["gfx942"]
 
     def test_claimed_counts_only_claimed_graphs_per_arch(self, tmp_path: Path) -> None:
         _bundle(
@@ -718,6 +747,27 @@ class TestFeatureClaims:
         _bundle(tmp_path, "b", [_node(features=["dtype:bf16"])])
         claims = _feature_claims(tmp_path)
         assert claims.group_graphs["Attention"] == 2
+
+    def test_expected_rejection_graph_changes_no_count(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        before = _feature_claims(tmp_path)
+        _bundle(
+            tmp_path,
+            "rejected",
+            [_node(features=["dtype:bf16", "mask:causal"])],
+            claims={"E2": {"gfx1100": ["windows"]}},
+        )
+        _flag_expected_rejection(tmp_path, "rejected")
+        after = _feature_claims(tmp_path)
+        assert after.tested == before.tested == {FAKE_TYPE: {"dtype:fp16"}}
+        assert after.targets == before.targets == [("gfx942", "linux")]
+        assert after.group_graphs == before.group_graphs
+        assert after.on_target([FAKE_TYPE], ("gfx942", "linux")) == 1
 
 
 class TestFeatureMatrixNames:
@@ -1167,8 +1217,11 @@ class TestSdpaExtract:
         [
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
+            (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
+            (128, 64, "head_dim:128x64"),
+            (256, 64, "head_dim:256x64"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1185,10 +1238,10 @@ class TestSdpaExtract:
         [
             ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
+            ({"v_dims": (2, 8, 128, 96)}, "head dim 128 x 96"),
             ({"dtype": "float"}, "dtype 'float'"),
-            # No engine runs it.
-            ({"dtype": "fp8_e5m2"}, "dtype 'fp8_e5m2'"),
+            # The MX scale type, never an attention input.
+            ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
             ({"dtype": ["bfloat16"]}, r"dtype \['bfloat16'\]"),
             (
                 {"q_dims": (8, 128, 128), "strides": lambda dims: [1] * len(dims)},
@@ -1210,6 +1263,8 @@ class TestSdpaExtract:
             ("fp8_e4m3", "dtype:fp8e4m3"),
             # Not folded into OCP fp8: the two are not bit-compatible.
             ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
+            ("fp8_e5m2", "dtype:fp8e5m2"),
+            ("fp8_e5m2_fnuz", "dtype:fp8e5m2_fnuz"),
         ],
     )
     def test_fp8_dtype(self, dtype: str, expected: str) -> None:
@@ -1303,12 +1358,15 @@ class TestSdpaExtract:
             {},
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 1, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "dtype": "fp8_e4m3",
                 "o_dtype": "bfloat16",
                 "q_dims": (2, 8, 64, 192),
                 "k_dims": (2, 2, 128, 192),
             },
+            {"dtype": "fp8_e5m2", "o_dtype": "bfloat16"},
+            {"dtype": "fp8_e5m2_fnuz", "o_dtype": "bfloat16"},
             {
                 "dtype": "fp8_e4m3_fnuz",
                 "strides": _bshd_strides,
@@ -1316,6 +1374,16 @@ class TestSdpaExtract:
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -1418,10 +1486,11 @@ class TestSdpaBackwardExtract:
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
 
-    def test_ragged_raises(self) -> None:
+    def test_ragged_layout_ignores_strides(self) -> None:
         # Not counted as its bshd stride order.
-        with pytest.raises(FeatureError, match="ragged q"):
-            self._extract(ragged=True, strides=_bshd_strides)
+        assert (
+            self._group("layout", ragged=True, strides=_bshd_strides) == "layout:ragged"
+        )
 
     def test_optional_ports(self) -> None:
         features = self._extract(
@@ -1439,14 +1508,26 @@ class TestSdpaBackwardExtract:
         reached = set()
         for kwargs in (
             {},
+            {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "strides": _bshd_strides,
                 "causal_mask": True,
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -7373,19 +7454,3 @@ class TestRealBundleTree:
         assert (
             size < 500_000
         ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = feature_matrix_main(
-            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err

@@ -264,7 +264,6 @@ inv build --architecture gfx1100 --clean
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts that set PYTHONPATH and trigger rebuilds of rocisa (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 
 *Device libraries options:*
@@ -275,6 +274,7 @@ inv build --architecture gfx1100 --clean
 * `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
 * `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
 * `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
+* `TENSILELITE_EMIT_OCCUPANCY_PROBE` Emit the CU-occupancy probe in Stream-K Hybrid kernels, needed by `HIPBLASLT_ADAPTIVE_SM_COUNT` (default: `OFF`)
 * `HIPBLASLT_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
 

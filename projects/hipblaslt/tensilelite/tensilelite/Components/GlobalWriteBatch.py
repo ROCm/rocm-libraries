@@ -394,9 +394,11 @@ class GlobalWriteBatchWriter:
       return 1
     VW1 = kernel["VectorWidthB"]
     outerTT1 = kernel["MIWaveTile"][1] // VW1
-    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+    # Non-square MI (e.g. 16x32) is stored as N//miT blocks of miT x miT; the
+    # block count must match AsmStoreState.getStoreElementsInfoForBatch.
+    miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * (kernel["MatrixInstN"] // miT)
     if kernel["SourceSwap"]:
-      miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
       miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
       miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
       OPM  = miM_ * miN_ // kernel["WavefrontSize"]
@@ -407,6 +409,34 @@ class GlobalWriteBatchWriter:
       if _d > 1:
         return _d
     return 1
+
+  @staticmethod
+  def clsEpilogVectorLoopUnsafe(kernel, factorDim) -> bool:
+    """
+    True when an epilogue vector read is indexed along the CLS loop's own
+    iteration dimension (free1/N), so the loop cannot be formed.
+
+    The bias / scaleAlphaVec LDS reads are emitted once, with the immediate
+    offsets of the FIRST iteration (AddrCalculation.biasOffset /
+    scaleAlphaVecOffset). Those immediates are coordOffset1-derived for
+    factorDim == 1, and scaleB is coordOffset1-derived regardless, while the
+    loop only advances SrdD and M0. Re-running such a body would re-read the
+    first N group's vector for every iteration (see AsmAddressCalculation).
+    factorDim == 0 is safe: coordOffset0 is fully unrolled inside one body.
+
+    Only a bias READ takes that immediate path. A Gradient kernel WRITES a bias
+    vector instead (KernelWriter sets states.useBias = WRITE) and addresses it
+    through coutRowPtrBias, which emitRowPtrAdvance steps once per CLS iteration
+    exactly like coutRowPtrD -- so it does not block the loop.
+    """
+    if not kernel.get("CompactLoopStore", False):
+      return False
+    if kernel["ProblemType"].get("UseScaleAB", "") == "Vector":
+      return True
+    biasRead = (kernel["ProblemType"].get("UseBias", 0)
+                and not kernel["ProblemType"].get("Gradient", False))
+    return factorDim == 1 and (biasRead or
+                               kernel["ProblemType"].get("UseScaleAlphaVec", 0))
 
   @staticmethod
   def alignNEPBForCLS(kernel, nElem, numElementsPerBatch, gwvw, edge):
@@ -433,7 +463,7 @@ class GlobalWriteBatchWriter:
     return numElementsPerBatch
 
   @staticmethod
-  def computeCLSLayout(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, forceNoCompact: bool = False, flatWorkspaceWalk: bool = False):
+  def computeCLSLayout(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, forceNoCompact: bool = False, flatWorkspaceWalk: bool = False, factorDim: int = 0):
     """Single source of truth for the CLS loop layout math.
 
     Returns (batchesPerCLSBody, iterCount, m0Step).
@@ -468,6 +498,11 @@ class GlobalWriteBatchWriter:
 
     # forceNoCompact / single batch: no loop.
     if forceNoCompact or numBatches <= 1:
+      return numBatches, 1, m0Step
+
+    # An epilogue vector indexed along free1/N cannot be re-read by the loop.
+    # flatWorkspaceWalk stores raw accumulators, so it reads no such vector.
+    if not flatWorkspaceWalk and GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, factorDim):
       return numBatches, 1, m0Step
 
     # (A) Only the outermost N tile loops. flatWorkspaceWalk: linear WS soffset, ignore clsMaxNIter.
@@ -514,22 +549,22 @@ class GlobalWriteBatchWriter:
     return numBatches, 1, m0Step
 
   @staticmethod
-  def computeBatchesPerCLSBody(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[0]
+  def computeBatchesPerCLSBody(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, factorDim: int = 0) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)[0]
 
   def _computeBatchesPerCLSBody(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[0]
+    return self._computeCLSLayout()[0]
 
   @staticmethod
-  def computeCLSIterCount(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
+  def computeCLSIterCount(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, factorDim: int = 0) -> int:
     """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[1]
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)[1]
 
   def _computeCLSIterCount(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[1]
+    return self._computeCLSLayout()[1]
 
   def _computeCLSLayout(self):
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw, factorDim=self.factorDim)
 
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
@@ -938,6 +973,8 @@ class GlobalWriteBatchWriter:
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
     if self.ss.emitGateResidual:
       module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
+    if self.kernel["CompactLoopStore"] and self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]:
+      module.add(SMovB32(dst=sgpr("CLSERowInc"), src=0, comment="Init E CLS row offset"))
     if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
       self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
@@ -1155,8 +1192,12 @@ class GlobalWriteBatchWriter:
       module.addComment2(commentStr)
       self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
       module.add(self.ss._clsLoopLabel)
+      # This overwrites the prologue's m0 for the rest of the kernel and never
+      # restores it. CompactLoopStore is gated on HasMovRelsD2B32 (gfx1250), where
+      # m0 no longer bounds DS addressing, so the epilogue's bias / scaleAlphaVec
+      # ds_load inside this loop body are unaffected.
       module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
-          comment="LDS clamp at sgpr(CLSm0Base)"))
+          comment="CLS M0[9:0] = acc src offset for v_movrelsd_2_b32"))
       # M0 step from computeCLSLayout (src VGPR stride of the CLS iter dim).
       _, _, cls_m0_step = self._computeCLSLayout()
       module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
@@ -1532,7 +1573,9 @@ class GlobalWriteBatchWriter:
         if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
           vgprIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
           vgprDst = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else "ValuC+%d"%vgprIdx
-          module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+          module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge,
+                                                elementIdx=elementIdx, batchIdx=self.batchIdx,
+                                                overrideAfterPrimerRows=self._lookaheadRowInc(elementIdx), comment="store E"))
 
         sumIdx = self.ss.elementSumIdx[elementIdx]
         if self.kernel["StoreRemapVectorWidth"]:
@@ -2120,7 +2163,7 @@ class GlobalWriteBatchWriter:
 
         gwvw = 1 if factorDim else self.gwvw
         if isGlobal:
-          vecModule.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+          vecModule.add(self.parentWriter.vecSrdNonNullMask(addressStr, self.parentWriter.states.laneSGPRCount))
           for vi2 in range(0, gwvw):
             vecModule.add(VCndMaskB32(
               dst=vgpr(dataScaleVec + vi2), \
@@ -2301,7 +2344,9 @@ class GlobalWriteBatchWriter:
         else:
           printExit("Unsupport compute type for E output. (%s)"%self.kernel["ProblemType"]["ComputeDataType"].toEnum())
 
-        module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+        module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge,
+                                              elementIdx=elementIdx, batchIdx=self.batchIdx,
+                                              overrideAfterPrimerRows=_emitOverrideRows, comment="store E"))
         if self.parentWriter.states.bpeE * self.gwvw > 8:
           module.add(SNop(1, "2 wait states required when next inst writes vgprs held by previous dwordx3/x4 store inst"))
 
@@ -2985,8 +3030,8 @@ class GlobalWriteBatchWriter:
     Unit conversion happens here, not in the emitter: every X-direction field
     leaves ALREADY IN PACKET ELEMENTS while outRectYS stays in ROWS, the
     hardware not scaling y.  outNShardPkS is both dst_pitch and rect_x, the
-    same nShard.  Divisibility by the packet element is a launch-time
-    precondition (FusedA2ARunner.cpp); a non-multiple truncates here.
+    same nShard.  Divisibility by the packet element is a
+    precondition (the GemmA2AShape predicate); a non-multiple truncates here.
 
     The two shifts use different amounts: elements->bytes uses D_ELEMENT_LOG2,
     elements->packet-elements uses packetElementLog2 minus it.  Conflating them
@@ -3098,8 +3143,8 @@ class GlobalWriteBatchWriter:
     The four packet coordinates are FOLDED into the 64-bit base addresses by
     _fusedA2AComputeCopyFields and emitted as literal 0, leaving N unconstrained.
     What still has to fit -- rect_x, rect_y, src_pitch -- is packed unmasked, so
-    an over-range value corrupts a neighbouring field. The bounds are enforced
-    at launch time by client/src/FusedA2ARunner.cpp.
+    an over-range value corrupts a neighbouring field. The GemmA2AShape predicate
+    bounds rect_x and src_pitch; the MacroTile1 limit in Solution.py bounds rect_y.
 
     Args:
       dstRankSgpr:  1 SGPR, the peer rank p (== this WG's dst_rank).
@@ -3496,7 +3541,7 @@ class GlobalWriteBatchWriter:
     module.add(localSyncModule)
 
     # counter3: one u32 at FUSED_A2A_COUNTER3_OFFSET in the counter block (host
-    # mirror: client/src/FusedA2ARunner.cpp),
+    # mirror: client/src/DeviceContext.cpp),
     # incremented by EVERY surviving WG -- PUSH WGs fall through the block above,
     # local WGs jump straight here from the PUSH gate.  The WG that takes it to
     # FusedTotalWGs is the globally last one; by then nothing else is queued, so

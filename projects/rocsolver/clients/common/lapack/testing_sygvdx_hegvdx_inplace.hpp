@@ -437,7 +437,7 @@ void sygvdx_hegvdx_inplace_getError(const rocblas_handle handle,
             if(hInfo[b][0] == 0)
             {
                 err = norm_error('F', 1, hNev[b][0], 1, hW[b], hWRes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
         else
@@ -487,7 +487,7 @@ void sygvdx_hegvdx_inplace_getError(const rocblas_handle handle,
                 // error is ||hA - hARes|| / ||hA||
                 // using frobenius norm
                 err = norm_error('F', n, hNev[b][0], lda, hA[b], hARes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }
