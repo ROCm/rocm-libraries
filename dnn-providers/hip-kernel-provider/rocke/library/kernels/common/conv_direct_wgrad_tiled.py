@@ -255,10 +255,12 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "row_unroll must be >= 0"
     if spec.target_blocks < 1:
         return False, "target_blocks must be >= 1"
-    if spec.row_unroll % spec.n_buffers:
-        return False, "row_unroll must be a multiple of n_buffers"
+    # Before the n_buffers check: prefetch -1 (-2 with the single-group
+    # ping-pong's extra buffer) makes n_buffers 0.
     if spec.prefetch < 1:
         return False, "prefetch must be >= 1"
+    if spec.row_unroll % spec.n_buffers:
+        return False, "row_unroll must be a multiple of n_buffers"
     if spec.rows_per_seg <= 0 or spec.rows_per_seg % spec.unroll:
         return False, f"rows_per_seg must be a positive multiple of {spec.unroll}"
     if p.KH > 8 or p.KW > 8:

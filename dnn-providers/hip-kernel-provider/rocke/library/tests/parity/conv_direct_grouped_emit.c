@@ -3021,6 +3021,9 @@ static int make_wgrad_pp_cfg(int idx, rocke_direct_wgrad_tiled_spec_t* ts)
     case 4: /* must reject: row_unroll not a multiple of n_buffers */
         ts->row_unroll = 3;
         return 0;
+    case 5: /* must reject: prefetch -2 leaves zero row buffers */
+        ts->prefetch = -2;
+        return 0;
     default:
         return -1;
     }

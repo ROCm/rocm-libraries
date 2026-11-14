@@ -256,6 +256,21 @@ def test_degenerate_knobs_are_rejected(spec, valid):
     assert not valid(spec)[0]
 
 
+@pytest.mark.parametrize(
+    "spec",
+    [
+        DirectWgradTiledSpec(problem=_p(), prefetch=-1),
+        # n_buffers is prefetch + 2 here, so -2 makes it 0.
+        DirectWgradTiledSpec(problem=_p(), pingpong=True, prefetch=-2, rows_per_seg=12),
+    ],
+)
+def test_prefetch_making_n_buffers_zero_is_refused(spec):
+    """Refused by the prefetch gate (the C++ engine's reason), not raised as a
+    ZeroDivisionError by the row_unroll % n_buffers check."""
+    assert spec.n_buffers == 0
+    assert is_valid_wgrad_tiled_spec(spec) == (False, "prefetch must be >= 1")
+
+
 def test_single_group_pingpong_keeps_an_extra_row_buffer():
     """The lagging half reads row t while the leading half refills a buffer;
     one buffer more than the prefetch keeps that buffer out of row t's reach."""

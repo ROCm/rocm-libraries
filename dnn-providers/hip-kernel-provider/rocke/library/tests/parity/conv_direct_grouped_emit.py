@@ -2426,10 +2426,10 @@ def _wgrad_stem_spec(idx: int):
 
 # ---------------------------------------------------------------------------
 # Tiled wgrad ping-pong on one wave group (q_groups 1: the two halves of the
-# block's waves share one row stream), indices 359..363: a short last
+# block's waves share one row stream), indices 359..364: a short last
 # segment, packed images under a deeper prefetch, blocks walking several
-# segments, and an odd wave count and a row_unroll off the extra row buffer
-# that both engines must reject.
+# segments, and an odd wave count, a row_unroll off the extra row buffer and
+# a prefetch of -2 (zero row buffers) that both engines must reject.
 # ---------------------------------------------------------------------------
 _WGRAD_PP_CFG_BASE = 359
 
@@ -2461,6 +2461,7 @@ def _wgrad_pp_spec(idx: int):
         ),
         3: ts(problem=_wp(), pingpong=True, waves_k=1, waves_c=1, rows_per_seg=12),
         4: ts(problem=_wp(), pingpong=True, row_unroll=3, rows_per_seg=12),
+        5: ts(problem=_wp(), pingpong=True, prefetch=-2, rows_per_seg=12),
     }
     sel = table.get(idx)
     if sel is None:

@@ -457,15 +457,15 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "target_blocks must be >= 1");
     }
-    /* (Python divides by n_buffers here; a prefetch that makes it 0, which
-     * raises there, falls through to the prefetch check.) */
-    if(n_buffers(s) > 0 && s->row_unroll % n_buffers(s))
-    {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of n_buffers");
-    }
+    /* Before the n_buffers check: prefetch -1 (-2 with the single-group
+     * ping-pong's extra buffer) makes n_buffers 0. */
     if(s->prefetch < 1)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "prefetch must be >= 1");
+    }
+    if(s->row_unroll % n_buffers(s))
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of n_buffers");
     }
     {
         int u = rocke_direct_wgrad_tiled_unroll(s);
