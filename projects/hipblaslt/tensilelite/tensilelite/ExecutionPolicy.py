@@ -277,9 +277,10 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     outer_version = support.get("KernArgsVersion", 3)
     custom = result.get("CustomKernel")
     # Layout 3 is layout 0 plus CustomKernel.postKernels.
-    if (type(version) is not int or version not in (0, 1, 2, 3)
-            or (version == 3 and not (isinstance(custom, dict) and custom.get("postKernels")))):
+    if type(version) is not int or version not in (0, 1, 2, 3):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
+    if version == 3 and not (isinstance(custom, dict) and custom.get("postKernels")):
+        raise ValueError("PersistentLoopArgsVersion=3 requires CustomKernel.postKernels")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
     handwritten = (not custom.get("generated", False)

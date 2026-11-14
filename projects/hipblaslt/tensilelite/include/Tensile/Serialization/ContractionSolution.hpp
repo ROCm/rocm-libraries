@@ -112,6 +112,7 @@ namespace TensileLite
             static void mapping(IO& io, CustomPostKernel& s)
             {
                 iot::mapRequired(io, "kind", s.kind);
+                iot::mapOptional(io, "version", s.version);
                 iot::mapRequired(io, "name", s.name);
                 iot::mapOptional(io, "args", s.args);
                 iot::mapOptional(io, "threads", s.threads);

@@ -1745,6 +1745,7 @@ def test_post_kernels_parse(tmp_path):
     (post,) = descriptor["postKernels"]
     assert post["kind"] == "streamKReduce"
     assert post["bands"] == 1
+    assert post["version"] == 1
     assert [a["semantic"] for a in post["args"]][1:] == ["SKSplitFactor", "NumTiles", "WorkspaceOffsetPartials"]
 
     state = ContractionsCustomKernel.FromOriginalState(descriptor).state()
@@ -1791,6 +1792,8 @@ def _dropPostKernels(config):
     (_setPost("kind", "splitKReduce"), "Unknown post kernel kind"),
     (_setPost("name", "other_streamKReduce"), "must be named 'sk_main_streamKReduce'"),
     (_setPost("bands", 0), "bands must be a positive integer"),
+    (_setPost("version", 2), "version must be 1"),
+    (_setDescriptor("generated", True), "require a handwritten custom kernel"),
     (_setPost("threads", [256, 1]), "three-element threads"),
     (_setPost("threads", [0, 1, 1]), "threads must be positive"),
     (_setPost("grid", "TilesBands"), "three-element grid"),
@@ -1812,6 +1815,22 @@ def test_post_kernel_validation_errors(mutate, match):
     mutate(config)
     with pytest.raises(ValueError, match=match):
         ck_mod.validateCustomPostKernels(config)
+
+
+@pytest.mark.parametrize("strategy", ["None", "DataParallel"])
+def test_post_kernels_require_stream_k(strategy):
+    config = _post_kernel_config()
+    config["TileProcessingStrategy"] = strategy
+    with pytest.raises(ValueError, match="require TileProcessingStrategy=StreamK"):
+        ck_mod.validateCustomPostKernels(config)
+
+
+def test_post_kernel_validation_does_not_mutate():
+    config = _post_kernel_config()
+    del config["CustomKernel"]["postKernels"][0]["grid"]
+    before = deepcopy(config)
+    ck_mod.validateCustomPostKernels(config)
+    assert config == before
 
 
 def test_post_kernels_require_kern_args_version_3(tmp_path):
