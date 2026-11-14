@@ -46,7 +46,7 @@ from tensilelite.Common import DataDirection, IsaVersion
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Components import StreamK as StreamKModule
 from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
