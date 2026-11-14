@@ -14,11 +14,17 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 * `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A, and optionally B, is pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both scale modes are set together with the order on A, with `opA = T` and `opB = N`; B uses the same order or `HIPBLASLT_ORDER_COL`.
 * rocKE MXFP6 GEMM kernels for that scale mode and order, registered for gfx950 PCI chip IDs `0x75a0` and `0x75a3`: E2M3 and E3M2, TN, `m = n = 4096` with `K = 65536` or `131584`, bf16 C and D, alpha `1` and beta `0`; with B in `HIPBLASLT_ORDER_COL`, E2M3 at `K = 65536` only. `hipblasLtMatmulAlgoGetHeuristic` does not return them; the extension API's heuristic does, and `hipblasLtMatmul` runs the algo it returns.
+* `HIPBLASLT_TENSILE_LIBPATH` may point at an installed library directory with one sub-directory per architecture (`<path>/<arch>/`); each device uses its own architecture's sub-directory when it holds that architecture's Tensile library, and the directory itself otherwise.
+
+### Changed
+
+* `hipblasltExtSoftmax`, `hipblasltExtLayerNorm`, `hipblasltExtAMax` and `hipblasLtMatrixTransform` return `HIPBLAS_STATUS_ARCH_MISMATCH` on a device whose architecture has no ExtOp or transform kernels, instead of terminating the process or returning `HIPBLAS_STATUS_INTERNAL_ERROR`. GEMM APIs still return `HIPBLAS_STATUS_INVALID_VALUE` when no Tensile library is available for the device.
 
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
+* Processes using GPUs of different architectures now get each device's own GEMM, ExtOp and matrix-transform kernels. Previously only the architecture of the first device to use hipBLASLt was loaded: other devices found no GEMM algorithms (or all devices failed when the first one had no kernels), ExtOps on them terminated the process, and matrix transforms failed. Also, `hipblasLtMatrixTransform` now always runs on the handle's device, making it current for the call (buffers and stream must belong to that device), rocRoller uses the current device instead of device 0 for its hardware model, and rocRoller's gfx950 custom kernels are preloaded only for gfx950 devices.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 

@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hipblaslt/hipblaslt-ext-op.h"
+#include "exceptions.hpp"
 #include "hipblaslt-ext-op-internal.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
@@ -37,6 +38,7 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime_api.h>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <rocblaslt-auxiliary.h>
 #include <rocblaslt_secure_env.hpp>
@@ -61,8 +63,13 @@ hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
                                     void*       output,
                                     void*       input,
                                     hipStream_t stream)
+try
 {
     return hipblasltSoftmaxRun(datatype, m, n, dim, output, input, stream);
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
 }
 
 hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
@@ -88,9 +95,14 @@ hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
                                       void*       gamma,
                                       void*       beta,
                                       hipStream_t stream)
+try
 {
     return hipblasltLayerNormRun(
         datatype, output, mean, invvar, input, m, n, eps, gamma, beta, stream);
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
 }
 
 hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
@@ -108,8 +120,13 @@ hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                  uint32_t          m,
                                  uint32_t          n,
                                  hipStream_t       stream)
+try
 {
     return hipblasltAMaxRun(datatype, outDatatype, output, input, m, n, stream);
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
 }
 
 namespace
@@ -117,25 +134,13 @@ namespace
     constexpr uint32_t SUPPORTED_MAX_N = 256;
     constexpr uint32_t WORKGROUP_SIZE  = 256;
 
-    std::string trimArchName(const std::string& archName)
-    {
-        auto pos = archName.find(':');
-
-        if(pos != std::string::npos)
-        {
-            return archName.substr(0, pos);
-        }
-
-        return archName;
-    }
-
     // Strict per-base layout: every ExtOp .dat lives at
     //   <library_root>/<base-arch>/hipblasltExtOpLibrary_<base-arch>.dat
     // The HIPBLASLT_EXT_OP_LIBRARY_PATH env override is still honored verbatim
     // for explicit user-supplied paths. There is no flat fallback and no
     // hard-coded /opt/rocm path — a missing file logs an error and yields an
     // empty path, which surfaces as a clean ExtOpMasterLibrary load failure.
-    std::string getExtOpLibraryPath()
+    std::string getExtOpLibraryPath(int deviceId)
     {
         // ROCM-26729 / SEC-00896: honor the override only for a non-privileged
         // process so a process in a secure execution context cannot be
@@ -161,18 +166,16 @@ namespace
                                 "the default per-arch library location");
         }
 
-        int              deviceId{};
-        hipDeviceProp_t  props{};
-        if(hipGetDevice(&deviceId) != hipSuccess
-           || hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+        hipDeviceProp_t props{};
+        if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
         {
             rocblaslt_log_error("getExtOpLibraryPath",
-                                "hipGetDevice/hipGetDeviceProperties",
+                                "hipGetDeviceProperties",
                                 "failed to query device for ExtOp arch lookup");
             return {};
         }
 
-        const std::string archName = trimArchName(props.gcnArchName);
+        const std::string archName = rocblaslt_internal_get_arch_name(props);
         auto              basename = "hipblasltExtOpLibrary_" + archName;
         auto              relpath  = std::filesystem::path(archName) / (basename + ".dat");
         if(auto perArchPath = rocblaslt_find_library_relative_path(relpath))
@@ -231,47 +234,74 @@ namespace
         return elementNumBytes(datatype) * tileM * tileN;
     }
 
-    static const hipblaslt_ext::ExtOpMasterLibrary& getExtOpMasterLibrary()
+    // Each architecture has its own ExtOp library file. Devices of the same
+    // architecture share the library loaded from it; libraries are never
+    // unloaded. Throws if the file cannot be loaded.
+    const hipblaslt_ext::ExtOpMasterLibrary& loadExtOpMasterLibrary(const std::string& path)
     {
-        static hipblaslt_ext::ExtOpMasterLibrary lib(getExtOpLibraryPath());
-        return lib;
+        static std::mutex mutex;
+        static std::unordered_map<std::string, std::unique_ptr<hipblaslt_ext::ExtOpMasterLibrary>>
+            libraries;
+
+        std::lock_guard<std::mutex> lock(mutex);
+        auto&                       library = libraries[path];
+        if(!library)
+            library = std::make_unique<hipblaslt_ext::ExtOpMasterLibrary>(path);
+        return *library;
     }
 
-    std::vector<std::unique_ptr<TensileLite::hip::SolutionAdapter>>& extOpLibraries()
+    // The ExtOp library of a device and an adapter loading code objects from
+    // its folder, set up once on the device's first ExtOp call. A device whose
+    // library fails to load, or holds no kernels for its architecture, keeps a
+    // null library and is not retried.
+    struct ExtOpDevice
     {
-        static std::vector<std::unique_ptr<TensileLite::hip::SolutionAdapter>> adapters;
+        std::once_flag                                     once;
+        const hipblaslt_ext::ExtOpMasterLibrary*           library = nullptr;
+        std::unique_ptr<TensileLite::hip::SolutionAdapter> adapter;
+        std::string                                        archName;
+        std::shared_ptr<TensileLite::Hardware>             hardware;
+    };
 
-        if(adapters.size())
-        {
-            return adapters;
-        }
+    ExtOpDevice& extOpDevice(int deviceId)
+    {
+        static std::vector<ExtOpDevice> devices = [] {
+            int numDevices{};
+            if(hipGetDeviceCount(&numDevices) != hipSuccess)
+                numDevices = 0;
+            return std::vector<ExtOpDevice>(numDevices);
+        }();
 
-        int  numDevices{};
-        auto err = hipGetDeviceCount(&numDevices);
-
-        for(std::size_t i = 0; i < numDevices; ++i)
-        {
-            adapters.emplace_back(std::make_unique<TensileLite::hip::SolutionAdapter>());
-        }
-
-        int currentDevice{};
-        err = hipGetDevice(&currentDevice);
-
-        try
-        {
-            auto& lib = getExtOpMasterLibrary();
-
-            for(auto& adapter : adapters)
+        auto& device = devices.at(deviceId);
+        std::call_once(device.once, [&] {
+            device.adapter  = std::make_unique<TensileLite::hip::SolutionAdapter>();
+            const auto path = getExtOpLibraryPath(deviceId);
+            try
             {
-                adapter->codeObjectDir(lib.getLibraryFolder());
+                hipDeviceProp_t props{};
+                if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+                {
+                    rocblaslt_log_error("extOpDevice", "hipGetDeviceProperties", path.c_str());
+                    return;
+                }
+                device.archName     = rocblaslt_internal_get_arch_name(props);
+                device.hardware     = TensileLite::hip::GetDevice(props, deviceId);
+                const auto& library = loadExtOpMasterLibrary(path);
+                if(!library.hasArchitecture(device.archName))
+                {
+                    rocblaslt_log_error(
+                        "extOpDevice", path.c_str(), ("no kernels for " + device.archName).c_str());
+                    return;
+                }
+                device.adapter->codeObjectDir(library.getLibraryFolder());
+                device.library = &library;
             }
-        }
-        catch(const std::runtime_error& e)
-        {
-            rocblaslt_log_error("extOpLibraries", "ExtOpLibPath", getExtOpLibraryPath().c_str());
-        }
-
-        return adapters;
+            catch(const std::exception& e)
+            {
+                rocblaslt_log_error("extOpDevice", path.c_str(), e.what());
+            }
+        });
+        return device;
     }
 }
 
@@ -303,10 +333,15 @@ hipblasStatus_t hipblasltSoftmaxRun(hipDataType datatype,
 
     int         currentDeviceId{};
     auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
+    if(err != hipSuccess)
+        return HIPBLAS_STATUS_INTERNAL_ERROR;
+    auto& extOp = extOpDevice(currentDeviceId);
+    if(!extOp.library)
+        return HIPBLAS_STATUS_ARCH_MISMATCH;
+    auto*       adapter   = extOp.adapter.get();
+    const auto& gpu       = extOp.hardware;
+    const auto& archName  = extOp.archName;
+    auto&       masterLib = *extOp.library;
     const auto& lib       = masterLib
                           .getLibrary(archName,
                                       hipblaslt_ext::SoftmaxSolutionLibrary::opName,
@@ -365,10 +400,15 @@ hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
 
     int         currentDeviceId{};
     auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
+    if(err != hipSuccess)
+        return HIPBLAS_STATUS_INTERNAL_ERROR;
+    auto& extOp = extOpDevice(currentDeviceId);
+    if(!extOp.library)
+        return HIPBLAS_STATUS_ARCH_MISMATCH;
+    auto*       adapter   = extOp.adapter.get();
+    const auto& gpu       = extOp.hardware;
+    const auto& archName  = extOp.archName;
+    auto&       masterLib = *extOp.library;
     const auto& lib       = masterLib
                           .getLibrary(archName,
                                       hipblaslt_ext::LayerNormSolutionLibrary::opName,
@@ -434,10 +474,15 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
     uint32_t    len = m * n;
     int         currentDeviceId{};
     auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
+    if(err != hipSuccess)
+        return HIPBLAS_STATUS_INTERNAL_ERROR;
+    auto& extOp = extOpDevice(currentDeviceId);
+    if(!extOp.library)
+        return HIPBLAS_STATUS_ARCH_MISMATCH;
+    auto*       adapter   = extOp.adapter.get();
+    const auto& gpu       = extOp.hardware;
+    const auto& archName  = extOp.archName;
+    auto&       masterLib = *extOp.library;
     const auto& lib       = masterLib
                           .getLibrary(archName,
                                       hipblaslt_ext::AMaxSolutionLibrary::opName,
