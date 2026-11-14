@@ -1949,9 +1949,9 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
     }
 }
 
-// Host-only: the partition planner fills whole rounds of blocks over the units, and one
-// partition takes no workspace (the partial kernel writes dw).
-TEST(TestConvDepthwiseValuWrwPartitions, FillWholeRoundsAndOnePartitionWritesDw)
+// Host-only: the partition planner takes the least rounds of blocks times rows a partition, and
+// one partition takes no workspace (the partial kernel writes dw).
+TEST(TestConvDepthwiseValuWrwPartitions, LeastRoundsTimesRowsAndOnePartitionWritesDw)
 {
     namespace dw = conv_depthwise_valu_wrw;
     const auto problemOf = [](ConvShape shape, int units) {
@@ -1961,8 +1961,8 @@ TEST(TestConvDepthwiseValuWrwPartitions, FillWholeRoundsAndOnePartitionWritesDw)
         return dw::parseWrwProblem(fixture.context());
     };
     // EfficientNet c960 30^2 n16 on 256 units, hankel q32 g2 nwg1 at 2 blocks a unit: 15 blocks
-    // a partition. The target 35 (rows of 14) would run a third round for 13 blocks; 32 rows
-    // of 15 fill 480 of the two rounds' 512.
+    // a partition. The target 35 (rows of 14) runs three rounds (42 rows on the busiest unit);
+    // 17 partitions of 29 rows are 255 blocks, one round (29 rows), the least of 17 .. 35.
     auto shape = depthwise(960, {30, 30}, {3, 3}, {1, 1}, true);
     shape.n = 16;
     auto problem = problemOf(shape, 256);
@@ -1978,10 +1978,10 @@ TEST(TestConvDepthwiseValuWrwPartitions, FillWholeRoundsAndOnePartitionWritesDw)
     hankel.mult = 1;
     hankel.s = 1;
     dw::partitionFor(*problem, 256, hankel);
-    EXPECT_EQ(problem->args.partitions, 32);
-    EXPECT_EQ(problem->args.rowsPerPartition, 15);
+    EXPECT_EQ(problem->args.partitions, 17);
+    EXPECT_EQ(problem->args.rowsPerPartition, 29);
     EXPECT_EQ(problem->args.direct, 0);
-    EXPECT_EQ(dw::workspaceBytesFor(*problem), size_t{32} * 960 * 9 * 4);
+    EXPECT_EQ(dw::workspaceBytesFor(*problem), size_t{17} * 960 * 9 * 4);
     // One unit at one block a unit: one partition, written straight into dw.
     dw::WrwConfig tile;
     tile.variant = "tile";

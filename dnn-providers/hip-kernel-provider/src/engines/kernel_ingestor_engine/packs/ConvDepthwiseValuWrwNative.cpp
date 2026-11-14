@@ -311,24 +311,21 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
               : 1;
     const int64_t most = std::clamp<int64_t>(
         divUp(wanted, blocksPerPartition), 1, std::max<int64_t>(1, a.rows / rowsAtLeast));
-    // Whole rounds of blocks over the units: of most / 2 .. most partitions, the one whose grid
-    // leaves the least of its last round idle (the most partitions on a tie), as K3 sizes its
-    // splits. gfx950 EfficientNet c960 30^2 n16: 35 partitions of 15 blocks ran a third round
-    // for 13 blocks (26.8 us); a full second round is 1.17x faster.
-    // Each count is taken as the rows split into it (equal runs of whole rows).
+    // Whole rounds of blocks over the units: of most / 2 .. most partitions (each taken as the
+    // rows split into equal runs), the one with the least rounds x rows a partition, the busiest
+    // unit's rows (the most partitions on a tie). gfx950 EfficientNet c960 30^2 n16: 35
+    // partitions of 15 blocks ran a third round for 13 blocks (26.8 us); 32 run two rounds.
     const auto partitionsOf = [&](int64_t p) { return divUp(a.rows, divUp(a.rows, p)); };
     int64_t partitions = partitionsOf(most);
-    double bestUse = -1;
+    int64_t bestCost = std::numeric_limits<int64_t>::max();
     for(int64_t p = most; p >= std::max({int64_t{1}, most / 2, most - 64}); --p)
     {
         const int64_t actual = partitionsOf(p);
-        const double blocks = static_cast<double>(actual) * static_cast<double>(blocksPerPartition);
-        const double rounds = std::ceil(blocks / static_cast<double>(units));
-        const double use = blocks / (rounds * static_cast<double>(units));
-        if(use > bestUse + 1e-9)
+        const int64_t cost = divUp(actual * blocksPerPartition, units) * divUp(a.rows, actual);
+        if(cost < bestCost)
         {
             partitions = actual;
-            bestUse = use;
+            bestCost = cost;
         }
     }
     a.rowsPerPartition = static_cast<int>(divUp(a.rows, partitions));
