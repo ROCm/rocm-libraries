@@ -16,6 +16,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <regex>
 #include <set>
@@ -6676,6 +6677,30 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_TRUE(set.heuristicsByMetric.empty());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, ParsesASlottedUedToOneDescriptorWhateverItsStorageHeld)
+{
+    // Per-arch shards ship byte-identical copies of one slotted UED, and the loader keeps
+    // them only while their parsed descriptors compare equal. A compared member the slotted
+    // branch leaves unassigned would carry whatever its storage held, so each parse lands in
+    // storage pre-filled with a different pattern (the parser's result is constructed in
+    // place where the compiler elides the copy).
+    auto documents = makeSlottedDocuments('1', "test:slotted_storage");
+    const auto& ued = documentOfType(documents, ".ued.json");
+    const auto parseOver = [&ued](unsigned char fill, unsigned char* storage) {
+        std::fill_n(storage, sizeof(EngineDescriptor), fill);
+        return new(storage) EngineDescriptor(detail::parseEngineDescriptor(ued, "slotted ued"));
+    };
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> first{};
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> second{};
+    auto* lhs = parseOver(0xAA, first.data());
+    auto* rhs = parseOver(0x55, second.data());
+
+    const bool equal = *lhs == *rhs;
+    lhs->~EngineDescriptor();
+    rhs->~EngineDescriptor();
+    EXPECT_TRUE(equal);
 }
 
 TEST(TestDescriptorLoader, UnslottedFilesLoadWithEmptySlotState)
