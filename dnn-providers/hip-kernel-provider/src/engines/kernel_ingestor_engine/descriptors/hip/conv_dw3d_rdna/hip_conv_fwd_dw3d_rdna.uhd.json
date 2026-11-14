@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "a8729ceb-0b20-40a4-b1a4-50e2147f5834",
+  "name": "hip_conv_fwd_dw3d_rdna selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.hip_conv_fwd_dw3d_rdna.score"
+  }
+}
