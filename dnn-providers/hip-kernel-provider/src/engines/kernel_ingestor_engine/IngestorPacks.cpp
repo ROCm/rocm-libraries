@@ -73,6 +73,11 @@ const std::vector<IngestorPack>& ingestorPacks()
 #ifdef HIPDNN_ENGINE_CONV_FFT
         {"hipkernel:CONV_FFT", &registerConvFftSymbols, &resetConvFftModuleCache},
 #endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        {"hipkernel:CONV_GROUP_VALU",
+         &registerConvGroupValuSymbols,
+         &resetConvGroupValuModuleCache},
+#endif
 #ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
         {"hipkernel:CONV_GROUP_VALU_WRW",
          &registerConvGroupValuWrwSymbols,

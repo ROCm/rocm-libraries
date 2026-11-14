@@ -714,6 +714,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #ifdef HIPDNN_ENGINE_CONV_FFT
         "hipkernel.conv_fft.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        "hipkernel.conv_group_valu.dispatch",
+#endif
 #ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
         "hipkernel.conv_group_valu_wrw.dispatch",
 #endif

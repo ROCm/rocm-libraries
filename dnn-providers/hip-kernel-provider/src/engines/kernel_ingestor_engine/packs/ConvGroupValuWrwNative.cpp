@@ -230,6 +230,9 @@ public:
         options.add("GVW_COLMASK", plan.colmask ? 1 : 0);
         options.add("GVW_DOT2", config.dot2);
         options.add("GVW_RING", config.ring);
+        // The depth code only where there is a depth: 2-D problems compile without it.
+        const auto& problem = resolved->problem;
+        options.add("GVW_3D", problem.t > 1 || problem.di > 1 || problem.dOut > 1 ? 1 : 0);
 
         struct Launch
         {

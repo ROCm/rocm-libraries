@@ -61,6 +61,7 @@ FAMILIES = {
     "gen_direct.py": "direct",
     "gen_fft.py": "fft",
     "gen_group.py": "group",
+    "gen_group_valu.py": "group_valu",
     "gen_group_valu_wrw.py": "group_valu_wrw",
     "gen_igemm.py": "igemm",
     "gen_igemm_nchw.py": "igemm_nchw",

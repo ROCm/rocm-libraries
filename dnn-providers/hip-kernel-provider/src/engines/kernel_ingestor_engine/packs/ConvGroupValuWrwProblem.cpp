@@ -50,13 +50,26 @@ int64_t divUp(int64_t value, int64_t divisor)
     return (value + divisor - 1) / divisor;
 }
 
-/// Bytes from a tensor's first element to one past its last: sum of (extent - 1) x stride, plus
-/// one element. nullopt for a negative stride or an overflow.
-std::optional<long long>
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
-    extentBytes(const long long (&dims)[4], const long long (&strides)[4], int elementBytes)
+/// Bytes from a tensor's first element to one past its last: sum of (extent - 1) x stride over
+/// n, c, h, w and the depth, plus one element. nullopt for a negative stride or an overflow.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+std::optional<long long> extentBytes(const long long (&dims)[4],
+                                     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- as above
+                                     const long long (&strides)[4],
+                                     long long depth,
+                                     long long depthStride,
+                                     int elementBytes)
 {
-    int64_t last = 0;
+    if(depthStride < 0)
+    {
+        return std::nullopt;
+    }
+    const auto depthTerm = multiply(depth - 1, depthStride);
+    if(!depthTerm.has_value())
+    {
+        return std::nullopt;
+    }
+    int64_t last = *depthTerm;
     for(int axis = 0; axis < 4; ++axis)
     {
         if(strides[axis] < 0)
@@ -137,7 +150,7 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
     {
         return std::nullopt;
     }
-    if(base->spatialRank != 1 && base->spatialRank != 2)
+    if(base->spatialRank < 1 || base->spatialRank > 3)
     {
         return std::nullopt;
     }
@@ -149,7 +162,7 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
             return std::nullopt;
         }
     }
-    for(int axis = 1; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+    for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
         for(const long long value : {a.inSpatial[axis],
                                      a.outSpatial[axis],
@@ -182,14 +195,26 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
     problem.sw = static_cast<int>(a.stride[2]);
     problem.dh = static_cast<int>(a.dilation[1]);
     problem.dw = static_cast<int>(a.dilation[2]);
+    problem.di = static_cast<int>(a.inSpatial[0]);
+    problem.dOut = static_cast<int>(a.outSpatial[0]);
+    problem.t = static_cast<int>(a.filter[0]);
+    problem.pd = static_cast<int>(a.prePadding[0]);
+    problem.sd = static_cast<int>(a.stride[0]);
+    problem.dd = static_cast<int>(a.dilation[0]);
+    // Below 3-D the depth is 1 and its strides are never multiplied by more than 0.
+    const bool threeD = base->spatialRank == 3;
+    problem.xsd = threeD ? a.xStrides[2] : 0;
+    problem.ysd = threeD ? a.yStrides[2] : 0;
+    problem.wsd = threeD ? a.wStrides[2] : 0;
     problem.flip = a.flipFilter != 0 ? 1 : 0;
     problem.elementBytes = base->dataType == data_objects::DataType::FLOAT ? 4 : 2;
     if(problem.sh < 1 || problem.sw < 1 || problem.dh < 1 || problem.dw < 1 || problem.r < 1
-       || problem.s < 1 || problem.ho < 1 || problem.wo < 1)
+       || problem.s < 1 || problem.ho < 1 || problem.wo < 1 || problem.sd < 1 || problem.dd < 1
+       || problem.t < 1 || problem.di < 1 || problem.dOut < 1)
     {
         return std::nullopt;
     }
-    // (n, c, d, h, w) -> (n, c, h, w); depth is 1.
+    // (n, c, d, h, w) -> (n, c, h, w); the depth strides are apart (xsd, ysd, wsd).
     // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const long long* strides[3] = {a.xStrides, a.wStrides, a.yStrides};
     long long* out[3] = {problem.xStr, problem.wStr, problem.yStr};
@@ -205,8 +230,10 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
     const long long xDims[4] = {a.n, a.c, problem.hi, problem.wi};
     const long long yDims[4] = {a.n, a.k, problem.ho, problem.wo};
     // NOLINTEND(modernize-avoid-c-arrays)
-    const auto xBytes = extentBytes(xDims, problem.xStr, problem.elementBytes);
-    const auto yBytes = extentBytes(yDims, problem.yStr, problem.elementBytes);
+    const auto xBytes
+        = extentBytes(xDims, problem.xStr, problem.di, problem.xsd, problem.elementBytes);
+    const auto yBytes
+        = extentBytes(yDims, problem.yStr, problem.dOut, problem.ysd, problem.elementBytes);
     if(!xBytes.has_value() || !yBytes.has_value())
     {
         return std::nullopt;
@@ -324,7 +351,8 @@ std::optional<Plan>
         return std::nullopt;
     }
     const int64_t rowsPerPass = wave / lanes;
-    const int64_t rows = static_cast<int64_t>(problem.n) * problem.ho;
+    const int64_t rowsAnImage = static_cast<int64_t>(problem.dOut) * problem.ho;
+    const int64_t rows = static_cast<int64_t>(problem.n) * rowsAnImage;
     if(rows > INT_LIMIT)
     {
         return std::nullopt;
@@ -332,15 +360,18 @@ std::optional<Plan>
 
     // Offsets within the images one pass spans (its rows reach at most this many images) stay
     // within 31 bits; the pass's first image is a 64-bit base.
-    const int64_t images = std::min<int64_t>(problem.n, divUp(rowsPerPass - 1, problem.ho) + 1);
+    const int64_t images = std::min<int64_t>(problem.n, divUp(rowsPerPass - 1, rowsAnImage) + 1);
     const int es = problem.elementBytes;
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const auto reach = [&](const long long(&str)[4],
                            int64_t channels,
+                           int64_t depth,
+                           long long depthStride,
                            int64_t h,
                            int64_t w) -> std::optional<int64_t> {
         const auto terms = {multiply(images, str[0]),
                             multiply(channels, str[1]),
+                            multiply(depth, depthStride),
                             multiply(h, str[2]),
                             multiply(w, str[3])};
         int64_t sum = 0;
@@ -355,8 +386,14 @@ std::optional<Plan>
         return multiply(sum, es);
     };
     // Lanes past the row read a whole window (out of range: zeros) at most one window further.
-    const auto xReach = reach(problem.xStr, config.cb, problem.hi, lanes * own + own);
-    const auto yReach = reach(problem.yStr, config.kb, problem.ho, lanes * config.p + config.p);
+    const auto xReach
+        = reach(problem.xStr, config.cb, problem.di, problem.xsd, problem.hi, lanes * own + own);
+    const auto yReach = reach(problem.yStr,
+                              config.kb,
+                              problem.dOut,
+                              problem.ysd,
+                              problem.ho,
+                              lanes * config.p + config.p);
     if(!xReach.has_value() || !yReach.has_value() || *xReach >= OFFSET_LIMIT
        || *yReach >= OFFSET_LIMIT)
     {
@@ -444,18 +481,32 @@ std::optional<Plan>
     a.rows = static_cast<int>(rows);
     a.cBlocks = problem.cpg / config.cb;
     a.kBlocks = problem.kpg / config.kb;
-    const int64_t tiles = static_cast<int64_t>(problem.groups) * a.cBlocks * a.kBlocks;
+    // A tile per depth tap too: the grid's tiles are fd x the plane's.
+    const int64_t tilesPlane = static_cast<int64_t>(problem.groups) * a.cBlocks * a.kBlocks;
+    const int64_t tiles = tilesPlane * problem.t;
     if(tiles > INT_LIMIT)
     {
         return std::nullopt;
     }
     a.tiles = static_cast<int>(tiles);
+    a.tilesPlane = static_cast<int>(tilesPlane);
     a.flip = problem.flip;
+    a.di = problem.di;
+    a.dOut = problem.dOut;
+    a.pd = problem.pd;
+    a.sd = problem.sd;
+    a.dd = problem.dd;
+    a.fd = problem.t;
+    a.rowsAnImage = static_cast<int>(rowsAnImage);
+    a.xsd = problem.xsd;
+    a.ysd = problem.ysd;
+    a.wsd = problem.wsd;
 
     if(config.ring != 0)
     {
-        // The ring walks rows at unit height stride and dilation.
-        if(problem.sh != 1 || problem.dh != 1)
+        // The ring walks the rows of 2-D images at unit height stride and dilation.
+        if(problem.sh != 1 || problem.dh != 1 || problem.t != 1 || problem.dOut != 1
+           || problem.di != 1)
         {
             return std::nullopt;
         }
