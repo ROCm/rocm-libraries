@@ -71,7 +71,7 @@ def _inter_wave_reduction_text(make_generator):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("make_generator", [_amax_generator, _layer_norm_generator])
-def test_inter_wave_reduction_synchronizes_before_lds_reuse(make_generator):
+def test_inter_wave_reduction_synchronizes_each_level(make_generator):
     # Both generators hardcode gfx90a, so the worker split follows that ISA.
     text = run_where_backend_matches_isa(
         gfxToIsa("gfx90a"), _inter_wave_reduction_text, make_generator
@@ -79,18 +79,16 @@ def test_inter_wave_reduction_synchronizes_before_lds_reuse(make_generator):
 
     upper = _between(text, "label_upper:", "label_lower:")
     lower = _between(text, "label_lower:", "label_empty:")
-    empty = _between(text, "label_empty:", "label_inter_sync:")
-    sync = _between(text, "label_inter_sync:", "label_end:")
+    empty = _between(text, "label_empty:", "label_end:")
 
     assert upper.count("s_barrier") == 1
     assert lower.count("s_barrier") == 1
     assert empty.count("s_barrier") == 1
-    assert sync.count("s_barrier") == 1
+    assert "label_inter_sync" not in text
 
     assert "ds_write" in upper
-    assert "s_branch label_inter_sync" in upper
+    assert "s_branch label_inter" in upper
 
     assert lower.index("s_barrier") < lower.index("ds_read")
-    assert "s_branch label_inter_sync" in lower
-
-    assert "s_branch label_inter" in sync
+    assert "s_branch label_inter" in lower
+    assert "s_branch label_inter" in empty

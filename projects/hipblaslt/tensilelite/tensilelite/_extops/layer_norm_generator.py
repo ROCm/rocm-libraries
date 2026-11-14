@@ -147,9 +147,8 @@ class LayerNormKernelGenerator:
 
     @property
     def lds_usage_byte(self) -> int:
-        # used in reduce inter wave mean and invvar
-        # 4 data * half_wave_num * bpe
-        return 4 * (self.num_workitems // self.wavefront_size // 2) * self.bpe
+        # Four values per wave, including the broadcast slot.
+        return 4 * (self.num_workitems // self.wavefront_size) * self.bpe
 
     @property
     def func_name(self):
@@ -536,7 +535,6 @@ class LayerNormKernelGenerator:
         label_upper = Label("upper", f'upper')
         label_lower = Label("lower", f'lower')
         label_empty = Label("empty", f'empty')
-        label_sync  = Label("inter_sync", f'inter-wave LDS reuse')
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
@@ -555,9 +553,9 @@ class LayerNormKernelGenerator:
         mod.add(ri.SCBranchVCCNZ(label_lower.getLabelName()))
         mod.add(ri.SBranch(label_empty.getLabelName()))
 
+        # Each level uses disjoint wave-indexed LDS slots.
         mod.add(label_upper)
-        mod.add(ri.VSubU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
-        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Tmp"), 4))
+        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Widx"), 4))
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 2, vgpr("Tmp")))
         ds = DSModifiers(offset=0)
         mod.add(ri.DSStoreB32(vgpr("Tmp"), vgpr("Count"), ds))
@@ -567,10 +565,11 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSStoreB32(vgpr("Tmp"), vgpr("Invvar"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_lower)
         mod.add(ri.SBarrier())
-        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Widx"), 4))
+        mod.add(ri.VAddU32(vgpr("Tmp"), vgpr("Widx"), sgpr("Offset")))
+        mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Tmp"), 4))
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 2, vgpr("Tmp")))
         ds = DSModifiers(offset=0)
         mod.add(ri.DSLoadB32(vgpr("CountB"), vgpr("Tmp"), ds))
@@ -580,13 +579,8 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSLoadB32(vgpr("StdB"), vgpr("Tmp"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
-        mod.add(ri.SBranch(label_sync.getLabelName()))
+        mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_empty)
-        mod.add(ri.SBarrier())
-        mod.add(label_sync)
-        # The first barrier publishes the upper-wave writes. This second
-        # barrier retires the lower-wave reads before the next tree level
-        # reuses the same LDS slots.
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_end)
