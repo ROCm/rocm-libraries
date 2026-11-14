@@ -137,7 +137,7 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
     )
 
 
-def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1):
+def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
     (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images.
@@ -158,7 +158,7 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1):
         vec=vec,
         ring=0,
         bl=0,
-        split=0,
+        split=split,
         tm=0,
         tn=0,
         nt=0,
@@ -228,6 +228,19 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=1),
         ],
     )
+    # gfx942 (MI325X) rows, dword LDS DMA, 16-channel chunks: the 16 x 16 x 256 tile and the
+    # 4-image 8 x 8 tile (40^2 layers 0.80-0.91x of MIOpen's search time) take most 2-D 3x3 16-bit
+    # layers from the halo tile (kernel-only sweep, 37 SD/SDXL/VAE shapes: 7% of the weighted time).
+    add(
+        dt,
+        ["gfx942"],
+        [
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 1, 4, 16, 8),
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8),
+            RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
+            RW(f"mfma16_{e}", F33, 5, 4, 4, 1, 2, 16, 8),
+        ],
+    )
     # gfx950: the rows kernel (LDS DMA), then the halo-tile configs
     add(
         dt,
@@ -257,6 +270,15 @@ for dt in ("HALF", "BFLOAT16"):
             # 24^2 (1.25x over the best plain tile) and 40^2 / 16^2 maps (1.03-1.16x).
             RW(f"mfma16x32_{e}", F33, 6, 4, 4, 1, 2, 64, 8, un=2),
             RW(f"mfma16x32_{e}", F33, 5, 4, 2, 1, 4, 64, 8, un=2),
+            # Four images of 4 columns per MFMA column group: an 8 x 8-pixel tile of 4 images
+            # (hipconv's batch-packed direct tile), so 40^2 c1280 layers fill one persistent round
+            # (MI355X vs ConvHipConv: 40^2 1.35-1.42x -> 1.13-1.18x behind, 80^2 1.16x -> 0.99x).
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 64, 8, un=4),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, un=4),
+            RW(f"mfma16x32_{e}", F33, 4, 4, 2, 2, 2, 64, 8, un=4),
+            # Split-C of the main tile for grids with at most a quarter of the units busy (n1-n2
+            # layers): fp32 partials and an in-order reduce (n1 c640 64^2: 1.4x).
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 64, 8, split=1),
             RW(f"mfma16x32_{e}", F55, 8, 2, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F77, 8, 2, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F17, 8, 4, 2, 2, 2, 32, 8),
@@ -652,6 +674,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".p{c['pw']}f{c['fn']}.w{c['wp']}x{c['wq']}x{c['wk']}c{c['bc']}.v{c['vec']}"
                     f".pp{c['pp']}.epi{c['epi']}"
                     + (f".u{c['un']}" if c["un"] > 1 else "")
+                    + (".split" if c["split"] else "")
                 )
             else:
                 name = (

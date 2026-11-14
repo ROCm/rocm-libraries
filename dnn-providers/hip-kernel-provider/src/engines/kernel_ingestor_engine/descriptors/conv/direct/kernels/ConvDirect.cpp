@@ -78,7 +78,8 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_PP,
                CONV_DIRECT_EPI,
                CONV_DIRECT_TO,
-               CONV_DIRECT_UN>(a);
+               CONV_DIRECT_UN,
+               CONV_DIRECT_SPLIT>(a);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,
