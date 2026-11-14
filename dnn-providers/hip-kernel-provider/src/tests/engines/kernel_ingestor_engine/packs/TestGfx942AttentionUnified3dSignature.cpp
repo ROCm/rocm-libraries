@@ -75,7 +75,7 @@ std::vector<KernelArgument> pythonSegmentAbi()
                             "softcap",
                             "num_seqs",
                             "block_table_stride",
-                            "qq_bias_stride_0",
+                            "qq_bias_stride0",
                             "num_query_heads",
                             "num_kv_heads",
                             "sliding_window"})

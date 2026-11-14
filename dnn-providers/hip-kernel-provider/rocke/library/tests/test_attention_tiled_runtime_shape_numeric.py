@@ -385,7 +385,7 @@ def _launch_3d(rt, arch, problem, q, k, v, out, cu, seq_lens, table, scale):
         "softcap": 0.0,
         "num_seqs": problem.num_seqs,
         "block_table_stride": table.stride(0),
-        "qq_bias_stride_0": 0,
+        "qq_bias_stride0": 0,
         **au._runtime_kernarg_values(problem),
     }
     red_vals = {

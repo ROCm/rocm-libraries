@@ -1598,7 +1598,7 @@ def build_unified_attention_2d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -6061,7 +6061,7 @@ def _build_gfx942_4warp_gqa_lean(
     bt_stride_p = b.param("block_table_stride", I32)
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
-    b.param("qq_bias_stride_0", I32)
+    b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -6390,7 +6390,7 @@ def build_gfx942_4warp_gqa(
     bt_stride_p = b.param("block_table_stride", I32)
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
-    b.param("qq_bias_stride_0", I32)
+    b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}

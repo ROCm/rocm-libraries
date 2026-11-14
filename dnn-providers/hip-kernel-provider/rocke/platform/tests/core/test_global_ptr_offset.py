@@ -69,9 +69,9 @@ def test_llvm_ir_offsets_without_inbounds_and_casts_the_pointer_to_i64():
     steps = [line for line in text.splitlines() if "%X, i64 %off" in line]
     assert len(steps) == 1
     assert re.fullmatch(
-        r"  %gptr\d+ = getelementptr i8, ptr addrspace\(1\) %X, i64 %off", steps[0]
+        r"  %gptr_\d+ = getelementptr i8, ptr addrspace\(1\) %X, i64 %off", steps[0]
     ), steps[0]
-    assert re.search(r" = ptrtoint ptr addrspace\(1\) %gptr\d+ to i64\n", text)
+    assert re.search(r" = ptrtoint ptr addrspace\(1\) %gptr_\d+ to i64\n", text)
 
 
 def test_both_engines_emit_the_same_llvm_ir():
@@ -86,9 +86,9 @@ def test_hip_offsets_in_integer_arithmetic_and_casts_the_pointer_to_int64():
     # The result keeps the pointer's element type, so indexing it counts
     # elements, as indexing X does.
     assert re.search(
-        r"float\* (gptr\d+) = \(float\*\)\(\(uintptr_t\)X \+ \(uint64_t\)off\);", hip
+        r"float\* (gptr_\d+) = \(float\*\)\(\(uintptr_t\)X \+ \(uint64_t\)off\);", hip
     ), hip
-    assert re.search(r"int64_t gaddr\d+ = \(int64_t\)\(uintptr_t\)gptr\d+;", hip), hip
+    assert re.search(r"int64_t gaddr_\d+ = \(int64_t\)\(uintptr_t\)gptr_\d+;", hip), hip
 
 
 # --------------------------------------------------------------------------

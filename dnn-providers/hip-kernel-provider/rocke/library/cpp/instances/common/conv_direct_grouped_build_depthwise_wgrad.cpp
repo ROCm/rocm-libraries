@@ -453,21 +453,21 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_wgrad(
         }
         for(k = 0; k < NA; ++k)
         {
-            snprintf(names[ni], sizeof names[0], "dwa%d_%d", i, k);
+            snprintf(names[ni], sizeof names[0], "dwa%d_k%d", i, k);
             iargs[ni].name = names[ni];
             iargs[ni].init = accs[k];
             ++ni;
         }
         for(k = 0; k < NH; ++k)
         {
-            snprintf(names[ni], sizeof names[0], "dwh%d_%d", i, k);
+            snprintf(names[ni], sizeof names[0], "dwh%d_k%d", i, k);
             iargs[ni].name = names[ni];
             iargs[ni].init = head0[k];
             ++ni;
         }
         for(k = 0; k < NP; ++k)
         {
-            snprintf(names[ni], sizeof names[0], "dwp%d_%d", i, k);
+            snprintf(names[ni], sizeof names[0], "dwp%d_k%d", i, k);
             iargs[ni].name = names[ni];
             iargs[ni].init = pend0[k];
             ++ni;

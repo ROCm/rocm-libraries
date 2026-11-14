@@ -51,6 +51,12 @@ function(rocke_build_id_inputs out_var root_dir)
        "${root_dir}/python/rocke/core/arch/domain.py"
        "${root_dir}/tools/gen_arch_domain_cpp.py")
 
+  # Likewise the engine's C++ keyword table (tools/gen_cxx_keywords_cpp.py).
+  # Keep this list mirrored in online.py.
+  list(APPEND _rocke_all
+       "${root_dir}/python/rocke/core/cxx_keywords.py"
+       "${root_dir}/tools/gen_cxx_keywords_cpp.py")
+
   # Include the CLI frontend and the build recipes that select, stamp, compile,
   # and link the two native artifacts. Keep this list mirrored in online.py.
   foreach(_rocke_input

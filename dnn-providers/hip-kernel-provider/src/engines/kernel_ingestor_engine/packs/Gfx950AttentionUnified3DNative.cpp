@@ -504,7 +504,7 @@ std::vector<KernelArgument> unified3DSegmentSignature()
             KernelArgument{"by_value", F32, 108, "softcap"},
             KernelArgument{"by_value", I32, 112, "num_seqs"},
             KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
+            KernelArgument{"by_value", I32, 120, "qq_bias_stride0"},
             KernelArgument{"by_value", I32, 124, "num_query_heads"},
             KernelArgument{"by_value", I32, 128, "num_kv_heads"},
             KernelArgument{"by_value", I32, 132, "sliding_window"}};

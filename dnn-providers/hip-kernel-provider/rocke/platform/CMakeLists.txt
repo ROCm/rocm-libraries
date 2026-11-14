@@ -237,6 +237,25 @@ target_sources(rocke_core_objects PRIVATE "${_rocke_arch_domain_inc}")
 target_include_directories(rocke_core_objects PRIVATE
                            "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
+# --- C++ keyword table ---------------------------------------------------------
+# Both engines refuse a value name an author picks when it is a C++ keyword (the
+# HIP lowering prints such names unchanged). python/rocke/core/cxx_keywords.py is
+# the one list; this engine gets a copy generated from it at build time, in the
+# build tree and never committed. tests/core/test_value_names.cpp includes the
+# same copy to check this engine refuses every word of it.
+set(_rocke_cxx_keywords_include_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_rocke_cxx_keywords_inc "${_rocke_cxx_keywords_include_dir}/rocke/cxx_keywords.inc")
+add_custom_command(
+  OUTPUT "${_rocke_cxx_keywords_inc}"
+  COMMAND "${Python3_EXECUTABLE}" -I
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_cxx_keywords_cpp.py"
+          --out "${_rocke_cxx_keywords_inc}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_cxx_keywords_cpp.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/cxx_keywords.py"
+  COMMENT "Generating the C++ keyword table from python/rocke/core/cxx_keywords.py"
+  VERBATIM)
+target_sources(rocke_core_objects PRIVATE "${_rocke_cxx_keywords_inc}")
+
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine
 # and replay CLI sources plus their CMake build recipes. This common bundle ID is

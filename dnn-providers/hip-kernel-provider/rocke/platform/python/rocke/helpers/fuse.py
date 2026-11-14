@@ -882,14 +882,14 @@ def _match_matmul_epilogue(graph_module) -> Optional[FusionPlan]:
             if lhs_ph and not rhs_ph:
                 residual_names.append(lhs_ph)
                 ops_rev.append(
-                    ResidualMul(param_name=f"residual_mul_{len(residual_names) - 1}")
+                    ResidualMul(param_name=f"residual_mul{len(residual_names) - 1}")
                 )
                 cur = rhs
                 continue
             if rhs_ph and not lhs_ph:
                 residual_names.append(rhs_ph)
                 ops_rev.append(
-                    ResidualMul(param_name=f"residual_mul_{len(residual_names) - 1}")
+                    ResidualMul(param_name=f"residual_mul{len(residual_names) - 1}")
                 )
                 cur = lhs
                 continue
@@ -912,7 +912,7 @@ def _match_matmul_epilogue(graph_module) -> Optional[FusionPlan]:
                 else:
                     residual_names.append(lhs_ph)
                     ops_rev.append(
-                        ResidualAdd(param_name=f"residual_{len(residual_names) - 1}")
+                        ResidualAdd(param_name=f"residual{len(residual_names) - 1}")
                     )
                 cur = rhs
                 continue
@@ -923,7 +923,7 @@ def _match_matmul_epilogue(graph_module) -> Optional[FusionPlan]:
                 else:
                     residual_names.append(rhs_ph)
                     ops_rev.append(
-                        ResidualAdd(param_name=f"residual_{len(residual_names) - 1}")
+                        ResidualAdd(param_name=f"residual{len(residual_names) - 1}")
                     )
                 cur = lhs
                 continue

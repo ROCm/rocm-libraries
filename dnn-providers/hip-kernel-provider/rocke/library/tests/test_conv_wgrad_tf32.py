@@ -132,7 +132,7 @@ class TestTf32BuildMatrix(unittest.TestCase):
         w = min(n, 4)
         part_reads = len(
             re.findall(
-                rf"tile\.smem_load_vN %[AB]_smem\d+, [^\n]*vec = {w}\}} : vec<f32x{w}>",
+                rf"tile\.smem_load_vN %[AB]_smem2?_\d+, [^\n]*vec = {w}\}} : vec<f32x{w}>",
                 ir,
             )
         )

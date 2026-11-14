@@ -39,7 +39,7 @@ _AT_I32_LIMIT = 65534
 _PAST_2GIB = 69632
 # A page pointer: value_cache_ptr plus a 64-bit byte offset.
 _PAGE_PTR = re.compile(
-    r"(%gptr\d+) = getelementptr inbounds i8, ptr addrspace\(1\) %value_cache_ptr, i64 "
+    r"(%gptr_\d+) = getelementptr inbounds i8, ptr addrspace\(1\) %value_cache_ptr, i64 "
 )
 # A typed V element load address: (base, index width).
 _V_GEP = re.compile(
