@@ -815,3 +815,43 @@ class TestUpdateOccupancyFromMaxVgpr:
         kernel, mkb = self._run_with_max_vgpr(max_vgpr=-1)
         assert kernel["CUOccupancy"] == 1
         assert mkb._set_gprs_calls == []
+
+    def test_ceil_to_8_boundary_no_update_when_rounds_equal(self):
+        """max_vgpr below pool but rounding to same multiple of 8 → no update.
+
+        With vgprPool=21, agprPool=240:
+          pool_total = ceil(21/8)*8 + 240 = 24 + 240 = 264
+          max_vgpr=18 → ceil(18/8)*8 + 240 = 24 + 240 = 264  (18 < 21 but both → 24)
+          max_vgpr=17 → ceil(17/8)*8 + 240 = 24 + 240 = 264  (17 < 21 but both → 24)
+
+        The >= comparison after rounding must prevent spurious descriptor rewrites.
+        """
+        # max_vgpr=18: rounds to same total as pool (264)
+        kernel18, mkb18 = self._run_with_max_vgpr(max_vgpr=18)
+        assert kernel18["CUOccupancy"] == 1, "CUOccupancy should stay unchanged (264 >= 264)"
+        assert mkb18._set_gprs_calls == [], "setGprs must not be called (264 >= 264)"
+
+        # max_vgpr=17: also rounds to same total as pool (264)
+        kernel17, mkb17 = self._run_with_max_vgpr(max_vgpr=17)
+        assert kernel17["CUOccupancy"] == 1, "CUOccupancy should stay unchanged (264 >= 264)"
+        assert mkb17._set_gprs_calls == [], "setGprs must not be called (264 >= 264)"
+
+    def test_ceil_to_8_non_multiple_triggers_update(self):
+        """max_vgpr not a multiple of 8 that rounds below pool → triggers update.
+
+        With vgprPool=21, agprPool=240:
+          pool_total = ceil(21/8)*8 + 240 = 24 + 240 = 264
+          max_vgpr=16 → ceil(16/8)*8 + 240 = 16 + 240 = 256 < 264  ✓ update
+          max_vgpr=15 → ceil(15/8)*8 + 240 = 16 + 240 = 256 < 264  ✓ update
+          max_vgpr=9  → ceil(9/8)*8 + 240 = 16 + 240 = 256 < 264  ✓ update
+
+        All values in [9..16] round to 16, which gives 256 < 264 → update triggered.
+        """
+        # max_vgpr=16 is already tested by test_update_when_max_vgpr_lower_than_pool
+        # Test a non-multiple within the same rounded bucket
+        kernel15, mkb15 = self._run_with_max_vgpr(max_vgpr=15)
+        assert kernel15["CUOccupancy"] == 2, f"max_vgpr=15 → 256 unified → occ=2"
+        assert mkb15._set_gprs_calls, "setGprs must be called (256 < 264)"
+        vgprs, agprs, _ = mkb15._set_gprs_calls[-1]
+        assert vgprs == 15
+        assert agprs == 240
