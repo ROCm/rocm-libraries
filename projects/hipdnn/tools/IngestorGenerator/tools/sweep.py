@@ -583,6 +583,94 @@ def _is_reference(row, provider):
     )
 
 
+def _result_schema(doc):
+    """The dnn-benchmark result schema of `doc`: 1 has no `schema_version`.
+
+    Schema 2 (dnn-benchmarking docs/results-schema.md) is read through
+    `_schema1_row` and `_schema2_metadata`; any other version is refused rather than
+    misread.
+    """
+    version = doc["schema_version"] if "schema_version" in doc else 1
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError(
+            f"dnn-benchmark result schema_version {version!r} is not supported; "
+            "the sweep reads schema 1 and 2"
+        )
+    return version
+
+
+def _schema2_metadata(doc):
+    """Schema-2 `summary` and `environment` as the schema-1 `metadata` keys read here.
+
+    Schema 1 wrote a graph-level error, and a graph with no selected engine, as an
+    engine error row, so its `error_combinations` counted both; schema 2 counts them
+    apart.
+    """
+    summary = doc["summary"]
+    return {
+        "total_graphs": summary["graphs"],
+        "fail_combinations": summary["failed"],
+        "error_combinations": summary["errors"]
+        + summary["graph_errors"]
+        + summary["no_engine_graphs"],
+        "gpu_arch": doc["environment"]["gpu_arch"],
+    }
+
+
+def _schema1_row(row, plugin_paths):
+    """A schema-2 result row under the schema-1 keys `evaluate_phase` reads.
+
+    Schema 2 names the row's runtime (`hipdnn` or `pytorch`) in `runtime`, nests
+    `engine`, writes its ID as `0x` plus 16 upper-case hex digits of the unsigned
+    value, and labels an unnamed engine with that hex ID. The default plan's timing
+    and comparison are in `ootb.kernel` and `ootb.correctness`; the kernel stats have
+    no mean, so the headline `median_ms` is the timing read here. `message` holds the
+    skip reason or the error, and `verdict` says if validation passed. Plugin
+    directories are per run (`run.config.plugin_paths`), so a hipDNN row is
+    attributed to the one directory of a single-path run. Any other ID spelling reads
+    as no ID, so the row cannot be attributed.
+    """
+    engine = row.get("engine") if isinstance(row.get("engine"), dict) else {}
+    hex_id = engine.get("id")
+    engine_id = (
+        int(hex_id, 16)
+        if isinstance(hex_id, str) and re.fullmatch(r"0x[0-9A-F]{16}", hex_id)
+        else None
+    )
+    name = engine.get("name")
+    if engine_id is not None and name == hex_id:
+        name = f"engine_{engine_id:#x}"
+    ootb = row.get("ootb") if isinstance(row.get("ootb"), dict) else {}
+    kernel = ootb.get("kernel")
+    skipped = row.get("status") == "skipped"
+    correctness = ootb.get("correctness")
+    if isinstance(correctness, dict):
+        correctness = {
+            **correctness,
+            "passed": row.get("verdict") == "passed",
+            "execution_success": row.get("status") == "success",
+            "tolerance_match": correctness.get("match"),
+        }
+    single_path = (
+        plugin_paths[0]
+        if isinstance(plugin_paths, list) and len(plugin_paths) == 1
+        else None
+    )
+    return {
+        **row,
+        "provider": row.get("runtime"),
+        "engine_name": name,
+        "engine_id": engine_id,
+        "plugin_path": single_path if row.get("runtime") == "hipdnn" else None,
+        "gpu_kernel_stats": (
+            {"mean_ms": kernel.get("median_ms")} if isinstance(kernel, dict) else None
+        ),
+        "skip_reason": row.get("message") if skipped else None,
+        "error_message": None if skipped else row.get("message"),
+        "correctness": correctness,
+    }
+
+
 def evaluate_phase(
     config,
     arm,
@@ -594,7 +682,10 @@ def evaluate_phase(
     command_exit,
     required_served=(),
 ):
-    """Evaluate real graph-first dnn-benchmark JSON, independently of command status."""
+    """Evaluate real graph-first dnn-benchmark JSON, independently of command status.
+
+    Reads result schema 1 and 2; see `_result_schema`.
+    """
     gates = {
         "command": command_exit == 0,
         "descriptors": False,
@@ -625,8 +716,11 @@ def evaluate_phase(
     except (OSError, UnicodeError) as exc:
         errors.append(f"plugin provenance: {exc}")
     metadata = None
+    schema = 1
+    plugin_paths = None
     try:
         doc = read_json(result_path)
+        schema = _result_schema(doc)
         graphs = doc["graphs"]
         if not isinstance(graphs, list):
             raise ValueError("graphs must be a list")
@@ -640,7 +734,8 @@ def evaluate_phase(
                 raise ValueError("duplicate graph name or invalid results list")
             rows[name] = graph
         gates["parsed_inventory"] = set(rows) == {g["graph_name"] for g in inventory}
-        metadata = doc["metadata"]
+        metadata = doc["metadata"] if schema == 1 else _schema2_metadata(doc)
+        plugin_paths = doc["run"]["config"]["plugin_paths"] if schema == 2 else None
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be a mapping")
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -668,6 +763,8 @@ def evaluate_phase(
             if not isinstance(row, dict):
                 entry.update(outcome="ambiguous", reason="non-mapping result row")
                 continue
+            if schema == 2:
+                row = _schema1_row(row, plugin_paths)
             if _is_reference(row, wanted):
                 references.append(row)
                 continue

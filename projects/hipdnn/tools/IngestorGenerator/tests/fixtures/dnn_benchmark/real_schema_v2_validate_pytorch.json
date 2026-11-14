@@ -1,0 +1,219 @@
+{
+  "_provenance": "Real dnn-benchmark output, result schema 2, dnn-benchmarking main 3bf2cd5 on MI210 (gfx90a): `dnn-benchmark -g graphs/sample_conv_fwd.json graphs/sample_matmul.json --validate pytorch`. Trimmed to the conv graph's PyTorch reference and MIOPEN_ENGINE rows (a sweep phase pins one engine), with summary recounted to match; every other value is as written. Hostname replaced and local path prefixes shortened to /work.",
+  "schema_version": 2,
+  "tool": {
+    "name": "dnn-benchmarking",
+    "version": "0.3.0"
+  },
+  "run": {
+    "started_at": "2026-10-29T19:44:21.426653+00:00",
+    "finished_at": "2026-10-29T19:44:30.077692+00:00",
+    "complete": true,
+    "argv": [
+      "/tmp/dnnb-main/src/dnn_benchmarking/__main__.py",
+      "-g",
+      "graphs/sample_conv_fwd.json",
+      "graphs/sample_matmul.json",
+      "--validate",
+      "pytorch",
+      "-o",
+      "/tmp/alm2866/main_validate_pytorch.json"
+    ],
+    "config": {
+      "runtime": "hipdnn",
+      "engine_filter": null,
+      "plugin_paths": [
+        "/work/.workspace/.venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/hipdnn_plugins/engines"
+      ],
+      "warmup_iters": 10,
+      "iters": 100,
+      "min_time_ms": 0.0,
+      "cache_mode": "warm",
+      "timing_block": 1,
+      "seed": 0,
+      "validate": "pytorch",
+      "rtol": null,
+      "atol": null,
+      "oracle": false,
+      "autotune": false,
+      "hipdnn_cache_dir": null,
+      "pytorch_sdpa_backend": "default",
+      "pytorch_rocm_fa_library": null,
+      "metrics": true,
+      "profiling": {
+        "pmc": null,
+        "trace": false,
+        "perf": false,
+        "roofline": false
+      }
+    }
+  },
+  "environment": {
+    "hostname": "mi210-host",
+    "cpu_model": "AMD EPYC 7513 32-Core Processor",
+    "cpu_count": 128,
+    "numa_nodes": 8,
+    "total_ram_gb": 503.59,
+    "kernel_version": "5.15.0-112-generic",
+    "gpu_model": "AMD Instinct MI210",
+    "gpu_arch": "gfx90a",
+    "gpu_compute_units": 104,
+    "gpu_hbm_gb": 63.98,
+    "gpu_pcie_link": "16 GT/s x16",
+    "amdgpu_driver_version": "6.8.5",
+    "gpu_power_cap_w": 300.0,
+    "gpu_max_sclk_mhz": 1700.0,
+    "gpu_compute_partition": null,
+    "rocm_version": "7.18.26433",
+    "cuda_version": null,
+    "cudnn_version": null,
+    "hipdnn_version": "0.2.0",
+    "python_version": "3.12.13",
+    "torch_version": "2.16.0a0+rocm10.3.0a20261029",
+    "amdsmi_available": true,
+    "selection_env": null
+  },
+  "summary": {
+    "graphs": 1,
+    "rows": 1,
+    "passed": 1,
+    "unchecked": 0,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 0,
+    "graph_errors": 0,
+    "no_engine_graphs": 0
+  },
+  "graphs": [
+    {
+      "graph_id": "e50543fd1d83",
+      "graph_name": "sample_conv_fwd_16x16x16x16_k16_3x3",
+      "graph_path": "graphs/sample_conv_fwd.json",
+      "status": "ok",
+      "error": null,
+      "message": null,
+      "results": [
+        {
+          "runtime": "pytorch",
+          "role": "reference",
+          "engine": {
+            "id": null,
+            "name": "pytorch",
+            "version": "2.16.0a0+rocm10.3.0a20261029"
+          },
+          "status": "success",
+          "verdict": "reference",
+          "message": null,
+          "started_at": "2026-10-29T19:44:21.624750+00:00",
+          "elapsed_s": 7.64294,
+          "metrics": {
+            "flops": 18874368,
+            "io_bytes": 533504,
+            "clocks_after": {
+              "sclk_mhz": 1700.0,
+              "mclk_mhz": 1600.0,
+              "power_w": 41.0,
+              "temp_hotspot_c": 37.0,
+              "throttle_status": 0
+            }
+          },
+          "ootb": {
+            "build_ms": null,
+            "timing": {
+              "mode": "staged",
+              "timer": "hip",
+              "warmup_iters": 10,
+              "samples": 100,
+              "first_call_ms": 7551.61,
+              "capped": false,
+              "fallback_reason": null
+            },
+            "kernel": {
+              "p25_ms": 0.02544,
+              "median_ms": 0.02544,
+              "p75_ms": 0.0256
+            },
+            "host": {
+              "p25_ms": 0.048399,
+              "median_ms": 0.0490472,
+              "p75_ms": 0.0496376
+            },
+            "workspace_bytes": null,
+            "tflops": 0.741917,
+            "gbps": 20.9711,
+            "correctness": null
+          },
+          "oracle": null,
+          "oracle_error": null,
+          "warnings": [],
+          "extra_metrics": null
+        },
+        {
+          "runtime": "hipdnn",
+          "role": "engine",
+          "engine": {
+            "id": "0x15B46865C717A122",
+            "name": "MIOPEN_ENGINE",
+            "version": "0.2.0.b27971267e0"
+          },
+          "status": "success",
+          "verdict": "passed",
+          "message": null,
+          "started_at": "2026-10-29T19:44:29.267884+00:00",
+          "elapsed_s": 0.267244,
+          "metrics": {
+            "flops": 18874368,
+            "io_bytes": 533504,
+            "clocks_after": {
+              "sclk_mhz": 1700.0,
+              "mclk_mhz": 1600.0,
+              "power_w": 42.0,
+              "temp_hotspot_c": 38.0,
+              "throttle_status": 0
+            }
+          },
+          "ootb": {
+            "build_ms": 2.35876,
+            "timing": {
+              "mode": "staged",
+              "timer": "hip",
+              "warmup_iters": 10,
+              "samples": 100,
+              "first_call_ms": 2.05022,
+              "capped": false,
+              "fallback_reason": null
+            },
+            "kernel": {
+              "p25_ms": 0.02528,
+              "median_ms": 0.02544,
+              "p75_ms": 0.0256
+            },
+            "host": {
+              "p25_ms": 0.0128374,
+              "median_ms": 0.0130385,
+              "p75_ms": 0.0133142
+            },
+            "workspace_bytes": 0,
+            "tflops": 0.741917,
+            "gbps": 20.9711,
+            "correctness": {
+              "match": true,
+              "rtol": 1e-05,
+              "atol": 1e-06,
+              "max_abs_diff": 0.0,
+              "max_rel_diff": 0.0,
+              "n_mismatch": 0,
+              "n_total": 65536,
+              "worst_output_uid": 0,
+              "message": null
+            }
+          },
+          "oracle": null,
+          "oracle_error": null,
+          "warnings": [],
+          "extra_metrics": null
+        }
+      ]
+    }
+  ]
+}
