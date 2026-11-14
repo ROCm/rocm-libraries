@@ -50,3 +50,6 @@ html_theme_options = {
 suppress_warnings = ["etoc.toctree"]
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
