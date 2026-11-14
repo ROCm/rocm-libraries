@@ -95,6 +95,8 @@ if AMDGPU_FAMILIES == "gfx1151" and platform == "windows":
 
 # Temporarily exclude managed buffer cases under ASAN until the allocator is fixed:
 # Tracking: ROCM-34263 and https://github.com/ROCm/rocm-systems/issues/15163
+# REMOVE once the ROCM-34263 fix is in CI and both Managed cases pass with
+# a clean ASAN exit. Review by 2026-12-15.
 test_filter = []
 if test_type == "quick":
     if is_asan():
