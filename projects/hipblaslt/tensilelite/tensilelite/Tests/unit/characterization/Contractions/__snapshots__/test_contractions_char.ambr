@@ -68,7 +68,7 @@
       'BiasSrcWhiteList',
       'DataTypeE',
       'F32XdlMathOp',
-      'FusedGemmA2A',
+      'FusedA2A',
       'GateResidualDataTypeWhiteList',
       'GroupedGemm',
       'HighPrecisionAccumulate',

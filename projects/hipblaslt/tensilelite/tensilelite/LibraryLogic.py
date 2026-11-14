@@ -584,7 +584,7 @@ class LogicAnalyzer:
           header = [col.strip() for col in row]
           missing = [name for name in ("World", "A2AExtent") if name not in header]
           if missing:
-            printExit("\"%s\" has no %s column(s) required for FusedGemmA2A" % (dataFileName, ", ".join(missing)))
+            printExit("\"%s\" has no %s column(s) required for fused A2A" % (dataFileName, ", ".join(missing)))
           worldIdx = header.index("World")
           extentIdx = header.index("A2AExtent")
         if perfUnit == "GFlops":
