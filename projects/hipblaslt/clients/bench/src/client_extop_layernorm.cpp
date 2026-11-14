@@ -32,6 +32,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -203,6 +204,11 @@ void compare(const char* title, const std::vector<T>& cpuOutput, const std::vect
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
+    // GEMM-only inits (e.g. maf2_0) need the GEMM A/B/C layout; the argument parser already
+    // rejects them, so fail loudly here instead of leaving the buffer unfilled.
+    if(hipblaslt_initialization_is_gemm_only(initMethod))
+        throw std::invalid_argument(std::string(hipblaslt_initialization2string(initMethod))
+                                    + " is not supported by this client; use hipblaslt-bench");
     switch(initMethod)
     {
     case hipblaslt_initialization::rand_int:
