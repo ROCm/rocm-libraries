@@ -63,6 +63,8 @@ double test_prob;
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
+// Probability of verifying that a transform left its input buffer alone
+double input_preservation_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -370,6 +372,11 @@ int main(int argc, char* argv[])
                    "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--input_preservation_prob",
+                   input_preservation_prob,
+                   "Probability of checking that an out-of-place transform left its input intact")
+        ->default_val(0.1)
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
@@ -412,6 +419,7 @@ int main(int argc, char* argv[])
                    "--nrand",
                    "--callback_prob",
                    "--very_large_prob",
+                   "--input_preservation_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
@@ -427,6 +435,10 @@ int main(int argc, char* argv[])
 
             // Very large transforms are not an emulation test target.
             very_large_prob_factor = 0;
+
+            // Whether a transform preserves its input is a property of the
+            // software, and confirming it costs two extra copies of the input.
+            input_preservation_prob = 0;
 
             if(emulationtype == emulation_quick)
             {

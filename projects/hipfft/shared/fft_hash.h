@@ -27,6 +27,7 @@
 #include "../../../shared/increment.h"
 #include "../../../shared/index_partition_omp.h"
 #include "../../../shared/rocfft_complex.h"
+#include "../../../shared/stable_hash.h"
 
 #include <algorithm>
 #include <bit>
@@ -83,16 +84,6 @@ struct hash_output
     Tint buffer_real;
     Tint buffer_imag;
 };
-
-// Fixed, platform-independent 64-bit mix (splitmix64 finalizer).
-// Unlike std::hash, the result is defined here and does not depend on compiler,
-// standard library, or process.
-static inline uint64_t stable_hash(uint64_t z)
-{
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
-}
 
 // Raw IEEE-754 bit pattern of a value, widened to 64 bits.  Hashing the bits
 // (not a rounded product) makes every bit of the value count.
