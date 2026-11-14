@@ -23,6 +23,7 @@
 #pragma once
 
 #include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
+#include <thrust/detail/config/device_system.h>
 
 // This is a utility file that helps managing which
 // 'std' implementation we're using. The provided
@@ -47,26 +48,11 @@
     #define USE_LIBHIPCXX 1
 #endif
 
-// If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if THRUST_HAS_INCLUDE(<cuda/std/version>) \
-	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
-#  include <cuda/std/version>
-// If version matches and '_CUDA_VSTD' is available.
-#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
-#    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
-#    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
-#    define _THRUST_LIBCXX                ::cuda
-#    define _THRUST_STD_NOVERSION         _CUDA_VSTD_NOVERSION
-#    define _THRUST_STD                   _CUDA_VSTD
-#    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
-#    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
-#    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
-#    define _THRUST_USE_ROCPRIM           0
-#  endif
+// Select by device system, not compiler. <cuda/std/version> may be NVIDIA's libcu++.
 
-// Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#elif THRUST_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
+// If the '::hip::std' namespace from 'libhipcxx' is available.
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA \
+	&& THRUST_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
 #  include <hip/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
@@ -77,6 +63,24 @@
 #    define _THRUST_LIBCXX                ::hip
 // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
 #    define _THRUST_STD_NOVERSION         ::hip::std
+#    define _THRUST_STD                   _CUDA_VSTD
+#    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
+#    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
+#    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
+#    define _THRUST_USE_ROCPRIM           0
+#  endif
+
+// Otherwise, if the '::cuda::std' namespace from 'libcudacxx' is available.
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA \
+	&& THRUST_HAS_INCLUDE(<cuda/std/version>) && USE_LIBCUDACXX
+#  include <cuda/std/version>
+// If version matches and '_CUDA_VSTD' is available.
+#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
+#    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
+#    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
+#    define _THRUST_LIBCXX                ::cuda
+#    define _THRUST_STD_NOVERSION         _CUDA_VSTD_NOVERSION
 #    define _THRUST_STD                   _CUDA_VSTD
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
@@ -107,6 +111,12 @@
 #  include <nv/target>
 #else
 #  include <thrust/detail/libcxx_wrapper/nv/detail/__target_macros.h>
+#endif
+
+// NVIDIA's <nv/target> always selects host code under HIP.
+// Detected by its non-CUDA fallback, which defines _NV_COMPILER_NVCC without __NVCC__.
+#if defined(__HIP__) && defined(_NV_COMPILER_NVCC) && !defined(__NVCC__)
+#  error "NVIDIA's <nv/target> (libcu++) was included in a HIP compilation. It is not HIP-aware and breaks rocThrust's host/device dispatch."
 #endif
 
 // NV_* macros provided by 'libhipcxx' are suffixed with _LIBHIPCXX.

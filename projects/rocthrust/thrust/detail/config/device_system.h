@@ -19,6 +19,8 @@
 
 // Internal config header that is only included through thrust/detail/config/config.h
 
+#include <thrust/detail/config/compiler.h>
+
 // reserve 0 for undefined
 #define THRUST_DEVICE_SYSTEM_CUDA 1
 #define THRUST_DEVICE_SYSTEM_OMP  2
