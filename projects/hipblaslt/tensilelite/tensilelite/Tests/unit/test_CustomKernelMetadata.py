@@ -1859,3 +1859,25 @@ def test_post_kernel_symbols_checked_against_metadata(tmp_path, symbols, descrip
     write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, symbols, descriptors)
     with pytest.raises(RuntimeError, match=match):
         getCustomKernelConfig("sk_main", {}, str(tmp_path))
+
+
+def test_validate_all_checks_post_kernels(tmp_path):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, ["sk_main", "sk_main_streamKReduce"])
+    assert validate_all(str(tmp_path), strict=True) == ([], [])
+
+
+@pytest.mark.parametrize("symbols,match", [
+    (["sk_main"], "not in the amdhsa.kernels"),
+    (["sk_main", "sk_main_reduce"], "not in the amdhsa.kernels"),
+])
+def test_validate_all_reports_bad_post_kernel_symbols(tmp_path, symbols, match):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG, symbols)
+    errors, warnings = validate_all(str(tmp_path), strict=True)
+    assert warnings == [] and len(errors) == 1 and match in errors[0]
+
+
+def test_validate_all_reports_bad_post_kernel_config(tmp_path):
+    write_multi_kernel(tmp_path / "sk_main.s", _POST_KERNEL_CONFIG.replace("StreamK", "DataParallel"),
+                       ["sk_main", "sk_main_streamKReduce"])
+    errors, _ = validate_all(str(tmp_path), strict=True)
+    assert len(errors) == 1 and "require TileProcessingStrategy=StreamK" in errors[0]
