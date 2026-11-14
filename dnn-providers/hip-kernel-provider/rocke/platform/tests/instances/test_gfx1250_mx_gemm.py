@@ -42,6 +42,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     K_READS,
     LDS_BUFFERS,
     OUT_DTYPES,
+    SCALE_SWAPS,
     SCALES,
     TILE_K,
     TILE_MN,
@@ -367,6 +368,43 @@ class MxGemmSpecTest(unittest.TestCase):
             "value": (_spec6(lds_buffers=4), "lds_buffers must be one of"),
             "row": (_spec8(tile_k=128, lds_buffers=3), "cannot take 128 B rows"),
             "capacity": (_spec6(tile_k=384, lds_buffers=3), "exceeds"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_scale_swap_validate_and_name(self):
+        """Swapping the scale words after the K-step's wait tags the kernel
+        name and needs "contiguous" FP6 reads with scales in LDS."""
+        self.assertEqual(SCALE_SWAPS, ("read", "wait"))
+        for fields in (
+            _DIRECT,
+            {"half_plr": "none"},
+            {"half_plr": "b"},
+            {"half_plr": "b", "half_b_order": "late"},
+        ):
+            spec = _spec6(k_reads="contiguous", **fields)
+            wait = replace(spec, scale_swap="wait")
+            with self.subTest(wait.kernel_name()):
+                self.assertIsNone(validate(wait))
+                self.assertTrue(wait.kernel_name().endswith("_swait"))
+                self.assertNotIn("_swait", spec.kernel_name())
+                self.assertTrue(wait.swap_after_wait)
+                self.assertFalse(spec.swap_after_wait)
+        needs = "needs k_reads 'contiguous' and scales 'lds'"
+        bad = {
+            "value": (_spec6(scale_swap="late"), "scale_swap must be one of"),
+            "chunked": (_spec6(scale_swap="wait"), needs),
+            "fp8": (_spec8(scale_swap="wait"), needs),
+            "registers": (
+                _spec6(
+                    k_reads="contiguous",
+                    scales="registers",
+                    scale_swap="wait",
+                    **_DIRECT,
+                ),
+                needs,
+            ),
         }
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
@@ -931,6 +969,39 @@ class MxGemmIrTest(unittest.TestCase):
                         r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)", llvm
                     )
                     self.assertEqual(len(swaps), groups * (rm + rn))
+
+    def test_scale_swaps_follow_the_k_step_wait(self):
+        """With ``scale_swap`` "wait" each K-step's scale swaps come right
+        after its first wait, behind a barrier VALU may not cross, in every
+        compute path; by default no barrier comes before them."""
+        barrier = "call void @llvm.amdgcn.sched.barrier(i32 2044)"
+        swap = re.compile(r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)")
+        for path in (
+            _DIRECT,
+            {"half_plr": "none"},
+            {"half_plr": "b"},
+            {"half_plr": "b", "half_b_order": "late"},
+        ):
+            spec = _spec6(k_reads="contiguous", scale_swap="wait", **path)
+            lines = _llvm(spec).splitlines()
+            words = spec.wave_repeat_m + spec.wave_repeat_n
+            swaps = [i for i, line in enumerate(lines) if swap.search(line)]
+            barriers = [i for i, line in enumerate(lines) if barrier in line]
+            wmmas = sum(1 for line in lines if re.search(_WMMA, line))
+            with self.subTest(**path):
+                self.assertEqual(
+                    len(barriers), wmmas // (spec.wave_repeat_m * spec.wave_repeat_n)
+                )
+                self.assertEqual(len(swaps), len(barriers) * words)
+                for at in barriers:
+                    self.assertIn('asm sideeffect "s_wait_dscnt', lines[at - 1])
+                    self.assertEqual(
+                        [i for i in swaps if at < i <= at + words],
+                        list(range(at + 1, at + 1 + words)),
+                    )
+            for other in (_spec6(k_reads="contiguous", **path), _spec8(**path)):
+                with self.subTest(other.kernel_name()):
+                    self.assertNotIn(barrier, _llvm(other))
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -1881,6 +1952,26 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 )
                 for f in (_DIRECT, {"half_plr": "b"})
             ),
+            # Scale swaps after the K-step's wait on every read-ahead path
+            # at the reference design's tile.
+            *(
+                _spec6(
+                    *_MAF_MED[0],
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=512,
+                    cluster_dim=(2, 4, 1),
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    **f,
+                )
+                for f in (
+                    {"half_plr": "b"},
+                    {"half_plr": "b", "half_b_order": "late"},
+                    {"half_plr": "none"},
+                    {"half_plr": "b", "lds_buffers": 3},
+                )
+            ),
             # Register scales at the MAF/MED, MAB and SM tilings.
             *(
                 _spec6(
@@ -2054,6 +2145,25 @@ class MxGemmDeviceTest(unittest.TestCase):
             + [
                 _spec8(tile_m=128, tile_n=128, lds_buffers=3),
                 _spec8(tile_m=128, tile_n=128, lds_buffers=3, **_DIRECT),
+            ]
+            # Scale swaps after the K-step's wait: every compute path, three
+            # buffers, edge tiles and a K tail.
+            + [
+                _spec6(*problem, k_reads="contiguous", scale_swap="wait", **fields)
+                for problem, fields in (
+                    ((), _DIRECT),
+                    ((), {"tile_m": 128, "tile_n": 128, "half_plr": "none"}),
+                    ((), {"tile_m": 128, "tile_n": 128}),
+                    ((), {"tile_m": 128, "tile_n": 128, "half_b_order": "late"}),
+                    (
+                        (1024, 1024, 3072 + 256),
+                        {"tile_m": 128, "tile_n": 128, "tile_k": 512, "lds_buffers": 3},
+                    ),
+                    (
+                        (1000, 1000, 2048 + 96),
+                        {"tile_m": 128, "tile_n": 128, "tile_k": 384},
+                    ),
+                )
             ]
             # Register scales: every half packing, the reuse orders, edge
             # tiles and K tails.

@@ -882,6 +882,7 @@ _AXES = {
     "wmma_reuse": ("wmma_reuse", str, "none"),
     "scales": ("scales", str, "lds"),
     "lds_buffers": ("lds_buffers", int, "2"),
+    "scale_swap": ("scale_swap", str, "read"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

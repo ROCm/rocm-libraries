@@ -130,6 +130,7 @@ TILE_K = (128, 256, 384, 512, 1024)
 K_READS = ("chunked", "contiguous")
 WMMA_REUSE = ("none", "a", "b", "ab")
 SCALES = ("lds", "registers")
+SCALE_SWAPS = ("read", "wait")
 LDS_BUFFERS = (2, 3)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
@@ -164,6 +165,9 @@ _FP8_MAX = 448.0
 # sched_barrier mask: VALU (0x2), SALU (0x4) and TRANS (0x400) may cross;
 # WMMAs and memory operations may not.
 _SCHED_ALU_ONLY = 0x2 | 0x4 | 0x400
+# sched_barrier mask: everything but VALU may cross (SALU 0x4, WMMA 0x8,
+# VMEM 0x10..0x40, DS 0x80..0x200, TRANS 0x400).
+_SCHED_NO_VALU = 0x7FC
 # llvm.amdgcn.s.cluster.barrier as inline asm (see mxfp4_tdm_gemm), whole
 # and split into its signal and wait halves.
 _CLUSTER_BARRIER_ASM = (
@@ -226,6 +230,14 @@ class MxGemmSpec:
     leaves the product unchanged once each scale word's bytes 1 and 2 are
     swapped. FP4 and the 8-bit types read their 16 B chunks either way.
 
+    ``scale_swap`` is where those swaps go: ``"read"`` right after the
+    scale reads, so the compiler waits for the scale reads (and every LDS
+    read before them) before it issues the K-step's data reads; ``"wait"``
+    (``k_reads`` "contiguous", ``scales`` "lds") right after the first wait
+    of the K-step whose WMMAs take the words, behind a scheduling barrier
+    VALU may not cross, so the scale reads need no wait of their own. Words
+    carried to the next K-step or tile stay in K order until then.
+
     ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
     K-step's WMMAs and flags every WMMA whose next WMMA takes the same
     operand, so the hardware may keep that operand instead of reading it
@@ -275,6 +287,7 @@ class MxGemmSpec:
     wmma_reuse: str = "none"
     scales: str = "lds"
     lds_buffers: int = 2
+    scale_swap: str = "read"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -450,6 +463,10 @@ class MxGemmSpec:
         return self.scales == "registers"
 
     @property
+    def swap_after_wait(self) -> bool:
+        return self.contiguous_k and self.scale_swap == "wait"
+
+    @property
     def tdm_loads(self) -> int:
         """TDM loads a wave issues per tile: its data component, then its
         scale component unless the scales go to registers."""
@@ -561,6 +578,7 @@ class MxGemmSpec:
                 "rab": self.wmma_reuse == "ab",
                 "sreg": self.scale_regs,
                 "lb3": self.lds_buffers == 3,
+                "swait": self.scale_swap == "wait",
             },
         )
 
@@ -826,6 +844,10 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "scales 'registers' is for the 16x16 WMMA"
     if spec.lds_buffers not in LDS_BUFFERS:
         return f"lds_buffers must be one of {LDS_BUFFERS}"
+    if spec.scale_swap not in SCALE_SWAPS:
+        return f"scale_swap must be one of {SCALE_SWAPS}"
+    if spec.scale_swap == "wait" and (not spec.contiguous_k or spec.scale_regs):
+        return "scale_swap 'wait' needs k_reads 'contiguous' and scales 'lds'"
     row = spec.k_bytes(spec.tile_k)
     if spec.lds_buffers != 2 and row < _GL2_LINE_BYTES and _GL2_LINE_BYTES % row == 0:
         # The GL2 prefetch of such rows follows the tile index's parity,
@@ -1577,11 +1599,18 @@ class LdsReader:
         else:
             words = self.load_i32(b_base, n=rn_count)
             b_scales = [b.vec_extract(words, i) for i in range(rn_count)]
-        if spec.contiguous_k:
-            swap = b.const_i32(self._SWAP_GROUPS_1_2)
-            a_scales = [b.perm_b32(w, w, swap) for w in a_scales]
-            b_scales = [b.perm_b32(w, w, swap) for w in b_scales]
+        if spec.contiguous_k and not spec.swap_after_wait:
+            return self.swap_groups(a_scales, b_scales)
         return a_scales, b_scales
+
+    def swap_groups(self, a_scales, b_scales):
+        """The words with bytes 1 and 2 swapped (``k_reads`` "contiguous")."""
+        b = self.k.b
+        swap = b.const_i32(self._SWAP_GROUPS_1_2)
+        return (
+            [b.perm_b32(w, w, swap) for w in a_scales],
+            [b.perm_b32(w, w, swap) for w in b_scales],
+        )
 
     def head(self, buffer, step):
         a_scales, b_scales = self.scales(buffer, step)
@@ -1659,6 +1688,15 @@ class TileCompute:
 
     def _wait(self, count: int) -> None:
         self.k.b.inline_asm(f"s_wait_dscnt {min(count, _DSCNT_MAX)}", "~{memory}")
+
+    def _wmma_scales(self, a_scales, b_scales):
+        """A K-step's scale words as its WMMAs take them, right after the
+        K-step's first wait: with ``scale_swap`` "wait" the swaps come here,
+        and stay below the wait (VALU may not cross the barrier)."""
+        if not self.k.spec.swap_after_wait:
+            return a_scales, b_scales
+        self.k.b.sched_barrier(_SCHED_NO_VALU)
+        return self.reader.swap_groups(a_scales, b_scales)
 
     def head_parts(self) -> list[int]:
         spec = self.k.spec
@@ -1763,6 +1801,8 @@ class TileCompute:
                     hooks.signal is not None and which == 1 and step + 2 == steps
                 )
                 self._wait(spec.reads_per_step)
+                if which == 0:
+                    a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
                 order = [(rm, j) for j in range(half) for rm in range(rm_count)]
                 issued = 0
                 for rm, j in order:
@@ -1808,6 +1848,7 @@ class TileCompute:
                 )
                 self._wait(waits[which])
                 if which == 0:
+                    a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
                     if last:
                         hooks.refill()
                     head = reader.head(*source)
@@ -1859,6 +1900,7 @@ class TileCompute:
                 hooks.late_refill()
             signal_here = hooks.signal is not None and step + 2 == steps
             self._wait(spec.reads_per_step)
+            a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
             issued = 0
             for rm in range(rm_count):
                 for rn in range(rn_count):
@@ -1936,6 +1978,7 @@ class TileCompute:
                 a_frags, a_scales, b_scales = reader.head(buffer, step)
             b_frags = reader.b_group(buffer, step, 0, rn_count)
             self._wait(0)
+            a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
             if last:
                 hooks.refill()
                 if hooks.signal is not None:
