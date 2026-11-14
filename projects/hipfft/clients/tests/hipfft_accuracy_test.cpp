@@ -20,10 +20,17 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <iostream>
 #include <math.h>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#ifndef _WIN32
+#include <cstdlib>
+#include <filesystem>
+#include <string_view>
+#include <unistd.h>
+#endif
 
 #include "hipfft/hipfft.h"
 
@@ -44,6 +51,48 @@ struct user_mp_launch_command
     std::string              exe;
     std::vector<std::string> user_mp_argv;
 };
+
+// Resolve a launcher given by bare name (e.g. "mpirun") against PATH, as a
+// shell would.  This is deliberately done here rather than in
+// execute_subprocess, which is shared with the rocFFT library and must not
+// search PATH.  Returns an empty string if nothing is found.
+static std::string resolve_mp_launch_exe(const std::string& exe)
+{
+#ifdef _WIN32
+    // Not implemented: Windows lookup rules differ (';' separator, PATHEXT
+    // extensions), so the name is passed through unchanged.  As
+    // execute_subprocess's CreateProcessA call does not search PATH (a bare
+    // name is only looked up in the current directory), the launcher should
+    // be given by its path on Windows.
+    return exe;
+#else
+    if(exe.empty() || exe.find('/') != std::string::npos)
+        return exe;
+
+    const char* path_env = std::getenv("PATH");
+    if(path_env == nullptr)
+        return {};
+
+    std::string_view path(path_env);
+    while(true)
+    {
+        const auto             sep = path.find(':');
+        const std::string_view dir = path.substr(0, sep);
+        // an empty PATH entry denotes the current directory
+        const auto candidate = std::filesystem::path(dir.empty() ? "." : dir) / exe;
+
+        std::error_code ec;
+        if(std::filesystem::is_regular_file(candidate, ec) && access(candidate.c_str(), X_OK) == 0)
+            return candidate.string();
+
+        if(sep == std::string_view::npos)
+            break;
+        path.remove_prefix(sep + 1);
+    }
+    return {};
+#endif
+}
+
 static user_mp_launch_command get_mp_launch_command()
 {
     user_mp_launch_command ret;
@@ -52,8 +101,11 @@ static user_mp_launch_command get_mp_launch_command()
         CLI::App command_splitter;
         command_splitter.allow_extras();
         command_splitter.parse(mp_launch, /*program_name_included = */ true);
-        ret.exe          = command_splitter.get_name();
+        ret.exe          = resolve_mp_launch_exe(command_splitter.get_name());
         ret.user_mp_argv = command_splitter.remaining();
+        if(ret.exe.empty() && !command_splitter.get_name().empty())
+            std::cerr << "multi-process launcher \"" << command_splitter.get_name()
+                      << "\" not found on PATH" << std::endl;
     }
     catch(const CLI::Error& e)
     {
