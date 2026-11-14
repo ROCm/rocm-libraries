@@ -85,6 +85,13 @@ const vector<vector<int>> large_size_range
 
 const vector<vector<int>> large_opt_range = {{0, 0, 0, 0}, {1, 0, 1, 0}, {0, 1, 0, 1}, {1, 0, 0, 0}};
 
+// for the accuracy tests (singular values of a random bidiagonal in single precision, against a
+// reference in double precision): each is a {n, uplo}
+const vector<vector<int>> accuracy_range = {{1000, 0}, {1000, 1}};
+
+// for daily_lapack accuracy tests
+const vector<vector<int>> large_accuracy_range = {{4000, 0}};
+
 Arguments bdsqr_setup_arguments(bdsqr_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -142,7 +149,49 @@ class BDSQR_HYBRID : public BDSQR_BASE<1>
 {
 };
 
+template <rocblas_int MODE>
+class BDSQR_ACCURACY_BASE : public ::TestWithParam<vector<int>>
+{
+protected:
+    void TearDown() override
+    {
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
+    }
+
+    template <typename T>
+    void run_tests()
+    {
+        vector<int> p = GetParam();
+        Arguments arg;
+        arg.set<rocblas_int>("n", p[0]);
+        arg.set<char>("uplo", p[1] ? 'L' : 'U');
+        arg.set<rocblas_int>("accuracy", 1);
+        arg.alg_mode = MODE;
+        arg.timing = 0;
+
+        testing_bdsqr<T>(arg);
+    }
+};
+
+class BDSQR_ACCURACY : public BDSQR_ACCURACY_BASE<0>
+{
+};
+
+class BDSQR_HYBRID_ACCURACY : public BDSQR_ACCURACY_BASE<1>
+{
+};
+
 // non-batch tests
+
+TEST_P(BDSQR_ACCURACY, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(BDSQR_HYBRID_ACCURACY, __float)
+{
+    run_tests<float>();
+}
 
 TEST_P(BDSQR, __float)
 {
@@ -197,3 +246,11 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          BDSQR_HYBRID,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, BDSQR_ACCURACY, ValuesIn(large_accuracy_range));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, BDSQR_ACCURACY, ValuesIn(accuracy_range));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, BDSQR_HYBRID_ACCURACY, ValuesIn(large_accuracy_range));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, BDSQR_HYBRID_ACCURACY, ValuesIn(accuracy_range));
