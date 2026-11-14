@@ -245,6 +245,15 @@ void graphBindings(nb::module_& m)
         .def("validate", &graph::Graph::validate)
         .def("checkNoDuplicateTensorIds", &graph::Graph::checkNoDuplicateTensorIds)
         .def("topologicallySortGraph", &graph::Graph::topologicallySortGraph)
+        .def("checkTensorUidsSet", &graph::Graph::checkTensorUidsSet)
+        .def("getTensorsByUid",
+             &graph::Graph::getTensorsByUid,
+             "Return a dict mapping tensor UID to TensorAttributes for every tensor in "
+             "the graph.")
+        .def("getTensorsByName",
+             &graph::Graph::getTensorsByName,
+             "Return a dict mapping tensor name to TensorAttributes for every named "
+             "tensor in the graph. Unnamed tensors are omitted.")
         .def(
             "build_operation_graph",
             [](graph::Graph& g, const nb::object& handle) {
@@ -357,6 +366,26 @@ void graphBindings(nb::module_& m)
              "error listing every attempted engine and its failure is returned and the active "
              "plan is unchanged. An active plan that finalizes but is over the workspace limit "
              "is an error. ALL compiles every plan, skipping any that fail.")
+        .def(
+            "build",
+            [](graph::Graph& g,
+               const nb::object& handle,
+               const std::vector<HeuristicMode>& modes,
+               BuildPlanPolicy policy) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                return g.build(rawHandle, modes, policy);
+            },
+            nb::arg("handle"),
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
+            "One-shot graph build: validates, builds the operation graph, creates "
+            "execution plans from the given heuristic modes, runs check_support(), "
+            "and finalizes with the given policy. Equivalent to calling validate(), "
+            "build_operation_graph(), create_execution_plans(), check_support(), and "
+            "build_plans() in sequence. Returns an Error after add_engine_*() specs "
+            "have been added, since those require the plan-spec autotune path instead.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -891,6 +920,58 @@ void graphBindings(nb::module_& m)
             nb::arg("dO"),
             nb::arg("stats"),
             nb::arg("attributes"))
+        .def("set_override_shape_enabled",
+             &graph::Graph::set_override_shape_enabled,
+             nb::arg("enabled"),
+             nb::rv_policy::reference_internal,
+             "Enable or disable runtime tensor shape and stride overrides during "
+             "execution. Must be set before build(). When enabled, the execute overload "
+             "accepting override UIDs, shapes, and strides becomes usable.")
+        .def("is_override_shape_enabled",
+             &graph::Graph::is_override_shape_enabled,
+             "Query whether runtime shape override mode is enabled.")
+        .def(
+            "execute",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               const nb::dict& variantPack,
+               const nb::object& workspace,
+               const std::vector<int64_t>& overrideUids,
+               const std::vector<std::vector<int64_t>>& overrideShapes,
+               const std::vector<std::vector<int64_t>>& overrideStrides) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+
+                Error err;
+                {
+                    const nb::gil_scoped_release release;
+                    err = g.execute(rawHandle,
+                                    cppVariantPack,
+                                    workspacePtr,
+                                    overrideUids,
+                                    overrideShapes,
+                                    overrideStrides);
+                }
+                return err;
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace"),
+            nb::arg("override_uids"),
+            nb::arg("override_shapes"),
+            nb::arg("override_strides"),
+            "Execute the graph with runtime tensor shape and stride overrides. "
+            "Requires set_override_shape_enabled(True) before build(). "
+            "override_uids, override_shapes, and override_strides must have the same "
+            "length; each entry overrides the shape and stride of the tensor with the "
+            "corresponding UID. variant_pack and workspace accept the same keys and "
+            "values as execute().")
 #endif
         .def(
             "resample",
@@ -1024,7 +1105,36 @@ void graphBindings(nb::module_& m)
             nb::arg("data"),
             "Deserialize graph structure from binary without a handle.\n"
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
-            "Call build_operation_graph(handle) after to finalize for execution.");
+            "Call build_operation_graph(handle) after to finalize for execution.")
+        .def(
+            "to_compiled_plan_binary",
+            [](const graph::Graph& g) {
+                auto [data, err] = g.to_compiled_plan_binary();
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to serialize compiled plan: "
+                                             + err.get_message());
+                }
+                return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+            },
+            "Serialize the compiled execution plan to binary bytes. The graph must "
+            "have been built and a plan must be active. The result can be passed to "
+            "from_compiled_plan_binary() to restore the plan without recompilation.")
+        .def(
+            "from_compiled_plan_binary",
+            [](graph::Graph& g, const nb::object& handle, const nb::bytes& data) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
+                const std::vector<uint8_t> vec(ptr, ptr + data.size());
+                return g.from_compiled_plan_binary(rawHandle, vec);
+            },
+            nb::arg("handle"),
+            nb::arg("data"),
+            "Deserialize and restore a compiled execution plan from binary bytes "
+            "previously obtained from to_compiled_plan_binary(). The graph is ready "
+            "for execute() after this call without recompilation.");
 
     // cuDNN spellings and call shapes. Each is registered after every existing
     // overload of its name, and either repeats that overload with only the
