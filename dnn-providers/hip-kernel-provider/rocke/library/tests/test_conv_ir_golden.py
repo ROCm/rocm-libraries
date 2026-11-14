@@ -3562,6 +3562,49 @@ def cases():
             build_fwd_small_mfma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_fwd_pp_mfma: LDS-DMA ping-pong MFMA forward (gfx950) ---
+    # buffer_load ... lds staging, two wave ranks with s_setprio ping-pong,
+    # per-buffer LDS alias scopes. The C++ twin is gated (every knob, both
+    # dtypes) by library/tests/parity/conv_direct_fwd_pp_mfma_emit.*.
+    def build_fwd_pp_mfma_case(dtype, KH, block_k):
+        def _build():
+            from kernels.common.conv_direct_fwd_pp_mfma import (
+                FwdPpMfmaSpec,
+                build_fwd_pp_mfma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=72,
+                kpg=96,
+                KH=KH,
+                KW=KH,
+                PAD=(KH - 1) // 2,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_fwd_pp_mfma(
+                FwdPpMfmaSpec(problem=p, block_k=block_k), arch="gfx950"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _bk in (
+        ("bf16_k3_bk64", "bf16", 3, 64),
+        ("fp16_k3_bk128", "fp16", 3, 128),
+        ("bf16_k3_bk256", "bf16", 3, 256),
+    ):
+        add(
+            "conv_direct_fwd_pp_mfma",
+            f"conv_direct_fwd_pp_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_fwd_pp_mfma_case(_dtype, _KH, _bk),
+        )
+
     # --- conv_direct_fwd_tapouter_wmma: tap-outer forward of large dilations
     # (gfx1250). TDM tap windows + wave32 WMMA; every case needs llvm23 (TDM),
     # so the other flavors record them as expected failures. The C++ twin is
