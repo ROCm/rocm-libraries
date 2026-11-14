@@ -1212,12 +1212,12 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a.workgroup_mask =
+                tdm_config_a.workgroup_mask = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b.workgroup_mask =
+                        block_id_in_cluster));
+                tdm_config_b.workgroup_mask = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
 
                 if constexpr(UseDataCachePrefetch)
                 {
@@ -1364,12 +1364,12 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a.workgroup_mask =
+                tdm_config_a.workgroup_mask = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b.workgroup_mask =
+                        block_id_in_cluster));
+                tdm_config_b.workgroup_mask = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
 
                 if constexpr(UseDataCachePrefetch)
                 {

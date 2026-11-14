@@ -1312,6 +1312,9 @@ CK_TILE_DEVICE void block_sync_load_raw(index_t cnt = 0)
 }
 
 // cluster related builtins
+// get_cluster_id_* return the position of the calling workgroup's cluster in the grid of clusters.
+// get_hw_cluster_id() (amd_tdm_descriptor.hpp) tells whether the calling wave is in a cluster
+// dispatch at all.
 CK_TILE_DEVICE auto get_cluster_id_x()
 {
 #if CK_TILE_ENABLE_CLUSTER_LAUNCH

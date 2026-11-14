@@ -196,6 +196,7 @@ std::vector<uint32_t> read_back(const std::vector<DescCase>& cases)
 // inverse, so that a decoder cannot cancel out an encoder defect.
 struct Group1Fields
 {
+    uint32_t workgroup_mask;
     uint32_t data_size;
     uint32_t tensor_dim0;
     uint32_t tensor_dim1;
@@ -208,7 +209,8 @@ struct Group1Fields
 Group1Fields decode_group1(const uint32_t* words)
 {
     const uint32_t* w = words + kGroup1Word;
-    return Group1Fields{(w[0] >> 16) & 0x3u,
+    return Group1Fields{w[0] & 0xFFFFu,
+                        (w[0] >> 16) & 0x3u,
                         (w[1] >> 16) | ((w[2] & 0xFFFFu) << 16),
                         (w[2] >> 16) | ((w[3] & 0xFFFFu) << 16),
                         w[3] >> 16,
@@ -353,6 +355,8 @@ void expect_fields_unchanged(uint32_t data_size)
     {
         const Group1Fields f = decode_group1(words.data() + i * kNumWord);
         const DescCase& c    = cases[i].desc;
+        // The kernel leaves TDMConfig's workgroup mask at its default: no multicast.
+        EXPECT_EQ(f.workgroup_mask, 0u) << cases[i].label;
         EXPECT_EQ(f.data_size, data_size) << cases[i].label;
         EXPECT_EQ(f.tensor_dim0, c.dims[0]) << cases[i].label;
         EXPECT_EQ(f.tensor_dim1, c.dims[1]) << cases[i].label;
