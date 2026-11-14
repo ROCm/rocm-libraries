@@ -89,7 +89,7 @@ Plist="s d c z"
 Clist="small medium large huge"
 ##### TODO: include missing functions once they are added to hipsolver #####
 Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfBatch getrfNpvt getrfNpvtBatch
-        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch trtri geqrf geqrfBatch gels gelsBatch xxgqr xxmqr xxtrd xxgtr xxmtr gebrd xxgbr xxevd
+        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch trtri geqrf geqrfBatch gels gelsBatch stedc xxgqr xxmqr xxtrd xxgtr xxmtr gebrd xxgbr xxevd
         xxgvd xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesvdj gesvdjBatch"
 
 
