@@ -2541,8 +2541,9 @@ TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsTh
     EXPECT_EQ(MiopenBatchnormPlanBuilder{}.isApplicable(*_dummyHandle, graph), planHonoursStats);
 }
 
-// The training builder serves the complete running-statistics set, but, like the plan
-// it builds, only a complete one.
+// The training builder serves no running statistics, or the complete set together with the
+// saved mean and inverse variance: with running statistics the plan calls the MIOpen API that
+// requires the saved-statistics descriptors.
 TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
        TrainingBuilderServesOnlyCompleteOrNoRunningStats)
 {
@@ -2552,8 +2553,8 @@ TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const bool planHonoursStats
-        = (p.runningStatsMask == 0U || p.runningStatsMask == ALL_RUNNING_STATS)
-          && p.saveMean == p.saveInvVariance;
+        = (p.runningStatsMask == 0U && p.saveMean == p.saveInvVariance)
+          || (p.runningStatsMask == ALL_RUNNING_STATS && p.saveMean && p.saveInvVariance);
 
     EXPECT_EQ(MiopenBatchnormFwdTrainingPlanBuilder{}.isApplicable(*_dummyHandle, graph),
               planHonoursStats);
