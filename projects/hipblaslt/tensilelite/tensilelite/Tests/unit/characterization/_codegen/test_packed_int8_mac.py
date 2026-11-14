@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 import yaml
 
@@ -20,6 +24,16 @@ def test_packed_int8_mac_codegen(tmp_path):
             entry["LocalReadVectorWidth"] = [1]
     path = tmp_path / "packed-int8.yaml"
     path.write_text(yaml.safe_dump(config))
-    kernels = emit_kernels_from_config(path, limit=8, arch="gfx1030")
+    kernels = emit_kernels_from_config(path, limit=8, arch="gfx1030", canonical=False)
     assert kernels
-    assert all(err == 0 and "v_dot4_i32_i8" in src for _, src, err in kernels)
+    assembler = shutil.which("amdclang++")
+    if not assembler:
+        pytest.skip("amdclang++ is unavailable")
+    for index, (_, source, err) in enumerate(kernels):
+        assert err == 0 and "v_dot4_i32_i8" in source
+        asm = tmp_path / f"kernel-{index}.s"
+        asm.write_text(source)
+        subprocess.run(
+            [assembler, "-x", "assembler", "-target", "amdgcn-amd-amdhsa",
+             "-mcpu=gfx1030", "-c", str(asm), "-o", str(asm.with_suffix(".o"))],
+            check=True, capture_output=True)
