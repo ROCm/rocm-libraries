@@ -297,9 +297,16 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
             "${CMAKE_COMMAND}" -E env "TENSILELITE_SOURCE_REVISION=${TENSILELITE_SOURCE_REVISION}"
             "${Python3_EXECUTABLE}")
     endif()
+    # Only a TheRock build with a real package version stamps a ROCm identity
+    # (+rocm/+devrocm); every other build is a development build (+g<commit>).
+    hipblaslt_resolve_build_rocm_version(HIPBLASLT_BUILD_ROCM_VERSION)
+    set(_tensilelite_identity_args)
+    if(HIPBLASLT_BUILD_ROCM_VERSION)
+        set(_tensilelite_identity_args --rocm-identity "${HIPBLASLT_BUILD_ROCM_VERSION}")
+    endif()
     execute_process(
         COMMAND ${_tensilelite_metadata_command}
-            "${_tensilelite_source_root}/release_metadata.py" version
+            "${_tensilelite_source_root}/release_metadata.py" version ${_tensilelite_identity_args}
         OUTPUT_VARIABLE TENSILELITE_DISTRIBUTION_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         COMMAND_ERROR_IS_FATAL ANY
@@ -1003,6 +1010,9 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
     endif()
     if(TENSILELITE_SOURCE_DATE_EPOCH)
         list(APPEND _tensilelite_wheel_env "SOURCE_DATE_EPOCH=${TENSILELITE_SOURCE_DATE_EPOCH}")
+    endif()
+    if(HIPBLASLT_BUILD_ROCM_VERSION)
+        list(APPEND _tensilelite_wheel_env "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}")
     endif()
 
     set(_tensilelite_canonical_stage "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-canonical")

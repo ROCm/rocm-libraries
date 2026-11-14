@@ -59,6 +59,12 @@ uv sync                          # provisions deps, rocisa, and the pre-commit a
 uv run invoke precommit-install  # writes the git hook (once per clone)
 ```
 
+`VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format and
+must remain equal. A build from a checkout is a development build versioned
+`5.0.0+g<commit>` (`.dirty` when the checkout has uncommitted changes). Only
+TheRock's build stamps a ROCm identity: `+rocm<identity>` for releases, release
+candidates and nightlies, `+devrocm<identity>` for its development builds.
+
 `git commit` from inside the container then runs the affected tests. Bypass once
 with `git commit --no-verify`. On a snapshot mismatch the hook prints a
 `--snapshot-update` command scoped to the failing file(s).
