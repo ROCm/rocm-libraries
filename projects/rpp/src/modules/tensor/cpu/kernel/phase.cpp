@@ -998,11 +998,11 @@ RppStatus phase_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, RpptDescPtr sr
                     }
 #endif
                     for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp++ = static_cast<Rpp8s>(
-                            RPPPIXELCHECKI8((atan(static_cast<Rpp32f>(*srcPtr1Temp + 128) /
-                                                  static_cast<Rpp32f>(*srcPtr2Temp + 128)) *
-                                             multiplier) -
-                                            128));
+                        *dstPtrTemp++ = static_cast<Rpp8s>(RPPPIXELCHECKI8(
+                            std::nearbyintf(atan(static_cast<Rpp32f>(*srcPtr1Temp + 128) /
+                                                 static_cast<Rpp32f>(*srcPtr2Temp + 128)) *
+                                            multiplier) -
+                            128));
 
                         srcPtr1Temp++;
                         srcPtr2Temp++;
