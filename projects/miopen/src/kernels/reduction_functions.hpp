@@ -4,6 +4,7 @@
 #ifndef GUARD_REDUCTION_FUNCTIONS_HPP
 #define GUARD_REDUCTION_FUNCTIONS_HPP
 
+#include "batchnorm_functions.hpp"
 #include "vector_types.hpp"
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
@@ -410,41 +411,30 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
     variance = lcl_data_variance[0] * scale;
 }
 
-template <typename FpPrecType>
+template <typename FpPrecType, int VecSize>
 __forceinline__ __device__ void
-welford_step_unroll4(typename mapped_vector_type<FpPrecType, 4>::type& read4Prec,
-                     FpPrecType& mean,
-                     FpPrecType& variance,
-                     FpPrecType& curN)
+welford_step_unroll(typename mapped_vector_type<FpPrecType, VecSize>::type& readPrecVec,
+                    FpPrecType& mean,
+                    FpPrecType& variance,
+                    FpPrecType& curN)
 {
     // Using Welford's algorithm for calculating variance
     // Manually unrolled calculation for the mean and variance of 4 elements, plus a
     // merger step
 
-    FpPrecType mean4     = read4Prec.x;
-    FpPrecType oldMean4  = mean4;
-    FpPrecType variance4 = cast<FpPrecType>(0.);
+    FpPrecType meanVec           = cast<FpPrecType>(0);
+    FpPrecType varianceVec       = cast<FpPrecType>(0);
+    constexpr FpPrecType curNVec = static_cast<FpPrecType>(VecSize);
 
-    mean4 += read4Prec.y;
-    mean4 *= 0.5f;
-    variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
+    miopen::batchnorm::_accumulate(meanVec, readPrecVec);
+    meanVec /= curNVec;
 
-    oldMean4 = mean4;
-    mean4    = mean4 * 2.0f + read4Prec.z;
-    mean4 *= 0.333333333f;
-    variance4 = fma(read4Prec.z - mean4, read4Prec.z - oldMean4, variance4);
+    miopen::batchnorm::_accumulate_mad(varianceVec, readPrecVec - meanVec, readPrecVec - meanVec);
 
-    oldMean4 = mean4;
-    mean4    = mean4 * 3.0f + read4Prec.w;
-    mean4 *= 0.25f;
-    variance4 = fma(read4Prec.w - mean4, read4Prec.w - oldMean4, variance4);
-
-    // merge the local mean and variance with the currently computed ones
-
-    FpPrecType delta = mean4 - mean;
-    mean             = (mean4 * 4.0f + mean * curN) / (curN + 4.f);
-    variance += variance4 + delta * delta * 4.f * curN / (curN + 4.f);
-    curN += 4.f;
+    FpPrecType delta = meanVec - mean;
+    mean             = (meanVec * curNVec + mean * curN) / (curN + curNVec);
+    variance += varianceVec + delta * delta * curNVec * curN / (curN + curNVec);
+    curN += curNVec;
 }
 
 } // namespace reduction
