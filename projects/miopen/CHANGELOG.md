@@ -6,6 +6,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
+  elements per output when the compute type is wider than the input type (for example FP16 `AVG`
+  with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
+  size that `miopenGetReductionWorkspaceSize` returns.
+* [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
+  reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
+  `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
+* [Reduce] Fixed an out-of-bounds shared-memory read in warp-wise reductions that return indices,
+  when the compute type has no built-in shuffle support (compute types other than FP32 and FP64, for
+  example FP16). The results were not affected.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
