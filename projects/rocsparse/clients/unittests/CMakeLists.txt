@@ -46,6 +46,8 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
   unit_test_csrmv_adaptive_analysis.cpp
+  # gtsv_no_pivot medium-path kernel selection (gtsv_nopivot_index.hpp) [ROCM-33382]
+  unit_test_gtsv_nopivot_index.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly

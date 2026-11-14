@@ -506,6 +506,30 @@ TEST_F(PrecondTridiagonal, strided_batch_medium_sizes)
     run_strided<rocsparse_double_complex>(handle, 135000, 1, 0);
 }
 
+// The medium path puts one block per tile of 8 right-hand sides, or per system of
+// the batch, on grid.y. A grid.y limit of 1 to 3 forces the grid-stride kernels,
+// with several tiles per block and a partial last step: 51 right-hand sides are 7
+// tiles, the last one partial, and 7 systems. m = 135000 also runs them in the
+// recursion on the reduced system of 1056 rows.
+TEST_F(PrecondTridiagonal, medium_grid_stride_grid_y)
+{
+    for(const int limit : {1, 2, 3})
+    {
+        SCOPED_TRACE("maxGridSize[1] = " + std::to_string(limit));
+        ScopedOverride<int> clamp(handle->properties.maxGridSize[1], limit);
+        for(const int32_t m : {1025, 3000})
+        {
+            run_multi_rhs<Solver::no_pivot, double>(handle, m, 51);
+            run_strided<double>(handle, m, 7, 0);
+        }
+        run_multi_rhs<Solver::no_pivot, float>(handle, 1025, 51, 5);
+        run_multi_rhs<Solver::no_pivot, rocsparse_double_complex>(handle, 1025, 27);
+        run_strided<rocsparse_float_complex>(handle, 1025, 7, 3);
+        run_multi_rhs<Solver::no_pivot, double>(handle, 135000, 33);
+        run_strided<double>(handle, 135000, 5, 0);
+    }
+}
+
 TEST_F(PrecondTridiagonal, no_pivot_argument_validation)
 {
     const int32_t          m = 8;

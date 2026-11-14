@@ -313,8 +313,10 @@ Tests:
 # and both kernels index with NUM_RHS * hipBlockIdx_y + rhs and no loop, so the launch
 # became illegal once the count of right-hand side blocks passed the hardware cap of
 # 65535, i.e. from n = 524281 on. The small path is already correct because it puts the
-# same count on grid.x. The medium path now clamps grid.y and both kernels grid-stride
-# over the blocks in steps of NUM_RHS.
+# same count on grid.x. The medium path clamps grid.y. Launches that fit in the grid
+# and whose 32-bit unsigned indices m * column + m - 1 and num_spikes * column +
+# num_spikes - 1 do not overflow keep a single-iteration kernel; the rest grid-stride
+# over the blocks in steps of NUM_RHS with 64-bit indices.
 #
 # m = 1025 is the smallest size that forces the medium path; a small-m case passes
 # against the unfixed code and proves nothing. n = 524289 asks for 65537 blocks, the
@@ -338,10 +340,12 @@ Tests:
 
 # AISPARSE-689 / AISPARSE-691 regression: the medium path (m > 1024) keeps the NUM_RHS = 8
 # right-hand sides of a block in a temporary buffer, written by the forward elimination
-# and read back by the backward substitution at m * rhs + gid with rhs = 0 ... 7. The
-# offset is formed in 64 bit; as a plain int it overflows once m * 7 >= 2^31, i.e. from
-# m = 306783379 on. Only a block that holds 8 right-hand sides reaches rhs = 7, so n = 8
-# is the smallest n. No smaller case reaches the overflow, hence the memory: 25.4 GiB on
+# and read back by the backward substitution at m * rhs + gid with rhs = 0 ... 7. As a
+# plain int that offset overflows once m * 7 >= 2^31, i.e. from m = 306783379 on. Here
+# the launch fits in grid.y and 8 * m - 1 < 2^32, so the straight-line kernels form it
+# as the 32-bit unsigned m * column + gid; no other case covers the unsigned range
+# between 2^31 and 2^32. Only a block that holds 8 right-hand sides reaches rhs = 7, so
+# n = 8 is the smallest n. No smaller case reaches the overflow, hence the memory: 25.4 GiB on
 # the device (diagonals 3.7 GB, right-hand sides 9.8 GB, temporary buffer 13.7 GB) and
 # 30.9 GiB on the host (the right-hand sides twice, the diagonals and the residual of the
 # harness check), so it only runs on the large-memory parts.
