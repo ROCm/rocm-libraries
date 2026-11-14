@@ -179,6 +179,17 @@ def test_data_parallel_custom_claim_requires_descriptor_and_version():
         validateCustomPersistentArgs(config)
 
 
+def test_post_kernel_args_refuse_persistent_grid_under_layout_3():
+    config = _persistent_args_config()
+    config["InternalSupportParams"]["PersistentLoopArgsVersion"] = 3
+    config["CustomKernel"]["args"] = [a for a in config["CustomKernel"]["args"]
+                                      if a["semantic"] != "PersistentGrid"]
+    config["CustomKernel"]["postKernels"] = [
+        {"kind": "streamKReduce", "args": [{"type": "uint32", "semantic": "PersistentGrid"}]}]
+    with pytest.raises(ValueError, match="PersistentGrid requires"):
+        validateCustomPersistentArgs(config)
+
+
 @pytest.mark.parametrize("semantic", ["AddressSynchronizer", "Synchronizer", "GSUSync"])
 def test_data_parallel_custom_descriptor_rejects_partial_flag_aliases(semantic):
     config = _persistent_args_config()
