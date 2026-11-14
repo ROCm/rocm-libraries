@@ -5,6 +5,7 @@
 
 import configparser
 import re
+import runpy
 import subprocess
 import sys
 import zipfile
@@ -16,6 +17,7 @@ from packaging.requirements import Requirement
 pytestmark = pytest.mark.unit
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_STAGER = _PROJECT_ROOT / "scripts/stage_release_source.py"
 
 
 def test_ci_bootstrap_requirements_include_invoke():
@@ -31,8 +33,15 @@ def test_ci_bootstrap_requirements_include_invoke():
     ), "Math CI's source-build bootstrap must install Invoke unconditionally"
 
 
+def _isolated_source(tmp_path):
+    destination = tmp_path / "source"
+    runpy.run_path(str(_STAGER))["stage_source"](_PROJECT_ROOT, destination)
+    return destination
+
+
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
+    source_root = _isolated_source(tmp_path)
     # The build reads no ROCm installation; these must not change the version.
     monkeypatch.setenv("ROCM_VERSION", "7.2.4")
     monkeypatch.setenv("ROCM_PATH", str(tmp_path / "no-rocm-here"))
@@ -50,7 +59,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             str(tmp_path),
             ".",
         ],
-        cwd=_PROJECT_ROOT,
+        cwd=source_root,
         check=True,
         capture_output=True,
         text=True,
@@ -66,7 +75,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    component_version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
     version = re.search(r"^Version: (.+)$", metadata, re.MULTILINE).group(1)
     # A source build is a development build: labelled with the commit when git
     # knows it, unlabelled otherwise. It never claims a ROCm release.
@@ -86,12 +95,6 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     parsed_entry_points.read_string(entry_points)
     assert dict(parsed_entry_points["console_scripts"]) == {
         "tensilelite": "tensilelite.cli:main",
-        "Tensile": "tensilelite.run:main",
-        "TensileCreateLibrary": "tensilelite.create_library:main",
-        "TensileVerifyStinkyElfText": "tensilelite.verify_stinky_comment_vs_elf_text:main",
-        "TensileGetPath": "tensilelite:PrintTensileRoot",
-        "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
-        "TensileRetuneLibrary": "tensilelite.retune_library:main",
         "tensilelite-configure-client": "tensilelite_configure_client:main",
     }
     assert "_tensilelite_client_binding.py" in archived_names
@@ -112,10 +115,14 @@ def test_client_identity_is_scoped_and_checked_exactly():
         encoding="utf-8"
     )
 
+    version_condition = (
+        "if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT\n"
+        "        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)"
+    )
+    assert version_condition in top_cmake
     block = top_cmake.split(
-        'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
+        f"{version_condition}\n    set(_tensilelite_source_root", 1
     )[1].split("\nendif()", 1)[0]
-    assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
     # The version and commit come from release_metadata.py, which reads no ROCm
     # root; the selected build root feeds only the client's --build-rocm.
     assert '"${_tensilelite_source_root}/release_metadata.py" version' in block
@@ -133,6 +140,40 @@ def test_client_identity_is_scoped_and_checked_exactly():
         assert query in tests_cmake
     assert '"-DQUERY=--${_query}"' in tests_cmake
     assert "actual STREQUAL EXPECTED" in query_check
+
+
+def test_wheel_rebuild_depends_on_top_level_runtime_modules():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert '"${_tensilelite_src}/_tensilelite_client_binding.py"' in cmake
+    assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
+
+
+def test_cmake_wheel_builds_use_isolated_source_trees():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert cmake.count("scripts/stage_release_source.py") >= 2
+    assert '"${_tensilelite_canonical_source}"' in cmake
+    assert "compat" not in cmake.replace("__HIP_HCC_COMPAT_MODE__", "")
+
+
+def test_cmake_wheel_build_gets_the_configure_commit_and_no_rocm():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    recipe = cmake.split("# Build the hermetic tensilelite release wheel", 1)[1].split(
+        "\nendif()", 1
+    )[0]
+
+    # The staged copy is not owned by git, so the commit must be passed in, and
+    # the wheel must record the same commit as the client from this configure.
+    assert '"TENSILELITE_SOURCE_REVISION=${TENSILELITE_CLIENT_SOURCE_REVISION}"' in recipe
+    assert '"SOURCE_DATE_EPOCH=${TENSILELITE_SOURCE_DATE_EPOCH}"' in recipe
+    assert '--expected-source-revision "${TENSILELITE_CLIENT_SOURCE_REVISION}"' in recipe
+    assert "ROCM_PATH" not in recipe
+    assert ".info/version" not in recipe
+    # A new commit renames and restamps the wheel even if no TensileLite file
+    # changed, so the build must depend on the configure's identity.
+    assert "file(CONFIGURE OUTPUT \"${_tensilelite_wheel_identity}\"" in recipe
+    assert '"${_tensilelite_wheel_identity}"\n' in recipe.split("DEPENDS", 1)[1]
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
