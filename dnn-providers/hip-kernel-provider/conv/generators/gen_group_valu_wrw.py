@@ -165,6 +165,10 @@ write(
         "metadata": kmd,
         "knobs": KNOBS,
         "behavior_notes": ["runtime_compilation"],
+        # RFC 0025 numerical notes. No "nondeterministic": every config is
+        # bitwise reproducible (fixed-order sums, no atomics), which the
+        # family's device test checks by relaunching each config.
+        "numerical_notes": [],
     },
 )
 

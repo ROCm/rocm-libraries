@@ -25,6 +25,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -470,6 +471,19 @@ void runCase(ConvShape shape,
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               workspace);
+            },
+            handle.getStream(),
+            written,
+            workspace,
+            workspaceBytes));
         if(workspace != nullptr)
         {
             ASSERT_EQ(hipFree(workspace), hipSuccess);

@@ -21,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -568,6 +569,19 @@ void runCase(ConvShape shape, ConvDirection direction)
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               nullptr);
+            },
+            handle.getStream(),
+            written,
+            nullptr,
+            0));
         written.markDeviceModified();
 
         const auto* actual = static_cast<const T*>(written.rawHostData());
@@ -868,6 +882,19 @@ void runWrwCase(ConvShape shape)
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               workspace);
+            },
+            handle.getStream(),
+            w,
+            workspace,
+            workspaceBytes));
         ASSERT_EQ(hipFree(workspace), hipSuccess);
         w.markDeviceModified();
 
@@ -1020,6 +1047,19 @@ void runWrwInfCase(const InfCase& infCase)
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               workspace);
+            },
+            handle.getStream(),
+            w,
+            workspace,
+            workspaceBytes));
         ASSERT_EQ(hipFree(workspace), hipSuccess);
         w.markDeviceModified();
         const auto* actual = static_cast<const T*>(w.rawHostData());

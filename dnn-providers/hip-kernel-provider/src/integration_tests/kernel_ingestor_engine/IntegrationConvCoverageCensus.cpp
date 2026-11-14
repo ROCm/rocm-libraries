@@ -55,7 +55,10 @@
  *       every scaled pair whose fwd/bwd original naive serves (the naive engines are the
  *       structural floor);
  *   (d) each gated engine serves the graph just below its limit on the architectures the
- *       map records.
+ *       map records;
+ *   (e) every hipkernel:CONV_* engine offered for a graph reports, through the frontend's
+ *       get_numerical_notes_for_engine, its RFC 0025 claim: FFT or WINOGRAD for those engines,
+ *       nothing for the rest, and never NONDETERMINISTIC.
  * The naive engines' workload budget counts the device's SIMD lanes, so parts of one
  * architecture with fewer compute units decline graphs a larger part's map records as naive
  * (s053w: 4750 multiply-accumulates a lane on a 64-CU gfx906, 5067 on a 60-CU one, against a
@@ -370,6 +373,10 @@ struct Observed
     std::vector<std::string> engines;
     Tier tier = Tier::NONE;
     std::string error;
+    /// The numerical notes each hipkernel:CONV_* engine reported for the graph, or the error
+    /// of the query, by engine name.
+    std::map<std::string, std::vector<hipdnn_frontend::NumericalNote>> numericalNotes;
+    std::map<std::string, std::string> numericalNoteErrors;
 };
 
 struct Census
@@ -440,6 +447,21 @@ Observed discover(hipdnnHandle_t handle,
     for(const auto id : ids)
     {
         result.engines.push_back(engineName(handle, id, names));
+        const auto& name = result.engines.back();
+        if(name.rfind("hipkernel:CONV", 0) != 0)
+        {
+            continue;
+        }
+        std::vector<hipdnn_frontend::NumericalNote> notes;
+        const auto noteError = graph.get_numerical_notes_for_engine(id, notes);
+        if(noteError.is_bad())
+        {
+            result.numericalNoteErrors.emplace(name, noteError.get_message());
+        }
+        else
+        {
+            result.numericalNotes.emplace(name, std::move(notes));
+        }
     }
     result.tier = tierOf(result.engines);
     return result;
@@ -731,6 +753,57 @@ TEST(IntegrationConvCoverageCensus, NaiveBudgetArithmeticFollowsComputeUnits)
             GTEST_SKIP() << census().skip; \
         }                                  \
     } while(false)
+
+/// The numerical notes a hipkernel:CONV_* engine reports (RFC 0025): its algorithm class where
+/// cuDNN names one, and no NONDETERMINISTIC, since every engine claims bitwise-reproducible
+/// results (each family's device test launches every config twice and compares the bits).
+std::vector<hipdnn_frontend::NumericalNote> expectedNumericalNotes(const std::string& engine)
+{
+    if(engine.rfind("hipkernel:CONV_FFT_", 0) == 0)
+    {
+        return {hipdnn_frontend::NumericalNote::FFT};
+    }
+    if(engine.rfind("hipkernel:CONV_WINOGRAD_", 0) == 0)
+    {
+        return {hipdnn_frontend::NumericalNote::WINOGRAD};
+    }
+    return {};
+}
+
+TEST(IntegrationConvCoverageCensus, EveryConvEngineReportsItsNumericalNotes)
+{
+    SKIP_WITHOUT_CENSUS();
+    const auto& c = census();
+    std::set<std::string> checked;
+    int mismatches = 0;
+    for(const auto& [id, observed] : c.observed)
+    {
+        for(const auto& [engine, message] : observed.numericalNoteErrors)
+        {
+            if(++mismatches <= 10)
+            {
+                ADD_FAILURE() << id << ": " << engine
+                              << ": numerical-note query failed: " << message;
+            }
+        }
+        for(const auto& [engine, notes] : observed.numericalNotes)
+        {
+            checked.insert(engine);
+            if(notes != expectedNumericalNotes(engine) && ++mismatches <= 10)
+            {
+                std::ostringstream reported;
+                for(const auto note : notes)
+                {
+                    reported << ' ' << note;
+                }
+                ADD_FAILURE() << id << ": " << engine << " reports {" << reported.str() << " }";
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
+    EXPECT_FALSE(checked.empty()) << "no hipkernel:CONV_* engine served any graph";
+    std::cout << "Note: numerical notes checked on " << checked.size() << " conv engines\n";
+}
 
 TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
 {

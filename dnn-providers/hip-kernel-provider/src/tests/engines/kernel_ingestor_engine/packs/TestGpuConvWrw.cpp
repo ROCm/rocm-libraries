@@ -30,6 +30,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
@@ -793,6 +794,19 @@ void runCase(const DeviceCase& deviceCase,
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               workspace);
+            },
+            handle.getStream(),
+            w,
+            workspace,
+            workspaceBytes));
         if(workspace != nullptr)
         {
             ASSERT_EQ(hipFree(workspace), hipSuccess);

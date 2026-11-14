@@ -421,8 +421,10 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
             "metadata": kmd,
             "knobs": KNOBS,
             "behavior_notes": ["runtime_compilation"],
-            # RFC 0020 4.2 numerical notes, by their cuDNN names (lowercase), reported through
-            # the engine's details.
+            # RFC 0025 numerical notes: WINOGRAD, the algorithm class. No
+            # "nondeterministic": every config is bitwise reproducible (fixed-order
+            # sums, no atomics), which the family's device test checks by
+            # relaunching each config.
             "numerical_notes": ["winograd"],
         },
     )
