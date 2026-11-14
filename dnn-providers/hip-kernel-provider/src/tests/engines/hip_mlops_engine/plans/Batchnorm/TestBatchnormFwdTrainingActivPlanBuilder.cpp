@@ -950,6 +950,7 @@ std::vector<FusedStatsMutation> fusedStatsMutations()
         {"MissingNextRunningVariance", [](auto& a) { a.next_running_variance_tensor_uid.reset(); }},
         {"SaveMeanWithoutInvVariance", [](auto& a) { a.inv_variance_tensor_uid.reset(); }},
         {"SaveInvVarianceWithoutMean", [](auto& a) { a.mean_tensor_uid.reset(); }},
+        {"UnresolvableEpsilon", [](auto& a) { a.epsilon_tensor_uid = 9999; }},
     };
 }
 } // namespace
@@ -978,6 +979,27 @@ INSTANTIATE_TEST_SUITE_P(Mutations,
                              return info.param.name;
                          });
 
+TEST_F(TestBatchnormFusedTrainingStatsDecline, RuntimeEpsilonIsApplicable)
+{
+    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            const auto epsilonUid
+                = graph.nodes.at(0)->attributes.AsBatchnormAttributes()->epsilon_tensor_uid;
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->uid == epsilonUid)
+                {
+                    tensor->is_runtime_pass_by_value = true;
+                    tensor->value.Reset();
+                }
+            }
+        });
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestBatchnormFusedTrainingStatsDecline, GraphWithoutSavedStatisticsIsApplicable)
 {
     auto builder = mutatedFusedTrainingGraph([](BatchnormAttributesT& a) {
@@ -987,6 +1009,55 @@ TEST_F(TestBatchnormFusedTrainingStatsDecline, GraphWithoutSavedStatisticsIsAppl
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
+       DeclinesRunningStatisticsThatAreNotSavedStatisticShaped)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+    using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
+
+    const auto isApplicable = [this](const flatbuffers::FlatBufferBuilder& builder) {
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_dummyHandle, graph);
+    };
+    ASSERT_TRUE(isApplicable(createValidBatchnormFwdTrainingActivGraph(true, true)));
+
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"dtype", [](TensorAttributesT& tensor) { tensor.data_type = DataType::HALF; }},
+           {"channel length", [](TensorAttributesT& tensor) {
+                tensor.dims = {1, 4, 1, 1};
+                tensor.strides = {4, 1, 1, 1};
+            }}};
+    for(const char* name : {"prev_running_mean",
+                            "prev_running_variance",
+                            "next_running_mean",
+                            "next_running_variance"})
+    {
+        for(const auto& mutation : mutations)
+        {
+            const auto& mutate = mutation.second;
+            SCOPED_TRACE(std::string(name) + " " + mutation.first);
+            auto builder = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true),
+                                       [&](GraphT& graph) {
+                                           for(auto& tensor : graph.tensors)
+                                           {
+                                               if(tensor->name == name)
+                                               {
+                                                   mutate(*tensor);
+                                               }
+                                           }
+                                       });
+            EXPECT_FALSE(isApplicable(builder));
+        }
+    }
+
+    auto builder
+        = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true), [](GraphT& graph) {
+              graph.nodes.at(0)->attributes.AsBatchnormAttributes()->momentum_tensor_uid = 9999;
+          });
+    EXPECT_FALSE(isApplicable(builder));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

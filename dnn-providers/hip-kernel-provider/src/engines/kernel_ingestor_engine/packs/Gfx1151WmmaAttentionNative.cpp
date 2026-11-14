@@ -42,6 +42,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file Gfx1151WmmaAttentionNative.cpp
@@ -756,6 +757,11 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
     if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::FLOAT
        && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)
+    {
+        return std::nullopt;
+    }
+    // The kernels accumulate and keep the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
     {
         return std::nullopt;
     }

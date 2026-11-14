@@ -8,6 +8,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <cstdint>
 #include <unordered_set>
 
 namespace hip_kernel_provider::resample
@@ -15,6 +16,26 @@ namespace hip_kernel_provider::resample
 using namespace hip_kernel_provider::core::utils;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+namespace
+{
+
+// True when the product of dims[first..] is at most `limit`, multiplied in 64 bits without
+// overflow.
+bool extentProductAtMost(const std::vector<int64_t>& dims, size_t first, int64_t limit)
+{
+    int64_t product = 1;
+    for(size_t i = first; i < dims.size(); ++i)
+    {
+        if(__builtin_mul_overflow(product, dims[i], &product) || product > limit)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 void ResampleValidator::checkTensorsNotVirtual(const std::vector<int64_t>& tensorIds)
 {
@@ -109,11 +130,28 @@ void ResampleValidator::checkTensorShapesSupported(
                                 toStdVector(resampleAttr.stride()),
                                 toStdVector(resampleAttr.window()));
 
+    // The forward kernel forms its global thread id from 32-bit block and thread indices, so it
+    // reaches at most 2^32 output elements, and it narrows the flattened input spatial index to
+    // the INT32 index tensor.
+    constexpr int64_t MAX_OUTPUT_ELEMENTS = int64_t{1} << 32;
+    if(!extentProductAtMost(yDims, 0, MAX_OUTPUT_ELEMENTS))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ResampleFwd output exceeds the 2^32 elements one launch can index.");
+    }
+
     if(resampleAttr.index_tensor_uid().has_value())
     {
         const auto& indexTensor
             = findTensorAttributes(_tensorMap, resampleAttr.index_tensor_uid().value());
         validateResampleIndexShape(indexTensor, yDims, "ResampleFwd");
+        if(!extentProductAtMost(xDims, 2, INT32_MAX))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "ResampleFwd flattened input spatial extent does not fit the INT32 index tensor.");
+        }
     }
 }
 

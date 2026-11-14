@@ -1981,10 +1981,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
          {K_U32_DIM_LIMIT, 8, 256, 128}},
         {"nhead_q at UINT32_MAX",
          {4, K_U32_DIM_LIMIT, 256, 128},
-         {4, 8, 256, 128},
-         {4, 8, 256, 128}},
+         {4, 1, 256, 128},
+         {4, 1, 256, 128}},
         {"nhead_kv at UINT32_MAX",
-         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128},
          {4, K_U32_DIM_LIMIT, 256, 128},
          {4, K_U32_DIM_LIMIT, 256, 128}},
         {"seqlen_q at INT32_MAX", {4, 8, K_I32_DIM_LIMIT, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
@@ -2022,10 +2022,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimit
          {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
         {"nhead_q one past UINT32_MAX",
          {4, K_U32_DIM_LIMIT + 1, 256, 128},
-         {4, 8, 256, 128},
-         {4, 8, 256, 128}},
+         {4, 1, 256, 128},
+         {4, 1, 256, 128}},
         {"nhead_kv one past UINT32_MAX",
-         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
          {4, K_U32_DIM_LIMIT + 1, 256, 128},
          {4, K_U32_DIM_LIMIT + 1, 256, 128}},
         {"seqlen_q one past INT32_MAX",
@@ -2429,6 +2429,165 @@ INSTANTIATE_TEST_SUITE_P(Attributes,
                          [](const ::testing::TestParamInfo<SdpaFwdUnservedAttributeCase>& info) {
                              return info.param.name;
                          });
+
+// =============================================================================
+// Graphs whose operands disagree, or whose tensor metadata no kernel reads
+// =============================================================================
+
+// The shape predicate the contract test below reaches through isApplicable, run on the host:
+// a GQA graph (8 query heads over 4 key/value heads) with each case changing one extent.
+TEST(TestSdpaFwdShapeConsistency, DeclinesOperandsThatDisagreeOnShape)
+{
+    const auto hasConsistentShapes
+        = [](const std::function<void(std::vector<int64_t> & q,
+                                      std::vector<int64_t> & k,
+                                      std::vector<int64_t> & v,
+                                      std::vector<int64_t> & o)>& mutateDims) {
+              auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+                  createSdpaFwdGraph({4, 8, 256, 128}, {4, 4, 256, 128}),
+                  [&mutateDims](GraphT& graph) {
+                      auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                      mutateDims(findTensorByUid(graph, attrs.q_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.k_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.v_tensor_uid).dims,
+                                 findTensorByUid(graph, attrs.o_tensor_uid).dims);
+                  });
+              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                  builder.GetBufferPointer(), builder.GetSize());
+              const auto& attrs
+                  = graph.nodeWrappers()
+                        .front()
+                        ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+              const auto& tensors = graph.getTensorMap();
+              return plan_utils::hasConsistentFwdShapes(*tensors.at(attrs.q_tensor_uid()),
+                                                        *tensors.at(attrs.k_tensor_uid()),
+                                                        *tensors.at(attrs.v_tensor_uid()),
+                                                        *tensors.at(attrs.o_tensor_uid()));
+          };
+
+    // Accepted: the legal GQA graph, equal head sizes at another width, and a GQA ratio of 1.
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto&, auto&, auto&) {}));
+    EXPECT_TRUE(hasConsistentShapes([](auto& q, auto& k, auto&, auto&) { q[3] = k[3] = 64; }));
+    EXPECT_TRUE(hasConsistentShapes([](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 8; }));
+
+    using DimsMutation = std::function<void(std::vector<int64_t> & q,
+                                            std::vector<int64_t> & k,
+                                            std::vector<int64_t> & v,
+                                            std::vector<int64_t> & o)>;
+    const std::vector<std::pair<std::string, DimsMutation>> declined = {
+        {"KHeadSizeDiffersFromQ", [](auto&, auto& k, auto&, auto&) { k[3] = 64; }},
+        {"KHeadSizeExceedsQ", [](auto&, auto& k, auto&, auto&) { k[3] = 256; }},
+        {"QueryHeadsNotAMultipleOfKvHeads",
+         [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 3; }},
+        {"VHeadsDifferFromKHeads", [](auto&, auto&, auto& v, auto&) { v[1] = 2; }},
+        {"KBatchDiffersFromQBatch", [](auto&, auto& k, auto&, auto&) { k[0] = 2; }},
+        {"OHeadSizeDiffersFromVHeadSize", [](auto&, auto&, auto&, auto& o) { o[3] = 64; }},
+        // Every operand agrees on the zero, so only the positive-extent rule declines them.
+        {"ZeroBatch", [](auto& q, auto& k, auto& v, auto& o) { q[0] = k[0] = v[0] = o[0] = 0; }},
+        {"ZeroQueryLength", [](auto& q, auto&, auto&, auto& o) { q[2] = o[2] = 0; }},
+        {"ZeroKeyValueLength", [](auto&, auto& k, auto& v, auto&) { k[2] = v[2] = 0; }},
+        {"ZeroQkHeadSize", [](auto& q, auto& k, auto&, auto&) { q[3] = k[3] = 0; }},
+        {"ZeroVHeadSize", [](auto&, auto&, auto& v, auto& o) { v[3] = o[3] = 0; }},
+    };
+    for(const auto& [name, mutateDims] : declined)
+    {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(hasConsistentShapes(mutateDims));
+    }
+}
+
+class TestSdpaFwdGraphContract : public ::testing::Test
+{
+protected:
+    SdpaFwdPlanBuilder _planBuilder;
+    Handle _handle;
+
+    bool servedArch()
+    {
+        const std::string deviceString
+            = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+        return deviceString == "gfx942" || deviceString == "gfx950";
+    }
+
+    bool isApplicable(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, graph);
+    }
+};
+
+// A GQA graph the engine serves (8 query heads over 4 key/value heads), with each case
+// changing one extent or one tensor property the kernel's addressing relies on. The frontend
+// rejects these graphs; the raw backend does not.
+TEST_F(TestSdpaFwdGraphContract, DeclinesOperandsThatDisagreeOnShape)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+
+    const auto base = [] { return createSdpaFwdGraph({4, 8, 256, 128}, {4, 4, 256, 128}); };
+    ASSERT_TRUE(isApplicable(base()));
+
+    using DimsMutation = std::function<void(std::vector<int64_t> & q,
+                                            std::vector<int64_t> & k,
+                                            std::vector<int64_t> & v,
+                                            std::vector<int64_t> & o)>;
+    const std::vector<std::pair<std::string, DimsMutation>> cases = {
+        {"QueryHeadsNotAMultipleOfKvHeads",
+         [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 3; }},
+        {"KvHeadsExceedQueryHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 16; }},
+        {"ZeroKvHeads", [](auto&, auto& k, auto& v, auto&) { k[1] = v[1] = 0; }},
+        {"VHeadsDifferFromKHeads", [](auto&, auto&, auto& v, auto&) { v[1] = 2; }},
+        {"VSequenceDiffersFromKSequence", [](auto&, auto&, auto& v, auto&) { v[2] = 128; }},
+        {"VBatchDiffersFromQBatch", [](auto&, auto&, auto& v, auto&) { v[0] = 2; }},
+        {"KBatchDiffersFromQBatch", [](auto&, auto& k, auto&, auto&) { k[0] = 2; }},
+        {"KHeadSizeDiffersFromQ", [](auto&, auto& k, auto&, auto&) { k[3] = 64; }},
+        {"OBatchDiffersFromQBatch", [](auto&, auto&, auto&, auto& o) { o[0] = 2; }},
+        {"OHeadsDifferFromQHeads", [](auto&, auto&, auto&, auto& o) { o[1] = 4; }},
+        {"OSequenceDiffersFromQSequence", [](auto&, auto&, auto&, auto& o) { o[2] = 128; }},
+        {"OHeadSizeDiffersFromVHeadSize", [](auto&, auto&, auto&, auto& o) { o[3] = 64; }},
+        {"ZeroQuerySequence", [](auto& q, auto&, auto&, auto& o) { q[2] = o[2] = 0; }},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        const auto& mutateDims = testCase.second;
+        SCOPED_TRACE(testCase.first);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            base(), [&mutateDims](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                auto& q = findTensorByUid(graph, attrs.q_tensor_uid).dims;
+                auto& k = findTensorByUid(graph, attrs.k_tensor_uid).dims;
+                auto& v = findTensorByUid(graph, attrs.v_tensor_uid).dims;
+                auto& o = findTensorByUid(graph, attrs.o_tensor_uid).dims;
+                mutateDims(q, k, v, o);
+            });
+        EXPECT_FALSE(isApplicable(builder));
+    }
+}
+
+TEST_F(TestSdpaFwdGraphContract, DeclinesARaggedOffsetMultiplierOnATensorWithoutRaggedOffset)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!servedArch())
+    {
+        GTEST_SKIP();
+    }
+    ASSERT_TRUE(isApplicable(createSdpaFwdGraph()));
+
+    for(const char* name : {"q", "k", "v", "o"})
+    {
+        SCOPED_TRACE(name);
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            createSdpaFwdGraph(), [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                findTensor(graph, name).ragged_offset_multiplier = 2;
+            });
+        EXPECT_FALSE(isApplicable(builder));
+    }
+}
 
 } // namespace
 } // namespace asm_sdpa_engine

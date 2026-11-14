@@ -405,6 +405,17 @@ INSTANTIATE_TEST_SUITE_P(
         // ...and in f32, 256999 rows of 2089 is 2^31 - 4 bytes.
         GraphCase{"FloatAtThirtyTwoBitAddressing",
                   [] { return buildFlydslRmsNormGraph(DataType::FLOAT, {256999, 2089}); }},
+        // Gamma is its own buffer view, in f32 beside 16-bit x and y: 2^29 - 1 elements are
+        // 2^31 - 4 bytes, the last width whose gamma stays within the 32-bit byte offsets.
+        GraphCase{"F32ScaleAtThirtyTwoBitAddressing",
+                  [] {
+                      return buildFlydslRmsNormGraph(DataType::HALF,
+                                                     {1, (1 << 29) - 1},
+                                                     FLYDSL_TEST_EPSILON,
+                                                     false,
+                                                     std::nullopt,
+                                                     DataType::FLOAT);
+                  }},
         // An f32 gamma beside 16-bit x and y: cuDNN's and PyTorch's usual mixed form.
         GraphCase{"Bfloat16WithAnF32Scale",
                   [] {
@@ -741,6 +752,17 @@ INSTANTIATE_TEST_SUITE_P(
         // 2^29 of them is 2 GiB, one byte past it, where bf16 would still fit.
         GraphCase{"FloatPastThirtyTwoBitAddressing",
                   [] { return buildFlydslRmsNormGraph(DataType::FLOAT, {1 << 19, 1 << 10}); }},
+        // x and y fit (2^30 bytes of f16) but the f32 gamma beside them is 2^31 bytes, one past
+        // the 32-bit byte offsets of its buffer view.
+        GraphCase{"F32ScalePastThirtyTwoBitAddressing",
+                  [] {
+                      return buildFlydslRmsNormGraph(DataType::HALF,
+                                                     {1, 1 << 29},
+                                                     FLYDSL_TEST_EPSILON,
+                                                     false,
+                                                     std::nullopt,
+                                                     DataType::FLOAT);
+                  }},
         // Rows and width are read from the graph's shapes at prepare, which an
         // override-shape graph may replace at execute.
         GraphCase{"OverrideShapeEnabled",

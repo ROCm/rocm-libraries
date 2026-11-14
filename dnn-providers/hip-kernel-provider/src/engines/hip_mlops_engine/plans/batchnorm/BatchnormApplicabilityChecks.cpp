@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 #include "BatchnormApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
@@ -174,6 +175,10 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for batchnorm must have the same shape.");
+    validateElementCountFitsUint32(
+        ioDims,
+        "Batchnorm kernels size and index tensors with 32-bit unsigned arithmetic; the IO "
+        "tensor has too many elements.");
 
     // Check that scale and bias tensors must have the same shape
     if(!affineTensorIds.empty())
@@ -338,6 +343,8 @@ void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
     const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
+    checkEpsilonSupported(bnInfAttr.epsilon_tensor_uid());
+
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
 
     auto xDataType
@@ -394,6 +401,8 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
         = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
     const std::vector<int64_t> statTensorIds
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
+
+    checkEpsilonSupported(bnInfAttr.epsilon_tensor_uid());
     const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
@@ -435,6 +444,28 @@ void checkRunningStatsComplete(const BatchnormAttrs& bnAttr)
     }
 }
 
+// When the plan updates running statistics it reads prev and writes next with the saved-statistic
+// layout, so the four statistic operands are validated like the saved ones (FLOAT, packed, the
+// shape derived from the IO tensor); momentum is resolved as a scalar operand at plan build.
+void addRunningStats(
+    const BatchnormAttrs& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    std::vector<int64_t>& statTensorIds)
+{
+    if(!bnAttr.prev_running_mean_tensor_uid().has_value())
+    {
+        return;
+    }
+    statTensorIds.push_back(bnAttr.prev_running_mean_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.prev_running_variance_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.next_running_mean_tensor_uid().value());
+    statTensorIds.push_back(bnAttr.next_running_variance_tensor_uid().value());
+    hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, bnAttr.momentum_tensor_uid().value(), "Momentum");
+}
+
 // The plan writes saved statistics only when both saved mean and saved inv_variance
 // are present, so exactly one of them would never be written.
 void checkSavedStatsPair(const BatchnormAttrs& bnAttr)
@@ -461,6 +492,7 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
 
     checkRunningStatsComplete(bnAttr);
     checkSavedStatsPair(bnAttr);
+    checkEpsilonSupported(bnAttr.epsilon_tensor_uid());
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
@@ -474,6 +506,8 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     {
         statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
     }
+
+    addRunningStats(bnAttr, _tensorMap, statTensorIds);
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 
@@ -505,6 +539,7 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
 
     checkRunningStatsComplete(bnAttr);
     checkSavedStatsPair(bnAttr);
+    checkEpsilonSupported(bnAttr.epsilon_tensor_uid());
 
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
@@ -520,6 +555,8 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
     }
     const std::vector<int64_t> intermediateTensorIds
         = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
+
+    addRunningStats(bnAttr, _tensorMap, statTensorIds);
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);

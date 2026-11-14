@@ -404,6 +404,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
     HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(opGraph.getTensorMap()),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
+    HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
         "All tensors must be aligned to a multiple of 16 bytes");
 
@@ -512,6 +515,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
+
+    // The kernel derives the GQA ratio as Hq / Hkv and indexes K, V and O with Q's batch,
+    // so the four tensors must agree on every extent they share.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !plan_utils::hasConsistentFwdShapes(*qTensor, *kTensor, *vTensor, *oTensor),
+        "Q, K, V and O dimensions are inconsistent: every dimension must be positive, "
+        "K and V must share batch, head count and sequence length, the batch must match Q, "
+        "K's head size must match Q's, Hq must be a multiple of Hkv, and O must be "
+        "[B, Hq, Sq, Dv]");
 
     if(batchMode == BatchMode::GROUP
        && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
