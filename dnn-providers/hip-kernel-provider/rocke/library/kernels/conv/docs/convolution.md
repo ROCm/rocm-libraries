@@ -11,6 +11,7 @@ This page covers:
   `library/kernels/common/conv_direct_wgrad_gather.py`,
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
   `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
+- `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 direct forward)
 - `library/kernels/common/img2col.py`
 
 Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
@@ -1582,6 +1583,49 @@ builder directly.
 Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
 knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
 7x7 (variant `direct_dw_fwd_wmma`).
+
+## Direct Forward on MFMA with LDS DMA (gfx950)
+
+`library/kernels/common/conv_direct_fwd_pp_mfma.py`, spec `FwdPpMfmaSpec`,
+builder `build_fwd_pp_mfma` (C++ twin `instance_conv_direct_fwd_pp_mfma.h`).
+A dense (`groups == 1`) stride-1 forward for gfx950 (wave64,
+`mfma_f32_16x16x32`). The arch gate reads `ArchTarget` capabilities (wave64,
+16-byte `buffer_load ... lds`, `mfma_f32_16x16x32`), which of the known
+targets only gfx950 has.
+
+A workgroup of 8 waves owns a 16x16 output pixel tile and `block_k` (64, 128
+or 256) output channels, and walks the input channels in chunks of 64:
+
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane,
+  4 for the narrow tail of a halo row), never through VGPRs; the LDS
+  swizzle, a 16-byte granule XOR (granule `g` of a 64-channel row `x` at
+  slot `g ^ (x % 8)`) chosen from the bank arithmetic to spread fragment
+  reads over distinct slots, is applied on the global side;
+- the waves form two ranks of 4: rank 0 streams the next filter tap's
+  weights (`[block_k][64]`) into a double buffer, rank 1 the next chunk's
+  input halo `[16 + KH - 1][16 + KW - 1][64]` into the other input buffer, a
+  few 1 KiB pieces per step;
+- rank 1 runs one barrier behind; every step (one tap, one 32-channel half of
+  the chunk) is `reads + DMA issue; barrier; s_setprio 1; MFMAs; s_setprio 0;
+  barrier`, so one rank's MFMAs overlap the other rank's fragment reads and
+  DMA issue. The `vmcnt` waits are explicit, every buffer is its own LDS
+  allocation (`lds_alias_scopes`), and the chunk loop is unrolled twice so
+  each read names its buffer statically.
+
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter, padding, dtype and `block_k`. Constraints:
+square odd filters, stride 1, no dilation, "same" padding on both axes,
+every extent and channel count at least 1, C a multiple of 8 and K a
+multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 up to
+`block_k` 128, 7x7 only at 64), and one input image, one output image and
+the filter each at most `INT32_MAX` bytes (the buffer descriptors span them
+and a masked lane reads at that offset), with an i32 block count. The AOT
+grid is `FWD_PP_MFMA_FILTERS` (3x3) times the kernel module's `BLOCK_K`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_fwd_pp_mfma`); a binary
+is offered where at least half of its padded tile grid is real work. The C++
+twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_fwd_pp_mfma_emit.{c,py}`, the GPU numeric
+test `library/tests/test_direct_fwd_pp_mfma.py`.
 
 ## Winograd Forward (gfx1250)
 
