@@ -870,18 +870,22 @@ class ArchFilter:
         single source of truth shared with unified_gemm_codegen and
         python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
         instructions compile to no-ops and the kernel silently writes zeros),
-        need the TDM epilogue (and vice versa), intrawave, unpadded tiles and,
-        for comp_tdm_v2, exactly four waves, for comp_tdm_pc, at most 256 fp32
-        accumulators per lane; only the plain and preshuffle GEMM operators can
-        use them (comp_tdm_pc is plain only). Non-MX comp_async GEMM on gfx1250
-        needs the cshuffle
+        need the TDM epilogue (and vice versa; plain GEMM may also pair
+        codegen_common.GEMM_TDM_CSHUFFLE_PIPELINES with cshuffle), intrawave,
+        unpadded tiles and, for comp_tdm_v2, exactly four waves, for
+        comp_tdm_pc, at most 256 fp32 accumulators per lane; only the plain and
+        preshuffle GEMM operators can use them (comp_tdm_pc is plain only, apart
+        from Stream-K GEMM).
+        Non-MX comp_async GEMM on gfx1250 needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
         warp_tile_k >= 128 and a 16x16 warp tile (32x32 does not compile).
+        Stream-K GEMM can use codegen_common.STREAMK_GFX1250_PIPELINES, whose
+        epilogue rules are codegen_common.streamk_trait_reject_reason's.
 
-        comp_async is only gated for the GEMM operator on gfx1250: other
-        operators (e.g. grouped convolution) and architectures use it under
-        their own rules. Pad rules are skipped while the pads are unknown
-        (None). KernelConfig has no persistent field, so the TDM
+        comp_async is only gated for the GEMM and Stream-K operators on
+        gfx1250: other operators (e.g. grouped convolution) and architectures
+        use it under their own rules. Pad rules are skipped while the pads are
+        unknown (None). KernelConfig has no persistent field, so the TDM
         "no persistent kernel" rule is enforced only by the codegen and
         python/gemm_utils, which see the persistent trait.
         """
@@ -889,10 +893,11 @@ class ArchFilter:
             OperatorType.GEMM,
             OperatorType.GEMM_PRESHUFFLE,
         )
+        is_streamk = config.operator == OperatorType.GEMM_STREAMK
         if (
             config.pipeline == "comp_async"
             and config.epilogue != "tdm"
-            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not is_gemm)
+            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not (is_gemm or is_streamk))
         ):
             return
         pads = (config.pad_m, config.pad_n, config.pad_k)
@@ -908,11 +913,12 @@ class ArchFilter:
             dtype_a=config.datatype_a,
             dtype_b=config.datatype_b,
             layout=config.layout,
-            variant_supported=is_gemm,
+            variant_supported=is_gemm or is_streamk,
             variant_name=f"operator={config.operator.value}",
             pads=None if None in pads else tuple(bool(p) for p in pads),
             tile_mn=(config.tile_m, config.tile_n),
             warp_k=config.warp_k,
+            streamk=is_streamk,
         )
         if reason:
             result.add_error(reason)

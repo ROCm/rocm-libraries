@@ -15,7 +15,8 @@
  *   is_valid_spec(spec, arch)              rocke_gemm_universal_is_valid_spec()
  *   TileSpec.mfmas_per_warp_m / _n         rocke_gemm_tile_mfmas_per_warp_m / _n
  *   TileSpec.k_atoms_per_tile_k            rocke_gemm_tile_k_atoms_per_tile_k
- *   _dtype_ir / _mma_family                (file-static helpers)
+ *   _dtype_ir                              rocke_gemm_dtype_ir
+ *   _mma_family                            (file-static helper)
  *   _acc_dtype / _elem_bytes               (file-static helpers)
  *   _resolve_mma_op / _storage_dtype       (file-static helpers)
  *   _ab_lds_plan / _mfma_atom_widths       (file-static helpers)
@@ -29,6 +30,7 @@
  * sibling TUs that bind to rocke/instance_gemm_internal.h.
  */
 
+#include "rocke/instance_gemm_internal.h" /* ROCKE_GEMM_TDM_MAX_DEPTH, helpers */
 #include "rocke/instance_gemm_universal.h"
 
 #include <stdio.h>
@@ -199,11 +201,18 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.dtl_prefetch = false;
     s.trait.active_tile_skip = false;
     s.trait.lds_k_pad = 0;
+    s.trait.tdm = false;
+    s.trait.tdm_depth = 1;
     s.trait.lds_swizzle = false;
     s.trait.emit_sched_hints_set = false; /* Python None (arch-resolved) */
     s.trait.emit_sched_hints = false;
     s.trait.split_k = 1; /* default 1 (single-K-pass body) */
     s.trait.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+    s.trait.ab_load_elem_bytes_set = false; /* Python None (dtype-resolved) */
+    s.trait.ab_load_elem_bytes = 0;
+    s.trait.split_barrier = false;
+    s.trait.tdm_alternate_issuers = false;
+    s.trait.tdm_early_refill = false;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -244,7 +253,11 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *          f"{pipeline}_{scheduler}_{epilogue}",
  *          flags={"pad": any(pad_*), "pers": persistent, "bat": batched,
  *                 "preb": preshuffle_b, "dtl": direct_to_lds,
- *                 "pref": dtl_prefetch, "actt": active_tile_skip})
+ *                 "pref": dtl_prefetch, "actt": active_tile_skip,
+ *                 f"spk{split_k}": split_k > 1, "noalc": cshuffle_no_alias,
+ *                 f"abeb{ab_load_elem_bytes}": set, f"tdm{tdm_depth}": tdm,
+ *                 "spb": split_barrier, "alti": tdm_alternate_issuers,
+ *                 "erf": tdm_early_refill})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
  *  same fixed order to rocke_kernel_name_join.
@@ -260,8 +273,11 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_pipe[128];
     char part_spk[32];
     const char* parts[5];
-    const char* flag_names[9];
-    int flag_on[9];
+    char part_abeb[32];
+    char part_tdm[32];
+    char part_c[32];
+    const char* flag_names[15];
+    int flag_on[15];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -297,6 +313,23 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     snprintf(part_spk, sizeof(part_spk), "spk%d", tr->split_k);
     flag_names[7] = part_spk;
     flag_names[8] = "noalc";
+    /* Python flag key f"abeb{tr.ab_load_elem_bytes}" (dynamic name; only on
+     * when the width is overridden, so the resolved default leaves every
+     * existing kernel name untouched). */
+    snprintf(part_abeb, sizeof(part_abeb), "abeb%d", tr->ab_load_elem_bytes);
+    flag_names[9] = part_abeb;
+    /* The gfx1250 TDM K-loop knobs, each named only when on, so every kernel
+     * without them keeps its name. Python flag key f"tdm{tr.tdm_depth}" carries
+     * the TDM depth. */
+    snprintf(part_tdm, sizeof(part_tdm), "tdm%d", tr->tdm_depth);
+    flag_names[10] = part_tdm;
+    flag_names[11] = "spb";
+    flag_names[12] = "alti";
+    flag_names[13] = "erf";
+    /* Python flag key f"c{dtype_c}": the C dtype, named only when it differs
+     * from A's (the fp8/bf8 path), so every other kernel keeps its name. */
+    snprintf(part_c, sizeof(part_c), "c%s", spec->data.dtype_c ? spec->data.dtype_c : "");
+    flag_names[14] = part_c;
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -307,8 +340,18 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[6] = tr->active_tile_skip ? 1 : 0;
     flag_on[7] = (tr->split_k > 1) ? 1 : 0;
     flag_on[8] = tr->cshuffle_no_alias ? 1 : 0;
+    flag_on[9] = tr->ab_load_elem_bytes_set ? 1 : 0;
+    flag_on[10] = tr->tdm ? 1 : 0;
+    flag_on[11] = tr->split_barrier ? 1 : 0;
+    flag_on[12] = tr->tdm_alternate_issuers ? 1 : 0;
+    flag_on[13] = tr->tdm_early_refill ? 1 : 0;
+    flag_on[14] = (spec->data.dtype_c != NULL && spec->data.dtype_a != NULL
+                   && strcmp(spec->data.dtype_c, spec->data.dtype_a) != 0)
+                      ? 1
+                      : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 9, out, out_cap, NULL);
+    return rocke_kernel_name_join(
+        spec->name, parts, 5, flag_names, flag_on, 15, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -316,15 +359,37 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
  *  helpers of the same name). None of these emit IR.
  * ===================================================================== */
 
-/* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
- * Python maps fp64 to F64 and wraps io_ir_type otherwise; returns NULL for an
- * unsupported dtype (Python ValueError path -- the caller turns it into a
- * structured reject). */
-static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
+/* _FP8_AB_DTYPES: A/B storage dtypes that are 8-bit floats. These are the one
+ * case where the GEMM's A/B storage dtype differs from its C storage dtype (see
+ * ck_gemm_storage_dtype), and the one case where an element is narrower than
+ * the 2 bytes the LDS plan historically hardcoded. */
+bool rocke_gemm_is_fp8_ab(const char* name)
 {
-    if(strcmp(name, "fp64") == 0)
+    return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
+}
+
+/* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
+ * A/B/C are homogeneous f16 or bf16 with f32 accumulation, or fp64 with fp64
+ * accumulation, except on the gfx1250 fp8/bf8 WMMA path where A/B are 8-bit
+ * floats and C stays 16-bit.
+ *
+ * The 8-bit cases are resolved here rather than in io_ir_type, whose contract is
+ * deliberately f16/bf16-only: the small ops that share it promote to f32 on
+ * read, which is not what a packed fp8 MMA operand wants.
+ *
+ * Returns NULL for an unsupported dtype (Python ValueError path), for the
+ * caller to turn into a structured reject or a builder error. Shared by the
+ * validator, the emitter and the epilogue (declared in
+ * instance_gemm_internal.h). */
+const rocke_type_t* rocke_gemm_dtype_ir(const char* name)
+{
+    if(name != NULL && strcmp(name, "fp64") == 0)
     {
         return rocke_f64();
+    }
+    if(rocke_gemm_is_fp8_ab(name))
+    {
+        return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
     }
     return rocke_io_ir_type(name);
 }
@@ -333,13 +398,6 @@ static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
 static const char* ck_gemm_acc_dtype(const rocke_gemm_universal_spec_t* spec)
 {
     return (strcmp(spec->data.dtype_a, "fp64") == 0) ? "fp64" : "fp32";
-}
-
-/* _elem_bytes(spec): storage element size in bytes of the homogeneous A/B/C
- * dtype. */
-static int ck_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec)
-{
-    return rocke_dtype_info(spec->data.dtype_a)->encoded_bits / 8;
 }
 
 /* _mma_family(arch): "wmma" for the RDNA wave32 targets, "mma" (MFMA) for CDNA.
@@ -354,18 +412,104 @@ static const char* ck_gemm_mma_family(const rocke_archtarget_t* target)
     return (target->wave_size == 32) ? "wmma" : "mma";
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C, fp32 acc (fp64 acc for fp64
- * storage), RCR layout, then return the A dtype's IR type. On a validation
- * failure returns NULL and (when `reason`/`reason_cap` are non-NULL) writes the
- * Python ValueError text. */
-static const rocke_type_t*
-    ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
+/* _validate_storage(spec): validate the spec's storage dtypes and return the
+ * A/B IR type, writing the C IR type to `c_ty_out` when it is non-NULL.
+ *
+ * f16/bf16 (f32 acc) and fp64 (fp64 acc) GEMMs are homogeneous A/B/C -- the
+ * long-standing contract, and the reason the two returned types are the same
+ * object for every pre-fp8 spec.
+ *
+ * The gfx1250 fp8/bf8 WMMA path is the single exception: A and B are 8-bit
+ * floats while C is 16-bit. There is no fp8 accumulator -- the WMMA atom
+ * accumulates into <8 x float> whatever the operand dtype is -- and writing C
+ * back as fp8 would need an output quantisation scale this spec has no field
+ * for, so C stays a 16-bit float and the epilogue's f32 -> C cast is unchanged.
+ *
+ * On a validation failure returns NULL and (when `reason`/`reason_cap` are
+ * non-NULL) writes the Python ValueError text. */
+/* Mirrors Python _tdm_padding_for_tile: one tile row as the interval and the
+ * lds_k_pad gap as the pad, encoded by the core rocke_encode_tdm_padding. */
+rocke_status_t rocke_gemm_tdm_padding_for_tile(int64_t elem_bytes,
+                                               int64_t row_elems,
+                                               int64_t pad_elems,
+                                               int* out_pad_enable,
+                                               int* out_pad_interval,
+                                               int* out_pad_amount,
+                                               char* reason,
+                                               size_t reason_cap)
 {
-    const rocke_gemm_data_spec_t* d;
-    const rocke_type_t* ty;
+    int interval = 0;
+    int amount = 0;
+    int enable = 0;
+    if(pad_elems != 0)
+    {
+        if(!rocke_encode_tdm_padding(elem_bytes * row_elems,
+                                     elem_bytes * pad_elems,
+                                     &interval,
+                                     &amount,
+                                     reason,
+                                     reason_cap))
+            return ROCKE_ERR_VALUE;
+        enable = 1;
+    }
+    if(out_pad_enable != NULL)
+        *out_pad_enable = enable;
+    if(out_pad_interval != NULL)
+        *out_pad_interval = interval;
+    if(out_pad_amount != NULL)
+        *out_pad_amount = amount;
+    return ROCKE_OK;
+}
 
-    d = &spec->data;
-    if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
+/* The single home of the GEMM storage-dtype rule (declared in
+ * instance_gemm_internal.h): ck_gemm_storage_dtype below, the emitter's
+ * storage dtype (gemm_universal.cpp) and the epilogue's C dtype
+ * (gemm_epilogue.cpp) all call it. */
+bool rocke_gemm_check_storage(const rocke_gemm_universal_spec_t* spec,
+                              char* reason,
+                              size_t reason_cap)
+{
+    const rocke_gemm_data_spec_t* d = &spec->data;
+
+    if(d->dtype_a == NULL || d->dtype_b == NULL || d->dtype_c == NULL || d->dtype_acc == NULL
+       || d->layout == NULL)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "UniversalGemmSpec has an unset dtype or layout");
+        }
+        return false;
+    }
+    if(rocke_gemm_is_fp8_ab(d->dtype_a) || rocke_gemm_is_fp8_ab(d->dtype_b))
+    {
+        if(strcmp(d->dtype_a, d->dtype_b) != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "UniversalGemmSpec fp8/bf8 GEMM requires matching A/B dtypes; "
+                         "got A=%s, B=%s",
+                         d->dtype_a,
+                         d->dtype_b);
+            }
+            return false;
+        }
+        if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
+           && strcmp(d->dtype_c, "bf16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "UniversalGemmSpec fp8/bf8 GEMM requires an f16/bf16 C dtype "
+                         "(there is no fp8 accumulator), got C=%s",
+                         d->dtype_c);
+            }
+            return false;
+        }
+    }
+    else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -377,7 +521,7 @@ static const rocke_type_t*
                      d->dtype_b,
                      d->dtype_c);
         }
-        return NULL;
+        return false;
     }
     if(strcmp(d->dtype_a, "fp64") == 0)
     {
@@ -390,7 +534,7 @@ static const rocke_type_t*
                          "UniversalGemmSpec only supports fp64 accumulation for fp64, got '%s'",
                          d->dtype_acc);
             }
-            return NULL;
+            return false;
         }
     }
     else if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
@@ -403,7 +547,7 @@ static const rocke_type_t*
                      "UniversalGemmSpec only supports fp32 accumulation, got '%s'",
                      d->dtype_acc);
         }
-        return NULL;
+        return false;
     }
     if(strcmp(d->layout, "RCR") != 0)
     {
@@ -414,15 +558,55 @@ static const rocke_type_t*
                      "UniversalGemmSpec only supports RCR layout, got '%s'",
                      d->layout);
         }
+        return false;
+    }
+
+    return true;
+}
+
+static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec,
+                                                 const rocke_type_t** c_ty_out,
+                                                 char* reason,
+                                                 size_t reason_cap)
+{
+    const rocke_gemm_data_spec_t* d;
+    const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
+
+    d = &spec->data;
+    if(!rocke_gemm_check_storage(spec, reason, reason_cap))
+    {
         return NULL;
     }
 
-    ty = ck_gemm_dtype_ir(d->dtype_a);
-    if(ty == NULL && reason != NULL && reason_cap > 0)
+    ty = rocke_gemm_dtype_ir(d->dtype_a);
+    if(ty == NULL)
     {
-        /* io_ir_type ValueError surface (unsupported A dtype). */
-        snprintf(
-            reason, reason_cap, "unsupported I/O dtype '%s'; expected f16/fp16/bf16", d->dtype_a);
+        if(reason != NULL && reason_cap > 0)
+        {
+            /* io_ir_type ValueError surface (unsupported A dtype). */
+            snprintf(reason,
+                     reason_cap,
+                     "unsupported I/O dtype '%s'; expected f16/fp16/bf16",
+                     d->dtype_a);
+        }
+        return NULL;
+    }
+    c_ty = rocke_gemm_dtype_ir(d->dtype_c);
+    if(c_ty == NULL)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "unsupported I/O dtype '%s'; expected f16/fp16/bf16",
+                     d->dtype_c);
+        }
+        return NULL;
+    }
+    if(c_ty_out != NULL)
+    {
+        *c_ty_out = c_ty;
     }
     return ty;
 }
@@ -430,9 +614,8 @@ static const rocke_type_t*
 /* _resolve_mma_op(spec, arch): resolve the MmaOp for spec on the target via
  * target.mma.op_for_shape(family, a, a, acc, wt_m, wt_n, wt_k). Returns NULL if
  * the target has no atom for the spec's warp-tile shape + dtype. */
-[[maybe_unused]] static const rocke_mmaop_t*
-    ck_gemm_resolve_mma_op(const rocke_gemm_universal_spec_t* spec,
-                           const rocke_archtarget_t* target)
+static const rocke_mmaop_t* ck_gemm_resolve_mma_op(const rocke_gemm_universal_spec_t* spec,
+                                                   const rocke_archtarget_t* target)
 {
     const rocke_gemm_tile_spec_t* t;
     const char* a_name;
@@ -442,7 +625,7 @@ static const rocke_type_t*
         return NULL;
     }
     t = &spec->tile;
-    a_name = spec->data.dtype_a; /* homogeneous A/B/C (validated in storage_dtype) */
+    a_name = spec->data.dtype_a; /* A/B storage dtype (validated in storage_dtype) */
     return rocke_archtarget_op_for_shape(target,
                                          ck_gemm_mma_family(target),
                                          a_name,
@@ -468,8 +651,15 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     bool db_fits_2wg;
     bool db;
 
+    /* The LDS row is tile_k + lds_k_pad elements wide, not tile_k: the pad is
+     * physically allocated on every row, which is how it breaks bank conflicts.
+     * Charging only tile_k under-reserves by (lds_k_pad / tile_k) of the whole
+     * AB region -- invisible at tdm_depth 1-2, but at depth >= 3 it is enough to
+     * admit specs that then fail in the backend rather than being rejected
+     * here. DirectToLDS allocates no pad. Mirrors _ab_lds_plan in
+     * gemm_universal.py. */
     lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
-    ab_single = (t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * ck_gemm_elem_bytes(spec);
+    ab_single = (t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * rocke_gemm_elem_bytes(spec);
     lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
     db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
     db = (strcmp(spec->trait.pipeline, "compv4") == 0)
@@ -486,7 +676,8 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
     if(out_two_buf != NULL)
     {
-        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                       || rocke_gemm_tdm_pipelined(&spec->trait);
     }
 }
 
@@ -586,11 +777,21 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
     t = &spec->tile;
 
-    /* _storage_dtype(spec): validates homogeneous dtypes / fp32 acc / RCR. */
-    if(ck_gemm_storage_dtype(spec, reason, reason_cap) == NULL)
+    /* _storage_dtype(spec): validates the storage dtypes / fp32 acc / RCR. */
+    if(ck_gemm_storage_dtype(spec, NULL, reason, reason_cap) == NULL)
     {
         /* reason already written by ck_gemm_storage_dtype. */
         return false;
+    }
+
+    /* The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is built and verified on
+     * gfx1250 only. gfx942 / gfx950 carry fp8 MFMA atoms, so the catalog check
+     * below would admit them, but nothing there is verified: gfx942 reads FNUZ
+     * encodings, and the DirectToLDS path assumes 2-byte elements. */
+    if((rocke_gemm_is_fp8_ab(spec->data.dtype_a) || rocke_gemm_is_fp8_ab(spec->data.dtype_b))
+       && strcmp(target->gfx, "gfx1250") != 0)
+    {
+        CK_GEMM_REJECT("fp8/bf8 A/B GEMM is supported only on gfx1250 (got %s)", arch);
     }
 
     /* MMA atom must be in the target's catalog for this dtype combo. */
@@ -614,6 +815,22 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "unsupported %s warp_tile (%d, %d, %d) on %s", a_name, atom_m, atom_n, atom_k, arch);
     }
 
+    /* The catalog can list an atom whose operand lane maps are not verified
+     * yet (such as the 16x16x128 bf8 row): the build would then fail on the
+     * missing map, so reject it here with one reason in both engines. */
+    {
+        const rocke_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
+        if(op == NULL || op->srcs[0].layout == NULL || op->srcs[1].layout == NULL)
+        {
+            CK_GEMM_REJECT("no verified A/B lane map for %s warp_tile (%d, %d, %d) on %s",
+                           a_name,
+                           atom_m,
+                           atom_n,
+                           atom_k,
+                           arch);
+        }
+    }
+
     /* spec wave size must match the target's. */
     if(spec->wave_size != target->wave_size)
     {
@@ -621,26 +838,60 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "spec wave_size %d != %s wave_size %d", spec->wave_size, arch, target->wave_size);
     }
 
-    /* WMMA coverage is narrower than CDNA's MFMA matrix. */
+    /* TDM emits tensor_load_to_lds / s_wait_tensorcnt, which exist only on
+     * targets carrying the mover. Gated here, *ahead* of the per-family checks,
+     * so an MFMA target cannot admit the knob and hand the lowerer an opcode it
+     * has no instruction for -- it previously sat inside the WMMA block, which
+     * MFMA targets never enter. */
+    if(spec->trait.tdm && !target->memory.has_tdm)
+    {
+        CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
+    }
+
+    /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
+     * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
+     * 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128 (fp8, via the
+     * f8f6f4 opcode) atoms, all through the simple 'mem' pipeline. */
     if(strcmp(family, "wmma") == 0)
     {
-        if(!(atom_m == 16 && atom_n == 16 && atom_k == 16))
+        bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
+        bool atom_ok;
+
+        if(is_gfx1250)
         {
-            CK_GEMM_REJECT("WMMA path supports only 16x16x16 (got (%d, %d, %d)) on %s",
+            atom_ok
+                = (atom_m == 16 && atom_n == 16 && (atom_k == 32 || atom_k == 64 || atom_k == 128));
+        }
+        else
+        {
+            atom_ok = (atom_m == 16 && atom_n == 16 && atom_k == 16);
+        }
+        if(!atom_ok)
+        {
+            /* Python: ", ".join(f"{m}x{n}x{k}" for ... in sorted(supported_atoms)). */
+            CK_GEMM_REJECT("WMMA path supports only %s (got (%d, %d, %d)) on %s",
+                           is_gfx1250 ? "16x16x32, 16x16x64, 16x16x128" : "16x16x16",
                            atom_m,
                            atom_n,
                            atom_k,
                            arch);
         }
+        /* 'mem' only: the C++ engine does not emit the wmma_v1 schedule
+         * (Python's SchedulePolicy for 'wmma_v1'), so it rejects it rather than
+         * build a different kernel under the same name. */
         if(strcmp(spec->trait.pipeline, "mem") != 0)
         {
             CK_GEMM_REJECT("WMMA path supports only the 'mem' pipeline (got '%s') on %s",
                            spec->trait.pipeline,
                            arch);
         }
-        if(strcmp(spec->trait.epilogue, "default") != 0)
+        /* The cshuffle epilogue is admitted on gfx1250 only. The emitter is
+         * arch-neutral (its scatter is driven by the op's dst_layout() map); what
+         * the other WMMA targets lack is coverage, not capability. Lift the arch
+         * test once gfx1151 / gfx1201 have gate configs of their own. */
+        if(strcmp(spec->trait.epilogue, "default") != 0 && !is_gfx1250)
         {
-            CK_GEMM_REJECT("WMMA path supports only the 'default' epilogue (got '%s') on %s",
+            CK_GEMM_REJECT("WMMA path supports the '%s' epilogue only on gfx1250, not %s",
                            spec->trait.epilogue,
                            arch);
         }
@@ -665,6 +916,123 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.chiplet_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
+        }
+        /* lds_swizzle is rejected for the whole family, not only the load paths
+         * that structurally cannot express it. It XORs the LDS column on the
+         * store side, and the inverse is applied on the MFMA read path but not
+         * the WMMA one, so where it emits at all it writes one address and
+         * reads another: fast, plausible, numerically wrong. Under TDM it emits
+         * nothing instead. It is bit-exact on the CDNA MFMA path, hence family
+         * scope rather than a global gate. Every WMMA target is affected:
+         * gfx1151 returns wrong outputs with it too. */
+        if(spec->trait.lds_swizzle)
+        {
+            CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
+        }
+    }
+
+    /* An element width for the A/B load-vector picker: one of the element
+     * sizes. TDM loads whole tiles and never consults it, so there it would
+     * only rename the kernel (abeb{N}). */
+    if(spec->trait.ab_load_elem_bytes_set)
+    {
+        int abeb = spec->trait.ab_load_elem_bytes;
+        if(abeb != 1 && abeb != 2 && abeb != 4 && abeb != 8)
+        {
+            CK_GEMM_REJECT("ab_load_elem_bytes must be 1, 2, 4 or 8 (got %d)", abeb);
+        }
+        if(spec->trait.tdm)
+        {
+            CK_GEMM_REJECT("ab_load_elem_bytes has no effect with tdm");
+        }
+    }
+
+    if(spec->trait.tdm)
+    {
+        if(spec->trait.direct_to_lds)
+        {
+            CK_GEMM_REJECT("tdm and direct_to_lds are alternative load paths");
+        }
+        {
+            int row_bytes = t->tile_k * rocke_gemm_elem_bytes(spec);
+            if(spec->trait.lds_k_pad)
+            {
+                char why[256] = {0};
+                if(rocke_gemm_tdm_padding_for_tile(rocke_gemm_elem_bytes(spec),
+                                                   t->tile_k,
+                                                   spec->trait.lds_k_pad,
+                                                   NULL,
+                                                   NULL,
+                                                   NULL,
+                                                   why,
+                                                   sizeof(why))
+                   != ROCKE_OK)
+                {
+                    CK_GEMM_REJECT("tdm cannot encode lds_k_pad: %s", why);
+                }
+            }
+            else if((row_bytes % 4) != 0 || row_bytes < 8)
+            {
+                CK_GEMM_REJECT("tdm needs a dword-multiple tile row (got %dB)", row_bytes);
+            }
+        }
+        if(spec->trait.tdm_depth < 1 || spec->trait.tdm_depth > ROCKE_GEMM_TDM_MAX_DEPTH)
+        {
+            CK_GEMM_REJECT("tdm_depth must be in 1..%d (got %d)",
+                           ROCKE_GEMM_TDM_MAX_DEPTH,
+                           spec->trait.tdm_depth);
+        }
+    }
+    if(spec->trait.tdm_depth != 1 && !spec->trait.tdm)
+    {
+        CK_GEMM_REJECT("tdm_depth is only meaningful with tdm=True");
+    }
+    /* The signal is raised from inside the WMMA phase of the TDM ping-pong
+     * (depth 2) or ring (depth >= 3) loop. Any other loop shape would wait on
+     * a barrier nothing signals, which hangs the GPU rather than failing,
+     * hence the narrow gate. */
+    if(spec->trait.split_barrier)
+    {
+        if(strcmp(family, "wmma") != 0 || strcmp(spec->trait.pipeline, "mem") != 0)
+        {
+            CK_GEMM_REJECT("split_barrier needs the WMMA 'mem' pipeline");
+        }
+        if(!spec->trait.tdm || spec->trait.tdm_depth < 2)
+        {
+            CK_GEMM_REJECT("split_barrier needs tdm=True with tdm_depth >= 2");
+        }
+        if(spec->trait.split_k != 1)
+        {
+            CK_GEMM_REJECT("split_barrier does not support split_k");
+        }
+    }
+
+    /* The issuer of a half is chosen per fill, which only keeps one fill per
+     * issuer outstanding (and so every TENSORcnt wait exact) in the ping-pong. */
+    if(spec->trait.tdm_alternate_issuers)
+    {
+        if(!spec->trait.tdm || spec->trait.tdm_depth != 2)
+        {
+            CK_GEMM_REJECT("tdm_alternate_issuers needs tdm=True with tdm_depth == 2");
+        }
+        if(spec->block_size / spec->wave_size < 4)
+        {
+            CK_GEMM_REJECT("tdm_alternate_issuers needs at least four waves");
+        }
+    }
+
+    /* The early refill pairs every wait with the split-barrier signal and
+     * relies on the alternating issuers to keep one fill per issuer
+     * outstanding. */
+    if(spec->trait.tdm_early_refill)
+    {
+        if(!(spec->trait.split_barrier && spec->trait.tdm_alternate_issuers))
+        {
+            CK_GEMM_REJECT("tdm_early_refill needs split_barrier and tdm_alternate_issuers");
+        }
+        if(spec->trait.tdm_depth != 2)
+        {
+            CK_GEMM_REJECT("tdm_early_refill needs tdm_depth == 2");
         }
     }
 
@@ -717,7 +1085,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("direct_to_lds: %s has no DRAM->LDS DMA instruction", arch);
         }
-        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 4 / ck_gemm_elem_bytes(spec);
+        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 4 / rocke_gemm_elem_bytes(spec);
         if(dtl_halves != 0 && (t->tile_k % dtl_halves) != 0)
         {
             CK_GEMM_REJECT("direct_to_lds requires tile_k %% %d == 0 (got %d) with "
@@ -753,11 +1121,31 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
     /* LDS budget. */
     ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
-    ab_bytes = ab_single * (ab_dbl ? 2 : 1);
+    {
+        int ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+        ab_bytes = ab_single * (ring ? ring : (ab_dbl ? 2 : 1));
+    }
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0)
-                  ? (t->tile_m * t->tile_n * ck_gemm_elem_bytes(spec))
+                  ? (t->tile_m * t->tile_n * rocke_gemm_dtype_bytes(spec->data.dtype_c))
                   : 0;
-    bytes_lds = ab_bytes + c_bytes;
+    /* The cshuffle C staging tile is aliased onto the A/B pool, so peak usage is
+     * max(AB, C) rather than AB + C: the smem-pool packer sorts allocations by
+     * live-interval start, so A lands at offset 0 and the C tile -- live only
+     * after the last A/B read -- reuses it. Charging the sum over-counted by a
+     * whole C tile and rejected specs the emitter builds and runs fine.
+     * Counted as max on gfx1250 only, where it has run on silicon; the other
+     * targets keep the sum until they have been run with it.
+     * cshuffle_no_alias (C marked exclusive) and persistent (the grid-stride
+     * tile loop makes A/B and C interfere) really are additive. */
+    if(c_bytes != 0 && strcmp(target->gfx, "gfx1250") == 0 && !spec->trait.cshuffle_no_alias
+       && !spec->trait.persistent)
+    {
+        bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
+    }
+    else
+    {
+        bytes_lds = ab_bytes + c_bytes;
+    }
     if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
     {
         CK_GEMM_REJECT("LDS budget %d > %d cap (AB=%d, C=%d) on %s",
@@ -811,10 +1199,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 #undef CK_GEMM_REJECT
 }
 
-/* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths are pure parity surfaces
- * mirroring the Python module's file-scope _resolve_mma_op / _mfma_atom_widths.
- * The validity gate above resolves the atom via rocke_mma_catalog_has_shape, so
- * neither is called within this TU; they are kept defined for source parity and
- * marked [[maybe_unused]] at their definitions. (A prior "anchor" function that
- * referenced them tripped clang's -Wunneeded-internal-declaration, since it was
- * itself never emitted.) */
+/* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths mirror the Python module's
+ * file-scope _resolve_mma_op / _mfma_atom_widths. The validity gate above calls
+ * ck_gemm_resolve_mma_op (an atom without A/B lane maps is rejected there, as in
+ * Python). ck_gemm_mfma_atom_widths is not called within this TU; it is kept
+ * defined for source parity and marked [[maybe_unused]]. (A prior "anchor"
+ * function that referenced it tripped clang's -Wunneeded-internal-declaration,
+ * since it was itself never emitted.) */

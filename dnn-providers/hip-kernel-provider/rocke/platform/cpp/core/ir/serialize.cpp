@@ -1521,6 +1521,88 @@ static int count_top(const char* s, size_t n, char sep)
 
 static rocke_region_t* parse_region(rocke_ir_builder_t* b, line_reader_t* lr, val_table_t* vt);
 
+/* Mirrors Python _is_loop_block_value: true when `value` is an induction
+ * variable or carried value of an scf.for (bound to the loop, not one of its
+ * results). */
+static bool is_loop_block_value(const rocke_value_t* value)
+{
+    if(!value || !value->op || value->op->opcode != ROCKE_OP_SCF_FOR)
+    {
+        return false;
+    }
+    for(int i = 0; i < value->op->num_results; ++i)
+    {
+        if(value->op->results[i] == value)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Mirrors Python _refuse_reused_loop_names: refuse the names the scf.for `loop`
+ * gives its values (rocke_i_scf_for_value_names) when one is taken
+ * (rocke_i_first_reused_loop_name): bound in `vt` to a block value of a loop
+ * whose body `loop` is in, or repeating an earlier name of `loop`. Every name is
+ * checked, also one whose type attr is not a type name (refuse_untyped_loop_value
+ * refuses it next), so a reused name always gets this refusal. A refusal raises
+ * a ValueError (rocke_i_set_err). */
+static void refuse_reused_loop_names(rocke_ir_builder_t* b, const rocke_op_t* loop, val_table_t* vt)
+{
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(count == 0)
+    {
+        return;
+    }
+    const char** names
+        = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * 2 * (size_t)count);
+    if(!names)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf.for loop names: OOM");
+        return;
+    }
+    const char** taken = names + count;
+    rocke_i_scf_for_value_names(loop, names);
+    size_t n_taken = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        if(is_loop_block_value(vt_get(vt, names[i])))
+        {
+            taken[n_taken++] = names[i];
+        }
+    }
+    const char* reused = rocke_i_first_reused_loop_name(taken, n_taken, names, (size_t)count);
+    if(reused)
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
+    }
+}
+
+/* Mirrors Python _loop_value_type's refusal: an induction variable or carried
+ * value named `name` whose type attr is not a type name could not be bound,
+ * and the body's reads of `name` would read whatever other value holds that
+ * name, or none. Raises a ValueError (rocke_i_set_err) with
+ * _untyped_loop_value_message's text. */
+static void refuse_untyped_loop_value(rocke_ir_builder_t* b, const char* name)
+{
+    rocke_i_set_err(b,
+                    ROCKE_ERR_VALUE,
+                    "scf.for: the loop value '%s' has no type name; its iv_type attr or "
+                    "iter_args entry must name its type",
+                    name);
+}
+
+/* Bind `v`, a block value of the scf.for being parsed, under its name. */
+static void bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+{
+    if(vt_put(vt, v->name, v) != 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "value table OOM");
+    }
+}
+
 /* Register block-defined SSA values for an scf.for op (iv + iter-args), so the
  * body operands resolve. Mirrors Python _register_block_values. Returns the
  * names added via out_added (arena array) / out_n. */
@@ -1530,6 +1612,11 @@ static void register_block_values(
     *out_added = NULL;
     *out_n = 0;
     if(op->opcode != ROCKE_OP_SCF_FOR)
+    {
+        return;
+    }
+    refuse_reused_loop_names(b, op, vt);
+    if(!rocke_i_live(b))
     {
         return;
     }
@@ -1547,7 +1634,12 @@ static void register_block_values(
 
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     const char* iv_type = rocke_attr_get_str(&op->attrs, "iv_type");
-    if(iv && iv_type)
+    if(iv && !iv_type)
+    {
+        refuse_untyped_loop_value(b, iv);
+        return;
+    }
+    if(iv)
     {
         const rocke_type_t* t = parse_type(b, iv_type, strlen(iv_type));
         if(t)
@@ -1556,7 +1648,7 @@ static void register_block_values(
             if(v)
             {
                 v->op = op;
-                vt_put(vt, v->name, v);
+                bind_block_value(b, vt, v);
                 added[na++] = v->name;
             }
         }
@@ -1568,7 +1660,12 @@ static void register_block_values(
             const rocke_attr_map_t* entry = ia->u.list.items[i];
             const char* nm = rocke_attr_get_str(entry, "name");
             const char* ty = rocke_attr_get_str(entry, "type");
-            if(nm && ty)
+            if(nm && !ty)
+            {
+                refuse_untyped_loop_value(b, nm);
+                return;
+            }
+            if(nm)
             {
                 const rocke_type_t* t = parse_type(b, ty, strlen(ty));
                 if(t)
@@ -1577,7 +1674,7 @@ static void register_block_values(
                     if(v)
                     {
                         v->op = op;
-                        vt_put(vt, v->name, v);
+                        bind_block_value(b, vt, v);
                         added[na++] = v->name;
                     }
                 }
@@ -2524,6 +2621,40 @@ static void canon_rename_region(rename_table_t* rt, rocke_region_t* region)
     }
 }
 
+/* A param leaf "N" of a relation names the id "%N"; its canonical name is the
+ * renamed id without the '%'. */
+static const char* canon_rename_leaf(void* ctx, const char* name)
+{
+    rename_table_t* rt = (rename_table_t*)ctx;
+    const char* oldid = rocke_arena_printf(&rt->b->arena, "%%%s", name);
+    const char* newid = oldid ? rn_get(rt, oldid) : NULL;
+    return newid && newid[0] == '%' ? newid + 1 : name;
+}
+
+/* Python canonicalize's rparam_attrs: a relation names parameters, so its
+ * leaves are renamed by walking its tree, never by text substitution. */
+static void canon_rename_param_relations(rename_table_t* rt, rocke_kernel_def_t* k)
+{
+    for(int i = 0; i < k->num_params; ++i)
+    {
+        rocke_attr_map_t* attrs = &k->params[i]->attrs;
+        for(int j = 0; j < attrs->count; ++j)
+        {
+            rocke_attr_entry_t* e = &attrs->entries[j];
+            if(!rocke_param_is_fact_word(e->key) || e->value.kind != ROCKE_ATTR_STR)
+            {
+                continue;
+            }
+            const char* renamed
+                = rocke_relation_canonical(e->value.u.s, &rt->b->arena, canon_rename_leaf, rt);
+            if(renamed)
+            {
+                e->value.u.s = renamed;
+            }
+        }
+    }
+}
+
 /* Boundary shim: a ckc::Error thrown while parsing is caught here and recorded
  * on the builder, returning the exception's status code (the C ABI is
  * unchanged). */
@@ -2583,6 +2714,7 @@ rocke_status_t rocke_ir_canonicalize(const char* text, char** out_text)
             k->params[i]->name = rocke_arena_strdup(&b.arena, newid + 1);
         }
     }
+    canon_rename_param_relations(&rt, k);
     canon_rename_region(&rt, k->body);
 
     char* ser = NULL;

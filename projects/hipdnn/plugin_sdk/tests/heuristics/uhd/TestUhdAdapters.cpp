@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LinearModelTestBuilder.hpp>
 
 #include "../../TestResourcePaths.hpp"
 
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -185,5 +187,35 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesATableWhoseDeclaredHashIsNotItsBy
     EXPECT_DOUBLE_EQ(loaded->score({0.0}), 1.0) << "not the table's one entry";
 }
 
+TEST(TestIngestorUhdAdapters, TheFactoryBuildsALinearDataAdapterAndVerifiesItsDeclaredHash)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path()
+        / ("uhd_adapters_linear_"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+    UhdConfig config;
+    config.adapterType = "linear_data";
+    config.objective = "min";
+    config.modelArtifactPath = (dir.path() / "linear.fb").string();
+    config.featuresHash = FEATURES_HASH;
+
+    hipdnn_test_sdk::utilities::LinearModelTestBuilder builder;
+    builder.setNumFeatures(1).setFeaturesHash(FEATURES_HASH).setGlobal({{}, {2.5}, 0.0});
+    ASSERT_TRUE(builder.buildToFile(config.modelArtifactPath));
+
+    config.modelHash = sha256(std::string("a different model"));
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+
+    std::ifstream file(config.modelArtifactPath, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+    config.modelHash = sha256(bytes);
+    const auto loaded = makeUhdAdapter(config);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_DOUBLE_EQ(loaded->score({0.0}), 2.5) << "not the linear model's global entry";
+
+    config.modelArtifactPath.clear();
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+}
 } // namespace
 } // namespace hipdnn_plugin_sdk::uhd

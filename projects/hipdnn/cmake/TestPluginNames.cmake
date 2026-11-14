@@ -64,3 +64,6 @@ set(TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME "test_duplicate_policy_id_b_plugin")
 
 # Autotune plugin test names
 set(TEST_AUTOTUNE_PLUGIN_NAME "test_autotune_plugin")
+
+# cuDNN v8 compatibility-layer test plugin
+set(TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME "test_cudnn_compatibility_v8_plugin")

@@ -3,6 +3,8 @@
 
 #include "parameter_selection.hpp"
 
+#include "utility.hpp"
+
 const int SWIZZLE_BLOCK_SIZE = 64;
 
 std::string SolutionParameters::toString() const
@@ -22,6 +24,7 @@ std::string SolutionParameters::toString() const
            << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
            << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
+    result << "SyncLDSQueueAtKLoop:" << syncLDSQueueAtKLoop << std::endl;
     result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
            << " Prefetch Scale:" << prefetchScale << " loadPathAScale:" << loadPathAScale
            << " loadPathBScale:" << loadPathBScale << std::endl;
@@ -113,17 +116,20 @@ std::shared_ptr<SolutionParameters>
     // Check if the workgroup tile K dimension is 256
     bool isWorkgroupTileK256 = solutionIndexParameters.workgroupTile.k == 256;
 
+    // rocRoller's SwizzleScale transform only supports TN (transA=T, transB=N).
+    bool swizzleScaleSupported = kernelType.transA && !kernelType.transB;
+
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if(kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate
-       || kernelType.scaleTypeB.mode != rocRoller::Operations::ScaleMode::Separate)
+    if(!isBlockScaling(kernelType.scaleTypeA.format)
+       || !isBlockScaling(kernelType.scaleTypeB.format))
     {
         gemm->swizzleScale   = false;
         gemm->prefetchScale  = false;
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
-    else if(isWorkgroupTileK256)
+    else if(isWorkgroupTileK256 && swizzleScaleSupported)
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
@@ -143,8 +149,8 @@ std::shared_ptr<SolutionParameters>
             gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
         }
     }
-    else if(solutionIndexParameters.workgroupTile.m >= 128
-        && solutionIndexParameters.workgroupTile.n >= 128)
+    else if(swizzleScaleSupported && solutionIndexParameters.workgroupTile.m >= 128
+            && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
@@ -169,12 +175,12 @@ std::shared_ptr<SolutionParameters>
         gemm->streamK = rocRoller::StreamKMode::TwoTile;
 
     // Direct To LDS only supported in certain situations
-    if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
+    if(kernelType.typeA == HIP_R_6F_E2M3 || kernelType.typeA == HIP_R_6F_E3M2)
         gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-    if(kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6)
+    if(kernelType.typeB == HIP_R_6F_E2M3 || kernelType.typeB == HIP_R_6F_E3M2)
         gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-    if((kernelType.typeA == rocRoller::DataType::FP4
-        || kernelType.typeB == rocRoller::DataType::FP4)
+    if((kernelType.typeA == HIP_R_4F_E2M1
+        || kernelType.typeB == HIP_R_4F_E2M1)
        && (solutionIndexParameters.workgroupTile.m <= 64
            || solutionIndexParameters.workgroupTile.n <= 64))
     {

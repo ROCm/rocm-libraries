@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseDenseToSparse_bufferSize computes the required user-allocated buffer size needed when converting
@@ -48,12 +49,12 @@ extern "C" {
 *  alg                 algorithm for the dense to sparse computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
 *               pointer is invalid.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           handle,
                                                     hipsparseConstDnMatDescr_t  matA,
@@ -69,6 +70,7 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
                                                     size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseDenseToSparse_analysis performs analysis that is later used in \ref hipsparseDenseToSparse_convert when
@@ -94,7 +96,6 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
 *               pointer is invalid.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           handle,
                                                   hipsparseConstDnMatDescr_t  matA,
@@ -110,6 +111,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
                                                   void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Dense matrix to sparse matrix conversion.
 *
@@ -197,7 +199,6 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
 *               pointer is invalid.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_convert(hipsparseHandle_t           handle,
                                                  hipsparseConstDnMatDescr_t  matA,

@@ -32,6 +32,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
 #include "hipsparse_local_dnmat.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -90,15 +91,10 @@ void testing_spmm_csr_bad_arg(const Arguments& argus)
     float*   dC   = (float*)dC_managed.get();
     void*    dbuf = (void*)dbuf_managed.get();
 
-    // SpMM structures
-    hipsparseSpMatDescr_t A;
-
     size_t bsize;
 
     // Create SpMM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsr(&A, m, k, nnz, dptr, dcol, dval, idxTypeI, idxTypeJ, idxBase, dataType),
-        "success");
+    hipsparseLocalCsr   A(m, k, nnz, dptr, dcol, dval, idxTypeI, idxTypeJ, idxBase, dataType);
     hipsparseLocalDnMat B(k, n, k, dB, dataType, order);
     hipsparseLocalDnMat C(m, n, m, dC, dataType, order);
 
@@ -181,9 +177,6 @@ void testing_spmm_csr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMM(handle, transA, transB, &alpha, A, B, &beta, nullptr, dataType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
 #endif
 }
 
@@ -315,9 +308,7 @@ void testing_spmm_csr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&A, A_m, A_n, nnz_A, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr A(A_m, A_n, nnz_A, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
     hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
@@ -449,8 +440,6 @@ void testing_spmm_csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
 
 #endif
 }
