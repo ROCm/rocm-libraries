@@ -164,7 +164,14 @@ public:
 
         const auto network_config = problem.MakeNetworkConfig();
 
-        if(record.in_sync && !record.Validate(handle, network_config))
+        // A record holds the best solution for the workspace it was found with. If it has a
+        // not-measured entry (a solver Find skipped for lack of workspace) that fits the workspace
+        // provided now, run Find again so that solver gets measured.
+        if(record.in_sync && record.HasSkippedSolverThatFits(invokeParams))
+        {
+            MIOPEN_LOG_I("Find-db record was found with less workspace than provided now.");
+        }
+        else if(record.in_sync && !record.Validate(handle, network_config))
         {
             auto solutions = std::vector<Solution>{};
             record.CopyTo(solutions);
@@ -195,7 +202,8 @@ public:
         }
 
         MIOPEN_LOG_I("Find-db regenerating.");
-        record.in_sync = false;
+        const auto previous = record.in_sync ? record.content : std::nullopt;
+        record.in_sync      = false;
         record.content.emplace(DbKinds::FindDb, problem);
 
         const auto result = regenerator();
@@ -210,6 +218,19 @@ public:
             record.content->SetValues(
                 solution.GetSolver().ToString(),
                 FindDbData{solution.GetTime(), solution.GetWorkspaceSize(), algo});
+        }
+        // Solvers skipped for lack of workspace: not measured, with the workspace they need. A
+        // measurement from an earlier Find with enough workspace is kept instead (Normal Find
+        // runs every time, and must not discard it when called with less workspace).
+        for(const auto& skipped : result.skipped_for_workspace)
+        {
+            const auto id   = skipped.GetSolver().ToString();
+            const auto algo = skipped.GetSolver().GetAlgo(problem.GetDirection());
+            auto data = FindDbData{FindDbData::NotMeasuredTime(), skipped.GetWorkspaceSize(), algo};
+            auto measured = FindDbData{};
+            if(previous.has_value() && previous->GetValues(id, measured) && measured.IsMeasured())
+                data = measured;
+            record.content->SetValues(id, data);
         }
 
         return result.solutions;
@@ -239,7 +260,10 @@ private:
 
     // Returns true if rebuild is required
     bool Validate(const Handle& handle, const NetworkConfig& config) const;
+    // Measured entries only.
     void CopyTo(std::vector<Solution>& to) const;
+    // True if a not-measured entry fits the workspace in invokeParams (false without them).
+    bool HasSkippedSolverThatFits(const AnyInvokeParams* invokeParams) const;
 
     void LogFindDbItem(const std::pair<std::string, FindDbData>& item) const;
 };

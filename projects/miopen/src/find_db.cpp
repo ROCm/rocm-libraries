@@ -35,6 +35,7 @@
 #endif
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -252,6 +253,10 @@ bool FindDbRecord_t<TDb>::Validate(const Handle& handle, const NetworkConfig& co
     {
         for(const auto& pair : content->As<FindDbData>())
         {
+            // A not-measured entry was never built: it only records the workspace it needs.
+            if(!pair.second.IsMeasured())
+                continue;
+
             if(in_sync)
             {
                 if(!handle.GetInvoker(config, {{pair.first}}))
@@ -281,15 +286,30 @@ void FindDbRecord_t<TDb>::CopyTo(std::vector<Solution>& to) const
 {
     if(content.has_value())
     {
-        const auto range = content->As<FindDbData>();
-        std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
-            return Solution{solver::Id{pair.first}, pair.second.time, pair.second.workspace};
-        });
+        for(const auto& pair : content->As<FindDbData>())
+        {
+            if(pair.second.IsMeasured())
+                to.emplace_back(solver::Id{pair.first}, pair.second.time, pair.second.workspace);
+        }
     }
     else
     {
         MIOPEN_LOG_E("Error: no content.");
     }
+}
+
+template <class TDb>
+bool FindDbRecord_t<TDb>::HasSkippedSolverThatFits(const AnyInvokeParams* invokeParams) const
+{
+    if(invokeParams == nullptr || !content.has_value())
+        return false;
+
+    const auto range = content->As<FindDbData>();
+    return std::any_of(range.begin(), range.end(), [&](const auto& pair) {
+        return !pair.second.IsMeasured() &&
+               conv::IsEnoughWorkspace(
+                   "TryLoad", solver::Id{pair.first}, pair.second.workspace, invokeParams, false);
+    });
 }
 
 template <class TDb>
