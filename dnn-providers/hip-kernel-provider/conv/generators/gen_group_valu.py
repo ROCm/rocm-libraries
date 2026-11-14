@@ -33,7 +33,7 @@ F333S2 = (3, 3, 3, 2, 1, 1)
 
 # Tiles: (kb, cb, p, nw); kb x p sums a lane (at most 64). The valu tiles cover, within 5%, the
 # best config of every graph of the gfx906 sweeps of ResNeXt / ResNeXt3D / RegNet / StyleGAN2
-# grouped layers (~/old-asic-hipdnn/gvfb), plus one kb = cb = 1 tile a class for channel counts
+# grouped layers, plus one kb = cb = 1 tile a class for channel counts
 # no wider tile divides.
 F3_TILES = [
     (8, 1, 8, 4),
