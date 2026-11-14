@@ -98,6 +98,7 @@ compilation::KpackModuleCache& gfx1250ConvDgradAotKpackModuleCache();
 compilation::KpackModuleCache& gfx942AttentionUnified3dKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionUnified3DKpackModuleCache();
+compilation::KpackModuleCache& gfx942AttentionUnified2DKpackModuleCache();
 compilation::KpackModuleCache& gfx942AttentionDenseKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device, or read again for a

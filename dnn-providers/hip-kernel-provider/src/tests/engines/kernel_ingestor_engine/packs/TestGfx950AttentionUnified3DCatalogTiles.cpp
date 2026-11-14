@@ -46,21 +46,6 @@ constexpr std::size_t REDUCE_ARGUMENTS = 6;
 /// The name suffix of an LSE-on twin (the selection's `*_lse` group).
 constexpr std::string_view LSE_SUFFIX = "_lse.gfx950";
 
-std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
-
 TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryShippedKernelsGeometryIsOneTheEngineLaunches)
 {
     const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);

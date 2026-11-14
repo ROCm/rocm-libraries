@@ -1053,10 +1053,12 @@ enumerate:
   # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
   # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
   # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
+  # hold_fields: [use_k_sliced_ring]  # optional, per section (inherited): performance fields kept at the default spec
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
       space: full                 #   candidates/request/sweep_level/space inherited unless set;
-                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
+                                  #   selector_fields/cell_keyed_by/hold_fields inherited, a different
+                                  #   selector_fields/cell_keyed_by list exits 2
       spec_overrides: {emit_lse: true}  # optional: spec fields this section's kernels take
       kernel_name_template: "..."       # optional: this section's own names (needed when
                                         #   an override would otherwise repeat a name)
@@ -1094,7 +1096,7 @@ or flat kernel may carry `default: true`, the variant its cell always keeps. An 
 kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
 config's `launches` rules below, checked when the generated config loads.
 
-Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+Five optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
 request and picks a knob from request fields (rocKE's strided split-KV decode picks
 `num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
 field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
@@ -1124,11 +1126,13 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
   `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
   the value builds; a value it refuses exits 2 naming the request. An overridden field must
-  be a spec field, and must not be a `performance` or neutral field. It must not be a
-  `feature` field either, unless another section pins it differently (another value, or
-  none): then the field takes more than one value across the catalog, so it is a feature
-  axis. The gfx950 unified engines' `also` sections override `emit_lse` for their LSE-on
-  twins this way, beside a primary section that leaves it off. The g3
+  be a spec field, and must not be a neutral field. It may be a `performance` field: each
+  section then pins one value of it (`hold_fields` below keeps the sections that do not
+  override it from sweeping it). It must not be a `feature` field, unless another section
+  pins it differently (another value, or none): then the field takes more than one value
+  across the catalog, so it is a feature axis. The gfx950 unified engines' `also` sections
+  override `emit_lse` for their LSE-on twins this way, beside a primary section that leaves
+  it off. `spec_overrides` is not inherited by `also` sections: each sets its own. The g3
   regeneration gate compares the shipped catalog against the overridden picks.
 - `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
   that also key the merged cell, so combos merge only when they agree on them. It serves
@@ -1141,8 +1145,19 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
   every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
   field or sweep spec that moves one would silently file a kernel in the wrong cell.
+- `hold_fields` lists `performance` fields a section keeps at its default spec's value
+  instead of varying and projecting them, so a section that leaves a stack of codegen
+  flags alone does not also sweep it. It applies to `space: full` sections only: a `slice`
+  section projects no performance field, so one that sets it (or inherits it, where an `also`
+  section's `hold_fields: []` opts out) exits 2. It is inherited by `also` sections unless they
+  set their own, must name spec fields (checked when the section is read, in every section),
+  and applies after `spec_overrides` (a section may
+  override and hold the same field: the override moves the default, the hold keeps every spec
+  there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: four
+  `also` sections override a (dtype, head size)'s stack on the geometry rocKE selects, while
+  every geometry section holds the five stack fields (`configs/gfx942_attention_unified_2d.engine.yaml`).
 
-Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+Without any of the five keys (or with all empty) the output is byte-identical to a manifest
 that never had them. `--plan-space` counts merged cells and prints the combo count beside
 them; duplicate kernel names after merging still exit 2.
 

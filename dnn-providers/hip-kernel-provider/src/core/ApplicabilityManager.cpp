@@ -14,6 +14,10 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#endif
+
 namespace hip_kernel_provider::core
 {
 
@@ -97,6 +101,26 @@ std::size_t ApplicabilityManager::stagedEngineCount() const noexcept
     return _stagedCount;
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+void applyEngineOrderRules(std::vector<int64_t>& engineIds)
+{
+    for(const auto& rule : kernel_ingestor_engine::ENGINE_ORDER_RULES)
+    {
+        const auto preferredId = hipdnn_data_sdk::utilities::engineNameToId(rule.preferred);
+        const auto otherId = hipdnn_data_sdk::utilities::engineNameToId(rule.other);
+        const auto preferred = std::find(engineIds.begin(), engineIds.end(), preferredId);
+        const auto other = std::find(engineIds.begin(), engineIds.end(), otherId);
+        if(preferred == engineIds.end() || other == engineIds.end() || preferred < other)
+        {
+            continue;
+        }
+        // The preferred engine moves to the other's slot; the other and whatever sat between
+        // them shift one place later in the order they had.
+        std::rotate(other, preferred, preferred + 1);
+    }
+}
+#endif
+
 hipdnn_data_sdk::utilities::Version ApplicabilityManager::maxGraphSchema(int64_t engineId) const
 {
     const auto it = _maxGraphSchema.find(engineId);
@@ -127,6 +151,16 @@ bool ApplicabilityManager::admits(int64_t engineId,
 std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle,
                                                                   const IGraph& opGraph)
 {
+    auto ids = collectApplicableEngineIds(handle, opGraph);
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    applyEngineOrderRules(ids);
+#endif
+    return ids;
+}
+
+std::vector<int64_t> ApplicabilityManager::collectApplicableEngineIds(Handle& handle,
+                                                                      const IGraph& opGraph)
+{
     // The provider's schema guard: an engine that has not opted in to the graph's schema never
     // sees it, on whichever path the call takes. The staged path applies it per engine, so the
     // engines it admits keep their threaded finish.
@@ -141,38 +175,39 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle
     const bool guarded = std::any_of(engines().begin(), engines().end(), [&](const auto& entry) {
         return !understands(entry.first, floor);
     });
-    if(guarded)
+    if(!guarded)
     {
-        // The base class's sequential loop, in its order, over the engines the guard admits:
-        // one that throws a std::exception is skipped with a warning and the others are still
-        // reported.
-        std::vector<int64_t> applicable;
-        for(const auto& [id, engine] : engines())
-        {
-            if(!admits(id, floor))
-            {
-                continue;
-            }
-            bool isApplicable = false;
-            try
-            {
-                isApplicable = engine->isApplicable(handle, opGraph);
-            }
-            catch(const std::exception& e)
-            {
-                HIPDNN_PLUGIN_LOG_WARN("applicability manager: engine "
-                                       << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
-                                       << " threw from its applicability check and is skipped: "
-                                       << e.what());
-            }
-            if(isApplicable)
-            {
-                applicable.push_back(id);
-            }
-        }
-        return applicable;
+        return Base::getApplicableEngineIds(handle, opGraph);
     }
-    return Base::getApplicableEngineIds(handle, opGraph);
+
+    // The base class's sequential loop, in its order, over the engines the guard admits: one
+    // that throws a std::exception is skipped with a warning and the others are still
+    // reported.
+    std::vector<int64_t> ids;
+    for(const auto& [id, engine] : engines())
+    {
+        if(!admits(id, floor))
+        {
+            continue;
+        }
+        bool isApplicable = false;
+        try
+        {
+            isApplicable = engine->isApplicable(handle, opGraph);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("applicability manager: engine "
+                                   << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
+                                   << " threw from its applicability check and is skipped: "
+                                   << e.what());
+        }
+        if(isApplicable)
+        {
+            ids.push_back(id);
+        }
+    }
+    return ids;
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

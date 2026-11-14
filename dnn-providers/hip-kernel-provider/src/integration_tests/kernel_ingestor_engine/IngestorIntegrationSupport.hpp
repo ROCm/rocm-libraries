@@ -466,6 +466,20 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(_engine.name);
     }
 
+    // Whether the engine is in graph's ranked engine list, for a case that expects it to be
+    // left out.
+    bool offersToServe(hipdnn_frontend::graph::Graph& graph)
+    {
+        auto result = graph.build_operation_graph(this->_handle);
+        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        return result.code == hipdnn_frontend::ErrorCode::OK
+               && std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId())
+                      != rankedEngineIds.end();
+    }
+
     // On engine.arch the engine's absence from the ranked list is a missing engine or pack,
     // not a skip.
     void buildOperationGraphTheEngineOffersToServe(hipdnn_frontend::graph::Graph& graph)

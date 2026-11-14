@@ -3,33 +3,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <initializer_list>
-#include <memory>
 #include <optional>
-#include <ostream>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <variant>
-#include <vector>
 
-#include <hip/hip_runtime_api.h>
-
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
@@ -38,17 +16,17 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
-#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/UnifiedAttention2DCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGraphMatch.hpp"
 
 /**
  * @file Gfx950AttentionUnified2DNative.cpp
- * @brief The hipkernel:Gfx950AttentionUnified2D engine's native half: matching, scoring and
- *        dispatch.
+ * @brief The hipkernel:Gfx950AttentionUnified2D engine's native half: its candidate record,
+ *        scoring and registration. Matching and dispatch are UnifiedAttention2DCommon.hpp's,
+ *        parameterised by this file's Unified2DArch.
  *
  * The kernel is `rocke/library/kernels/gfx950/attention_tiled_2d.py`'s
  * `build_unified_attention_2d_tiled`, packaged (kind: rocke -> kpack) for gfx950 only: the
@@ -80,7 +58,6 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified
 // on the catalog key and the loader drops one. `num_seqs` is declared but not read: the kernel
 // takes the batch as a kernarg and derives its cu_q search trip count from it, so no batch is
 // baked.
-constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
 constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
@@ -114,129 +91,25 @@ constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale
 /// The stats output's uid, or NO_STATS for a graph that asks for none.
 constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
-// ---------------------------------------------------------------------------
-// Matching helpers
-// ---------------------------------------------------------------------------
-
-using unified_attention::findTensor;
-using unified_attention::hasBshdStrides;
-using unified_attention::integerMetadata;
-using unified_attention::isWellFormedOperand;
-using unified_attention::MaskType;
-using unified_attention::problemFor;
-using unified_attention::sdpaNode;
-using unified_attention::stringMetadata;
-using unified_attention::supportedDataTypeName;
-using unified_attention::UnifiedAttentionBinding;
-using unified_attention::UnifiedAttentionProblem;
-
-// ---------------------------------------------------------------------------
-// Decline logging
-//
-// hipDNN reports a declined graph to its caller only as "No engine configurations available
-// for the graph", so each decline logs its cause at INFO. graph_match runs on every catalog
-// miss, so every piece of that work sits inside HIPDNN_PLUGIN_LOG_INFO's argument: the macro
-// tests the level first, and with INFO off nothing below is called.
-// ---------------------------------------------------------------------------
-
-/// The head of this engine's decline lines (unified_attention::DeclinedBy).
-struct Declined : unified_attention::DeclinedBy
+/// The engine's bound-token names, field by field.
+constexpr unified_attention::BoundTokenNames tokenNames()
 {
-    explicit Declined(std::string_view cause)
-        : DeclinedBy{GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME, cause}
-    {
-    }
-};
-
-constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
-                                                         K_TOKEN,
-                                                         V_TOKEN,
-                                                         O_TOKEN,
-                                                         MASK_TOKEN,
-                                                         SLIDING_WINDOW_TOKEN,
-                                                         SCALE_BITS_TOKEN,
-                                                         STATS_TOKEN,
-                                                         "gfx950 attention_unified_2d"};
-
-/**
- * @brief Graph-scoped applicability for the whole engine.
- *
- * The shared unified-attention match (UnifiedAttentionGraphMatch.hpp) around this engine's
- * rules: GQA groups up to 16, head_size 64 or 128, q_len <= kv_len, and decode handed to
- * Unified3D. Each decline of a graph with an SDPA-forward node logs its cause at INFO (see
- * Declined); any other graph declines silently.
- *
- * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips EVERY
- *          remaining pack, not just this one.
- */
-std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchContext& context)
-{
-    const auto operands
-        = unified_attention::matchOperands(context, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
-    if(!operands.has_value())
-    {
-        return std::nullopt;
-    }
-    const auto& problem = operands->problem;
-
-    // GQA: the kernel derives its group size by integer division, so a non-divisible pair
-    // silently drops heads, and a group over 16 is a shape it is not built for.
-    if(problem.numKvHeads <= 0 || problem.numQueryHeads % problem.numKvHeads != 0
-       || problem.numQueryHeads / problem.numKvHeads > GFX950_UNIFIED_2D_MAX_QUERIES_PER_KV)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"} << "query heads " << problem.numQueryHeads
-                                               << " must be a whole multiple, at most "
-                                               << GFX950_UNIFIED_2D_MAX_QUERIES_PER_KV
-                                               << ", of key/value heads " << problem.numKvHeads);
-        return std::nullopt;
-    }
-
-    // head_size 64 or 128. D256 prefill is not shipped (deferred); bf16 D256 decode is
-    // Unified3D's.
-    if(problem.headSize != 64 && problem.headSize != 128)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}
-                               << "head size " << problem.headSize
-                               << " is not supported; this catalog is built for 64 and 128");
-        return std::nullopt;
-    }
-
-    // The kernel's seq_lens contract (vLLM's) is q_len <= kv_len per sequence: its causal
-    // limit is seq_len - q_len, which a longer query makes negative. Declined for every mask
-    // rather than served on the strength of how the kernel happens to behave there.
-    if(problem.seqLenQ > problem.seqLenKv)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"} << "seqlen_q " << problem.seqLenQ
-                                                 << " exceeds seqlen_kv " << problem.seqLenKv
-                                                 << "; the kernel needs q_len <= kv_len");
-        return std::nullopt;
-    }
-
-    // Decode (one query token per sequence) is hipkernel:Gfx950AttentionUnified3D's wherever
-    // its split-KV kernel can be built: there the 2D kernel runs one under-filled Q block
-    // per sequence while the 3D kernel splits the keys across CTAs. No select_path crossover
-    // is replayed: the boundary is this static rule.
-    if(problem.seqLenQ == 1
-       && gfx950Unified3DServesGqaGroup(problem.numQueryHeads, problem.numKvHeads))
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"decode"} << "decode (seqlen_q 1) with a GQA group of "
-                                                  << problem.numQueryHeads / problem.numKvHeads
-                                                  << " is served by the split-KV Unified3D engine");
-        return std::nullopt;
-    }
-
-    const auto matched = unified_attention::matchAttributes(
-        context, *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
-    if(!matched.has_value())
-    {
-        return std::nullopt;
-    }
-    // All three mask kinds are served, each by its own kernel: top-left and bottom-right
-    // coincide only at Sq == Skv, but they are distinct kernel bodies and the catalog carries
-    // both.
-    return unified_attention::bindGraph(
-        *operands->attributes, matched->mask, matched->scale, matched->stats, TOKEN_NAMES);
+    unified_attention::BoundTokenNames names;
+    names.q = Q_TOKEN;
+    names.k = K_TOKEN;
+    names.v = V_TOKEN;
+    names.o = O_TOKEN;
+    names.maskType = MASK_TOKEN;
+    names.slidingWindow = SLIDING_WINDOW_TOKEN;
+    names.scaleBits = SCALE_BITS_TOKEN;
+    names.stats = STATS_TOKEN;
+    names.dispatchLabel = "gfx950 attention_unified_2d";
+    return names;
 }
+
+using unified_attention::integerMetadata;
+using unified_attention::MaskType;
+using unified_attention::SdpaShape;
 
 /// What a candidate bakes, read from its completed metadata and judged buildable.
 struct AttentionUnified2DCandidate
@@ -285,17 +158,13 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
-    if(*emitLse != 0 && *emitLse != 1)
-    {
-        return std::nullopt;
-    }
 
     if(*headSize != 64 && *headSize != 128)
     {
         return std::nullopt;
     }
-    if(*numKvHeads <= 0 || *numQueryHeads <= 0 || *numQueryHeads % *numKvHeads != 0
-       || *numQueryHeads / *numKvHeads > GFX950_UNIFIED_2D_MAX_QUERIES_PER_KV)
+    const auto ratio = unified_attention::gqaRatio(*numQueryHeads, *numKvHeads);
+    if(*numQueryHeads <= 0 || !ratio.has_value() || *ratio > GFX950_UNIFIED_2D_MAX_QUERIES_PER_KV)
     {
         return std::nullopt;
     }
@@ -305,7 +174,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
         return std::nullopt;
     }
     if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
-       || *useTransposedQk32x32 > 1)
+       || *useTransposedQk32x32 > 1 || *emitLse < 0 || *emitLse > 1)
     {
         return std::nullopt;
     }
@@ -335,86 +204,44 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *emitLse != 0};
 }
 
-/**
- * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
- *
- * One binary serves any sequence length for its head/dtype/mask configuration: batch,
- * seqlen_q and seqlen_kv reach the kernel as runtime arguments and in the staged tables,
- * so the metadata carries no shape and none is compared. What a candidate does bake, and
- * what this checks against the graph:
- *
- *   - dtype, head_size, num_query_heads, num_kv_heads, the mask kind and sliding window;
- *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
- *
- * The batch is not bounded here: the kernel derives its cu_q search trip count from the
- * `num_seqs` kernarg, so one binary serves every batch the identity table can index.
- */
+/// This catalog lists each head configuration as its own entry, so a candidate bakes both head
+/// counts and matches only the graph that has them.
+bool headsMatch(const AttentionUnified2DCandidate& candidate, const SdpaShape& problem)
+{
+    return candidate.numQueryHeads == problem.numQueryHeads
+           && candidate.numKvHeads == problem.numKvHeads;
+}
+
+/// This engine's rules and records, for the shared graph match, kernel match and dispatch.
+/// All three mask kinds are served, each by its own kernel: top-left and bottom-right coincide
+/// only at Sq == Skv, but they are distinct kernel bodies and the catalog carries both. Decode
+/// is handed to Unified3D wherever its split-KV kernel can be built. The catalog lists each
+/// head pair as its own entry (e.g. 28/4 and 40/8, ratios 7 and 5, ship while 7/1 does not), so
+/// no GQA ratio list can say which graphs it serves and none is judged at graph_match.
+constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
+    {"gfx950",
+     GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME,
+     &GFX950_UNIFIED_ATTENTION_TRAITS,
+     tokenNames(),
+     &gfx950Unified3DServesGqaGroup,
+     "Unified3D",
+     /*bottomRightOnly=*/false,
+     /*shippedGqaRatios=*/nullptr,
+     /*numShippedGqaRatios=*/0},
+    &candidateFor,
+    &headsMatch,
+    /*prepareChecks=*/nullptr};
+
+std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchContext& context)
+{
+    return unified_attention::graphMatches(context, ARCH.graph);
+}
+
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
                    const KernelDefinition& kernel)
 {
-    const auto* attributesPtr = sdpaNode(context);
-    if(attributesPtr == nullptr)
-    {
-        return false;
-    }
-    const auto& attributes = *attributesPtr;
-
-    const auto* q = findTensor(context, attributes.q_tensor_uid());
-    const auto* k = findTensor(context, attributes.k_tensor_uid());
-    // problemFor reads dims without checking them, so a direct caller (not behind
-    // graph_match) must not reach it with a malformed operand.
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
-    {
-        return false;
-    }
-    const auto problem = problemFor(*q, *k);
-
-    // Before any comparison that could divide by it.
-    const auto candidate = candidateFor(kernel);
-    if(!candidate.has_value())
-    {
-        return false;
-    }
-
-    const auto dataTypeName = supportedDataTypeName(problem.dataType);
-    if(!dataTypeName.has_value() || stringMetadata(kernel, DTYPE_FIELD) != dataTypeName)
-    {
-        return false;
-    }
-
-    if(candidate->headSize != problem.headSize || candidate->numQueryHeads != problem.numQueryHeads
-       || candidate->numKvHeads != problem.numKvHeads)
-    {
-        return false;
-    }
-
-    const auto mask = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, MASK_TOKEN);
-    if(!mask.has_value() || candidate->maskType != *mask)
-    {
-        return false;
-    }
-
-    // Sliding window: the KV-loop bound is baked at compile time.
-    const auto slidingWindow
-        = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SLIDING_WINDOW_TOKEN);
-    if(!slidingWindow.has_value() || candidate->slidingWindow != *slidingWindow)
-    {
-        return false;
-    }
-
-    // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
-    // LSE store is baked in, with its trailing lse_ptr.
-    const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, STATS_TOKEN);
-    if(!stats.has_value() || candidate->emitLse != (*stats != unified_attention::NO_STATS))
-    {
-        return false;
-    }
-
-    // The identity cache must be whole blocks of THIS candidate's size, and small enough for
-    // the table the kernel indexes in 32 bits.
-    return gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
-        .has_value();
+    return unified_attention::kernelMatches(context, bound, kernel, ARCH);
 }
 
 /// Scores for the cold ranking. The baseline geometry scores `BASELINE_SCORE`; every
@@ -464,378 +291,6 @@ double scoreKernel(const MatchContext& /*context*/,
     return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
-
-/// The kernel signature for all variants in this engine: 10 pointers, 6 scalars, the two
-/// strides (`_attn_signature(include_bt_stride=True, include_qq_bias_stride=True)`) and the
-/// runtime shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window).
-///
-/// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
-/// only when BOTH sides carry one. Kind and size alone cannot tell the ten pointers apart, nor
-/// the f32 scalars from the i32 ones, so without names an operand permutation passes the check
-/// and the kernel reads the wrong buffers with no error and no status code. hkp_pack lowers
-/// the recorded names out of the rocKE builder's own parameter list, so keep these spellings
-/// identical to the Python (kernels/gfx950/attention_tiled_2d.py,
-/// build_unified_attention_2d_tiled's `b.param` calls); a divergence here fails every
-/// dispatch rather than silently weakening the check.
-///
-/// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one. An LSE-on kernel
-/// (@p emitLse) appends lse_ptr.
-std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false)
-{
-    constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
-    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
-    constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
-
-    std::vector<KernelArgument> arguments{
-        KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
-        KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
-        KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
-        KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
-        KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
-        KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
-        KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
-        KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
-        KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
-        KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
-        KernelArgument{"by_value", F32, 80, "scale"},
-        KernelArgument{"by_value", F32, 84, "k_scale"},
-        KernelArgument{"by_value", F32, 88, "v_scale"},
-        KernelArgument{"by_value", F32, 92, "out_scale"},
-        KernelArgument{"by_value", F32, 96, "softcap"},
-        KernelArgument{"by_value", I32, 100, "num_seqs"},
-        KernelArgument{"by_value", I32, 104, "block_table_stride"},
-        KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
-        KernelArgument{"by_value", I32, 112, "num_query_heads"},
-        KernelArgument{"by_value", I32, 116, "num_kv_heads"},
-        KernelArgument{"by_value", I32, 120, "sliding_window"}};
-    if(emitLse)
-    {
-        // After the runtime kernargs, 8-byte aligned (read off the compiled LSE kernel).
-        arguments.push_back(KernelArgument{"global_buffer", PTR, 128, "lse_ptr"});
-    }
-    return arguments;
-}
-
-/// The compiled kernel plus everything launch() needs, owning nothing that points back into
-/// the MatchContext or BoundTokens it came from.
-class PreparedGfx950AttentionUnified2D : public PreparedDispatch
-{
-public:
-    PreparedGfx950AttentionUnified2D(IngestorKernelCode code,
-                                     UnifiedAttentionBinding binding,
-                                     UnifiedAttentionProblem problem,
-                                     Gfx950Unified2DWorkspaceLayout layout,
-                                     std::vector<unsigned char> workspaceImage,
-                                     int64_t slidingWindow)
-        : _code(std::move(code))
-        , _binding(binding)
-        , _problem(problem)
-        , _layout(layout)
-        , _workspaceImage(std::move(workspaceImage))
-        , _slidingWindow(slidingWindow)
-    {
-    }
-
-    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
-    {
-        return _code.kernelForStream(stream);
-    }
-
-    const UnifiedAttentionBinding& binding() const
-    {
-        return _binding;
-    }
-
-    const UnifiedAttentionProblem& problem() const
-    {
-        return _problem;
-    }
-
-    const Gfx950Unified2DWorkspaceLayout& layout() const
-    {
-        return _layout;
-    }
-
-    const std::vector<unsigned char>& workspaceImage() const
-    {
-        return _workspaceImage;
-    }
-
-    /// The variant's window, which the kernel reads as a kernarg.
-    int64_t slidingWindow() const
-    {
-        return _slidingWindow;
-    }
-
-private:
-    IngestorKernelCode _code;
-    UnifiedAttentionBinding _binding;
-    UnifiedAttentionProblem _problem;
-    Gfx950Unified2DWorkspaceLayout _layout;
-    std::vector<unsigned char> _workspaceImage;
-    int64_t _slidingWindow = 0;
-};
-
-/// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
-/// names no tensor: refused by name, since everything after indexes dims.
-UnifiedAttentionProblem boundProblem(const MatchContext& context,
-                                     const UnifiedAttentionBinding& binding)
-{
-    const auto* q = findTensor(context, binding.q);
-    const auto* k = findTensor(context, binding.k);
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950 attention_unified_2d: the bound Q or K tensor is missing or malformed");
-    }
-    return problemFor(*q, *k);
-}
-
-/// The candidate, or a refusal that names the kernel: kernel_match declines a candidate it
-/// cannot launch, so this is defence in depth for a caller that reaches the handler without
-/// having matched. The grid and CTA come from it, and there is no geometry to substitute that
-/// would not launch this binary with another binary's.
-AttentionUnified2DCandidate requireCandidate(const KernelDefinition& kernel)
-{
-    const auto candidate = candidateFor(kernel);
-    if(!candidate.has_value())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "gfx950 attention_unified_2d: kernel '"
-                                                           + toString(kernel.kernelId)
-                                                           + "' declares no supported geometry");
-    }
-    return *candidate;
-}
-
-/// The layout for @p candidate over @p problem, or a refusal that says which rule failed.
-Gfx950Unified2DWorkspaceLayout requireLayout(const AttentionUnified2DCandidate& candidate,
-                                             const UnifiedAttentionProblem& problem,
-                                             const KernelDefinition& kernel)
-{
-    const std::string name = toString(kernel.kernelId);
-    const auto layout
-        = gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate.blockSize);
-    if(!layout.has_value())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950 attention_unified_2d: kernel '" + name + "' has block_size "
-                + std::to_string(candidate.blockSize) + ", which does not divide seqlen_kv "
-                + std::to_string(problem.seqLenKv) + " into a table the kernel can index");
-    }
-    return *layout;
-}
-
-/**
- * @brief The native dispatch behind this engine's UDD.
- */
-class Gfx950AttentionUnified2DDispatchHandler : public IKernelDispatchHandler<Handle>
-{
-public:
-    explicit Gfx950AttentionUnified2DDispatchHandler(
-        const compilation::KpackKernelLoader& kpackLoader)
-        : _kpackLoader(kpackLoader)
-    {
-    }
-
-    /// The identity block table, seq_lens and query_start_len, each section 256-byte aligned.
-    size_t workspaceBytes(const MatchContext& context,
-                          const BoundTokens& bound,
-                          const KernelDefinition& kernel) const override
-    {
-        const auto binding = unified_attention::readBinding(bound, TOKEN_NAMES);
-        const auto problem = boundProblem(context, binding);
-        const auto candidate = requireCandidate(kernel);
-        return requireLayout(candidate, problem, kernel).totalBytes;
-    }
-
-    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
-                                              const BoundTokens& bound,
-                                              const KernelDefinition& kernel) const override
-    {
-        const auto binding = unified_attention::readBinding(bound, TOKEN_NAMES);
-
-        // graph_match is the gate for this: a non-BSHD output declines there and never
-        // reaches prepare(). This re-check is defence in depth for a caller that reaches the
-        // handler without having matched, which is why it faults rather than declines --
-        // by this point the engine has been chosen and there is no one left to defer to.
-        const auto* o = findTensor(context, binding.o);
-        if(o == nullptr || !isWellFormedOperand(*o) || !hasBshdStrides(*o))
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950 attention_unified_2d: the output tensor is not dense BSHD; the kernel "
-                "bakes that layout and takes no stride arguments");
-        }
-
-        const auto candidate = requireCandidate(kernel);
-        // kernelMatches pairs them; a caller that skipped it would launch the wrong kernarg
-        // list.
-        if(candidate.emitLse != (binding.stats != unified_attention::NO_STATS))
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950 attention_unified_2d: kernel '" + toString(kernel.kernelId)
-                    + (candidate.emitLse ? "' writes stats, but the graph asks for none"
-                                         : "' writes no stats, but the graph asks for them"));
-        }
-        const auto problem = boundProblem(context, binding);
-        const auto layout = requireLayout(candidate, problem, kernel);
-
-        // The host-side metadata is built before the code object is loaded, so a graph the
-        // tables cannot describe is refused by name without touching an archive.
-        auto image = gfx950Unified2DWorkspaceImage(
-            problem.batch, problem.seqLenQ, problem.seqLenKv, candidate.blockSize);
-        if(!image.has_value() || image->size() != layout.totalBytes)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950 attention_unified_2d: kernel '" + toString(kernel.kernelId)
-                    + "' cannot stage paged-KV metadata for this graph");
-        }
-
-        auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, unified2DKernelSignature(candidate.emitLse));
-
-        // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
-        // descriptor shape metadata: the binary takes its shape at runtime.
-        const auto geometry = gfx950Unified2DLaunchGeometry(candidate.numWarps,
-                                                            candidate.blockMPerWarp,
-                                                            problem.numQueryHeads,
-                                                            problem.numKvHeads,
-                                                            problem.seqLenQ,
-                                                            problem.batch,
-                                                            toString(kernel.kernelId));
-
-        code.setBlockSize(geometry.blockX, 1, 1);
-        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
-
-        return std::make_unique<PreparedGfx950AttentionUnified2D>(
-            std::move(code), binding, problem, layout, std::move(*image), candidate.slidingWindow);
-    }
-
-    void launch(const Handle& handle,
-                const PreparedDispatch& prepared,
-                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                uint32_t numDeviceBuffers,
-                void* workspace) const override
-    {
-        const auto& preparedUnified
-            = dynamic_cast<const PreparedGfx950AttentionUnified2D&>(prepared);
-        const auto& binding = preparedUnified.binding();
-        const auto& layout = preparedUnified.layout();
-        const auto& image = preparedUnified.workspaceImage();
-
-        if(workspace == nullptr)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950 attention_unified_2d: launched without the " + std::to_string(image.size())
-                    + "-byte workspace workspaceBytes() asked for");
-        }
-
-        const auto q
-            = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
-        const auto k
-            = hipdnn_plugin_sdk::findDeviceBuffer(binding.k, deviceBuffers, numDeviceBuffers);
-        const auto v
-            = hipdnn_plugin_sdk::findDeviceBuffer(binding.v, deviceBuffers, numDeviceBuffers);
-        const auto o
-            = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
-
-        // One copy of the whole image, on the handle's stream so the kernel launched next
-        // sees it. The image is immutable, and a pageable source is staged by the runtime
-        // before the call returns, so concurrent launches of one plan share it safely.
-        hipStream_t stream = handle.getStream();
-        const hipError_t copied
-            = hipMemcpyAsync(workspace, image.data(), image.size(), hipMemcpyHostToDevice, stream);
-        if(copied != hipSuccess)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("gfx950 attention_unified_2d: staging the paged-KV metadata failed: ")
-                    + hipGetErrorString(copied));
-        }
-
-        auto* const base = static_cast<unsigned char*>(workspace);
-        void* const blockTables = base + layout.blockTablesOffset;
-        void* const seqLens = base + layout.seqLensOffset;
-        void* const queryStartLen = base + layout.queryStartLenOffset;
-
-        // Unused pointers are null and the unused scalars neutral: the shipped variants have
-        // no sinks, ALiBi, qq-bias, softcap or fp8, so the kernel never reads them.
-        void* const unused = nullptr;
-        const float neutralScale = 1.0F;
-        const float noSoftcap = 0.0F;
-        const int32_t noQqBiasStride = 0;
-
-        const auto& p = preparedUnified.problem();
-        if(binding.stats != unified_attention::NO_STATS)
-        {
-            // The LSE-on kernel: the same arguments, then the stats output.
-            const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(
-                binding.stats, deviceBuffers, numDeviceBuffers);
-            preparedUnified.kernelForStream(stream).launch(
-                stream,
-                o.ptr,
-                q.ptr,
-                k.ptr,
-                v.ptr,
-                unused,
-                blockTables,
-                seqLens,
-                unused,
-                unused,
-                queryStartLen,
-                binding.scale,
-                neutralScale,
-                neutralScale,
-                neutralScale,
-                noSoftcap,
-                static_cast<int32_t>(p.batch),
-                static_cast<int32_t>(layout.blocksPerSeq),
-                noQqBiasStride,
-                static_cast<int32_t>(p.numQueryHeads),
-                static_cast<int32_t>(p.numKvHeads),
-                static_cast<int32_t>(preparedUnified.slidingWindow()),
-                stats.ptr);
-            return;
-        }
-        preparedUnified.kernelForStream(stream).launch(
-            stream,
-            o.ptr,
-            q.ptr,
-            k.ptr,
-            v.ptr,
-            unused,
-            blockTables,
-            seqLens,
-            unused,
-            unused,
-            queryStartLen,
-            binding.scale,
-            neutralScale,
-            neutralScale,
-            neutralScale,
-            noSoftcap,
-            static_cast<int32_t>(p.batch),
-            static_cast<int32_t>(layout.blocksPerSeq),
-            noQqBiasStride,
-            static_cast<int32_t>(p.numQueryHeads),
-            static_cast<int32_t>(p.numKvHeads),
-            static_cast<int32_t>(preparedUnified.slidingWindow()));
-    }
-
-private:
-    const compilation::KpackKernelLoader& _kpackLoader;
-};
-
 } // namespace
 
 compilation::KpackModuleCache& gfx950AttentionUnified2DKpackModuleCache()
@@ -853,11 +308,13 @@ namespace
 {
 
 /// This engine's dispatch handler, process-lifetime.
-const Gfx950AttentionUnified2DDispatchHandler& gfx950AttentionUnified2DDispatchHandler()
+const unified_attention::Unified2DDispatchHandler<AttentionUnified2DCandidate>&
+    gfx950AttentionUnified2DDispatchHandler()
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx950AttentionUnified2DKpackModuleCache());
-    static const Gfx950AttentionUnified2DDispatchHandler s_dispatchHandler(s_kpackLoader);
+    static const unified_attention::Unified2DDispatchHandler<AttentionUnified2DCandidate>
+        s_dispatchHandler(s_kpackLoader, ARCH);
     return s_dispatchHandler;
 }
 

@@ -92,6 +92,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
             Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
         IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionUnified2DKnobs.cpp Gfx942AttentionUnified2D
         IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
     )
     while(_knob_suites)

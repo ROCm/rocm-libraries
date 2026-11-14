@@ -653,6 +653,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx942_attention_unified3d.dispatch",
         "hipkernel.gfx950_attention_unified_2d.dispatch",
         "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_unified_2d.dispatch",
         "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",

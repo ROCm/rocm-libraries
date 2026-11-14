@@ -876,6 +876,74 @@ def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
     assert any("no_such_accessor" in f for f in failures), failures
 
 
+_UNIFIED_2D = "hipkernel:Gfx942AttentionUnified2D"
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    [_ROOT / "configs" / "gfx942_attention_unified_2d.engine.yaml"],
+    indirect=True,
+    ids=lambda p: p.name,
+)
+def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
+    manifest, registry_config
+):
+    """The unified 2D catalog's production kernels (the mask limit on) are the spec rocKE's
+    `_tiled_spec_from_problem` builds for a long prefill of their (dtype, head size, GQA
+    ratio), field for field, so a rocKE default or builder change that moves the production
+    spec fails here instead of leaving the catalog on a stale stack. Every (dtype, head size,
+    ratio) cell has one. Not a comparison of cold selection: the sweep ranks them. Only the
+    gfx942 unified 2D manifest enumerates production stacks, so it is the one case."""
+    assert manifest["engine"]["name"] == _UNIFIED_2D
+    enumerator.bind_provider(manifest.get("provider_root"))
+    from kernels.common.attention_unified import (
+        UnifiedAttentionProblem,
+        _tiled_spec_from_problem,
+    )
+
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    production = [k for k in kernels if k["metadata"]["use_transposed_mask_limit"]]
+    cells = collections.Counter(
+        (
+            k["metadata"]["dtype"],
+            k["metadata"]["head_size"],
+            k["metadata"]["num_queries_per_kv"],
+        )
+        for k in production
+    )
+    assert cells == {
+        (dtype, head, ratio): 1
+        for dtype in ("BF16", "FP16")
+        for head in (64, 128)
+        for ratio in (1, 2, 4, 8, 16)
+    }, cells
+    for kernel in production:
+        spec = kernel["kernel_source"]["spec"]
+        problem = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=spec["num_query_heads"],
+            num_kv_heads=spec["num_kv_heads"],
+            head_size=spec["head_size"],
+            block_size=spec["block_size"],
+            max_seqlen_q=2048,
+            max_seqlen_k=4096,
+            dtype=spec["dtype"],
+            num_cus=304,
+            num_kv_blocks=256,
+        )
+        rocke = dataclasses.asdict(_tiled_spec_from_problem(problem, manifest["arch"]))
+        # num_seqs is neutral: the kernel reads the batch at run time.
+        moved = {
+            f: (v, rocke[f])
+            for f, v in spec.items()
+            if f != "num_seqs" and rocke[f] != v
+        }
+        assert (
+            not moved
+        ), f"{kernel['name']} differs from rocKE's production spec: {moved}"
+
+
 def _knob_clashes(features, knobs, kernels) -> list:
     """Names of the kernels sharing one engine-knob tuple inside one cell, per clash.
     `kernels` is `(metadata, name)` pairs."""
@@ -893,7 +961,7 @@ def _knob_clashes(features, knobs, kernels) -> list:
 
 # Bundles whose whole enumeration is a catalog a sweep installs: every kernel a reduction
 # may keep must already page and load without a collision, before any is chosen.
-_SWEPT_WHOLE = frozenset({"gfx942_attention_dense"})
+_SWEPT_WHOLE = frozenset({"gfx942_attention_dense", "gfx942_attention_unified_2d"})
 
 
 @pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))

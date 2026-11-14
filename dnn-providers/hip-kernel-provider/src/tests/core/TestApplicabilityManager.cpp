@@ -46,7 +46,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
+
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #endif
 
 using namespace hip_kernel_provider::core;
@@ -1731,6 +1734,206 @@ TEST_F(TestApplicabilityManager, TheGuardKeepsTheThreadedPathForTheEnginesItAdmi
     EXPECT_EQ(_journal.finishCount(BASELINE_STAGED), 0u);
     EXPECT_EQ(_journal.plainCallCount(BASELINE_STAGED), 0u);
     EXPECT_TRUE(_journal.handWritten().empty());
+}
+
+// ---------------------------------------------------------------------------
+// Engine order rules
+//
+// The two engines of each ENGINE_ORDER_RULES pair serve the same graphs, and hipDNN keeps a
+// provider's order between engines it has no rule for, so the provider states which comes
+// first.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+using hip_kernel_provider::kernel_ingestor_engine::ENGINE_ORDER_RULES;
+using hip_kernel_provider::kernel_ingestor_engine::EngineOrderRule;
+
+int64_t preferredId(const EngineOrderRule& rule)
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(rule.preferred);
+}
+
+int64_t otherId(const EngineOrderRule& rule)
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(rule.other);
+}
+
+std::string describe(const EngineOrderRule& rule)
+{
+    return std::string(rule.preferred) + " before " + std::string(rule.other);
+}
+
+std::ptrdiff_t position(const std::vector<int64_t>& ids, int64_t id)
+{
+    return std::find(ids.begin(), ids.end(), id) - ids.begin();
+}
+
+} // namespace
+
+TEST(TestDenseAttentionOrder, PreferredEngineComesBeforeTheOtherInEveryArrangement)
+{
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        SCOPED_TRACE(describe(rule));
+        constexpr int64_t BEFORE = 0x41;
+        constexpr int64_t BETWEEN = 0x42;
+        constexpr int64_t AFTER = 0x43;
+        std::vector<int64_t> arrangement{BEFORE, BETWEEN, AFTER, preferredId(rule), otherId(rule)};
+        std::sort(arrangement.begin(), arrangement.end());
+        do
+        {
+            auto ids = arrangement;
+            applyEngineOrderRules(ids);
+
+            EXPECT_LT(position(ids, preferredId(rule)), position(ids, otherId(rule)));
+            // Nothing else moves relative to anything else.
+            const auto others = [&rule](std::vector<int64_t> list) {
+                list.erase(std::remove_if(list.begin(),
+                                          list.end(),
+                                          [&rule](int64_t id) {
+                                              return id == preferredId(rule) || id == otherId(rule);
+                                          }),
+                           list.end());
+                return list;
+            };
+            EXPECT_EQ(others(ids), others(arrangement));
+        } while(std::next_permutation(arrangement.begin(), arrangement.end()));
+    }
+}
+
+TEST(TestDenseAttentionOrder, LeavesAnOrderThatNeedsNoChangeAlone)
+{
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        SCOPED_TRACE(describe(rule));
+        for(const std::vector<int64_t>& original :
+            std::vector<std::vector<int64_t>>{{},
+                                              {0x41, 0x42},
+                                              {0x41, otherId(rule), 0x42},
+                                              {preferredId(rule), 0x41},
+                                              {preferredId(rule), 0x41, otherId(rule)}})
+        {
+            auto ids = original;
+            applyEngineOrderRules(ids);
+            EXPECT_EQ(ids, original);
+        }
+    }
+}
+
+// Names the gfx942 engines directly, not through the table, so emptying or editing the table
+// cannot pass: the gfx942 Dense engine must be listed ahead of Unified2D.
+TEST(TestDenseAttentionOrder, Gfx942DenseComesBeforeUnified2D)
+{
+    namespace engines = hip_kernel_provider::kernel_ingestor_engine;
+    const auto dense
+        = hipdnn_data_sdk::utilities::engineNameToId(engines::GFX942_ATTENTION_DENSE_ENGINE_NAME);
+    const auto unified = hipdnn_data_sdk::utilities::engineNameToId(
+        engines::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+    std::vector<int64_t> ids{0x41, unified, 0x42, dense};
+    applyEngineOrderRules(ids);
+    EXPECT_LT(position(ids, dense), position(ids, unified));
+}
+
+TEST(TestDenseAttentionOrder, AppliesEveryRuleToOneList)
+{
+    // Every pair listed the wrong way round, a bystander between the pairs.
+    std::vector<int64_t> ids;
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        ids.push_back(otherId(rule));
+        ids.push_back(preferredId(rule));
+    }
+    ids.push_back(0x41);
+    applyEngineOrderRules(ids);
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        EXPECT_LT(position(ids, preferredId(rule)), position(ids, otherId(rule))) << describe(rule);
+    }
+}
+
+// Every path getApplicableEngineIds takes lists the pair in order: the base class's loop, the
+// staged walk, and each of those behind the schema guard (a graph past a registered engine's
+// schema), whichever order the pair was registered in.
+TEST_F(TestApplicabilityManager, ListsThePreferredEngineAheadOfTheOtherOnEveryPath)
+{
+    using hipdnn_data_sdk::utilities::Version;
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        for(const bool preferredRegisteredFirst : {true, false})
+        {
+            for(const bool staged : {false, true})
+            {
+                for(const bool guarded : {false, true})
+                {
+                    SCOPED_TRACE(describe(rule)
+                                 + (preferredRegisteredFirst ? ", preferred registered first"
+                                                             : ", other registered first")
+                                 + (staged ? ", staged path" : ", sequential path")
+                                 + (guarded ? ", behind the schema guard" : ""));
+                    WorkerBudget budget{8};
+                    ApplicabilityPool pool{budget};
+                    ApplicabilityManager manager{pool};
+
+                    // Behind the guard the graph is 1.4.0: the engines under test opt in to
+                    // it, and a baseline engine is what makes the guard hold anything back.
+                    const Version schema
+                        = guarded ? Version{std::string("1.4.0")} : providerBaselineGraphSchema();
+                    const auto add = [&](int64_t id, bool asStaged) {
+                        if(asStaged)
+                        {
+                            manager.addEngine(
+                                std::make_unique<FakeStagedEngine>(
+                                    std::make_shared<StagedSpec>(decided(id, true)), _journal),
+                                "under test",
+                                schema);
+                        }
+                        else
+                        {
+                            manager.addEngine(
+                                std::make_unique<FakeHandWrittenEngine>(id, true, _journal),
+                                "under test",
+                                schema);
+                        }
+                    };
+                    addHandWritten(manager, guarded ? BASELINE_HAND : HAND_YES, true);
+                    const std::array<int64_t, 2> order
+                        = preferredRegisteredFirst
+                              ? std::array<int64_t, 2>{preferredId(rule), otherId(rule)}
+                              : std::array<int64_t, 2>{otherId(rule), preferredId(rule)};
+                    for(const auto id : order)
+                    {
+                        add(id, staged);
+                    }
+                    if(staged)
+                    {
+                        // The staged walk needs a second staged engine to be taken.
+                        add(DECIDED_YES, true);
+                    }
+                    ASSERT_EQ(manager.stagedEngineCount(), staged ? 3u : 0u);
+
+                    Outcome outcome;
+                    if(guarded)
+                    {
+                        const auto buffer = schemaGraph(withRagged(4));
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                            buffer.GetBufferPointer(), buffer.GetSize());
+                        outcome = call(manager, _handle, graph);
+                    }
+                    else
+                    {
+                        outcome = run(manager, "");
+                    }
+                    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+                    // The guard holds the baseline hand-written engine back; nothing else.
+                    ASSERT_EQ(outcome.ids.size(), (staged ? 3u : 2u) + (guarded ? 0u : 1u));
+                    EXPECT_LT(position(outcome.ids, preferredId(rule)),
+                              position(outcome.ids, otherId(rule)));
+                }
+            }
+        }
+    }
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
