@@ -84,7 +84,7 @@ protected:
         input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1));
         input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
@@ -104,7 +104,7 @@ protected:
         input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_5));
         input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
@@ -131,7 +131,7 @@ protected:
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::MAX_OP, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 4});
@@ -164,7 +164,7 @@ protected:
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::MIN_OP, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 4});
@@ -248,7 +248,7 @@ protected:
                 1); // φ + tan(1)
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PI);
@@ -314,7 +314,7 @@ protected:
                 safeTestTypeCast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
@@ -331,7 +331,7 @@ protected:
         input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5));
         input2.fillWithValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({2, 3, 10});
@@ -367,7 +367,7 @@ protected:
                                   0); // e² - e
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
@@ -384,7 +384,7 @@ protected:
         input1.setHostValue(safeTestTypeCast<Input1Type>(PRECISION_TEST_A), 0, 0, 0, 0);
         input2.setHostValue(safeTestTypeCast<Input2Type>(PRECISION_TEST_B), 0, 0, 0, 0);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 1});
@@ -408,7 +408,7 @@ protected:
             input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(i * 2)), i);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
@@ -446,7 +446,7 @@ protected:
             input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting input2[n] to all input1[m,n]
@@ -478,7 +478,7 @@ protected:
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0); // Channel 1
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         // Create expected tensor: broadcasting subtraction
@@ -515,7 +515,7 @@ protected:
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 1, 0); // Channel 1
         input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 2, 0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
         // Create expected tensor: broadcasting subtraction with implicit leading dimension
@@ -561,7 +561,7 @@ protected:
                             0,
                             0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
@@ -615,7 +615,7 @@ protected:
             }
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
@@ -664,7 +664,7 @@ protected:
             input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::MAX_OP, output, input1, input2);
 
         Tensor<OutputType> expected({3, 4});
@@ -703,7 +703,7 @@ protected:
             input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::MIN_OP, output, input1, input2);
 
         Tensor<OutputType> expected({3, 4});
@@ -755,7 +755,7 @@ protected:
                             0,
                             0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
@@ -808,7 +808,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 2, 1, 0); // -3.0
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 2, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_FWD, output, input);
 
         // Create expected tensor: ReLU(x) = max(0, x)
@@ -864,7 +864,7 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // ReLU backward expects dy first, then x.
-        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input2Type, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
@@ -942,7 +942,7 @@ protected:
         const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_FWD, output, input, lowerClip, upperClip, lowerSlope);
 
         // Create expected tensor: Generalized ReLU with parameters
@@ -1013,7 +1013,7 @@ protected:
         auto lowerSlope = static_cast<float>(0.1);
 
         // ReLU backward expects dy first, then x.
-        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input2Type, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_BWD, output, upstreamGrad, input, lowerClip, upperClip, lowerSlope);
 
         // Create expected tensor: dx = dy * local_gradient
@@ -1075,7 +1075,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::SIGMOID_FWD, output, input);
 
         // Create expected tensor: sigmoid(x) = 1 / (1 + exp(-x))
@@ -1161,7 +1161,7 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // Backward activations expect dy first, then x.
-        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input2Type, Input1Type>::pointwiseCompute(
             PointwiseMode::SIGMOID_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * sigmoid(x) * (1 - sigmoid(x))
@@ -1179,9 +1179,10 @@ protected:
                         // Compute using the template ComputeType
                         auto xCompute = static_cast<ComputeType>(inputVal);
                         auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
-                        auto sigmoid = ComputeType{1}
-                                       / (ComputeType{1} + hipdnn_data_sdk::types::exp(-xCompute));
-                        auto localGradient = sigmoid * (ComputeType{1} - sigmoid);
+                        auto sigmoid = static_cast<ComputeType>(1)
+                                       / (static_cast<ComputeType>(1)
+                                          + hipdnn_data_sdk::types::exp(-xCompute));
+                        auto localGradient = sigmoid * (static_cast<ComputeType>(1) - sigmoid);
                         auto downstreamGrad = dyCompute * localGradient;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
@@ -1210,7 +1211,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::TANH_FWD, output, input);
 
         // Create expected tensor: tanh(x)
@@ -1264,7 +1265,7 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
         // Backward activations expect dy first, then x.
-        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input2Type, Input1Type>::pointwiseCompute(
             PointwiseMode::TANH_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (1 - tanh²(x))
@@ -1284,7 +1285,7 @@ protected:
                         auto xCompute = static_cast<ComputeType>(inputVal);
                         auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
                         auto tanhVal = std::tanh(xCompute);
-                        auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
+                        auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
                         auto downstreamGrad = dyCompute * localGradient;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
@@ -1313,7 +1314,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::ABS, output, input);
 
         // Create expected tensor: abs(x)
@@ -1383,7 +1384,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_4), 0, 1, 1, 1); // -4.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::NEG, output, input);
 
         // Create expected tensor: -x
@@ -1418,15 +1419,16 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::GELU_FWD, output, input);
 
         // Create expected tensor: gelu_erf(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
         auto geluErf = [](float x) {
             auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
-            ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(ComputeType{2});
-            return ComputeType{0.5} * xCompute
-                   * (ComputeType{1.0} + hipdnn_data_sdk::types::erf(xCompute / sqrt2));
+            ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(static_cast<ComputeType>(2));
+            return static_cast<ComputeType>(0.5) * xCompute
+                   * (static_cast<ComputeType>(1.0)
+                      + hipdnn_data_sdk::types::erf(xCompute / sqrt2));
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
         expected.setHostValue(safeTestTypeCast<OutputType>(geluErf(0.0f)),
@@ -1489,18 +1491,18 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::GELU_APPROX_TANH_FWD, output, input);
 
         // gelu_tanh(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         auto geluTanh = [](float x) {
             auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
-            const auto sqrt2OverPi = static_cast<ComputeType>(
-                hipdnn_data_sdk::types::sqrt(ComputeType{2} / static_cast<ComputeType>(PI)));
-            static const auto s_kCoeff = ComputeType{0.044715};
+            const auto sqrt2OverPi = static_cast<ComputeType>(hipdnn_data_sdk::types::sqrt(
+                static_cast<ComputeType>(2) / static_cast<ComputeType>(PI)));
+            static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
             auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
-            return ComputeType{0.5} * xCompute
-                   * (ComputeType{1.0} + hipdnn_data_sdk::types::tanh(inner));
+            return static_cast<ComputeType>(0.5) * xCompute
+                   * (static_cast<ComputeType>(1.0) + hipdnn_data_sdk::types::tanh(inner));
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
         expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(0.0f)), 0, 0, 0, 0);
@@ -1531,14 +1533,14 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0);
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::SWISH_FWD, output, input);
 
         // swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
         auto swish = [](float x) {
             auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             auto exp = hipdnn_data_sdk::types::exp(-xCompute);
-            return xCompute / (ComputeType{1} + exp);
+            return xCompute / (static_cast<ComputeType>(1) + exp);
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(0.0f)), 0, 0, 0, 0);
@@ -1567,7 +1569,7 @@ protected:
                                i); // [-2, -1, 0, 1, 2]
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_FWD, output, input);
 
         // Create expected tensor: ReLU applied to [-2, -1, 0, 1, 2] = [0, 0, 0, 1, 2]
@@ -1598,7 +1600,7 @@ protected:
             }
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::ABS, output, input);
 
         // Create expected tensor: abs applied to the pattern
@@ -1625,7 +1627,7 @@ protected:
 
         input.fillWithValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_2_5));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::NEG, output, input);
 
         // Create expected tensor: negation of -2.5 = 2.5
@@ -1644,7 +1646,7 @@ protected:
 
         input.setHostValue(safeTestTypeCast<Input1Type>(E), 0, 0, 0, 0); // e
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::TANH_FWD, output, input);
 
         // Create expected tensor: tanh(e)
@@ -1671,7 +1673,7 @@ protected:
         input.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
         input.setHostValue(safeTestTypeCast<Input1Type>(SQRT_2), 0, 1, 1, 1); // √2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+        CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::IDENTITY, output, input);
 
         // Create expected tensor: identity(x) = x
@@ -2109,12 +2111,92 @@ TEST(TestCpuReferencePointwiseRegressions, ParameterizedReluBwdBfloat16LowerClip
 
     EXPECT_NE(lowerClip, safeTestTypeCast<float>(y.getHostValue(0, 0, 0, 0)));
 
-    CpuReferencePointwiseImpl<bfloat16, bfloat16, bfloat16>::pointwiseCompute(
+    CpuReferencePointwiseImpl<bfloat16, double, bfloat16, bfloat16>::pointwiseCompute(
         PointwiseMode::RELU_BWD, output, dy, y, lowerClip, upperClip, lowerSlope);
 
     output.markDeviceModified();
 
     EXPECT_EQ(output.getHostValue(0, 0, 0, 0), dy.getHostValue(0, 0, 0, 0));
+}
+
+// --- Compute type tests ---
+// 2049 is not representable in half (11-bit significand) but is in float.
+
+TEST(TestCpuReferencePointwiseComputeType, BinaryAddUsesComputeType)
+{
+    Tensor<half> in0({1, 1, 1, 1});
+    Tensor<half> in1({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    in0.setHostValue(safeTestTypeCast<half>(2048.0f), 0, 0, 0, 0);
+    in0.markHostModified();
+    in1.setHostValue(safeTestTypeCast<half>(1.0f), 0, 0, 0, 0);
+    in1.markHostModified();
+
+    CpuReferencePointwiseImpl<float, float, half, half>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+
+    CpuReferencePointwiseImpl<float, half, half, half>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+}
+
+TEST(TestCpuReferencePointwiseComputeType, UnaryIdentityUsesComputeType)
+{
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.setHostValue(2049.0f, 0, 0, 0, 0);
+    input.markHostModified();
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::IDENTITY, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+
+    CpuReferencePointwiseImpl<float, half, float>::pointwiseCompute(
+        PointwiseMode::IDENTITY, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+}
+
+TEST(TestCpuReferencePointwiseComputeType, UnaryAbsAndNegUseComputeType)
+{
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.setHostValue(-2049.0f, 0, 0, 0, 0);
+    input.markHostModified();
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::ABS, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+    CpuReferencePointwiseImpl<float, half, float>::pointwiseCompute(
+        PointwiseMode::ABS, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::NEG, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+    CpuReferencePointwiseImpl<float, half, float>::pointwiseCompute(
+        PointwiseMode::NEG, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+}
+
+TEST(TestCpuReferencePointwiseComputeType, BinaryAddUsesDoubleCompute)
+{
+    Tensor<double> in0({1, 1, 1, 1});
+    Tensor<double> in1({1, 1, 1, 1});
+    Tensor<double> output({1, 1, 1, 1});
+    in0.setHostValue(1.0, 0, 0, 0, 0);
+    in0.markHostModified();
+    in1.setHostValue(1e-12, 0, 0, 0, 0);
+    in1.markHostModified();
+
+    CpuReferencePointwiseImpl<double, double, double, double>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 1.0 + 1e-12);
+
+    // 1 + 1e-12 is lost in float compute
+    CpuReferencePointwiseImpl<double, float, double, double>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 1.0);
 }
 
 // --- Ternary operation tests ---
@@ -2126,7 +2208,7 @@ TEST(TestCpuReferencePointwiseTernary, BinarySelectInput0BroadcastMismatchThrows
     const Tensor<bool> mask({1, 1, 1, 1});
     Tensor<float> output({1, 3, 1, 1});
 
-    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, double, float, float, bool>::pointwiseCompute(
                      PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
                  std::runtime_error);
 }
@@ -2138,7 +2220,7 @@ TEST(TestCpuReferencePointwiseTernary, BinarySelectInput1BroadcastMismatchThrows
     const Tensor<bool> mask({1, 1, 1, 1});
     Tensor<float> output({1, 3, 1, 1});
 
-    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, double, float, float, bool>::pointwiseCompute(
                      PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
                  std::runtime_error);
 }
@@ -2150,7 +2232,7 @@ TEST(TestCpuReferencePointwiseTernary, BinarySelectMaskBroadcastMismatchThrows)
     const Tensor<bool> mask({1, 2, 1, 1});
     Tensor<float> output({1, 3, 1, 1});
 
-    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, double, float, float, bool>::pointwiseCompute(
                      PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
                  std::runtime_error);
 }
@@ -2165,7 +2247,7 @@ TEST(TestCpuReferencePointwiseTernary, UnsupportedTernaryModeThrows)
     // CMP_GT is a real PointwiseMode but has no ternary functor; calling the
     // 3-input overload directly (bypassing arity classification) must reject
     // it instead of silently misinterpreting the operands.
-    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, double, float, float, bool>::pointwiseCompute(
                      PointwiseMode::CMP_GT, output, in0, in1, mask)),
                  std::runtime_error);
 }
@@ -2196,7 +2278,7 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MaxNaNFirstOperandPropagates)
     input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
     input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
 
-    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+    CpuReferencePointwiseImpl<TypeParam, double, TypeParam, TypeParam>::pointwiseCompute(
         PointwiseMode::MAX_OP, output, input1, input2);
 
     EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
@@ -2213,7 +2295,7 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MaxNaNSecondOperandReturnsFirst)
     input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
     input2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
 
-    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+    CpuReferencePointwiseImpl<TypeParam, double, TypeParam, TypeParam>::pointwiseCompute(
         PointwiseMode::MAX_OP, output, input1, input2);
 
     EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));
@@ -2231,7 +2313,7 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNFirstOperandPropagates)
     input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
     input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
 
-    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+    CpuReferencePointwiseImpl<TypeParam, double, TypeParam, TypeParam>::pointwiseCompute(
         PointwiseMode::MIN_OP, output, input1, input2);
 
     EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
@@ -2248,7 +2330,7 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNSecondOperandReturnsFirst)
     input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_5), 0, 0, 0, 0);
     input2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
 
-    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+    CpuReferencePointwiseImpl<TypeParam, double, TypeParam, TypeParam>::pointwiseCompute(
         PointwiseMode::MIN_OP, output, input1, input2);
 
     EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));

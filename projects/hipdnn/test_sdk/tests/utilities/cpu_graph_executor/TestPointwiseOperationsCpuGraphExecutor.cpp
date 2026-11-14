@@ -138,7 +138,7 @@ public:
         if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
+            CpuReferencePointwiseImpl<InputType, double, InputType, InputType>::pointwiseCompute(
                 PointwiseMode::RELU_FWD,
                 output,
                 input0,
@@ -149,7 +149,7 @@ public:
         }
         else
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
+            CpuReferencePointwiseImpl<InputType, double, InputType, InputType>::pointwiseCompute(
                 PointwiseMode::RELU_FWD, output, input0);
         }
 
@@ -170,7 +170,7 @@ public:
         if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
            || params.reluLowerClipSlope.has_value())
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
+            CpuReferencePointwiseImpl<InputType, double, InputType, InputType>::pointwiseCompute(
                 PointwiseMode::RELU_BWD,
                 output,
                 upstreamGrad,
@@ -182,7 +182,7 @@ public:
         }
         else
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
+            CpuReferencePointwiseImpl<InputType, double, InputType, InputType>::pointwiseCompute(
                 PointwiseMode::RELU_BWD, output, upstreamGrad, input);
         }
 

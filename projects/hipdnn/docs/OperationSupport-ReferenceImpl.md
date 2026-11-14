@@ -49,9 +49,9 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference |  |
+| Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference |  |
+| Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -114,6 +114,11 @@ The following table lists all operations currently supported in the CPU Referenc
 | Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
 | Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
+
+The pointwise reference honors the node `compute_data_type`: a plan is only built for a registered
+(input, compute, output) tuple, and operations that perform arithmetic evaluate their intermediate
+math in that compute type before rounding to the output type. A node whose compute type has no
+registered tuple is declined.
 
 `CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
 pointwise output inference otherwise uses the graph's intermediate data type.

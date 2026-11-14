@@ -24,9 +24,9 @@ struct ReluForward
     ComputeType upperClip;
     ComputeType lowerSlope;
 
-    ReluForward(ComputeType lowerClipVal = ComputeType{0},
+    ReluForward(ComputeType lowerClipVal = static_cast<ComputeType>(0),
                 ComputeType upperClipVal = std::numeric_limits<ComputeType>::max(),
-                ComputeType lowerSlopeVal = ComputeType{0})
+                ComputeType lowerSlopeVal = static_cast<ComputeType>(0))
         : lowerClip(lowerClipVal)
         , upperClip(upperClipVal)
         , lowerSlope(lowerSlopeVal)
@@ -63,7 +63,7 @@ struct SigmoidForward
     {
         using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
-        auto result = ComputeType{1} / (ComputeType{1} + exp(-xCompute));
+        auto result = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
         return static_cast<OutputType>(result);
     }
 };
@@ -124,8 +124,9 @@ struct GeluForward
         using hipdnn_data_sdk::types::sqrt;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
-        static const ComputeType s_kSqrt2 = sqrt(ComputeType{2});
-        auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + erf(xCompute / s_kSqrt2));
+        static const ComputeType s_kSqrt2 = sqrt(static_cast<ComputeType>(2));
+        auto result = static_cast<ComputeType>(0.5) * xCompute
+                      * (static_cast<ComputeType>(1) + erf(xCompute / s_kSqrt2));
         return static_cast<OutputType>(result);
     }
 };
@@ -140,10 +141,12 @@ struct GeluApproxTanhForward
         using hipdnn_data_sdk::types::tanh;
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{3.14159265});
-        static const auto s_kCoeff = ComputeType{0.044715};
+        static const ComputeType s_kSqrt2OverPi
+            = sqrt(static_cast<ComputeType>(2) / static_cast<ComputeType>(3.14159265));
+        static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
-        auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
+        auto result = static_cast<ComputeType>(0.5) * xCompute
+                      * (static_cast<ComputeType>(1) + tanh(inner));
         return static_cast<OutputType>(result);
     }
 };
@@ -153,7 +156,7 @@ struct SwishForward
 {
     ComputeType beta;
 
-    explicit SwishForward(ComputeType betaVal = ComputeType{1})
+    explicit SwishForward(ComputeType betaVal = static_cast<ComputeType>(1))
         : beta(betaVal)
     {
     }
@@ -164,7 +167,7 @@ struct SwishForward
         using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
         // Swish(x) = x * sigmoid(beta * x) = x / (1 + exp(-beta * x))
-        auto result = xCompute / (ComputeType{1} + exp(-beta * xCompute));
+        auto result = xCompute / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
         return static_cast<OutputType>(result);
     }
 };
