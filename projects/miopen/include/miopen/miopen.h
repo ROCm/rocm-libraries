@@ -5823,7 +5823,7 @@ MIOPEN_EXPORT miopenStatus_t miopenDropoutGetStatesSize(miopenHandle_t handle,
  * @param use_mask     Boolean flag indicating whether to use a saved mask (an existing or
  * user-defined dropout layout) in reserveSpace (Output)
  * @param state_evo    Boolean flag indicating whether to adopt state evolution strategy to update
- * the PRNG states by the end of each implementation (Output placeholder, currently not enabled)
+ * the PRNG states by the end of each implementation (Output)
  * @param rng_mode     Random number generator used to generate parallel random number sequences
  * (Output)
  * @return             miopenStatus_t
@@ -5853,8 +5853,11 @@ MIOPEN_EXPORT miopenStatus_t miopenGetDropoutDescriptor(miopenDropoutDescriptor_
  * @param use_mask          Boolean flag indicating whether to use a saved mask (an existing or
  * user-defined dropout layout) in reserveSpace (input)
  * @param state_evo         Boolean flag indicating whether to adopt state evolution strategy to
- * update the PRNG states by the end of each implementation (input placeholder, currently not
- * enabled)
+ * update the PRNG states by the end of each implementation (input). When true, every forward
+ * dropout that generates a mask writes the advanced PRNG states back to `states`, so consecutive
+ * calls draw independent masks. When false, the states are left unchanged and every call with
+ * the same states draws the same mask. RNN training forward always advances the states between
+ * its per-layer dropout launches, so each layer gets an independent mask.
  * @param rng_mode          Random number generator used to generate parallel random number
  * sequences (input)
  * @return                  miopenStatus_t
@@ -5882,8 +5885,11 @@ MIOPEN_EXPORT miopenStatus_t miopenRestoreDropoutDescriptor(miopenDropoutDescrip
  * @param use_mask          Boolean flag indicating whether to use a saved mask (an existing or
  * user-defined dropout layout) in reserveSpace (input)
  * @param state_evo         Boolean flag indicating whether to adopt state evolution strategy to
- * update the PRNG states by the end of each implementation (input placeholder, currently not
- * enabled)
+ * update the PRNG states by the end of each implementation (input). When true, every forward
+ * dropout that generates a mask writes the advanced PRNG states back to `states`, so consecutive
+ * calls draw independent masks. When false, the states are left unchanged and every call with
+ * the same states draws the same mask. RNN training forward always advances the states between
+ * its per-layer dropout launches, so each layer gets an independent mask.
  * @param rng_mode          Random number generator used to generate parallel random number
  * sequences (input)
  * @return                  miopenStatus_t

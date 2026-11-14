@@ -556,3 +556,63 @@ TEST(CPU_dropout_NONE, test_dropout_miopen_throw)
         check_vals(dd, testval);
     }
 }
+
+// Two consecutive forward launches on the same PRNG states buffer:
+// - state_evo == false: the kernel does not persist the advanced state, so both launches draw
+//   the same mask (historical behaviour, kept for API compatibility);
+// - state_evo == true: the advanced state is written back, so the second launch draws a new
+//   mask, equal to what the CPU emulator produces when it keeps advancing the same states.
+static void RunStateEvoTest(bool state_evo)
+{
+    auto&& handle = get_handle();
+    const std::vector<int> in_dim{4, 32, 67};
+    auto in = tensor<float>{in_dim}.generate(tensor_elem_gen_integer{17});
+
+    miopen::DropoutDescriptor dd;
+    dd.dropout          = 0.3f;
+    dd.seed             = 1234ULL;
+    dd.use_mask         = false;
+    dd.state_evo        = state_evo;
+    dd.rng_mode         = MIOPEN_RNG_PSEUDO_XORWOW;
+    dd.stateSizeInBytes = std::min(size_t(MAX_PRNG_STATE), handle.GetImage3dMaxWidth()) *
+                          sizeof(rocrand_state_xorwow);
+    auto state_buf      = handle.Create<unsigned char>(dd.stateSizeInBytes);
+    dd.pstates          = state_buf.get();
+    dd.InitPRNGState(handle, dd.pstates, dd.stateSizeInBytes, dd.seed);
+
+    const size_t n = in.desc.GetElementSize();
+    auto in_dev    = handle.Write(in.data);
+    auto out_dev   = handle.Write(std::vector<float>(n));
+    std::vector<std::vector<unsigned char>> gpu_masks;
+    for(int call = 0; call < 2; ++call)
+    {
+        auto rsv_dev = handle.Write(std::vector<unsigned char>(n));
+        dd.Dropout(
+            handle, in.desc, in.desc, in_dev.get(), in.desc, out_dev.get(), rsv_dev.get(), n);
+        gpu_masks.push_back(handle.Read<unsigned char>(rsv_dev, n));
+    }
+
+    // CPU reference: one states vector, advanced by both calls when state_evo is on.
+    std::vector<rocrand_state_xorwow> states(dd.stateSizeInBytes / sizeof(rocrand_state_xorwow));
+    InitKernelStateEmulator(states, dd);
+    std::vector<std::vector<unsigned char>> cpu_masks;
+    for(int call = 0; call < 2; ++call)
+    {
+        auto st          = state_evo ? std::vector<rocrand_state_xorwow>{} : states;
+        auto& use_states = state_evo ? states : st;
+        std::vector<unsigned char> rsv(n);
+        auto out = in.data;
+        DropoutForwardVerify<float>(handle, dd, in.desc, in.data, in.desc, out, rsv, use_states);
+        cpu_masks.push_back(rsv);
+    }
+
+    EXPECT_EQ(gpu_masks[0], cpu_masks[0]);
+    EXPECT_EQ(gpu_masks[1], cpu_masks[1]);
+    if(state_evo)
+        EXPECT_NE(gpu_masks[0], gpu_masks[1]);
+    else
+        EXPECT_EQ(gpu_masks[0], gpu_masks[1]);
+}
+
+TEST(GPU_Dropout_StateEvo_FP32, MaskRepeatsWithoutStateEvo) { RunStateEvoTest(false); }
+TEST(GPU_Dropout_StateEvo_FP32, MaskAdvancesWithStateEvo) { RunStateEvoTest(true); }
