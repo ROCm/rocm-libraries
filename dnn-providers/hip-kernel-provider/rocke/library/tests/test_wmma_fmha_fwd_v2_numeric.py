@@ -9,7 +9,8 @@ padded strides, runtime head widths (multiples of 8) inside a bucket, the
 causal class (top-left / bottom-right, sliding and two-sided windows, fully
 masked rows), additive f32 / Q-dtype bias with broadcast strides, the wave
 pair and gfx12's unsplit wide Q, large logits, an outlier key, and long
-context.
+context. A separate test checks that a row's O is bit-independent of scores
+only its wave neighbours see.
 """
 
 from __future__ import annotations
@@ -592,3 +593,110 @@ def test_prefill_matches_reference(case, dtype):
     if fin.any():
         lse_tol = 1e-2 + 1e-5 * float(np.abs(ref_lse[fin]).max())
         np.testing.assert_allclose(got_lse[fin], ref_lse[fin], rtol=0, atol=lse_tol)
+
+
+def _launch_dense(spec, q, k, v, *, wl, wr, bias=None):
+    """O of one BSHD launch of ``spec`` (top-left diagonal, no LSE)."""
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        build_wmma_fmha_fwd_v2,
+        wmma_fmha_fwd_v2_grid,
+        wmma_fmha_fwd_v2_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    B, S, H, D = q.shape
+    rt = Runtime()
+    tensors = []
+    module = None
+    try:
+        tq, tk, tv = (_Tensor(rt, x) for x in (q, k, v))
+        to = _Tensor(rt, np.zeros_like(q))
+        tensors = [tq, tk, tv, to]
+        values = dict(
+            Q=tq.ptr, K=tk.ptr, V=tv.ptr, O=to.ptr, LSE=0,
+            scale_log2=D**-0.5 * _LOG2E, batch=B, seqlen_q=S, seqlen_k=S,
+            num_query_heads=H, num_kv_heads=H, num_v_heads=H, head_dim_q=D, head_dim_v=D,
+            bottom_right=0, window_left=wl, window_right=wr, write_lse=0,
+            stride_lse_batch=0, stride_lse_token=0, stride_lse_head=0,
+        )  # fmt: skip
+        for name, t in (("q", tq), ("k", tk), ("v", tv), ("o", to)):
+            sb, st, sh = t.strides
+            values.update(
+                {
+                    f"stride_{name}_batch": sb,
+                    f"stride_{name}_token": st,
+                    f"stride_{name}_head": sh,
+                }
+            )
+        if bias is not None:
+            tb = _Tensor(rt, bias)
+            tensors.append(tb)
+            values.update(
+                attn_bias_ptr=tb.ptr, bias_stride_b=0, bias_stride_h=0, bias_stride_q=S
+            )
+        artifact = compile_kernel(
+            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
+        )
+        module = rt.load_module(artifact.hsaco)
+        grid, block = wmma_fmha_fwd_v2_grid(
+            spec, batch=B, seqlen_q=S, num_query_heads=H
+        )
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            grid,
+            block,
+            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
+        )
+        rt.sync()
+        return to.read()
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        for t in tensors:
+            t.free()
+
+
+@pytest.mark.gpu
+@_NEEDS_RDNA
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("mask", ["causal", "bias_lowest"])
+def test_prefill_rows_independent_of_wave_neighbours(mask, dtype):
+    """A row's O must not depend on scores only other rows see. Under causal
+    S = 72, key 71 is visible to row 71 alone; giving it huge K / V must leave
+    rows 0..70 bit-equal, although row 71 shares a wave (rows 64..79) with
+    them and its max jumps (the lazy-rescale decision is per row). The mask is
+    the runtime causal bound, or a bias of the dtype's lowest finite value."""
+    if dtype == "bf16":
+        npdt = pytest.importorskip("ml_dtypes").bfloat16
+        lowest = float(pytest.importorskip("ml_dtypes").finfo(npdt).min)
+    else:
+        npdt = np.float16
+        lowest = float(np.finfo(np.float16).min)
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import WmmaFmhaFwdV2Spec
+
+    B, S, H, D = 1, 72, 16, 64
+    rng = np.random.default_rng(5)
+    q, k, v = (
+        rng.standard_normal((B, S, H, D), dtype=np.float32).astype(npdt)
+        for _ in range(3)
+    )
+    kp, vp = k.copy(), v.copy()
+    for t in (kp, vp):
+        t[:, S - 1] = ((rng.integers(0, 2, (B, H, D)) * 2 - 1) * 1e4).astype(npdt)
+    if mask == "causal":
+        spec = WmmaFmhaFwdV2Spec(dtype=dtype, head_dim=D, mask="causal")
+        launch = dict(wl=-1, wr=0)
+    else:
+        spec = WmmaFmhaFwdV2Spec(dtype=dtype, head_dim=D, mask="causal", bias="q")
+        keep = np.arange(S)[None, :] <= np.arange(S)[:, None]
+        launch = dict(wl=-1, wr=-1, bias=np.where(keep, 0.0, lowest).astype(npdt))
+    clean = _launch_dense(spec, q, k, v, **launch)
+    poisoned = _launch_dense(spec, q, kp, vp, **launch)
+    assert np.isfinite(poisoned.astype(np.float32)).all()
+    rows = slice(0, S - 1)
+    assert np.array_equal(
+        clean[:, rows].view(np.uint16), poisoned[:, rows].view(np.uint16)
+    )
