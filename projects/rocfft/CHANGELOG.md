@@ -21,6 +21,7 @@ Documentation for rocFFT is available at
 * Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
+* Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 

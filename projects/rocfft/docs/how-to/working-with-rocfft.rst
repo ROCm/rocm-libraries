@@ -448,8 +448,8 @@ The workflow for using fields is as follows:
 
 .. important::
 
-   For in-place transforms, pass a non-empty array of input pointers and
-   an empty array of output pointers.
+   For in-place transforms, pass a non-empty array of input pointers. The
+   array of output pointers is ignored and may be null.
 
 Transforms of real data
 =======================
