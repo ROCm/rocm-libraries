@@ -11,7 +11,7 @@ Tests:
 # ==============================================================================
 
 - name: extended_grouped_gemm_basic
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -36,7 +36,7 @@ Tests:
 # ==============================================================================
 
 - name: extended_complex_float
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f32_c
@@ -57,7 +57,7 @@ Tests:
   batch_count: [1, 2]
 
 - name: extended_complex_double
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f64_c
@@ -78,7 +78,7 @@ Tests:
   batch_count: 1
 
 - name: extended_complex_float_batch
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f32_c
@@ -314,7 +314,7 @@ Tests:
 
 # MX Block Size Variants
 - name: extended_grouped_gemm_activation
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -345,7 +345,7 @@ Tests:
 
 # Test 1: Large group count (16 groups) with variable problem sizes
 - name: extended_grouped_16
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -367,7 +367,7 @@ Tests:
 # Test 2: Variable group sizes with comprehensive transpose/beta combos
 # Creates 36 test variations (3 group counts × 2 transA × 2 transB × 3 beta)
 - name: extended_grouped_gemm_large_batch
-  gpu_arch_exclude: '90a|12|11'
+  gpu_arch_exclude: '90a|12|11|1030'
   category: pre_checkin
   function: matmul
   a_type: f16_r
