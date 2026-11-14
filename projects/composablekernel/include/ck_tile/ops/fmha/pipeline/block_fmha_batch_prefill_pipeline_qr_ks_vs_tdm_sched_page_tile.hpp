@@ -586,6 +586,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         // two-fragment struct.
         index_t page_id3_valid_tokens = 0;
         index_t page_id3_raw_scalar   = 0;
+        // Policy::UsePageIdBatch: the j+3 ids come from VGPR batches of 32 tiles
+        // (load_page_id_batch), the next batch loaded one batch ahead. The other P>=64 tiles
+        // publish each id through LDS (the scalar queue).
+        constexpr bool kPageIdBatch             = Policy::template UsePageIdBatch<Problem>();
+        [[maybe_unused]] int32_t id_batch       = 0;
+        [[maybe_unused]] int32_t id_batch_next  = 0;
+        [[maybe_unused]] index_t id_batch_tile0 = 0;
+        if constexpr(kPageIdBatch)
+        {
+            id_batch      = k_dram_window.load_page_id_batch(0, num_total_loop, kv_load_start);
+            id_batch_next = k_dram_window.load_page_id_batch(32, num_total_loop, kv_load_start);
+        }
 
         static_assert(1 <= k1_loops);
         // kLeanIssue: per-wave TDM descriptor inputs, derived once (see tdm_issue_lean).
@@ -854,7 +866,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                                                                          kv_load_start,
                                                                          id_lds_slot,
                                                                          page_tile_order);
-                    else
+                    else if constexpr(!kPageIdBatch)
                         page_id3_valid_tokens = k_dram_window.prefetch_page_id_to_lds_scalar(
                             page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
                 }
@@ -1223,8 +1235,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 block_sync_lds<v_lds_insts>();
                 if constexpr(Problem::kPageBlockSize >= 64)
                 {
-                    page_id3_raw_scalar = k_dram_window.load_page_id_from_lds_scalar(
-                        page_id3_valid_tokens, id_lds_slot);
+                    if constexpr(!kPageIdBatch)
+                        page_id3_raw_scalar = k_dram_window.load_page_id_from_lds_scalar(
+                            page_id3_valid_tokens, id_lds_slot);
                 }
                 else
                 {
@@ -1253,7 +1266,22 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 // PV separates the page-ID LDS load from its first use.
                 s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount,
                                          kKPrefetchBarrierDsCount>();
-                if constexpr(Problem::kPageBlockSize >= 64)
+                if constexpr(kPageIdBatch)
+                {
+                    const index_t tile = page_tile_i + 3;
+                    if(tile - id_batch_tile0 >= 32)
+                    {
+                        id_batch = id_batch_next;
+                        id_batch_tile0 += 32;
+                        id_batch_next = k_dram_window.load_page_id_batch(
+                            id_batch_tile0 + 32, num_total_loop, kv_load_start);
+                    }
+                    page_id3 = k_dram_window.page_id_from_batch(
+                        id_batch,
+                        tile - id_batch_tile0,
+                        k_dram_window.tile_valid_tokens(tile, num_total_loop, kv_load_start));
+                }
+                else if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     page_id3 = k_dram_window.complete_page_id_from_value_scalar(
                         page_id3_valid_tokens, page_id3_raw_scalar);
