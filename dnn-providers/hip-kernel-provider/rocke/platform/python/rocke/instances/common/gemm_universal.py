@@ -3072,9 +3072,11 @@ def _emit_wmma_acc_scatter(
 
     The wave32 accumulator distributes a warp tile across lanes differently
     from MFMA, so each result slot's ``(row, col)`` comes from the op's
-    ``dst_layout()`` map instead of lane math. The cshuffle epilogue uses this
-    traversal for LDS staging; the caller's ``per_cell(c_m, c_n, acc_h, i)``
-    owns the write, and the base offsets locate the warp within the block.
+    ``dst_layout()`` map instead of lane math. The default epilogue (direct
+    global store) and the cshuffle epilogue (LDS staging) both use this
+    traversal; the caller's ``per_cell(c_m, c_n, acc_h, i)`` owns the write.
+    The default epilogue passes ``block + warp`` base offsets, the cshuffle
+    epilogue ``warp`` offsets.
     """
     t = spec.tile
     c_map = op.dst_layout()
@@ -3286,45 +3288,11 @@ def _emit_epilogue_default(
         with b.scf_if(in_bounds):
             b.global_store(C, c_off, h, align=elem_bytes)
 
-    # ---- WMMA (RDNA) accumulator scatter: fully MMA-contract driven. ----
-    # The WMMA accumulator distributes the M x N tile across wave32 lanes
-    # differently from MFMA, so we ask the op's destination layout map for the
-    # (row, col) of every per-lane slot rather than hard-coding the lane math.
-    # One slot -> one f16 store. (The supported WMMA subset is the single
-    # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
-    if op.family == "wmma":
-        c_map = op.dst_layout()
-        block_warp_m_off = b.add(block_m_off, warp_m_off)
-        block_warp_n_off = b.add(block_n_off, warp_n_off)
-        flat = 0
-        for mi in range(mfmas_m):
-            atom_m = b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m))
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                atom_n = b.add(block_warp_n_off, b.const_i32(ni * t.warp_tile_n))
-                acc_h = b.vec_cast_f32_to(acc, c_dtype)
-                for i in range(c_per_lane):
-                    row_in_atom, col_in_atom = c_map.coord(b, lane, i)
-                    c_m = b.add(atom_m, row_in_atom)
-                    c_n = b.add(atom_n, col_in_atom)
-                    c_off = b.add(b.mul(c_m, N), c_n)
-                    if batch_off_c is not None:
-                        c_off = b.add(batch_off_c, c_off)
-                    h = b.vec_extract(acc_h, i)
-                    if fused_epilogue is not None:
-                        h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
-                    _store_masked(c_m, c_n, c_off, h)
-        return
-
     # Compile-time invariants that do not depend on (mi, ni, i).
     # Hoisting them avoids re-emitting the same add chain per
     # accumulator slot; the IR's constant folder collapses them
     # downstream, but building them once keeps the IR small and the
-    # lowered LLVM readable. The accumulator -> (row, col) scatter (16x16
-    # and 32x32 layouts, with the per-mi base hoist + the single-constant
-    # per-slot ramp) lives in :func:`_emit_mfma_acc_scatter` so the default
-    # and cshuffle epilogues share one copy of the MFMA output-layout math.
+    # lowered LLVM readable.
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
@@ -3337,17 +3305,35 @@ def _emit_epilogue_default(
             h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
         _store_masked(c_m, c_n, c_off, h)
 
-    _emit_mfma_acc_scatter(
-        b,
-        spec,
-        lane,
-        accs,
-        block_warp_m_off,
-        block_warp_n_off,
-        c_per_lane,
-        c_dtype,
-        _store_cell,
-    )
+    # The accumulator -> (row, col) walk is shared with the cshuffle epilogue,
+    # one helper per ISA family: the WMMA walk reads the op's destination
+    # layout map, the MFMA walk the 16x16 / 32x32 output layouts. Here the base
+    # offsets are block + warp and each cell is one scalar global store.
+    if op.family == "wmma":
+        _emit_wmma_acc_scatter(
+            b,
+            spec,
+            op,
+            lane,
+            accs,
+            block_warp_m_off,
+            block_warp_n_off,
+            c_per_lane,
+            c_dtype,
+            _store_cell,
+        )
+    else:
+        _emit_mfma_acc_scatter(
+            b,
+            spec,
+            lane,
+            accs,
+            block_warp_m_off,
+            block_warp_n_off,
+            c_per_lane,
+            c_dtype,
+            _store_cell,
+        )
 
 
 def _emit_epilogue_split_k(

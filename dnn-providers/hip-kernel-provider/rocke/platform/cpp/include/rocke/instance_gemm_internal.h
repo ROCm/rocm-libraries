@@ -527,8 +527,9 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       bool n_base_first);
 
 /* _emit_wmma_acc_scatter(...): the WMMA sibling of the walk above. Each result
- * slot's (row, col) comes from the op's dst_layout() map instead of lane math;
- * the cshuffle epilogue uses this walk with its LDS staging callback. */
+ * slot's (row, col) comes from the op's dst_layout() map instead of lane math.
+ * The default epilogue uses this walk with its global-store callback and the
+ * cshuffle epilogue with its LDS staging callback. */
 void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
@@ -542,8 +543,8 @@ void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
                                       rocke_gemm_per_cell_fn per_cell,
                                       void* user);
 
-/* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
- * destination-layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
+/* _emit_epilogue_default(...): direct vector-store epilogue. fused_epilogue is
+ * opaque (NULL = matmul-only). */
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
