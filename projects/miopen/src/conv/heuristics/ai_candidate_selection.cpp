@@ -59,6 +59,7 @@ namespace candidate_selection {
 MIOPEN_INTERNALS_EXPORT
 CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                                                        const std::string& solver)
+    : arch_(arch)
 {
     const auto path = GetSystemDbPath() / (arch + "_" + solver + "_metadata.tn.model");
     MIOPEN_LOG_I2("Loading metadata file: " + path.string());
@@ -683,8 +684,20 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
 }
 
 // Number of derived kernel-config features appended below (see the derived-feature block in
-// EngineerCandidateSelectionKernelConfigFeatures).
-constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
+// EngineerCandidateSelectionKernelConfigFeatures). gfx1250 models add 2 SplitK features
+// (log2(SplitK) + is_autodeduce); other arches keep the base set, so their committed models
+// (trained without the SplitK features) stay valid.
+constexpr std::size_t kKernelConfigDerivedFeatureCount        = 10;
+constexpr std::size_t kKernelConfigDerivedFeatureCountGfx1250 = 12;
+
+// gfx1250 config models carry the two extra SplitK derived features.
+bool KernelConfigUsesSplitKFeatures(const std::string& arch) { return StartsWith(arch, "gfx1250"); }
+
+std::size_t KernelConfigDerivedFeatureCount(const std::string& arch)
+{
+    return KernelConfigUsesSplitKFeatures(arch) ? kKernelConfigDerivedFeatureCountGfx1250
+                                                : kKernelConfigDerivedFeatureCount;
+}
 
 std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata,
                                                      const std::vector<std::string>& active_params)
@@ -702,7 +715,8 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
             ++raw_numerical_features;
     }
 
-    return onehot_features + raw_numerical_features + kKernelConfigDerivedFeatureCount;
+    return onehot_features + raw_numerical_features +
+           KernelConfigDerivedFeatureCount(metadata.arch());
 }
 
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
@@ -822,6 +836,13 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     const auto safe_param = [&](const std::string& suffix) {
         return SafeConfigValueForDerived(get_param(suffix), missing_token);
     };
+    // Presence by active-param membership, not value: autodeduce SplitK is -1, which equals the
+    // missing_token, so a value test cannot tell "present but autodeduce" from "absent".
+    const auto has_param = [&](const std::string& suffix) {
+        return std::any_of(active_params.begin(), active_params.end(), [&](const std::string& p) {
+            return EndsWith(p, suffix);
+        });
+    };
     // Push a derived feature: the missing sentinel if any input param is absent, else the value.
     const auto emit = [&](bool any_missing, float value) {
         engineered.push_back(any_missing ? kMissingDerived : value);
@@ -869,6 +890,17 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
 
     // K-dimension.
     emit(k_per_block_missing, std::log1pf(k_per_block));
+
+    // Split-K (Wrw lever), gfx1250 models only. Present-but-autodeduce (SplitK <= 0) differs from
+    // absent; other arches keep the base derived set so their committed models stay valid.
+    if(KernelConfigUsesSplitKFeatures(metadata.arch()))
+    {
+        const bool split_k_present = has_param("SplitK");
+        const float split_k_val    = get_param("SplitK");
+        const bool split_k_auto    = split_k_present && split_k_val <= 0.0f;
+        emit(!split_k_present, split_k_auto ? 0.0f : std::log2f(split_k_val));
+        emit(!split_k_present, split_k_auto ? 1.0f : 0.0f);
+    }
 
     if(engineered.size() != expected_output_dim)
     {

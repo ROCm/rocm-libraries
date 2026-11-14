@@ -50,6 +50,15 @@ namespace ai {
 // Common utility functions for AI heuristics (2D, 3D, and KTN)
 namespace common {
 
+// Normalize a device/arch name for AI-heuristic model lookups and gates: drop any runtime
+// sub-target suffix ("gfx1250-strict" -> "gfx1250") or feature flags ("gfx1250:sramecc+" ->
+// "gfx1250"). The base gfx* names contain no '-' or ':', so trimming at the first such
+// separator maps a reported variant back to the arch the shipped per-arch models are keyed on.
+inline std::string NormalizeArch(const std::string& name)
+{
+    return name.substr(0, name.find_first_of("-:"));
+}
+
 // Sign- and bounds-safe one-hot encoding. A label outside [0, num_classes) yields an all-zero
 // vector (and a warning): an unknown or negative category degrades to "no class" rather than
 // indexing out of range (static_cast<size_t> of a negative value would otherwise be undefined).

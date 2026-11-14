@@ -127,6 +127,9 @@ public:
     {
         return output_params_;
     }
+    // Normalized arch this metadata was loaded for (e.g. "gfx1250"). Used to gate the per-arch
+    // derived kernel-config feature set (gfx1250 adds the SplitK features).
+    MIOPEN_INTERNALS_EXPORT const std::string& arch() const { return arch_; }
     MIOPEN_INTERNALS_EXPORT const std::map<std::string, std::map<std::string, int>>&
     sequence_encodings() const;
     MIOPEN_INTERNALS_EXPORT float GetMissingValueToken() const;
@@ -164,6 +167,7 @@ private:
     std::vector<int> split_k_values_;
     std::map<std::string, ConditionalLayout> conditional_layouts_;
     std::size_t num_cu_ = 0;
+    std::string arch_;
 };
 
 class CandidateSelectionModel
