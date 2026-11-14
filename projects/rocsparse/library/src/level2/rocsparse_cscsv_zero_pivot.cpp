@@ -85,10 +85,10 @@ rocsparse_status rocsparse::cscsv_seed_zero_pivot(rocsparse_handle     handle,
     void* zero_pivot = info->get_singularity_numeric_exact()->get_position();
     if(diag_type == rocsparse_diag_type_unit)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
-            info->get_batch_count(), indextype, info->get_position(), stream));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::assign_max_async(batch_count, indextype, zero_pivot, stream));
     }
-    if(indextype == rocsparse_indextype_i32)
+    else if(indextype == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
             batch_count, (int32_t*)zero_pivot, (const int32_t*)info->get_position(), stream));
