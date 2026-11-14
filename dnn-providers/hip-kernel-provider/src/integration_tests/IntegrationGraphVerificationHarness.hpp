@@ -464,6 +464,13 @@ private:
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         gpuBundle.addTensor(*tensorAttr,
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+
+        // A ragged tensor's offset table is an input the variant pack must carry, but the
+        // node lists only its primary tensors.
+        if(tensorAttr->has_ragged_offset())
+        {
+            tryAddTensorToBundles(tensorAttr->get_ragged_offset(), cpuBundle, gpuBundle);
+        }
     }
 };
 

@@ -6,20 +6,23 @@ snapshots were taken from **different** AITER commits (see table below).
 
 | Kernel group | AITER commit | Platforms | Per-arch SOURCE.md |
 |---|---|---|---|
-| `fmha_v3_fwd` (gfx942, gfx950) | `17d4a33b6f9535e820353ebc6217769efc3766d6` | gfx942, gfx950 | — |
+| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_fwd_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
 | `fmha_v3_bwd` (gfx942, gfx950) | `cdcfa833bdf554ca75594c90dde4316ea9b50199` (v0.1.13) | gfx942, gfx950 | `gfx942/fmha_v3_bwd/SOURCE.md`, `gfx950/fmha_v3_bwd/SOURCE.md` |
 
-The forward POC snapshot (`17d4a33b`) pre-dates the backward snapshot
-(`cdcfa833`, AITER v0.1.13). There is no single unified AITER commit that
-contains both the forward and backward kernels used here. When performing an
-AITER refresh, both groups must be updated together (or the commit mismatch
-documented explicitly) so reviewers can verify provenance from a single source
-of truth.
+The forward kernels are pinned in `aiter_fwd_pins.json`, which records for each
+forward module the AITER commit of its objects, the AITER host code the engine
+mirrors, and the upstream rows left out with the reason. The per-arch
+`SOURCE.md` files are generated from it by the
+`hipdnn-aiter-asm-sdpa-fwd-sync` skill. The forward and backward kernels come
+from different AITER commits, so check each group against its own row above.
 
 ## Directory layout notes
 
-- **Forward kernels** (`fmha_v3_fwd/`): AITER has separate `MI300/` and `MI308/` subdirectories
-  because MI308 (MI300A APU) has different fp8 support. We only include MI300 for the POC.
+- **Forward kernels** (`fmha_v3_fwd/`): gfx942 keeps AITER's separate `MI300/` and `MI308/`
+  subdirectories, because MI308X needs its own objects. The engine picks `MI308/` at runtime
+  when the device's PCI chip ID is an MI308X ID (`isMi308Device` in `SdpaFwdPlanBuilder.cpp`)
+  and `MI300/` for every other gfx942 device, including MI300X and MI300A. gfx950 stores its
+  objects flat.
 - **Backward kernels** (`fmha_v3_bwd/`): AITER stores these flat (no MI300/MI308 split) because
   backward kernels only support bf16/fp16 (no fp8), so the same binary works on both MI300X and
   MI300A. SHA256 manifests for each arch are recorded in the per-arch `SOURCE.md` files.

@@ -377,6 +377,18 @@ auto createRaggedBshdSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256
     return sdpa::withRaggedTensors(createBshdSdpaFwdGraph(qDims, vDims), {"q", "k", "v", "o"});
 }
 
+// Requests the bottom-right causal band (left bound unbounded, right bound 0) that the
+// causal registry rows serve.
+flatbuffers::FlatBufferBuilder withBottomRightCausalMask(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return mutateGraph(std::move(builder), [](GraphT& graph) {
+        auto* attrs = graph.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->right_bound = 0;
+        attrs->diagonal_alignment
+            = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    });
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -434,6 +446,49 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
                    "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
                    "tensor"},
          false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+// The gfx950 bf16 hd256 kernels are group-mode only and index K/V by the query head, so
+// GQA/MQA declines for head dim 256, with or without a causal mask, while it stays
+// accepted for head dim 128.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableGfx950Hd256DeclinesGqa)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx950")
+    {
+        GTEST_SKIP() << "head dim 256 forward kernels are gfx950-only";
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Group mode hd256 with equal head counts"},
+            true},
+           {GraphTest{withBottomRightCausalMask(
+                          createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256})),
+                      "Causal group mode hd256 with equal head counts"},
+            true},
+           {GraphTest{withBottomRightCausalMask(
+                          createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 2, 256, 256})),
+                      "Causal group mode hd256 with GQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 2, 256, 256}),
+                      "Group mode hd256 with GQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 1, 256, 256}),
+                      "Group mode hd256 with MQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 128}, {4, 2, 256, 128}),
+                      "Group mode hd128 with GQA"},
+            true},
+           {GraphTest{createBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Batch mode hd256 has no kernel"},
+            false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
@@ -2283,6 +2338,117 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachFp8VByteStrideField)
         EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_BF16_PAST_LIMIT));
         EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT));
         EXPECT_FALSE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT + 1));
+    }
+}
+
+// =============================================================================
+// hd192x128 K/V per-head row extent
+// =============================================================================
+
+// The hd192x128 kernels need S_kv * seq stride * element bytes below 2^32 for K
+// and for V. With S_kv = 256 bf16 rows, the largest sequence stride that fits is
+// UINT32_MAX / 512 = 2^23 - 1, and one more element makes the extent exactly
+// 2^32. Both strides clear the per-field byte-stride guard, so only the extent
+// rule separates them.
+constexpr int64_t K_EXTENT_SEQ_LEN_KV = 256;
+constexpr int64_t K_EXTENT_BF16_BYTES = 2;
+constexpr int64_t K_EXTENT_STRIDE_LIMIT
+    = static_cast<int64_t>(UINT32_MAX) / (K_EXTENT_BF16_BYTES * K_EXTENT_SEQ_LEN_KV);
+
+// A bf16 graph with one batch, so no batch stride bounds a head's extent, whose
+// K and V are BSHD with the given sequence strides. Q and O stay contiguous BSHD.
+flatbuffers::FlatBufferBuilder
+    createGraphWithKvSeqStrides(int64_t kSeqStride, int64_t vSeqStride, int64_t headDimQk = 192)
+{
+    const std::vector<int64_t> qDims = {1, 8, K_EXTENT_SEQ_LEN_KV, headDimQk};
+    const std::vector<int64_t> kDims = {1, 8, K_EXTENT_SEQ_LEN_KV, headDimQk};
+    const std::vector<int64_t> vDims = {1, 8, K_EXTENT_SEQ_LEN_KV, 128};
+    const std::vector<int64_t> oDims = {1, 8, K_EXTENT_SEQ_LEN_KV, 128};
+    const std::vector<int64_t> bshd = {3, 1, 2, 0};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims, bshd),
+        kDims,
+        {kSeqStride, headDimQk, kSeqStride, 1},
+        vDims,
+        {vSeqStride, 128, vSeqStride, 1},
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims, bshd),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+// Runs the predicate on the graph's K and V descriptors at the bf16 element size.
+// Only descriptors are read, so these run without a device.
+bool kvRowExtentsFit(flatbuffers::FlatBufferBuilder&& builder)
+{
+    const GraphTest test{std::move(builder), ""};
+    const auto graph = test.graphWrapper();
+    const auto& attrs = graph.nodeWrappers()
+                            .front()
+                            ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    const auto& tensorMap = graph.getTensorMap();
+    return fwdKvRowExtentsFitU32(*tensorMap.at(attrs.k_tensor_uid()),
+                                 *tensorMap.at(attrs.v_tensor_uid()),
+                                 K_EXTENT_BF16_BYTES);
+}
+
+TEST(TestSdpaFwdKvRowExtent, AcceptsExtentsJustBelow2Pow32)
+{
+    EXPECT_TRUE(
+        kvRowExtentsFit(createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT, K_EXTENT_STRIDE_LIMIT)));
+}
+
+TEST(TestSdpaFwdKvRowExtent, DeclinesWhenEitherExtentReaches2Pow32)
+{
+    EXPECT_FALSE(kvRowExtentsFit(
+        createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT + 1, K_EXTENT_STRIDE_LIMIT)));
+    EXPECT_FALSE(kvRowExtentsFit(
+        createGraphWithKvSeqStrides(K_EXTENT_STRIDE_LIMIT, K_EXTENT_STRIDE_LIMIT + 1)));
+}
+
+// The rule belongs to the hd192x128 kernels on both architectures, in batch and
+// group mode. An hd128 graph with the same strides has no such limit.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheHd192x128KvRowExtent)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_FITS = K_EXTENT_STRIDE_LIMIT;
+    constexpr int64_t K_REACHES = K_EXTENT_STRIDE_LIMIT + 1;
+    const auto ragged = [](flatbuffers::FlatBufferBuilder&& builder) {
+        return sdpa::withRaggedTensors(std::move(builder), {"q", "k", "v", "o"});
+    };
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createGraphWithKvSeqStrides(K_FITS, K_FITS),
+                      "Batch mode, K and V extents just below 2^32"},
+            true},
+           {GraphTest{createGraphWithKvSeqStrides(K_REACHES, K_FITS), "Batch mode, K extent 2^32"},
+            false},
+           {GraphTest{createGraphWithKvSeqStrides(K_FITS, K_REACHES), "Batch mode, V extent 2^32"},
+            false},
+           {GraphTest{ragged(createGraphWithKvSeqStrides(K_FITS, K_FITS)),
+                      "Group mode, K and V extents just below 2^32"},
+            true},
+           {GraphTest{ragged(createGraphWithKvSeqStrides(K_REACHES, K_REACHES)),
+                      "Group mode, K and V extents 2^32"},
+            false},
+           {GraphTest{createGraphWithKvSeqStrides(K_REACHES, K_REACHES, /*headDimQk=*/128),
+                      "hd128 with the same strides"},
+            true}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
     }
 }
 
