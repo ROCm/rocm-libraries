@@ -384,6 +384,17 @@ class FmhaFwdApiTrait:
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.skip}-{self.sink}"
         )
 
+    def is_gfx12_d128_qr_bk64_o6(self) -> bool:
+        return (
+            self.arch.name == "gfx12"
+            and self.dtype in ("fp16", "bf16")
+            and self.hdim == "128"
+            and self.pipeline_tag == "qr"
+            and (self.bm0, self.bn0, self.bk0) == (128, 64, 64)
+            and (self.bn1, self.bk1, self.bk0max) == (128, 64, 128)
+            and self.occupancy == 6
+        )
+
     @property
     def scheck(self) -> str:
         if self.mode == "group":
@@ -410,7 +421,7 @@ class FmhaFwdApiTrait:
             assert False
 
     def seqtune(self, max_bm0: int) -> str:
-        if self.bm0 == max_bm0 or self.bm0 == 64:
+        if self.is_gfx12_d128_qr_bk64_o6() or self.bm0 == max_bm0 or self.bm0 == 64:
             return "true/*fall back to largest tile*/"
         else:
             if self.mode == "group":
@@ -699,6 +710,10 @@ class FmhaFwdApiPool:
     def __init__(self):
         self.pool = OrderedDict()
 
+    @staticmethod
+    def _dispatch_priority(trait: FmhaFwdApiTrait) -> int:
+        return int(trait.is_gfx12_d128_qr_bk64_o6())
+
     def register_traits(self, trait: FmhaFwdApiTrait) -> None:
         hdim = trait.hdim, trait.bn1
         ts = (
@@ -756,11 +771,13 @@ class FmhaFwdApiPool:
                 for i_hdim, ((hdim, hdim_v), pool_by_hdim) in enumerate(
                     item for item in pool_by_dtype.items() if has_traits(item[1])
                 ):
-                    # First match wins: the sched pipelines go first; stable sort keeps tile order.
+                    # First match wins: sched pipelines go first, then the gfx12 d128 QR BK64 candidate.
                     traits = sorted(
                         (trait for trait in pool_by_hdim if filter_fn(trait)),
-                        key=lambda trait: trait.pipeline_tag
-                        not in ("qr_tdm_sched", "qr_tdm_fp8_sched"),
+                        key=lambda trait: (
+                            trait.pipeline_tag not in ("qr_tdm_sched", "qr_tdm_fp8_sched"),
+                            -self._dispatch_priority(trait),
+                        ),
                     )
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()
@@ -1772,6 +1789,7 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128, 128,  32,  64, 128,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  16,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m64_d128_pv16_constraint)),
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m64_d128_constraint)),
+                              FmhaFwdTileSize(128,  64,  64, 128,  64,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6),
                               FmhaFwdTileSize(256,  64,  64, 128,  64,  128, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,   8)],
                 (192, 128) : [FmhaFwdTileSize(128,  64,  64, 128,  64,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  16,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
