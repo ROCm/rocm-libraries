@@ -21,7 +21,7 @@
  *     .kernel_name()                         rocke_dgrad_pp_mfma_kernel_name
  *   dgrad_pp_mfma_reason / is_valid_dgrad_pp_mfma_spec
  *                                            rocke_dgrad_pp_mfma_is_valid_spec
- *   build_dgrad_pp_mfma(spec, arch)          rocke_build_dgrad_pp_mfma(_new)
+ *   build_dgrad_pp_mfma(spec, *, arch)       rocke_build_dgrad_pp_mfma(_new)
  *   (+ convenience: build -> lower .ll)      rocke_dgrad_pp_mfma_lower_to_llvm
  *
  * The spec's problem is the forward pass the dgrad runs as

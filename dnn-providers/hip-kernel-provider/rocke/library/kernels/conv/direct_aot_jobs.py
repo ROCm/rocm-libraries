@@ -621,10 +621,10 @@ DGRAD_WMMA_DILATED_KNOBS = (
     (2, 4, 4, 8, 64, 1, 32, 2, True),
 )
 # LDS-DMA ping-pong MFMA dgrad (direct_dgrad_pp_mfma, gfx950): "same"-padded
-# square filters and the output-channel block. 7x7 fits LDS only below the
-# 128-channel block its transposing weight reads need.
+# square filters (the output-channel blocks are the kernel module's BLOCK_K).
+# 7x7 fits LDS only below the 128-channel block its transposing weight reads
+# need.
 DGRAD_PP_MFMA_FILTERS = (3, 5)
-DGRAD_PP_MFMA_BLOCK_K = (128, 256)
 WGRAD_MFMA_K = (32,)
 # Wave32 WMMA direct forward (direct_fwd_wmma): (waves_k, waves_p, tiles_k,
 # tiles_p, tile_w, tile_n, ck, stages, prefetch, split_barrier,
@@ -2245,7 +2245,9 @@ def _knob_grid(
     elif variant == _DGRAD_PP_MFMA:
         if arch != "gfx950":
             return  # 16-byte LDS DMA and transposing LDS reads: gfx950 only
-        for bk in DGRAD_PP_MFMA_BLOCK_K:
+        from kernels.common.conv_direct_dgrad_pp_mfma import BLOCK_K
+
+        for bk in BLOCK_K:
             yield dict(block_k=bk)
     elif variant == _DGRAD_WMMA:
         from rocke.core.arch import ArchTarget

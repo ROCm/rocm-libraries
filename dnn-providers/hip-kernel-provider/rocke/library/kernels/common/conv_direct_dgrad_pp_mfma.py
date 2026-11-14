@@ -74,6 +74,7 @@ from kernels.common.conv_direct_grouped import (
 )
 
 __all__ = [
+    "BLOCK_K",
     "DgradPpMfmaSpec",
     "build_dgrad_pp_mfma",
     "dgrad_pp_mfma_problem",
@@ -288,7 +289,7 @@ def _tr_swz(b: IRBuilder, row: Value) -> Value:
     return b.mul(b.add(lo, b.mul(hi, b.const_i32(4))), b.const_i32(2))
 
 
-def build_dgrad_pp_mfma(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> KernelDef:
+def build_dgrad_pp_mfma(spec: DgradPpMfmaSpec, *, arch: str = "gfx950") -> KernelDef:
     why = dgrad_pp_mfma_reason(spec, arch)
     if why is not None:
         raise ValueError(f"invalid DgradPpMfmaSpec for {arch}: {why}")
