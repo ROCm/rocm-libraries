@@ -605,3 +605,42 @@ TEST(RocprimDeviceTransformTests, UnalignedPointer)
         }
     }
 }
+
+TEST(RocprimDeviceTransformTests, FloatPointerTuningBoundaries)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    HIP_CHECK(hipSetDevice(device_id));
+
+    constexpr size_t   max_size = 65537;
+    std::vector<float> input(max_size);
+    for(size_t i = 0; i < max_size; ++i)
+        input[i] = static_cast<float>(i % 97);
+
+    float* d_input;
+    float* d_output;
+    HIP_CHECK(hipMalloc(&d_input, max_size * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_output, max_size * sizeof(float)));
+    HIP_CHECK(hipMemcpy(d_input, input.data(), max_size * sizeof(float), hipMemcpyHostToDevice));
+
+    for(size_t size : {size_t(1),
+                       size_t(32767),
+                       size_t(32768),
+                       size_t(32769),
+                       size_t(49152),
+                       size_t(65535),
+                       size_t(65536),
+                       size_t(65537)})
+    {
+        SCOPED_TRACE(testing::Message() << "size = " << size);
+        HIP_CHECK(rocprim::transform(d_input, d_output, size, transform<float>{}));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        std::vector<float> result(size);
+        HIP_CHECK(hipMemcpy(result.data(), d_output, size * sizeof(float), hipMemcpyDeviceToHost));
+        for(size_t i = 0; i < size; ++i)
+            ASSERT_FLOAT_EQ(result[i], input[i] + 5.0f);
+    }
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+}
