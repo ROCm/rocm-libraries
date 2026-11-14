@@ -108,8 +108,8 @@ The compiled code objects are checked in two parts. The kernel descriptor,
 read from the ELF itself, must start every wave in round-to-nearest-even with
 FP16 and FP32 denormals kept; this needs COMGR but no disassembler. An ISA
 contract then disassembles the code objects: one division with every FP32 FMA
-inside it, that division being the expansion evaluated on the device (see
-A-DIV below), the FP16 epilogue as the only fused site anywhere in the kernel,
+inside it, that division being one pinned instruction sequence (see A-DIV
+below), the FP16 epilogue as the only fused site anywhere in the kernel,
 no write to the MODE register, and the round-to-nearest-even sequence at every
 BF16 conversion. Any instruction outside the model fails with "re-derive the
 path model": Tier B is re-derived for the new path, never widened to absorb
@@ -137,14 +137,15 @@ changes one version, and a failure is attributed to one of them.
 
 A-DIV is the assumption every nonzero output depends on, and the stored bits
 cannot test it: a reciprocal one FP32 step from `RN(1/l)` leaves Tier B at no
-coordinate. Its evidence is a device evaluation of the division expansion
-itself. A program outside this repository ran that expansion on every FP32
-denominator on gfx942 and obtained `RN(1/l)` each time. The ISA contract
-reduces the expansion of each compiled quick kernel to its dataflow and
-requires the evaluated one, in the modes it was evaluated in; a compiler that
-expands the division differently fails the contract until its expansion is
-evaluated. Structural zeros do not depend on A-DIV at all: they store `+0`
-for any reciprocal below `2^11`.
+coordinate. gfx942 has no FP32 divide instruction, so the compiler expands
+`fdiv 1.0, l` into a sequence of instructions, and A-DIV is a statement about
+that sequence. The ISA contract therefore pins it: the expansion of each
+compiled quick kernel is reduced to its dataflow, independent of register
+allocation, and must be the one sequence the assumption is stated for, in a
+kernel that starts with FP32 denormals kept. A compiler that expands the
+division differently fails the contract; A-DIV says nothing about another
+sequence. Structural zeros do not depend on A-DIV at all: they store `+0` for
+any reciprocal below `2^11`.
 
 A-F covers an AMDGPU backend behaviour: affected compilers select some
 unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which

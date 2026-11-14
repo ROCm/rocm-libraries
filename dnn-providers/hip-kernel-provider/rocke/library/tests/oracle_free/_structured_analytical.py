@@ -602,12 +602,9 @@ class StructuredScopeError(ArithmeticError):
 #
 # The stored bits cannot show a wrong reciprocal (a neighbor of ``RN(1 / l)``
 # leaves Tier B nowhere: ``STRUCTURED_UNOBSERVED_VIOLATIONS``), so passing
-# launches are no evidence for A-DIV. Its evidence is a device evaluation of
-# the expansion itself. A program outside this repository ran the sequence on
-# every FP32 denominator on gfx942 and got ``RN(1 / l)`` each time; the ISA
-# contract requires a compiled quick kernel to hold exactly that sequence, in
-# the modes it was evaluated in. That settles A-DIV for the sequence and the
-# device; it stays a named assumption of the model.
+# launches are no evidence for A-DIV. The assumption is a statement about one
+# instruction sequence, and the ISA contract pins it: a compiled quick kernel
+# must hold exactly that expansion, and start with FP32 denormals kept.
 # ---------------------------------------------------------------------------
 
 DIV_ASSUMPTION = "A-DIV v1: FDIV(1, l) = RN(1 / l) for every FP32 l in [1/2, 2**9)"

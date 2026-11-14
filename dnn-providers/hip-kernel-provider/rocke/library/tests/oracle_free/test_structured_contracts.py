@@ -1543,8 +1543,8 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
     model.divisions = len(ends)
     model.division = division_dataflow(text)
     # A write to the MODE register changes the rounding or denormal mode the
-    # wave started with (A-MODE32, A-CVT-F16, and the mode the division was
-    # evaluated in), and the change outlives the instruction that needed it.
+    # wave started with (A-MODE32, A-CVT-F16, and the mode A-DIV is stated
+    # for), and the change outlives the instruction that needed it.
     # None is accepted, not even inside the division expansion: nothing here
     # proves that a write there is undone before the epilogue.
     model.mode_writes = [
@@ -1652,11 +1652,11 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
 #
 # gfx942 has no FP32 divide instruction: the backend expands ``fdiv 1.0, l``
 # into a scaled reciprocal refined by FMAs. A-DIV says that expansion returns
-# ``RN(1 / l)``. The stored bits cannot show whether it does, so the evidence
-# is a device evaluation of one particular sequence on every FP32 denominator.
-# This contract ties a compiled kernel to that evidence: its expansion must be
-# the evaluated one, the same operations on the same values in the same order,
-# whatever registers and operand order the compiler chose.
+# ``RN(1 / l)``. The stored bits cannot show whether it does, and the
+# assumption is a statement about one particular instruction sequence. This
+# contract pins that sequence: the expansion of a compiled kernel must be the
+# same operations on the same values in the same order, whatever registers and
+# operand order the compiler chose.
 # ---------------------------------------------------------------------------
 
 _ISA_SUFFIX = re.compile(r"_e(?:32|64)$")
@@ -1671,8 +1671,8 @@ _ISA_DIVISION_OPERATIONS = {
     "v_div_fmas_f32": ("div_fmas", 3),
     "v_div_fixup_f32": ("div_fixup", 3),
 }
-# The expansion both recorded compilers emit, and the one evaluated on the
-# device. ``t0`` and ``t2`` are the scaled denominator and numerator, ``t4`` a
+# The expansion both recorded compilers emit, and the one A-DIV is stated
+# for. ``t0`` and ``t2`` are the scaled denominator and numerator, ``t4`` a
 # Newton refinement of ``rcp(t0)``, ``t7`` two FMA corrections of the quotient
 # estimate ``t2 * t4``, ``t8`` its residual; the last two instructions undo the
 # scaling and fix the special cases.
@@ -1869,8 +1869,8 @@ def test_isa_classifier_reads_each_epilogue_form(lanes: frozenset[int]) -> None:
     assert model.mix_sites == (2 if lanes else 0)
 
 
-def test_division_dataflow_is_the_evaluated_expansion() -> None:
-    """A-DIV: the expansion reduces to the evaluated dataflow under either
+def test_division_dataflow_is_the_pinned_expansion() -> None:
+    """A-DIV: the expansion reduces to the pinned dataflow under either
     register allocation, with the factors of a product in either order, with
     a multiply-accumulate written as an FMA and with unrelated instructions
     interleaved. An expansion that computes anything else does not."""
@@ -2321,8 +2321,8 @@ def test_quick_code_objects_start_waves_in_the_modeled_modes(case: DenseShape) -
     quick spec: every wave starts in round-to-nearest-even for FP32 and FP16,
     with FP16 denormals kept. No enclosure depends on the FP32 denormal mode
     (every FP32 subnormal of the path is enclosed with its flushed value), but
-    the division expansion was evaluated with FP32 denormals kept, so the
-    evidence for A-DIV applies only to a kernel that starts in that mode.
+    A-DIV is stated for the division expansion as it runs with FP32 denormals
+    kept, the mode both recorded compilers set, so that mode is required too.
 
     The descriptor is read from the ELF itself, so this needs COMGR but no
     disassembler and still runs where ``llvm-objdump`` is missing."""
@@ -2331,7 +2331,7 @@ def test_quick_code_objects_start_waves_in_the_modeled_modes(case: DenseShape) -
     print(f"{case.case_id}: modes={modes}")
     assert (modes.round_32, modes.round_16_64) == (0, 0), f"{_REDERIVE}: {modes}"
     assert modes.denorm_16_64 == 3, f"{_REDERIVE}: {modes}"
-    assert modes.denorm_32 == 3, f"{_REDERIVE}: evaluate the division again: {modes}"
+    assert modes.denorm_32 == 3, f"{_REDERIVE}: {modes}"
 
 
 @pytest.mark.parametrize("case", QUICK_SHAPES, ids=lambda case: case.case_id)
@@ -2350,8 +2350,8 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     - A named artifact (by HSACO digest) must show its recorded lanes. A digest
       no artifact names, from a compiler version an artifact was recorded
       under, raises a warning: the recorded digests are out of date for it.
-    - A-DIV: the division expansion is the one evaluated on the device
-      (``division_dataflow``). Another expansion has no evidence behind it.
+    - A-DIV: the division expansion is the pinned one
+      (``division_dataflow``). The assumption says nothing about another.
     - A-MODE32, A-CVT-F16: no instruction, the division expansion included,
       writes the MODE register. The modes the waves start with are the
       descriptor contract above.
@@ -2384,7 +2384,7 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     assert not model.mode_writes, f"{_REDERIVE}: {model.mode_writes}"
     assert model.divisions == 1, f"{_REDERIVE}: {model.divisions} divisions"
     assert model.division == _ISA_DIVISION_DATAFLOW, (
-        f"{_REDERIVE}: the division expansion is not the evaluated one: "
+        f"{_REDERIVE}: the division expansion is not the pinned one: "
         f"{model.division}"
     )
     assert not model.fma_outside_division, f"{_REDERIVE}: {model.fma_outside_division}"
