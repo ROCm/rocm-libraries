@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -391,11 +391,19 @@ namespace rocalution
                 delete this->op_level_[i];
                 delete this->restrict_op_level_[i];
                 delete this->prolong_op_level_[i];
+
+                // Clear transfer mapping
+                delete this->trans_level_[i];
             }
 
             delete[] this->op_level_;
             delete[] this->restrict_op_level_;
             delete[] this->prolong_op_level_;
+            delete[] this->trans_level_;
+            this->op_level_          = NULL;
+            this->restrict_op_level_ = NULL;
+            this->prolong_op_level_  = NULL;
+            this->trans_level_       = NULL;
 
             // De-allocate smoothers, if not allocated by the user
             if(this->set_sm_ == false)
@@ -408,12 +416,15 @@ namespace rocalution
 
                 delete[] this->smoother_level_;
                 delete[] this->sm_default_;
+                this->smoother_level_ = NULL;
+                this->sm_default_     = NULL;
             }
 
             // De-allocate coarse grid solver, if not allocated by user
             if(this->set_s_ == false)
             {
                 delete this->solver_coarse_;
+                this->solver_coarse_ = NULL;
             }
 
             this->levels_    = -1;
@@ -455,6 +466,23 @@ namespace rocalution
         FATAL_ERROR(__FILE__, __LINE__);
     }
     // LCOV_EXCL_STOP
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseAMG<OperatorType, VectorType, ValueType>::MoveToBackendOf_(
+        OperatorType* op, const OperatorType& src) const
+    {
+        assert(op != NULL);
+
+        // Not CloneBackend, which also gives a GlobalMatrix the parallel manager of src
+        if(static_cast<const BaseRocalution<ValueType>&>(src).is_accel_())
+        {
+            op->MoveToAccelerator();
+        }
+        else
+        {
+            op->MoveToHost();
+        }
+    }
 
     template class BaseAMG<LocalMatrix<double>, LocalVector<double>, double>;
     template class BaseAMG<LocalMatrix<float>, LocalVector<float>, float>;

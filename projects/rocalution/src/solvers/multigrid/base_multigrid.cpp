@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,8 @@ namespace rocalution
 
         this->restrict_op_level_ = NULL;
         this->prolong_op_level_  = NULL;
+
+        this->trans_level_ = NULL;
 
         this->d_level_ = NULL;
         this->r_level_ = NULL;
@@ -367,14 +369,6 @@ namespace rocalution
 
         if(this->build_ == true)
         {
-            // Clear transfer mapping
-            for(int i = 0; i < this->levels_ - 1; ++i)
-            {
-                delete this->trans_level_[i];
-            }
-
-            delete[] this->trans_level_;
-
             // Clear temporary VectorTypes
             for(int i = 0; i < this->levels_; ++i)
             {
@@ -724,7 +718,17 @@ namespace rocalution
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
                                                                      VectorType*       x)
     {
+        this->Vcycle_(rhs, x, false);
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
+                                                                     VectorType*       x,
+                                                                     bool              continue_x)
+    {
         log_debug(this, "BaseMultiGrid::Vcycle_()", " #*# begin", (const void*&)rhs, x);
+
+        assert(!continue_x || this->current_level_ < this->levels_ - 1);
 
         // Run coarse grid solver, if coarsest grid has been reached
         if(this->current_level_ == this->levels_ - 1)
@@ -754,7 +758,7 @@ namespace rocalution
 
         // Pre-smoothing
         smoother->InitMaxIter(this->iter_pre_smooth_);
-        if(this->is_precond_ || this->current_level_ != 0)
+        if(!continue_x && (this->is_precond_ || this->current_level_ != 0))
         {
             // When this AMG is a preconditioner or if we are not on the finest level,
             // we have to use a zero initial guess
@@ -925,10 +929,13 @@ namespace rocalution
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Wcycle_(const VectorType& rhs,
                                                                      VectorType*       x)
     {
-        // gamma = 2 hardcoded
-        for(int i = 0; i < 2; ++i)
+        // gamma = 2 hardcoded, the second cycle continues from the first. The coarsest
+        // level is solved once per visit
+        this->Vcycle_(rhs, x);
+
+        if(this->current_level_ < this->levels_ - 1)
         {
-            this->Vcycle_(rhs, x);
+            this->Vcycle_(rhs, x, true);
         }
     }
 
@@ -978,8 +985,25 @@ namespace rocalution
             // q = Ax
             op->Apply(*x, q);
 
+            // (x,q)
+            ValueType xq = x->DotNonConj(*q);
+
+            // The CG step breaks down if (x,Ax) is zero, as for a zero rhs, whose cycle gives
+            // the zero correction. Keep the correction of the cycle then
+            if(xq == static_cast<ValueType>(0))
+            {
+                return;
+            }
+
+            // The CG step is zero if (r,x) is zero
+            if(rho == static_cast<ValueType>(0))
+            {
+                x->Zeros();
+                return;
+            }
+
             // alpha = rho / (x,q)
-            alpha = rho / x->DotNonConj(*q);
+            alpha = rho / xq;
 
             // r = r - alpha * q
             r->AddScale(*q, -alpha);
@@ -1005,8 +1029,17 @@ namespace rocalution
             // x = x * alpha
             x->Scale(alpha);
 
+            // (r,q)
+            ValueType rq = r->DotNonConj(*q);
+
+            // The search direction is zero if the first step solved the level exactly
+            if(rq == static_cast<ValueType>(0))
+            {
+                return;
+            }
+
             // alpha = rho / (r,q)
-            alpha = rho / r->DotNonConj(*q);
+            alpha = rho / rq;
 
             // x = x + alpha * r
             x->AddScale(*r, alpha);

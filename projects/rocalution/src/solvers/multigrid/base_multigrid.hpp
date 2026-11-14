@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -138,6 +138,10 @@ namespace rocalution
 
         /** \brief V-cycle */
         void Vcycle_(const VectorType& rhs, VectorType* x);
+        /** \brief V-cycle; a coarse level, and the finest level of a preconditioner, start
+         *  from a zero initial guess unless continue_x is set. The coarsest level always
+         *  solves from zero, so continue_x must not be set there */
+        void Vcycle_(const VectorType& rhs, VectorType* x, bool continue_x);
         /** \brief W-cycle */
         void Wcycle_(const VectorType& rhs, VectorType* x);
         /** \brief F-cycle */

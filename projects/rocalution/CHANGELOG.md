@@ -43,6 +43,12 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `MultiGrid` crashing in `Clear()` and in its destructor after `Build()`, because it deleted transfer maps that only the AMG solvers allocate.
+* Fixed the W-cycle returning the V-cycle result at the cost of a W-cycle. Its second coarse cycle now continues from the first instead of restarting from zero, and the coarsest level is solved once per visit.
+* Fixed the K-cycle returning NaN when a CG step on a coarse level breaks down: for a zero coarse residual, a zero first step, or a first step that solves the level exactly.
+* Fixed `UAAMG` failing an assert at a level without aggregates. Like `SAAMG`, it now stops coarsening at that level.
+* Fixed `UAAMG::ReBuildNumeric()` not scaling the coarse operators by the over-interpolation factor.
+* Fixed `ReBuildNumeric()` of the AMG solvers after `SetHostLevels()`. It failed a backend assert, and for a `GlobalMatrix` it gave a coarse operator a wrong parallel manager, or for `PairwiseAMG` none, which broke the solve. The coarse operators now end up on the backend of their level and keep their parallel manager.
 
 ## (Unreleased) rocALUTION 4.1.1
 

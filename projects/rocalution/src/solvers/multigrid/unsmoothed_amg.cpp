@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,13 +123,20 @@ namespace rocalution
         assert(this->build_);
         assert(this->op_ != NULL);
 
-        // Create coarse operator
+        assert(this->restrict_op_level_[0] != NULL);
+        assert(this->prolong_op_level_[0] != NULL);
+
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
         this->op_level_[0]->ConvertToCSR();
         this->op_level_[0]->CloneBackend(*this->op_);
 
-        assert(this->restrict_op_level_[0] != NULL);
-        assert(this->prolong_op_level_[0] != NULL);
+        // If all coarse levels are on the host, move the transfer operators for the product
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->MoveToBackendOf_(this->restrict_op_level_[0], *this->op_);
+            this->MoveToBackendOf_(this->prolong_op_level_[0], *this->op_);
+        }
 
         if(this->op_->GetFormat() != CSR)
         {
@@ -146,18 +153,27 @@ namespace rocalution
                 *this->restrict_op_level_[0], *this->op_, *this->prolong_op_level_[0]);
         }
 
+        if(this->over_interp_ > static_cast<ValueType>(1))
+        {
+            this->op_level_[0]->Scale(static_cast<ValueType>(1) / this->over_interp_);
+        }
+
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+            this->restrict_op_level_[0]->MoveToHost();
+            this->prolong_op_level_[0]->MoveToHost();
+        }
+
         for(int i = 1; i < this->levels_ - 1; ++i)
         {
-            this->op_level_[i]->Clear();
-            this->op_level_[i]->ConvertToCSR();
-
-            // Create coarse operator
-            OperatorType tmp;
-            tmp.CloneBackend(*this->op_);
-            this->op_level_[i]->CloneBackend(*this->op_);
-
             assert(this->restrict_op_level_[i] != NULL);
             assert(this->prolong_op_level_[i] != NULL);
+
+            // Create coarse operator, on the backend of its transfer operators
+            this->op_level_[i]->Clear();
+            this->op_level_[i]->ConvertToCSR();
+            this->MoveToBackendOf_(this->op_level_[i], *this->restrict_op_level_[i]);
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
@@ -169,7 +185,12 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->MoveToBackendOf_(this->op_level_[i - 1], *this->restrict_op_level_[i - 1]);
+            }
+
+            if(this->over_interp_ > static_cast<ValueType>(1))
+            {
+                this->op_level_[i]->Scale(static_cast<ValueType>(1) / this->over_interp_);
             }
         }
 
@@ -244,6 +265,14 @@ namespace rocalution
         connections.Clear();
         aggregates.Clear();
         aggregate_root_nodes.Clear();
+
+        // We need to revert the level creation, if the number of columns of P is zero
+        // because in that case, R will have zero rows and thus the coarse level will be
+        // a 0x0 matrix.
+        if(pro->GetN() == 0)
+        {
+            return false;
+        }
 
         // Transpose P to obtain R
         pro->Transpose(res);
