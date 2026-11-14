@@ -104,7 +104,9 @@ struct ConvolutionBiasActivationTestParam
 
     // Dims of the ADD operand that is not the convolution output. Empty: the per-channel bias
     // getDerivedShape(yDims).
-    std::vector<int64_t> biasDimsOverride;
+    // Explicit init avoids -Wmissing-field-initializers on the Param{...} that stop at label.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::vector<int64_t> biasDimsOverride{};
     // Pass that operand as the first input of the ADD (bias + y_conv) instead of the second.
     bool biasFirst = false;
 
