@@ -43,6 +43,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed the host conversion of non-square matrices to DIA writing past the end of the values when the matrix has more rows than columns, for example in `LocalMatrix::ExtractSubMatrices()` and in the multicolored preconditioners. When the matrix has more columns than rows, `LocalMatrix::LeaveDataPtrDIA()` aborted on the result. The host now sizes the DIA values and decides whether the conversion succeeds as the accelerator does, so some non-square matrices that the host converted to DIA before now stay in CSR, with the fallback warning.
+* Fixed the host `LocalMatrix::Apply()` and `LocalMatrix::ApplyAdd()` of non-square DIA matrices ignoring the entries in the columns at or past the number of rows, and reading past the end of the input vector when the matrix has more rows than columns. They also skipped diagonals in the last rows, for square matrices too, when the offsets set with `LocalMatrix::SetDataPtrDIA()` were not in ascending order.
+* Fixed the conversion to DIA of matrices with more than 2^31 - 1 DIA entries, which overflowed the number of entries or the index into the values. These matrices now stay in CSR, with the fallback warning.
 
 ## (Unreleased) rocALUTION 4.1.1
 
