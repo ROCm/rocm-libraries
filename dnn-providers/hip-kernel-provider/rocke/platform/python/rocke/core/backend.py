@@ -790,7 +790,6 @@ def mx_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         group_k=spec.group_k,
         block_tile_m=spec.block_tile_m,
         block_tile_n=spec.block_tile_n,
-        per_input_row=spec.per_input_row,
     )
 
 

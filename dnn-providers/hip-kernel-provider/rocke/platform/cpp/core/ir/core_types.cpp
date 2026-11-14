@@ -489,6 +489,39 @@ const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, 
     return rocke_i_global_ptr_to_i64_error(op->operands[0]->type, op->results[0]->type, buf, cap);
 }
 
+/* Python core/ir.py::_ldexp_types_error; the text is the Python engine's. */
+const char* rocke_i_ldexp_types_error(const rocke_type_t* value_type,
+                                      const rocke_type_t* exponent_type,
+                                      const rocke_type_t* result_type,
+                                      char* buf,
+                                      size_t cap)
+{
+    if(!rocke_type_eq(value_type, rocke_f32()) || !rocke_type_eq(exponent_type, rocke_i32())
+       || !rocke_type_eq(result_type, rocke_f32()))
+    {
+        snprintf(buf,
+                 cap,
+                 "ldexp takes an f32 value and an i32 exponent and gives an f32, got %s, %s -> %s",
+                 value_type->name,
+                 exponent_type->name,
+                 result_type->name);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_ldexp_op_error; the texts are the Python engine's. */
+const char* rocke_i_ldexp_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 2 || op->num_results != 1 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "ldexp takes two operands and gives one result");
+        return buf;
+    }
+    return rocke_i_ldexp_types_error(
+        op->operands[0]->type, op->operands[1]->type, op->results[0]->type, buf, cap);
+}
+
 /* Python core/ir.py::_trap_op_error; the text is the Python engine's. */
 const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
@@ -1333,7 +1366,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_addr_of",
 
     /* tile.* buffer f32 atomic add with a cache policy */
-    "tile.buffer_atomic_fadd_f32"};
+    "tile.buffer_atomic_fadd_f32",
+
+    /* math.* value * 2^exponent */
+    "math.ldexp"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1635,7 +1671,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* tile.global_addr_of        */ true,
 
     /* tile.* buffer f32 atomic add (effectful) */
-    /* buffer_atomic_fadd_f32     */ false};
+    /* buffer_atomic_fadd_f32     */ false,
+
+    /* math.* value * 2^exponent */
+    /* math.ldexp                 */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

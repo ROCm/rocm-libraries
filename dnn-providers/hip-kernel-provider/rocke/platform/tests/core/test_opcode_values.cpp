@@ -265,6 +265,7 @@ constexpr PinnedOpcode kPinned[] = {
     {ROCKE_OP_TILE_GPU_CHECK_FAILED, 230, "tile.gpu_check_failed", false},
     {ROCKE_OP_TILE_GLOBAL_ADDR_OF, 231, "tile.global_addr_of", true},
     {ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, 232, "tile.buffer_atomic_fadd_f32", false},
+    {ROCKE_OP_MATH_LDEXP, 233, "math.ldexp", true},
 };
 
 /* Each pinned opcode keeps its value, its name and its purity. */

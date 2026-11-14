@@ -126,8 +126,12 @@ extern "C" {
  * 17: rocke_attention_tiled_2d_spec_t gained lse_head_major and
  *     rocke_unified_attention_3d_tiled_spec_t gained emit_lse, each a bool in
  *     its old tail padding: sizes unchanged, but an old caller leaves that byte
- *     unset. */
-#define ROCKE_ABI_VERSION 17
+ *     unset.
+ * 19: rocke_mx_gemm_spec_t lost per_input_row and now declares the required
+ *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
+ *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
+ *     returns long long (it returned int), which changes its signature. */
+#define ROCKE_ABI_VERSION 19
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

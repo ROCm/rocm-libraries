@@ -63,6 +63,7 @@ from .ir import (
     SmemType,
     _gpu_check_failed_op_error,
     GPU_CHECK_FAILED_OP,
+    _ldexp_op_error,
     _trap_op_error,
 )
 from .value_sources import ASSUME_RANGE_OP
@@ -496,6 +497,10 @@ class _Verifier:
                 self.err(error, op)
         elif name == "tile.global_ptr_to_i64":
             error = _global_ptr_to_i64_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "math.ldexp":
+            error = _ldexp_op_error(op)
             if error:
                 self.err(error, op)
         elif name == "tile.trap":

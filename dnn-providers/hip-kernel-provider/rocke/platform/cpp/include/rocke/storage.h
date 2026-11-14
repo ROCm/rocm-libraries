@@ -46,6 +46,12 @@ typedef struct rocke_matrix_fragment_layout
     int lanes_per_group;
 } rocke_matrix_fragment_layout_t;
 
+/* MatrixFragmentLayout.chunks_per_lane: the K chunks one lane's fragment holds. */
+static inline int rocke_matrix_fragment_chunks_per_lane(const rocke_matrix_fragment_layout_t* p)
+{
+    return (int)(p->fragment.count / (uint64_t)p->chunk_elements);
+}
+
 bool rocke_matrix_fragment_layout_init(rocke_matrix_fragment_layout_t* out,
                                        const rocke_fragment_packing_t* fragment,
                                        int chunk_elements,

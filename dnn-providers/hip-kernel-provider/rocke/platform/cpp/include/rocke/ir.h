@@ -502,6 +502,10 @@ typedef enum rocke_opcode
      * policy). Appended so no existing opcode index shifts. */
     ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
 
+    /* value * 2^exponent rounded once (Python IRBuilder.ldexp). Appended so no
+     * existing index shifts. */
+    ROCKE_OP_MATH_LDEXP,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -985,6 +989,9 @@ rocke_value_t*
 /* ----- math ----- */
 rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a);
+/* value * 2^exponent rounded once (Python IRBuilder.ldexp): an f32 value and an
+ * i32 exponent give an f32; llvm.ldexp.f32.i32, one v_ldexp_f32. */
+rocke_value_t* rocke_b_ldexp(rocke_ir_builder_t* b, rocke_value_t* value, rocke_value_t* exponent);
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);

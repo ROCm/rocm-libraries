@@ -40,7 +40,9 @@ parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
 run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
 test runs the Python engine alone there and both engines wherever the binding
 is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
-same engines through ``compile_kernel`` and similar entry points.
+same engines through ``compile_kernel`` and similar entry points, and
+``lower_spec_with_all_engines`` lowers an instance spec with them, each engine
+building the kernel with its own builder.
 """
 
 from __future__ import annotations
@@ -56,7 +58,7 @@ from rocke.core.backend import _lower_via_cpp_engine
 from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 
 __all__ = [
     "ENGINES",
@@ -69,6 +71,7 @@ __all__ = [
     "available_engines",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
+    "lower_spec_with_all_engines",
     "lower_with_both_engines",
     "lower_with_engine",
 ]
@@ -103,6 +106,29 @@ def all_engines_backend() -> str:
     """The ``backend`` that lowers with every engine in ``available_engines()``:
     ``"both"`` when the ``rocke_engine`` binding is importable, else ``"python"``."""
     return "both" if "cpp" in available_engines() else "python"
+
+
+def lower_spec_with_all_engines(
+    spec: object,
+    arch: str,
+    *,
+    build_kernel: Callable[..., KernelDef],
+    lower_spec: Callable[..., object],
+) -> str:
+    """The LLVM IR of the instance ``spec`` describes, for ``arch``, from every
+    engine in ``available_engines()``.
+
+    With the ``rocke_engine`` binding, each engine's builder builds the kernel
+    from the spec (``lower_spec(spec, arch=arch, backend="both")``, an
+    instance's ``rocke.core.backend.lower_*`` entry point), both kernels are
+    lowered, and the two texts must be the same byte for byte. Without it,
+    ``build_kernel(spec, arch=arch)``, the Python builder, lowered by the
+    default lowerer; a ``lower_*`` entry point needs the binding even for the
+    Python backend.
+    """
+    if "cpp" in available_engines():
+        return lower_spec(spec, arch=arch, backend="both").llvm_text
+    return lower_kernel_to_llvm(build_kernel(spec, arch=arch), arch=arch)
 
 
 def _require_native_engine() -> ModuleType:
