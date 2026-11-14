@@ -99,6 +99,10 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
                 iot::mapOptional(io, "generated", s.generated);
                 iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
+                // Sequence traits fill by index, so an explicit empty list would
+                // otherwise keep the default element.
+                if(!iot::outputting(io) && iot::hasKey(io, "reductions"))
+                    s.reductions.clear();
                 iot::mapOptional(io, "reductions", s.reductions);
                 iot::mapOptional(io, "postKernels", s.postKernels);
             }

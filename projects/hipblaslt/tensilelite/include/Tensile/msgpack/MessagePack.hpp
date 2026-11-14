@@ -879,8 +879,10 @@ namespace TensileLite
         {
             static void enumeration(MessagePackInput& io, CustomReductionMode& value)
             {
-                hashmapEnumeration(io, value, static_cast<int>(CustomReductionMode::Count),
-                    [](int i) { return TensileLite::toString(static_cast<CustomReductionMode>(i)); });
+                hashmapEnumeration(
+                    io, value, static_cast<int>(CustomReductionMode::Count), [](int i) {
+                        return TensileLite::toString(static_cast<CustomReductionMode>(i));
+                    });
             }
         };
 
@@ -889,8 +891,10 @@ namespace TensileLite
         {
             static void enumeration(MessagePackInput& io, CustomPostKernelKind& value)
             {
-                hashmapEnumeration(io, value, static_cast<int>(CustomPostKernelKind::Count),
-                    [](int i) { return TensileLite::toString(static_cast<CustomPostKernelKind>(i)); });
+                hashmapEnumeration(
+                    io, value, static_cast<int>(CustomPostKernelKind::Count), [](int i) {
+                        return TensileLite::toString(static_cast<CustomPostKernelKind>(i));
+                    });
             }
         };
 

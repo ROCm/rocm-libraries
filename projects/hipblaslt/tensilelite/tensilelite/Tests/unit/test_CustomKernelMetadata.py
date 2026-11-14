@@ -1811,6 +1811,8 @@ def _dropPostKernels(config):
     (_setDescriptor("grid", ["StreamKWithBatch", "One", "One"]), r"main grid \[StreamKNoBatch"),
     (_setDescriptor("grid", ["StreamKNoBatch", "One", "Batch"]), r"main grid \[StreamKNoBatch"),
     (lambda config: config.update(WorkAssignment="DynamicWorkQueue"), "StaticGrid or Hybrid"),
+    (_setDescriptor("grid", ["StreamKNoBatch", "TilesBands", "One"]), "must not use TilesBands"),
+    (lambda config: config.update(ProblemType={"GroupedGemm": True}), "do not support GroupedGemm"),
 ])
 def test_post_kernel_validation_errors(mutate, match):
     config = _post_kernel_config()
@@ -1818,6 +1820,12 @@ def test_post_kernel_validation_errors(mutate, match):
     mutate(config)
     with pytest.raises(ValueError, match=match):
         ck_mod.validateCustomPostKernels(config)
+
+
+def test_main_grid_refuses_tiles_bands_without_post_kernels():
+    descriptor = {"name": "k", "args": [], "grid": ["TilesBands", "One", "One"]}
+    with pytest.raises(ValueError, match="must not use TilesBands"):
+        ck_mod.validateCustomPostKernels({"CustomKernel": descriptor})
 
 
 @pytest.mark.parametrize("strategy", ["None", "DataParallel"])
