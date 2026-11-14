@@ -1760,7 +1760,7 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
              arch = "gfx950";
          },
          false},
-        // 256 channels a block: 96960 bytes of LDS, gfx950's.
+        // 256 channels a block: 96960 bytes of LDS (131776 with gfx950's staging), gfx950's.
         {"NwgFour",
          [](ConvShape&, WrwConfig& c, std::string& arch) {
              c.nwg = 4;
@@ -1770,7 +1770,8 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         {"NwgFourPastGfx942", [](ConvShape&, WrwConfig& c, std::string&) { c.nwg = 4; }, false},
         {"BpcThree", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 3; }, false},
         {"BpcSixteen", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 16; }, false},
-        // 7x7, 16 columns, 4 rows a step, 2 groups a wave: 87008 bytes of LDS.
+        // 7x7, 16 columns, 4 rows a step, 2 groups a wave: 87008 bytes of LDS (127968 on
+        // gfx950).
         {"LdsPastGfx942",
          [](ConvShape& s, WrwConfig& c, std::string&) {
              s.filter = {7, 7};

@@ -203,7 +203,7 @@ int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
 
 } // namespace
 
-int64_t hankelLdsBytes(const WrwConfig& config)
+int64_t hankelLdsBytes(const WrwConfig& config, bool staged)
 {
     // ConvDepthwiseHankelWrw.h: G x-row buffers (s phase rows each) of 64 nwg channel rows, and
     // KH + G - 1 ring slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots
@@ -219,7 +219,12 @@ int64_t hankelLdsBytes(const WrwConfig& config)
     // Plus 32 halves a buffer for the rows' skews (and the odd phase's shift).
     const int64_t slot = divUp(channels * dyPitch + 32, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
-    return (config.g * (stride * channels * xPitch + 32) + (slots + 1) * slot) * 2;
+    // gfx950 stages each row in LDS as it lies in memory: whole 64-lane chunks of 8-channel
+    // vectors (512 halves a chunk) of the row's x and dy columns.
+    const int64_t xChunks = divUp(4 * xg * stride * (channels / 8), 64);
+    const int64_t dyChunks = divUp(config.q * (channels / 8), 64);
+    const int64_t stage = staged ? config.g * (xChunks + dyChunks) * 512 : 0;
+    return (config.g * (stride * channels * xPitch + 32) + (slots + 1) * slot + stage) * 2;
 }
 
 bool hankelAdmits(const WrwProblem& problem,
@@ -271,7 +276,7 @@ bool hankelAdmits(const WrwProblem& problem,
         return false;
     }
     const int64_t ldsLimit = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
-    return hankelLdsBytes(config) <= ldsLimit;
+    return hankelLdsBytes(config, arch == "gfx950") <= ldsLimit;
 }
 
 bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign, int dyAlign)

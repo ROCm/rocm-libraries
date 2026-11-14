@@ -97,8 +97,21 @@ constexpr int SLOTS = KH + G - 1; // ring slots; slot SLOTS is zeros
 // Staging units: 4 x columns x 8 channels. At stride 2 a phase row's XG words take 2 XG units.
 constexpr int XU = S * XG * (CB / 8), DU = DG * (CB / 8);
 constexpr int XPT = (G * XU + THREADS - 1) / THREADS, DPT = (G * DU + THREADS - 1) / THREADS;
+#if defined(__gfx950__)
+// gfx950: rows are staged in LDS as they lie in memory ([column][channel], buffer loads
+// straight into LDS, whole 64-lane chunks of 16-byte vectors) and turned channel-major with
+// ds_read_b64_tr_b16: a 16-lane group reads 4 columns x 16 channels and lane L gets channel L's
+// four columns, one 64-bit word of its row. No staging registers, no byte permutes.
+constexpr bool TR = true;
+#else
+constexpr bool TR = false;
+#endif
+constexpr int XCOLS = 4 * XG * S, DCOLS = 4 * DG; // columns a staged row holds
+constexpr int XCHUNKS = (XCOLS * (CB / 8) + 63) / 64, DCHUNKS = (DCOLS * (CB / 8) + 63) / 64;
+constexpr int XSTAGE = XCHUNKS * 512, DSTAGE = DCHUNKS * 512; // halves a staged row
+constexpr int STAGE = TR ? G * (XSTAGE + DSTAGE) : 1;
 /// The LDS the kernel declares (bytes); the host gates it against the device's.
-constexpr int LDS_BYTES = (G * XB + (SLOTS + 1) * SS) * 2;
+constexpr int LDS_BYTES = (G * XB + (SLOTS + 1) * SS + (TR ? STAGE : 0)) * 2;
 
 typedef _Float16 h4 __attribute__((ext_vector_type(4)));
 typedef short s4 __attribute__((ext_vector_type(4)));
@@ -257,6 +270,8 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
             for(int sg = 0; sg < SG; ++sg)
                 acc[cg][rg][sg] = f4{0, 0, 0, 0};
 
+    __shared__ __attribute__((aligned(16))) u16 stage[STAGE];
+    const int waveU = __builtin_amdgcn_readfirstlane(wave);
     Stage<XPT, XU> sx;
     Stage<DPT, DU> sd;
     const int first = partition * a.rowsPerPartition;
@@ -289,8 +304,51 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     xo[g] = yy < y1 && yy >= 0 && yy < a.hi ? yy * a.wi * a.c : -1;
                     dyo[g] = entering(yy, oy) ? oy * a.wo * a.c : -1;
                 }
-                sx.load(xr, xo, q0 * S - a.pw, a.wi, a.c, c0, tid);
-                sd.load(dr, dyo, q0, a.wo, a.c, c0, tid);
+#if defined(__gfx950__)
+                {
+                    // Chunk k of a staged row: lanes are vectors k 64 + lane, column-major
+                    // (CB / 8 vectors a column), landing at 16 bytes a lane.
+                    auto stageRow = [&](__amdgpu_buffer_rsrc_t r,
+                                        int off,
+                                        int col0,
+                                        int width,
+                                        int cols,
+                                        int chunks,
+                                        u16* dst) {
+                        for(int k = waveU; k < chunks; k += THREADS / 64)
+                        {
+                            const int v = k * 64 + lane, col = v / (CB / 8);
+                            const int cv = (v % (CB / 8)) * 8, ix = col0 + col;
+                            const unsigned o
+                                = off >= 0 && col < cols && ix >= 0 && ix < width
+                                          && c0 + cv + 8 <= a.c
+                                      ? static_cast<unsigned>((off + ix * a.c + c0 + cv) * 2)
+                                      : OOB;
+                            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                                r,
+                                (__attribute__((address_space(3))) void*)(dst + k * 512),
+                                16,
+                                o,
+                                0,
+                                0,
+                                0);
+                        }
+                    };
+#pragma unroll
+                    for(int g = 0; g < G; ++g)
+                    {
+                        stageRow(
+                            xr, xo[g], q0 * S - a.pw, a.wi, XCOLS, XCHUNKS, stage + g * XSTAGE);
+                        stageRow(
+                            dr, dyo[g], q0, a.wo, DCOLS, DCHUNKS, stage + G * XSTAGE + g * DSTAGE);
+                    }
+                }
+#else
+                {
+                    sx.load(xr, xo, q0 * S - a.pw, a.wi, a.c, c0, tid);
+                    sd.load(dr, dyo, q0, a.wo, a.c, c0, tid);
+                }
+#endif
             };
             auto storeStep = [&](int y) {
                 u16* xd[G];
@@ -303,18 +361,63 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     xd[g] = xs[g];
                     dd[g] = entering(yy, oy) ? ring + (oy % SLOTS) * SS : nullptr;
                 }
-                if constexpr(S == 1)
+#if defined(__gfx950__)
                 {
-                    sx.store(xd, XP, tid);
+                    // Word w (4 columns; at stride 2, phase p's) of channel block cb: a 16-lane
+                    // group's transposed read, lane L the word of channel 16 cb + L.
+                    const int quad = (lane / 4) % 4, chunk4 = 4 * (lane % 4), ch16 = lane % 16;
+                    auto turn = [&](const u16* src, int words, u16* dst, int pitch, bool phases) {
+                        const int groups = words * (CB / 16);
+                        for(int t = waveU; t * 4 < groups; t += THREADS / 64)
+                        {
+                            const int gi = t * 4 + lane / 16;
+                            if(gi >= groups)
+                            {
+                                continue;
+                            }
+                            const int wp = gi / (CB / 16), cb = gi % (CB / 16);
+                            const int p = phases ? wp / XG : 0, w = phases ? wp % XG : wp;
+                            const int xpos = phases ? 2 * (4 * w + quad) + p : 4 * w + quad;
+                            const s4 v = __builtin_amdgcn_ds_read_tr16_b64_v4i16(
+                                (__attribute__((address_space(3)))
+                                 s4*)(const_cast<u16*>(src) + xpos * CB + 16 * cb + chunk4));
+                            const int ch = 16 * cb + ch16;
+                            *reinterpret_cast<s4*>(dst + (phases ? p * PHASE : 0) + ch * pitch
+                                                   + skewOf(ch) + 4 * w)
+                                = v;
+                        }
+                    };
+#pragma unroll
+                    for(int g = 0; g < G; ++g)
+                    {
+                        turn(stage + g * XSTAGE, S * XG, xd[g], XP, S == 2);
+                        if(dd[g] != nullptr)
+                        {
+                            turn(stage + G * XSTAGE + g * DSTAGE, DG, dd[g], DP, false);
+                        }
+                    }
                 }
-                else
+#else
                 {
-                    sx.storePhases(xd, XP, PHASE, tid);
+                    if constexpr(S == 1)
+                    {
+                        sx.store(xd, XP, tid);
+                    }
+                    else
+                    {
+                        sx.storePhases(xd, XP, PHASE, tid);
+                    }
+                    sd.store(dd, DP, tid);
                 }
-                sd.store(dd, DP, tid);
+#endif
             };
             __syncthreads(); // the previous tile's reads are done
             loadStep(y0);
+            if constexpr(TR)
+            {
+                __builtin_amdgcn_s_waitcnt(0); // this wave's loads have landed in LDS
+                __syncthreads(); // and every wave's
+            }
             storeStep(y0);
             __syncthreads();
             for(int y = y0; y < y1; y += G)
@@ -428,6 +531,10 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                                     acc[cg][rg][sg]
                                         = keep[rg] ? acc[cg][rg][sg] : saved[cg][rg][sg];
                     }
+                }
+                if constexpr(TR)
+                {
+                    __builtin_amdgcn_s_waitcnt(0); // the next step's rows are in LDS
                 }
                 __syncthreads();
                 if(y + G < y1)
