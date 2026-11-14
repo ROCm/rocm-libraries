@@ -10,9 +10,27 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
 * Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
 
+### Optimizations
+
+* Added autotuned gfx950 (MI355X) configs for the following device algorithms:
+  * `adjacent_find`, `histogram`, `merge`, `merge_sort` (block sort), `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `reduce_by_key`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_radix_sort`, `segmented_reduce`, `segmented_topk`, `select` (flag, predicate, predicated flag, unique, unique by key), `topk`, `transform`, and `transform` (pointer).
+* Retuned the gfx950 config for the `radix_sort` onesweep variant.
+
 ### Removed
 
 * Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
+
+### Known issues
+
+* TODO: Retune and investigate the gfx950 configs for the following algorithms. Their autotuned configs regressed against the previous configs on MI355X, so they are kept at the previous configs for now:
+  * `adjacent_difference` (`device_adjacent_difference.hpp`).
+  * `adjacent_difference_inplace` (`device_adjacent_difference_inplace.hpp`).
+  * `merge_sort` block merge (`device_merge_sort_block_merge.hpp`).
+  * `find_first_of` (`device_find_first_of.hpp`).
+  * `binary_search` (`device_binary_search.hpp`).
+  * `lower_bound` (`device_lower_bound.hpp`).
+  * `upper_bound` (`device_upper_bound.hpp`).
+
 ### Resolved Issues
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 
