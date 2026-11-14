@@ -815,6 +815,12 @@ namespace rocsparse
         return __scoped_atomic_load_n(ptr, order, scope);
     }
 
+    template <typename T>
+    __device__ __forceinline__ T atomic_fetch_sub(T* ptr, T val, int order, int scope)
+    {
+        return __scoped_atomic_fetch_sub(ptr, val, order, scope);
+    }
+
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)

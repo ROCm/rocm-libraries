@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse-types.h"
+#include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_csrsv_info.hpp"
 #include "rocsparse_ellsv_info.hpp"
 #include <memory>
@@ -39,6 +40,7 @@ protected:
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
     std::shared_ptr<_rocsparse_ellsv_info> m_ellsv_info;
+    std::shared_ptr<_rocsparse_cscsv_info> m_cscsv_info;
     rocsparse_format                       m_format{};
     rocsparse_solve_mode                   m_solve_mode{rocsparse_solve_mode_triangular};
     rocsparse_diagonal_modifier            m_diagonal_modifier{rocsparse_diagonal_modifier_none};
@@ -74,6 +76,9 @@ public:
     rocsparse_ellsv_info get_ellsv_info();
     void                 set_ellsv_info(rocsparse_ellsv_info value);
     void                 set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value);
+
+    rocsparse_cscsv_info get_cscsv_info();
+    void                 set_cscsv_info(rocsparse_cscsv_info value);
 
     rocsparse_solve_mode        get_solve_mode() const;
     void                        set_solve_mode(rocsparse_solve_mode value);

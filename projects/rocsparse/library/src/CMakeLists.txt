@@ -43,6 +43,7 @@ set(rocsparse_source
   src/common/rocsparse_bsric0_info.cpp
   src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
+  src/common/rocsparse_cscsv_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
   src/common/rocsparse_datatype_utils.cpp
@@ -141,6 +142,13 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv_impl.cpp
   src/level2/rocsparse_sellmv.cpp
   #
+  src/level2/rocsparse_cscsv_analysis.cpp
+  src/level2/rocsparse_cscsv_buffer_size.cpp
+  src/level2/rocsparse_cscsv_build_tasks.cpp
+  src/level2/rocsparse_cscsv_diagonal_solve.cpp
+  src/level2/rocsparse_cscsv_init.cpp
+  src/level2/rocsparse_cscsv_solve.cpp
+  src/level2/rocsparse_cscsv_zero_pivot.cpp
   src/level2/rocsparse_csrsv.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_xcsrsv_buffer_size.cpp
