@@ -179,6 +179,8 @@ class _GFX1250DropMIGroupGSU:
     per-MI one wins for those MIs. Doing it here rather than in MIDesign keeps
     the change inside the generic gfx1250 search space: MIDesign is shared by
     every architecture, and the heuristic profile still wants its per-MI value.
+    ``GSU_PER_MI: true`` drops the flat parameter instead, so this step finds
+    nothing to resolve and the per-MI values stay.
     """
 
     @mark_post_process
@@ -204,6 +206,105 @@ class _GFX1250DropMIGroupGSU:
                 seen.add(key)
                 deduped.append(e)
         return fork_params, deduped
+
+
+def _mi_num_waves(entry: Dict[str, ForkParameter]) -> int:
+    """Waves per workgroup of an MI group entry, or 0 when it cannot be read.
+
+    ``MIWaveGroup`` holds ``mi[7] * mi[8]`` waves, and an entry that carries a
+    ``WorkGroup`` multiplies that by its LocalSplitU, ``WorkGroup[2]`` (Tensile:
+    ``NumWaves = NumThreads // WavefrontSize``).
+    """
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    if not mi or len(mi) != 9:
+        return 0
+    waves = mi[7] * mi[8]
+    wg = getattr(entry.get("WorkGroup"), "values", entry.get("WorkGroup"))
+    if isinstance(wg, list) and len(wg) == 3:
+        waves *= wg[2]
+    return waves
+
+
+class _GFX1250TDMFuseOneWave:
+    """Keep one-wave MI groups at TDMFuse=0.
+
+    Tensile rejects TDMFuse 1-3 on one wave ("TDMFuse=%d needs more than one
+    wave ... Use TDMFuse=0 on one wave"): those values split a descriptor set's
+    loads across waves. A flat TDMFuse that the profile pins to 1 would leave
+    every one-wave MI without a valid kernel, so when any MI group has one wave
+    the flat parameter moves into the MI groups: one-wave groups get the values
+    that build there (0), every other group keeps the profile's values.
+    """
+
+    @mark_post_process
+    def keep_one_wave_tdm_fuse_zero(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("TDMFuse")
+        if fp is None or not isinstance(fp.values, list):
+            return fork_params, mi_groups
+        if not any(_mi_num_waves(e) == 1 for e in mi_groups):
+            return fork_params, mi_groups
+        one_wave = [v for v in fp.values if v == 0] or [0]
+        coupled = []
+        for entry in mi_groups:
+            values = one_wave if _mi_num_waves(entry) == 1 else list(fp.values)
+            coupled.append({**entry, "TDMFuse": self._make_param("TDMFuse", values)})
+        del fork_params["TDMFuse"]
+        return fork_params, coupled
+
+
+def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
+    """True when an MI group entry's MatrixInstruction has M == N.
+
+    Entries whose MatrixInstruction cannot be read count as square, so the
+    SourceSwap coupling never narrows something it cannot parse.
+    """
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    if not isinstance(mi, list) or len(mi) < 2:
+        return True
+    return mi[0] == mi[1]
+
+
+class _GFX1250SourceSwapCoupling:
+    """Pin SourceSwap to False on non-square MI groups (32x16 on gfx1250).
+
+    SourceSwap=True on a non-square MI swaps the effective M and N, so the
+    kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2] is
+    512x128 with SourceSwap=False but 256x256 with SourceSwap=True.
+    _GFX1250ClusterDimCoupling ranks ClusterDim shapes on the tile of the
+    MatrixInstruction as written, so SourceSwap=True kernels on these MIs would
+    get shapes ranked for the wrong tile (on 4096x3072 the [4, 4] that 256x256
+    needs is dropped for [2, 8]). Until that coupling ranks each SourceSwap
+    tile, SourceSwap moves into the MI groups: non-square groups keep only
+    False, square groups keep every profile value, one entry per value so each
+    group entry stays single-valued. A profile without SourceSwap=True, or MI
+    groups that are all square, leaves the flat parameter untouched.
+    """
+
+    @mark_post_process
+    def pin_non_square_source_swap(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("SourceSwap")
+        if fp is None or not fp.active or not isinstance(fp.values, list) or True not in fp.values:
+            return fork_params, mi_groups
+        if all(_mi_is_square(e) for e in mi_groups):
+            return fork_params, mi_groups
+        non_square = [v for v in fp.values if v is False] or [False]
+        coupled = []
+        for entry in mi_groups:
+            values = list(fp.values) if _mi_is_square(entry) else non_square
+            for v in values:
+                coupled.append({**entry, "SourceSwap": self._make_param("SourceSwap", [v])})
+        del fork_params["SourceSwap"]
+        return fork_params, coupled
 
 
 class _GFX1250ClusterDimCoupling:
@@ -248,10 +349,14 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups.
+# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapCoupling
+# runs just before it and _GFX1250TDMFuseOneWave before that, so each per-shape
+# copy inherits its group's SourceSwap and TDMFuse.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
+    _GFX1250SourceSwapCoupling,
+    _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
     _GFX1250WaveTileFilter,

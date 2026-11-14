@@ -546,6 +546,28 @@ class TestGAUpdate:
         # negative clamped to -1
         assert pop.G[0][0] == -1.0
 
+    def test_nonfinite_scores_coalesced_to_zero_distinct_from_unbuildable(self):
+        # NaN/inf (e.g. a built kernel with a degenerate zero-time measurement) must
+        # collapse to 0, NOT -1, so it stays distinguishable from the -1.0 sentinel
+        # DuctileBackend uses to mark candidates that never got built at all.
+        ga = _make_ga(n_gen=1, pop_size=8)
+        from tensilelite.ductile.core.population import Population, Individual
+        pop = Population([
+            Individual({"DepthU": 0, "SourceSwap": 0}),
+            Individual({"DepthU": 1, "SourceSwap": 1}),
+            Individual({"DepthU": 0, "SourceSwap": 1}),
+            Individual({"DepthU": 1, "SourceSwap": 0}),
+            Individual({"DepthU": 0, "SourceSwap": 0}),
+        ])
+        scores = np.array([[np.nan, np.inf, -np.inf, -1.0, 10.0]], dtype=np.float32)
+        best, _ = ga.update(None, pop, Population(), scores)
+        assert pop.G[0][0] == 0.0
+        assert pop.G[1][0] == 0.0
+        assert pop.G[2][0] == 0.0
+        # genuinely-unbuildable sentinel (-1.0) remains -1, not coalesced into the
+        # same 0 bucket as nan/inf.
+        assert pop.G[3][0] == -1.0
+
 
 # ---------------------------------------------------------------------------
 # termination() method
