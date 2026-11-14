@@ -55,6 +55,31 @@
           ]
         }
       }
+    ],
+    "hipkernel:AttentionGeneralBwd": [
+      {
+        "cases": [
+          "m26f_b32h12k12v12_197x197_d64_bfp16_none_bshd_told"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "x06_b1h1k1v1_64x65536_d128_fp16_none_dom128to128_told"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

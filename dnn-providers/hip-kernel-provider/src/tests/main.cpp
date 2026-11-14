@@ -328,10 +328,18 @@ int main(int argc, char** argv)
             hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets())
         {
             ++loadedSets;
-            loadedPacks += descriptorSet.packs.size();
-            for(const auto& pack : descriptorSet.packs)
+            const auto stamp = [&loadedPacks, &stamped](const auto& packs) {
+                loadedPacks += packs.size();
+                for(const auto& pack : packs)
+                {
+                    stamped.insert(pack.arch.begin(), pack.arch.end());
+                }
+            };
+            stamp(descriptorSet.packs);
+            // A slotted engine holds its packs per slot (RFC 0021), not at the set level.
+            for(const auto& slot : descriptorSet.slots)
             {
-                stamped.insert(pack.arch.begin(), pack.arch.end());
+                stamp(slot.packs);
             }
         }
         if(stamped.size() != 1 || *stamped.begin() != censusArch)

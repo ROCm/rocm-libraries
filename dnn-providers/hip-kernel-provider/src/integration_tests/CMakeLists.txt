@@ -135,6 +135,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX1250_CONV_DGRAD_AOT=1
         )
     endif()
+    # The hipkernel:AttentionGeneralBwd device suites: compiled whenever the product carries
+    # the bundle and the hipDNN GPU SDPA reference is a target of this configure,
+    # GTEST_SKIP on a device of the other arch (see the dense block above). hipdnn_gpu_ref
+    # is a static library of the integration-tests component that its package does not
+    # export, so only a configure that adds that component's sources builds these suites.
+    hkp_product_offers_engine(_hkp_general_bwd_bundle "hipkernel:AttentionGeneralBwd")
+    if(_hkp_general_bwd_bundle AND HIPDNN_ENABLE_SDPA AND TARGET hipdnn_gpu_ref)
+        if(NOT TARGET hiprtc::hiprtc)
+            find_package(hiprtc REQUIRED)
+        endif()
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionGeneralBwd.cpp
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionGeneralBwd.cpp
+        )
+        target_link_libraries(hip_kernel_provider_integration_tests PRIVATE hipdnn_gpu_ref)
+    elseif(_hkp_general_bwd_bundle)
+        message(WARNING
+                "hipkernel:AttentionGeneralBwd is packaged, but HIPDNN_ENABLE_SDPA is OFF or "
+                "hipdnn_gpu_ref is not a target of this configure (the integration-tests "
+                "package does not export it). Skipping its device integration tests.")
+    endif()
     # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
     # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)

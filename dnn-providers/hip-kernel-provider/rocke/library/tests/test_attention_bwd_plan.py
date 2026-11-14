@@ -239,8 +239,39 @@ def _accept_rows():
         "zero_b_stride_input": _req(
             strides={"k": (0, 128 * 128, 128, 1), "v": (0, 128 * 128, 128, 1)}
         ),
+        # hipDNN token offsets: element multipliers per side (H * D)
+        "thd_gqa_per_side_multipliers": _thd_side_req(h_k=2, h_v=2),
+        "thd_mqa_per_side_multipliers": _thd_side_req(h_k=1, h_v=1),
+        "thd_hk_ne_hv_per_side_multipliers": _thd_side_req(h_k=4, h_v=2),
+        "thd_lse_ragged_on_q": _thd_side_req(
+            h_k=2,
+            h_v=2,
+            lse_ragged=True,
+            lse_dims=(2, 8, 128, 1),
+            lse_strides=(1024, 1, 8, 1),
+            lse_mult=8,
+        ),
+        "thd_lse_packed": _thd_side_req(h_k=2, h_v=2, lse_dims=(256, 8, 1)),
+        "thd_lse_packed_not_ragged": _thd_side_req(
+            h_k=2, h_v=2, lse_ragged=False, lse_dims=(256, 8, 1)
+        ),
     }
     return rows
+
+
+def _side_mults(h_q, h_k, h_v, d, lse_mult=None):
+    """hipDNN multipliers of packed THD tensors with token offsets."""
+    mults = {n: h_q * d for n in ("q", "o", "do", "dq")}
+    mults.update({n: h_k * d for n in ("k", "dk")})
+    mults.update({n: h_v * d for n in ("v", "dv")})
+    if lse_mult is not None:
+        mults["lse"] = lse_mult
+    return mults
+
+
+def _thd_side_req(h_k, h_v, lse_mult=None, **kw):
+    mults = _side_mults(8, h_k, h_v, 128, lse_mult)
+    return _req(layout="thd", h_k=h_k, h_v=h_v, ragged_offset_multipliers=mults, **kw)
 
 
 @pytest.mark.parametrize("arch", DECLARED)
@@ -354,6 +385,105 @@ def test_seq_len_and_ragged_format_rows():
     ]
     for req, code in bad:
         assert attn_bwd_support(req, "gfx950", policy=FULL).code == code
+
+
+def test_per_side_ragged_and_lse_forms():
+    """Per-tensor multipliers must land every tensor on its side's token; the
+    THD LSE is read per sequence (ragged on Q's table or packed), never as a
+    dense per-batch tensor."""
+    mults = _side_mults(8, 2, 2, 128)
+    ok = _thd_side_req(h_k=2, h_v=2)
+    assert attn_bwd_support(ok, "gfx942", policy=FULL).ok
+
+    def thd(**kw):
+        return _req(layout="thd", h_k=2, h_v=2, **kw)
+
+    rows = [
+        (thd(ragged_offset_multipliers={**mults, "o": 512}), "RAGGED_FORMAT", "o "),
+        (thd(ragged_offset_multipliers={**mults, "dv": 128}), "RAGGED_FORMAT", "dv "),
+        (thd(ragged_offset_multipliers={**mults, "lse": 4}), "RAGGED_FORMAT", "lse"),
+        (thd(ragged_offset_multipliers={**mults, "x": 4}), "RAGGED_FORMAT", "unknown"),
+        (thd(ragged_offset_multipliers={**mults, "k": 0}), "RAGGED_FORMAT", "outside"),
+        (thd(ragged_offset_multipliers={"q": 2**31}), "RAGGED_FORMAT", "outside"),
+        (thd(ragged_offset_dtype="mixed"), "RAGGED_FORMAT", "dtype"),
+        (thd(ragged_same_table=False), "RAGGED_FORMAT", "offset table"),
+        (
+            thd(
+                lse_ragged=False, lse_dims=(2, 8, 128, 1), lse_strides=(1024, 128, 1, 1)
+            ),
+            "LSE_FORMAT",
+            "dense per-batch",
+        ),
+        (_req(lse_ragged=True), "LSE_FORMAT", "THD"),
+    ]
+    for req, code, phrase in rows:
+        v = attn_bwd_support(req, "gfx950", policy=FULL)
+        assert (v.code, phrase in v.detail) == (code, True), (req, v)
+    # an lse multiplier for a packed, non-ragged LSE is contradictory
+    packed = thd(
+        lse_ragged=False,
+        lse_dims=(256, 8, 1),
+        ragged_offset_multipliers={**mults, "lse": 8},
+    )
+    assert attn_bwd_support(packed, "gfx942", policy=FULL).code == "RAGGED_FORMAT"
+    # a dense request ignores the multipliers and lse_ragged=False
+    dense = _req(ragged_offset_multipliers={"q": 0}, lse_ragged=False)
+    assert attn_bwd_support(dense, "gfx942", policy=FULL).ok
+    with pytest.raises(TypeError, match="ragged_offset_multipliers"):
+        _req(ragged_offset_multipliers={"q": 1.5})
+    with pytest.raises(TypeError, match="lse_ragged"):
+        _req(lse_ragged=1)
+
+
+def test_per_side_multipliers_reach_every_launch():
+    """GQA THD with token offsets: Q's multiplier scales the Q table and K's
+    the K table in the main, prep, convert and split dQ launches."""
+    req = _thd_side_req(h_k=4, h_v=2)
+    q_mult, kv_mult = 8 * 128, 4 * 128
+    plan = attn_bwd_plan(req, "gfx942", policy=FULL)
+    by_stage = collections.defaultdict(list)
+    for step in plan.launches:
+        by_stage[step.stage].append(step)
+    for stage in ("prep", "main"):
+        s = by_stage[stage][0].scalars
+        assert (s["q_mult"], s["q_div"]) == (q_mult, 8 * 128)
+        assert (s["kv_mult"], s["kv_div"]) == (kv_mult, 4 * 128)
+    toks = {
+        st.pointers["DST"]: (st.scalars["tok_mult"], st.scalars["tok_div"])
+        for st in by_stage["convert"]
+    }
+    assert toks == {
+        "dq": (q_mult, 8 * 128),
+        "dk": (kv_mult, 4 * 128),
+        "dv": (kv_mult, 4 * 128),
+    }
+    split = dataclasses.replace(FULL, tuning=lambda *a: {"dq_mode": "split"})
+    plan = attn_bwd_plan(req, "gfx950", policy=split)
+    dq = next(st for st in plan.launches if st.stage == "dq").scalars
+    assert (dq["q_mult"], dq["kv_mult"]) == (q_mult, kv_mult)
+    # without per-tensor multipliers both sides take the one multiplier
+    legacy = _req(layout="thd", h_k=4, h_v=2, ragged_offset_multiplier=3)
+    s = attn_bwd_plan(legacy, "gfx942", policy=FULL).launches[1].scalars
+    assert (s["q_mult"], s["kv_mult"]) == (3, 3)
+
+
+def test_per_side_multipliers_are_frozen_and_order_independent():
+    import copy
+    import pickle
+
+    mults = _side_mults(8, 2, 2, 128)
+    a = _thd_side_req(h_k=2, h_v=2)
+    b = _req(
+        layout="thd",
+        h_k=2,
+        h_v=2,
+        ragged_offset_multipliers=dict(reversed(list(mults.items()))),
+    )
+    assert a == b and hash(a) == hash(b)
+    assert list(a.normalized()["ragged_offset_multipliers"]) == sorted(mults)
+    assert copy.deepcopy(a) == a and pickle.loads(pickle.dumps(a)) == a
+    with pytest.raises(TypeError):
+        a.ragged_offset_multipliers["q"] = 1
 
 
 def test_format_decline_rows_per_rule():

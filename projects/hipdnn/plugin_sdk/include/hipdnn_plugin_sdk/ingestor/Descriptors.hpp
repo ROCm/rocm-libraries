@@ -199,7 +199,7 @@ inline bool operator!=(const MetadataField& lhs, const MetadataField& rhs)
 /// read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<MetadataField> fields;
     /// Authored semantics; independent of the JSON file-format version.
@@ -440,7 +440,7 @@ struct SlotDescriptor
 {
     /// `^[a-z][a-z0-9_]*$`, unique within the engine, never `global`.
     std::string name;
-    DescriptorId metadataSchemaId;
+    DescriptorId metadataSchemaId{};
     /// The slot's ranker by arch key. Metric-less (RFC 0021 §7).
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::vector<std::string> knobs;
@@ -480,7 +480,9 @@ struct EngineDescriptor
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
-    DescriptorId metadataSchemaId;
+    /// Zero for a slotted engine, whose slots carry the KMDs. Value-initialized so per-arch
+    /// copies of one slotted UED compare equal.
+    DescriptorId metadataSchemaId{};
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
     std::vector<int32_t> behaviorNotes;

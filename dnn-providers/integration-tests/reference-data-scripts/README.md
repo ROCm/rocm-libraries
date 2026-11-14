@@ -362,6 +362,7 @@ From the `rocm-libraries/` repo root:
 python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_bundles.py \
   --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
   --toml dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml \
+  --toml dnn-providers/hip-kernel-provider/config/hipkernel_AttentionGeneralBwd.toml \
   --report
 ```
 

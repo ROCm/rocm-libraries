@@ -285,6 +285,27 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 900)\n")
 
+# Attention backward hipDNN lowering and plan tests (no GPU): the graph lowering and
+# verdicts hipkernel:AttentionGeneralBwd's C++ mirrors, its shipped catalog, the
+# backward plan and the host-side length checks.
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS
+    "tests/library/tests/test_attention_bwd_hipdnn.py"
+    "tests/library/tests/test_attention_bwd_hipdnn_catalog.py"
+    "tests/library/tests/test_attention_bwd_plan.py"
+    "tests/library/tests/test_attention_bwd_host_checks.py")
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS "")
+foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_bwd_hipdnn_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS} -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_hipdnn_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
+
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
 # requires the reference COMGR/LLVM toolchain and llvm-objdump. They share a

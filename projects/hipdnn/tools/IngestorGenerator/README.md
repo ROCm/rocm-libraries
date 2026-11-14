@@ -845,6 +845,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/attention_general_bwd.yaml` | The slotted `hipkernel:AttentionGeneralBwd` catalog (SDPA backward, gfx942 and gfx950): a single-launch `prep` slot and a multi-launch `main` slot (`main`, `dq`, `convert_dk`, `convert_dv`), one pack per slot and arch plus `main_splitdq_gfx950`. Generated, not hand-written: `dnn-providers/hip-kernel-provider/descriptor-packaging/tools/general_bwd_catalog.py` writes it from rocKE's catalog and regenerates the descriptors |
+| `configs/attention_general_bwd.profile.yaml` | Not a generator config: the `launch_surface:` audit of `hipkernel:AttentionGeneralBwd`, for `tools/launch_surface.py --check` |
 
 ## Generated variant sets: `variants`
 

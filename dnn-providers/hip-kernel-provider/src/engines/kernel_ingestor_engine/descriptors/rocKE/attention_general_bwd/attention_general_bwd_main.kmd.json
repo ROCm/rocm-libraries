@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "id": "b0b95d84-8486-40a6-81d4-c03d0283e809",
+  "name": "AttentionGeneralBwd main variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "seq_mode",
+      "type": "string"
+    },
+    {
+      "name": "stage_vec",
+      "type": "int"
+    },
+    {
+      "name": "dkv_mode",
+      "type": "string"
+    },
+    {
+      "name": "mask_class",
+      "type": "string"
+    },
+    {
+      "name": "dq_mode",
+      "type": "string"
+    },
+    {
+      "name": "head_pack",
+      "type": "bool"
+    },
+    {
+      "name": "lb_mirror",
+      "type": "bool"
+    },
+    {
+      "name": "lb_interleave",
+      "type": "bool"
+    },
+    {
+      "name": "tuning_key",
+      "type": "string",
+      "default_value": ""
+    },
+    {
+      "name": "main_block_n",
+      "type": "int"
+    },
+    {
+      "name": "main_worklist",
+      "type": "bool"
+    },
+    {
+      "name": "main_static_scale",
+      "type": "string"
+    }
+  ]
+}

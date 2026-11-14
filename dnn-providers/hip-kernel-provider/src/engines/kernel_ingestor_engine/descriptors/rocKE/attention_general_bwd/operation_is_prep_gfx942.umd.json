@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "09768b9f-eb69-4819-8cce-0622abaac0df",
+  "name": "graph operation is prep_gfx942",
+  "scope": "graph",
+  "match_symbol": "hipkernel.attention_general_bwd.prep_gfx942_match"
+}

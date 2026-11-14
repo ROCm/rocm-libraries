@@ -1981,6 +1981,15 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
+    # The generated-header staleness tests format with HKP_CLANG_FORMAT. The lanes install
+    # clang-format into the interpreter's own environment, whose scripts directory is not
+    # on PATH, so look there first.
+    get_filename_component(_hkp_py_dir "${Python3_EXECUTABLE}" DIRECTORY)
+    find_program(HKP_CLANG_FORMAT NAMES clang-format-18 clang-format NAMES_PER_DIR
+                 HINTS "${_hkp_py_dir}")
+    if(HKP_CLANG_FORMAT)
+        list(APPEND _pyenv "HKP_CLANG_FORMAT=${HKP_CLANG_FORMAT}")
+    endif()
 
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"

@@ -6636,6 +6636,33 @@ nlohmann::json kmdsOf(Documents& documents, const std::vector<std::pair<std::str
 
 } // namespace
 
+/// A per-arch layout ships one slotted UED in every arch shard. A slotted UED has no
+/// engine-level KMD, so the copies must still parse to equal descriptors and collapse to one
+/// engine rather than poison it.
+TEST(TestDescriptorLoader, CollapsesPerArchCopiesOfASlottedUed)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slotted_shards"));
+    auto documents = makeSlottedDocuments('1', "test:slotted_shards");
+    writeDocuments(dir.path() / "a", documents);
+    const auto ued = documentOfType(documents, ".ued.json");
+    writeDocument(dir.path() / "b", TestDocument{".ued.json", ued});
+
+    const auto parse
+        = [&ued](const std::string& where) { return detail::parseEngineDescriptor(ued, where); };
+    EXPECT_EQ(parse("first"), parse("second"));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+    ASSERT_EQ(catalog.engines.size(), 1u);
+    EXPECT_FALSE(catalog.engines.begin()->second.conflicted);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:slotted_shards");
+}
+
 TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("three_slots"));

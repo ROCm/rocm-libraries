@@ -108,6 +108,44 @@
           ]
         }
       }
+    ],
+    "hipkernel:AttentionGeneralBwd": [
+      {
+        "cases": [
+          "h30_b1h1k1v1_64x4096_d128_fp16_none_tols",
+          "l34_b2h3k3v3_1x4096_d128_bfp16_none_dom256to256_tolp",
+          "m31pr_b1h2k2v2_64x1500_d64_bfp16_none_bshd_tols"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "l04_b1h3k3v3_288x480_d128_bfp16_brw128_told",
+          "l05_b1h3k3v3_288x480_d128_fp16_tlw65r64_told",
+          "l09_b1h6k3v3_144x240_d128_fp16_tlcausal_tolp",
+          "l14_b1h3k3v3_288x480_d64_bfp16_none_told",
+          "l25_b1h3k3v3_288x480_d128_bfp16_tlw1_tolp",
+          "tpcg02_b2h4k2v2_40x72_d128_bfp16_tlcausal_v0to1_tolp",
+          "tpcg04_b2h4k2v2_40x72_d128_bfp16_tlw16_v0to1_tolp",
+          "tpcg05_b2h4k2v2_40x72_d128_bfp16_brw16_v0to1_tolp",
+          "tpcg08_b2h4k2v2_64x64_d128_bfp16_tlw16_v0to1_tolp",
+          "tpcg10_b2h4k2v2_72x40_d128_bfp16_tlcausal_v0to1_tolp",
+          "tpcg12_b2h4k2v2_72x40_d128_bfp16_tlw16_v0to1_tolp",
+          "tpcg13_b2h4k2v2_72x40_d128_bfp16_brw16_v0to1_tolp"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

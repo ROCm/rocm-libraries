@@ -78,6 +78,49 @@
           ]
         }
       }
+    ],
+    "hipkernel:AttentionGeneralBwd": [
+      {
+        "cases": [
+          "def06c_b1h2k2v2_72x120_d128_fp16_none_sm1p2_tolp",
+          "h17_b1h2k2v2_72x191_d128_bfp16_none_told",
+          "h18_b1h2k2v2_72x192_d128_fp16_none_told",
+          "h21_b1h2k2v2_63x129_d128_bfp16_none_told",
+          "h61_b2h3k3v3_72x120_d128_fp16_none_gaps_told",
+          "h66_b1h2k2v2_256x256_d128_bfp16_tlw17_tolp",
+          "h74_b1h2k2v2_72x120_d128_fp16_none_lbm1rbm1_told",
+          "h84_b1h2k2v2_72x120_d128_fp16_none_s4_dom0p0625to0p0625_tolu"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "h09_b1h2k2v2_16x120_d128_bfp16_none_toldl",
+          "h28_b1h2k2v2_1x512_d128_fp16_none_tols"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "h100_b1h2k2v2_16x256_d128_bfp16_brcausal_tols"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

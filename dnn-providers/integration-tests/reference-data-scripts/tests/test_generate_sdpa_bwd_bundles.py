@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the SDPA backward bundle generator and its plan module.
 
-They check that the checked-in SdpaBackward sweeps and the generated block
-of ASM_SDPA_ENGINE.toml are what the generator writes, that the generator is
+They check that the checked-in SdpaBackward sweeps and the generated blocks
+of the engine TOMLs are what the generator writes, that the generator is
 deterministic, that every written case is legal and traceable to the plan,
 that the cases up to nightly cover every required pair of axis values, and
 that every case id resolves to exactly one tolerance row."""
@@ -30,6 +30,14 @@ import sdpa_bwd_plan as P  # noqa: E402
 BUNDLES = SCRIPTS.parent / "integration-test-bundles"
 ENGINE_TOML = (
     SCRIPTS.parents[1] / "hip-kernel-provider" / "config" / "ASM_SDPA_ENGINE.toml"
+)
+# Every engine TOML that carries the generated block.
+GENERATED_TOMLS = (
+    ENGINE_TOML,
+    SCRIPTS.parents[1]
+    / "hip-kernel-provider"
+    / "config"
+    / "hipkernel_AttentionGeneralBwd.toml",
 )
 ENGINE_TIER_YAML = (
     SCRIPTS.parents[1]
@@ -94,8 +102,9 @@ def test_checked_in_sweeps_are_generated(files):
     ), f"stale generator files: {sorted(on_disk - set(files))}"
 
 
-def test_engine_toml_block_is_generated():
-    text = ENGINE_TOML.read_text(encoding="utf-8")
+@pytest.mark.parametrize("toml", GENERATED_TOMLS, ids=lambda p: p.name)
+def test_engine_toml_block_is_generated(toml):
+    text = toml.read_text(encoding="utf-8")
     i, j = text.index(G.TOML_BEGIN), text.index(G.TOML_END)
     assert text[i : j + len(G.TOML_END) + 1] == G.toml_block()
 

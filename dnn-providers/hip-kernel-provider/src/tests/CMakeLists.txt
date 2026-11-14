@@ -221,6 +221,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
             DESTINATION "${CMAKE_INSTALL_BINDIR}/fixtures")
 
+    # The hipkernel:AttentionGeneralBwd replay corpus: graphs with the verdict and plan
+    # rocKE's Python reaches on them. Staged in the test descriptor tree beside the kpack
+    # fixture, outside every discovery root, and named binary-relative for the same reason.
+    set(_hkp_general_bwd_corpus_subdir "attention_general_bwd_corpus")
+    foreach(_corpus_arch gfx942 gfx950)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/corpus_${_corpus_arch}.jsonl"
+            "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/corpus_${_corpus_arch}.jsonl"
+            COPYONLY)
+    endforeach()
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_GENERAL_BWD_CORPUS_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_general_bwd_corpus_subdir}")
+
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
@@ -567,6 +580,36 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
         )
+    endif()
+
+    # The general SDPA backward engine ships one prep and one or two main packs per
+    # architecture into the product shard; each wired architecture's census checks its own.
+    set(_hkp_general_bwd_arches "")
+    foreach(_arch IN ITEMS gfx942 gfx950)
+        hkp_product_ships_engine_for_arch(_hkp_ships "hipkernel:AttentionGeneralBwd" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_general_bwd_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_general_bwd_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_general_bwd_arches}
+            SUITES TestAttentionGeneralBwdPacks
+            EXPECTED_CASES
+                DeclaresThePrepAndMainSlotsAndTheSharedWorkspace
+                LoadsExactlyThePacksOfTheRequestedArch
+                EveryMainKernelDeclaresTheFourMainLaunches
+                EveryKernelIsOneCatalogRowAndEveryRowShips
+                EveryLaunchIsTheSymbolThePlanNames
+                EveryLaunchRecordsTheAbiTheHandlerMarshals
+                AsmSdpaRanksAheadOfThisEngine
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:AttentionGeneralBwd, so its "
+            "census is not registered.")
     endif()
 
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
