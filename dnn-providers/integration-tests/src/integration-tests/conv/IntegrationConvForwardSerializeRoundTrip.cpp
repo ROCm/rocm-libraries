@@ -202,15 +202,15 @@ protected:
             refTensor->markDeviceModified();
         }
 
-        const float tolerance = this->getTolerance(graphObj, outputs.y);
+        const auto tolerance = this->getTolerance(graphObj, outputs.y);
         const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
                                                 referenceUsesDevice ? ValidationSite::DEVICE
                                                                     : ValidationSite::HOST);
-        auto selection
-            = bundle::makeValidator(frontendToSdkDataType(outputs.y->get_data_type()),
-                                    bundle::tensorLabel(yUid, outputs.y->get_name()),
-                                    bundle::ComparisonTolerance::allClose(tolerance, tolerance),
-                                    site);
+        auto selection = bundle::makeValidator(
+            frontendToSdkDataType(outputs.y->get_data_type()),
+            bundle::tensorLabel(yUid, outputs.y->get_name()),
+            bundle::ComparisonTolerance::allClose(tolerance.atol, tolerance.rtol),
+            site);
         ASSERT_NE(selection.validator, nullptr) << selection.error;
         ASSERT_TRUE(selection.validator->allClose(*refTensor, *gpuTensor))
             << "Mismatch in output tensor after serialize round-trip (uid: " << yUid << ")";

@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
@@ -110,6 +111,33 @@ protected:
         harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
                           _tempDir / "Bundle",
                           gap);
+    }
+
+    // Runs TestBody() on the FP8_E4M3-output bundle, whose golden y is all zero, with a
+    // host-memory reference that writes `value` into every element of y.
+    void runFp8Reference(float value, ::testing::TestPartResultArray* results)
+    {
+        using ::testing::_;
+        using ::testing::Return;
+
+        ON_CALL(_gpuExecutor, requiresDeviceMemory()).WillByDefault(Return(false));
+        ON_CALL(_gpuExecutor, execute(_, _, _))
+            .WillByDefault([value](void*, size_t, const VariantPack& variantPack) {
+                auto* ptr = static_cast<hipdnn_data_sdk::types::fp8_e4m3*>(
+                    variantPack.at(fixtures::K_OUTPUT_UID));
+                std::fill(
+                    ptr, ptr + fixtures::K_OUTPUT_ELEMS, hipdnn_data_sdk::types::fp8_e4m3(value));
+            });
+
+        BundleReferenceValidationHarness harness(
+            ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
+        harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", true, "fp8_e4m3"),
+                          _tempDir / "Bundle",
+                          /*expectedGap=*/std::nullopt);
+
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
+        harness.TestBody();
     }
 
     // A GPU gap entry. The harness asserts whatever entry it is handed and looks nothing
@@ -621,6 +649,22 @@ TEST_F(TestBundleReferenceValidationHarness, LiveRowLengthPastTheExtentFailsTheV
     EXPECT_NE(messages.find("live_rows cannot be applied"), std::string::npos) << messages;
     EXPECT_NE(messages.find("length 5 of batch 0 is not in the range 0 to 4"), std::string::npos)
         << messages;
+}
+
+// An fp8 output is graded at one step of its format. Near zero that step is the
+// subnormal step 2^-9 of FP8_E4M3, so one step from the zero golden passes and two fail.
+TEST_F(TestBundleReferenceValidationHarness, Fp8OutputOneStepFromGoldenPasses)
+{
+    ::testing::TestPartResultArray results;
+    runFp8Reference(0x1p-9f, &results);
+    EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, Fp8OutputTwoStepsFromGoldenFails)
+{
+    ::testing::TestPartResultArray results;
+    runFp8Reference(0x1p-8f, &results);
+    EXPECT_TRUE(testing_support::anyFailed(results));
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -1530,8 +1530,8 @@ VerificationOutcome
     // the only place that can log the check that actually graded this tensor.
     const auto toleranceFor
         = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value, value);
+              const auto value = tolerance::defaultTolerance(wrapper, dataType);
+              return gradingForTensor(currentTestName(), label, value.atol, value.rtol);
           };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
