@@ -219,6 +219,7 @@ struct NaiveWarmup
     {
         Completed,
         TimedOut,
+        EstimatedTooSlow,
         ScratchUnavailable,
         UnsupportedInvokeParams,
     };
@@ -259,6 +260,10 @@ std::string NaiveSkipReason(NaiveWarmup::Status status, float best_time)
     case NaiveWarmup::Status::TimedOut:
         return "exceeded " + std::to_string(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) +
                "% of best non-naive time (" + std::to_string(best_time) + " ms)";
+    case NaiveWarmup::Status::EstimatedTooSlow:
+        return "estimated MAC lower bound exceeds " +
+               std::to_string(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) +
+               "% of best non-naive time (" + std::to_string(best_time) + " ms)";
     case NaiveWarmup::Status::ScratchUnavailable:
         return "output tensor exceeds the scratch buffer cap";
     case NaiveWarmup::Status::UnsupportedInvokeParams:
@@ -268,13 +273,83 @@ std::string NaiveSkipReason(NaiveWarmup::Status status, float best_time)
     return "completed";
 }
 
+/// Computes total multiply-accumulates of a convolution from its tensor descriptors,
+/// returning 0 if the lengths are unexpected or the product would overflow.
+double EstimateConvMacs(const TensorDescriptor& y_desc, const TensorDescriptor& w_desc)
+{
+    const auto& y_lens = y_desc.GetLengths();
+    const auto& w_lens = w_desc.GetLengths();
+    if(y_lens.size() < 3 || w_lens.size() != y_lens.size())
+        return 0.0;
+
+    // Both Fwd (y = outDesc) and BwdData/WrW (y = inDesc/dyDesc) perform
+    // N * K * prod(y_spatial) * (C / G) * prod(filter_spatial) MACs:
+    // y_lens = [N, K, ...], w_lens = [K, C / G, ...].
+    double macs = static_cast<double>(y_lens[0]) * static_cast<double>(y_lens[1]);
+    for(std::size_t i = 2; i < y_lens.size(); ++i)
+        macs *= static_cast<double>(y_lens[i]);
+    for(std::size_t i = 1; i < w_lens.size(); ++i)
+        macs *= static_cast<double>(w_lens[i]);
+    return macs;
+}
+
+/// Checks whether the naive scalar loop cannot finish within the warmup budget even at a
+/// generous scalar throughput ceiling, avoiding a doomed GPU launch whose stream would have
+/// to drain (or block a caller's hipFree / hipMemUnmap).
+bool NaiveExceedsLaunchBudget(const Handle& handle,
+                              const TensorDescriptor& y_desc,
+                              const TensorDescriptor& w_desc,
+                              float naive_budget_ms)
+{
+    // Scalar naive_conv issues one scalar FMA + address calculation + global loads per inner
+    // iteration (~0.03-0.06 MAC / lane-cycle measured across 1D/2D shapes). 0.125 MAC / lane-cycle
+    // (>= 2x headroom) paired with a 2 ms floor keeps tiny/borderline shapes on the timed path.
+    constexpr double kMaxNaiveMacPerLaneCycle = 0.125;
+    constexpr double kMinSkipLaunchMs         = 2.0;
+
+    const double macs = EstimateConvMacs(y_desc, w_desc);
+    if(macs <= 0.0)
+        return false;
+
+    const std::size_t hw_cus    = handle.GetMaxHardwareComputeUnits();
+    const std::size_t wave_size = handle.GetWavefrontWidth();
+    const std::size_t clock_khz = handle.GetClockRateKhz();
+    if(hw_cus == 0 || wave_size == 0 || clock_khz == 0)
+        return false;
+
+    const double max_macs_per_ms = static_cast<double>(hw_cus) * static_cast<double>(wave_size) *
+                                   static_cast<double>(clock_khz) * kMaxNaiveMacPerLaneCycle;
+    const double min_elapsed_ms = macs / max_macs_per_ms;
+    const double threshold_ms   = std::max(static_cast<double>(naive_budget_ms), kMinSkipLaunchMs);
+    return min_elapsed_ms > threshold_ms;
+}
+
 } // namespace
 
 static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
                                        const Invoker& invoker,
                                        const AnyInvokeParams& invoke_ctx,
+                                       const AlgorithmName& algorithm_name,
                                        float best_time)
 {
+    const float timeout_factor =
+        static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
+    const float naive_budget = best_time * timeout_factor;
+
+    if(invoke_ctx.IsOfType<conv::DataInvokeParams>())
+    {
+        const auto& tensors = invoke_ctx.CastTo<conv::DataInvokeParams>().tensors;
+        const bool is_fwd   = algorithm_name.ToString().find("Fwd") != std::string::npos;
+        const auto& y_desc  = is_fwd ? tensors.outDesc : tensors.inDesc;
+        if(NaiveExceedsLaunchBudget(handle, y_desc, tensors.wDesc, naive_budget))
+            return {NaiveWarmup::Status::EstimatedTooSlow, 0.0f};
+    }
+    else if(invoke_ctx.IsOfType<conv::WrWInvokeParams>())
+    {
+        const auto& tensors = invoke_ctx.CastTo<conv::WrWInvokeParams>().tensors;
+        if(NaiveExceedsLaunchBudget(handle, tensors.dyDesc, tensors.dwDesc, naive_budget))
+            return {NaiveWarmup::Status::EstimatedTooSlow, 0.0f};
+    }
     std::shared_ptr<ScratchAllocation> scratch;
     AnyInvokeParams scratch_ctx;
 
@@ -330,10 +405,7 @@ static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
         throw;
     }
 
-    const float timeout_factor =
-        static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
-    const float naive_budget = best_time * timeout_factor;
-    const auto deadline      = std::chrono::steady_clock::now() +
+    const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
     bool finished = false;
     while(std::chrono::steady_clock::now() < deadline)
@@ -482,7 +554,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             if(cutoff_naive)
             {
                 const auto warmup = TryNaiveWithTimeout(
-                    handle, invoker, invoke_ctx, core_result.find_search_best_time);
+                    handle, invoker, invoke_ctx, algorithm_name, core_result.find_search_best_time);
                 if(warmup.status != NaiveWarmup::Status::Completed)
                 {
                     MIOPEN_LOG_I(

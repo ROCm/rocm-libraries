@@ -311,6 +311,106 @@ TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
     }
 }
 
+// Large convolution where naive's scalar MAC lower bound far exceeds both the 3x budget
+// and the 2 ms launch floor: TryNaiveWithTimeout must skip naive BEFORE allocating scratch
+// or launching on an evaluation stream, so the handle's custom allocator is never invoked
+// and a caller's subsequent hipFree does not block waiting for an abandoned naive kernel.
+TEST(GPU_NaiveTimeout_FP32, LargeNaiveSkippedBeforeLaunchingKernel)
+{
+    if(IsWinogradOnlyArch(get_handle()))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << get_handle().GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+
+    struct CountingContext
+    {
+        int allocs = 0;
+    } ctx;
+
+    auto count_alloc = [](void* c, size_t sz) -> void* {
+        static_cast<CountingContext*>(c)->allocs++;
+        void* p = nullptr;
+        (void)hipMalloc(&p, sz);
+        return p;
+    };
+    auto count_free = [](void*, void* p) { (void)hipFree(p); };
+
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+    miopenHandle_t raw_handle = nullptr;
+    ASSERT_EQ(miopenCreateWithStream(&raw_handle, stream), miopenStatusSuccess);
+    ASSERT_EQ(miopenSetAllocator(raw_handle, count_alloc, count_free, &ctx), miopenStatusSuccess);
+
+    // N=1, C=128, H=1, W=65536, K=128, R=1, S=11 -> ~11.8 GMACs.
+    // Pass explicit workspace + tensors via miopenFindOptionsSetPreallocatedTensor so Find's
+    // own tensor/workspace setup never calls the handle allocator — only TryNaiveWithTimeout's
+    // GetScratchBuffer would.
+    tensor<float> x{1, 128, 1, 65536};
+    tensor<float> w{128, 128, 1, 11};
+    miopen::ConvolutionDescriptor conv{
+        2, miopenConvolution, miopenPaddingDefault, {0, 5}, {1, 1}, {1, 1}};
+    tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+
+    miopenProblem_t problem = nullptr;
+    ASSERT_EQ(miopenCreateConvProblem(&problem, &conv, miopenProblemDirectionForward),
+              miopenStatusSuccess);
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+              miopenStatusSuccess);
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, &w.desc),
+              miopenStatusSuccess);
+    ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, &y.desc),
+              miopenStatusSuccess);
+
+    size_t ws_max = 0;
+    ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
+                  raw_handle, &w.desc, &x.desc, &conv, &y.desc, &ws_max),
+              miopenStatusSuccess);
+    ConvBuffers buffers;
+    ASSERT_EQ(hipMalloc(&buffers.x, x.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.w, w.desc.GetNumBytes()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&buffers.y, y.desc.GetNumBytes()), hipSuccess);
+    if(ws_max > 0)
+        ASSERT_EQ(hipMalloc(&buffers.ws, ws_max), hipSuccess);
+
+    miopenFindOptions_t opts = nullptr;
+    ASSERT_EQ(miopenCreateFindOptions(&opts), miopenStatusSuccess);
+    ASSERT_EQ(miopenSetFindOptionPreallocatedTensor(opts, miopenTensorConvolutionX, buffers.x),
+              miopenStatusSuccess);
+    ASSERT_EQ(miopenSetFindOptionPreallocatedTensor(opts, miopenTensorConvolutionW, buffers.w),
+              miopenStatusSuccess);
+    ASSERT_EQ(miopenSetFindOptionPreallocatedTensor(opts, miopenTensorConvolutionY, buffers.y),
+              miopenStatusSuccess);
+    if(ws_max > 0)
+        ASSERT_EQ(miopenSetFindOptionPreallocatedWorkspace(opts, buffers.ws, ws_max),
+                  miopenStatusSuccess);
+
+    ctx.allocs = 0;
+    std::vector<miopenSolution_t> solutions(8);
+    size_t found = 0;
+    ASSERT_EQ(
+        miopenFindSolutions(raw_handle, problem, opts, solutions.data(), &found, solutions.size()),
+        miopenStatusSuccess);
+    solutions.resize(found);
+    ASSERT_FALSE(solutions.empty());
+    for(auto sol : solutions)
+    {
+        uint64_t solver_id = 0;
+        ASSERT_EQ(miopenGetSolutionSolverId(sol, &solver_id), miopenStatusSuccess);
+        EXPECT_FALSE(IsNaive(miopen::solver::Id{solver_id}.ToString()));
+        miopenDestroySolution(sol);
+    }
+
+    EXPECT_EQ(ctx.allocs, 0)
+        << "Large naive evaluation should be skipped pre-launch without allocating scratch";
+
+    miopenDestroyFindOptions(opts);
+    miopenDestroyProblem(problem);
+    miopenDestroy(raw_handle);
+    (void)hipStreamDestroy(stream);
+}
+
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug
 // registry (the same path ScopedEnvironment uses in the GPU tests).
 TEST(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
