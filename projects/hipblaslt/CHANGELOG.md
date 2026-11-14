@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Allow explicit `gfx1030` builds with `GPU_TARGETS=gfx1030`.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
