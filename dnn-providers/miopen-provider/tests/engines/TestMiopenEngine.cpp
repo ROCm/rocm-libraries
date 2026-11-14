@@ -245,7 +245,9 @@ TEST(TestMiopenEngine, GetDetailsDeterministicEngineReportsExplicitEmptyNumerica
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID,
+                              hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_NAME,
+                              {});
     HipdnnMiopenHandle dummyHandle;
     const MockGraph mockGraph;
 
@@ -263,7 +265,9 @@ TEST(TestMiopenEngine, GetDetailsDefaultEngineReportsNondeterministicNumericalNo
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID);
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                              hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME,
+                              {});
     HipdnnMiopenHandle dummyHandle;
     const MockGraph mockGraph;
 
