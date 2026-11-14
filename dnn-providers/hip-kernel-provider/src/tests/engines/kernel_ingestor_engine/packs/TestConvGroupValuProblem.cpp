@@ -235,10 +235,10 @@ TEST(TestConvGroupValuGraph, RefusesLayoutsWithNeitherAxisPacked)
         const auto good = specFor(grouped(), direction);
         EXPECT_TRUE(graphAcceptsSpec(good, direction));
         auto xSpec = good;
-        xSpec.x.strides = {128 * 56 * 112, 56 * 112, 112, 2};
+        xSpec.x.strides = {int64_t{128} * 56 * 112, int64_t{56} * 112, 112, 2};
         EXPECT_FALSE(graphAcceptsSpec(xSpec, direction));
         auto ySpec = good;
-        ySpec.y.strides = {128 * 56 * 112, 56 * 112, 112, 2};
+        ySpec.y.strides = {int64_t{128} * 56 * 112, int64_t{56} * 112, 112, 2};
         EXPECT_FALSE(graphAcceptsSpec(ySpec, direction));
         auto mixed = good;
         mixed.y.strides = packedStrides(mixed.y.dims, true);

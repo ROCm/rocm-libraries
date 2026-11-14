@@ -260,7 +260,7 @@ bool hankelAdmits(const WrwProblem& problem,
         return false;
     }
     // The kernel addresses an image of x and of dy through a buffer descriptor: under 2 GiB.
-    const int64_t maxImage = int64_t{0x7fffffff};
+    const auto maxImage = int64_t{0x7fffffff};
     if(int64_t{a.hi} * a.wi * a.c * 2 > maxImage || int64_t{a.ho} * a.wo * a.c * 2 > maxImage)
     {
         return false;

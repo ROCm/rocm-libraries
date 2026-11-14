@@ -217,7 +217,7 @@ std::optional<GvProblem> parseGvProblem(const MatchContext& context, ConvDirecti
     }
     problem.xAlign = pointerAlignment(context, base->operands.x);
     problem.yAlign = pointerAlignment(context, base->operands.y);
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -461,7 +461,7 @@ std::optional<Plan>
     const int64_t perBlock = config.nw * rowsPerPass;
     int64_t rowBlocks = std::clamp<int64_t>(
         divUp(4 * units, blocksY), 1, std::max<int64_t>(1, divUp(rows, perBlock)));
-    int64_t rowsPerBlock = divUp(divUp(rows, rowBlocks), rowsPerPass) * rowsPerPass;
+    const int64_t rowsPerBlock = divUp(divUp(rows, rowBlocks), rowsPerPass) * rowsPerPass;
     rowBlocks = divUp(rows, rowsPerBlock);
     if(rowBlocks > INT_LIMIT)
     {

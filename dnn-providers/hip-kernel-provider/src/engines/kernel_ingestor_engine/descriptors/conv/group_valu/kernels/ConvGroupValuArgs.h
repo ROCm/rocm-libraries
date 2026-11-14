@@ -7,6 +7,10 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// One grouped convolution in the kernel's roles: out (n, groups x ko, dOut, ho, wo) =
 /// in (n, groups x ci, di, hi, wi) correlated with the prepared filter. Forward: in = x, out = y,
 /// ci / ko the graph's channels a group. Backward data: in = dy, out = dx, ci = the graph's output
@@ -55,3 +59,5 @@ struct ConvGroupValuArgs
     int ud; ///< backward data: the graph's depth stride (in upsampled), else 1
     int uh; ///< the same along the height
 };
+
+// NOLINTEND(modernize-avoid-c-arrays)
