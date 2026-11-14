@@ -94,7 +94,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - fp32 accumulation (fp16/bf16 operands convert to fp32 exactly), in a fixed order (reduction channel, then depth, row and column taps), one rounding to the output type.
 - Padding taps are skipped rather than multiplied by zero, so an infinity or NaN in the input reaches exactly the outputs whose real taps read it. With an infinite filter value, a reference that multiplies zero padding gives NaN at border outputs where naive gives ±inf; no test covers infinite filters.
 - Determinism: forward and backward data have one writer per element and a sequential loop; backward weights adds lane partials in a fixed tree. The device suite relaunches every case and compares bits.
-- Numerical notes: none. TF32 permission is ignored; the engine stays exact.
+- Numerical notes: none. The engine stays exact and has no TF32 sibling.
 - Tested against hipDNN's CPU reference with a tolerance of 1e-6 per reduction term plus 2 storage epsilons of the value.
 
 ## Comparison with MIOpen

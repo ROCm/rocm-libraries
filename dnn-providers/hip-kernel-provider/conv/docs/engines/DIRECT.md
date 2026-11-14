@@ -9,7 +9,7 @@ SPDX-License-Identifier:  MIT
 
 ## At a glance
 - **What:** direct convolution with every filter tap run as a small GEMM over an LDS-staged input window. Two kernel kinds: the halo tile (`mma`, `fma`) and `rows`, hipconv's filter-row-reuse form with LDS DMA and a persistent tile walk.
-- **Covers:** forward and backward data. fp32, fp16 and bf16; a three-bf16 fp32 form exists only under `HIP_KERNEL_PROVIDER_CONV_TF32`. Any activation layout (channels-last is native, others are staged). 2-D and 3-D only: 1-D graphs are declined.
+- **Covers:** forward and backward data. fp32, fp16 and bf16; a three-bf16 fp32 form in the `CONV_DIRECT_FWD/BWD_TF32` sibling engines. Any activation layout (channels-last is native, others are staged). 2-D and 3-D only: 1-D graphs are declined.
 - **Geometry limits:** filters 3x3, 5x5, 7x7, 1x7, 7x1, 3x3x3 and 5x5x5, fixed at compile time. Groups 1, stride 1, dilation 1. Any padding, asymmetric included, and both convolution modes.
 - **Large tensors:** served past 2 GiB as long as one forward-form input image stays under 2 GiB (32-bit offsets inside an image, 64-bit image bases).
 - **Arches:** MFMA on gfx908 to gfx950 and WMMA on gfx11/gfx12, both on the implicit-GEMM core's atoms. FMA micro-tiles everywhere, gfx906 included, as the floor and the exact-fp32 path on RDNA. `rows` runs on gfx950 (16-byte LDS DMA) and on gfx90a and gfx942 (dword LDS DMA).
@@ -19,8 +19,8 @@ SPDX-License-Identifier:  MIT
   - 384-channel 3x3x3 layers on gfx90a and gfx942 trail CK's 3-D grouped forward by 1.09-1.16x;
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
   - anything strided, dilated or grouped goes to `CONV_IGEMM`.
-- **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note.
-- **Instances:** 582 configs, 291 per direction: 145 halo-tile MMA, 84 `rows`, 44 FMA (the floor on every architecture) and 18 three-bf16 (TF32 switch only). Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
+- **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note on the exact engines; the TF32 siblings report `TENSOR_CORE`.
+- **Instances:** 546 exact configs, 273 per direction: 145 halo-tile MMA, 84 `rows`, 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K2 is our fastest engine: 1.49x gfx950, 1.23x gfx942, 1.22x gfx90a, 1.03x gfx908, 2.16x gfx906, 2.80x gfx1201, 3.88x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
@@ -72,7 +72,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
 
   Per config, the kernel match also requires:
   - direction, dtype and filter equal to the graph's;
-  - the atom runs on the device and takes the graph's element type (three-bf16 only for fp32 graphs, with TF32 permission);
+  - the atom runs on the device and takes the graph's element type (three-bf16 only for fp32 graphs);
   - the ship list names the device; `rows` LDS fits the device (160 KiB gfx950, 64 KiB elsewhere);
   - the channel vector divides the reduction channels;
   - the formatted weights stay under 2^31 elements and bytes, and the grid fits one dispatch.
@@ -120,7 +120,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - **Test tolerance:** the device suite grades against hipDNN's CPU reference convolution. The tolerance is (2e-6 x reduction length) + 2 storage-eps x (|ref| + 1e-3), and three-bf16 uses 3e-5 x reduction length.
 - **inf/NaN:** an infinity planted in the input reaches every output it touches as that infinity (NaN where +inf and -inf meet), as in the reference. Padding never multiplies a real infinity by a structural zero: halo positions outside the image and padded channels read zero on both operands. The three-bf16 split keeps infinities, which a dedicated test pins.
 - **Determinism:** fixed-order sums, no atomics. Each config is launched twice over a re-filled workspace and must reproduce its bits.
-- **Reduced precision:** the three-bf16 form computes xh·wh + xh·wl + xl·wh on bf16 atoms over 3C reduction channels, with fp32 output. Its error is about 2^-16 of each product. It is admitted only for fp32 graphs under `HIP_KERNEL_PROVIDER_CONV_TF32`, carries no precision note today (notes are per engine), and moves to a sibling engine once callers can filter by note.
+- **Reduced precision:** the three-bf16 form computes xh·wh + xh·wl + xl·wh on bf16 atoms over 3C reduction channels, with fp32 output. Its error is about 2^-16 of each product. It is admitted only for fp32 graphs, and only the `CONV_DIRECT_FWD/BWD_TF32` siblings list it; they report `TENSOR_CORE`, by which a caller excludes them (`deselect_numeric_notes`).
 
 ## Comparison with MIOpen
 - **`ConvHipConv`** (hipconv; MIOpen's pick on gfx950 in our sweeps) uses the same `direct` / `direct_l1` design as K2's `rows`, NHWC 16-bit only. K2 trails it by 1.08-1.14x on large-map VAE layers. Its remaining tricks are kernel-argument preload, in-workgroup channel split and dynamic per-XCD tile claiming. Their total value was estimated at under about 20 ms of weighted time per architecture.
@@ -147,12 +147,12 @@ No code was copied.
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvDirectProblem.cpp` (host, no device):
   - **Gates:** each gated field refused one at a time; the buffer-range and LDS declines; ship lists and arch families; malformed metadata; cuDNN compute types.
   - **Planner:** tile versus halo bound, split and unfold rules, the small-tile decline, the rows one-block-per-unit grid.
-  - **TF32:** three-bf16 admitted only with TF32 permission.
+  - **TF32:** three-bf16 admitted only for fp32 graphs.
 - `TestGpuConvDirect.cpp` (device):
   - every admitted config on fp32/fp16/bf16, forward and backward data;
   - NHWC and staged NCHW, asymmetric padding, convolution mode, a split-C case;
   - the three-bf16 forms under the switch, and planted infinities (native and three-bf16);
   - the determinism relaunch;
   - every config parses, and every filter/dtype has a config on every architecture.
-- `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (none, deterministic).
+- `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (exact engines none, TF32 siblings `TENSOR_CORE`; all deterministic) and that only the TF32 siblings list three-bf16 configs.
 - No in-repo device test goes past 2 GiB. The large-tensor runs use sampled fp64 checks outside the unit suites.

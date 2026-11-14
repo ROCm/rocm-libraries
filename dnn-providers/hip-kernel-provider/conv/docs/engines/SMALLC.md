@@ -72,7 +72,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
 - fp32 accumulation (fp16/bf16 products exact in fp32 on the 16x16 atoms, fp32 on the 16x16x4 atom or FMA); the whole reduction runs inside one block in a fixed order; one rounding at the store. No split, no atomics. The device suite relaunches every config and compares bits.
 - Channel padding (c >= C) and tap padding (s >= S) are stored as zeros and multiplied: an infinite input or weight can meet those zeros and give NaN where an exact reference gives ±inf. This is an open parity item.
-- TF32 permission is ignored: a three-bf16 form (3C channels) measures 0.27-0.75x of exact on every architecture, so none ships.
+- No TF32 sibling: a three-bf16 form (3C channels) measures 0.27-0.75x of exact on every architecture, so none ships.
 
 ## Comparison with MIOpen
 
