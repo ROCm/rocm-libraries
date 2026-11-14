@@ -161,6 +161,9 @@ namespace TensileLite
         mutable SolutionMap<MySolution>                         solutions;
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
+        // Per-shard load mutexes for loadLibrary, keyed by file prefix and
+        // guarded by solutionsGuard.
+        mutable std::map<std::string, std::shared_ptr<std::mutex>> shardLoadMutexes;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -239,6 +242,21 @@ namespace TensileLite
             --it;
             std::string filePrefix = it->second;
             // load the file here directly and push the library for later use.
+            // Loads of one shard are serialized so it is parsed once; shards
+            // load in parallel. Lock order: shard mutex, then solutionsGuard.
+            std::shared_ptr<std::mutex> shardMutex;
+            {
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                {
+                    return;
+                }
+                auto& slot = shardLoadMutexes[filePrefix];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                shardMutex = slot;
+            }
+            std::lock_guard<std::mutex> shardLock(*shardMutex);
             {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
@@ -246,6 +264,7 @@ namespace TensileLite
                     return;
                 }
             }
+            beforeShardLoaded(filePrefix);
             if(Debug::Instance().printDataInit())
             {
                 std::cout << "Loading library for index " << index
@@ -657,6 +676,11 @@ namespace TensileLite
         {
             return library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
         }
+
+    protected:
+        // Runs in loadLibrary under the shard's load mutex, before the shard
+        // file is parsed. If it throws, nothing is registered.
+        virtual void beforeShardLoaded(std::string const& /*filePrefix*/) const {}
     };
 
 } // namespace TensileLite

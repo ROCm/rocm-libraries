@@ -4,27 +4,28 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
 #include "local_kernel_test_common.hpp"
 
 #include <unistd.h>
 
-#include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <stdexcept>
-#include <thread>
-#include <vector>
 #endif
 
 namespace
@@ -240,6 +241,77 @@ namespace
         EXPECT_EQ(adapter->numRotationModules(), 1);
         EXPECT_EQ(loads.unloads, 4u);
         EXPECT_EQ(loads.live.size(), 2u);
+    }
+
+    // Recovery runs while FindCodeObject holds the file's load mutex.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_RecoveryInsideFindCodeObjectReloadsFiles)
+    {
+        constexpr char other[] = "/library/other.co";
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co"));
+        expectLoad(other, GetParam());
+        expectLoad(helper);
+        expectLoad(other);
+        EXPECT_FALSE(adapter->FindCodeObject("other.co"));
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
+        expectLoad(primary);
+        EXPECT_FALSE(adapter->FindCodeObject("primary.co")) << "recovery unloaded it";
+        EXPECT_TRUE(adapter->FindCodeObject("primary.co"));
+        EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    std::mutex                 fileLoadsMutex;
+    std::map<std::string, int> fileLoads;
+    std::atomic<int>           liveFileModules{0};
+    std::atomic<uintptr_t>     nextFileModule{0};
+
+    // Slow enough that concurrent callers overlap the load.
+    hipError_t slowFileLoad(hipModule_t* module, const char* path)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        {
+            std::lock_guard<std::mutex> guard(fileLoadsMutex);
+            ++fileLoads[path];
+        }
+        ++liveFileModules;
+        *module = reinterpret_cast<hipModule_t>(++nextFileModule);
+        return hipSuccess;
+    }
+
+    hipError_t fileUnload(hipModule_t)
+    {
+        --liveFileModules;
+        return hipSuccess;
+    }
+
+    hipError_t noFileLoadError()
+    {
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterConcurrentLoad, smoke_ConcurrentFirstUseLoadsEachFileOnce)
+    {
+        fileLoads.clear();
+        liveFileModules = 0;
+        {
+            TensileLite::hip::SolutionAdapter adapter(TensileLite::hip::SolutionAdapter::ModuleApi{
+                slowFileLoad, fileUnload, noFileLoadError});
+            adapter.codeObjectDir("/library");
+            std::vector<std::thread> threads;
+            for(int i = 0; i < 16; i++)
+                threads.emplace_back(
+                    [&adapter, i]() { adapter.FindCodeObject(i % 2 ? "a.co" : "b.co"); });
+            for(auto& thread : threads)
+                thread.join();
+            EXPECT_EQ(fileLoads,
+                      (std::map<std::string, int>{{"/library/a.co", 1}, {"/library/b.co", 1}}));
+            EXPECT_EQ(liveFileModules.load(), 2);
+            EXPECT_TRUE(adapter.FindCodeObject("a.co"));
+            EXPECT_TRUE(adapter.FindCodeObject("b.co"));
+        }
+        EXPECT_EQ(liveFileModules.load(), 0) << "the adapter unloads every module";
     }
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS

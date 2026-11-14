@@ -1454,6 +1454,51 @@ TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
         << "a shard reached from both sides must still register exactly once";
 }
 
+namespace
+{
+    // Counts shard parses. The first waits up to 50 ms for a second, so loads
+    // that are not serialized overlap.
+    struct CountingMaster : Master
+    {
+        mutable std::atomic<int> shardLoads{0};
+
+        void beforeShardLoaded(std::string const&) const override
+        {
+            shardLoads.fetch_add(1);
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+            while(shardLoads.load() < 2 && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+} // namespace
+
+TEST_F(PlaceholderIndexedShardTest, ConcurrentIndexLookupsParseShardOnce)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    CountingMaster master;
+    ASSERT_TRUE(master.initLibraryMapping(masterPath().string()));
+
+    constexpr int                                     kThreads = 8;
+    std::vector<std::shared_ptr<ContractionSolution>> got(kThreads);
+    std::vector<std::thread>                          threads;
+    for(int t = 0; t < kThreads; t++)
+        threads.emplace_back([&, t]() {
+            got[t] = master.resolveSolutionByIndex(shardIndices[t % shardIndices.size()]);
+        });
+    for(auto& thread : threads)
+        thread.join();
+
+    EXPECT_EQ(master.shardLoads.load(), 1) << "concurrent misses parsed the shard more than once";
+    EXPECT_EQ(master.solutionSources.size(), 1u);
+    for(int t = 0; t < kThreads; t++)
+    {
+        ASSERT_NE(got[t], nullptr) << "thread " << t;
+        EXPECT_EQ(got[t]->index, shardIndices[t % shardIndices.size()]);
+    }
+}
+
 TEST_F(PlaceholderIndexedShardTest, AllSolutionsIteratorLoadsUnvisitedIndexedShards)
 {
     if(!layOutLibrary())

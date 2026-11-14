@@ -449,7 +449,7 @@ namespace TensileLite
                 std::lock_guard<std::mutex> guard(m_access);
                 if(m_localModules.count(path) != 0)
                     return hipSuccess;
-                auto& slot = m_localLoadMutexes[path];
+                auto& slot = m_loadMutexes[path];
                 if(!slot)
                     slot = std::make_shared<std::mutex>();
                 pathMutex = slot;
@@ -550,12 +550,24 @@ namespace TensileLite
                 return false;
             }
 #endif
-            //If required code object file hasn't yet been loaded, load it now
-            m_access.lock();
-            bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))
-                          != m_loadedCOFiles.end();
+            // If required code object file hasn't yet been loaded, load it now.
+            // Loads of one file are serialized so it is loaded once; the key is
+            // the m_loadedCOFiles name, shared by its xnack variants.
+            std::string const            key = removeXnack(codeObjectFile);
+            std::unique_lock<std::mutex> guard(m_access);
+            if(m_loadedCOFiles.count(key) != 0)
+                return true;
+            auto& slot = m_loadMutexes[key];
+            if(!slot)
+                slot = std::make_shared<std::mutex>();
+            std::shared_ptr<std::mutex> fileMutex = slot;
+            guard.unlock();
+
+            std::lock_guard<std::mutex> loadGuard(*fileMutex);
+            guard.lock();
+            bool        loaded        = m_loadedCOFiles.count(key) != 0;
             std::string codeObjectDir = m_codeObjectDirectory;
-            m_access.unlock();
+            guard.unlock();
 
             if(!loaded)
             {

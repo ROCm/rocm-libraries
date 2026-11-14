@@ -187,10 +187,14 @@ namespace TensileLite
             // the xnack suffix stripped, so the on-disk name cannot be derived.
             std::string m_helperKernelPath;
 
+            // One mutex per code object serializes its load, so two threads
+            // cannot both load it: keyed by absolute path for a local code
+            // object, else by m_loadedCOFiles name. Taken before m_access,
+            // never while holding it. This map and the local maps below are
+            // guarded by m_access.
+            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_loadMutexes;
+
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-            // One mutex per path serializes its load, so two threads cannot
-            // both load it. The maps are guarded by m_access.
-            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_localLoadMutexes;
             std::unordered_map<std::string, hipModule_t>                 m_localModules;
             std::map<std::pair<std::string, std::string>, hipFunction_t> m_localKernels;
 #endif
