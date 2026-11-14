@@ -14,6 +14,7 @@
 #include <hipblaslt_init.hpp>
 #include <limits>
 #include <numeric>
+#include <tuple>
 #include <vector>
 
 #include "../include/hipblaslt_random.hpp"
@@ -136,7 +137,7 @@ class ExtOpSoftmaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDat
 {
 };
 
-class ExtOpLayerNormTest : public testing::TestWithParam<uint32_t>
+class ExtOpLayerNormTest : public testing::TestWithParam<std::tuple<uint32_t, uint32_t>>
 {
 };
 class ExtOpLayerNormUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
@@ -182,8 +183,7 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 
 TEST_P(ExtOpLayerNormTest, layernormSuccess)
 {
-    uint32_t m = GetParam();
-    uint32_t n = 16;
+    auto [m, n] = GetParam();
 
     std::vector<float> output(m * n, 0.f);
     std::vector<float> mean(m, 0.f);
@@ -373,7 +373,11 @@ INSTANTIATE_TEST_SUITE_P(ExtOpTest,
 
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpLayerNormTest,
-                         testing::Values<uint32_t>(1, 16, 1335, 6666));
+                         testing::Values(std::make_tuple(1u, 16u),
+                                         std::make_tuple(16u, 16u),
+                                         std::make_tuple(1335u, 16u),
+                                         std::make_tuple(6666u, 16u),
+                                         std::make_tuple(12u, 4096u)));
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpLayerNormUnsupportedDatatypeTest,
                          testing::Values<hipDataType>(HIP_R_16F, HIP_R_16BF));
