@@ -177,7 +177,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
-        bool            log = Log::getLogger()->should_log(LogLevel::Debug);
+        bool            log = Log::logger().should_log(LogLevel::Debug);
         KernelArguments rv(log);
 
         auto const& argStructs = m_context->kernel()->arguments();
@@ -322,7 +322,8 @@ namespace rocRoller
 
         auto kernelGraph = KernelGraph::translate(m_command, m_commandParameters);
 
-        if(Settings::getInstance()->get(Settings::LogGraphs))
+        if(Settings::getInstance()->get(Settings::LogGraphs)
+           && Log::logger().should_log(LogLevel::Debug))
             Log::debug("CommandKernel::generateKernel: post translate: {}",
                        kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
 
