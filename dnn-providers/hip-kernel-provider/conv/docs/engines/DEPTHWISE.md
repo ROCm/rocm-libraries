@@ -120,7 +120,7 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - Catalog: floor plus 6 tiles, plus 4 multiplier-2 configs, x 2 layouts x 3 dtypes (66). 11 Hankel schedules (q, g, nwg, bpc) x filters 3/5/7 x stride 1/2 x fp16/bf16 (132); the schedules are those that won on gfx950 ConvNeXt, EfficientNet and MobileNet shapes. 8 vtile shapes x 3 dtypes (24). Floors come first.
 
 ## Strengths and weaknesses
-- **Usage-weighted, depthwise class, all engines, against MIOpen search** (conv-kpi corpus; the class is served almost entirely by these engines and FFT):
+- **Usage-weighted, depthwise class, all engines, against MIOpen search** (model corpus; the class is served almost entirely by these engines and FFT):
   - Full corpus, native layouts: gfx942 MI325X 16.0x, gfx1201 12.3x, gfx1100 17.9x, gfx950 1.31x.
   - 2K-shape subset: gfx90a 24.4x; usage-weighted MIOpen/ours about 13x on MI325X, 16x on gfx90a, 8x on gfx1201, 12x on gfx1100 and 8x on gfx906.
 - **gfx950:** a dedicated depthwise tier after the Hankel stride-2 and operand rework measured 1.28x overall. Wrw rose from 0.64x to about 1.13x; NCHW fp16 wrw is about 1.67x, while NHWC 16-bit wrw remains 0.84-0.88x. MFMA forward and backward data are about at parity with hipconv (1.02x tier ratio). MFMA was the best engine on about 110 graphs.

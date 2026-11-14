@@ -65,7 +65,7 @@ Counts: 1845 exact configs (WMMA 1020, MFMA 16x16 684, FMA 141) and 84 three-bf1
 
 ## Strengths and weaknesses
 
-Latest autotuned conv-kpi 2K-subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where K7 is our autotuned best (it is admitted on 258 of the 634 bwd graphs; 205 on gfx906):
+Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where K7 is our autotuned best (it is admitted on 258 of the 634 bwd graphs; 205 on gfx906):
 
 | GPU | best on | W/L | call-weighted factor | weighted time saved |
 |---|---|---|---|---|

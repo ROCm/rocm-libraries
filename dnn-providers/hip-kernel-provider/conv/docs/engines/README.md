@@ -26,4 +26,4 @@ The explicit-GEMM engines (`ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` and th
 
 Instance counts per engine are in [HEURISTICS.md](../../HEURISTICS.md). For regenerating catalogs, see [REGEN.md](../../REGEN.md).
 
-Performance figures in these docs come from the convkpi sweeps: autotuned, with only our engines running, compared against MIOpen. Each doc names the MIOpen mode it compares against (search or exhaustive) and the build the figures come from.
+Performance figures in these docs come from sweeps over an internal real-model convolution corpus (9,471 shapes) and a 1,998-shape subset of it: autotuned, with only our engines running, compared against MIOpen. Each doc names the MIOpen mode it compares against (search or exhaustive) and the build the figures come from.

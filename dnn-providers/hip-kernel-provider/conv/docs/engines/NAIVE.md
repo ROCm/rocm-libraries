@@ -72,7 +72,7 @@ admitted    <=> perLane <= 5000
 
 ## Strengths and weaknesses
 
-Latest autotuned conv-kpi 2K-subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906), no MIOpen provider loaded, compared with MIOpen in search mode:
+Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906), no MIOpen provider loaded, compared with MIOpen in search mode:
 
 | GPU | fwd graphs admitted (of 771) | bwd (of 634) | wrw (of 593) | graphs where naive is the best engine |
 |---|---|---|---|---|

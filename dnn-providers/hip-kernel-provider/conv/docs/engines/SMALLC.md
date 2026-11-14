@@ -51,7 +51,7 @@ Backward data at unit stride is the forward convolution over dy that writes dx: 
 
 ## Strengths and weaknesses
 
-Latest autotuned conv-kpi 2K-subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where the engine is our autotuned best (W/L: faster / slower by more than 5%):
+Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where the engine is our autotuned best (W/L: faster / slower by more than 5%):
 
 | GPU | FWD best on (of admitted) | FWD W/L | FWD factor | BWD best on (of admitted) | BWD W/L | BWD factor |
 |---|---|---|---|---|---|---|

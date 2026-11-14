@@ -107,7 +107,7 @@ SPDX-License-Identifier:  MIT
 - **Catalog.** Variants x tiles per dtype and arch family. The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math` and `pf`. Configs were kept where they won measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape conv-kpi subset against MIOpen in search mode. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
+Measured: an autotuned sweep of the 1,998-shape model-corpus subset against MIOpen in search mode. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
 
 | GPU | fwd graphs (W/L) | bwd graphs (W/L) | wrw graphs (W/L) |
 |---|---|---|---|

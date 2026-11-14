@@ -90,7 +90,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - gfx950 rounds bf16 pairs with the hardware convert, which is bit-identical to the software round for every non-NaN input (checked exhaustively).
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape conv-kpi subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
+Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
 
 | GPU | graphs K2 is our best | W/L vs MIOpen | weighted speedup | MIOpen solver it mostly meets |
 |---|---|---|---|---|

@@ -87,7 +87,7 @@ Engine-specific knobs (`taps`, `stride`, `flat`, `ring`, `phase`, `fold`, ...) a
 **Per-config timings.** With autotune (`HIPDNN_FORCE_BENCHMARKING=1`), each ingestor engine times every admitted config on the first execute and keeps the fastest. Every candidate's time and its problem features are logged as a JSON record at INFO plugin log level (`BenchmarkPlan::logCandidateTiming`). That is the per-config training data the `hipdnn-uhd` skill's pipeline consumes. The BLAS engines tune internally and report only their best.
 
 **Problem sets in use for measuring this group**, as dnn-benchmarking graph JSON:
-- **conv-kpi subset:** 1998 shapes chosen from a 9471-shape real-model corpus to keep its range: every direction, dtype, layout, conv type and filter class. It covers 31 models.
+- **model-corpus subset:** 1998 shapes chosen from a 9471-shape real-model corpus to keep its range: every direction, dtype, layout, conv type and filter class. It covers 31 models.
 - **rapid:** 86 shapes. Every conv class, direction, dtype and layout.
 - **rdna_av:** 414 audio/video shapes (vocoders, video VAEs, conformer, segmentation).
 - **depthwise** and **pointwise** tiers.

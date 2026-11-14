@@ -86,7 +86,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
   - The ring, DMA-ring and direct loops fit 256 VGPRs only with the current (nightly) LLVM. Older compilers spill the same source heavily.
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape conv-kpi subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
+Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
 
 | GPU | graphs K3 is our best | W/L vs MIOpen | weighted speedup | MIOpen solver it mostly meets |
 |---|---|---|---|---|

@@ -78,7 +78,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 
 ## Strengths and weaknesses
 
-Latest autotuned conv-kpi 2K-subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
+Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
 
 | GPU | fwd best on | fwd W/L | fwd factor | bwd best on | bwd W/L | bwd factor |
 |---|---|---|---|---|---|---|
