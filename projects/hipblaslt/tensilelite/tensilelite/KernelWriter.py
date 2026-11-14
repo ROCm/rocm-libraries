@@ -71,7 +71,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
-from .Common.Architectures import ARCH_CAP_OVERRIDES
+from .Common.Capabilities import archCapOverrides
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
@@ -8049,13 +8049,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # process -- including unqualified ones, which then lose their drains
       # without anything reporting it.
       self.states.archCaps = {**self.states.archCaps,
-                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"]}
+                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"],
+                              "MTypeNC": isaInfo.archCaps.get("MTypeNC", True)}
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
     # dict rather than mutate: some backends return the live cached cap dict.
     archName = globalParameters.get("StinkyTofuArchName") or ""
-    archCapDeltas = ARCH_CAP_OVERRIDES.get(archName, {}).get("archCaps", {})
+    archCapDeltas = archCapOverrides(archName).get("archCaps", {})
     if archCapDeltas:
       self.states.archCaps = {**self.states.archCaps, **archCapDeltas}
 

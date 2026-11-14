@@ -6061,6 +6061,16 @@ miopenGetReductionWorkspaceSize(miopenHandle_t handle,
  * dimensions
  * of A to be reduced.
  *
+ * The scale factors alpha and beta are read as float, or as double when the data type of tensor A
+ * is double, and are passed to the kernels as float; they are converted to the compute type of the
+ * reduce descriptor. The reduction, the scaling by alpha and the blend with the prior content of
+ * tensor C are made in the compute type, and the result is converted once to the data type of C
+ * (rounded for a floating point type, truncated for an integer type). An integer compute type
+ * truncates a fractional alpha, beta and prior content of C. The prior content of C is not read
+ * when beta, converted to the compute type, is zero. A compute type that cannot hold every value
+ * of the data type of C (for example FP16 compute for FP32 data) rounds the prior content of C
+ * to the compute type.
+ *
  * @param handle                   MIOpen Handle (input)
  * @param reduceTensorDesc         Pointer to the ReduceTensor descriptor object (input)
  * @param indices                  Address of the allocated indices data space (output)

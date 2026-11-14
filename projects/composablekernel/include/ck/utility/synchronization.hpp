@@ -14,6 +14,58 @@ __device__ void llvm_amdgcn_s_wait_dscnt(short cnt) __asm("llvm.amdgcn.s.wait.ds
 #endif
 #endif
 
+#if CK_HAS_ASYNCMARK
+namespace detail {
+// Newer compilers take a trailing stage mask operand in the asyncmark builtins. MaskType holds its
+// type for those and is empty otherwise, which drops the mask: such compilers keep one sequence
+// of marks for all stages, so after each wait at least the async operations that the stage mask
+// asks for have completed.
+template <typename... MaskType>
+struct asyncmark_builtins
+{
+    template <unsigned int StageMask>
+    __device__ static void mark()
+    {
+        __builtin_amdgcn_asyncmark(MaskType{StageMask}...);
+    }
+
+    template <index_t NumMarks, unsigned int StageMask>
+    __device__ static void wait()
+    {
+        __builtin_amdgcn_wait_asyncmark(NumMarks, MaskType{StageMask}...);
+    }
+};
+
+// Overload resolution selects the arity the builtins accept. The probe sits in a function
+// template's return type because clang checks AMDGPU builtin calls against an enclosing function,
+// which partial specializations and default template arguments lack.
+template <typename StageMask>
+auto select_asyncmark_builtins(int) -> decltype(__builtin_amdgcn_asyncmark(StageMask{}),
+                                                asyncmark_builtins<StageMask>{});
+
+template <typename StageMask>
+asyncmark_builtins<> select_asyncmark_builtins(long);
+
+using asyncmark_builtins_t = decltype(select_asyncmark_builtins<unsigned int>(0));
+} // namespace detail
+
+// Appends an asyncmark to the sequence of each stage in StageMask, a mask of LLVM's async stage
+// bits in which zero names every stage.
+template <unsigned int StageMask = 0>
+__device__ void asyncmark()
+{
+    detail::asyncmark_builtins_t::template mark<StageMask>();
+}
+
+// Waits until the sequence of each stage in StageMask, where zero names every stage, holds at
+// most NumMarks asyncmarks.
+template <index_t NumMarks = 0, unsigned int StageMask = 0>
+__device__ void wait_asyncmark()
+{
+    detail::asyncmark_builtins_t::template wait<NumMarks, StageMask>();
+}
+#endif
+
 template <index_t cnt = 0>
 __device__ void wait_dscnt(Number<cnt> = {})
 {
@@ -73,7 +125,7 @@ __device__ void block_sync_lds_direct_load()
 #if CK_HAS_ASYNCMARK
     // Wait on async traffic to conclude, then sync the workgroup so that everyone sees the values
     // in LDS.
-    __builtin_amdgcn_wait_asyncmark(0);
+    wait_asyncmark();
     block_sync_lds();
 #else
 #if defined(__gfx125__)
@@ -109,7 +161,7 @@ __device__ void block_sync_lds_direct_load()
 __device__ void block_sync_lds_async_load()
 {
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_wait_asyncmark(0);
+    wait_asyncmark();
     block_sync_lds();
 #elif defined(__gfx125__)
     // Fallback: async-engine completion wait + "local" fences + manual barrier (avoids the
