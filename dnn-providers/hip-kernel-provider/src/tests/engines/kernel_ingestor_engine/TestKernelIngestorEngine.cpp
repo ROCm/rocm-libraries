@@ -647,6 +647,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
+        "hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",

@@ -649,6 +649,40 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx1250, so its census is not registered.")
     endif()
 
+    # Census for the HIP-source RDNA conv forward pack, hipkernel:hip_conv_fwd_fma_igemm_rdna, at
+    # every RDNA arch this configuration packs it for (gfx11-generic and gfx12-generic
+    # members).
+    set(_hkp_hip_conv_fwd_fma_igemm_rdna_arches "")
+    foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
+                           gfx1200 gfx1201)
+        hkp_product_ships_engine_for_arch(_hkp_ships "hipkernel:hip_conv_fwd_fma_igemm_rdna" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_hip_conv_fwd_fma_igemm_rdna_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_hip_conv_fwd_fma_igemm_rdna_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_hip_conv_fwd_fma_igemm_rdna_arches}
+            SUITES TestHipConvFwdFmaIgemmRdnaPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:hip_conv_fwd_fma_igemm_rdna for any "
+            "RDNA arch, so its census is not registered.")
+    endif()
+
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

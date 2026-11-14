@@ -2,7 +2,7 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below, plus
 `FlyDSL/<op>/` bundles.
 
 | Bundle | Engine | Native pack |
@@ -16,6 +16,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
+| `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
@@ -32,6 +33,12 @@ configs, not by hand): the prefill bundle `rocKE/gfx1151_wmma_attention/` declar
 declares `head_size`. A knob value is the bucket width a kernel serves, not an exact size,
 which keeps the knob tuple of every co-admitted kernel distinct. A pin that matches no
 kernel is refused. The tile size (`block_m`) is not a knob.
+
+`hip/conv_rdna/` holds HIP-source kernels (`kind: "hip"`) under `kernels/`, compiled when the
+bundle is packed, for every build whose GPU targets include one of the gfx11 and gfx12 RDNA
+targets its KDP declares. It needs neither rocKE nor DVC. Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_fma_igemm_rdna.yaml`; edit the config and
+regenerate rather than editing the JSON.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

@@ -845,6 +845,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/hip_conv_fwd_fma_igemm_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_fma_igemm_rdna` catalog: HIP-source kernels (`kind: hip`, one per dtype x layout x tile, built with `defines`) under `hip/conv_rdna` |
 
 ## Generated variant sets: `variants`
 
