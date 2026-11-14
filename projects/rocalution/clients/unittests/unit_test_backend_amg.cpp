@@ -223,16 +223,26 @@ namespace
             return undecided;
         }
 
-        // The ext+i style steps index the C/F map by column, so A is square
+        // The ext+i style steps index the C/F map by column, so A is square. The entries of
+        // the ghost part follow those of A in S, and its columns follow the rows of A in
+        // omega. The omega entries of the ghost columns start at 0, as GlobalMatrix allocates them.
         std::vector<bool> strong_influences(const Csr<T>&       ref,
                                             float               eps,
                                             int64_t             offset,
-                                            std::vector<float>* omega) const
+                                            std::vector<float>* omega,
+                                            const Csr<T>*       ghost_part = nullptr) const
         {
+            const int64_t gst_nnz  = ghost_part == nullptr ? 0 : ghost_part->nnz();
+            const int     gst_ncol = ghost_part == nullptr ? 0 : ghost_part->m;
+
+            std::vector<float> w0(ref.n + gst_ncol, 0.0f);
+            std::fill(w0.begin(), w0.begin() + ref.n, -1.0f);
+
             auto A = make(ref);
-            auto S = flags(std::vector<bool>(ref.nnz(), true));
-            auto w = vec(std::vector<float>(ref.n, -1.0f));
-            EXPECT_TRUE(A->RSPMISStrongInfluences(eps, S.get(), w.get(), offset, *ghost()));
+            auto G = ghost_part == nullptr ? ghost() : make(*ghost_part);
+            auto S = flags(std::vector<bool>(ref.nnz() + gst_nnz, true));
+            auto w = vec(w0);
+            EXPECT_TRUE(A->RSPMISStrongInfluences(eps, S.get(), w.get(), offset, *G));
             if(omega != nullptr)
             {
                 *omega = values_of(*w);
@@ -578,8 +588,9 @@ TYPED_TEST(backend_amg, pmis_unassigned_nodes_join_a_neighbouring_aggregate)
     EXPECT_EQ(a[8], -2);
 }
 
-// j influences i if a_ij < eps min_k a_ik, never on the diagonal. omega counts the rows
-// that i influences, plus a random number in [0, 1).
+// j influences i if a_ij < eps min_k a_ik, or a_ij > eps max_k a_ik if the diagonal of i
+// is negative, never on the diagonal. omega counts the rows that i influences, plus a
+// random number in [0, 1).
 TYPED_TEST(backend_amg, rs_strong_influences_compare_with_the_most_negative_coupling)
 {
     using T = typename TypeParam::value_type;
@@ -629,6 +640,64 @@ TYPED_TEST(backend_amg, rs_strong_influences_compare_with_the_most_negative_coup
         EXPECT_GE(omega[i], static_cast<float>(influenced[i])) << "node " << i;
         EXPECT_LT(omega[i], static_cast<float>(influenced[i] + 1)) << "node " << i;
     }
+
+    // Scaled by -1, every row has a negative diagonal. In row 0, a_02 = 0.2 lies below the
+    // threshold 0.25 and a_03 = -0.5 has the sign of the diagonal, so neither is strong.
+    const Csr<T> negated = transformed(ref, [](int, int, T v) { return -v; });
+    const auto   S       = this->strong_influences(negated, 0.25f, 0, nullptr);
+    EXPECT_EQ(S, rs_strength(negated, 0.25));
+    EXPECT_EQ(S, rs_strength(ref, 0.25));
+}
+
+// The couplings of the ghost part count for the threshold and are strong by the same rule,
+// and omega counts the rows that each ghost column influences. The threshold of row 0 is
+// 0.25 times its smallest coupling, -2 in the ghost part, so a_01 = -0.4 is weak. Row 1
+// has a negative diagonal, so its threshold is 0.25 times its largest coupling, 2 in the
+// ghost part, and a_10 = 0.25 is weak. Row 2 has no ghost couplings.
+TYPED_TEST(backend_amg, rs_strong_influences_with_a_ghost_part)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> ref(3);
+    ref.add(0, 4.0);
+    ref.add(1, -0.4);
+    ref.end_row();
+    ref.add(0, 0.25);
+    ref.add(1, -4.0);
+    ref.add(2, -1.0);
+    ref.end_row();
+    ref.add(1, -1.0);
+    ref.add(2, -2.0);
+    ref.end_row();
+
+    Csr<T> gst(3, 2);
+    gst.add(0, -2.0);
+    gst.add(1, 1.0);
+    gst.end_row();
+    gst.add(0, 2.0);
+    gst.add(1, -3.0);
+    gst.end_row();
+    gst.end_row();
+
+    const std::vector<bool> expected
+        = {false, false, false, false, false, false, false, true, false, true, false};
+
+    std::vector<float> omega;
+    EXPECT_EQ(this->strong_influences(ref, 0.25f, 0, &omega, &gst), expected);
+
+    ASSERT_EQ(omega.size(), 5u);
+    for(int i = 0; i < 3; ++i)
+    {
+        EXPECT_GE(omega[i], 0.0f) << "node " << i;
+        EXPECT_LT(omega[i], 1.0f) << "node " << i;
+    }
+    EXPECT_EQ(omega[3], 2.0f);
+    EXPECT_EQ(omega[4], 0.0f);
+
+    // Scaling every row by -1, with its ghost part, changes nothing
+    const auto   minus       = [](int, int, T v) { return -v; };
+    const Csr<T> negated_gst = transformed(gst, minus);
+    EXPECT_EQ(this->strong_influences(transformed(ref, minus), 0.25f, 0, nullptr, &negated_gst),
+              expected);
 }
 
 // The random part of omega is a function of the global row
@@ -650,8 +719,8 @@ TYPED_TEST(backend_amg, rs_strong_influences_random_part)
     }
 }
 
-// Strength is invariant under scaling a row by -1, so it treats a negative diagonal
-// with the sign of the couplings reversed
+// Strength is invariant under scaling a row with a nonzero diagonal by -1, so it treats
+// a negative diagonal with the sign of the couplings reversed
 TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
 {
     using T          = typename TypeParam::value_type;
@@ -666,8 +735,22 @@ TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
         v = -v;
     }
     const auto S_negated = this->strong_influences(negated, 0.25f, 0, nullptr);
-    KNOWN_BUG("for a negative diagonal, a_ij < eps max_k a_ik is taken as strong");
     EXPECT_EQ(S_negated, S);
+}
+
+// A row without diagonal counts as one with a positive diagonal. The negated grid runs
+// first, so that a diagonal sign left over between launches, for example in uninitialized
+// shared memory, would show. Such a sign shows only where the second launch runs on the
+// same compute units, so the grid has enough rows for several workgroups on every
+// compute unit.
+TYPED_TEST(backend_amg, rs_strong_influences_of_rows_without_diagonal)
+{
+    using T           = typename TypeParam::value_type;
+    const Csr<T> full = grid<T>(256, 128, 1.0, 0.1, true);
+    const Csr<T> ref  = filtered(full, [](int i, int j, T) { return i != j; });
+
+    this->strong_influences(transformed(full, [](int, int, T v) { return -v; }), 0.25f, 0, nullptr);
+    EXPECT_EQ(this->strong_influences(ref, 0.25f, 0, nullptr), rs_strength(ref, 0.25));
 }
 
 // Undecided points (0) become C points (1) and are marked if they influence another
