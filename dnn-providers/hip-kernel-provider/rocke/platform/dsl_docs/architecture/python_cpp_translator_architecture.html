@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rocKE Python to C++ translator - architecture</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#1d2330; --ink2:#2c3445; --muted:#5d6678; --line:#dde1e8;
+  --accent:#c8102e; --accent2:#1f5fbf; --ok:#1b8a4b; --warn:#b26a00; --violet:#7a3db8;
+  --soft:#f7f8fa; --chip:#eef1f6; --info-bg:#eef4fd; --info-line:#cddcf3; --warn-bg:#fff8ec; --ok-bg:#ecf7f0;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+header{background:#14181f;color:#fff;padding:12px 22px;display:flex;align-items:center;gap:22px;height:74px}
+header h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.1px}
+header .lede{color:#b9c1cf;font-size:13px;margin-top:2px}
+header .kpis{margin-left:auto;display:flex;gap:10px}
+.kpi{background:#1e2430;border:1px solid #2d3545;border-radius:10px;padding:6px 12px;min-width:132px}
+.kpi b{display:block;font-size:19px;font-weight:650;color:#fff}
+.kpi span{font-size:11.5px;color:#b9c1cf}
+main{height:calc(100vh - 74px - 26px);display:grid;grid-template-columns:1.62fr 1fr;grid-template-rows:56% 44%;gap:12px;padding:12px 16px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:0;display:flex;flex-direction:column}
+.card h2{font-size:14.5px;margin:0 0 2px;font-weight:650}
+.card .sub{color:var(--muted);font-size:12.3px;margin-bottom:6px}
+.row{display:flex;align-items:center;gap:8px}
+.btn{font:inherit;font-size:12.5px;padding:4px 11px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:#9fb2d4}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.legend{display:flex;gap:12px;font-size:11.8px;color:var(--muted);margin-left:auto}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+/* pipeline figure */
+#fig{flex:1;min-height:0;width:100%}
+#fig .node rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5;rx:10;transition:stroke .2s,fill .2s}
+#fig .node{cursor:pointer;outline:none}
+#fig .node .bar{rx:3}
+#fig .node text{font-size:14px;fill:var(--ink);font-weight:600;pointer-events:none}
+#fig .node text.f{font:11.5px var(--mono);fill:var(--muted);font-weight:400}
+#fig .node:hover rect.box,#fig .node:focus rect.box{stroke:#9fb2d4}
+#fig .node.on rect.box{stroke:var(--accent2);stroke-width:2.5;fill:var(--info-bg)}
+#fig .edge path{fill:none;stroke:#aab3c2;stroke-width:1.6}
+#fig .edge text{font-size:11.5px;fill:var(--muted)}
+#fig .edge.on path{stroke:var(--accent2);stroke-width:2.2;stroke-dasharray:6 5;animation:flow .9s linear infinite}
+#fig .edge.loop path{stroke:var(--warn)}
+#fig .edge.loop.on path{stroke:var(--warn)}
+@keyframes flow{to{stroke-dashoffset:-22}}
+#fig .lane{font-size:11px;fill:#9aa3b2;letter-spacing:.8px;font-weight:600}
+/* detail card */
+#det .kind{display:inline-block;font-size:11px;font-weight:650;letter-spacing:.5px;border-radius:10px;padding:1px 8px;margin-bottom:6px}
+#det h3{margin:0 0 6px;font-size:17px}
+#det p{margin:0 0 8px;color:var(--ink2)}
+#det ul{margin:0 0 8px 18px;padding:0;color:var(--ink2)}
+#det li{margin:2px 0}
+#det .io{display:grid;grid-template-columns:62px 1fr;gap:3px 10px;font-size:12.6px;margin:6px 0 8px;padding:8px 10px;background:var(--soft);border:1px solid var(--line);border-radius:8px}
+#det .io b{color:var(--muted);font-weight:600}
+#det code,.mono{font-family:var(--mono);font-size:12px}
+#det pre{margin:0;background:#14181f;color:#e6e9ef;border-radius:8px;padding:8px 10px;font:11.8px/1.45 var(--mono);overflow:hidden;white-space:pre}
+#det .scroll{overflow:auto;min-height:0;flex:1}
+/* code compare */
+.codes{display:grid;grid-template-columns:1fr 1.15fr;gap:10px;flex:1;min-height:0}
+.code{background:#14181f;border-radius:9px;padding:8px 0;overflow:hidden;font:11.6px/1.5 var(--mono);color:#d7dce5;min-height:0}
+.code .hd{font:600 11px system-ui;color:#8f9ab0;padding:0 12px 4px;letter-spacing:.4px}
+.code .ln{padding:0 12px;white-space:pre;border-left:3px solid transparent;cursor:default}
+.code .ln.m{cursor:pointer}
+.code .ln.hl{background:#24324d;border-left-color:#6ea0ff}
+.code .ln.anf.hl{background:#3a2c14;border-left-color:#e3a33c}
+.kw{color:#ff8f9f}.fn{color:#8fc1ff}.st{color:#a8db8f}.cm{color:#7e889b}.ty{color:#d8b4fe}
+.note{font-size:12.2px;color:var(--ink2);margin-top:7px;border-left:4px solid var(--warn);background:var(--warn-bg);padding:5px 9px;border-radius:4px;min-height:34px}
+/* chart */
+#chart{flex:1;min-height:0;width:100%}
+#chart .lbl{font-size:12px;fill:var(--ink2)}
+#chart .val{font-size:11.5px;fill:var(--ink2);font-variant-numeric:tabular-nums}
+#chart .ref{stroke:#8a93a3;stroke-width:1.2;stroke-dasharray:4 4}
+#chart .reft{font-size:11px;fill:var(--muted)}
+#chart .bar{fill:var(--accent2)}
+#chart .hit{fill:transparent;cursor:default}
+#chart .hit:hover+.bar,#chart g.b:hover .bar{fill:#174a96}
+.claims{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+.claim{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.2px;color:var(--ink2)}
+.claim b{display:block;font-size:12.6px;color:var(--ink)}
+#tip{position:fixed;pointer-events:none;background:#14181f;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;opacity:0;transition:opacity .12s;z-index:9}
+footer{height:26px;padding:4px 18px;font-size:11.5px;color:var(--muted);display:flex;gap:16px}
+footer span:last-child{margin-left:auto}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>rocKE Python &rarr; C++ translator</h1>
+    <div class="lede">Writes the C++ twin of a Python kernel builder from the Python itself. Fixed rules or a hand fill, never a guess. The byte-identity gate is the only judge.</div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><b>77.0%</b><span>of Python lines translate mechanically</span></div>
+    <div class="kpi"><b>4 / 4</b><span>generated modules byte-identical</span></div>
+    <div class="kpi"><b>&lt; 2 s</b><span>to translate one module</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="card" style="grid-column:1;grid-row:1">
+    <div class="row">
+      <div><h2>Pipeline</h2><div class="sub">Click a stage, or play the flow.</div></div>
+      <div class="legend">
+        <span><i style="background:#9aa3b2"></i>input</span>
+        <span><i style="background:var(--accent2)"></i>mechanical</span>
+        <span><i style="background:var(--warn)"></i>person, once</span>
+        <span><i style="background:var(--ok)"></i>proof</span>
+      </div>
+      <button class="btn primary" id="play" aria-label="Play the flow">&#9654; Play</button>
+    </div>
+    <svg id="fig" viewBox="0 0 1060 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Translator pipeline"></svg>
+  </section>
+
+  <section class="card" id="det" style="grid-column:2;grid-row:1" aria-live="polite"></section>
+
+  <section class="card" style="grid-column:1;grid-row:2">
+    <div class="row"><div><h2>One real function, both sides</h2><div class="sub"><span class="mono">softmax_p</span> in <span class="mono">_attention_bwd_valu.py</span> and the C++ the translator wrote for it. Hover a line.</div></div></div>
+    <div class="codes">
+      <div class="code" id="py"><div class="hd">PYTHON (authoring)</div></div>
+      <div class="code" id="cpp"><div class="hd">GENERATED C++ (internal function; the C entry wraps it)</div></div>
+    </div>
+    <div class="note" id="cnote">Hover a line to see which rule produced it.</div>
+  </section>
+
+  <section class="card" style="grid-column:2;grid-row:2">
+    <h2>How much translates, by module</h2>
+    <div class="sub">Attention backward package, share of Python lines with no hand fill. Total 3,945 of 5,122 lines.</div>
+    <svg id="chart" viewBox="0 0 520 230" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Mechanical share by module"></svg>
+    <div class="claims">
+      <div class="claim"><b>Rule or hole</b>No rule fits: <span class="mono">#error</span>, and a person writes the fill once.</div>
+      <div class="claim"><b>Types from runs</b>Recorded from every parity config. Unreached code is a hole.</div>
+      <div class="claim"><b>Gate decides</b>Same IR bytes on every config: llvm22 + llvm20, gcc + clang.</div>
+    </div>
+  </section>
+</main>
+<footer><span>Source: <span class="mono">platform/tools/translator/</span> and <span class="mono">platform/dsl_docs/architecture/python_cpp_translator_rfc.md</span></span><span>Numbers measured 2026-10-26 on the attention backward port</span></footer>
+<div id="tip"></div>
+
+<script>
+const C={blue:"#1f5fbf",warn:"#b26a00",ok:"#1b8a4b",gray:"#9aa3b2"};
+const KIND={input:["INPUT","#eef1f6","#5d6678",C.gray],mech:["MECHANICAL","#eef4fd","#1f5fbf",C.blue],person:["PERSON, ONCE","#fff8ec","#b26a00",C.warn],proof:["PROOF","#ecf7f0","#1b8a4b",C.ok]};
+const N=[
+ {id:"py",x:20,y:30,t:"Python module",f:"library/kernels/common/",k:"input",
+  h:"The authoring surface",d:"The Python kernel builder stays the source of truth. Builders are mostly unannotated and call the IR builder <code>b</code> directly.",
+  io:[["In","<code>&lt;module&gt;.py</code>"],["Out","its AST, read by Lower"]]},
+ {id:"cfg",x:20,y:150,t:"Parity configs",f:"<module>_emit.py",k:"input",
+  h:"The configs the gate already runs",d:"Each module has a parity driver with its list of builder arguments. The same list types the code and proves it.",
+  io:[["In","<code>library/tests/parity/&lt;module&gt;_emit.py</code>"],["Out","every config, run in-process by Record"]]},
+ {id:"hdr",x:20,y:270,t:"C headers",f:"platform/cpp/include/",k:"input",
+  h:"What the callees look like in C",d:"Calls into modules that are not regenerated use their existing headers. A scanner reads them and pairs each Python function with its C twin.",
+  io:[["Tools","<code>tools/cscan.py</code>, <code>tools/mine_maps.py</code>"],["Out","<code>sigmap.json</code>, <code>twin_map.json</code> (mined in seconds)"]]},
+ {id:"rec",x:240,y:90,t:"Record",f:"tr/record.py",k:"mech",
+  h:"Types from real runs, not inference",d:"Runs every parity config with a profile hook at function boundaries and records the types each argument and result took.",
+  ul:["<code>int</code> in some configs and <code>Value</code> in others becomes <code>int | Value</code>","A function no config reaches gets no types: it is a hole, not a guess"],
+  io:[["Out","<code>data/facts/&lt;module&gt;.json</code>"]]},
+ {id:"low",x:460,y:150,t:"Lower",f:"tr/lower.py",k:"mech",
+  h:"A-normal form, then fixed rules",d:"Every call that can emit IR is bound to its own local, inner calls first, left to right. C argument order can then never reorder the IR. Each dynamic Python feature has one fixed C++ template.",
+  ul:["Short-circuit <code>and</code>/<code>or</code>, <code>if</code>, <code>with</code> keep emitting code inside its arm","No rule matches: the function is refused, with the reason and the Python line"],
+  io:[["In","AST + recorded types + sigmap"],["Out","C++ bodies, or refusals"]]},
+ {id:"abi",x:680,y:30,t:"Header",f:"tr/abi.py",k:"mech",
+  h:"The C header comes from the Python",d:"The export set is <code>__all__</code> plus the methods of exported classes. One C shape per Python shape, so a new port needs no hand header.",
+  ul:["A value of one of several classes: one tagged struct with generated dispatch","Code run on host ints and on IR values: one version per value kind"],
+  io:[["Rules","<code>designs/generated_abi.md</code>, <code>tagged_values.md</code>, <code>host_clones.md</code>"]]},
+ {id:"hole",x:460,y:270,t:"Holes → fills",f:"holes/<module>/",k:"person",
+  h:"The only hand work, done once",d:"A refused function becomes <code>#error \"hole: name: reason (line n)\"</code>, so it can never build by accident. A person writes the fill once; regeneration reuses it.",
+  pre:"$ python -m tr.translate _attention_bwd_valu --analyze\ntranslated cast_c_frag\ntranslated softmax_p\n...\n6/6 functions mechanical, 0 holes\n\n// what a refused function looks like in the .cpp:\n#error \"hole: <name>: <reason> (line <n>)\"",
+  io:[["Out","<code>holes/&lt;module&gt;/&lt;function&gt;.cpp</code>"]]},
+ {id:"emit",x:680,y:150,t:"Emit",f:"tr/translate.py",k:"mech",
+  h:"Normal C++ in the tree",d:"Writes internal C++ plus one <code>extern \"C\"</code> entry per export, formatted with clang-format 18.1.4. It includes the prelude <code>rocke_py.hpp</code> (Python semantics: floor division, negative indexing, <code>str</code>, <code>dict</code>, <code>list</code>).",
+  ul:["First line: <code>generated from &lt;py&gt;:&lt;sha&gt; by tr/translate.py</code>","Never edited by hand: change the Python, a fill or a rule, then regenerate"],
+  io:[["Out","<code>instances/common/&lt;module&gt;.cpp</code> + its header"]]},
+ {id:"gate",x:890,y:150,t:"Gate",f:"check_byte_identity.py",k:"proof",
+  h:"The only acceptance test",d:"Builds the engine and compares the <code>.ll</code> text of Python and C++ on every parity config. The translator never claims a translation is right; the gate does.",
+  ul:["Both LLVM flavors: <code>llvm22</code> and <code>llvm20</code>","Engine built by gcc and clang, warnings as errors","Measured: 31 of 31 attention families, 3,083 configs per flavor"],
+  io:[["Pass","byte-identical, every config"]]},
+ {id:"ci",x:890,y:270,t:"regen --check",f:"CI",k:"proof",
+  h:"Generated files stay current",d:"Regenerates into a temporary tree and compares. Exit 1 lists the stale files. Running <code>tr.regen</code> twice leaves <code>git status</code> clean.",
+  pre:"$ python -m tr.regen --check _attention_bwd_addr \\\n    _attention_bwd_valu _attention_bwd_counted attention_bwd_aux\ncurrent: all 8 generated files",
+  io:[["When","every change to a Python module, a fill or a rule"]]}
+];
+const E=[
+ ["py","rec","",""],["cfg","rec","configs",""],["rec","low","types",""],["py","low","AST","top"],["hdr","low","sigmap",""],
+ ["low","abi","exports",""],["abi","emit","header",""],["low","emit","C++",""],["low","hole","refusal","loop"],["hole","emit","fill","loop"],
+ ["emit","gate",".cpp/.h",""],["gate","ci","",""]
+];
+const W=150,H=60,GW=150;
+const svg=document.getElementById("fig"), NS="http://www.w3.org/2000/svg";
+const el=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);(p||svg).appendChild(e);return e;};
+const byId=Object.fromEntries(N.map(n=>[n.id,n]));
+const pt=(n,side)=>{const w=W;return side==="r"?[n.x+w,n.y+H/2]:side==="l"?[n.x,n.y+H/2]:side==="t"?[n.x+w/2,n.y]:[n.x+w/2,n.y+H];};
+// lanes
+el("text",{x:20,y:20,class:"lane"}).textContent="INPUTS";
+el("text",{x:240,y:20,class:"lane"}).textContent="TRANSLATOR (tr/)";
+el("text",{x:890,y:20,class:"lane"}).textContent="PROOF";
+el("line",{x1:222,y1:28,x2:222,y2:345,stroke:"#e6e9ee"});
+el("line",{x1:860,y1:28,x2:860,y2:345,stroke:"#e6e9ee"});
+const edges={};
+for(const [a,b,lab,kind] of E){
+  const A=byId[a],B=byId[b]; let d,lx,ly;
+  if(kind==="top"){const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"t");d=`M${x1},${y1} C${x1+170},${y1} ${x2},${y2-80} ${x2},${y2}`;lx=x1+150;ly=y1-8;}
+  else if(a==="low"&&b==="hole"){const [x1,y1]=pt(A,"b"),[x2,y2]=pt(B,"t");d=`M${x1-30},${y1} L${x2-30},${y2}`;lx=x1-88;ly=(y1+y2)/2+4;}
+  else if(a==="hole"&&b==="emit"){const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"b");d=`M${x1},${y1} C${x2},${y1} ${x2},${y1} ${x2},${y2}`;lx=x1+12;ly=y1-8;}
+  else if(a==="low"&&b==="abi"){const [x1,y1]=pt(A,"t"),[x2,y2]=pt(B,"l");d=`M${x1+30},${y1} C${x1+30},${y2} ${x1+60},${y2} ${x2},${y2}`;lx=x1+38;ly=y2+40;}
+  else if(a==="abi"&&b==="emit"){const [x1,y1]=pt(A,"b"),[x2,y2]=pt(B,"t");d=`M${x1},${y1} L${x2},${y2}`;lx=x1+8;ly=(y1+y2)/2+4;}
+  else if(a==="gate"&&b==="ci"){const [x1,y1]=pt(A,"b"),[x2,y2]=pt(B,"t");d=`M${x1},${y1} L${x2},${y2}`;}
+  else if(a==="hdr"&&b==="low"){const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"l");d=`M${x1},${y1} C${x1+120},${y1} ${x2-110},${y2+14} ${x2},${y2+14}`;lx=x1+8;ly=y1+18;}
+  else if(a==="cfg"&&b==="rec"){const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"l");d=`M${x1},${y1} C${x1+40},${y1} ${x2-40},${y2+12} ${x2},${y2+12}`;lx=x1+6;ly=y1+16;}
+  else if(a==="py"&&b==="rec"){const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"l");d=`M${x1},${y1} C${x1+40},${y1} ${x2-40},${y2-12} ${x2},${y2-12}`;}
+  else {const [x1,y1]=pt(A,"r"),[x2,y2]=pt(B,"l");const yy=(a==="rec")?y2-14:y2;d=`M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${yy} ${x2},${yy}`;lx=(x1+x2)/2-14;ly=Math.min(y1,yy)-8+(a==="rec"?0:0);}
+  const g=el("g",{class:"edge"+(kind==="loop"?" loop":"")});
+  el("path",{d,"marker-end":kind==="loop"?"url(#ah2)":"url(#ah)"},g);
+  if(a==="emit"&&b==="gate"){lx=(pt(A,"r")[0]+pt(B,"l")[0])/2;ly=pt(A,"r")[1]-9;}
+  if(lab){const t=el("text",{x:lx,y:ly,"text-anchor":(a==="emit"&&b==="gate")?"middle":"start"},g);t.textContent=lab;}
+  (edges[a]=edges[a]||[]).push(g); (edges["in:"+b]=edges["in:"+b]||[]).push(g);
+}
+const defs=el("defs",{});
+for(const [id,col] of [["ah","#aab3c2"],["ah2",C.warn]]){const m=el("marker",{id,viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:7,markerHeight:7,orient:"auto-start-reverse"},defs);el("path",{d:"M0,0 L10,5 L0,10 z",fill:col},m);}
+for(const n of N){
+  const g=el("g",{class:"node","data-id":n.id,tabindex:0,role:"button","aria-label":n.t});
+  el("rect",{class:"box",x:n.x,y:n.y,width:W,height:H},g);
+  el("rect",{class:"bar",x:n.x,y:n.y+8,width:4,height:H-16,fill:KIND[n.k][3]},g);
+  const t=el("text",{x:n.x+14,y:n.y+25},g);t.textContent=n.t;
+  const f=el("text",{x:n.x+14,y:n.y+44,class:"f"},g);f.textContent=n.f;
+  n.g=g;
+}
+const det=document.getElementById("det");
+let cur=null;
+function show(id){
+  const n=byId[id]; cur=id;
+  N.forEach(m=>m.g.classList.toggle("on",m.id===id));
+  document.querySelectorAll("#fig .edge").forEach(e=>e.classList.remove("on"));
+  (edges["in:"+id]||[]).forEach(e=>e.classList.add("on"));
+  const k=KIND[n.k];
+  det.innerHTML=`<span class="kind" style="background:${k[1]};color:${k[2]}">${k[0]}</span><h3>${n.t}</h3><div class="scroll"><p><b>${n.h}.</b> ${n.d}</p>${n.ul?"<ul>"+n.ul.map(x=>`<li>${x}</li>`).join("")+"</ul>":""}<div class="io">${n.io.map(([a,b])=>`<b>${a}</b><span>${b}</span>`).join("")}</div>${n.pre?`<pre>${n.pre.replace(/</g,"&lt;")}</pre>`:""}</div>`;
+}
+svg.addEventListener("click",e=>{const g=e.target.closest(".node");if(g){stop();show(g.dataset.id);}});
+svg.addEventListener("keydown",e=>{const g=e.target.closest(".node");if(g&&(e.key==="Enter"||e.key===" ")){e.preventDefault();stop();show(g.dataset.id);}});
+const ORDER=["py","cfg","rec","hdr","low","abi","hole","emit","gate","ci"];
+let timer=null;
+const playBtn=document.getElementById("play");
+function stop(){if(timer){clearInterval(timer);timer=null;playBtn.innerHTML="&#9654; Play";}}
+playBtn.addEventListener("click",()=>{
+  if(timer){stop();return;}
+  let i=Math.max(0,ORDER.indexOf(cur)+1); if(i>=ORDER.length)i=0;
+  show(ORDER[i]); playBtn.innerHTML="&#10074;&#10074; Pause";
+  timer=setInterval(()=>{i++; if(i>=ORDER.length){stop();return;} show(ORDER[i]);},2200);
+});
+show("low");
+
+// ---- code compare (real source and generated output) ----
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+const hlpy=s=>esc(s).replace(/(&quot;|"[^"]*"|'[^']*')/g,'<span class="st">$1</span>').replace(/\b(def|if|else|return|raise|is|None)\b/g,'<span class="kw">$1</span>').replace(/\b(b\.\w+)/g,'<span class="fn">$1</span>').replace(/(#.*)$/,'<span class="cm">$1</span>');
+const hlc=s=>esc(s).replace(/("[^"]*")/g,'<span class="st">$1</span>').replace(/\b(if|else|return|throw)\b/g,'<span class="kw">$1</span>').replace(/\b(rocke_b_\w+|py::\w+|py_softmax_p)\b/g,'<span class="fn">$1</span>').replace(/\b(rocke_value_t\*?|rocke_ir_builder_t\*?|const char\*)/g,'<span class="ty">$1</span>').replace(/(\/\*.*\*\/)/,'<span class="cm">$1</span>');
+const PY=[
+ ["def softmax_p(b, sv, scale_log2, lse2, *,",0],
+ ["              neg_lse2=None, bwd_exp2=\"exact\"):",0],
+ ["    if neg_lse2 is None:",1],
+ ["        arg = b.fsub(b.fmul(sv, scale_log2), lse2)",2],
+ ["    else:",3],
+ ["        arg = b.fma(sv, scale_log2, neg_lse2)",3],
+ ["    if bwd_exp2 == \"exact\":",4],
+ ["        return b.exp2(arg)",4],
+ ["    if bwd_exp2 == \"fast\":",5],
+ ["        return b.exp2_fast(arg)",5],
+ ["    raise ValueError(f\"bwd_exp2={bwd_exp2!r} not in ...\")",6]];
+const CPP=[
+ ["/* py: softmax_p (_attention_bwd_valu.py:141) */",0],
+ ["rocke_value_t* py_softmax_p(rocke_ir_builder_t* b, rocke_value_t* sv,",0],
+ ["    rocke_value_t* scale_log2, rocke_value_t* lse2,",0],
+ ["    rocke_value_t* neg_lse2, const char* bwd_exp2) {",0],
+ ["  rocke_value_t* arg{};",7],
+ ["  if(neg_lse2 == nullptr) {",1],
+ ["    rocke_value_t* fmul_1 = rocke_b_fmul(b, sv, scale_log2);",2],
+ ["    arg = rocke_b_fsub(b, fmul_1, lse2);",2],
+ ["  } else {",3],
+ ["    arg = rocke_b_fma(b, sv, scale_log2, neg_lse2);",3],
+ ["  }",3],
+ ["  if(py::eq(bwd_exp2, \"exact\")) return rocke_b_exp2(b, arg);",4],
+ ["  if(py::eq(bwd_exp2, \"fast\")) return rocke_b_exp2_fast(b, arg);",5],
+ ["  throw ckc::ValueError(std::string(\"bwd_exp2=\")",6],
+ ["      + py::repr(bwd_exp2) + \" not in ('exact', 'fast')\");",6],
+ ["}",0]];
+const NOTE={
+ 0:"Signature: types come from the recorded runs. <code>Value</code> is <code>rocke_value_t*</code>; <code>str</code> is <code>const char*</code>; a <code>None</code> default is NULL. The C entry fills in the default <code>\"exact\"</code>.",
+ 1:"<code>x is None</code> on a <code>Value | None</code> becomes a NULL test.",
+ 2:"<b>A-normal form.</b> The inner call <code>b.fmul(...)</code> is bound to its own local <code>fmul_1</code> first. C does not fix the order it evaluates arguments in, so nesting the calls could emit the two IR ops in the wrong order. This rule makes the order the same as Python's, every time.",
+ 3:"Same call, same arguments, in source order. One IR op, so no extra local.",
+ 4:"String compare through the prelude (<code>py::eq</code> in <code>rocke_py.hpp</code>).",
+ 5:"Each branch keeps its emitting call inside its own arm.",
+ 6:"<code>raise ValueError</code> becomes <code>throw ckc::ValueError</code> with the same message; <code>{x!r}</code> becomes <code>py::repr(x)</code>. The C entry turns it into a builder error.",
+ 7:"A local assigned in both arms is declared once, before the <code>if</code> (hoisted to the block that dominates its uses)."};
+function fill(id,rows,hl){const box=document.getElementById(id);for(const [s,k] of rows){const d=document.createElement("div");d.className="ln m"+(k===2?" anf":"");d.dataset.k=k;d.innerHTML=hl(s)||" ";box.appendChild(d);}}
+fill("py",PY,hlpy); fill("cpp",CPP,hlc);
+const cnote=document.getElementById("cnote");
+document.querySelectorAll(".code .ln").forEach(d=>{
+  d.addEventListener("mouseenter",()=>{const k=d.dataset.k;document.querySelectorAll(".code .ln").forEach(x=>x.classList.toggle("hl",x.dataset.k===k));cnote.innerHTML=NOTE[k];});
+});
+document.querySelector(".codes").addEventListener("mouseleave",()=>{document.querySelectorAll(".code .ln").forEach(x=>x.classList.remove("hl"));});
+
+// ---- bar chart: one series, magnitude ----
+const MODS=[["gemm",596,650],["addr",622,680],["band",344,389],["sched",1036,1216],["frag",681,838],["lds",391,707],["sinks",81,170],["ring",194,472]];
+const ch=document.getElementById("chart"), X0=58, XW=410, BH=17, GAP=8, Y0=14;
+const sx=p=>X0+XW*p/100;
+const tip=document.getElementById("tip");
+const cel=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);(p||ch).appendChild(e);return e;};
+for(const [p,lab,an,dx] of [[70,"70% bar","end",-4],[80,"80% goal","start",4]]){cel("line",{x1:sx(p),x2:sx(p),y1:Y0-6,y2:Y0+MODS.length*(BH+GAP),class:"ref"});const t=cel("text",{x:sx(p)+dx,y:Y0+MODS.length*(BH+GAP)+10,class:"reft","text-anchor":an});t.textContent=lab;}
+MODS.forEach(([m,a,n],i)=>{
+  const y=Y0+i*(BH+GAP), p=100*a/n;
+  const g=cel("g",{class:"b"});
+  const l=cel("text",{x:X0-8,y:y+BH-4,"text-anchor":"end",class:"lbl"},g);l.textContent=m;
+  cel("rect",{class:"bar",x:X0,y,width:Math.max(4,sx(p)-X0),height:BH,rx:4},g);
+  const v=cel("text",{x:sx(p)+6,y:y+BH-4,class:"val"},g);v.textContent=p.toFixed(1)+"%";
+  const hit=cel("rect",{class:"hit",x:0,y:y-GAP/2,width:520,height:BH+GAP},g);
+  hit.addEventListener("mousemove",e=>{tip.innerHTML=`<b>${m}</b>: ${a.toLocaleString()} of ${n.toLocaleString()} lines (${p.toFixed(1)}%)`;tip.style.left=(e.clientX+12)+"px";tip.style.top=(e.clientY-30)+"px";tip.style.opacity=1;});
+  hit.addEventListener("mouseleave",()=>tip.style.opacity=0);
+});
+</script>
+</body>
+</html>
