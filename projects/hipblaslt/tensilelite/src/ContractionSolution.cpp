@@ -7788,7 +7788,9 @@ namespace TensileLite
                                           + std::to_string(skTiles) + " rather than 0");
                 }
             }
-            else
+            // The data-parallel clamp, one workgroup per tile, splits no tile.
+            else if(!(launch.reduction == origami::reduction_t::none && launch.grid == tiles
+                      && customDataParallelClamp(launch.reduction)))
             {
                 return refuse("UnknownReduction",
                               "the resolved StreamK reduction is neither tree nor parallel");
