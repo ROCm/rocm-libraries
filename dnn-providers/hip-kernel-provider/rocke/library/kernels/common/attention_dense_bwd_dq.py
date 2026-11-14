@@ -48,6 +48,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds, BandEmitter
+from rocke.helpers.grid import xcd_remap_plane
 from rocke.helpers.spec import salted_kernel_name
 
 from kernels.common._attention_bwd_addr import (
@@ -66,7 +67,6 @@ from kernels.common._attention_bwd_dqbody import (
 )
 from kernels.common._attention_bwd_frag import ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
-from kernels.common._attention_bwd_worklist import xcd_remap_id
 from kernels.common._attention_dense_bwd_shell import (
     DenseFixedAddr,
     DenseNoMask,
@@ -428,11 +428,9 @@ def emit_dense_bwd_dq(spec: AttentionDenseBwdDqSpec, arch: str, *, sentinel=True
         # per batch plane, as in the general dQ kernel (identity at xcd_n = 0)
         gx = c(gx_n)
         gy = c(h_q // G if group else h_q)
-        plane = xcd_remap_id(
-            b, b.add(x, b.mul(gx, y)), num_wgs=b.mul(gx, gy), n=a["xcd_n"],
-            chunk=a["xcd_chunk"],
-        )  # fmt: skip
-        x, y = b.mod(plane, gx), b.div(plane, gx)
+        x, y = xcd_remap_plane(
+            b, x, y, gx=gx, gy=gy, num_xcds=a["xcd_n"], chunk=a["xcd_chunk"]
+        )
     seq_q = decode_batched(b, z, s_max=s_q)
     seq_kv = decode_batched(b, z, s_max=s_kv)
     h = b.mul(y, c(G)) if group else y  # the (first) query head of the CTA

@@ -234,8 +234,11 @@ from .grid import (
     python_chiplet_transform_chunked,
     python_chiplet_transform_chunked_runtime,
     python_super_tile_swizzle,
+    python_xcd_remap,
     super_tile_swizzle,
     super_tile_swizzle_dynamic,
+    xcd_remap,
+    xcd_remap_plane,
 )
 from .io import (
     concat_tree,
@@ -497,8 +500,11 @@ __all__ = [
     "python_chiplet_transform_chunked",
     "python_chiplet_transform_chunked_runtime",
     "python_super_tile_swizzle",
+    "python_xcd_remap",
     "super_tile_swizzle",
     "super_tile_swizzle_dynamic",
+    "xcd_remap",
+    "xcd_remap_plane",
     # Loads
     "LdsLayout",
     "TransposeLdsReader",
