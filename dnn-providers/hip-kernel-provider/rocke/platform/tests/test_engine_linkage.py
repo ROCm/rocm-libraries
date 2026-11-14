@@ -612,8 +612,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
-    rocke_ctest_shard_pytest runs the plugin's tests in the standard tier and
-    not in the quick tier."""
+    rocke_ctest_shard_pytest and rocke_library_gdn_pytest run in the standard,
+    comprehensive and full tiers and not in the quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
@@ -633,6 +633,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             *tiling_entries,
             "rocke_library_gpu_pytest",
             "rocke_ctest_shard_pytest",
+            "rocke_library_gdn_pytest",
         ],
         tmp_path,
     )
@@ -644,9 +645,13 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert library_gpu_labels
     assert labels.get("rocke_tiling_gpu_pytest") == library_gpu_labels
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
-    plugin_tests_labels = labels.get("rocke_ctest_shard_pytest", set())
-    assert "standard" in plugin_tests_labels, plugin_tests_labels
-    assert not {"quick", "ffm-quick"} & plugin_tests_labels, plugin_tests_labels
+    for name in ["rocke_ctest_shard_pytest", "rocke_library_gdn_pytest"]:
+        standard_labels = labels.get(name, set())
+        assert {"standard", "comprehensive", "full"} <= standard_labels, (
+            name,
+            standard_labels,
+        )
+        assert not {"quick", "ffm-quick"} & standard_labels, (name, standard_labels)
 
 
 # (exported target, installed header, extern "C" symbol it declares). The
