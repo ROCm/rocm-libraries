@@ -235,6 +235,12 @@ pin these properties (`Tests/unit/test_rocroller_*`); a change to a kernel's
 predicates shows up as a diff of `Tests/unit/data/rocroller_predicate_manifest.yaml`,
 regenerated with `HIPBLASLT_UPDATE_RR_PREDICATE_MANIFEST=1`.
 
+The layout in a kernel's name (`RR_GEMM_<A><B>_`, `T` for a transposed
+operand) selects its logic file: `Cijk_Alik_Bljk` for TN, `Cijk_Ailk_Bljk` for
+NN, `Cijk_Ailk_Bjlk` for NT and `Cijk_Alik_Bjlk` for TT, each with that
+layout's `ProblemType`. The library offers a kernel only for problems with its
+file's transposes.
+
 ## Validation
 
 Two ways to validate:
