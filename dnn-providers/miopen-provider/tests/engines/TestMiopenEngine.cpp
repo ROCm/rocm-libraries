@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <cmath>
 #include <deque>
 #include <filesystem>
@@ -44,6 +45,8 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <nlohmann/json.hpp>
+
+#include "MiopenShippedModels.hpp"
 #endif
 
 using namespace miopen_plugin;
@@ -1074,5 +1077,66 @@ TEST(TestMiopenEngine, DeployedModelsForTheDeclaredIdsAnswerThroughTheEngine)
         testing::ExitedWithCode(0),
         "");
 #pragma clang diagnostic pop
+}
+
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently. The revision names the provider's version and the MIOpen library
+/// it is linked against, so this fails on a build whose MIOpen is not the one the models
+/// were measured with, which is true: they would not bind there. The models are the
+/// table embedded at configure time (MiopenShippedModels.hpp), not a tree read at run time.
+TEST(TestMiopenEngine, ShippedL1ModelsRecordTheRevisionThisBuildAndLibraryCompute)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hipdnn_data_sdk::utilities;
+
+    struct DeclaredEngine
+    {
+        int64_t id;
+        std::string name;
+        L1ModelIds l1ModelIds;
+    };
+    const std::vector<DeclaredEngine> engines{
+        {MIOPEN_ENGINE_ID,
+         MIOPEN_ENGINE_NAME,
+         declaredL1Models(MIOPEN_ENGINE_L1_MODELS, MIOPEN_ENGINE_ARCH_L1_MODELS)},
+        {MIOPEN_ENGINE_DETERMINISTIC_ID,
+         MIOPEN_ENGINE_DETERMINISTIC_NAME,
+         declaredL1Models(MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS,
+                          MIOPEN_ENGINE_DETERMINISTIC_ARCH_L1_MODELS)}};
+
+    HipdnnMiopenHandle handle;
+    size_t checked = 0;
+    for(const auto& model : shipped_models::MODELS)
+    {
+        for(const auto& engine : engines)
+        {
+            const bool declared = std::any_of(
+                engine.l1ModelIds.begin(), engine.l1ModelIds.end(), [&](const auto& byArch) {
+                    return std::any_of(
+                        byArch.second.begin(), byArch.second.end(), [&](const auto& byMetric) {
+                            return byMetric.second == model.id;
+                        });
+                });
+            if(!declared)
+            {
+                continue;
+            }
+            ++checked;
+            const auto revision
+                = describedRevision(MiopenEngine(engine.id, engine.name, {}), handle);
+            const std::string recorded = model.revision[0] == '\0' ? "<none>" : model.revision;
+            EXPECT_EQ(recorded, revision)
+                << engine.name << ": the shipped model " << model.path << " (id " << model.id
+                << ") records another selector revision than this build computes, so the loader "
+                   "refuses it and the engine reports no estimate. The revision is built from "
+                   "the provider version and the linked MIOpen's version; retrain the model "
+                   "against this build, or build against the MIOpen it was measured with.";
+        }
+    }
+    // Declared ids may ship ahead of their models, but a table matching none of them would
+    // pass having checked nothing.
+    EXPECT_GT(checked, 0u) << "none of the " << shipped_models::MODELS.size()
+                           << " shipped models embedded at configure time carries a declared "
+                              "model id";
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

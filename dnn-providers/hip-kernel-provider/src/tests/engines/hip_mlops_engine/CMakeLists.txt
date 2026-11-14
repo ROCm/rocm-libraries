@@ -30,3 +30,16 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleBwdPlanBuilder.cpp
 )
+
+# The gate in TestHipMlopsEngine.cpp checks the models this source tree ships. They are read
+# here, at configure time, because the binary may run where no checkout exists (an installed
+# or repackaged layout).
+if(hip_mlops IN_LIST HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+    include(HkpShippedModels)
+    hkp_write_shipped_models_header(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HipMlopsShippedModels.hpp"
+        NAMESPACE hip_mlops_engine::shipped_models
+        SOURCE_DIR "${HIPKERNELPROVIDER_hip_mlops_DESCRIPTOR_SOURCE_DIR}"
+        FILES ${HIPKERNELPROVIDER_hip_mlops_DESCRIPTOR_FILES})
+    target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+endif()

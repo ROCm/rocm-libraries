@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
@@ -22,6 +23,11 @@
 #include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
 #include "engines/hip_mlops_engine/HipMlopsL1Models.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "tests/engines/ShippedL1ModelGate.hpp"
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "HipMlopsShippedModels.hpp"
+#endif
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
@@ -465,6 +471,21 @@ TEST(TestHipMlopsEngineDeclaration, SelectorRevisionIsTheEnginePrefixAndSixteenH
         return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
     })) << revision;
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
+TEST(TestHipMlopsEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
+{
+    EXPECT_TRUE(shipped_model_gate::shippedL1ModelsBindThisBuild(
+        hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME,
+        "hip_mlops",
+        hip_mlops_engine::shipped_models::MODELS,
+        HKP_SELECTOR_DUMP_DIR,
+        HIP_MLOPS_L1_MODEL_IDS,
+        HipMlopsEngine::selectorRevision()));
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
 /// The engine has no knobs, so a configuration-level request is declined; the backend
 /// rejects a response whose metric differs from the request, so the decline carries it.
