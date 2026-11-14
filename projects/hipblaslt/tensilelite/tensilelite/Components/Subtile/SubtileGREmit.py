@@ -27,11 +27,11 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SAndB64, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SSubU32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
-    VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
+    VAddU32, VAndB32, VCmpLtI32, VCmpLtU32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -954,12 +954,8 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
   laneSGPRCount = writer.states.laneSGPRCount
   with contextlib.ExitStack() as padStack:
     padMaskSgpr = None
-    oobVgpr = None
     if padFreeElems is not None:
       padChunks = -(-padFreeElems // elemsPerChunk)
-      oobVgpr = writer.vgprPool.checkOut(1, tag="_graColScatter_oob")
-      module.add(VMovB32(dst=vgpr(oobVgpr), src="BufferOOB",
-                 comment="%s: offset that the buffer bound rejects" % tc))
       padMaskSgpr = padStack.enter_context(
           writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount,
                               tag="_graColScatter_padMask")).idx
@@ -971,6 +967,24 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
     # m_chunk * elemsPerChunk (free-dim element start, load-independent).
     module.add(VLShiftLeftB32(dst=vgpr(mc), shiftHex=hex(elemsPerChunk.bit_length() - 1),
                src=vgpr(mc), comment="%s: m_chunk * %u (free-dim start)" % (tc, elemsPerChunk)))
+
+    # mc is now the lane's free-dim element start, which is what the edge compare
+    # needs, and it does not vary by load.  A pad lane is rejected for a
+    # compile-time reason and an edge lane for a runtime one, so fold the two
+    # masks together and let one select cover both.
+    edge = padStack.enter_context(_TluFreeEdge(writer, kernel, module, tileInfo)) \
+           if _tluFreeEdgeUsable(kernel) else None
+    padOnlyOobVgpr = None
+    if edge is not None:
+      edge.compare(module, mc)
+      if padMaskSgpr is not None:
+        edge.absorb(module, padMaskSgpr)
+    elif padMaskSgpr is not None:
+      # No runtime edge mask here, but the compile-time pad mask still applies
+      # and is workgroup-independent, so it survives a persistent tile switch.
+      padOnlyOobVgpr = writer.vgprPool.checkOut(1, tag="_graColScatter_oob")
+      module.add(VMovB32(dst=vgpr(padOnlyOobVgpr), src="BufferOOB",
+                 comment="%s: offset that the buffer bound rejects" % tc))
 
     waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
     colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
@@ -993,13 +1007,15 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
       if waveAxisOffVgpr is not None:
         module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
                    comment="%s: + per-wave free-dim (M/N) global offset" % tc))
-      if padMaskSgpr is not None:
-        module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(oobVgpr), src1=vgpr(out),
+      if edge is not None:
+        edge.select(module, out)
+      elif padOnlyOobVgpr is not None:
+        module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(padOnlyOobVgpr), src1=vgpr(out),
                    src2=sgpr(padMaskSgpr, laneSGPRCount),
                    comment="%s: pad lane -> BufferOOB, dropping its global read" % tc))
 
-    if oobVgpr is not None:
-      writer.vgprPool.checkIn(oobVgpr)
+    if padOnlyOobVgpr is not None:
+      writer.vgprPool.checkIn(padOnlyOobVgpr)
 
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
@@ -1072,6 +1088,14 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   # is unit-stride, so this is a flat byte offset added to every GR load.
   waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
 
+  # A lane owns an M/N block of its own only when the b128 splits the K row, so
+  # that is the only shape here whose edge lanes can be dropped individually.
+  # With one chunk per K row the free dim sits inside the load width and the
+  # whole strip would have to go.
+  edgeStack = contextlib.ExitStack()
+  edge = edgeStack.enter_context(_TluFreeEdge(writer, kernel, module, tileInfo)) \
+         if chunksPerK > 1 and _tluFreeEdgeUsable(kernel) else None
+
   for i in range(tileInfo.numGRPerSubtile):
     out = tile.sharedVgprGROffset[i]
     # Physical chunk P handled by this lane in load i: laneId + i*wavesize
@@ -1104,6 +1128,10 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
       # + M block * elemsPerChunk (free dim is unit stride)
       module.add(VLShiftLeftB32(dst=vgpr(mTileTmp), shiftHex=hex(elemsPerChunk.bit_length() - 1),
                  src=vgpr(mTileTmp), comment="%s: M block * %u" % (tc, elemsPerChunk)))
+      # mTileTmp is the lane's free-dim element start, which is what the edge
+      # compare needs; read it before it folds into the address below.
+      if edge is not None:
+        edge.compare(module, mTileTmp)
       module.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(mTileTmp),
                  comment="%s: K*strideK + M block" % tc))
     else:
@@ -1118,6 +1146,11 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
     if waveAxisOffVgpr is not None:
       module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
                  comment="%s: + per-wave free-dim (M/N) global offset" % tc))
+    # Last, as in the column-scatter path: the steps above would mangle an
+    # out-of-range value back into a valid address.
+    if edge is not None:
+      edge.select(module, out)
+  edgeStack.close()
   if swzTmp is not None:
     writer.vgprPool.checkIn(swzTmp)
   if mTileTmp is not None:
@@ -1316,6 +1349,147 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
           comment="%s: + K-slice offset" % tc))
     writer.vgprPool.checkIn(kOff)
   return dst
+
+
+def _tluWaveFreeElemOffset(writer, kernel, module, tileInfo):
+  """VGPR holding this wave's free-dim (M/N) element offset, or None when it is 0.
+
+  _tluWaveAxisGlobalOffset returns a byte offset with the K-slice step already
+  folded in, which cannot be separated again.  The edge mask needs the free-dim
+  term on its own, so recompute just that one here.
+  """
+  tc = tileInfo.tc
+  subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
+  axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
+  # Bail before the id helpers, which emit a mov even when they report no split.
+  if int(tileInfo.grWavesPerStrip) <= 1 and axisWaves <= 1:
+    return None
+  dst = writer.vgprPool.checkOut(1, tag="_tluWaveFreeElemOffset_%s" % tc)
+  if int(tileInfo.grWavesPerStrip) > 1:
+    # Waves sharing a strip step along the free dim by whole strips.
+    idOk = _tluStripIdx(writer, kernel, module, tc, tileInfo, dst)
+    elemsPerId = subtileM
+  else:
+    idOk = _tluWaveAxisId(writer, kernel, module, tc, dst)
+    elemsPerId = int(tileInfo.localSubtileGrid[0]) * subtileM
+  if not idOk:
+    writer.vgprPool.checkIn(dst)
+    return None
+  assert elemsPerId > 0, "free-dim elements per id must be positive, got %u" % elemsPerId
+  comment = "%s: wave free-dim element offset = id*%u" % (tc, elemsPerId)
+  if elemsPerId > 1 and (elemsPerId & (elemsPerId - 1)) == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(dst), shiftHex=hex(int(log2(elemsPerId))),
+               src=vgpr(dst), comment=comment))
+  elif elemsPerId > 1:
+    # Not every supported shape is a power of two: MT192 at MIWaveGroup [2,2]
+    # gives three 32-element strips per wave, so elemsPerId is 96.
+    tmpS = writer.sgprPool.checkOut(1, tag="_tluWaveFreeElemOffset_s_%s" % tc,
+                                    preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(elemsPerId),
+               comment="%s: free-dim elements per id" % tc))
+    module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst), comment=comment))
+    writer.sgprPool.checkIn(tmpS)
+  return dst
+
+
+def _tluFreeEdgeUsable(kernel):
+  """Whether the GR offsets may carry a workgroup-specific edge mask.
+
+  The mask is folded into the offset VGPRs, which makes them specific to the
+  workgroup whose M/N bound produced them.  PrefetchAcrossPersistent rebuilds
+  the descriptors for the next tile but reuses those offsets, so an edge tile
+  followed by a full one would keep lanes at BufferOOB that the next tile needs
+  and read zeros for them.  Masking per tile would mean rebuilding the offsets
+  inside the persistent loop, which costs more than the edge reads it saves.
+  """
+  return not kernel.get("PrefetchAcrossPersistent")
+
+
+class _TluFreeEdge:
+  """Drops the GR lanes whose free-dim (M/N) element is past the real size.
+
+  On TLU=1 the free dim is contiguous, so a lane past the real M/N does not run
+  off the tensor: it wraps into the next K row.  computeLoadSrd does clamp the
+  TLU=1 window to min(size - WG*MT, MT) free elements, but a buffer limit is one
+  linear cut and so only runs tight on the last K row of the window; every
+  earlier row keeps its edge lanes, and each costs a vector-memory request for
+  data no MFMA result survives to use.  Expressing "m < M on every K row" takes
+  a per-lane compare, which is what this does, selecting BufferOOB for the lanes
+  that fail so the buffer bound rejects them.
+
+  TLU=0 operands need none of this: there the free dim is the strided one, so
+  the same SRD clamp already rejects their edge lanes outright.
+
+  The tile start is folded into the SRD base, so the bound is tile-relative:
+  waveFree + laneFree < size - WG*MT.  Both terms left of the "<" are
+  load-independent except for the lane's own block, so the bound, the wave
+  offset and the BufferOOB constant are emitted once by the constructor and only
+  compare() and select() repeat per load.
+  """
+
+  def __init__(self, writer, kernel, module, tileInfo):
+    self.writer, self.tc = writer, tileInfo.tc
+    self.lanes = writer.states.laneSGPRCount
+    self.stack = contextlib.ExitStack()
+    self.why   = "past-M/N"
+    isA = (self.tc == 'A')
+    mt = int(kernel["MacroTile0" if isA else "MacroTile1"])
+    sizeIdx = kernel["ProblemType"]["Index0" if isA else "Index1"]
+
+    self.rem = self.stack.enter_context(
+        writer.allocTmpSgpr(1, tag="_tluFreeEdge_rem_%s" % self.tc)).idx
+    self.mask = self.stack.enter_context(
+        writer.allocTmpSgpr(self.lanes, alignment=self.lanes,
+                            tag="_tluFreeEdge_mask_%s" % self.tc)).idx
+    module.addComment0("%s: drop GR lanes past the real M/N" % self.tc)
+    self.waveFree = _tluWaveFreeElemOffset(writer, kernel, module, tileInfo)
+    self.pos = writer.vgprPool.checkOut(1, tag="_tluFreeEdge_pos_%s" % self.tc) \
+               if self.waveFree is not None else None
+    module.add(SMulI32(dst=sgpr(self.rem), src0=sgpr("WorkGroup0" if isA else "WorkGroup1"),
+               src1=mt, comment="%s: tile start = WG*%u" % (self.tc, mt)))
+    module.add(SSubU32(dst=sgpr(self.rem), src0=writer.sizeRef(sizeIdx), src1=sgpr(self.rem),
+               comment="%s: free-dim elements left in the operand" % self.tc))
+    self.oob = writer.vgprPool.checkOut(1, tag="_tluFreeEdge_oob_%s" % self.tc)
+    module.add(VMovB32(dst=vgpr(self.oob), src="BufferOOB",
+               comment="%s: offset that the buffer bound rejects" % self.tc))
+
+  def compare(self, module, laneFreeElemVgpr):
+    """Set the mask from this load's lane free-dim element."""
+    src = laneFreeElemVgpr
+    if self.waveFree is not None:
+      module.add(VAddU32(dst=vgpr(self.pos), src0=vgpr(self.waveFree), src1=vgpr(laneFreeElemVgpr),
+                 comment="%s: lane free-dim element within the tile" % self.tc))
+      src = self.pos
+    module.add(VCmpLtU32(dst=sgpr(self.mask, self.lanes), src0=vgpr(src), src1=sgpr(self.rem),
+               comment="%s: lane inside the real M/N?" % self.tc))
+
+  def absorb(self, module, otherMaskSgpr):
+    """Fold a caller mask that rejects lanes for its own reason into this one,
+    so a single select covers both."""
+    andX = SAndB64 if self.lanes == 2 else SAndB32
+    module.add(andX(dst=sgpr(self.mask, self.lanes), src0=sgpr(self.mask, self.lanes),
+               src1=sgpr(otherMaskSgpr, self.lanes),
+               comment="%s: keep lanes that are neither pad nor past M/N" % self.tc))
+    self.why = "pad or past-M/N"
+
+  def select(self, module, out):
+    """Send the rejected lanes of this load's offset to BufferOOB."""
+    module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(self.oob), src1=vgpr(out),
+               src2=sgpr(self.mask, self.lanes),
+               comment="%s: %s lane -> BufferOOB, dropping its global read"
+                       % (self.tc, self.why)))
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, *exc):
+    """Hand back the scratch. A context manager so that an early return between
+    the compare and the select cannot leak it."""
+    for v in (self.pos, self.waveFree, self.oob):
+      if v is not None:
+        self.writer.vgprPool.checkIn(v)
+    self.stack.close()
+    return False
 
 
 def _tluKWaveSlots(tileInfo):
