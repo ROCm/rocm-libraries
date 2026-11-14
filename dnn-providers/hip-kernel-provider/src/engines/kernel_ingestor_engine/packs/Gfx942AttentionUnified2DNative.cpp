@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -311,11 +312,13 @@ bool kernelMatches(const MatchContext& context,
     return unified_attention::kernelMatches(context, bound, kernel, ARCH);
 }
 
-/// Scores for the cold ranking. A production stack scores `PRODUCTION_SCORE`; the cell's
-/// default geometry scores `DEFAULT_SCORE`; every alternative scores
-/// `ALTERNATIVE_CEILING - key / KEY_SPAN`, which lies strictly between zero and
-/// ALTERNATIVE_CEILING, so the alternatives sit strictly below the default and the default
-/// strictly below the production stack.
+/// Scores for the cold ranking. When rocKE would build its light narrow geometry for the graph
+/// (rockeRoutesToNarrow), each narrow kernel scores in (NARROW_FLOOR, NARROW_FLOOR + 1], above
+/// everything else. Otherwise a production stack scores `PRODUCTION_SCORE`; the cell's default
+/// geometry scores `DEFAULT_SCORE`; every alternative scores `ALTERNATIVE_CEILING - key /
+/// KEY_SPAN`, which lies strictly between zero and ALTERNATIVE_CEILING, so the alternatives
+/// sit strictly below the default and the default strictly below the production stack.
+constexpr double NARROW_FLOOR = 4.0;
 constexpr double PRODUCTION_SCORE = 3.0;
 constexpr double DEFAULT_SCORE = 2.0;
 constexpr double ALTERNATIVE_CEILING = 1.0;
@@ -324,6 +327,16 @@ constexpr double ALTERNATIVE_CEILING = 1.0;
 constexpr double KEY_SPAN = 134217728.0; // 2^27
 /// Below every legal candidate: only a record kernelMatches already declined gets it.
 constexpr double UNSUPPORTED_SCORE = 0.0;
+/// A narrow kernel's preference key times this, plus its alternative key (< 2^26), stays
+/// below NARROW_KEY_SPAN, so every narrow kernel scores distinctly and exactly.
+constexpr double NARROW_PREFERENCE_STRIDE = 67108864.0; // 2^26
+constexpr double NARROW_KEY_SPAN = 2199023255552.0; // 2^41
+/// rocKE's short-prefill bound (`1 < max_seqlen_q <= 768`, _enable_gfx942_small_q_narrow).
+constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 768;
+/// rocKE's light narrow geometry (_enable_gfx942_small_q_narrow's docstring and the selectors
+/// it gates): 16 rows per warp, a 64-token KV tile, 1 warp for MHA and 2 for GQA.
+constexpr int64_t NARROW_BLOCK_M_PER_WARP = 16;
+constexpr int64_t NARROW_TILE_SIZE = 64;
 
 /// rocKE's production stack for a (dtype, head size): the mask limit and invariant hoist the
 /// production spec turns on together with the rest of the mask stack. A geometry's default
@@ -351,22 +364,121 @@ bool isDefaultGeometry(const AttentionUnified2DCandidate& candidate)
     return false;
 }
 
+/// A 16x16 MFMA kernel: neither the 32x32x8 atom nor the transposed 32x32 QK.
+bool isNarrow(const AttentionUnified2DCandidate& candidate)
+{
+    return !candidate.useMfma32x32x8 && !candidate.useTransposedQk32x32;
+}
+
+/**
+ * @brief Whether rocKE's own tiled 2D route builds its light narrow geometry for @p problem,
+ *        not its flash (production) stack.
+ *
+ * Mirrors dnn-providers/hip-kernel-provider/rocke/library/kernels/common/attention_unified.py
+ * (as of 5538d22bdd):
+ *
+ *  - `_enable_gfx942_small_q_narrow` (:2303-2325): fp16 or bf16, head size 64 or 128,
+ *    `1 < max_seqlen_q <= 768`, no window, sinks, softcap or score bias.
+ *  - `_enable_gfx942_fp16_flash` (:2380-2410) keeps fp16 on its flash stack unless the shape
+ *    is small-q narrow AND GQA (`num_queries_per_kv > 1`, :2406-2409): fp16 MHA stays on flash
+ *    at every Sq.
+ *  - `_enable_gfx942_bf16_flash` (:2413-2456) excludes every small-q narrow shape (:2455),
+ *    MHA and GQA alike.
+ *  - The geometry selectors then build the narrow geometry for exactly those shapes:
+ *    `_select_2d_num_warps` (:1484-1485) and `_select_2d_block_m_per_warp` (:3516-3519).
+ *
+ * graph_match declines a window, sinks, softcap, a score bias and every head size but 64 and
+ * 128, and serves dense graphs, so max_seqlen_q is the Q tensor's sequence extent.
+ */
+bool rockeRoutesToNarrow(const SdpaShape& problem)
+{
+    if(problem.seqLenQ <= 1 || problem.seqLenQ > SHORT_PREFILL_MAX_SEQ_LEN_Q)
+    {
+        return false;
+    }
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    if(problem.dataType == DataType::BFLOAT16)
+    {
+        return true;
+    }
+    const auto ratio = unified_attention::gqaRatio(problem.numQueryHeads, problem.numKvHeads);
+    return problem.dataType == DataType::HALF && ratio.has_value() && *ratio > 1;
+}
+
+/// The graph's problem, derived the way graphMatches derives it (the SDPA node's Q and K), or
+/// nullopt for a graph it would have declined.
+std::optional<SdpaShape> matchedProblem(const MatchContext& context)
+{
+    const auto* attributes = unified_attention::sdpaNode(context);
+    if(attributes == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto* q = unified_attention::findTensor(context, attributes->q_tensor_uid());
+    const auto* k = unified_attention::findTensor(context, attributes->k_tensor_uid());
+    if(q == nullptr || k == nullptr || !unified_attention::isWellFormedOperand(*q)
+       || !unified_attention::isWellFormedOperand(*k))
+    {
+        return std::nullopt;
+    }
+    return unified_attention::problemFor(*q, *k);
+}
+
+/// Ascending lexicographic (tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8,
+/// use_transposed_qk_32x32, then the five codegen flags): distinct per kernel, below 2^26.
+int64_t alternativeKey(const AttentionUnified2DCandidate& candidate)
+{
+    // tile <= 512, warps <= 8, rows <= 32, five flags: the key stays below 2^26.
+    int64_t key = candidate.tileSize;
+    key = key * 16 + candidate.numWarps;
+    key = key * 64 + candidate.blockMPerWarp;
+    key = key * 2 + (candidate.useMfma32x32x8 ? 1 : 0);
+    key = key * 2 + (candidate.useTransposedQk32x32 ? 1 : 0);
+    key = key * 2 + (candidate.useKSlicedRing ? 1 : 0);
+    key = key * 2 + (candidate.useQDirectGlobal ? 1 : 0);
+    key = key * 2 + (candidate.useConflictFreeVStore ? 1 : 0);
+    key = key * 2 + (candidate.useTransposedMaskLimit ? 1 : 0);
+    key = key * 2 + (candidate.useTransposedInvariantHoist ? 1 : 0);
+    return key;
+}
+
+/// A narrow kernel's score when rocKE routes the graph to its narrow geometry: nearest that
+/// geometry first (16 rows per warp, then the tile nearest 64, then the warp count nearest
+/// rocKE's), then alternativeKey.
+double narrowScore(const AttentionUnified2DCandidate& candidate, const SdpaShape& problem)
+{
+    const int64_t wantWarps = problem.numQueryHeads == problem.numKvHeads ? 1 : 2;
+    // rows penalty <= 1, tile distance < 1024, warp distance < 16: below 2^15.
+    int64_t preference = candidate.blockMPerWarp == NARROW_BLOCK_M_PER_WARP ? 0 : 1;
+    preference = preference * 1024 + std::abs(candidate.tileSize - NARROW_TILE_SIZE);
+    preference = preference * 16 + std::abs(candidate.numWarps - wantWarps);
+    const double key = static_cast<double>(preference) * NARROW_PREFERENCE_STRIDE
+                       + static_cast<double>(alternativeKey(candidate));
+    return NARROW_FLOOR + 1.0 - key / NARROW_KEY_SPAN;
+}
+
 /**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * A stable fallback order for cold selection, not a performance model:
+ * A stable fallback order for cold selection, not a performance model. It follows rocKE's
+ * own route for the graph:
  *
+ *  0. When rocKE builds its light narrow geometry for the graph (rockeRoutesToNarrow) and the
+ *     cell ships narrow (16x16 MFMA) kernels, those rank first, nearest rocKE's geometry first.
+ *     A cell that ships none keeps the order below, since rocKE's short-prefill kernel is not
+ *     in it.
  *  1. rocKE's production stack for the cell (the kernel rocKE's own dispatcher builds for a
  *     long prefill of that dtype, head size and ratio, measured by the stage 6 sweep).
  *  2. The head size's default geometry (the catalog cell's default, which a correctness-
  *     checked gfx942 sweep through rocKE's own launcher chose for the most prefill shapes).
+ *     D64's production kernel has this geometry too and scores as the production stack.
  *  3. The alternatives in ascending lexicographic (tile_size, num_warps, block_m_per_warp,
  *     use_mfma_32x32x8, use_transposed_qk_32x32, then the five codegen flags) order.
  *
  * Every distinct kernel of a cell gets a distinct score, so the selector's descriptor-id
  * tie-break never decides between two of them.
  */
-double scoreKernel(const MatchContext& /*context*/,
+double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
@@ -374,6 +486,14 @@ double scoreKernel(const MatchContext& /*context*/,
     if(!candidate.has_value())
     {
         return UNSUPPORTED_SCORE;
+    }
+    if(isNarrow(*candidate))
+    {
+        const auto problem = matchedProblem(context);
+        if(problem.has_value() && rockeRoutesToNarrow(*problem))
+        {
+            return narrowScore(*candidate, *problem);
+        }
     }
     if(isProductionStack(*candidate))
     {
@@ -383,18 +503,7 @@ double scoreKernel(const MatchContext& /*context*/,
     {
         return DEFAULT_SCORE;
     }
-    // tile <= 512, warps <= 8, rows <= 32, five flags: the key stays below 2^26.
-    int64_t key = candidate->tileSize;
-    key = key * 16 + candidate->numWarps;
-    key = key * 64 + candidate->blockMPerWarp;
-    key = key * 2 + (candidate->useMfma32x32x8 ? 1 : 0);
-    key = key * 2 + (candidate->useTransposedQk32x32 ? 1 : 0);
-    key = key * 2 + (candidate->useKSlicedRing ? 1 : 0);
-    key = key * 2 + (candidate->useQDirectGlobal ? 1 : 0);
-    key = key * 2 + (candidate->useConflictFreeVStore ? 1 : 0);
-    key = key * 2 + (candidate->useTransposedMaskLimit ? 1 : 0);
-    key = key * 2 + (candidate->useTransposedInvariantHoist ? 1 : 0);
-    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+    return ALTERNATIVE_CEILING - static_cast<double>(alternativeKey(*candidate)) / KEY_SPAN;
 }
 
 } // namespace

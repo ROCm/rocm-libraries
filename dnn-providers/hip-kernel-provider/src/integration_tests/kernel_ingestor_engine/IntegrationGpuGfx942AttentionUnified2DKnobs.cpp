@@ -164,10 +164,12 @@ struct ForcedClass
 };
 
 /// Every kernel class the catalog ships, forced once on a prefill shape with B > 1 and
-/// Sq != Skv; then cold cases the engine's own ranking serves: rocKE's production stack where
-/// the catalog ships one for the cell, the default geometry where it does not (bf16 D128,
-/// whose production stack lost to the default on every sweep graph). Variant reduction kept
-/// 14 classes; the rest of the geometries have no case.
+/// Sq != Skv; then cold cases the engine's own ranking serves. Where rocKE builds its light
+/// narrow geometry (1 < Sq <= 768, bf16 at every ratio, fp16 GQA) and the cell ships a narrow
+/// kernel, that kernel; otherwise rocKE's production stack where the catalog ships one for the
+/// cell, the default geometry where it does not (bf16 D128, whose production stack lost to the
+/// default on every sweep graph). Variant reduction kept 14 classes; the rest of the
+/// geometries have no case.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto BF16 = DataType::BFLOAT16;
@@ -216,15 +218,28 @@ std::vector<KnobCase> knobCases()
                      {DataType::HALF, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 512, 2048},
                      {},
                      knobsOf(D128_GEOMETRIES[5])});
+    cases.push_back({"D128_Bf16_ShortPrefill_Cold_SelectsTheNarrowKernel",
+                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 768, 2048},
+                     {},
+                     knobsOf(D128_GEOMETRIES[2])});
     cases.push_back({"D128_Bf16_Cold_SelectsTheDefaultGeometry",
-                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 512, 2048},
+                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 769, 2048},
                      {},
                      knobsOf(D128_GEOMETRIES[0])});
+    cases.push_back({"D64_Bf16_Mha_ShortPrefill_Cold_SelectsTheNarrowKernel",
+                     {DataType::BFLOAT16, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 768, 1024},
+                     {},
+                     knobsOf(D64_GEOMETRIES[2])});
+    // rocKE keeps its fp16 flash stack for MHA at every Sq.
+    cases.push_back({"D64_Fp16_Mha_ShortPrefill_Cold_SelectsTheProductionStack",
+                     {DataType::HALF, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 768, 1024},
+                     {},
+                     knobsOf(D64_GEOMETRIES[1])});
     // The kernel derives its cu_q search trip count from the num_seqs kernarg.
     cases.push_back({"D128_Cold_Batch512",
                      {DataType::BFLOAT16, 128, 8, 2, SdpaMask::BOUNDS_BOTTOM_RIGHT, 512, 16, 64},
                      {},
-                     knobsOf(D128_GEOMETRIES[0])});
+                     knobsOf(D128_GEOMETRIES[4])});
     return cases;
 }
 

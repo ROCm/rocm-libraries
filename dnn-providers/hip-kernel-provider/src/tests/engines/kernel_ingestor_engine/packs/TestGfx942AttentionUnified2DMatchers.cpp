@@ -814,15 +814,29 @@ KernelSpec geometry(int64_t tile, int64_t warps, int64_t rows, int64_t x8 = 0, i
     return spec;
 }
 
+/// rocKE's short-prefill bound (`_enable_gfx942_small_q_narrow`: 1 < max_seqlen_q <= 768).
+constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 768;
+
+/// The default graph (bf16, D128, 8 query heads over 2) at @p seqLenQ over 2048 keys.
+GraphSpec prefill(int64_t seqLenQ)
+{
+    GraphSpec spec;
+    spec.seqLenQ = seqLenQ;
+    spec.seqLenKv = 2048;
+    return spec;
+}
+
 } // namespace
 
 /// The ranking is a stable fallback order for cold selection, not a performance model: the
 /// head size's default geometry above every alternative, the alternatives in ascending
 /// lexicographic (tile, warps, rows, 32x32x8, transposed) order, and every distinct geometry a
-/// distinct score so the selector's descriptor-id tie-break never decides between two.
+/// distinct score so the selector's descriptor-id tie-break never decides between two. Read
+/// past rocKE's short-prefill bound, where no narrow route applies.
 TEST(TestGfx942AttentionUnified2DMatchers, ScoreRanksTheDefaultFirstThenAscendingGeometry)
 {
-    const double defaultScore = scoreOf(GraphSpec{}, KernelSpec{});
+    const GraphSpec longPrefill = prefill(1024);
+    const double defaultScore = scoreOf(longPrefill, KernelSpec{});
 
     const std::vector<KernelSpec> ascending{geometry(16, 2, 16),
                                             geometry(32, 1, 16),
@@ -840,7 +854,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreRanksTheDefaultFirstThenAscendin
     double previous = defaultScore;
     for(const auto& candidate : ascending)
     {
-        const double score = scoreOf(GraphSpec{}, candidate);
+        const double score = scoreOf(longPrefill, candidate);
         EXPECT_GT(score, 0.0) << "tile " << candidate.tileSize << " warps " << candidate.numWarps;
         EXPECT_LT(score, previous)
             << "tile " << candidate.tileSize << " warps " << candidate.numWarps << " rows "
@@ -848,7 +862,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreRanksTheDefaultFirstThenAscendin
         previous = score;
     }
     // Every alternative sits in the band below ALTERNATIVE_CEILING (1.0), under the default.
-    EXPECT_LT(scoreOf(GraphSpec{}, ascending.front()), 1.0);
+    EXPECT_LT(scoreOf(longPrefill, ascending.front()), 1.0);
     EXPECT_EQ(defaultScore, 2.0);
 }
 
@@ -883,8 +897,8 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreGivesAnUnbuildableRecordTheFloor
     EXPECT_GT(scoreOf(GraphSpec{}, widest), 0.0);
 }
 
-/// The ranking does not read the mask, dtype or ratio: two candidates of one geometry for
-/// different problems score alike, so a catalog cannot be steered by them.
+/// The ranking does not read the candidate's mask, dtype or ratio: two candidates of one
+/// geometry for different problems score alike, so a catalog cannot be steered by them.
 TEST(TestGfx942AttentionUnified2DMatchers, ScoreDependsOnlyOnTheGeometryAndHeadSize)
 {
     KernelSpec other = geometry(64, 4, 16);
@@ -950,6 +964,239 @@ TEST(TestGfx942AttentionUnified2DMatchers,
         scores.insert(score);
     }
     EXPECT_EQ(scores.size(), static_cast<std::size_t>(variants));
+}
+
+namespace
+{
+
+/// One shipped catalog kernel, named by its geometry and codegen stack.
+struct CellKernel
+{
+    std::string name;
+    KernelSpec spec;
+};
+
+/// A catalog cell's shipped kernels (the gfx942_attention_unified_2d KDP at 5538d22bdd) and the
+/// graph that reaches it at a given Sq.
+struct Cell
+{
+    std::string name;
+    data_objects::DataType dataType;
+    int64_t headSize;
+    int64_t ratio;
+    std::vector<CellKernel> kernels;
+
+    GraphSpec graph(int64_t seqLenQ) const
+    {
+        GraphSpec spec = prefill(seqLenQ);
+        spec.dataType = dataType;
+        spec.headSize = headSize;
+        spec.numKvHeads = 2;
+        spec.numQueryHeads = 2 * ratio;
+        return spec;
+    }
+};
+
+/// "t<tile>_nw<warps>_mw<rows>_x<atoms>_f<ring><qdirect><cfvst><mlimit><hoist>", as the
+/// shipped kernel names spell them.
+CellKernel cellKernel(const std::string& dtype,
+                      int64_t headSize,
+                      int64_t ratio,
+                      int64_t tile,
+                      int64_t warps,
+                      int64_t rows,
+                      int64_t atoms,
+                      const std::string& stack = "00000")
+{
+    KernelSpec spec;
+    spec.dtype = dtype;
+    spec.headSize = headSize;
+    spec.numQueriesPerKv = ratio;
+    spec.tileSize = tile;
+    spec.numWarps = warps;
+    spec.blockMPerWarp = rows;
+    spec.useMfma32x32x8 = atoms;
+    spec.useTransposedQk32x32 = atoms;
+    spec.useKSlicedRing = stack[0] - '0';
+    spec.useQDirectGlobal = stack[1] - '0';
+    spec.useConflictFreeVStore = stack[2] - '0';
+    spec.useTransposedMaskLimit = stack[3] - '0';
+    spec.useTransposedInvariantHoist = stack[4] - '0';
+    const std::string x = atoms != 0 ? "11" : "00";
+    return {"t" + std::to_string(tile) + "_nw" + std::to_string(warps) + "_mw"
+                + std::to_string(rows) + "_x" + x + "_f" + stack,
+            spec};
+}
+
+/// The cell's kernel names, best score first. Fails the test if two kernels tie.
+std::vector<std::string> ranking(const Cell& cell, int64_t seqLenQ)
+{
+    std::vector<std::pair<double, std::string>> scored;
+    std::set<double> distinct;
+    for(const auto& kernel : cell.kernels)
+    {
+        const double score = scoreOf(cell.graph(seqLenQ), kernel.spec);
+        scored.emplace_back(score, kernel.name);
+        distinct.insert(score);
+    }
+    EXPECT_EQ(distinct.size(), cell.kernels.size()) << cell.name << " at Sq " << seqLenQ << " ties";
+    std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
+    std::vector<std::string> names;
+    names.reserve(scored.size());
+    for(const auto& entry : scored)
+    {
+        names.push_back(entry.second);
+    }
+    return names;
+}
+
+constexpr auto BF16 = data_objects::DataType::BFLOAT16;
+constexpr auto HALF = data_objects::DataType::HALF;
+
+} // namespace
+
+/// Where rocKE builds its light narrow geometry (bf16 at every ratio, fp16 GQA, 1 < Sq <= 768)
+/// and the cell ships narrow kernels, the narrow kernel nearest rocKE's geometry (16 rows per
+/// warp, then the tile nearest 64, then the warps nearest 1 for MHA or 2 for GQA) ranks first
+/// up to and at Sq 768; one row past it the cell's own order returns (the production stack,
+/// else the default). These are every cell of the shipped catalog where that holds.
+TEST(TestGfx942AttentionUnified2DMatchers,
+     ScoreRanksTheNarrowKernelFirstWhereRockeRoutesShortPrefillToIt)
+{
+    struct Case
+    {
+        Cell cell;
+        std::string shortFirst;
+        std::string longFirst;
+    };
+    const std::vector<Case> cases{
+        {{"bf16 D64 ratio 1",
+          BF16,
+          64,
+          1,
+          {cellKernel("BF16", 64, 1, 64, 2, 16, 0),
+           cellKernel("BF16", 64, 1, 64, 4, 32, 1),
+           cellKernel("BF16", 64, 1, 64, 4, 32, 1, "11111")}},
+         "t64_nw2_mw16_x00_f00000",
+         "t64_nw4_mw32_x11_f11111"},
+        {{"bf16 D128 ratio 1",
+          BF16,
+          128,
+          1,
+          {cellKernel("BF16", 128, 1, 16, 2, 16, 0),
+           cellKernel("BF16", 128, 1, 32, 2, 32, 0),
+           cellKernel("BF16", 128, 1, 32, 2, 32, 1),
+           cellKernel("BF16", 128, 1, 32, 4, 32, 1)}},
+         "t16_nw2_mw16_x00_f00000",
+         "t32_nw2_mw32_x11_f00000"},
+        {{"bf16 D128 ratio 2",
+          BF16,
+          128,
+          2,
+          {cellKernel("BF16", 128, 2, 32, 2, 32, 1),
+           cellKernel("BF16", 128, 2, 32, 4, 16, 0),
+           cellKernel("BF16", 128, 2, 32, 4, 32, 1)}},
+         "t32_nw4_mw16_x00_f00000",
+         "t32_nw2_mw32_x11_f00000"},
+        {{"bf16 D128 ratio 4",
+          BF16,
+          128,
+          4,
+          {cellKernel("BF16", 128, 4, 16, 2, 16, 0),
+           cellKernel("BF16", 128, 4, 32, 2, 32, 0),
+           cellKernel("BF16", 128, 4, 32, 2, 32, 1),
+           cellKernel("BF16", 128, 4, 32, 4, 32, 1)}},
+         "t16_nw2_mw16_x00_f00000",
+         "t32_nw2_mw32_x11_f00000"},
+        {{"bf16 D128 ratio 8",
+          BF16,
+          128,
+          8,
+          {cellKernel("BF16", 128, 8, 16, 2, 16, 0),
+           cellKernel("BF16", 128, 8, 32, 2, 32, 1),
+           cellKernel("BF16", 128, 8, 32, 4, 16, 0),
+           cellKernel("BF16", 128, 8, 32, 4, 32, 1)}},
+         "t32_nw4_mw16_x00_f00000",
+         "t32_nw2_mw32_x11_f00000"},
+    };
+    for(const auto& c : cases)
+    {
+        for(const int64_t sq : {int64_t{2}, int64_t{128}, SHORT_PREFILL_MAX_SEQ_LEN_Q})
+        {
+            EXPECT_EQ(ranking(c.cell, sq).front(), c.shortFirst) << c.cell.name << " at Sq " << sq;
+        }
+        for(const int64_t sq : {SHORT_PREFILL_MAX_SEQ_LEN_Q + 1, int64_t{2048}})
+        {
+            EXPECT_EQ(ranking(c.cell, sq).front(), c.longFirst) << c.cell.name << " at Sq " << sq;
+        }
+    }
+}
+
+/// Everywhere else the ranking is the same on both sides of Sq 768: in a cell that ships no
+/// narrow kernel (rocKE's short-prefill kernel is not in it) and in fp16 MHA cells, where rocKE
+/// keeps its flash stack at every Sq (`_enable_gfx942_fp16_flash`'s narrow carve-out is GQA
+/// only). The production stack ranks first wherever it ships, and D64's, which has the
+/// default's geometry, never scores as the default.
+TEST(TestGfx942AttentionUnified2DMatchers,
+     ScoreKeepsTheCellOrderWhereRockeKeepsFlashOrNoNarrowKernelShips)
+{
+    const std::vector<Cell> cells{
+        {"bf16 D64 ratio 4 (no narrow kernel)",
+         BF16,
+         64,
+         4,
+         {cellKernel("BF16", 64, 4, 64, 4, 32, 1),
+          cellKernel("BF16", 64, 4, 64, 4, 32, 1, "11111")}},
+        {"fp16 D64 ratio 8 (no narrow kernel)",
+         HALF,
+         64,
+         8,
+         {cellKernel("FP16", 64, 8, 64, 4, 32, 1),
+          cellKernel("FP16", 64, 8, 64, 4, 32, 1, "11111")}},
+        {"fp16 D128 ratio 4 (no narrow kernel)",
+         HALF,
+         128,
+         4,
+         {cellKernel("FP16", 128, 4, 32, 2, 32, 1),
+          cellKernel("FP16", 128, 4, 64, 4, 32, 1, "10111")}},
+        {"bf16 D128 ratio 16 (no narrow kernel)",
+         BF16,
+         128,
+         16,
+         {cellKernel("BF16", 128, 16, 32, 2, 32, 1), cellKernel("BF16", 128, 16, 32, 4, 32, 1)}},
+        {"fp16 D64 ratio 1 (rocKE keeps flash)",
+         HALF,
+         64,
+         1,
+         {cellKernel("FP16", 64, 1, 64, 2, 16, 0),
+          cellKernel("FP16", 64, 1, 64, 4, 32, 1),
+          cellKernel("FP16", 64, 1, 64, 4, 32, 1, "11111")}},
+        {"fp16 D128 ratio 1 (rocKE keeps flash)",
+         HALF,
+         128,
+         1,
+         {cellKernel("FP16", 128, 1, 16, 2, 16, 0),
+          cellKernel("FP16", 128, 1, 32, 2, 32, 1),
+          cellKernel("FP16", 128, 1, 64, 4, 32, 1, "10111")}},
+    };
+    for(const auto& cell : cells)
+    {
+        const auto atBound = ranking(cell, SHORT_PREFILL_MAX_SEQ_LEN_Q);
+        EXPECT_EQ(atBound, ranking(cell, SHORT_PREFILL_MAX_SEQ_LEN_Q + 1)) << cell.name;
+        EXPECT_EQ(atBound, ranking(cell, 128)) << cell.name;
+        const auto production
+            = std::find_if(cell.kernels.begin(), cell.kernels.end(), [](const auto& k) {
+                  return k.spec.useTransposedMaskLimit != 0;
+              });
+        if(production != cell.kernels.end())
+        {
+            EXPECT_EQ(atBound.front(), production->name) << cell.name;
+            EXPECT_EQ(scoreOf(cell.graph(SHORT_PREFILL_MAX_SEQ_LEN_Q), production->spec), 3.0)
+                << cell.name;
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -464,9 +464,11 @@ launch_surface:
       block_size, or the candidate's geometry is one gfx942 does not build; a record
       without one of the five codegen stack fields, or with a value outside 0/1, is
       declined too. graph_match leaves the single-token decode cells the split-KV gfx942
-      engine serves to it. score() ranks rocKE's production stack for the cell first, then
-      the cell's default geometry, then ascending (tile_size, num_warps, block_m_per_warp,
-      the MFMA flags, the codegen stack).
+      engine serves to it. score() follows rocKE's route: where rocKE builds its light
+      narrow geometry (1 < seqlen_q <= 768, bf16 at every ratio, fp16 GQA) and the cell
+      ships narrow kernels, the one nearest that geometry ranks first; otherwise rocKE's
+      production stack for the cell, then the cell's default geometry, then ascending
+      (tile_size, num_warps, block_m_per_warp, the MFMA flags, the codegen stack).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified2DMatchers.cpp
 
   - name: kernargs
