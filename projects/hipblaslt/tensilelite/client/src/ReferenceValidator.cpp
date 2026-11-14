@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
+#include "ClientProblemFactory.hpp"
 #include "ResultComparison.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
@@ -124,9 +125,12 @@ namespace TensileLite
                 {
                     ScopedTimer timer("cpu_data_init");
                     m_referenceInputs.clear();
-                    forEachDevice(*m_devices, [&](DeviceContext& ctx) {
-                        m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
-                    });
+                    for(size_t d = 0; d < m_devices->size(); d++)
+                    {
+                        ScopedDevice device((*m_devices)[d]->deviceId);
+                        m_referenceInputs.push_back(
+                            (*m_devices)[d]->dataInit->prepareCPUInputs(deviceProblem(d)));
+                    }
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
@@ -135,14 +139,19 @@ namespace TensileLite
 
                 {
                     ScopedTimer timer("cpu_reference_gemm");
-                    for(auto const& reference : m_referenceInputs)
-                        SolveCPU(problem, reference.get(), m_elementsToValidate);
+                    for(size_t d = 0; d < m_referenceInputs.size(); d++)
+                        SolveCPU(deviceProblem(d), m_referenceInputs[d].get(), m_elementsToValidate);
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
                    gemm != nullptr && gemm->fusedA2A() == FusedA2A::GemmA2A)
                     referenceRecvs(*gemm);
             }
+        }
+
+        ContractionProblem* ReferenceValidator::deviceProblem(size_t card) const
+        {
+            return m_split ? m_split->sliceProblem(m_problem, card) : m_problem;
         }
 
         void ReferenceValidator::preSolution(ContractionSolution* const solution)
@@ -177,7 +186,7 @@ namespace TensileLite
                         PerSolutionScope() { g_inPerSolutionReference = true; }
                         ~PerSolutionScope() { g_inPerSolutionReference = false; }
                     } perSolutionScope;
-                    SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
+                    SolveCPU(deviceProblem(d), m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }
         }
@@ -229,7 +238,7 @@ namespace TensileLite
                         rv &= validate(problems->gemms[j], reference.grouped[j], result.grouped[j]);
                     }
                 }
-                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem(card)))
                 {
                     // These copy the whole ContractionInputs structs (including their vectors).
                     std::optional<ContractionInputs> reference;
