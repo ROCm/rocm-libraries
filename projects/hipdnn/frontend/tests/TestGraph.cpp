@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -6764,6 +6765,65 @@ TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
+
+TEST_F(TestGraph, SdpaFwdValidateFailsNegativeStrideOnK)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, -64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+
+    graph.sdpa(q, k, v, attributes);
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(), HasSubstr("SdpaNode::K"));
+    EXPECT_THAT(err.get_message(), HasSubstr("got -64 on axis 2"));
+}
+
+TEST_F(TestGraph, SdpaFwdValidateSucceedsWithZeroStrideBias)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_name("Bias")
+        .set_dim({2, 8, 16, 32})
+        .set_stride({0, 0, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+    attributes.set_bias(bias);
+
+    graph.sdpa(q, k, v, attributes);
+
+    const auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
 #endif // HIPDNN_ENABLE_SDPA
 
 TEST_F(TestGraph, CustomOpNodeCreation)
@@ -6818,6 +6878,196 @@ TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
     // This must return an error, not crash
     auto err = graph.validate();
     EXPECT_FALSE(err.is_good());
+}
+
+TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphInput)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    auto in1 = std::make_shared<TensorAttributes>();
+
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    in1->set_name("in1")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, -4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::ADD);
+
+    graph.pointwise(in0, in1, attributes);
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(),
+                HasSubstr("Tensor in1 strides must be non-negative, got -4 on axis 2"));
+}
+
+TEST_F(TestGraph, ValidateFailsNegativeStrideOnIntermediateTensor)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto a = std::make_shared<TensorAttributes>();
+    a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
+
+    MatmulAttributes matmulAttributes;
+    matmulAttributes.set_name("MatmulNode");
+    auto c = graph.matmul(a, b, matmulAttributes);
+
+    PointwiseAttributes reluAttributes;
+    reluAttributes.set_name("ReluNode");
+    reluAttributes.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(c, reluAttributes);
+
+    c->set_stride({-5, 1});
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(), HasSubstr("MatmulNode::C"));
+    EXPECT_THAT(err.get_message(), HasSubstr("non-negative"));
+}
+
+TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphOutput)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    auto in1 = std::make_shared<TensorAttributes>();
+
+    in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
+    in1->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::ADD);
+
+    auto out0 = graph.pointwise(in0, in1, attributes);
+    out0->set_is_virtual(false);
+    out0->set_stride({24, 12, 4, -1});
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(), HasSubstr("PointwiseNode::OUT_0"));
+    EXPECT_THAT(err.get_message(), HasSubstr("axis 3"));
+}
+
+TEST_F(TestGraph, CustomOpValidateFailsNegativeStrideOnOutput)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto inputA = std::make_shared<TensorAttributes>();
+    inputA->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto inputB = std::make_shared<TensorAttributes>();
+    inputB->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    CustomOpAttributes attributes;
+    attributes.set_name("MyCustomOp").set_custom_op_id("example.my_add");
+
+    auto outputs = graph.custom_op({inputA, inputB}, 2, attributes);
+    ASSERT_EQ(outputs.size(), 2u);
+
+    outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+    outputs[1]->set_dim({4, 8}).set_stride({-8, 1}).set_data_type(DataType::FLOAT);
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(), HasSubstr("MyCustomOp::output_1"));
+}
+
+TEST_F(TestGraph, ValidateSucceedsWithZeroStrideBroadcastInput)
+{
+    {
+        Graph graph;
+        graph.set_io_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT);
+
+        auto in0 = std::make_shared<TensorAttributes>();
+        auto in1 = std::make_shared<TensorAttributes>();
+
+        in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
+        in1->set_dim({1, 2, 3, 4}).set_stride({0, 0, 0, 1}).set_data_type(DataType::FLOAT);
+
+        PointwiseAttributes attributes;
+        attributes.set_name("PointwiseNode");
+        attributes.set_mode(PointwiseMode::ADD);
+
+        graph.pointwise(in0, in1, attributes);
+
+        const auto validationResult = graph.validate();
+        EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    }
+
+    {
+        Graph graph;
+        graph.set_io_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT);
+
+        auto a = std::make_shared<TensorAttributes>();
+        a->set_dim({2, 4, 8}).set_stride({32, 8, 1}).set_data_type(DataType::FLOAT);
+
+        auto b = std::make_shared<TensorAttributes>();
+        b->set_dim({2, 8, 5}).set_stride({0, 5, 1}).set_data_type(DataType::FLOAT);
+
+        MatmulAttributes attributes;
+        attributes.set_name("MatmulNode");
+
+        graph.matmul(a, b, attributes);
+
+        const auto validationResult = graph.validate();
+        EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    }
+}
+
+TEST_F(TestGraph, ValidateFailsNegativeStrideOnRaggedOffset)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_name("RaggedOffset")
+        .set_dim({2, 1, 1, 1})
+        .set_stride({-1, 1, 1, 1})
+        .set_data_type(DataType::INT64);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("X")
+        .set_dim({2, 3, 4, 5})
+        .set_stride({60, 20, 5, 1})
+        .set_data_type(DataType::FLOAT);
+    x->set_ragged_offset(raggedOffset);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("ReluNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    graph.pointwise(x, attributes);
+
+    const auto err = graph.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(),
+                HasSubstr("Tensor X ragged offset RaggedOffset strides must be non-negative"));
 }
 
 // ============================================================================

@@ -933,3 +933,37 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
+
+TEST(TestSdpaFwdNode, PostValidateFailsNegativeStrideOnO)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    q->set_stride({8192, 1024, 64, 1});
+    auto k = makeTensor4D(2, 8, 32, 64);
+    k->set_stride({16384, 2048, 64, 1});
+    auto v = makeTensor4D(2, 8, 32, 64);
+    v->set_stride({16384, 2048, 64, 1});
+
+    SdpaAttributes attrs;
+    attrs.set_name("SdpaNode");
+    attrs.set_q(q);
+    attrs.set_k(k);
+    attrs.set_v(v);
+    auto o = makeTensor4D(2, 8, 16, 64);
+    o->set_stride({8192, 1024, 64, -1});
+    attrs.set_o(o);
+
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    SdpaFwdNode node(std::move(attrs), graphAttrs);
+
+    auto err = node.pre_validate_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    err = node.infer_properties_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    err = node.post_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("got -1 on axis 3"), std::string::npos) << err.err_msg;
+}
