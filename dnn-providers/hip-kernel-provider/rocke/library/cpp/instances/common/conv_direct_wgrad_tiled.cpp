@@ -57,10 +57,17 @@ int n_waves(const rocke_direct_wgrad_tiled_spec_t* s)
     return s->waves_k * s->waves_c;
 }
 
+/* DirectWgradTiledSpec.pingpong_halves: single-group ping-pong, the two
+ * groups are the block's wave halves. */
+bool pingpong_halves(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    return s->pingpong && s->q_groups == 1;
+}
+
 /* The q_groups == 1 ping-pong keeps one more row buffer. */
 int n_buffers(const rocke_direct_wgrad_tiled_spec_t* s)
 {
-    if(s->pingpong && s->q_groups == 1)
+    if(pingpong_halves(s))
     {
         return s->prefetch + 2;
     }
@@ -425,7 +432,7 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "q_groups must be 1 or 2");
     }
-    if(s->pingpong && s->q_groups == 1 && n_waves(s) % 2)
+    if(pingpong_halves(s) && n_waves(s) % 2)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong with q_groups == 1 needs an even wave count");
     }
@@ -663,7 +670,7 @@ typedef std::vector<std::vector<V>> Ring; /* [KH][WK16] */
 void wait_rows(Ctx& c, bool lead)
 {
     const Em& e = c.e;
-    if(c.spec->pingpong && c.QG == 1)
+    if(pingpong_halves(c.spec))
     {
         if(lead)
         {
@@ -701,7 +708,7 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     const Em& e = c.e;
     wait_rows(c, true);
     rocke_b_s_barrier_bare(e.b);
-    bool late = c.spec->pingpong && c.QG == 1;
+    bool late = pingpong_halves(c.spec);
     if(!late)
     {
         issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
@@ -731,7 +738,7 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     }
     if(!compute)
     {
-        if(c.spec->pingpong && c.QG == 1)
+        if(late)
         {
             mid_barrier(c);
         }
@@ -784,7 +791,7 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     {
         issue_row(c, sg, t % c.NB, e.ci(t));
     }
-    if(c.spec->pingpong && c.QG == 1)
+    if(pingpong_halves(c.spec))
     {
         rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, -1, -1);
         e.if_(e.eq(c.pp_grp, c.c1), [&]() { rocke_b_s_barrier_bare(e.b); });
@@ -830,7 +837,7 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     std::vector<V> accs_out(res.begin(), res.begin() + std::min((size_t)c.n_acc, res.size()));
     rocke_b_s_waitcnt(e.b, 0, 0, -1);
     rocke_b_s_barrier_bare(e.b);
-    if(c.spec->pingpong && c.QG == 1)
+    if(pingpong_halves(c.spec))
     {
         e.if_(e.eq(c.pp_grp, c.c0), [&]() { rocke_b_s_barrier_bare(e.b); });
     }
@@ -1108,7 +1115,7 @@ rocke_kernel_def_t*
     /* ---- persistent segment loop ---- */
     /* Ping-pong group: the q group, or the half of the block's waves. */
     c.pp_grp = c.qg;
-    if(spec->pingpong && c.QG == 1)
+    if(pingpong_halves(spec))
     {
         c.pp_grp = e.divi(c.wave, c.NW / 2);
     }
