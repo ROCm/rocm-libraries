@@ -174,15 +174,68 @@ TEST(TestConvGroupValuWrwGraph, RefusesAComputeTypeBelowFp32)
     EXPECT_TRUE(graphAccepts(grouped(), DataType::FLOAT));
 }
 
-TEST(TestConvGroupValuWrwGraph, RefusesThreeD)
+ConvShape threeD()
 {
-    auto threeD = grouped();
-    threeD.input = {4, 14, 14};
-    threeD.filter = {3, 3, 3};
-    threeD.prePadding = threeD.postPadding = {1, 1, 1};
-    threeD.stride = {1, 1, 1};
-    threeD.dilation = {1, 1, 1};
-    EXPECT_FALSE(graphAccepts(threeD));
+    auto shape = grouped();
+    shape.input = {4, 14, 14};
+    shape.filter = {3, 3, 3};
+    shape.prePadding = shape.postPadding = {1, 1, 1};
+    shape.stride = {1, 1, 1};
+    shape.dilation = {1, 1, 1};
+    return shape;
+}
+
+TEST(TestConvGroupValuWrwGraph, AcceptsThreeD)
+{
+    EXPECT_TRUE(graphAccepts(threeD()));
+    auto nhwc = threeD();
+    nhwc.channelsLast = true;
+    EXPECT_TRUE(graphAccepts(nhwc));
+}
+
+TEST(TestConvGroupValuWrwPlan, ThreeDTilesPerDepthTapAndRowsOverTheOutputDepth)
+{
+    auto shape = threeD();
+    shape.stride = {2, 1, 1};
+    shape.dilation = {2, 1, 1};
+    shape.prePadding = shape.postPadding = {2, 1, 1};
+    shape.input = {9, 14, 14}; // output depth (9 + 4 - 5) / 2 + 1 = 5
+    const auto plan = planOf(shape, Fields{});
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    EXPECT_EQ(a.fd, 3);
+    EXPECT_EQ(a.tilesPlane, 32);
+    EXPECT_EQ(a.tiles, 3 * 32);
+    EXPECT_EQ(a.di, 9);
+    EXPECT_EQ(a.dOut, 5);
+    EXPECT_EQ(a.pd, 2);
+    EXPECT_EQ(a.sd, 2);
+    EXPECT_EQ(a.dd, 2);
+    EXPECT_EQ(a.rowsAnImage, 5 * 14);
+    EXPECT_EQ(a.rows, 8 * 5 * 14);
+    EXPECT_EQ(a.xsd, 14 * 14);
+    EXPECT_EQ(a.ysd, 14 * 14);
+    EXPECT_EQ(a.wsd, 9);
+    // 2-D: one tap, no depth strides.
+    const auto flat = planOf(grouped(), Fields{});
+    ASSERT_TRUE(flat.has_value());
+    EXPECT_EQ(flat->args.fd, 1);
+    EXPECT_EQ(flat->args.tiles, flat->args.tilesPlane);
+    EXPECT_EQ(flat->args.rowsAnImage, 56);
+    EXPECT_EQ(flat->args.xsd, 0);
+}
+
+TEST(TestConvGroupValuWrwKernel, TheRingStaysTwoD)
+{
+    auto ring = Fields{};
+    ring.ring = 1;
+    ring.cb = 2;
+    ring.p = 4;
+    EXPECT_FALSE(admits(ring, threeD()));
+    auto cb2 = Fields{};
+    cb2.cb = 2;
+    cb2.p = 4;
+    EXPECT_TRUE(admits(cb2, threeD()));
 }
 
 TEST(TestConvGroupValuWrwGraph, RefusesLayoutsWithNeitherAxisPacked)

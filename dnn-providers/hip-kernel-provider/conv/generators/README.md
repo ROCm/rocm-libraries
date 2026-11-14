@@ -25,6 +25,7 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_depthwise_rows.py` | `depthwise_rows` | `CONV_DEPTHWISE_ROWS_FWD`, `CONV_DEPTHWISE_ROWS_BWD` |
 | `gen_depthwise_mfma.py` | `depthwise_mfma` | `CONV_DEPTHWISE_MFMA_FWD`, `CONV_DEPTHWISE_MFMA_BWD` |
 | `gen_group.py` | `group` | `CONV_GROUP_FWD`, `CONV_GROUP_BWD`, `CONV_GROUP_WRW` |
+| `gen_group_valu.py` | `group_valu` | `CONV_GROUP_VALU_FWD`, `CONV_GROUP_VALU_BWD` |
 | `gen_group_valu_wrw.py` | `group_valu_wrw` | `CONV_GROUP_VALU_WRW` |
 | `gen_fft.py` | `fft` | `CONV_FFT_FWD`, `CONV_FFT_BWD`, `CONV_FFT_WRW` |
 

@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "id": "507167d8-672f-5881-864b-90d51d5db681",
+  "name": "hipkernel:CONV_GROUP_VALU_FWD",
+  "graph_match": {
+    "native": "hipkernel.conv_group_valu_fwd.graph_match"
+  },
+  "metadata": "036a601d-05c4-541b-8f20-b74b7a01f662",
+  "knobs": [
+    "kb",
+    "cb",
+    "p",
+    "nw"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

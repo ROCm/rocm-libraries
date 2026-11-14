@@ -256,6 +256,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvFftProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuWrwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuWrwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuProblem.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     # One definition per served family (conv/ConvContent.cmake): IngestorPacks.cpp
@@ -320,6 +322,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/fft/kernels/ConvFftTwiddles.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group_valu_wrw/kernels/ConvGroupValuWrw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group_valu_wrw/kernels/ConvGroupValuWrwArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group_valu/kernels/ConvGroupValu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/group_valu/kernels/ConvGroupValuArgs.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
         kernels/ConvNaive.cpp
@@ -374,6 +378,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvFftTwiddles.h
         kernels/ConvGroupValuWrw.cpp
         ConvGroupValuWrwArgs.h
+        kernels/ConvGroupValu.cpp
+        ConvGroupValuArgs.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl
