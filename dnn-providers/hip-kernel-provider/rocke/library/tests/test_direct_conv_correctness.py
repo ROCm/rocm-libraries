@@ -3646,6 +3646,30 @@ _AOT_WGRAD_CASES = [
             target_blocks=8,
         ),
     ),
+    # Auto launch (whole strips): a row count the unroll does not divide.
+    (
+        "tiled_auto_ru4",
+        "direct_wgrad_tiled",
+        dict(N=2, H=19, W=40, groups=1, cpg=64, kpg=64),
+        dict(waves_k=2, wave_c16=1, prefetch=3, row_unroll=4, rows_per_seg=0),
+    ),
+    # Auto launch with one row, below the row unroll: the tail rows of the
+    # only row-loop trip are masked.
+    (
+        "tiled_auto_h1_ru4",
+        "direct_wgrad_tiled",
+        dict(N=2, H=1, W=40, groups=1, cpg=64, kpg=64),
+        dict(waves_k=2, wave_c16=1, prefetch=3, row_unroll=4, rows_per_seg=0),
+    ),
+    # Auto launch with fewer blocks than strips: 8 segments (2 image groups,
+    # the second one partial, x 4 strips) over 3 blocks, so each block
+    # accumulates 2 or 3 segments.
+    (
+        "tiled_auto_unfold4_tb3",
+        "direct_wgrad_tiled",
+        dict(N=5, H=11, W=32, groups=1, cpg=32, kpg=32),
+        dict(waves_k=1, waves_c=1, rows_per_seg=0, unfold_n=4, target_blocks=3),
+    ),
     (
         "dw_c64",
         "direct_wgrad_dw",

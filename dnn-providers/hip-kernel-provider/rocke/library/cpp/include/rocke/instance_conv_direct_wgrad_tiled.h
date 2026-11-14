@@ -68,7 +68,7 @@ typedef struct rocke_direct_wgrad_tiled_spec
     int wave_c16; /* default 2 */
     int waves_k; /* default 4 */
     int waves_c; /* default 2 */
-    int rows_per_seg; /* default 30 */
+    int rows_per_seg; /* default 30; 0 = whole strips, one-round grid */
     int prefetch; /* default 2 */
     int target_blocks; /* default 256 */
     int row_unroll; /* default 0 (= lcm(prefetch + 1, KH)) */
