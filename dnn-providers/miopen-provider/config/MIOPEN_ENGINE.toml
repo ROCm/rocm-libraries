@@ -80,3 +80,379 @@ rtol = 0.01
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
+
+# -- Verification overlay: tolerance overrides from the unmerged conv test-plan branches (no skips) --
+
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*", "*_ConvolutionFwdPointwise_*.*_3d_*_fp32_*"]
+atol = 5e-5
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd*.x4_*_fp16_*"]
+atol = 0.2
+rtol = 0.1
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.L*_fp32_*",
+    "*_ConvolutionFwd*.M*_fp32_*",
+    "*_ConvolutionFwd*.H*_fp32_*",
+    "*_ConvolutionFwd*.X*_fp32_*",
+    "*_ConvolutionFwd*.S31_*_fp32_*",
+    "*_ConvolutionFwd*.R029_*_fp32_*",
+    "*_ConvolutionFwd*.R061_*_fp32_*",
+    "*_ConvolutionFwd*.R065_*_fp32_*",
+    "*_ConvolutionFwd*.R121_*_fp32_*",
+    "*_ConvolutionFwd*.R122_*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.A*_fp32_*",
+    "*_ConvolutionFwd*.L10_*_fp32_*",
+    "*_ConvolutionFwd*.L30_*_fp32_*",
+    "*_ConvolutionFwd*.L36_*_fp32_*",
+    "*_ConvolutionFwd*.L40_*_fp32_*",
+    "*_ConvolutionFwd*.L41_*_fp32_*",
+    "*_ConvolutionFwd*.L43_*_fp32_*",
+    "*_ConvolutionFwd*.R028_*_fp32_*",
+    "*_ConvolutionFwd*.R083_*_fp32_*",
+    "*_ConvolutionFwd*.R119_*_fp32_*",
+    "*_ConvolutionFwd*.R131_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.S19_*_fp32_*",
+    "*_ConvolutionFwd*.L19_*_fp32_*",
+    "*_ConvolutionFwd*.X4_*_fp32_*",
+    "*_ConvolutionFwd*.S45_*_fp32_*",
+    "*_ConvolutionFwd*.L45_*_fp32_*",
+    "*_ConvolutionFwd*.R066_*_fp32_*",
+    "*_ConvolutionFwd*.R067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = ["*_ConvolutionBwd*.*_fp32_*"]
+atol = 4e-5
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L*_fp32_*",
+    "*_ConvolutionBwd*.M*_fp32_*",
+    "*_ConvolutionBwd*.H*_fp32_*",
+    "*_ConvolutionBwd*.X*_fp32_*",
+    "*_ConvolutionBwd*.A*_fp32_*",
+    "*_ConvolutionBwd*.R*_fp32_*",
+    "*_ConvolutionBwd*.S2_*_fp32_*",
+    "*_ConvolutionBwd*.S3_*_fp32_*",
+    "*_ConvolutionBwd*.S6_*_fp32_*",
+    "*_ConvolutionBwd*.S7_*_fp32_*",
+    "*_ConvolutionBwd*.S9_*_fp32_*",
+    "*_ConvolutionBwd*.S15_*_fp32_*",
+    "*_ConvolutionBwd*.S16c_*_fp32_*",
+    "*_ConvolutionBwd*.S26_*_fp32_*",
+    "*_ConvolutionBwd*.S30_*_fp32_*",
+    "*_ConvolutionBwd*.S32_*_fp32_*",
+    "*_ConvolutionBwd*.S38_*_fp32_*",
+    "*_ConvolutionBwd*.S49_*_fp32_*",
+    "*_ConvolutionBwd*.S67_*_fp32_*",
+    "*_ConvolutionBwd*.S74_*_fp32_*",
+]
+atol = 1.25e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.A1_*_fp32_*",
+    "*_ConvolutionBwd*.A2_*_fp32_*",
+    "*_ConvolutionBwd*.H4_*_fp32_*",
+    "*_ConvolutionBwd*.H5_*_fp32_*",
+    "*_ConvolutionBwd*.H6_*_fp32_*",
+    "*_ConvolutionBwd*.L4_*_fp32_*",
+    "*_ConvolutionBwd*.L16c_*_fp32_*",
+    "*_ConvolutionBwd*.L28_*_fp32_*",
+    "*_ConvolutionBwd*.L30_*_fp32_*",
+    "*_ConvolutionBwd*.L33_*_fp32_*",
+    "*_ConvolutionBwd*.L34_*_fp32_*",
+    "*_ConvolutionBwd*.L38_*_fp32_*",
+    "*_ConvolutionBwd*.L48_*_fp32_*",
+    "*_ConvolutionBwd*.L66_*_fp32_*",
+    "*_ConvolutionBwd*.L67_*_fp32_*",
+    "*_ConvolutionBwd*.L74_*_fp32_*",
+    "*_ConvolutionBwd*.M8_*_fp32_*",
+    "*_ConvolutionBwd*.M12_*_fp32_*",
+    "*_ConvolutionBwd*.R074_*_fp32_*",
+    "*_ConvolutionBwd*.R075_*_fp32_*",
+    "*_ConvolutionBwd*.R076_*_fp32_*",
+    "*_ConvolutionBwd*.R083_*_fp32_*",
+    "*_ConvolutionBwd*.R087_*_fp32_*",
+    "*_ConvolutionBwd*.R157_*_fp32_*",
+    "*_ConvolutionBwd*.R159_*_fp32_*",
+    "*_ConvolutionBwd*.R173_*_fp32_*",
+    "*_ConvolutionBwd*.S4_*_fp32_*",
+    "*_ConvolutionBwd*.S5_*_fp32_*",
+    "*_ConvolutionBwd*.S28_*_fp32_*",
+    "*_ConvolutionBwd*.S33_*_fp32_*",
+    "*_ConvolutionBwd*.S34_*_fp32_*",
+    "*_ConvolutionBwd*.S48_*_fp32_*",
+    "*_ConvolutionBwd*.S76_*_fp32_*",
+    "*_ConvolutionBwd*.X2_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L5_*_fp32_*",
+    "*_ConvolutionBwd*.L13_*_fp32_*",
+    "*_ConvolutionBwd*.L14_*_fp32_*",
+    "*_ConvolutionBwd*.R084_*_fp32_*",
+    "*_ConvolutionBwd*.R088_*_fp32_*",
+    "*_ConvolutionBwd*.R168_*_fp32_*",
+    "*_ConvolutionBwd*.S13_*_fp32_*",
+    "*_ConvolutionBwd*.S14_*_fp32_*",
+    "*_ConvolutionBwd*.X4_*_fp32_*",
+]
+atol = 1.6e-3
+rtol = 1e-4
+
+[[tolerance_overrides]]
+filters = ["*_ConvolutionBwd*.*_fp16_*"]
+atol = 0.2
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L*_fp16_*",
+    "*_ConvolutionBwd*.M*_fp16_*",
+    "*_ConvolutionBwd*.H*_fp16_*",
+    "*_ConvolutionBwd*.X*_fp16_*",
+    "*_ConvolutionBwd*.A*_fp16_*",
+    "*_ConvolutionBwd*.R*_fp16_*",
+    "*_ConvolutionBwd*.S2_*_fp16_*",
+    "*_ConvolutionBwd*.S3_*_fp16_*",
+    "*_ConvolutionBwd*.S6_*_fp16_*",
+    "*_ConvolutionBwd*.S7_*_fp16_*",
+    "*_ConvolutionBwd*.S9_*_fp16_*",
+    "*_ConvolutionBwd*.S15_*_fp16_*",
+    "*_ConvolutionBwd*.S16c_*_fp16_*",
+    "*_ConvolutionBwd*.S26_*_fp16_*",
+    "*_ConvolutionBwd*.S30_*_fp16_*",
+    "*_ConvolutionBwd*.S32_*_fp16_*",
+    "*_ConvolutionBwd*.S38_*_fp16_*",
+    "*_ConvolutionBwd*.S49_*_fp16_*",
+    "*_ConvolutionBwd*.S67_*_fp16_*",
+    "*_ConvolutionBwd*.S74_*_fp16_*",
+]
+atol = 0.35
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.A1_*_fp16_*",
+    "*_ConvolutionBwd*.A2_*_fp16_*",
+    "*_ConvolutionBwd*.H4_*_fp16_*",
+    "*_ConvolutionBwd*.H5_*_fp16_*",
+    "*_ConvolutionBwd*.H6_*_fp16_*",
+    "*_ConvolutionBwd*.L4_*_fp16_*",
+    "*_ConvolutionBwd*.L16c_*_fp16_*",
+    "*_ConvolutionBwd*.L28_*_fp16_*",
+    "*_ConvolutionBwd*.L30_*_fp16_*",
+    "*_ConvolutionBwd*.L33_*_fp16_*",
+    "*_ConvolutionBwd*.L34_*_fp16_*",
+    "*_ConvolutionBwd*.L38_*_fp16_*",
+    "*_ConvolutionBwd*.L48_*_fp16_*",
+    "*_ConvolutionBwd*.L66_*_fp16_*",
+    "*_ConvolutionBwd*.L67_*_fp16_*",
+    "*_ConvolutionBwd*.L74_*_fp16_*",
+    "*_ConvolutionBwd*.M8_*_fp16_*",
+    "*_ConvolutionBwd*.M12_*_fp16_*",
+    "*_ConvolutionBwd*.R040_*_fp16_*",
+    "*_ConvolutionBwd*.R054_*_fp16_*",
+    "*_ConvolutionBwd*.R059_*_fp16_*",
+    "*_ConvolutionBwd*.R062_*_fp16_*",
+    "*_ConvolutionBwd*.R066_*_fp16_*",
+    "*_ConvolutionBwd*.R069_*_fp16_*",
+    "*_ConvolutionBwd*.R089_*_fp16_*",
+    "*_ConvolutionBwd*.R095_*_fp16_*",
+    "*_ConvolutionBwd*.R100_*_fp16_*",
+    "*_ConvolutionBwd*.R109_*_fp16_*",
+    "*_ConvolutionBwd*.R123_*_fp16_*",
+    "*_ConvolutionBwd*.R149_*_fp16_*",
+    "*_ConvolutionBwd*.R151_*_fp16_*",
+    "*_ConvolutionBwd*.R152_*_fp16_*",
+    "*_ConvolutionBwd*.R155_*_fp16_*",
+    "*_ConvolutionBwd*.R176_*_fp16_*",
+    "*_ConvolutionBwd*.R194_*_fp16_*",
+    "*_ConvolutionBwd*.R199_*_fp16_*",
+    "*_ConvolutionBwd*.S4_*_fp16_*",
+    "*_ConvolutionBwd*.S5_*_fp16_*",
+    "*_ConvolutionBwd*.S28_*_fp16_*",
+    "*_ConvolutionBwd*.S33_*_fp16_*",
+    "*_ConvolutionBwd*.S34_*_fp16_*",
+    "*_ConvolutionBwd*.S48_*_fp16_*",
+    "*_ConvolutionBwd*.S76_*_fp16_*",
+    "*_ConvolutionBwd*.X2_*_fp16_*",
+]
+atol = 0.6
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L5_*_fp16_*",
+    "*_ConvolutionBwd*.L13_*_fp16_*",
+    "*_ConvolutionBwd*.L14_*_fp16_*",
+    "*_ConvolutionBwd*.R012_*_fp16_*",
+    "*_ConvolutionBwd*.R063_*_fp16_*",
+    "*_ConvolutionBwd*.R097_*_fp16_*",
+    "*_ConvolutionBwd*.R099_*_fp16_*",
+    "*_ConvolutionBwd*.S13_*_fp16_*",
+    "*_ConvolutionBwd*.S14_*_fp16_*",
+    "*_ConvolutionBwd*.X4_*_fp16_*",
+]
+atol = 0.9
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = ["*_ConvolutionBwd*.*_bf16_*"]
+atol = 0.2
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L*_bf16_*",
+    "*_ConvolutionBwd*.M*_bf16_*",
+    "*_ConvolutionBwd*.H*_bf16_*",
+    "*_ConvolutionBwd*.X*_bf16_*",
+    "*_ConvolutionBwd*.A*_bf16_*",
+    "*_ConvolutionBwd*.R*_bf16_*",
+    "*_ConvolutionBwd*.S2_*_bf16_*",
+    "*_ConvolutionBwd*.S3_*_bf16_*",
+    "*_ConvolutionBwd*.S6_*_bf16_*",
+    "*_ConvolutionBwd*.S7_*_bf16_*",
+    "*_ConvolutionBwd*.S9_*_bf16_*",
+    "*_ConvolutionBwd*.S15_*_bf16_*",
+    "*_ConvolutionBwd*.S16c_*_bf16_*",
+    "*_ConvolutionBwd*.S26_*_bf16_*",
+    "*_ConvolutionBwd*.S30_*_bf16_*",
+    "*_ConvolutionBwd*.S32_*_bf16_*",
+    "*_ConvolutionBwd*.S38_*_bf16_*",
+    "*_ConvolutionBwd*.S49_*_bf16_*",
+    "*_ConvolutionBwd*.S67_*_bf16_*",
+    "*_ConvolutionBwd*.S74_*_bf16_*",
+]
+atol = 0.5
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.A1_*_bf16_*",
+    "*_ConvolutionBwd*.A2_*_bf16_*",
+    "*_ConvolutionBwd*.H4_*_bf16_*",
+    "*_ConvolutionBwd*.H5_*_bf16_*",
+    "*_ConvolutionBwd*.H6_*_bf16_*",
+    "*_ConvolutionBwd*.L4_*_bf16_*",
+    "*_ConvolutionBwd*.L16c_*_bf16_*",
+    "*_ConvolutionBwd*.L28_*_bf16_*",
+    "*_ConvolutionBwd*.L30_*_bf16_*",
+    "*_ConvolutionBwd*.L33_*_bf16_*",
+    "*_ConvolutionBwd*.L34_*_bf16_*",
+    "*_ConvolutionBwd*.L38_*_bf16_*",
+    "*_ConvolutionBwd*.L48_*_bf16_*",
+    "*_ConvolutionBwd*.L66_*_bf16_*",
+    "*_ConvolutionBwd*.L67_*_bf16_*",
+    "*_ConvolutionBwd*.L74_*_bf16_*",
+    "*_ConvolutionBwd*.M8_*_bf16_*",
+    "*_ConvolutionBwd*.M12_*_bf16_*",
+    "*_ConvolutionBwd*.R032_*_bf16_*",
+    "*_ConvolutionBwd*.R051_*_bf16_*",
+    "*_ConvolutionBwd*.R117_*_bf16_*",
+    "*_ConvolutionBwd*.R118_*_bf16_*",
+    "*_ConvolutionBwd*.R120_*_bf16_*",
+    "*_ConvolutionBwd*.R140_*_bf16_*",
+    "*_ConvolutionBwd*.R191_*_bf16_*",
+    "*_ConvolutionBwd*.R203_*_bf16_*",
+    "*_ConvolutionBwd*.R206_*_bf16_*",
+    "*_ConvolutionBwd*.S4_*_bf16_*",
+    "*_ConvolutionBwd*.S5_*_bf16_*",
+    "*_ConvolutionBwd*.S28_*_bf16_*",
+    "*_ConvolutionBwd*.S33_*_bf16_*",
+    "*_ConvolutionBwd*.S34_*_bf16_*",
+    "*_ConvolutionBwd*.S48_*_bf16_*",
+    "*_ConvolutionBwd*.S76_*_bf16_*",
+    "*_ConvolutionBwd*.X2_*_bf16_*",
+]
+atol = 0.75
+rtol = 2e-2
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionBwd*.L5_*_bf16_*",
+    "*_ConvolutionBwd*.L13_*_bf16_*",
+    "*_ConvolutionBwd*.L14_*_bf16_*",
+    "*_ConvolutionBwd*.R128_*_bf16_*",
+    "*_ConvolutionBwd*.R190_*_bf16_*",
+    "*_ConvolutionBwd*.R202_*_bf16_*",
+    "*_ConvolutionBwd*.R205_*_bf16_*",
+    "*_ConvolutionBwd*.S13_*_bf16_*",
+    "*_ConvolutionBwd*.S14_*_bf16_*",
+    "*_ConvolutionBwd*.X4_*_bf16_*",
+]
+atol = 0.9
+rtol = 2e-2
