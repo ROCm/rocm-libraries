@@ -1,0 +1,84 @@
+{
+  "version": "1.0",
+  "id": "3f368687-5222-489f-b354-ee0dca01bded",
+  "name": "hipkernel:Gfx942AttentionDense engine predictor (L1, gfx942, tflops)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$gfx942_attention_dense.causal",
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.SdpaAttributes",
+    "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
+    "$graph.nodes[0].k.data_type",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.dims[3]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[1]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.data_type",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.dims[3]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[1]",
+    "$graph.nodes[0].o.strides[2]",
+    "$graph.nodes[0].q.data_type",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[1]",
+    "$graph.nodes[0].q.strides[2]",
+    "$graph.nodes[0].v.data_type",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.dims[3]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[1]",
+    "$graph.nodes[0].v.strides[2]"
+  ],
+  "features_hash": "sha256:fa82aaa20586cc32",
+  "trained_against": {
+    "ued": {
+      "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "c1a8caf0-42aa-4852-a967-23328e1f6eb7",
+        "revision": "1.0"
+      }
+    ],
+    "selector_revision": "generic-untuned-v1/1b466bdc4bdf229abc3051bb3d51385109db2b250f62fb302ac10f8462bcb3ac",
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "b623e08430929e368b4e67f078ed6c64acde3f4db28335af1755877c3c7b8d96"
+  }
+}

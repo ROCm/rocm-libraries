@@ -21,6 +21,9 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
+
+#include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
 
 // The build's HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS, set by CMake on every census file
 // that includes this header (src/tests/CMakeLists.txt).
@@ -44,10 +47,6 @@
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
-
-/// The skip record hkp_pack writes at the packed arch root when it leaves a UHD out for an
-/// un-pulled model (hkp_pack.pipeline.UNPULLED_RECORD).
-constexpr const char* UNPULLED_RECORD = "hkp-unpulled-models.record";
 
 using ModelMap = std::map<std::string,
                           std::map<std::string, hipdnn_plugin_sdk::ingestor::HeuristicDescriptor>>;
@@ -114,29 +113,7 @@ inline bool packedTreeHoldsUhd(const std::string& id)
 inline bool packedTreeRecordsUnpulled(const std::string& id)
 {
     const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-    if(root.empty())
-    {
-        return false;
-    }
-    std::ifstream file(std::filesystem::path(root) / UNPULLED_RECORD);
-    if(!file)
-    {
-        return false;
-    }
-    const auto record = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
-    if(!record.is_object() || !record.contains("unpulled_models")
-       || !record["unpulled_models"].is_array())
-    {
-        return false;
-    }
-    for(const auto& entry : record["unpulled_models"])
-    {
-        if(entry.is_object() && entry.value("uhd_id", std::string()) == id)
-        {
-            return true;
-        }
-    }
-    return false;
+    return !root.empty() && unpulledRecordNames(root, id);
 }
 
 /// Whether the case must check that the models `ids` name loaded. False only when the
@@ -233,6 +210,65 @@ inline const hipdnn_plugin_sdk::ingestor::HeuristicDescriptor*
         << "the loaded " << metric << " ranker is not one the UED binds";
     expectModelArtifactPresent(*model, ROLE);
     return model;
+}
+
+/// The L1 predict_engine model @p set's UED binds under @p archKey, checked the way every
+/// ModelBinding census checks it: with none bound, none loaded; with one bound and the packed
+/// tree obliging it to load (packedTreeObligesLoad), one for @p metric survived the loader's
+/// pre-flight, its model file is present, and it records the selector revision this build
+/// computes. The engine selector's revision digests every launch's code-object hash and the
+/// L2 rankers, so a compiler bump, a catalog change or a retrained L2 makes GenericEngine
+/// refuse the L1 (PredictionStatus::UNAVAILABLE) with nothing but a log line; this fails the
+/// build instead.
+inline void
+    expectBoundPredictorMatchesThisBuild(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set,
+                                         const std::string& metric,
+                                         const std::string& archKey)
+{
+    constexpr const char* ROLE = "L1 predict_engine";
+    const auto ids = boundIds(set.engine.predictEngine, archKey);
+    if(ids.empty())
+    {
+        // No L1 ships. The check stays live: the day a UED binds one, the branches below
+        // hold it to the revision this build computes.
+        EXPECT_EQ(findModel(set.enginePredictionsByMetric, metric, archKey), nullptr)
+            << "the UED binds no " << archKey << " predict_engine model, yet one loaded";
+        return;
+    }
+    if(!packedTreeObligesLoad(ids, ROLE))
+    {
+        return;
+    }
+
+    const auto* model = findModel(set.enginePredictionsByMetric, metric, archKey);
+    ASSERT_NE(model, nullptr) << "no " << metric << " predict_engine model under " << archKey
+                              << " survived the loader's pre-flight; the engine reports no "
+                                 "prediction";
+    expectModelArtifactPresent(*model, ROLE);
+
+    // The revision digests the L2 too. With a bound L2 left out of the pack as un-pulled
+    // (the L2 case reports that), the runtime refuses the L1 for that reason, not because the
+    // L1 is stale, so the comparison below would blame the wrong model.
+    for(const auto& ranker : boundIds(set.engine.sortKernelCatalog, archKey))
+    {
+        // The macro is a compile-time 0 or 1, so one arm is dead in each build.
+        // NOLINTNEXTLINE(misc-redundant-expression)
+        if(HKP_REQUIRE_DVC_DESCRIPTORS == 0 && !packedTreeHoldsUhd(ranker)
+           && packedTreeRecordsUnpulled(ranker))
+        {
+            std::cout << "[  NOTE    ] the L2 sort_kernel_catalog model " << ranker
+                      << " was not pulled, so this build's selector revision cannot match the "
+                         "L1's and the engine runs with the L1 off too\n";
+            return;
+        }
+    }
+
+    // The same call makeEngine() makes, on the same loaded set.
+    EXPECT_EQ(model->trainedAgainstSelectorRevision,
+              hipdnn_plugin_sdk::ingestor::engineSelectorRevision(set))
+        << "GenericEngine refuses this model and reports no prediction: the shipped UHD was "
+           "trained against another selector revision than this build computes. Retrain the "
+           "L1 against this build, or find what changed the code objects.";
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
