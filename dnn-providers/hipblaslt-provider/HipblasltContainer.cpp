@@ -74,17 +74,15 @@ HipblasltContainer::HipblasltContainer()
         HIPDNN_PLUGIN_LOG_INFO(CONV_RPR_ENV_NAME << " set: registering the reduced-precision-"
                                                     "reduction explicit-GEMM convolution engines");
     }
-    const size_t repackCap = repackWorkspaceCapBytes();
-    if(repackCap != MAX_REPACK_WORKSPACE_BYTES)
+    const auto capOverride = repackWorkspaceCapOverride();
+    if(capOverride.has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(CONV_REPACK_WORKSPACE_CAP_ENV_NAME
                                << " set: explicit-GEMM convolution repack workspace cap "
-                               << repackCap << " bytes");
+                               << *capOverride << " bytes in every direction");
     }
-    // The override sets both caps; by default backward weights gets its own, larger one.
-    const size_t wrwRepackCap = repackCap == MAX_REPACK_WORKSPACE_BYTES
-                                    ? MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES
-                                    : repackCap;
+    const size_t repackCap = capOverride.value_or(MAX_REPACK_WORKSPACE_BYTES);
+    const size_t wrwRepackCap = capOverride.value_or(MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES);
     const auto addConvEngine =
         [this, repackCap, wrwRepackCap](int64_t engineId,
                                         ConvGemmPlanBuilder::PlanFactory factory,
