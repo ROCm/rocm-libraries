@@ -607,6 +607,12 @@ struct Seg
     std::vector<LaneOff> dy, xs;
 };
 
+/* A segment's first image, strip and row range (seg_origin). */
+struct SegOrigin
+{
+    V n0, q, h0, h_end;
+};
+
 /* issue_row(buf, t, h0, h_end, lane_offs, t_end) */
 void issue_row(Ctx& c, const Seg& sg, int buf, V t)
 {
@@ -1072,6 +1078,22 @@ rocke_kernel_def_t*
     c.zero_frag = rocke_b_zero_vec(b, c.io_type, kVec);
 
     /* ---- persistent segment loop ---- */
+    /* Segment seg -> first image, strip and row range (seg_origin in the
+     * Python builder). Row block fastest, then strip, then image group; in
+     * auto mode a segment is a whole strip. */
+    auto seg_origin = [&](V seg) {
+        V rest = seg, h0 = c.c0;
+        if(!c.AUTO)
+        {
+            V hb = e.mod(seg, n_hb);
+            rest = e.div(seg, n_hb);
+            h0 = e.muli(hb, c.HPB);
+        }
+        V n0 = e.muli(e.div(rest, n_q), c.UN);
+        V q = e.mod(rest, n_q);
+        V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
+        return SegOrigin{n0, q, h0, h_end};
+    };
     if(spec->pingpong)
     {
         /* Group 1 starts one barrier late. */
@@ -1089,17 +1111,8 @@ rocke_kernel_def_t*
                           zero_accs,
                           "seg",
                           [&](V seg, std::vector<V> carried) {
-                              V rest = seg, h0 = c.c0;
-                              if(!c.AUTO)
-                              {
-                                  V hb = e.mod(seg, n_hb);
-                                  rest = e.div(seg, n_hb);
-                                  h0 = e.muli(hb, c.HPB);
-                              }
-                              V n0 = e.muli(e.div(rest, n_q), c.UN);
-                              V q = e.mod(rest, n_q);
-                              V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
-                              return segment(c, carried, n0, q, h0, h_end, NULL);
+                              SegOrigin o = seg_origin(seg);
+                              return segment(c, carried, o.n0, o.q, o.h0, o.h_end, NULL);
                           });
     }
     else
@@ -1114,18 +1127,9 @@ rocke_kernel_def_t*
             c.c0, n_iter, c.c1, acc_names, zero_accs, "segi", [&](V segi, std::vector<V> carried) {
                 V a = e.add(vsplit0, c.qg);
                 V seg = e.add(a, e.mul(segi, n_vsplits));
-                V rest = seg, h0 = c.c0;
-                if(!c.AUTO)
-                {
-                    V hb = e.mod(seg, n_hb);
-                    rest = e.div(seg, n_hb);
-                    h0 = e.muli(hb, c.HPB);
-                }
-                V n0 = e.muli(e.div(rest, n_q), c.UN);
-                V q = e.mod(rest, n_q);
-                V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
+                SegOrigin o = seg_origin(seg);
                 V valid = e.lt(seg, total_segs);
-                return segment(c, carried, n0, q, h0, h_end, valid);
+                return segment(c, carried, o.n0, o.q, o.h0, o.h_end, valid);
             });
     }
     if((int)accs.size() != c.n_acc || !rocke_ir_builder_ok(b))

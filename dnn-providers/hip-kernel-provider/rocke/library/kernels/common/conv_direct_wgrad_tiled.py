@@ -739,6 +739,21 @@ def build_direct_wgrad_tiled(
         b.s_barrier_bare()
         return accs_out
 
+    def seg_origin(seg):
+        """Segment ``seg`` -> (n0, q, h0, h_end): first image, strip, and the
+        row range. Segments run row block fastest, then strip, then image
+        group; in auto mode a segment is a whole strip."""
+        if AUTO:
+            rest, h0 = seg, c0
+        else:
+            hb = b.mod(seg, n_hb)
+            rest = b.div(seg, n_hb)
+            h0 = b.mul(hb, ci(HPB))
+        n0 = b.mul(b.div(rest, n_q), ci(UN))
+        q = b.mod(rest, n_q)
+        h_end = p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H)
+        return n0, q, h0, h_end
+
     if spec.pingpong:
         # Group 1 starts one barrier late: from here on its every barrier
         # pairs with group 0's next one, half a row ahead of it.
@@ -755,19 +770,7 @@ def build_direct_wgrad_tiled(
             elide_trailing_barrier=False,
         )
         with seg_loop as (seg, carried):
-            if AUTO:
-                rest, h0 = seg, c0
-            else:
-                hb = b.mod(seg, n_hb)
-                rest = b.div(seg, n_hb)
-                h0 = b.mul(hb, ci(HPB))
-            accs_out = segment(
-                list(carried),
-                b.mul(b.div(rest, n_q), ci(UN)),
-                b.mod(rest, n_q),
-                h0,
-                p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H),
-            )
+            accs_out = segment(list(carried), *seg_origin(seg))
             b.scf_yield(*accs_out)
     else:
         # Group g of block `split` takes virtual split split * QG + g; both
@@ -782,19 +785,8 @@ def build_direct_wgrad_tiled(
         )
         with seg_loop as (segi, carried):
             seg = b.add(b.add(vsplit0, qg), b.mul(segi, n_vsplits))
-            if AUTO:
-                rest, h0 = seg, c0
-            else:
-                hb = b.mod(seg, n_hb)
-                rest = b.div(seg, n_hb)
-                h0 = b.mul(hb, ci(HPB))
             accs_out = segment(
-                list(carried),
-                b.mul(b.div(rest, n_q), ci(UN)),
-                b.mod(rest, n_q),
-                h0,
-                p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H),
-                valid=b.cmp_lt(seg, total_segs),
+                list(carried), *seg_origin(seg), valid=b.cmp_lt(seg, total_segs)
             )
             b.scf_yield(*accs_out)
     accs = list(seg_loop.results)
