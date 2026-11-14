@@ -71,6 +71,7 @@ __device__ inline int GenDot4(int a, int b, int c)
 #endif // HIP
 
 typedef _Float16 tensile_half2 __attribute__((ext_vector_type(2)));
+typedef _Float16 tensile_half4 __attribute__((ext_vector_type(4)));
 typedef _Float16 tensile_half;
 
 extern "C" __device__ tensile_half2 llvm_fma_v2f16(tensile_half2,

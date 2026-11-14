@@ -337,7 +337,8 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += " + (IDX%s)*arg.strideBias" % (indexChar)
       kStr += " ))" + self.endLine
 
-    self.num_dword_load = int(self.num_elements_load * self.state["ProblemType"]["ComputeDataType"].numBytes() / 4)
+    self.num_dword_load = (self.num_elements_load if self.state["ProblemType"]["ComputeDataType"].isHalf()
+                           else int(self.num_elements_load * self.state["ProblemType"]["ComputeDataType"].numBytes() / 4))
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
@@ -580,7 +581,8 @@ class KernelWriterConversion(KernelWriterBase):
       loadTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_store == 1 else self.num_dword_store)
     else:
-      loadTypeStr = "%s%s" % (typeStr, "" if self.num_dword_load == 1 else self.num_dword_load)
+      loadType = self.datatype if self.state["ProblemType"]["ComputeDataType"].isHalf() else typeStr
+      loadTypeStr = "%s%s" % (loadType, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (typeStr, self.num_dword_store) if self.num_dword_store >= 1 else typeStr2 if self.num_dword_store == 0.5 else destTypeStr
 
     #Bias A/B
