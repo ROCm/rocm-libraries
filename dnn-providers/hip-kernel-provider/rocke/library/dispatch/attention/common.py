@@ -411,6 +411,14 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
+    # Checked before any candidate coerces them: bool("false") is True, so a
+    # string flag would select an fp8 kernel, and bool(None) is False, so a
+    # missing encoding would pass as OCP instead of being refused.
+    for _flag in ("use_fp8", "fp8_fnuz"):
+        if type(getattr(req, _flag)) is not bool:
+            errors.append(
+                f"{_flag} must be a bool, got {type(getattr(req, _flag)).__name__}"
+            )
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")

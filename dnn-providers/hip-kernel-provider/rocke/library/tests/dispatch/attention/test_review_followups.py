@@ -279,3 +279,370 @@ class TestRouteAlgorithmCoverage(unittest.TestCase):
             "a not-served algorithm named here no longer exists on any "
             "registered candidate; trim it",
         )
+
+
+class TestFp8DenseGuards(unittest.TestCase):
+    """CPU guards for the fp8 dense review fixes (scale forwarding + rejections)."""
+
+    def _fp8_req(self, **kw):
+        base = dict(
+            arch="gfx950",
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=64,
+            hdim_v=64,
+            use_fp8=True,
+        )
+        base.update(kw)
+        return _req(**base)
+
+    def _fp8_grid_spec(self):
+        req = self._fp8_req()
+        return req, attention_tuning_spec(req, "gfx950_dense_grid")
+
+    def _capture_runner_call(self, *, bind_kwargs, launch_kwargs):
+        """Bind an fp8 grid spec and launch, returning the dict the runner saw."""
+        req, spec = self._fp8_grid_spec()
+        captured = {}
+        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **call: captured.update(call),
+        ):
+            binding = bind_dense_attention_torch(
+                req, spec, {"q": None, "k": fp8, "v": fp8, "out": None}, **bind_kwargs
+            )
+            binding.launch(**launch_kwargs)
+        return captured
+
+    def test_binding_launch_scale_overrides_bind_scale(self):
+        # A launch kwarg may still override the bind-time scale (e.g. a sweep
+        # varying scale per launch); the bind scale is the graph-capture value.
+        captured = self._capture_runner_call(
+            bind_kwargs={"k_scale": 1.0, "v_scale": 1.0},
+            launch_kwargs={"k_scale": 0.5, "v_scale": 0.25},
+        )
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_fp8_scales_are_read_once_at_bind_not_per_launch(self):
+        """A device-tensor scale costs a host sync to read.
+
+        Both fp8 bindings resolve the scales to floats at bind time so a
+        bind-once/launch-many caller (and graph capture) pays that sync once. A
+        counting scale makes that measurable: resolving per launch would show
+        one read per launch instead of one in total.
+        """
+
+        class _CountingScale:
+            def __init__(self, value):
+                self.value = value
+                self.reads = 0
+
+            def __float__(self):
+                self.reads += 1
+                return self.value
+
+        # Dense binding.
+        req, spec = self._fp8_grid_spec()
+        k_scale, v_scale = _CountingScale(0.5), _CountingScale(0.25)
+        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **_call: None,
+        ):
+            binding = bind_dense_attention_torch(
+                req,
+                spec,
+                {"q": None, "k": fp8, "v": fp8, "out": None},
+                k_scale=k_scale,
+                v_scale=v_scale,
+            )
+            binding.launch()
+            binding.launch()
+        self.assertEqual((k_scale.reads, v_scale.reads), (1, 1), "dense binding")
+
+        # Unified binding.
+        k2, v2 = _CountingScale(0.5), _CountingScale(0.25)
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=lambda **_call: None,
+        ):
+            unified = self._bind_unified_fp8(k_scale=k2, v_scale=v2)
+            unified.launch()
+            unified.launch()
+        self.assertEqual((k2.reads, v2.reads), (1, 1), "unified binding")
+
+    def test_binding_rejects_fp8_spec_with_no_scale(self):
+        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
+        # launch dequantized at unit scale (silently wrong). An fp8 spec with no
+        # scale supplied anywhere must now raise rather than default to 1.0 -- a
+        # caller wanting unit scale passes k_scale=1.0 explicitly (the combo sweep).
+        with self.assertRaisesRegex(ValueError, "scale"):
+            self._capture_runner_call(bind_kwargs={}, launch_kwargs={})
+
+    def test_binding_forwards_kv_scales_at_bind_time(self):
+        # The solera bench binds once (passing the scales) then launches with no
+        # kwargs for graph capture, so the scales must be captured at bind time.
+        captured = self._capture_runner_call(
+            bind_kwargs={"k_scale": 0.5, "v_scale": 0.25}, launch_kwargs={}
+        )
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_binding_rejects_bf16_kv_for_an_fp8_spec(self):
+        # Scales are supplied and the match names the OCP dtype: without both,
+        # deleting the dtype check still raises the missing-scale error, which
+        # also says "fp8", and this test passes with the guard gone.
+        req, spec = self._fp8_grid_spec()
+        bf16 = SimpleNamespace(dtype="torch.bfloat16")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **_call: None,
+        ):
+            with self.assertRaisesRegex(ValueError, r"expects OCP fp8"):
+                bind_dense_attention_torch(
+                    req,
+                    spec,
+                    {"q": None, "k": bf16, "v": bf16, "out": None},
+                    k_scale=1.0,
+                    v_scale=1.0,
+                )
+
+    def test_supports_accepts_fp8_bf16_and_fp16_but_rejects_sinks(self):
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        # bf16 and fp16 compute/output are both valid with fp8 KV.
+        self.assertTrue(supports_attention_dense(ks, arch="gfx950")[0])
+        self.assertTrue(
+            supports_attention_dense(replace(ks, dtype="fp16"), arch="gfx950")[0]
+        )
+        # Sinks on dense are a separate ticket; the fp8 loader has no sink path.
+        self.assertFalse(
+            supports_attention_dense(replace(ks, use_sinks=True), arch="gfx950")[0]
+        )
+
+    def test_gfx942_dense_rejects_fp8_storage(self):
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        ok, reason = supports_attention_dense(ks, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("fp8", reason.lower())
+
+    def test_fnuz_fp8_request_is_rejected_on_gfx950(self):
+        with self.assertRaisesRegex(ValueError, "OCP|FNUZ"):
+            attention_tuning_spec(self._fp8_req(fp8_fnuz=True), "gfx950_dense_grid")
+
+    def test_fp8_request_flags_must_be_bools(self):
+        """``bool("false")`` is True and ``bool(None)`` is False, so coercing
+        these flags before checking them would let a string select an fp8 kernel
+        and a missing encoding pass as OCP. ``_request_errors`` checks the types,
+        so the refusal names the flag."""
+        from dispatch.attention.common import _request_errors
+
+        for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
+            with self.subTest(flag=flag):
+                req = self._fp8_req(**{flag: bad})
+                self.assertIn(
+                    f"{flag} must be a bool",
+                    " ".join(_request_errors(req)),
+                )
+                # And it is fatal through dispatch, not merely reported.
+                with self.assertRaises(ValueError):
+                    attention_tuning_spec(req, "gfx950_dense_grid")
+
+    def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
+        # The binding guard only covers dispatch callers; a direct call to the
+        # runner must reject a bf16 or FNUZ K/V for an fp8 spec too, before any
+        # launch -- otherwise the OCP-declared pointers read the wrong encoding.
+        # The runner compares the dtype by name, so fakes keep this on the CPU lane.
+        from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+        spec = self._fp8_grid_spec()[1].kernel_spec
+        for wrong in ("torch.bfloat16", "torch.float8_e4m3fnuz"):
+            kv = SimpleNamespace(dtype=wrong)
+            with self.subTest(dtype=wrong):
+                with self.assertRaisesRegex(ValueError, r"fp8 dense expects OCP fp8 k"):
+                    run_attention_dense_torch(
+                        spec=spec,
+                        q=kv,
+                        k=kv,
+                        v=kv,
+                        out=kv,
+                        scale=0.125,
+                        k_scale=0.5,
+                        v_scale=0.5,
+                    )
+
+    def test_runner_rejects_fp8_spec_with_no_scale(self):
+        # The runner defaults k_scale/v_scale to None, not 1.0: a direct caller
+        # (bypassing the binding) that omits the fp8 dequant scale must raise, not
+        # silently dequantize at unit scale.
+        from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+        spec = self._fp8_grid_spec()[1].kernel_spec
+        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        with self.assertRaisesRegex(ValueError, r"requires 'k_scale'"):
+            run_attention_dense_torch(
+                spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125
+            )
+        with self.assertRaisesRegex(ValueError, r"requires 'v_scale'"):
+            run_attention_dense_torch(
+                spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125, k_scale=0.5
+            )
+
+    def test_spec_rejects_unknown_kv_storage_dtype(self):
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        with self.assertRaisesRegex(ValueError, r"kv_storage_dtype must be .*fp8e5m2"):
+            replace(ks, kv_storage_dtype="fp8e5m2")
+
+    def test_spec_rejects_fp8_with_unsupported_layouts(self):
+        # fp8 KV lands on the contiguous default-grid body only.
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        for field, overrides in (
+            ("persistent", {"persistent": True}),
+            ("ragged", {"ragged": True}),
+            ("varlen", {"varlen": True}),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    ValueError, rf"fp8 KV is not yet supported with {field}"
+                ):
+                    replace(ks, **overrides)
+
+    def test_spec_rejects_fp8_with_paged_kv(self):
+        # Paged needs a geometry the bf16 body accepts (D128 sliding window), so
+        # the only thing that can reject it is the fp8 guard.
+        req = self._fp8_req(hdim_q=128, hdim_v=128)
+        ks = attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
+        paged = dict(paged=True, block_size=64, num_kv_blocks=32, sliding_window=128)
+        replace(ks, kv_storage_dtype=None, **paged)  # bf16: valid
+        with self.assertRaisesRegex(
+            ValueError, r"fp8 KV is not yet supported with paged"
+        ):
+            replace(ks, **paged)
+
+    def test_fp8_runtime_shape_specs_sharing_a_key_lower_identically(self):
+        """One cache key must mean one binary.
+
+        On the runtime-shape path the head counts are kernargs, so two specs
+        differing only in heads share a cache key AND a symbol. The fp8 loader
+        baked ``Hkv*D`` at one address site while every other site read the
+        kernarg, so those two specs lowered to different IR under that single
+        key and the launcher served whichever compiled first to both. bf16 is
+        the control: it was always correct here.
+        """
+        import hashlib
+
+        from kernels.gfx950.attention_dense import (
+            Gfx950AttentionDenseSpec,
+            attention_dense_cache_key,
+            build_attention_dense,
+        )
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        def key_and_ir(nhead_k, kv_storage_dtype):
+            spec = Gfx950AttentionDenseSpec(
+                batch=1,
+                seqlen_q=2048,
+                seqlen_kv=2048,
+                num_query_heads=32,
+                num_kv_heads=nhead_k,
+                head_size=64,
+                causal=True,
+                dtype="bf16",
+                block_n=64,
+                kv_storage_dtype=kv_storage_dtype,
+            )
+            self.assertTrue(spec.runtime_shape, "heads must be kernargs here")
+            kernel = build_attention_dense(spec, arch="gfx950")
+            ir = _lower_kernel_to_llvm_python(
+                kernel, arch="gfx950", llvm_flavor="llvm20"
+            )
+            return (
+                attention_dense_cache_key(spec, arch="gfx950"),
+                hashlib.sha256(ir.encode("utf-8")).hexdigest(),
+            )
+
+        for kv in ("fp8e4m3", None):
+            with self.subTest(kv_storage_dtype=kv):
+                (key_8, ir_8), (key_4, ir_4) = key_and_ir(8, kv), key_and_ir(4, kv)
+                self.assertEqual(key_8, key_4, "the two specs must share a key")
+                self.assertEqual(
+                    ir_8,
+                    ir_4,
+                    "two head counts share this cache key, so they must lower to "
+                    "the same IR; a baked head stride makes the cache serve one "
+                    "binary for both",
+                )
+
+    def test_supports_rejects_fp8_tile_not_divisible_by_loader_width(self):
+        # The fp8 loaders move 8 elements per thread, so block_n * head_size must
+        # divide by num_waves * 64 * 8. bm256/bn32/D64 does not (2048 vs 4096).
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        self.assertTrue(supports_attention_dense(ks, arch="gfx950")[0])
+        ok, reason = supports_attention_dense(replace(ks, block_n=32), arch="gfx950")
+        self.assertFalse(ok)
+        self.assertIn("block_n*head_size", reason)
+        self.assertIn("block_n=32", reason)
+
+    def _bind_unified_fp8(self, *, use_fp8=True, **bind_kwargs):
+        """Bind the unified tuning path for an fp8 problem with the paged-tensor
+        validators stubbed out, so only the scale handling is exercised."""
+        from dispatch.attention.bindings import bind_tuning_attention_torch
+
+        req = self._fp8_req(use_fp8=use_fp8)
+        problem = attention_problem(req)
+        self.assertEqual(problem.use_fp8, use_fp8)
+        spec = SimpleNamespace(
+            path="2d", launch_grid=lambda _p: (1, 1, 1), launch_block=lambda: (64, 1, 1)
+        )
+        tensors = dict.fromkeys(
+            ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k", "block_table")
+        )
+        tensors["problem"] = problem
+        with mock.patch(
+            "dispatch.attention.bindings.validate_tuning_attention_contract"
+        ), mock.patch(
+            "dispatch.attention.bindings.validate_tuning_attention_tensors",
+            return_value=1,
+        ):
+            return bind_tuning_attention_torch(req, spec, tensors, **bind_kwargs)
+
+    def test_unified_binding_rejects_fp8_problem_with_no_scale(self):
+        with self.assertRaisesRegex(ValueError, r"fp8 attention requires 'k_scale'"):
+            self._bind_unified_fp8()
+        with self.assertRaisesRegex(ValueError, r"fp8 attention requires 'v_scale'"):
+            self._bind_unified_fp8(k_scale=0.5)
+
+    def test_unified_binding_forwards_bind_time_scales(self):
+        # Regression for the unified path: k_scale/v_scale given at bind time must
+        # reach run_unified_attention_torch on a launch with no kwargs.
+        captured = {}
+        # Patched before binding: the binding imports the runner when it is built.
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=lambda **call: captured.update(call),
+        ):
+            self._bind_unified_fp8(k_scale=0.5, v_scale=0.25).launch()
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_unified_binding_keeps_forwarding_non_fp8_bind_scales(self):
+        # The fp8 hardening above must not narrow the non-fp8 path: the runner
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and swallowing the kwarg here would swallow that error.
+        captured = {}
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=lambda **call: captured.update(call),
+        ):
+            self._bind_unified_fp8(use_fp8=False, k_scale=0.5, v_scale=0.25).launch()
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)

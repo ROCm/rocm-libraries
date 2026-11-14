@@ -1642,6 +1642,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 block_size=16,
                 num_kv_blocks=128,
             ),
+            "fp8-kv": AttentionDenseSpec(**base, kv_storage_dtype="fp8e4m3"),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
@@ -1685,6 +1686,18 @@ class TestAttentionHelpers(unittest.TestCase):
             [True, True, False],
         )
         self.assertTrue(_has_shape_params(arms["bottom-right"]))
+        # The mirror above only catches signature/params DISAGREEING, so dropping
+        # the fp8 scales from both sides would still pass it. Pin that the fp8 arm
+        # carries them as f32 and that a non-fp8 arm does not.
+        fp8_sig = attention_dense_signature(arms["fp8-kv"])
+        self.assertEqual(
+            [a["type"] for a in fp8_sig if a["name"] in ("k_scale", "v_scale")],
+            ["f32", "f32"],
+        )
+        self.assertNotIn(
+            "k_scale",
+            [a["name"] for a in attention_dense_signature(arms["runtime-shape"])],
+        )
 
     def test_gfx950_launcher_rejects_tensors_whose_heads_disagree_with_the_spec(self):
         """The spec's head counts set the kernel's strides, GQA divide and K/V
