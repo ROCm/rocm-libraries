@@ -5,6 +5,7 @@ orient-gate)."""
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -495,27 +496,89 @@ def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
     assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)
 
 
-def test_packets_impact_lane_takes_ingestor_files_only(part, tmp_path, capsys):
-    # catches: IMPACT not registered as a concern lane, or scoped to every changed file
+@pytest.mark.parametrize(
+    ("lane", "trigger"),
+    [
+        (
+            "IMPACT",
+            "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        ),
+        ("APPL", "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"),
+    ],
+)
+def test_packets_concern_lane_takes_trigger_files_only(
+    part, tmp_path, capsys, lane, trigger
+):
+    # catches: the lane not registered as a concern lane, or scoped to every changed file
     for sub in ("a", "b"):
         (tmp_path / sub).mkdir()
-    header = (
-        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp"
-    )
     other = "projects/hipdnn/backend/a.cpp"
-    rd = make_round(tmp_path / "a", [(3, 1, header), (2, 0, other)])
+    rd = make_round(tmp_path / "a", [(3, 1, trigger), (2, 0, other)])
     run(part, "areas", rd)
     run(part, "plan", rd)
-    run(part, "packets", rd, "--lanes", "IMPACT")
-    packet = (rd / "packets" / "IMPACT.md").read_text()
-    assert header in packet and other not in packet
+    run(part, "packets", rd, "--lanes", lane)
+    packet = (rd / "packets" / f"{lane}.md").read_text()
+    assert trigger in packet and other not in packet
     rd = make_round(tmp_path / "b", [(2, 0, other)])
     run(part, "areas", rd)
     run(part, "plan", rd)
     capsys.readouterr()
-    run(part, "packets", rd, "--lanes", "IMPACT")
-    assert not (rd / "packets" / "IMPACT.md").exists()
-    assert "IMPACT: no changed file in scope, N/A" in capsys.readouterr().out
+    run(part, "packets", rd, "--lanes", lane)
+    assert not (rd / "packets" / f"{lane}.md").exists()
+    assert f"{lane}: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_appl_scope_is_providers_engine_headers_and_schemas(part):
+    # catches: a schema or provider change that never reaches APPL, or core code that does
+    inside = (
+        "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs",
+        "dnn-providers/hip-kernel-provider/src/core/GraphSchema.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "dnn-providers/hipblaslt-provider/src/a.cpp",
+    )
+    outside = (
+        "projects/hipdnn/flatbuffers_sdk/include/a.hpp",
+        "projects/hipdnn/backend/src/a.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+        "projects/hipdnn/plugin_sdk/src/x.cpp",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
+
+
+def test_leak_sweep_allowlist_covers_every_report_lane(part):
+    # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
+    # finding IDs are flagged as leaks
+    leaks = SCRIPT.parent.parent / "lanes" / "leaks.md"
+    match = re.search(
+        r"^\^\(([A-Z|]+)\)\[0-9\]\*-p\?\[0-9\]\+\$$", leaks.read_text(), re.M
+    )
+    assert match, "finding-ID allow-list line not found in leaks.md"
+    assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
+
+
+@pytest.mark.parametrize("lane", ["APPL", "IMPACT"])
+def test_lane_id_is_a_provisional_id(part, lane):
+    """A finding ID from a concern lane is recognised, like every other report lane."""
+    # catches: the lane dropped from CONCERN_LANES/REPORT_LANES, so its findings are
+    # invisible to the ledger and comment-reference checks.
+    assert lane in part.CONCERN_LANES
+    assert part.PROVISIONAL_ID.findall(f"see {lane}1-p2 and CORR1-p2") == [
+        f"{lane}1-p2",
+        "CORR1-p2",
+    ]
+
+
+def test_runbook_partition_table_lists_exactly_the_concern_lanes(part):
+    """The RUNBOOK lane table names every concern lane and the CORR<k> correctness lanes."""
+    # catches: a lane added to CONCERN_LANES without a RUNBOOK row (or the reverse), so
+    # the host never learns when to run it.
+    runbook = SCRIPT.parent.parent / "RUNBOOK.md"
+    section = re.search(r"^## Partition\n(.*?)^## ", runbook.read_text(), re.M | re.S)
+    assert section, "## Partition section not found in RUNBOOK.md"
+    rows = re.findall(r"^\| `([A-Z]+)(?:<k>)?` \|", section.group(1), re.M)
+    assert sorted(rows) == sorted({"CORR", *part.CONCERN_LANES})
 
 
 def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
@@ -549,16 +612,6 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
     run(part, "orient-gate", rd)
     assert capsys.readouterr().out == ""
-
-
-def test_impact_lane_id_is_a_provisional_id(part):
-    """A finding ID from the IMPACT lane is recognised, like every other report lane."""
-    # catches: IMPACT dropped from CONCERN_LANES/REPORT_LANES, so IMPACT findings are
-    # invisible to the ledger and comment-reference checks.
-    assert part.PROVISIONAL_ID.findall("see IMPACT1-p2 and CORR1-p2") == [
-        "IMPACT1-p2",
-        "CORR1-p2",
-    ]
 
 
 def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):

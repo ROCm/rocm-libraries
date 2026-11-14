@@ -689,6 +689,12 @@ def _validate_ued(desc):
                 f"{where}.behavior_notes has unknown note '{note}' "
                 f"(expected one of {', '.join(_BEHAVIOR_NOTES)})"
             )
+    for note in doc.get("numerical_notes", []):
+        if note not in _NUMERICAL_NOTES:
+            raise HkpPackError(
+                f"{where}.numerical_notes has unknown note '{note}' "
+                f"(expected one of {', '.join(_NUMERICAL_NOTES)})"
+            )
     if "sdk_version" in doc:
         version = doc["sdk_version"]
         if not isinstance(version, str) or not _sdk_version_fits(version):
@@ -816,6 +822,20 @@ _UHD_ADAPTERS = (
     "custom_library",
 )
 _BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
+# DescriptorLoader.hpp numericalNoteFromString: the ten cuDNN numerical-note names, in
+# NumericalNote.h enum order.
+_NUMERICAL_NOTES = (
+    "tensor_core",
+    "down_convert_inputs",
+    "reduced_precision_reduction",
+    "fft",
+    "nondeterministic",
+    "winograd",
+    "winograd_tile_4x4",
+    "winograd_tile_6x6",
+    "winograd_tile_13x13",
+    "strict_nan_prop",
+)
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")

@@ -37,6 +37,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdMatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradGeometry.cpp
@@ -137,6 +138,14 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdRemovedKeys.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdParity.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjectsPerObject.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxOracle.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxDevice.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaDropout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaHeadPad.cpp
@@ -144,17 +153,43 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     )
     # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
-    # The content list, not what this build packs: this binary is a host artifact that a
-    # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
-    # every other, so the test asks at run time whether the device's shard is staged.
+    # The content list, not what this build packs: both test binaries are host artifacts that
+    # a multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
+    # every other, so the tests ask at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask
-                       sdpa_head_pad)
+                       sdpa_head_pad sdpa_bwd_merged sdpa_bwd_prep sdpa_bwd_dkdv
+                       sdpa_bwd_dq)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
-        target_compile_definitions(hip_kernel_provider_tests PRIVATE
-            HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+        foreach(_hkp_target hip_kernel_provider_tests hip_kernel_provider_census_tests)
+            target_compile_definitions(${_hkp_target} PRIVATE
+                HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+        endforeach()
+    endforeach()
+    # The gfx11 verdict table and the manifests whose hashes it names, staged beside the
+    # descriptor trees so a relocated or staged build tree carries them: the split SDPA
+    # backward suites (census and seam) resolve them from the executable's own directory like
+    # the descriptor roots. configure_file re-copies when a source changes.
+    set(HKP_FLYDSL_SDPA_BWD_DATA_RELDIR "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/flydsl_sdpa_bwd")
+    set(_hkp_bwd_data "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/flydsl_sdpa_bwd")
+    set(_hkp_provider_root "${HKP_INGESTOR_PLAN_SOURCE_DIR}/../../..")
+    configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv"
+                   "${_hkp_bwd_data}/sdpa_bwd_gfx11_verdicts.csv" COPYONLY)
+    configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_probe_graphs.csv"
+                   "${_hkp_bwd_data}/sdpa_bwd_probe_graphs.csv" COPYONLY)
+    foreach(_hkp_bwd_op sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq)
+        set(_hkp_bwd_manifest
+            "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/gfx11-generic/manifest.json")
+        if(EXISTS "${_hkp_bwd_manifest}")
+            configure_file("${_hkp_bwd_manifest}"
+                           "${_hkp_bwd_data}/${_hkp_bwd_op}/gfx11-generic/manifest.json" COPYONLY)
+        endif()
+    endforeach()
+    foreach(_hkp_verdict_target hip_kernel_provider_tests hip_kernel_provider_census_tests)
+        target_compile_definitions(${_hkp_verdict_target} PRIVATE
+            HKP_FLYDSL_SDPA_BWD_DATA_RELDIR="${HKP_FLYDSL_SDPA_BWD_DATA_RELDIR}")
     endforeach()
     target_sources(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp
@@ -163,5 +198,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaDecodePacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaAiwPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitPacks.cpp
     )
 endif()

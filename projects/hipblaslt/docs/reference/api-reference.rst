@@ -81,6 +81,9 @@ An algorithm is valid only for the problem it was queried for. ``hipblasLtMatmul
 ``HIPBLAS_STATUS_INVALID_VALUE`` when the problem no longer satisfies that kernel's problem
 predicates, such as its sizes, strides, or ``alpha`` value, or uses
 ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``, which hand-written kernels do not support.
+They also refuse an algorithm for a grouped GEMM solution, and
+``hipblaslt_ext::GroupedGemm::initialize`` refuses one for a non-grouped solution, with
+``HIPBLAS_STATUS_INVALID_VALUE``.
 
 Supported data types
 ------------------------------------------
