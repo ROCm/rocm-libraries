@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "Probe-only rejection library for ASM_SDPA_ENGINE (forward) on gfx950: a legal bfloat16 SDPA forward (head size 128 or 192 for Q and K, 128 for V and O, BHSD or BSHD, grouped-query heads, packed strides, declared alignment 16) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts. The `expect` of a case is `declined` where the engine must not take the graph (it has no kernel input for the feature, so an accept computes something else) and `declined_or_pass` where a correct engine may take it. Source: SdpaFwdPlanBuilder.cpp isApplicable (lines cited are in that file). none: the control, a plain graph the engine takes on gfx950 (bf16, no mask). odd_dims: batch-1/odd sequence lengths, odd head counts and odd or unshipped head sizes (not divisible by 4); head sizes outside {128, 192} fail the kernel-registry lookup (key.empty, line 575), the rest is the engine's to support, so `declined_or_pass`. dropout_philox: dropout_probability 0.1 with seed, offset and rng_dump tensors; declined by line 320. dropout_mask: cuDNN's explicit dropout mask and scale tensors with no dropout_probability: isApplicable has NO check for dropout_mask / dropout_scale, so an engine that takes the graph ignores the mask [gap, expected WRONG]. alibi (line 324), padding (padding_mask with seq_len_q / seq_len_kv, line 325), attn_mask (additive bias, line 326), paged_kv (page tables, K and V as page containers, lines 329-332), sink (line 334): declined. seq_len_group: seq_len_q / seq_len_kv without padding_mask selects GROUP mode (getBatchMode); no kernel row has mode=1, so the registry lookup is empty (line 575). block_mask: the block-sparse mask tensor is never looked at [gap]. fp8_softmax_scales: descale_s, scale_s, scale_o, amax_s, amax_o on a bf16 graph (lines 531-540). descale_qkv: descale_q/k/v on a bf16 graph; they are demanded only for fp8 inputs (line 480), so a bf16 graph carrying them is taken and they are ignored [gap]. row_stats: max and sum_exp outputs next to the LSE; never written by the kernel [gap]. scale_tensor: a non-pass-by-value scale tensor (lines 338-347). dt_q_half, dt_k_half, dt_v_half: Q, K and V must share one dtype (line 426): `declined`. dt_o_half, dt_o_float: bf16 inputs with another output dtype are declined (line 453) but a mixed-output kernel is the engine's to add: `declined_or_pass`. dt_all_half, dt_all_float: no fp16 or fp32 kernel exists (the engine lists bf16 and fp8bf16 only): `declined_or_pass`. overflow: `ovf` names one uint32 / int32 kernarg field pushed past its limit at enforcement_level buildable (no tensor is allocated, filled or executed): q_batch, o_batch (batch stride 2**31 elements, B=2, bf16 bytes overflow uint32, line 582), k_head (head stride), v_seq (row stride), q_ts (Ts = ts_qo * row stride * 2 bytes, line 592; row stride 2**24, Sq 2), stats_batch (LSE batch stride 2**30 fp32), batch_dim (B = 2**32, dimFitsU32, line 378), sq_dim (seqlen_q = 2**31, dimFitsI32). `expect` is `declined`: the kernarg field would truncate. An accepted and built overflow case is reported `UNEXERCISED` with the reason `accepted above the oracle ceiling`, never PASS. On gfx950 the engine's registry holds bf16 head size 128/128 and 192/128 without a mask only, so the attribute families also fail for no other reason than the one named. Never frozen into a bundle.",
+  "description": "Probe-only rejection library for ASM_SDPA_ENGINE (forward) on gfx950: a legal bfloat16 SDPA forward (head size 128 or 192 for Q and K, 128 for V and O, BHSD or BSHD, grouped-query heads, packed strides, declared alignment 16) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts. The `expect` of a case is `declined` where the engine must not take the graph (it has no kernel input for the feature, so an accept computes something else) and `declined_or_pass` where a correct engine may take it. Source: SdpaFwdPlanBuilder.cpp isApplicable (lines cited are in that file). none: the control, a plain graph the engine takes on gfx950 (bf16, no mask). odd_dims: batch-1/odd sequence lengths, odd head counts and odd or unshipped head sizes (not divisible by 4); head sizes outside {128, 192} fail the kernel-registry lookup (key.empty, line 575), the rest is the engine's to support, so `declined_or_pass`. dropout_philox: dropout_probability 0.1 with seed, offset and rng_dump tensors; declined by line 320. dropout_mask: cuDNN's explicit dropout mask and scale tensors with no dropout_probability: isApplicable has NO check for dropout_mask / dropout_scale, so an engine that takes the graph ignores the mask [gap, expected WRONG]. alibi (line 324), padding (padding_mask with seq_len_q / seq_len_kv, line 325), attn_mask (additive bias, line 326), paged_kv (page tables, K and V as page containers, lines 329-332), sink (line 334): declined. seq_len_group: seq_len_q / seq_len_kv without padding_mask selects GROUP mode (getBatchMode); no kernel row has mode=1, so the registry lookup is empty (line 575). block_mask: the block-sparse mask tensor is never looked at [gap]. fp8_softmax_scales: descale_s, scale_s, scale_o, amax_s, amax_o on a bf16 graph (lines 531-540). descale_qkv: descale_q/k/v on a bf16 graph; they are demanded only for fp8 inputs (line 480), so a bf16 graph carrying them is taken and they are ignored [gap]. row_stats: max and sum_exp outputs next to the LSE; never written by the kernel [gap]. scale_tensor: a non-pass-by-value scale tensor (lines 338-347). scale_bad: a literal attn_scale the kernels mishandle (`nscale`: 0, a negative value, a float32 subnormal 1e-39, and 1e39, which overflows float32 when the builder narrows it); SdpaPlanUtils.hpp accepts only a finite, positive, normal float: `declined`. hd256: head size 256 for Q, K, V and O (dqk_e and dv 256) over the `shape` axis, so both equal and grouped-query head counts; the gfx950 bf16 hd256 kernels ship in group mode only (fmha_fwd.csv rows with mode 1, reached by ragged tensors, which no space can build) and compute only equal Q and KV head counts (kernelServesHeadCounts), so a batch-mode graph has no row: `declined_or_pass`. dt_q_half, dt_k_half, dt_v_half: Q, K and V must share one dtype (line 426): `declined`. dt_o_half, dt_o_float: bf16 inputs with another output dtype are declined (line 453) but a mixed-output kernel is the engine's to add: `declined_or_pass`. dt_all_half, dt_all_float: no fp16 or fp32 kernel exists (the engine lists bf16 and fp8bf16 only): `declined_or_pass`. overflow: `ovf` names one uint32 / int32 kernarg field pushed past its limit at enforcement_level buildable (no tensor is allocated, filled or executed): q_batch, o_batch (batch stride 2**31 elements, B=2, bf16 bytes overflow uint32, line 582), k_head (head stride), v_seq (row stride), q_ts (Ts = ts_qo * row stride * 2 bytes, line 592; row stride 2**24, Sq 2), stats_batch (LSE batch stride 2**30 fp32), batch_dim (B = 2**32, dimFitsU32, line 378), sq_dim (seqlen_q = 2**31, dimFitsI32). `expect` is `declined`: the kernarg field would truncate. An accepted and built overflow case is reported `UNEXERCISED` with the reason `accepted above the oracle ceiling`, never PASS. On gfx950 the engine's registry holds bf16 head size 128/128 and 192/128 without a mask only, so the attribute families also fail for no other reason than the one named. Never frozen into a bundle.",
   "engine": "ASM_SDPA_ENGINE",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -22,6 +22,8 @@
         "descale_qkv",
         "row_stats",
         "scale_tensor",
+        "scale_bad",
+        "hd256",
         "dt_q_half",
         "dt_k_half",
         "dt_v_half",
@@ -54,7 +56,8 @@
         [5, 255, 1, 1, 126]
       ]
     },
-    "ovf": {"values": ["q_batch", "k_head", "v_seq", "o_batch", "q_ts", "stats_batch", "batch_dim", "sq_dim"]}
+    "ovf": {"values": ["q_batch", "k_head", "v_seq", "o_batch", "q_ts", "stats_batch", "batch_dim", "sq_dim"]},
+    "nscale": {"values": [0.0, -0.0883883461356163, -1.0, 1e-39, 1e39]}
   },
   "derive": {
     "odd_f": "family == 'odd_dims'",
@@ -73,8 +76,8 @@
     "hq": "hkv_e * group_e",
     "sq_e": "odd[0] if odd_f else (2 if ov and ovf == 'q_ts' else sq)",
     "skv_e": "odd[1] if odd_f else skv",
-    "dqk_e": "odd[4] if odd_f else dqk",
-    "dv": "128",
+    "dqk_e": "odd[4] if odd_f else (256 if family == 'hd256' else dqk)",
+    "dv": "256 if family == 'hd256' else 128",
     "lay": "'bhsd' if (ov or paged) else layout",
     "bdim": "2**32 if ov and ovf == 'batch_dim' else b_e",
     "sqd": "2**31 if ov and ovf == 'sq_dim' else sq_e",
@@ -105,7 +108,7 @@
     "dto": "'half' if family in ['dt_all_half', 'dt_o_half'] else ('float' if family in ['dt_all_float', 'dt_o_float'] else 'bfloat16')",
     "stats_ovf": "ov and ovf == 'stats_batch'",
     "stats_on": "family == 'row_stats' or stats_ovf",
-    "scale_value": "None if family == 'scale_tensor' else 0.0883883461356163"
+    "scale_value": "None if family == 'scale_tensor' else (nscale if family == 'scale_bad' else 0.0883883461356163)"
   },
   "constraints": [
     {
@@ -114,7 +117,7 @@
     },
     {"rule": "not paged or skv_e % 64 == 0", "reason": "a paged container holds whole 64-row blocks"}
   ],
-  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'dt_o_half', 'dt_o_float', 'dt_all_half', 'dt_all_float'] else 'declined'}",
+  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'hd256', 'dt_o_half', 'dt_o_float', 'dt_all_half', 'dt_all_float'] else 'declined'}",
   "case": {
     "values": {
       "io_data_type": "${dtype}",
