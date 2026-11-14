@@ -14,8 +14,8 @@
 //   CONV_GROUP_CF       1: packed channels-first activations read and written in place
 //   CONV_GROUP_PF       1: phase-fused backward data at stride 2 (k4ConvMmaPhased)
 //   CONV_GROUP_RS       row streaming (k4ConvMmaRows) with CONV_GROUP_RS input rows in flight:
-//                       CONV_GROUP_CB waves, one 16-channel block each, 16 output columns and
-//                       a band of CONV_GROUP_TH rows
+//                       CONV_GROUP_CB waves, one 16-channel block each, 16 CONV_GROUP_WP output
+//                       columns and a band of CONV_GROUP_TH rows
 //   CONV_GROUP_WIDE     1: wide groups (k4ConvMmaWide), CONV_GROUP_NBI blocks a group,
 //                       CONV_GROUP_NBO output blocks a workgroup
 //   CONV_GROUP_WRW      1: backward weights (k4WrwMma; k4WrwFma under CONV_GROUP_FMA,
@@ -156,6 +156,7 @@ extern "C" __global__ void __launch_bounds__(CONV_GROUP_CB* CONV_GROUP_ATOM::WAV
                   CONV_GROUP_R,
                   CONV_GROUP_S,
                   CONV_GROUP_TH,
+                  CONV_GROUP_WP,
                   CONV_GROUP_CB,
                   CONV_GROUP_RS>(a);
 }

@@ -84,10 +84,10 @@ long long divUp(long long a, long long b)
 
 } // namespace
 
-long long groupRowsLdsBytes(int elementBytes, int s, int cb)
+long long groupRowsLdsBytes(int elementBytes, int s, int tw, int cb)
 {
     const long long vec = 16 / elementBytes;
-    return 2LL * (16 + s - 1) * (16LL * cb + vec) * elementBytes;
+    return (2LL * (tw + s - 1) * (16LL * cb + vec) + vec) * elementBytes;
 }
 
 long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb)
@@ -732,8 +732,8 @@ struct Tile
     /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
     /// Row streaming (k4ConvMmaRows) with rs (1 to 4) input rows in flight: cb waves of one
-    /// 16-channel block each, 16 output columns (wp 1), a band of th output rows, unit gather
-    /// stride, channels-last. 0: the other kernels.
+    /// 16-channel block each, 16 wp output columns (wp 1, 2 or 4), a band of th output rows, unit
+    /// gather stride, channels-last. 0: the other kernels.
     int64_t rs = 0;
 };
 
@@ -790,10 +790,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     // 16-column fragment, channels-last, not phase-fused; no other direction's knobs.
     if(tile.rs != 0
        && (tile.rs < 0 || tile.rs > 4 || direction == ConvDirection::BACKWARD_WEIGHTS || tile.fma
-           || info->wave == 0 || tile.nbi != 0 || tile.nbo != 0 || tile.wp != 1 || tile.pf != 0
-           || tile.cf != 0 || tile.math != 0 || tile.cb < 1 || tile.cb * info->wave > 1024
-           || tile.th < 1 || tile.cg != 0 || tile.oc != 0 || tile.px != 0 || tw != 0
-           || tile.bpu != 0))
+           || info->wave == 0 || tile.nbi != 0 || tile.nbo != 0
+           || (tile.wp != 1 && tile.wp != 2 && tile.wp != 4) || tile.pf != 0 || tile.cf != 0
+           || tile.math != 0 || tile.cb < 1 || tile.cb * info->wave > 1024 || tile.th < 1
+           || tile.cg != 0 || tile.oc != 0 || tile.px != 0 || tw != 0 || tile.bpu != 0))
     {
         return std::nullopt;
     }
@@ -1075,8 +1075,8 @@ bool kernelMatches(const MatchContext& context,
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
     const long long lds
-        = tile->rs != 0
-              ? conv_group::groupRowsLdsBytes(bytes, problem->kernelS, static_cast<int>(tile->cb))
+        = tile->rs != 0 ? conv_group::groupRowsLdsBytes(
+                              bytes, problem->kernelS, tw, static_cast<int>(tile->cb))
           : tile->pf != 0
               ? conv_group::groupPhasedLdsBytes(bytes,
                                                 problem->kernelR,
