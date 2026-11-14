@@ -147,6 +147,10 @@ struct HarnessPolicy
     /// settings.
     std::optional<CaptureSettings> graphCapture;
 
+    /// The engine's TOML overrides, applied to every output tensor the harness grades; null
+    /// when no settings file was given. Not owned: the settings outlive the harness.
+    const TestSettings* testSettings = nullptr;
+
     bool useDevice() const
     {
         return placement == TensorPlacement::DEVICE;

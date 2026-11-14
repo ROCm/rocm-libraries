@@ -36,6 +36,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -934,6 +935,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     try
     {
         _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
+        _inputsFromRecipes = false;
     }
     catch(const std::exception& e)
     {
@@ -1099,6 +1101,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    _inputsFromRecipes = true;
     return checkRaggedLayouts(lengthUids);
 }
 
@@ -1528,11 +1531,58 @@ VerificationOutcome
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
-    const auto toleranceFor
-        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value, value);
-          };
+    //
+    // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
+    // tolerance computed from the graph and its input statistics instead of the fixed per-op
+    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
+    // inputs read from golden blobs are scanned on the host; a scalar baked into the graph is
+    // read from the graph (convFwdErrorScale() asks this lookup only for the rest). Computed
+    // once, and only when an output needs it.
+    std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
+    const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
+        if(_inputsFromRecipes)
+        {
+            return tolerance::recipeMoments(_inputFillRecipes.fill(uid));
+        }
+        const auto it = _inputs.find(uid);
+        if(it == _inputs.end())
+        {
+            return std::nullopt;
+        }
+        return tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
+    };
+    const auto toleranceFor = [&](const std::string& label,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
+        if(tolerance::hasDynamicToleranceFor(dataType))
+        {
+            if(!convScale.has_value())
+            {
+                convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
+            }
+            if(convScale->has_value())
+            {
+                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                   && _deps.policy.testSettings != nullptr)
+                {
+                    coefficients.summationOrder
+                        = _deps.policy.testSettings->convFwdSummationOrder("float");
+                }
+                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType, coefficients);
+            }
+        }
+        if(dynamic.has_value())
+        {
+            return gradingForTensor(currentTestName(),
+                                    label,
+                                    _deps.policy.testSettings,
+                                    static_cast<float>(dynamic->atol),
+                                    static_cast<float>(dynamic->rtol));
+        }
+        const float value = tolerance::defaultTolerance(wrapper, dataType);
+        return gradingForTensor(currentTestName(), label, _deps.policy.testSettings, value, value);
+    };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
     const auto dump = bundle::findSdpaRngDump(wrapper);
