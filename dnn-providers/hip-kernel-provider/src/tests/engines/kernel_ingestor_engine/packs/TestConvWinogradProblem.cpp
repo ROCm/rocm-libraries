@@ -581,6 +581,19 @@ ConfigFields coop(const std::string& arch, int64_t f16math)
     return f;
 }
 
+/// Cooperative 16-bin layout (RDNA): 4 K waves of 16 out channels by 16 tiles each, one tile wave.
+ConfigFields coop16(const std::string& arch)
+{
+    ConfigFields f = coop(arch, 1);
+    f.bk = 64;
+    f.bt = 16;
+    f.waves = 4;
+    f.tm = 1;
+    f.tn = 1;
+    f.bins = 16;
+    return f;
+}
+
 /// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
 ConfigFields sreg(int64_t f16math)
 {
@@ -709,6 +722,18 @@ TEST(TestConvWinogradKernelMatch, FusedRunsEverywhereAndStagesNhwc)
     prefetch.pf = 1;
     EXPECT_TRUE(admits(prefetch, "gfx1201"));
     EXPECT_TRUE(admits(prefetch, "gfx906"));
+    // 8 x 16 micro-tiles are tagged with their RDNA family and run only there.
+    auto wide = fused();
+    wide.arch = "gfx12";
+    wide.bt = 64;
+    wide.ccv = 2;
+    wide.tn = 16;
+    EXPECT_TRUE(admits(wide, "gfx1201"));
+    EXPECT_FALSE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx906"));
+    wide.arch = "gfx11";
+    EXPECT_TRUE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx1201"));
 }
 
 TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
@@ -813,6 +838,67 @@ TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixtee
     f32Bf16.m = 3;
     EXPECT_TRUE(admits(f32Bf16, "gfx1201", strideTwo(), "BFLOAT16"));
     EXPECT_FALSE(admits(f32Bf16, "gfx1100", strideTwo(), "BFLOAT16"));
+}
+
+TEST(TestConvWinogradKernelMatch, CooperativeSixteenBinLayoutOnRdnaForStrideOne)
+{
+    EXPECT_TRUE(admits(coop16("gfx12"), "gfx1201", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop16("gfx11"), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop16("gfx11"), "gfx1201", baseShape(), "HALF"));
+    // F(2,3) only: no stride 2.
+    EXPECT_FALSE(admits(coop16("gfx12"), "gfx1201", strideTwo(), "HALF"));
+    // Two tile waves (32 tiles), and 8 K waves (128 out channels).
+    auto twoTileWaves = coop16("gfx12");
+    twoTileWaves.bt = 32;
+    twoTileWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(twoTileWaves, "HALF")).has_value());
+    auto eightKWaves = coop16("gfx12");
+    eightKWaves.bk = 128;
+    eightKWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(eightKWaves, "HALF")).has_value());
+    // Every field the layout reads is gated: one decline each.
+    struct Case
+    {
+        const char* name;
+        std::function<void(ConfigFields&)> edit;
+    };
+    const std::vector<Case> cases{
+        {"Cdna", [](ConfigFields& f) { f.arch = "gfx9"; }},
+        {"FThreeTwo", [](ConfigFields& f) { f.m = 3; }},
+        {"Nhwc", [](ConfigFields& f) { f.layout = "NHWC"; }},
+        {"Bins8", [](ConfigFields& f) { f.bins = 8; }},
+        {"TwoKTiles", [](ConfigFields& f) { f.tm = 2; }},
+        {"TwoTileGroups", [](ConfigFields& f) { f.tn = 2; }},
+        {"KBlock48",
+         [](ConfigFields& f) {
+             f.bk = 48;
+             f.waves = 3;
+         }},
+        {"KBlock16",
+         [](ConfigFields& f) {
+             f.bk = 16;
+             f.waves = 1;
+         }},
+        {"TileBlock64",
+         [](ConfigFields& f) {
+             f.bt = 64;
+             f.waves = 16;
+         }},
+        {"WavesNotKwTimesTw", [](ConfigFields& f) { f.waves = 8; }},
+        {"Prefetch", [](ConfigFields& f) { f.pf = 1; }},
+        {"Llc", [](ConfigFields& f) { f.llc = 1; }},
+    };
+    for(const auto& [name, edit] : cases)
+    {
+        SCOPED_TRACE(name);
+        auto f = coop16("gfx12");
+        edit(f);
+        EXPECT_FALSE(conv_winograd::configOf(kernelOf(f, "HALF")).has_value());
+    }
+    // The transform-row layout reads no micro-tile fields.
+    auto rowLayout = coop("gfx12", 1);
+    rowLayout.tm = 1;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(rowLayout, "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
@@ -1070,6 +1156,12 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.f16math = 1;
              return f;
          }},
+        {"FusedArchGfx9",
+         [] {
+             auto f = fused();
+             f.arch = "gfx9";
+             return f;
+         }},
         {"WmmaF16Math",
          [] {
              auto f = wmma("gfx11");
@@ -1180,6 +1272,80 @@ TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
     const auto multipass = conv_winograd::configOf(kernelOf(ConfigFields{}, "FLOAT"));
     ASSERT_TRUE(multipass.has_value());
     EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
+}
+
+TEST(TestConvWinogradPlan, CooperativeSixteenBinGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: 65536 tiles, far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](const ConfigFields& fields, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 4 waves of up to 256 registers: 6 per SIMD on the 1536-register parts (24 per unit), 4 on
+    // the others.
+    EXPECT_EQ(gridOn(coop16("gfx12"), "gfx1201"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1100"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1102"), 32U * 4);
+    auto eightWaves = coop16("gfx11");
+    eightWaves.bk = 128;
+    eightWaves.waves = 8;
+    EXPECT_EQ(gridOn(eightWaves, "gfx1100"), 32U * 3);
+    // The transform-row layout keeps 1024 threads per unit: 16 waves of 32, two blocks.
+    EXPECT_EQ(gridOn(coop("gfx11", 1), "gfx1100"), 32U * 2);
+}
+
+TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        auto fields = coop("gfx9", 1);
+        fields.bk = bk;
+        fields.bt = bt;
+        fields.waves = waves;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 2 x 2 tiles, 4 waves (k5CoopCdnaWpe: 168 registers, 3 waves a SIMD), 32 KiB of LDS:
+    // 3 blocks a CU on gfx950 (160 KiB of LDS), 2 on the 64 KiB parts; gfx908 keeps its
+    // register bound (4) and takes the LDS one.
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx950"), 32U * 3);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx942"), 32U * 2);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx908"), 32U * 2);
+    // 2 x 4 tiles, 8 waves (2 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 8, "gfx950"), 32U);
+    // 1 x 4 tiles, 4 waves, two transform jobs a lane (2 waves a SIMD), 64 KiB of LDS.
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx950"), 32U * 2);
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx942"), 32U);
+    // 16 waves (4 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 16, "gfx950"), 32U);
 }
 
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)

@@ -25,7 +25,9 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three producers' bundles:
 - `conv/<family>/`, the conv engine group, one bundle per convolution engine family. Its
   kernels are HIP source, `kind: "embedded_source"`, stored beside their descriptors under
   `conv/<family>/kernels/`, embedded in the plugin and compiled at runtime through HIPRTC, so
-  its KDPs declare no arch and pack into every shard. A bundle packs for a build that has the
+  most of its KDPs declare no arch and pack into every shard; a catalog built for some
+  architectures only (gfx906's FMA packs, `group_valu_wrw`'s `valu` and `mma` packs) lists
+  them and packs into their shards. A bundle packs for a build that has the
   group enabled (`HIPKERNELPROVIDER_ENABLE_CONV`, OFF by default). The generated instance
   catalogs (`conv/<family>/*.kdp.json`) are in DVC, one `<catalog>.dvc` pointer each (see
   [Conv catalogs live in DVC](#conv-catalogs-live-in-dvc) below); naive's three hand-written

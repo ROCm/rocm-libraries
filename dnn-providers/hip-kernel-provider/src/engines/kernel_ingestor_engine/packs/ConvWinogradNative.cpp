@@ -489,7 +489,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         const bool registerVariant = config.variant == Variant::WREG
                                      || config.variant == Variant::SREG
                                      || config.variant == Variant::COOP;
-        if((config.variant != Variant::WREG && config.bins != 0)
+        // bins: the register WMMA's bins per wave, or 16 for the cooperative 16-bin layout.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        if((config.variant != Variant::WREG && !coop16 && config.bins != 0)
+           || (config.variant != Variant::FUSED && !coop16 && config.variant != Variant::WRW
+               && (config.tm != 0 || config.tn != 0))
            || (!registerVariant && config.variant != Variant::WRW && config.f16Math)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
                && config.pf != 0))
@@ -551,10 +555,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             break;
         case Variant::FUSED:
         {
+            // "any", or an RDNA family for the micro-tiles that need more than gfx9's 128
+            // registers at two waves per SIMD (8 x 16).
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
-               || config.arch != "any" || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0
-               || config.tn % 4 != 0 || config.bk < config.tm || config.bt < config.tn
-               || config.bk % config.tm != 0 || config.bt % config.tn != 0 || config.ccv < 1)
+               || (config.arch != "any" && config.arch != "gfx11" && config.arch != "gfx12")
+               || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0 || config.tn % 4 != 0
+               || config.bk < config.tm || config.bt < config.tn || config.bk % config.tm != 0
+               || config.bt % config.tn != 0 || config.ccv < 1)
             {
                 return std::nullopt;
             }
@@ -595,6 +602,23 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // bk = 16 x mt x waves / 4 with mt 1, 2 or 4, and the double-buffered transformed
             // input (bt KiB) within 64 KiB of LDS. Accumulator tiles per bin (mt x bt / 16): at
             // most 4 on RDNA (8 registers each), 16 on CDNA (4 each; mt and nt cap it).
+            if(coop16)
+            {
+                // 16-bin layout (RDNA, F(2,3)): a wave owns all 16 bins of 16 x tm out channels
+                // by 16 x tn tiles (accumulators 128 x tm x tn registers: tm = tn = 1); kw K
+                // waves by tw tile waves.
+                const int kw = config.bk / 16;
+                const int tw = config.bt / 16;
+                if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
+                   || (config.arch != "gfx11" && config.arch != "gfx12") || config.tm != 1
+                   || config.tn != 1 || config.bk % 16 != 0 || (kw != 2 && kw != 4 && kw != 8)
+                   || config.bt % 16 != 0 || (tw != 1 && tw != 2) || config.waves != kw * tw
+                   || config.pf != 0)
+                {
+                    return std::nullopt;
+                }
+                break;
+            }
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
             // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(2,3), or
@@ -659,6 +683,8 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
                    || arch == "gfx942" || arch == "gfx950";
         }
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+    case Variant::FUSED:
+        return config.arch == "any" || (arch.size() > 5 && arch.substr(0, 5) == config.arch);
     case Variant::WMMA:
     case Variant::WREG:
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
@@ -1098,6 +1124,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         plan.mainThreads
             = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
+        // The kernel counts items in 32 bits (and steps past the last by the grid size).
+        if(items > (INT_LIMIT >> 1))
+        {
+            return std::nullopt;
+        }
         // RDNA: tile blocks fastest where a group's transformed filter is past cache size (4 MiB
         // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
         // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
@@ -1106,7 +1137,35 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         {
             return std::nullopt;
         }
-        const long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        if(config.bins == 16)
+        {
+            // The 16-bin layout's waves take up to 256 registers: a SIMD holds 6 of them on the
+            // 1536-register RDNA parts, 4 on the others. A grid past what is resident runs a
+            // second, partly empty round of persistent blocks (gfx1201 unet bwd: 1.26x slower).
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const bool largeFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
+                                   || arch == "gfx1200" || arch == "gfx1201";
+            perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
+        }
+        else if(config.arch == "gfx9")
+        {
+            // CDNA: the blocks a CU holds, by registers (the kernel's k5CoopCdnaWpe waves per
+            // SIMD; gfx908 keeps 2 and the 1024-thread grid) and by LDS (160 KiB a CU on gfx950,
+            // 64 KiB before). A grid past that ran a second, partly empty round of persistent
+            // blocks: gfx950 hrnet c32 k32 56² n128 and yolo c32 160² 15-20% slower.
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const int kw = std::max(1, config.waves / 4);
+            const int mt = std::max(1, config.bk / (16 * kw));
+            const int nt = std::max(1, config.bt / 16);
+            const long long ldsPerUnit = arch == "gfx950" ? 160LL << 10 : 64LL << 10;
+            const long long byLds = ldsPerUnit / k5CoopLdsBytes(nt, kw, config.m, true);
+            const bool half = problem.base.dataType == data_objects::DataType::HALF;
+            const long long byRegs
+                = arch == "gfx908" ? perUnit
+                                   : k5CoopCdnaWpe(mt, nt, kw, half, config.m == 3 && forward) / kw;
+            perUnit = std::max<long long>(1, std::min(byLds, byRegs));
+        }
         plan.mainBlocks
             = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));
         break;
@@ -1464,11 +1523,19 @@ public:
         options.add("CONV_WINO_TG", std::to_string(std::max(1, config.bt / 16)));
         options.add("CONV_WINO_BINS", std::to_string(config.bins));
         options.add("CONV_WINO_F16MATH", std::string(config.f16Math ? "1" : "0"));
-        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups.
-        const int coopKw = std::max(1, config.waves / 4);
+        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups; the
+        // 16-bin layout (bins 16): K waves, 16 x tm channels by 16 x tn tiles, tile waves.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        const int coopMt = coop16 ? std::max(1, config.tm) : 0;
+        const int coopNt = coop16 ? std::max(1, config.tn) : 0;
+        const int coopKw
+            = coop16 ? std::max(1, config.bk / (16 * coopMt)) : std::max(1, config.waves / 4);
         options.add("CONV_WINO_KW", std::to_string(coopKw));
-        options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
-        options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_MT",
+                    std::to_string(coop16 ? coopMt : std::max(1, config.bk / (16 * coopKw))));
+        options.add("CONV_WINO_NT", std::to_string(coop16 ? coopNt : std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_TW",
+                    std::to_string(coop16 ? std::max(1, config.bt / (16 * coopNt)) : 0));
         options.add("CONV_WINO_PF", std::to_string(config.pf));
         // Fused VALU: pf 1 prefetches two chunks ahead (depth 2).
         options.add("CONV_WINO_PFD", std::to_string(config.pf + 1));

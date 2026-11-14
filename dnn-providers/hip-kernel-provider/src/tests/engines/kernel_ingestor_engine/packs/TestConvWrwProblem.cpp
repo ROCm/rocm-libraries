@@ -2192,29 +2192,31 @@ TEST(TestConvWrwLaunch, TheRingFillsTracksStepsSplitsAndTheWorkspace)
     EXPECT_EQ(a.ys[4], 1);
     EXPECT_EQ(a.xImage, 24 * 120);
     EXPECT_EQ(a.yImage, 40 * 120);
-    // One 32-position chunk per row; tracks of ceil(10 / 1) + 3 - 1 steps.
+    // One 32-position chunk per row; one height class whose track ends at the last x row: of
+    // the ceil(10 / 1) + 3 - 1 ring steps, the 12th stages x row 10, past the image (11 steps).
     EXPECT_EQ(a.chunks, 1);
-    EXPECT_EQ(a.trackLen, 12);
-    EXPECT_EQ(a.steps, 2 * 1 * 1 * 1 * 12);
+    EXPECT_EQ(a.trackLen, 11);
+    EXPECT_EQ(a.trackLong, 1);
+    EXPECT_EQ(a.steps, 2 * 1 * 1 * 1 * 11);
     // One block per split (1 x 1 channel tiles, one depth tap): 4 waves want 2 per unit,
-    // 608 splits, capped at steps / 4 = 6: 4 steps each.
+    // 608 splits, capped at steps / 4 = 5: 5 steps each (the last split 2).
     EXPECT_EQ(launch->gridX, 1u);
     EXPECT_EQ(launch->gridY, 1u);
-    EXPECT_EQ(a.stepsPerSplit, 4);
-    EXPECT_EQ(a.splits, 6);
-    EXPECT_EQ(launch->gridZ, 6u);
+    EXPECT_EQ(a.stepsPerSplit, 5);
+    EXPECT_EQ(a.splits, 5);
+    EXPECT_EQ(launch->gridZ, 5u);
     EXPECT_EQ(launch->block, 256u);
     EXPECT_EQ(a.partialElems, 9 * 40 * 24);
-    EXPECT_EQ(launch->workspaceBytes, size_t{6} * 9 * 40 * 24 * 4);
+    EXPECT_EQ(launch->workspaceBytes, size_t{5} * 9 * 40 * 24 * 4);
     EXPECT_EQ(launch->kernelType, "K1AtomMfma32F16");
-    // The reduce: 6 splits, so quads (the row reduce takes at most 2): 9 taps x 40 k x 6
+    // The reduce: 5 splits, so quads (the row reduce takes at most 2): 9 taps x 40 k x 6
     // quads of c, 64 per block.
     EXPECT_EQ(launch->reduceGrid, (9u * 40 * 6 + 63) / 64);
     EXPECT_EQ(launch->reduce.rows, 0);
     EXPECT_EQ(launch->reduceBlock, 256u);
     EXPECT_EQ(launch->reduce.elems, 40 * 24 * 9);
     EXPECT_EQ(launch->reduce.partialElems, a.partialElems);
-    EXPECT_EQ(launch->reduce.splits, 6);
+    EXPECT_EQ(launch->reduce.splits, 5);
     EXPECT_EQ(launch->reduce.groups, 1);
     EXPECT_EQ(launch->reduce.kg, 40);
     EXPECT_EQ(launch->reduce.cg, 24);
@@ -2254,9 +2256,91 @@ TEST(TestConvWrwLaunch, TheRingRunsADilatedHeightAsTracksPerClass)
     shape.prePadding = shape.postPadding = {3, 1};
     const auto launch = launchOf(ConfigFields{}, shape);
     ASSERT_TRUE(launch.has_value());
-    // ho 20: tracks of ceil(20 / 3) + 2 steps, one per height class of 3.
-    EXPECT_EQ(launch->args.trackLen, 9);
-    EXPECT_EQ(launch->args.steps, 2 * 1 * 3 * 1 * 9);
+    // ho 20, one track per height class of 3, ending at the class's last x row: classes 0 and
+    // 1 (7 dy rows) take steps 0 .. 7 (x rows -3 + 3m, the last 18 or 19), class 2 (6 dy rows)
+    // steps 0 .. 6 (its 8th would stage x row 20). Untrimmed: ceil(20 / 3) + 2 = 9 each.
+    EXPECT_EQ(launch->args.trackLen, 8);
+    EXPECT_EQ(launch->args.trackLong, 2);
+    EXPECT_EQ(launch->args.steps, 2 * 1 * 1 * (2 * 8 + 7));
+}
+
+TEST(TestConvWrwLaunch, PointwisePlanesRunAsOneRow)
+{
+    // 1x1, unit stride, no padding, packed channels-first: each 14 x 16 plane is one row of 224
+    // positions (7 chunks of 32, none partial), for the ring and the output rows alike.
+    auto shape = baseShape();
+    shape.input = {14, 16};
+    shape.filter = {1, 1};
+    shape.prePadding = shape.postPadding = {0, 0};
+    auto ring = ConfigFields{};
+    ring.s = 1;
+    ring.fr = 1;
+    for(const auto& f : {ring, [&] {
+                             auto rows = ring;
+                             rows.loop = 0;
+                             return rows;
+                         }()})
+    {
+        const auto launch = launchOf(f, shape);
+        ASSERT_TRUE(launch.has_value());
+        EXPECT_EQ(launch->args.hi, 1);
+        EXPECT_EQ(launch->args.ho, 1);
+        EXPECT_EQ(launch->args.wi, 224);
+        EXPECT_EQ(launch->args.wo, 224);
+        EXPECT_EQ(launch->args.chunks, 7);
+        EXPECT_EQ(launch->args.xs[3], 224);
+        EXPECT_EQ(launch->args.xs[4], 1);
+    }
+    // Padding, a stride or channels-last keeps the rows.
+    auto padded = shape;
+    padded.prePadding = padded.postPadding = {1, 1};
+    const auto paddedLaunch = launchOf(ring, padded);
+    ASSERT_TRUE(paddedLaunch.has_value());
+    EXPECT_EQ(paddedLaunch->args.ho, 16);
+    auto nhwc = shape;
+    nhwc.channelsLast = true;
+    auto cl = ring;
+    cl.layout = 1;
+    const auto clLaunch = launchOf(cl, nhwc);
+    ASSERT_TRUE(clLaunch.has_value());
+    EXPECT_EQ(clLaunch->args.ho, 14);
+}
+
+TEST(TestConvWrwLaunch, RingTracksEndAtTheirLastXRow)
+{
+    // Same padding (ph = dh) on 128 rows: class rho has ceil((128 - rho) / dh) dy rows, a
+    // leading step whose x row is padding (it fills the ring) and no step after its last x row.
+    // Dilation 36: classes 0 .. 19 have 4 rows (5 steps), 20 .. 35 have 3 (4 steps); the
+    // untrimmed ring ran ceil(128 / 36) + 2 = 6 for every class.
+    const auto d36 = conv_wrw::ringTrackOf(128, 128, 36, 36, 3);
+    EXPECT_EQ(d36.len, 5);
+    EXPECT_EQ(d36.longClasses, 20);
+    // Dilation 24 (classes below 8: 6 rows) and 12 (below 8: 11 rows).
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 24, 24, 3).len, 7);
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 24, 24, 3).longClasses, 8);
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 12, 12, 3).len, 12);
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 12, 12, 3).longClasses, 8);
+    // 65 rows at dilation 36: classes below 29 have 2 rows (3 steps), the rest 1 (2 steps).
+    const auto small = conv_wrw::ringTrackOf(65, 65, 36, 36, 3);
+    EXPECT_EQ(small.len, 3);
+    EXPECT_EQ(small.longClasses, 29);
+    // Unit dilation and padding 1: one class, its last step (x row 128) trimmed.
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 1, 1, 3).len, 129);
+    EXPECT_EQ(conv_wrw::ringTrackOf(128, 128, 1, 1, 3).longClasses, 1);
+    // No padding (a valid convolution): every class keeps rows + fr - 1 steps.
+    const auto valid = conv_wrw::ringTrackOf(26, 30, 0, 2, 3);
+    EXPECT_EQ(valid.len, 13 + 2);
+    EXPECT_EQ(valid.longClasses, 2);
+    // Padding past the filter's reach: the dy rows past the last x row's partners end the
+    // track sooner (min of both bounds).
+    const auto wide = conv_wrw::ringTrackOf(14, 10, 3, 1, 3);
+    EXPECT_EQ(wide.len, 13);
+    EXPECT_EQ(wide.longClasses, 1);
+    // A dilation past the output height leaves classes without dy rows: lengths of three
+    // values, so every class keeps the untrimmed ceil(ho / dh) + fr - 1 steps.
+    const auto sparse = conv_wrw::ringTrackOf(10, 10, 12, 12, 3);
+    EXPECT_EQ(sparse.len, 1 + 2);
+    EXPECT_EQ(sparse.longClasses, 12);
 }
 
 TEST(TestConvWrwLaunch, ChannelsLastStridesAndGroups)
@@ -2312,8 +2396,8 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(krsc->reduce.wtap, 24);
     // K C T R S of 2 to 64 taps at most 2 splits reduces by rows (a run of channels' taps,
     // contiguous in dw); more splits, K T R S C, one tap, or more than 64 taps by quads of
-    // channels. 304 units give the base 6 splits; one unit gives it 2.
-    EXPECT_EQ(kcrs->reduce.splits, 6);
+    // channels. 304 units give the base 5 splits (22 steps / 4); one unit gives it 2.
+    EXPECT_EQ(kcrs->reduce.splits, 5);
     EXPECT_EQ(kcrs->reduce.rows, 0);
     EXPECT_EQ(krsc->reduce.rows, 0);
     EXPECT_EQ(krsc->reduceGrid, (9u * 40 * 6 + 63) / 64); // 9 taps x 40 k x 6 quads, 64 a block
@@ -2517,7 +2601,7 @@ TEST(TestConvWrwLaunch, TheSplitPlannerFillsTheDeviceWithinItsCaps)
 
 TEST(TestConvWrwLaunch, TheConfigsBpuSetsTheSplits)
 {
-    // One block per split, 24 steps (cap 6): bpu 1 wants 304 per split, so the cap rules; a
+    // One block per split, 22 steps (cap 5): bpu 1 wants 304 per split, so the cap rules; a
     // 1-unit device wants bpu splits.
     for(const int64_t bpu : {1, 2, 4})
     {
@@ -3109,19 +3193,22 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     wide.dw = 16; // 48 + 8 = 56: already odd
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(wide), 2), 2 * (64 * 40 + 64 * 56) * 2);
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
-    // LDB ceil(42 / 8) x 8 + 8 = 56; two buffers of 64 x 40 + 64 x 56.
+    // LDB ceil(42 / 8) + 1 = 7 16-byte units (odd: k3CfPitch) = 56; two buffers of 64 x 40 +
+    // 64 x 56.
     auto ring = configOf(ConfigFields{});
     EXPECT_EQ(conv_wrw::ldsBytesOf(ring, 2), 2 * (64 * 40 + 64 * 56) * 2);
-    // Aligned units: one more vector of window (6), LDB 64, and an 8-element guard.
+    // Aligned units: one more vector of window (6), ceil(50 / 8) + 1 = 8 units bumped to 9
+    // (LDB 72), and an 8-element guard.
     auto aligned = ring;
     aligned.align = 1;
-    EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 64) * 2);
-    // Channels-last: the window's 34 positions (words of 2), LDB 48.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 72) * 2);
+    // Channels-last: the window's 34 positions (words of 2), ceil(36 / 8) + 1 = 6 units (LDB
+    // 48; channels-last tiles keep even counts).
     auto channelsLast = ring;
     channelsLast.layout = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 48) * 2);
-    // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48;
-    // x tile 3 rows x 2 phases x 64 channels.
+    // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48 (6
+    // units: strided tiles keep even counts); x tile 3 rows x 2 phases x 64 channels.
     auto rows = ring;
     rows.loop = 0;
     rows.sw = 2;
@@ -3133,7 +3220,7 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     packed.fr = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(packed, 2), 2 * (64 * 40 + 2 * 64 * 48) * 2);
     // fp32, 64 x 64 x 16, 4-element vectors: window 18 = 5 vectors (20), LDA 20, LDB
-    // ceil(22 / 4) x 4 + 4 = 28.
+    // ceil(22 / 4) + 1 = 7 units (odd) = 28.
     auto fp32 = configOf(floatFields());
     EXPECT_EQ(conv_wrw::ldsBytesOf(fp32, 4), 2 * (64 * 20 + 64 * 28) * 4);
     // DMA ring, 2 stages, 4 waves: dy 64 rows of 5 units (5 groups of 64, 2 passes a wave),

@@ -598,6 +598,39 @@ int64_t splitsWanted(int64_t blocksXY,
     return best;
 }
 
+RingTrack ringTrackOf(int64_t ho, int64_t hi, int64_t ph, int64_t dh, int64_t filterRows)
+{
+    const RingTrack uniform{divUp(ho, dh) + filterRows - 1, dh};
+    // Classes past the output height have no dy row (lengths of three values).
+    if(dh > ho)
+    {
+        return uniform;
+    }
+    const auto lenOf = [&](int64_t rho) -> int64_t {
+        const int64_t rows = rho < ho ? divUp(ho - rho, dh) : 0;
+        const int64_t reach = hi + ph - rho;
+        const int64_t xSteps = reach > 0 ? divUp(reach, dh) : 0;
+        return rows > 0 ? std::min(rows + filterRows - 1, xSteps) : 0;
+    };
+    RingTrack track{lenOf(0), 0};
+    while(track.longClasses < dh && lenOf(track.longClasses) == track.len)
+    {
+        ++track.longClasses;
+    }
+    for(int64_t rho = track.longClasses; rho < dh; ++rho)
+    {
+        if(lenOf(rho) != track.len - 1)
+        {
+            return uniform;
+        }
+    }
+    if(track.len < 1 || (track.longClasses < dh && track.len < 2) || track.len > uniform.len)
+    {
+        return uniform;
+    }
+    return track;
+}
+
 DirectPlan directPlanFor(int64_t tiles,
                          int64_t planes,
                          int64_t rows,
@@ -714,6 +747,37 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             std::min<int64_t>(divUp(std::max(*xElems, *yElems), 256), int64_t{1} << 16));
         launch->workspaceBytes += static_cast<size_t>(splitBytes);
         return launch;
+    }
+
+    // A 1x1 filter at unit stride and no padding over packed channels-first images reads every
+    // image plane (depth x height x width) as one contiguous run in x and dy alike: the
+    // specialized loops take it as one row of that many positions, so their position chunks
+    // run across row ends (resnext's 16-wide rows filled half of each 32-position chunk).
+    if(config.loop != LOOP_GENERIC && problem.channelsFirst)
+    {
+        const auto& p = problem.base.args;
+        bool pointwise = p.inSpatial[0] * p.inSpatial[1] > 1;
+        for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+        {
+            pointwise = pointwise && p.filter[axis] == 1 && p.stride[axis] == 1
+                        && p.prePadding[axis] == 0 && p.inSpatial[axis] == p.outSpatial[axis];
+        }
+        const auto plane
+            = pack_features::checkedProduct({p.inSpatial[0], p.inSpatial[1], p.inSpatial[2]});
+        if(pointwise && plane.has_value() && *plane <= INT_LIMIT / 4)
+        {
+            WrwProblem flat = problem;
+            auto& f = flat.base.args;
+            for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+            {
+                f.inSpatial[axis] = f.outSpatial[axis] = axis == 2 ? *plane : 1;
+                f.dilation[axis] = 1;
+            }
+            // Packed channels-first strides of the one-row planes (n, c, d, h, w).
+            f.xStrides[2] = f.xStrides[3] = *plane;
+            f.yStrides[2] = f.yStrides[3] = *plane;
+            return wrwLaunchFor(flat, config, device);
+        }
     }
 
     // The atom: known, its id, on this device, taking the graph's element type. "fma" is the
@@ -1088,6 +1152,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     int64_t gridZ = 1;
     int64_t chunks = 0;
     int64_t trackLen = 0;
+    int64_t trackLong = 0;
     int64_t splits = 0;
     int64_t stepsPerSplit = 0;
     std::optional<int64_t> steps;
@@ -1134,13 +1199,27 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                              : a.filter[0] * (phased ? a.stride[1] : 1));
         // Packed rows: a plane's chunks are its groups of packRows rows.
         chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
-        trackLen = phased ? a.outSpatial[1] + config.fr - 1
-                          : divUp(a.outSpatial[1], a.dilation[1]) + a.filter[1] - 1;
+        // A phased ring's one class keeps every step; a stride-1 ring's tracks end at their
+        // last x row in the image (ringTrackOf).
+        const RingTrack track = phased ? RingTrack{a.outSpatial[1] + config.fr - 1, a.dilation[1]}
+                                       : ringTrackOf(a.outSpatial[1],
+                                                     a.inSpatial[1],
+                                                     a.prePadding[1],
+                                                     a.dilation[1],
+                                                     a.filter[1]);
+        trackLen = track.len;
+        trackLong = track.longClasses;
+        // Steps per (image, output depth) plane: chunks tracks of each class.
+        const auto planeSteps = pack_features::checkedProduct(
+            {chunks,
+             trackLong * trackLen
+                 + (a.dilation[1] - trackLong) * std::max<int64_t>(trackLen - 1, 0)});
         steps = packed ? pack_features::checkedProduct({a.n, a.outSpatial[0], chunks})
                 : rows
                     ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
-                    : pack_features::checkedProduct(
-                          {a.n, a.outSpatial[0], a.dilation[1], chunks, trackLen});
+                : planeSteps.has_value()
+                    ? pack_features::checkedProduct({a.n, a.outSpatial[0], *planeSteps})
+                    : std::nullopt;
     }
     if(gridX < 1 || gridX > INT_LIMIT || gridY < 1 || gridY > MAX_GRID_YZ || !steps.has_value()
        || *steps < 1 || !partialElems.has_value() || trackLen > INT_LIMIT || chunks > INT_LIMIT)
@@ -1217,6 +1296,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.steps = *steps;
     k3.stepsPerSplit = stepsPerSplit;
     k3.trackLen = rows || direct ? 0 : static_cast<int>(trackLen);
+    k3.trackLong = rows || direct ? 0 : static_cast<int>(trackLong);
     k3.segs = direct ? static_cast<int>(plan.segs) : static_cast<int>(packWidth);
     k3.segRows = direct ? static_cast<int>(plan.segRows) : static_cast<int>(packRows);
     k3.walk = direct ? static_cast<int>(plan.walk) : 0;

@@ -364,7 +364,7 @@ struct ConfigFields
     int64_t bm = 128, bn = 64, bc = 32, wm = 2, wn = 2, vec = 8;
     int64_t ring = 1, bl = 0, split = 0;
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
-    int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0;
+    int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0;
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -385,6 +385,7 @@ ConfigFields rowsFields()
     f.fn = 4;
     f.wp = f.wq = f.wk = 2;
     f.epi = 1;
+    f.un = 1;
     return f;
 }
 
@@ -442,7 +443,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"wq", f.wq},
                        {"wk", f.wk},
                        {"pp", f.pp},
-                       {"epi", f.epi}};
+                       {"epi", f.epi},
+                       {"un", f.un}};
     return kernel;
 }
 
@@ -701,6 +703,8 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
              f.bn = 64;
          }},
         {"epi", [](ConfigFields& f) { f.epi = 2; }},
+        {"un", [](ConfigFields& f) { f.un = 3; }},
+        {"un 0", [](ConfigFields& f) { f.un = 0; }},
         {"kd (no 2x3x3 filter)", [](ConfigFields& f) { f.kd = 2; }},
         {"ring", [](ConfigFields& f) { f.ring = 1; }},
         {"bl", [](ConfigFields& f) { f.bl = 1; }},
@@ -717,14 +721,14 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
         EXPECT_FALSE(admits(f, "gfx950")) << name;
     }
     // The rows knobs belong to rows configs only.
-    for(int field = 0; field < 7; ++field)
+    for(int field = 0; field < 8; ++field)
     {
         ConfigFields mma;
         mma.atom = "mfma16x32_f16";
         mma.archs = "gfx950";
         ASSERT_TRUE(admits(mma, "gfx950"));
-        std::array<int64_t*, 7> knobs{
-            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi};
+        std::array<int64_t*, 8> knobs{
+            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi, &mma.un};
         *knobs[static_cast<size_t>(field)] = 1;
         EXPECT_FALSE(admits(mma, "gfx950")) << "rows knob " << field << " on an mma config";
     }
@@ -928,6 +932,69 @@ TEST(TestConvDirectPlan, Rows3dTilesWalkEveryOutputPlane)
     auto huge = shape;
     huge.input = {64, 1024, 1024};
     EXPECT_FALSE(planOf(huge, rows3d, "HALF", 1024).has_value());
+}
+
+TEST(TestConvDirectKernelMatch, BatchUnfoldIsGfx950And2dOnly)
+{
+    // One wave column (16 / un columns of each image): the 2 x 2 x 2 tile's unfolded halo rows
+    // (2 x 18 pixels) would pass gfx950's 160 KiB.
+    auto unfold = rowsFields();
+    unfold.wq = 1;
+    unfold.un = 2;
+    EXPECT_TRUE(admits(unfold, "gfx950"));
+    // Two images' halo rows of 8 + 2 pixels, 18 rows, 64 channels, two stages.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(unfold, "HALF"))),
+              2 * (2 * 8 + 2) * (2 * (8 + 2)) * 64 * 2);
+    unfold.un = 4;
+    EXPECT_TRUE(admits(unfold, "gfx950"));
+    auto wide = rowsFields();
+    wide.un = 2;
+    EXPECT_FALSE(admits(wide, "gfx950")) << "two 34-pixel halo rows of 64 channels: 162 KiB";
+    // Off gfx950 (dword LDS DMA) even when the ship list and atom would run.
+    auto gfx9 = rowsGfx9Fields();
+    gfx9.wq = 1;
+    ASSERT_TRUE(admits(gfx9, "gfx90a"));
+    gfx9.un = 2;
+    EXPECT_FALSE(admits(gfx9, "gfx90a"));
+    // 3-D rows configs walk planes, not image groups.
+    auto rows3d = rowsFields();
+    rows3d.kd = 3;
+    rows3d.wq = 1;
+    ASSERT_TRUE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
+    rows3d.un = 2;
+    EXPECT_FALSE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
+}
+
+TEST(TestConvDirectPlan, BatchUnfoldTilesPackImagesAlongTheColumns)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.n = 5;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {40, 40};
+    auto unfold = rowsFields();
+    unfold.wq = 1;
+    unfold.un = 2;
+    const auto plan = planOf(shape, unfold, "HALF", 1024);
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    // 16 columns per wave column: 8 columns of each of two images.
+    EXPECT_EQ(a.th, 16);
+    EXPECT_EQ(a.tw, 8);
+    EXPECT_EQ(a.tilesW, 5);
+    EXPECT_EQ(a.tilesH, 3);
+    // Image groups: 5 images -> 3 (the last holds one image).
+    EXPECT_EQ(plan->grid[0], 5u * 3u * 3u);
+    // Two images share the 32-bit buffer offsets: an image just under 1 GiB fits alone, not
+    // unfolded.
+    auto big = shape;
+    big.input = {4096, 2048};
+    big.c = 64;
+    big.k = 16;
+    EXPECT_TRUE(planOf(big, rowsFields(), "HALF", 1024).has_value());
+    EXPECT_FALSE(planOf(big, unfold, "HALF", 1024).has_value());
 }
 
 TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)

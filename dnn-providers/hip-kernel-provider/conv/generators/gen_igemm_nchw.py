@@ -175,7 +175,7 @@ def valid_fma(c, dtype):
 
 # The catalog, per stride: the tiles that won (or came within 3% of the winner on) a measured
 # shape on any GPU of the family (k7_bench over the rdna_av vocoder shapes with MIOpen >= 200 us
-# plus small ones; ~/scratch/k7, ~/old-asic-hipdnn/k7). A tile is (bmq, bn, bk, wm, wn, wp) for
+# plus small ones). A tile is (bmq, bn, bk, wm, wn, wp) for
 # matrix cores and (bmq, bn, bk, tq, tc, stages) for FMA.
 TAPS = {2: 2, 3: 3, 4: 2, 5: 2, 6: 2, 8: 2}
 WMMA = {  # fp16 and bf16, gfx11 and gfx12
@@ -414,8 +414,7 @@ def build_st1():
                                 CATALOG[dtype].append(c)
             # FMA: a one-vector halo is the register window (taps within the vector, unit
             # dilation); a wider one reads each tap's window from LDS (not _Float16: HIPRTC 7.18
-            # fails to select its form on gfx942, "Cannot select f32 = Constant<-1>"; reproducer in
-            # ~/old-asic-hipdnn/k7/ice. bf16, converted to fp32 explicitly, compiles: it is the
+            # fails to select its form on gfx942, "Cannot select f32 = Constant<-1>". bf16, converted to fp32 explicitly, compiles: it is the
             # only 16-bit path for these shapes where no matrix core takes bf16, gfx908).
             for halo in sorted({small, -(-(taps - 1) * 5 // vec) * vec}):
                 if (halo == vec and taps > vec) or (halo > vec and dtype == "HALF"):

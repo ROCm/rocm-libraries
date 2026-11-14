@@ -474,7 +474,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 27> ints{
+    const std::array<std::pair<const char*, int*>, 28> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -483,7 +483,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"tn", &config.tn},     {"nt", &config.nt},       {"threads", &config.threads},
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
-         {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi}}};
+         {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
+         {"un", &config.un}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -499,14 +500,17 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     // The rows knobs belong to rows configs only; the halo-tile knobs to the others.
     const bool rowsFields = config.pw != 0 || config.fn != 0 || config.wp != 0 || config.wq != 0
-                            || config.wk != 0 || config.pp != 0 || config.epi != 0;
+                            || config.wk != 0 || config.pp != 0 || config.epi != 0
+                            || config.un != 0;
     if(config.rows)
     {
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
            || (config.pp != 0 && config.pp != 1) || (config.pp == 1 && config.wk != 2)
            || (config.epi != 0 && config.epi != 1) || config.ring != 0 || config.bl != 0
            || config.split != 0 || config.wm != 0 || config.wn != 0
-           || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16)
+           || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16
+           || (config.un != 1 && config.un != 2 && config.un != 4)
+           || (config.un > 1 && config.kd != 1))
         {
             return std::nullopt;
         }
@@ -587,14 +591,20 @@ int64_t rowsLdsBytes(const Config& config)
     // The operand is the atom's element (three-bf16 runs on bf16 atoms).
     const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
     const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
-    const int64_t haloColumns = static_cast<int64_t>(config.wq) * 16 + config.s - 1;
+    // un images' halo rows side by side, (16 wq / un + s - 1) pixels each.
+    const int64_t haloColumns
+        = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + config.s - 1);
     return 2 * haloRows * haloColumns * config.bc * operandBytes;
 }
 
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
+    // Batch unfold addresses its images through the 16-byte LDS DMA (CDNA4, gfx950 alone).
+    const bool unfoldOk
+        = config.un <= 1
+          || hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0;
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName) && unfoldOk;
 }
 
 std::optional<Plan>
@@ -629,20 +639,23 @@ std::optional<Plan>
         // Fixed tile of one output plane; each block walks tiles, one block per compute unit at
         // most. A 2-D config (kd 1) takes 2-D problems; a 3-D one walks every output plane.
         Tile t;
+        // Batch unfold (un > 1): a tile is 16 wq / un columns of un consecutive images.
         t.th = config.wp * config.pw;
-        t.tw = config.wq * 16;
+        t.tw = config.wq * 16 / config.un;
         t.ds = 1;
         t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
         t.tilesH = static_cast<int>(divUp(a.ho, t.th));
         t.tilesD = 1;
-        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * a.dout * columnBlocks;
+        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * divUp(a.n, config.un) * a.dout
+                   * columnBlocks;
         // The halo moves in 16-byte granules of whole channels; 32-bit offsets within one input
         // image; the tile count fits an int.
         const int operandBytes = config.math ? 2 : problem.elementBytes;
         const long long imageBytes
             = static_cast<long long>(a.di) * a.hi * a.wi * reduction * operandBytes;
+        // An unfold tile's images share one 32-bit-offset buffer.
         if(config.vec * operandBytes != 16 || (config.kd == 1 && (a.dout != 1 || a.di != 1))
-           || imageBytes >= BUFFER_LIMIT || t.blocks > INT_LIMIT)
+           || imageBytes * config.un >= BUFFER_LIMIT || t.blocks > INT_LIMIT)
         {
             return std::nullopt;
         }
@@ -1050,6 +1063,7 @@ public:
             options.add("CONV_DIRECT_WP", std::to_string(config.wp));
             options.add("CONV_DIRECT_WQ", std::to_string(config.wq));
             options.add("CONV_DIRECT_WK", std::to_string(config.wk));
+            options.add("CONV_DIRECT_UN", std::to_string(config.un));
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
         }
@@ -1077,12 +1091,24 @@ public:
 
         auto format = build(FORMAT_ENTRY_POINT, signatureOf<K2FormatArgs>());
         format.setBlockSize(AUX_BLOCK, 1, 1);
-        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the rows
-        // and three-bf16 formats one element per thread.
-        format.setGridSize(
-            auxBlocks(config.rows || config.math ? plan.weightElems : plan.weightElems / config.ka),
-            1,
-            1);
+        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the
+        // three-bf16 formats one element per thread; the rows format one block per
+        // K2R_FORMAT_TILES tiles of 16 fn x ka elements (k2rFormatWeights), but at least
+        // K2R_FORMAT_MIN_BLOCKS blocks (one tile each) while there are tiles for them.
+        long long formatThreads = plan.weightElems / config.ka;
+        if(config.math)
+        {
+            formatThreads = plan.weightElems;
+        }
+        else if(config.rows)
+        {
+            const long long tileElems = 16LL * config.fn * config.ka;
+            const long long tiles = (plan.weightElems + tileElems - 1) / tileElems;
+            formatThreads = std::max((tiles + K2R_FORMAT_TILES - 1) / K2R_FORMAT_TILES,
+                                     std::min<long long>(tiles, K2R_FORMAT_MIN_BLOCKS))
+                            * AUX_BLOCK;
+        }
+        format.setGridSize(auxBlocks(formatThreads), 1, 1);
 
         std::optional<IngestorKernelCode> splitInput;
         if(config.math)
