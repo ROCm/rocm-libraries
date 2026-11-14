@@ -108,6 +108,18 @@ def test_extractArchInfo_success(mock_logic_file):
     assert result.DeviceIds == {"id=75a2"}
     assert result.CUCount is None
 
+def test_extractArchInfo_list_header_with_comments(tmp_path):
+    path = tmp_path / "logic.yaml"
+    path.write_text("# SPDX-License-Identifier: MIT\n\n"
+                    "- {MinimumRequiredVersion: 4.33.0}\n"
+                    "# comment between entries\n"
+                    "- gfx950\n- gfx950\n- [Device 75a2]\n")
+    result = _extractArchInfo(path)
+    assert result.Name == "gfx950"
+    assert result.Gfx == "gfx950"
+    assert result.DeviceIds == {"id=75a2"}
+
+
 def test_extractArchInfo_with_scalar_version():
     with patch("builtins.open", mock_open(read_data=VALID_LOGIC_FILE_CONTENT_WITH_SCALAR_VERSION)):
         result = _extractArchInfo("dummy.yaml")

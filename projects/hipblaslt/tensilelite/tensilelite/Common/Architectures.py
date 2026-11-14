@@ -1103,7 +1103,13 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
 
     if first_nonempty.startswith("-"): 
         # List format
-        raw = _extractArchInfoFromList(lines, file)
+        header_lines = []
+        for line in lines:
+            if line.strip() and not line.lstrip().startswith("#"):
+                header_lines.append(line)
+                if len(header_lines) == 4:
+                    break
+        raw = _extractArchInfoFromList(header_lines, file)
     else:  
         # Dict format
         raw = _extractArchInfoFromDictFast(lines, file)
