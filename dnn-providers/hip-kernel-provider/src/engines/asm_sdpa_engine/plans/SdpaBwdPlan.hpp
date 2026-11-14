@@ -21,12 +21,15 @@ namespace asm_sdpa_engine
  *
  * Orchestrates 2 or 3 ASM kernels for the backward pass:
  *   1. ODO        — D reduction: D[b,h,i] = sum_j(O * dO)
- *   2. DQDKDV     — Main gradients: dQ (FP32 via A32, or direct BF16 via A16), dK, dV
+ *   2. DQDKDV     — Main gradients: dQ (FP32 into dq_acc via A32, or added
+ *                   atomically into the output dQ via A16), dK, dV
  *   3. DQ_CONVERT — Post-processing: FP32 dQ → BF16 (A32 path only)
  *
  * Accumulator type selects the path:
  *   - A32 (3-kernel path): ODO → DQDKDV → DQ_CONVERT
- *   - A16 (2-kernel path): ODO → DQDKDV (dQ written directly in BF16)
+ *   - A16 (2-kernel path): ODO → DQDKDV (dQ added atomically into the output
+ *     dQ, which must be zeroed first). Not supported: SdpaBwdPlanBuilder never
+ *     builds an A16 plan.
  *
  * When A16, `_postKernel` is std::nullopt and the DQ_CONVERT launch + dq_acc
  * workspace are both skipped.

@@ -14,12 +14,14 @@ namespace asm_sdpa_engine
 ///
 /// - A32: dQ is accumulated in FP32 into a workspace buffer (dq_acc), then a
 ///   separate DQ_CONVERT kernel converts FP32 → BF16. Requires 3 kernels.
-/// - A16: dQ is written directly in BF16 by the DQDKDV kernel. No dq_acc
-///   workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels.
+/// - A16: dQ is accumulated directly in the output's 16-bit type: the DQDKDV
+///   kernel adds it atomically into the output dQ, which must be zeroed first.
+///   No dq_acc workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels. Not
+///   supported: SdpaBwdPlanBuilder rejects it (see initializeExecutionSettings).
 enum class AccumulatorType : uint8_t
 {
     A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
-    A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
+    A16 // 16-bit accumulator — 2-kernel path (ODO → DQDKDV)
 };
 
 /**
