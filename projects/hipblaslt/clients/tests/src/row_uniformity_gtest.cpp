@@ -215,6 +215,14 @@ namespace
         return hardware;
     }
 
+    // The CU count library logic is selected by, or 0 when the device cannot
+    // be described.
+    int currentCUCount()
+    {
+        const auto* gpu = dynamic_cast<const TensileLite::AMDGPU*>(currentHardware().get());
+        return gpu != nullptr ? gpu->computeUnitCount : 0;
+    }
+
     // The solution record behind an enumerated algorithm, or null with a
     // populated reason. This is metadata only: getSolutionByIndex pulls in a
     // placeholder's .dat on demand and never touches the code objects.
@@ -1058,8 +1066,8 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly. With gfx950Pick, the first pick on
-        // gfx950 must be a kernel whose name starts with it; elsewhere a
+        // row-uniform or refused cleanly. With gfx950Pick, the first pick on a
+        // 256-CU gfx950 must be a kernel whose name starts with it; elsewhere a
         // problem with no pick is skipped.
         void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
         {
@@ -1070,11 +1078,15 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
-            const bool gfx950          = gpuArchName().rfind("gfx950", 0) == 0;
-            if(candidates.empty() && gfx950Pick != nullptr && !gfx950)
+            // The logic that routes these shapes to the gfx950 skinny kernels
+            // declares CUCount: 256, so other CU counts (MI350P, compute
+            // partitions) keep the Tensile picks.
+            const bool expectPick = gfx950Pick != nullptr && gpuArchName().rfind("gfx950", 0) == 0
+                                    && currentCUCount() == 256;
+            if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
                 GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
-            if(gfx950Pick != nullptr && gfx950)
+            if(expectPick)
             {
                 const std::string pick = harness.solutionName(candidates.front());
                 ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
@@ -1108,9 +1120,10 @@ namespace
     }
 
     // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
-    // custom.config. Library logic routes these shapes to them, so on gfx950
-    // the default pick must be one of them: when uniform summation order
-    // refused them (#14010), nothing failed, they just stopped being picked.
+    // custom.config. Library logic routes these shapes to them on 256-CU gfx950,
+    // so there the default pick must be one of them: when uniform summation
+    // order refused them (#14010), nothing failed, they just stopped being
+    // picked. Other devices check that their default picks keep rows uniform.
     // A is TN and D takes A's type, as the kernels require.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16_4096x1x4096)
     {
