@@ -52,6 +52,7 @@ from the standard library plus the packages above.
 │   │
 │   ├── # TheRock / multi-arch CI
 │   ├── component_ci.py                 ← per-component CI trigger flags
+│   ├── get_changed_projects.py         ← TheRock project selection
 │   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
 │   │
 │   ├── # PR automation
@@ -62,7 +63,6 @@ from the standard library plus the packages above.
 │   ├── notify_teams.py                 ← route CI failure alerts to MS Teams channels
 │   │
 │   ├── # Repo maintenance
-│   ├── get_changed_projects.py         ← git-diff → validated changed project list
 │   ├── merge-submodules.py             ← merge per-project .gitmodules into one file
 │   │
 │   └── tests/
@@ -71,6 +71,7 @@ from the standard library plus the packages above.
 │       └── test_pr_merge_sync_patches.py
 │
 ├── repos-config.json                   ← subtree → sub-repo mapping (read by config_loader)
+├── skip-ci-config.toml                 ← paths irrelevant to TheRock CI
 └── requirements.txt                    ← pydantic, requests
 ```
 
@@ -85,12 +86,37 @@ from the standard library plus the packages above.
 | `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
 | `pr-merge-sync-patches-manual.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
 | `component-ci.yml` | `component_ci.py` |
+| `therock-multi-arch-ci.yml` | `get_changed_projects.py` |
 | `hipdnn-superbuild-ci.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
 | `merge-submodules.yml` | `merge-submodules.py` |
 
 ---
+
+## TheRock project selection
+
+`get_changed_projects.py` removes files covered by the common skip patterns in
+TheRock's `skip-ci-base.toml` and this repository's `skip-ci-config.toml` before
+classifying changes. Adding an irrelevant workflow or documentation file to a
+source change therefore does not broaden its test selection. Platform-specific
+skip patterns remain in TheRock's per-platform setup because the project list
+is shared by Linux and Windows.
+
+The script uses the pinned TheRock checkout for project-discovery helpers and
+shared-CI rules, with source roots from `repos-config.json`. TheRock continues
+to expand consumers and decide whether the entire run can skip. Shared workflow
+changes select the configured projects plus any changed monorepo-native roots.
+Unknown files, shared test logic, unavailable comparisons and manual runs retain
+broad testing.
+
+The configure job runs the selection regression tests before using the script.
+To run them locally, use the TheRock revision pinned by the workflow:
+
+```bash
+PYTHONPATH=/path/to/TheRock/build_tools/github_actions \
+  python3 .github/scripts/tests/test_get_changed_projects.py
+```
 
 ## Running the Tests
 
@@ -109,12 +135,12 @@ pytest . -v
 pytest tests/test_pr_merge_sync_patches.py -v
 ```
 
-Each test file puts `.github/scripts/` on `sys.path` itself, so `pytest .`
-works locally without any extra setup.
+Each test file puts `.github/scripts/` on `sys.path` itself.
 
-> **Note:** there is currently no CI job that runs these tests automatically.
-> Until one is added, run the suite locally before merging any change to a
-> script that has coverage.
+The project-selection tests run in Multi-Arch CI's configure job and require
+the pinned TheRock checkout on `PYTHONPATH`, including when running the full
+suite. The component path check runs in Component CI. Other script tests should
+be run locally before merging changes to the scripts they cover.
 
 ### Test conventions
 
