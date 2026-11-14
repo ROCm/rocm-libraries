@@ -534,6 +534,10 @@ namespace
                != HIPBLAS_STATUS_ARCH_MISMATCH;
         failures += hipblasltExtAMax(HIP_R_32F, HIP_R_32F, output, input, m, n, nullptr)
                     != HIPBLAS_STATUS_ARCH_MISMATCH;
+        failures += hipFree(invvar) != hipSuccess;
+        failures += hipFree(mean) != hipSuccess;
+        failures += hipFree(output) != hipSuccess;
+        failures += hipFree(input) != hipSuccess;
         std::exit(failures == 0 ? 0 : 1);
     }
 
