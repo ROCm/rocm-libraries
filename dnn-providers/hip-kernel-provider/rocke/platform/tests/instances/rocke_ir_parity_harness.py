@@ -1833,6 +1833,37 @@ def cases():
                 "num_persistent": 256,
             },
         ),
+        # A window that is not a multiple of block_n (64): 130 keys reach 3 tiles
+        # behind the diagonal tile but span only 2 whole tiles, so the first-tile
+        # and mask-free-phase tile counts differ.
+        ("swa_w130_sq512", {"sliding_window": 130}),
+        (
+            "persist_swa_w130_sq512",
+            {"persistent": True, "num_persistent": 256, "sliding_window": 130},
+        ),
+        ("noncausal_window_w130_sq512", {"causal": False, "sliding_window": 130}),
+        (
+            "two_sided_window_w130_sq512",
+            {"sliding_window": 130, "right_bound": 64},
+        ),
+        (
+            "persist_noncausal_window_w130_sq512",
+            {
+                "causal": False,
+                "sliding_window": 130,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_two_sided_window_w130_sq512",
+            {
+                "sliding_window": 130,
+                "right_bound": 64,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
         # --- Sinks ---
         # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
         ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),

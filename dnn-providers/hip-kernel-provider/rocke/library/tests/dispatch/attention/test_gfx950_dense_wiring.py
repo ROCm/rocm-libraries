@@ -611,6 +611,28 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
                 self.assertEqual(spec.sliding_window, window)
                 self.assertIn(f"swa{window}", spec.kernel_name())
 
+    def test_window_not_a_tile_multiple_dispatches_on_every_variant(self):
+        """A window that is not a multiple of block_n reaches every gfx950 dense
+        variant through the dispatcher when pinned: the request's width lands in
+        the spec and the kernel name unchanged, so 129 never runs as 128."""
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        for variant in GFX950_DENSE_VARIANTS:
+            for window in (100, 129, 130):
+                with self.subTest(spec_id=variant.spec_id, window=window):
+                    result = dispatch_attention(
+                        replace(
+                            req,
+                            sliding_window=window,
+                            algorithm=variant.algorithm,
+                            spec_id=variant.spec_id,
+                        )
+                    )
+                    self.assertEqual(result.candidate.name, variant.candidate_name)
+                    spec = result.spec.kernel_spec
+                    self.assertNotEqual(spec.sliding_window % spec.block_n, 0)
+                    self.assertEqual(spec.sliding_window, window)
+                    self.assertIn(f"swa{window}", spec.kernel_name())
+
     def test_sliding_window_with_persistent_mode(self):
         """Sliding window works with persistent mode (both appear in kernel_name)."""
         spec = _spec(_gfx950_dense_req(sliding_window=128, seqlen_q=4096), _PERSIST)
