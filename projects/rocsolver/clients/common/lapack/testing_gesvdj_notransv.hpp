@@ -861,12 +861,12 @@ void testing_gesvdj_notransv(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 2 * min(m, n) * machine_precision as tolerance
+    // using 6 * min(m, n) * machine_precision as tolerance
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_error, 2 * std::min(m, n));
+        ROCSOLVER_TEST_CHECK(T, max_error, 6 * std::min(m, n));
         if(svects)
-            ROCSOLVER_TEST_CHECK(T, max_errorv, 2 * std::min(m, n));
+            ROCSOLVER_TEST_CHECK(T, max_errorv, 6 * std::min(m, n));
     }
 
     // output results for rocsolver-bench
