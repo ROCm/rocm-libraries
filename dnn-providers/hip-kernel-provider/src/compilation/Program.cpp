@@ -17,6 +17,12 @@ namespace hip_kernel_provider::compilation
 Program::Program(std::string kernelFileName, const std::vector<std::string>& options)
     : _programName(std::move(kernelFileName))
 {
+    // Source, include texts and `options` reach hiprtc exactly as given. Do not add a
+    // compile flag here: it would change the code every graph gets, yet this file is not an
+    // input of the HIP_MLOPS selector revision (HipMlopsSelectorRevision.cmake), so L1
+    // models would keep binding to code they never measured. Put it in
+    // KernelCompileOptions.hpp, which that revision hashes.
+
     // Load source/includes
     auto kernelSrc = hip_plugin::getKernelSrc(_programName.c_str());
     std::vector<std::string_view> includeTexts;
