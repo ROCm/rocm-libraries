@@ -749,8 +749,8 @@ std::vector<DeviceCase> rowsInfinityCases()
         shape.groups = 64 / cg;
         cases.push_back({"Nhwc" + std::string("Groups") + std::to_string(cg), shape});
     }
-    auto strided = dense(32, 32, {9, 21}, {3, 3}, {1, 1}, true);
-    strided.groups = 8;
+    auto strided = dense(64, 64, {9, 21}, {3, 3}, {1, 1}, true);
+    strided.groups = 16;
     strided.stride = {2, 2};
     cases.push_back({"NhwcGroups4Stride2", strided});
     return cases;

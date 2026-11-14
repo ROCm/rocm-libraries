@@ -106,14 +106,20 @@ WIDE_TILES = {
 
 
 # Row streaming (rs): (th, wp, cb, rs) output rows a band, 16-column fragments, 16-channel blocks
-# (waves) a workgroup and input rows in flight.
+# (waves) a workgroup and input rows in flight. The gfx950 bench winners over ResNeXt c512 g32 at
+# 28-64 square (every row-band, fragment, wave and depth combination of 16-64 x 1-4 x 4-16 x 1-3
+# measured), plus 4-block tiles for 64-channel graphs.
 RS_TILES = [
-    (th, wp, cb, d)
-    for th in (32, 64)
-    for wp in (1, 2, 4)
-    for cb in (4, 8, 16)
-    for d in (1, 2)
-] + [(16, wp, cb, 1) for wp in (1, 2) for cb in (4, 8)]
+    (64, 4, 8, 1),
+    (64, 4, 8, 2),
+    (32, 2, 8, 1),
+    (32, 2, 8, 2),
+    (64, 2, 8, 1),
+    (32, 1, 16, 1),
+    (32, 2, 16, 2),
+    (32, 2, 4, 1),
+    (64, 4, 4, 1),
+]
 
 
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
