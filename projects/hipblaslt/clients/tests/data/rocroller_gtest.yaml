@@ -212,5 +212,43 @@ Tests:
   unit_check: 0
   norm_check: 1
   gpu_arch: '950'
+# rocRoller-off build only. rocRoller picks a 16x32x128 TT tile with
+# workgroup mapping for this problem (both operands transposed), so both APIs
+# must serve the checked-in TT kernel for it and get the right answer.
+- name: rocroller_tt_kernel
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: bf6_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [256]
+  N: [128]
+  K: [4096]
+  transA: T
+  transB: T
+  use_ext: [0, 1]
+  expected_kernel: RR_GEMM_TT_BF6_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2_WGM_
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+# rocRoller-off build only. rocRoller picks a 128x128x128 TT tile for this
+# BF6 x FP8 problem, whose kernel gives run-to-run different output and is not
+# checked in, so neither API may offer another kernel instead.
+- name: rocroller_tt_racy_pick_no_solution
+  category: pre_checkin
+  function:
+    rocroller_off_matmul:
+    - { a_type: bf6_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [4096]
+  N: [1024]
+  K: [512]
+  transA: T
+  transB: T
+  use_ext: [0, 1]
+  expect_no_solution: 1
+  initialization: hpl
+  gpu_arch: '950'
 
 ...

@@ -12,11 +12,11 @@ this test keeps them out. The rocRoller-off build returns no algorithm where
 rocRoller picks one. Remove a name only together with the rocRoller fix that
 makes the regenerated kernel correct, and the evidence for it.
 
-In NT, kernels with an FP6 or BF6 A and an FP4, FP8 or BF8 B give wrong
+In NT and TT, kernels with an FP6 or BF6 A and an FP4, FP8 or BF8 B give wrong
 output at some tiles, for every output type: run-to-run different at most of
 them, the same wrong answer every run at 16x16x128 and 32x32x64 with an 8-bit
 B. _NONTN_FAILING lists the tile groups that fail, with the name suffixes
-rocRoller picked; every A, B and output in a group fails alike, 168 kernels in
+rocRoller picked; every A, B and output in a group fails alike, 312 kernels in
 all.
 
 The _WGM_ and _LDSSYNC suffixes name the same tile built with workgroup
@@ -65,6 +65,16 @@ _NONTN_FAILING = {
         ("FP8/BF8", "128x128x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
         ("FP8/BF8", "256x256x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
     ],
+    "TT": [
+        ("FP4", "128x128x128", ("", "_WGM_")),
+        ("FP4", "256x256x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
+        ("FP8/BF8", "16x16x128", ("", "_WGM_")),
+        ("FP8/BF8", "32x32x64", ("",)),
+        ("FP8/BF8", "64x64x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
+        ("FP8/BF8", "128x64x128", ("_WGM__LDSSYNC",)),
+        ("FP8/BF8", "128x128x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
+        ("FP8/BF8", "256x256x128", ("_LDSSYNC", "_WGM__LDSSYNC")),
+    ],
 }
 
 _DROPPED += [
@@ -86,7 +96,7 @@ _DROPPED_NAME = re.compile(
 
 
 def test_the_dropped_list_is_complete():
-    assert len(_DROPPED) == len(set(_DROPPED)) == 36 + 168
+    assert len(_DROPPED) == len(set(_DROPPED)) == 36 + 168 + 144
 
 
 @pytest.mark.parametrize(
@@ -96,6 +106,8 @@ def test_the_dropped_list_is_complete():
         (f"RR_GEMM_NT_BF6_BF8_Float_Float_Float{_SCALES}WGT_64x64x128_UR_2", True),
         (f"RR_GEMM_NT_FP6_FP4_Half_Half_Float{_SCALES}WGT_128x128x128_UR_2_LDSSYNC", True),
         (f"RR_GEMM_TN_BF6_FP8_Half_Half_Float{_SCALES}WGT_256x128x128_UR_2_WGM__LDSSYNC", True),
+        (f"RR_GEMM_TT_FP6_BF8_Float_Float_Float{_SCALES}WGT_32x32x64_UR_2_WGM__LDSSYNC", True),
+        (f"RR_GEMM_TT_BF6_FP8_BFloat16_BFloat16_Float{_SCALES}WGT_128x128x128_UR_2", True),
         (f"RR_GEMM_NT_FP4_FP8_Half_Half_Float{_SCALES}WGT_32x32x64_UR_2_WGM_", False),
         (f"RR_GEMM_NT_FP6_FP8_Half_Half_Float{_SCALES}WGT_32x32x128_UR_2", False),
         (f"RR_GEMM_NN_FP6_FP8_Half_Half_Float{_SCALES}WGT_32x32x64_UR_2", False),
