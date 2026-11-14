@@ -8,7 +8,9 @@
 #   python scripts/run_tensile_logic_check.py [--changed-files=FILE] [LIBLOGIC_PATH]
 # --changed-files=FILE takes the changed paths, one per line, and checks only
 # the architectures of the changed logic YAMLs; a changed validator, known-bugs
-# list or this script, or an empty value, checks everything.
+# list or this script, or an empty value, checks everything. Each changed logic
+# YAML is also compared with its base revision (git show HEAD^): a new file
+# must be dict format, and a solution that had a SolutionUID must keep one.
 # If the current Python is missing deps (e.g. joblib), the script will re-run itself
 # with .venv/bin/python (Unix) or .venv\Scripts\python.exe (Windows) if that venv exists.
 # Requires: a full build first so rocisa exists under build/tensilelite/rocisa
@@ -17,6 +19,7 @@
 
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -174,6 +177,64 @@ def _changed_architectures(root: Path, list_file: Path):
     return archs
 
 
+def _base_revision_text(repo_root: Path, rel: str) -> str | None:
+    """Return ``rel`` at ``HEAD^``, or None when that blob does not exist.
+
+    Args:
+        repo_root: Git repository root.
+        rel: Repository-relative posix path.
+
+    Returns:
+        Decoded file text, or None when git cannot show the blob.
+
+    Raises:
+        OSError: If git cannot be started.
+    """
+    proc = subprocess.run(
+        ["git", "show", f"HEAD^:{rel}"], cwd=repo_root, capture_output=True, check=False
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def _check_logic_changes(root: Path, list_file: Path) -> None:
+    """Compare the changed logic files in ``list_file`` with ``HEAD^``.
+
+    Args:
+        root: hipBLASLt project directory.
+        list_file: Changed paths, one per line.
+
+    Returns:
+        None.
+
+    Raises:
+        SystemExit: If ``HEAD^`` is missing or a changed file breaks a rule.
+    """
+    from tensilelite.TensileLogic.ValidLogicChange import changed_logic_paths, check_changed_logic
+
+    repo_root = root.parents[1]
+    if not changed_logic_paths(repo_root, list_file):
+        return
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^"],
+        cwd=repo_root,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        raise SystemExit(
+            "Error: HEAD^ is not available, so changed logic files cannot be "
+            "compared with their base revision. Fetch the parent commit."
+        )
+    errors = check_changed_logic(
+        repo_root, list_file, lambda rel: _base_revision_text(repo_root, rel)
+    )
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        raise SystemExit(1)
+
+
 def main() -> None:
     root = _find_hipblaslt_root()
     build_dir = root / "build"
@@ -181,6 +242,7 @@ def main() -> None:
     _ensure_paths(root, build_dir, lib_logic_path)
 
     if changed_files:
+        _check_logic_changes(root, Path(changed_files))
         archs = _changed_architectures(root, Path(changed_files))
         if archs is None:
             print("The changes can affect every architecture; checking everything.")
