@@ -4,8 +4,8 @@
 
 Derived from the Step 6.14 kernel of :mod:`.mxfp4_tdm_gemm`, with its
 feature flags turned into structure. Always on: double-buffered TDM staging split over wave
-parity, scales staged by TDM, padded and segment-interleaved LDS, hoisted
-descriptors, the tile k+2 refill inside tile k, the split cluster barrier,
+parity, scales staged by TDM (unless ``scales`` "registers"), padded and segment-interleaved
+LDS, hoisted descriptors, the tile k+2 refill inside tile k, the split cluster barrier,
 coarse LDS waits, a loop unrolled to one tile per LDS buffer and the vector
 epilogue. The tile, wave group, cluster and the scheduling choices below are
 tuning parameters; LDS padding, multicast, convert width, WMMA order (unless
@@ -128,7 +128,8 @@ def _atom(mma: str, a_dtype: str, b_dtype: str) -> _MmaAtom:
 TILE_MN = (16, 32, 64, 128, 256)
 TILE_K = (128, 256, 384, 512, 1024)
 K_READS = ("chunked", "contiguous")
-WMMA_REUSE = ("none", "b")
+WMMA_REUSE = ("none", "a", "b", "ab")
+SCALES = ("lds", "registers")
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -224,11 +225,22 @@ class MxGemmSpec:
     leaves the product unchanged once each scale word's bytes 1 and 2 are
     swapped. FP4 and the 8-bit types read their 16 B chunks either way.
 
-    ``wmma_reuse`` ``"b"`` (``local_prefetch`` 0, the 16x16 WMMA) issues each
-    K-step's WMMAs N-repeat outer, M-repeat inner, and flags every WMMA whose
-    next WMMA takes the same B fragment, so the hardware keeps that operand
-    instead of reading it again from VGPRs (it keeps B, not A). ``"none"``
-    issues them M-repeat outer, without flags.
+    ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
+    K-step's WMMAs and flags every WMMA whose next WMMA takes the same
+    operand, so the hardware may keep that operand instead of reading it
+    again from VGPRs: ``"b"`` N-repeat outer, M-repeat inner, flagging B;
+    ``"a"`` M-repeat outer, N-repeat inner, flagging A; ``"ab"`` N-repeat
+    outer with the M-repeats in alternating direction, flagging B within an
+    N-repeat and A where the direction turns. ``"none"`` issues them M-repeat
+    outer, without flags.
+
+    ``scales`` is where the WMMAs' E8M0 scale words come from: ``"lds"``
+    from shared memory, where the TDM stages them with the tile;
+    ``"registers"`` (``local_prefetch`` 0, the 16x16 WMMA) from global memory
+    straight into registers, one tile ahead. There lanes 0-15 hold the
+    scales of the first half of the wave's M-repeats (N-repeats) and lanes
+    16-31 those of the second half, and each WMMA selects its half
+    (:class:`ScaleRegisters`).
     """
 
     name: str
@@ -255,6 +267,7 @@ class MxGemmSpec:
     b_dtype: str = "fp4"
     k_reads: str = "chunked"
     wmma_reuse: str = "none"
+    scales: str = "lds"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -426,12 +439,16 @@ class MxGemmSpec:
         return 8 if self.wave_repeat_n % 8 == 0 else 4
 
     @property
+    def scale_regs(self) -> bool:
+        return self.scales == "registers"
+
+    @property
     def a_scale_reads(self) -> int:
-        return max(1, self.wave_repeat_m // 4)
+        return 0 if self.scale_regs else max(1, self.wave_repeat_m // 4)
 
     @property
     def b_scale_reads(self) -> int:
-        return max(1, self.wave_repeat_n // 4)
+        return 0 if self.scale_regs else max(1, self.wave_repeat_n // 4)
 
     @property
     def row_reads(self) -> int:
@@ -526,7 +543,10 @@ class MxGemmSpec:
                 "hblate": self.half_b_late,
                 "mma16": self.mma == "16x16",
                 "kcont": self.contiguous_k,
+                "ra": self.wmma_reuse == "a",
                 "rb": self.wmma_reuse == "b",
+                "rab": self.wmma_reuse == "ab",
+                "sreg": self.scale_regs,
             },
         )
 
@@ -694,6 +714,8 @@ def mx_gemm_lds_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
 
     a_scale_comp = scale_component(a_rows, pads["a_scale"])
     b_scale_comp = scale_component(b_rows, pads["b_scale"])
+    if spec.scale_regs:
+        a_scale_comp = b_scale_comp = 0
     a_total = 2 * a_comp
     b_base, a_base = 0, b_comp
     b_stride = b_comp + a_total
@@ -779,9 +801,15 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     if spec.wmma_reuse not in WMMA_REUSE:
         return f"wmma_reuse must be one of {WMMA_REUSE}"
     if spec.wmma_reuse != "none" and spec.local_prefetch != 0:
-        return "wmma_reuse 'b' needs local_prefetch 0"
+        return f"wmma_reuse {spec.wmma_reuse!r} needs local_prefetch 0"
     if spec.wmma_reuse != "none" and spec.mma != "16x16":
-        return "wmma_reuse 'b' is for the 16x16 WMMA"
+        return f"wmma_reuse {spec.wmma_reuse!r} is for the 16x16 WMMA"
+    if spec.scales not in SCALES:
+        return f"scales must be one of {SCALES}"
+    if spec.scale_regs and spec.local_prefetch != 0:
+        return "scales 'registers' needs local_prefetch 0"
+    if spec.scale_regs and spec.mma != "16x16":
+        return "scales 'registers' is for the 16x16 WMMA"
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
@@ -973,8 +1001,9 @@ class RowMaps:
 
 class TdmLoader:
     """Tile loads: even waves copy one rocKE B component, odd waves one A
-    component (data, then scales); descriptors are built once and each tile
-    patches only its LDS address, global address and remaining sizes."""
+    component (data, then scales unless ``scales`` "registers"); descriptors
+    are built once and each tile patches only its LDS address, global
+    address and remaining sizes."""
 
     def __init__(self, k: _Kernel):
         self.k = k
@@ -1116,6 +1145,8 @@ class TdmLoader:
             self.data_descriptor("b", c0, component0, c0, b.sub(k.packed_k, c0)),
             self.data_descriptor("a", c0, component0, c0, b.sub(k.packed_k, c0)),
         )
+        if k.spec.scale_regs:
+            return
         self.scale = selected(
             self.scale_descriptor("b", c0, component0, c0),
             self.scale_descriptor("a", c0, component0, c0),
@@ -1170,6 +1201,8 @@ class TdmLoader:
                 },
             )
         )
+        if k.spec.scale_regs:
+            return
         k_step = ops.v(ops.div(k0, _ATOM_K))
         scale = self.scale
         steps_left = b.sub(ops.v(k.k_atoms()), k_step)
@@ -1354,6 +1387,70 @@ class Gl2Prefetcher:
             prefetch_round(round_start, index)
 
 
+class ScaleRegisters:
+    """``scales`` "registers": a tile's E8M0 scale words from the swizzled
+    scales ``[K/128][MN][4]`` straight into registers, one buffer load of
+    up to 16 B per lane, operand and K-step (all 32 lanes read 512
+    contiguous bytes on the large tiles). With ``r`` repeats of an operand
+    (M-repeats for A, N-repeats for B) and ``h = r // 2`` (1 for one
+    repeat), the lanes of half ``s`` hold the words of repeats ``s * h`` to
+    ``s * h + h - 1`` of their row; repeat ``i`` is word ``i % h`` with scale
+    selector ``i // h``. Words past the last K-step read 0; rows past M
+    (N) read words of another K-step, which only scale rows of D that are
+    not stored."""
+
+    def __init__(self, k: _Kernel, rows: RowMaps):
+        self.k = k
+        self.rows = rows
+        b, ops, p = k.b, k.ops, k.params
+        self.rsrc = {
+            name: b.buffer_rsrc(
+                p[f"{name.upper()}_scale"],
+                ops.v(ops.mul(k.k_atoms(), ops.mul(p[extent], 4))),
+            )
+            for name, extent in (("a", "M"), ("b", "N"))
+        }
+
+    @staticmethod
+    def half(repeats: int) -> int:
+        return repeats // 2 if repeats >= 2 else 1
+
+    @classmethod
+    def place(cls, repeats: int, index: int) -> tuple[int, int]:
+        """(word, scale selector) of repeat ``index``."""
+        h = cls.half(repeats)
+        return index % h, index // h
+
+    def _operand(self, name: str, k_step):
+        k = self.k
+        b, ops, spec, p = k.b, k.ops, k.spec, k.params
+        repeats = spec.wave_repeat_m if name == "a" else spec.wave_repeat_n
+        h = self.half(repeats)
+        first = ops.mul(k.lane_half, h) if repeats >= 2 else 0
+        row = (self.rows.m_row if name == "a" else self.rows.n_row)(first, k.lane_col)
+        extent = p["M"] if name == "a" else p["N"]
+        offset = ops.mul(ops.add(ops.mul(k_step, extent), row), 4)
+        words = []
+        for j in range(0, h, 4):
+            n = min(4, h - j)
+            loaded = b.buffer_load_vN(
+                self.rsrc[name], ops.v(ops.add(offset, 4 * j)), k.c0, I32, n
+            )
+            words += [b.vec_extract(loaded, i) for i in range(n)]
+        return words
+
+    def load(self, k0) -> list:
+        """Every K-step's A then B words of the tile at ``k0`` (a tile past
+        the end reads 0)."""
+        ops = self.k.ops
+        first = ops.div(k0, _ATOM_K)
+        out = []
+        for step in range(self.k.spec.k_steps):
+            k_step = ops.add(first, step)
+            out += self._operand("a", k_step) + self._operand("b", k_step)
+        return out
+
+
 class LdsReader:
     """LDS to registers: the scales of one K-step in 16 B reads, then each A
     row and B fragment as its ``lane_reads`` (one 16 B read per K chunk: two
@@ -1489,11 +1586,31 @@ class TileCompute:
         rn_count = k.spec.wave_repeat_n
         atom = k.spec.atom
 
-        def mma(rm, rn, a_frag, b_frag, a_scale, b_scale, reuse_b=False):
+        def mma(
+            rm,
+            rn,
+            a_frag,
+            b_frag,
+            a_scale,
+            b_scale,
+            *,
+            reuse_a=False,
+            reuse_b=False,
+            sel_a=0,
+            sel_b=0,
+        ):
             index = rm * rn_count + rn
-            attrs = {"reuse_b": True} if reuse_b else None
+            attrs = {}
+            if reuse_a:
+                attrs["reuse_a"] = True
+            if reuse_b:
+                attrs["reuse_b"] = True
+            if sel_a:
+                attrs["scale_sel_a"] = sel_a
+            if sel_b:
+                attrs["scale_sel_b"] = sel_b
             out[index] = k.b.mma(
-                atom, a_frag, b_frag, out[index], a_scale, b_scale, attrs=attrs
+                atom, a_frag, b_frag, out[index], a_scale, b_scale, attrs=attrs or None
             )
 
         return mma
@@ -1546,13 +1663,15 @@ class TileCompute:
         head=None,
         next_parity=None,
         steps=None,
+        scales=None,
     ):
         """Returns ``(accumulators, head)``; ``head`` is the next tile's
         K-step 0 reads (``None`` with ``local_prefetch`` 0). ``steps`` is the
-        tile's K-step count (all of them unless it is the K tail)."""
+        tile's K-step count (all of them unless it is the K tail); ``scales``
+        the tile's scale words with ``scales`` "registers"."""
         steps = self.k.spec.k_steps if steps is None else steps
         if self.k.spec.local_prefetch == 0:
-            return self._run_direct(parity, accumulators, hooks, steps)
+            return self._run_direct(parity, accumulators, hooks, steps, scales)
         if self.k.spec.half_b_late:
             return self._run_half_b_late(
                 parity, accumulators, head, next_parity, hooks, steps
@@ -1717,11 +1836,36 @@ class TileCompute:
             a_frags, a_scales, b_scales, b_frags = ahead
         return out, (a_frags, a_scales, b_scales, [b_frags])
 
-    def _run_direct(self, parity, accumulators, hooks, steps):
+    @staticmethod
+    def wmma_order(reuse: str, rm_count: int, rn_count: int):
+        """``(rm, rn)`` of each WMMA of a K-step and whether it flags A and B
+        for the next one (``wmma_reuse``)."""
+        if reuse in ("b", "ab"):
+            order = []
+            for rn in range(rn_count):
+                rms = list(range(rm_count))
+                if reuse == "ab" and rn % 2:
+                    rms.reverse()
+                order += [(rm, rn) for rm in rms]
+        else:
+            order = [(rm, rn) for rm in range(rm_count) for rn in range(rn_count)]
+        nxt = order[1:] + [None]
+        keep_a = [
+            reuse in ("a", "ab") and after is not None and after[0] == rm
+            for (rm, _), after in zip(order, nxt)
+        ]
+        keep_b = [
+            reuse in ("b", "ab") and after is not None and after[1] == rn
+            for (_, rn), after in zip(order, nxt)
+        ]
+        return order, keep_a, keep_b
+
+    def _run_direct(self, parity, accumulators, hooks, steps, scales=None):
         """local_prefetch 0: each K-step reads, drains and computes. The
         tile's last read is the last K-step's: its refill (GL2 prefetch, the
         signal) follows the drain, the cluster wait and TDM come
-        ``cluster_signal_wmmas`` WMMAs later (at once without a cluster)."""
+        ``cluster_signal_wmmas`` WMMAs later (at once without a cluster).
+        With ``scales`` "registers" the scale words come in ``scales``."""
         k, reader = self.k, self.reader
         spec = k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
@@ -1729,18 +1873,25 @@ class TileCompute:
         out = list(accumulators)
         mma = self._mma_fn(out)
         late_at = spec.signal_wmmas if spec.has_cluster else 0
-        if spec.wmma_reuse == "b":
-            order = [(rm, rn) for rn in range(rn_count) for rm in range(rm_count)]
-        else:
-            order = [(rm, rn) for rm in range(rm_count) for rn in range(rn_count)]
-        # A WMMA keeps its B for the next one when that takes the same B.
-        keep_b = [
-            spec.wmma_reuse == "b" and i + 1 < len(order) and order[i + 1][1] == rn
-            for i, (_, rn) in enumerate(order)
-        ]
+        order, keep_a, keep_b = self.wmma_order(spec.wmma_reuse, rm_count, rn_count)
+        if spec.scale_regs:
+            ha = ScaleRegisters.half(rm_count)
+            hb = ScaleRegisters.half(rn_count)
+            words = list(scales)
+            if spec.contiguous_k:
+                # Once per tile, a tile after the words were loaded.
+                swap = k.b.const_i32(LdsReader._SWAP_GROUPS_1_2)
+                words = [k.b.perm_b32(w, w, swap) for w in words]
         for step in range(steps):
             last = step + 1 == steps
-            a_frags, a_scales, b_scales = reader.head(buffer, step)
+            if spec.scale_regs:
+                a_frags = [
+                    reader.a_fragment(buffer, rm, step) for rm in range(rm_count)
+                ]
+                at = step * (ha + hb)
+                a_scales, b_scales = words[at : at + ha], words[at + ha : at + ha + hb]
+            else:
+                a_frags, a_scales, b_scales = reader.head(buffer, step)
             b_frags = reader.b_group(buffer, step, 0, rn_count)
             self._wait(0)
             if last:
@@ -1748,18 +1899,29 @@ class TileCompute:
                 if hooks.signal is not None:
                     hooks.signal()
             issued = 0
-            for (rm, rn), reuse_b in zip(order, keep_b):
+            for (rm, rn), reuse_a, reuse_b in zip(order, keep_a, keep_b):
                 if last and issued == late_at:
                     hooks.late_refill()
                 issued += 1
+                if spec.scale_regs:
+                    (wa, sel_a), (wb, sel_b) = (
+                        ScaleRegisters.place(rm_count, rm),
+                        ScaleRegisters.place(rn_count, rn),
+                    )
+                    a_scale, b_scale = a_scales[wa], b_scales[wb]
+                else:
+                    a_scale, b_scale, sel_a, sel_b = a_scales[rm], b_scales[rn], 0, 0
                 mma(
                     rm,
                     rn,
                     a_frags[rm],
                     b_frags[rn],
-                    a_scales[rm],
-                    b_scales[rn],
-                    reuse_b,
+                    a_scale,
+                    b_scale,
+                    reuse_a=reuse_a,
+                    reuse_b=reuse_b,
+                    sel_a=sel_a,
+                    sel_b=sel_b,
                 )
             if last and issued == late_at:
                 hooks.late_refill()
@@ -1782,6 +1944,7 @@ class Pipeline:
         self.tdm = tdm
         self.gl2 = gl2
         self.tile = tile
+        self.scales = ScaleRegisters(k, tile.reader.rows) if k.spec.scale_regs else None
 
     def _prefetch_ahead(self, k0, parity: int) -> None:
         distance = self.k.spec.gl2_prefetch_distance
@@ -1853,11 +2016,15 @@ class Pipeline:
             self.wait_next_tile()
         accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
         head_values = tile.flatten(tile.first_head(c0)) if read_ahead else []
+        regs = self.scales
+        # Register scales: tile 0's here, each tile loads the next one's.
+        scale_values = regs.load(c0) if regs else []
         start, start_parity = c0, 0
 
-        def loop_tile(k_tile, parity: int, acc, head_vals, steps=None):
+        def loop_tile(k_tile, parity: int, acc, head_vals, scale_vals, steps=None):
             if not read_ahead:
                 self.wait_next_tile()
+            next_scales = regs.load(ops.add(k_tile, spec.tile_k)) if regs else []
             updated, head = tile.run(
                 parity,
                 acc,
@@ -1865,44 +2032,55 @@ class Pipeline:
                 head=tile.unflatten(head_vals) if read_ahead else None,
                 next_parity=1 - parity,
                 steps=steps,
+                scales=scale_vals,
             )
-            return updated, tile.flatten(head) if read_ahead else []
+            return updated, tile.flatten(head) if read_ahead else [], next_scales
 
-        def carried(acc, head_vals):
-            return [(f"acc{i}", v) for i, v in enumerate(acc)] + [
-                (f"head{i}", v) for i, v in enumerate(head_vals)
-            ]
+        def carried(acc, head_vals, scale_vals):
+            return (
+                [(f"acc{i}", v) for i, v in enumerate(acc)]
+                + [(f"head{i}", v) for i, v in enumerate(head_vals)]
+                + [(f"scale{i}", v) for i, v in enumerate(scale_vals)]
+            )
 
         full_tiles = spec.K // spec.tile_k
         if (full_tiles - start_parity) % 2:
-            accumulators, head_values = loop_tile(
-                start, start_parity, accumulators, head_values
+            accumulators, head_values, scale_values = loop_tile(
+                start, start_parity, accumulators, head_values, scale_values
             )
             start, start_parity = ops.add(start, spec.tile_k), 1 - start_parity
+        n_head = len(head_values)
         loop = b.scf_for_iter(
             ops.v(start),
             b.const_i32(full_tiles * spec.tile_k) if spec.tail_steps else k.params["K"],
             b.const_i32(2 * spec.tile_k),
-            carried(accumulators, head_values),
+            carried(accumulators, head_values, scale_values),
             iv_name="k0",
             elide_trailing_barrier=False,
         )
         with loop as (k0, values):
-            acc, head_vals = list(values[:n_acc]), list(values[n_acc:])
+            acc = list(values[:n_acc])
+            head_vals = list(values[n_acc : n_acc + n_head])
+            scale_vals = list(values[n_acc + n_head :])
             for pair_index, parity in enumerate((start_parity, 1 - start_parity)):
-                acc, head_vals = loop_tile(
-                    ops.add(k0, pair_index * spec.tile_k), parity, acc, head_vals
+                acc, head_vals, scale_vals = loop_tile(
+                    ops.add(k0, pair_index * spec.tile_k),
+                    parity,
+                    acc,
+                    head_vals,
+                    scale_vals,
                 )
-            b.scf_yield(*acc, *head_vals)
+            b.scf_yield(*acc, *head_vals, *scale_vals)
         results = loop.results[:n_acc]
         if spec.tail_steps:
             # The K tail is one more tile: its TDM loads are clipped at K and
             # only its first tail_steps K-steps are read.
-            results, _ = loop_tile(
+            results, _, _ = loop_tile(
                 b.const_i32(full_tiles * spec.tile_k),
                 full_tiles % 2,
                 list(results),
-                list(loop.results[n_acc:]),
+                list(loop.results[n_acc : n_acc + n_head]),
+                list(loop.results[n_acc + n_head :]),
                 steps=spec.tail_steps,
             )
         # No workgroup may exit while a TDM load into its LDS is in flight:

@@ -41,6 +41,7 @@ from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mx_gemm import (
     K_READS,
     OUT_DTYPES,
+    SCALES,
     TILE_K,
     TILE_MN,
     WAVE_GROUPS,
@@ -48,8 +49,11 @@ from rocke.instances.gfx1250.mx_gemm import (
     IntOps,
     LdsPad,
     MxGemmSpec,
+    ScaleRegisters,
+    TileCompute,
     build_mx_gemm,
     derived_lds_pads,
+    mx_gemm_lds_layout,
     validate,
 )
 from rocke.runtime.hip_module import get_device_arch
@@ -85,6 +89,8 @@ _FORMATS = {"fp8": 0, "bf8": 1, "fp6": 2, "fp4": 4}
 _FP6_TILES = ((256, 256, 256), (256, 256, 384))
 # Two large problems made of whole 256x256 tiles.
 _MAF_MED = ((3072, 4096, 65536), (2048, 2048, 65536))
+# The direct path: each K-step reads, drains and computes.
+_DIRECT = {"local_prefetch": 0, "half_plr": "none"}
 
 
 def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
@@ -284,26 +290,75 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIn("_kcont", _spec6(k_reads="contiguous").kernel_name())
 
     def test_wmma_reuse_validates_and_names(self):
-        """B reuse runs with local_prefetch 0 and the 16x16 WMMA, and tags
-        the kernel name."""
+        """Operand reuse runs with local_prefetch 0 and the 16x16 WMMA, and
+        tags the kernel name."""
         direct = {"local_prefetch": 0, "half_plr": "none"}
-        self.assertEqual(WMMA_REUSE, ("none", "b"))
-        for spec in (
-            _spec6(wmma_reuse="b", **direct),
-            _spec8(wmma_reuse="b", **direct),
-        ):
-            with self.subTest(spec.kernel_name()):
-                self.assertIsNone(validate(spec))
-                self.assertIn("_rb", spec.kernel_name())
-        self.assertNotIn("_rb", _spec6(**direct).kernel_name())
+        self.assertEqual(WMMA_REUSE, ("none", "a", "b", "ab"))
+        tags = {"a": "_ra", "b": "_rb", "ab": "_rab"}
+        for reuse, tag in tags.items():
+            for spec in (
+                _spec6(wmma_reuse=reuse, **direct),
+                _spec8(wmma_reuse=reuse, **direct),
+            ):
+                with self.subTest(spec.kernel_name()):
+                    self.assertIsNone(validate(spec))
+                    self.assertTrue(spec.kernel_name().endswith(tag))
+        plain = _spec6(**direct).kernel_name()
+        self.assertFalse(any(tag in plain for tag in tags.values()))
         bad = {
-            "value": (_spec6(wmma_reuse="a", **direct), "wmma_reuse must be one of"),
-            "prefetch": (_spec6(wmma_reuse="b"), "needs local_prefetch 0"),
-            "atom": (_spec(wmma_reuse="b", **direct), "is for the 16x16 WMMA"),
+            "value": (_spec6(wmma_reuse="c", **direct), "wmma_reuse must be one of"),
+            "prefetch": (_spec6(wmma_reuse="ab"), "needs local_prefetch 0"),
+            "atom": (_spec(wmma_reuse="a", **direct), "is for the 16x16 WMMA"),
         }
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
                 self.assertIn(reason, validate(spec) or "")
+
+    def test_scales_validate_name_and_leave_lds(self):
+        """Register scales run with local_prefetch 0 and the 16x16 WMMA, tag
+        the kernel name and drop both LDS scale regions."""
+        direct = {"local_prefetch": 0, "half_plr": "none"}
+        self.assertEqual(SCALES, ("lds", "registers"))
+        for spec in (
+            _spec6(scales="registers", **direct),
+            _spec6(scales="registers", k_reads="contiguous", tile_k=384, **direct),
+            _spec8(scales="registers", wmma_reuse="b", **direct),
+        ):
+            lds = replace(spec, scales="lds")
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertIn("_sreg", spec.kernel_name())
+                self.assertNotIn("_sreg", lds.kernel_name())
+                self.assertEqual((spec.a_scale_reads, spec.b_scale_reads), (0, 0))
+                layout, lds_layout = mx_gemm_lds_layout(spec), mx_gemm_lds_layout(lds)
+                self.assertEqual(layout.a_scale.stride, 0)
+                self.assertEqual(layout.b_scale.stride, 0)
+                self.assertEqual(layout.buffer_bytes, lds_layout.b_scale.base)
+                self.assertLess(spec.lds_bytes, lds.lds_bytes)
+        bad = {
+            "value": (_spec6(scales="vgpr", **direct), "scales must be one of"),
+            "prefetch": (_spec6(scales="registers"), "needs local_prefetch 0"),
+            "atom": (_spec(scales="registers", **direct), "is for the 16x16 WMMA"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_scale_register_halves(self):
+        """Lanes 0-15 hold the first half of an operand's repeats, lanes
+        16-31 the second; repeat ``i`` is word ``i % h`` of the half its
+        selector names, so the halves' words cover every repeat once."""
+        for repeats in (1, 2, 4, 8, 16):
+            h = ScaleRegisters.half(repeats)
+            with self.subTest(repeats=repeats):
+                self.assertEqual(h, max(1, repeats // 2))
+                places = [ScaleRegisters.place(repeats, i) for i in range(repeats)]
+                self.assertEqual(len(set(places)), repeats)
+                for i, (word, selector) in enumerate(places):
+                    self.assertLess(word, h)
+                    self.assertIn(selector, (0, 1) if repeats > 1 else (0,))
+                    # A half-s lane's words are rows s * h .. s * h + h - 1.
+                    self.assertEqual(selector * h + word, i)
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -849,34 +904,152 @@ class MxGemmIrTest(unittest.TestCase):
                     )
                     self.assertEqual(len(swaps), groups * (rm + rn))
 
-    def test_wmma_reuse_b_orders_and_flags_the_wmmas(self):
-        """With B reuse each K-step's WMMAs run N-repeat outer; every WMMA
-        but the last of an N-repeat flags B and hands it to the next WMMA,
-        which takes the same B. Without it no WMMA flags an operand."""
+    def test_wmma_reuse_orders(self):
+        """The K-step order of each reuse option, and the operand each WMMA
+        keeps for the next one."""
+        T, F = True, False
+        expected = {
+            "none": (
+                [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
+                [F] * 6,
+                [F] * 6,
+            ),
+            "a": (
+                [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
+                [T, T, F, T, T, F],
+                [F] * 6,
+            ),
+            "b": (
+                [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)],
+                [F] * 6,
+                [T, F, T, F, T, F],
+            ),
+            "ab": (
+                [(0, 0), (1, 0), (1, 1), (0, 1), (0, 2), (1, 2)],
+                [F, T, F, T, F, F],
+                [T, F, T, F, T, F],
+            ),
+        }
+        for reuse, (order, keep_a, keep_b) in expected.items():
+            with self.subTest(reuse):
+                self.assertEqual(
+                    TileCompute.wmma_order(reuse, 2, 3), (order, keep_a, keep_b)
+                )
+
+    def test_wmma_reuse_orders_and_flags_the_wmmas(self):
+        """Each K-step's WMMAs follow :meth:`TileCompute.wmma_order`, and a
+        WMMA flags A (B) only when the next WMMA takes the same A (B)
+        fragment. Without reuse no WMMA flags an operand."""
         call = re.compile(
             _WMMA + r"[^(]*\(i32 \d+, <16 x i32> (%[\w.]+), i32 \d+, "
             r"<16 x i32> (%[\w.]+),[^\n]*i1 (true|false), i1 (true|false)\)"
         )
         direct = {"local_prefetch": 0, "half_plr": "none"}
+        for base in (
+            _spec6(k_reads="contiguous", **direct),
+            _spec8(**direct),
+            _spec6(scales="registers", tile_m=128, **direct),
+        ):
+            rm, rn = base.wave_repeat_m, base.wave_repeat_n
+            for reuse in WMMA_REUSE:
+                spec = replace(base, wmma_reuse=reuse)
+                calls = call.findall(_llvm(spec))
+                order, keep_a, keep_b = TileCompute.wmma_order(reuse, rm, rn)
+                with self.subTest(spec.kernel_name()):
+                    self.assertGreater(len(calls), 0)
+                    self.assertEqual(len(calls) % (rm * rn), 0)
+                    for at in range(0, len(calls), rm * rn):
+                        step = calls[at : at + rm * rn]
+                        self.assertEqual([c[2] == "true" for c in step], keep_a)
+                        self.assertEqual([c[3] == "true" for c in step], keep_b)
+                        for i, j in itertools.combinations(range(rm * rn), 2):
+                            self.assertEqual(
+                                step[i][0] == step[j][0], order[i][0] == order[j][0]
+                            )
+                            self.assertEqual(
+                                step[i][1] == step[j][1], order[i][1] == order[j][1]
+                            )
+
+    def test_register_scales_load_ahead_and_select_halves(self):
+        """Register scales: no TDM scale loads and no LDS scale reads. Tile 0's
+        words load before the loop and each tile loads the next tile's, one
+        buffer load of up to 4 words per lane, operand and K-step; each WMMA
+        names the half holding its repeat, and two repeats share a word
+        register exactly when they share the word. Contiguous FP6 swaps each
+        word once per tile."""
+        wmma = re.compile(
+            _WMMA + r"[^\n]*i32 (\d), i32 \d, i32 (%[\w.]+), "
+            r"i32 (\d), i32 \d, i32 (%[\w.]+), i1"
+        )
+        buffer_load = (
+            r"call (?:<(\d) x i32>|i32) @llvm\.amdgcn\.raw\.ptr\.buffer\.load\."
+        )
+        lds_read = r"load (?:<\d+ x )?i(?:32|64)>?, ptr addrspace\(3\)"
+        tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
+        swap = r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)"
+        direct = {**_DIRECT, "scales": "registers"}
         for spec in (
-            _spec6(k_reads="contiguous", wmma_reuse="b", **direct),
+            _spec6(k_reads="contiguous", tile_m=128, tile_n=128, **direct),
+            _spec6(**direct),
             _spec8(wmma_reuse="b", **direct),
+            _spec6(64, 64, 2048, tile_m=64, tile_n=64, cluster_dim=(1, 1, 1), **direct),
+            _spec6(
+                1024,
+                16,
+                2048,
+                tile_m=256,
+                tile_n=16,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                k_reads="contiguous",
+                **direct,
+            ),
         ):
             rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
-            calls = call.findall(_llvm(spec))
-            plain = call.findall(_llvm(replace(spec, wmma_reuse="none")))
+            ha, hb = ScaleRegisters.half(rm), ScaleRegisters.half(rn)
+            llvm, lds_llvm = _llvm(spec), _llvm(replace(spec, scales="lds"))
+            calls = wmma.findall(llvm)
             with self.subTest(spec.kernel_name()):
-                self.assertEqual(len(calls), len(plain))
-                self.assertEqual(len(calls) % (rm * rn), 0)
-                self.assertTrue(all(c[2:] == ("false", "false") for c in plain))
-                self.assertTrue(all(c[2] == "false" for c in calls))
-                flagged = [c[3] == "true" for c in calls]
-                self.assertEqual(sum(flagged), len(calls) // (rm * rn) * (rm - 1) * rn)
-                for i, keep in enumerate(flagged):
-                    if keep:
-                        self.assertEqual(calls[i][1], calls[i + 1][1])
-                for i in range(0, len(calls), rm):
-                    self.assertEqual(flagged[i : i + rm], [True] * (rm - 1) + [False])
+                self.assertEqual(spec.tail_steps, 0)
+                bodies, rest = divmod(len(calls), spec.k_steps * rm * rn)
+                self.assertEqual(rest, 0)
+                self.assertEqual(
+                    len(re.findall(tdm, llvm)) * 2, len(re.findall(tdm, lds_llvm))
+                )
+                lds_spec = replace(spec, scales="lds")
+                scale_reads = lds_spec.a_scale_reads + lds_spec.b_scale_reads
+                self.assertEqual(
+                    len(re.findall(lds_read, llvm)),
+                    len(re.findall(lds_read, lds_llvm))
+                    - bodies * spec.k_steps * scale_reads,
+                )
+                words = sorted(int(n or 1) for n in re.findall(buffer_load, llvm))
+                per_set = [
+                    min(4, h - j) for h in (ha, hb) for j in range(0, h, 4)
+                ] * spec.k_steps
+                self.assertEqual(words, sorted(per_set * (bodies + 1)))
+                self.assertEqual(
+                    len(re.findall(swap, llvm)),
+                    bodies * spec.k_steps * (ha + hb) if spec.contiguous_k else 0,
+                )
+                order = TileCompute.wmma_order(spec.wmma_reuse, rm, rn)[0]
+                for at in range(0, len(calls), rm * rn):
+                    step = calls[at : at + rm * rn]
+                    for (i, j), (sel_a, word_a, sel_b, word_b) in zip(order, step):
+                        self.assertEqual(int(sel_a), ScaleRegisters.place(rm, i)[1])
+                        self.assertEqual(int(sel_b), ScaleRegisters.place(rn, j)[1])
+                    for x, y in itertools.combinations(range(rm * rn), 2):
+                        (ix, jx), (iy, jy) = order[x], order[y]
+                        self.assertEqual(
+                            step[x][1] == step[y][1],
+                            ScaleRegisters.place(rm, ix)[0]
+                            == ScaleRegisters.place(rm, iy)[0],
+                        )
+                        self.assertEqual(
+                            step[x][3] == step[y][3],
+                            ScaleRegisters.place(rn, jx)[0]
+                            == ScaleRegisters.place(rn, jy)[0],
+                        )
 
     def test_fp6_k_tail_and_edge_tiles_build(self):
         """FP6 at tile_k 384 always has a K tail at these K: its GL2 line
@@ -1579,6 +1752,56 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     (_spec8, {}),
                 )
             ),
+            # Register scales at the MAF/MED, MAB and SM tilings.
+            *(
+                _spec6(
+                    *_MAF_MED[0],
+                    tile_k=384,
+                    cluster_dim=(2, 4, 1),
+                    k_reads="contiguous",
+                    scales="registers",
+                    wmma_reuse=reuse,
+                    **_DIRECT,
+                )
+                for reuse in WMMA_REUSE
+            ),
+            _spec8(
+                49152,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=64,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                scales="registers",
+                wmma_reuse="ab",
+                **_DIRECT,
+            ),
+            _spec6(
+                49152,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=16,
+                tile_k=512,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                k_reads="contiguous",
+                scales="registers",
+                **_DIRECT,
+            ),
+            _spec6(
+                256,
+                2048,
+                2048,
+                tile_m=64,
+                tile_n=64,
+                tile_k=512,
+                cluster_dim=(4, 2, 1),
+                scales="registers",
+                wmma_reuse="ab",
+                **_DIRECT,
+            ),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
@@ -1681,6 +1904,59 @@ class MxGemmDeviceTest(unittest.TestCase):
                     tile_n=128,
                     k_reads="contiguous",
                     out_dtype="bf16",
+                ),
+            ]
+            # Register scales: every half packing, the reuse orders, edge
+            # tiles and K tails.
+            + [
+                _spec6(scales="registers", **_DIRECT, **fields)
+                for fields in (
+                    {},
+                    {"k_reads": "contiguous", "tile_k": 384, "wmma_reuse": "b"},
+                    {"k_reads": "contiguous", "wmma_reuse": "ab"},
+                    {"wmma_reuse": "a"},
+                    {"tile_m": 64, "tile_n": 64},
+                    {
+                        "tile_m": 256,
+                        "tile_n": 16,
+                        "wave_group": (4, 1),
+                        "cluster_dim": (1, 2, 1),
+                    },
+                )
+            ]
+            + [
+                _spec6(
+                    1000,
+                    1000,
+                    2048 + 96,
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=384,
+                    scales="registers",
+                    **_DIRECT,
+                ),
+                _spec6(
+                    1000,
+                    1000,
+                    2048 + 96,
+                    tile_m=128,
+                    tile_n=128,
+                    k_reads="contiguous",
+                    out_dtype="bf16",
+                    scales="registers",
+                    wmma_reuse="ab",
+                    **_DIRECT,
+                ),
+                _spec8(scales="registers", wmma_reuse="ab", **_DIRECT),
+                _spec8(
+                    1000,
+                    1000,
+                    2048 + 96,
+                    tile_m=128,
+                    tile_n=128,
+                    b_dtype="bf8",
+                    scales="registers",
+                    **_DIRECT,
                 ),
             ]
         ):

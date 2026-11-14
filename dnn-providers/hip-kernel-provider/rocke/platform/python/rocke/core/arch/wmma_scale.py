@@ -115,6 +115,16 @@ def wmma_reuse_flags(attrs: dict) -> tuple[bool, bool]:
     return flags
 
 
+def wmma_scale_selectors(attrs: dict) -> tuple[int, int]:
+    """The ``scale_sel_a`` and ``scale_sel_b`` op attributes (default 0): which
+    half of the wave holds the operand's scales, lanes 0-15 (0) or lanes 16-31
+    (1); each half holds one scale word per row of the 16 rows."""
+    selectors = tuple(attrs.get(key, 0) for key in ("scale_sel_a", "scale_sel_b"))
+    if not all(type(sel) is int and sel in (0, 1) for sel in selectors):
+        raise ValueError(f"scale_sel_a and scale_sel_b must be 0 or 1, got {selectors}")
+    return selectors
+
+
 def is_wmma_scale_f32_32x16x128_f4(op_id: str) -> bool:
     """The FP4 32x16x128 scaled WMMA, outside the 16x16 ``wmma_scaled`` family."""
     return op_id.removeprefix("tile.") == WMMA_SCALE_F32_32X16X128_F4

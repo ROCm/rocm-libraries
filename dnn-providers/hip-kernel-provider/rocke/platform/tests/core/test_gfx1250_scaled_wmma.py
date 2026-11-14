@@ -9,7 +9,7 @@ from dataclasses import replace
 from unittest import mock
 
 from rocke.core.arch import ArchTarget
-from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma, wmma_scale_selectors
 from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
@@ -43,7 +43,7 @@ def _scaled_atom(dtype="fp8", scale16=False):
     return atom
 
 
-def _build_scaled_atom(*, scale16: bool):
+def _build_scaled_atom(*, scale16: bool, attrs=None):
     b = IRBuilder("gfx1250_scaled_wmma")
     matrix = b.param("matrix", PtrType(I32, "global"), readonly=True)
     accum = b.param("accum", PtrType(F32, "global"))
@@ -55,7 +55,9 @@ def _build_scaled_atom(*, scale16: bool):
     fragment = b.vec_concat(lo, hi)
     c = b.global_load_vN(accum, lane, F32, 8)
     scale = b.global_load(scales, lane, scale_ty)
-    d = b.mma(_scaled_atom(scale16=scale16), fragment, fragment, c, scale, scale)
+    d = b.mma(
+        _scaled_atom(scale16=scale16), fragment, fragment, c, scale, scale, attrs=attrs
+    )
     b.global_store(accum, lane, b.vec_extract(d, 0))
     return b.kernel
 
@@ -237,6 +239,37 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     ),
                 )
                 self.assertIn(f", {scale_ty} %", ll)
+
+    def test_scale_selectors_reach_the_intrinsic(self):
+        # scale_sel_a / scale_sel_b: the lanes 0-15 (0) or 16-31 (1) scale set.
+        for attrs, selectors in (
+            ({}, (0, 0)),
+            ({"scale_sel_a": 1}, (1, 0)),
+            ({"scale_sel_b": 1}, (0, 1)),
+            ({"scale_sel_a": 1, "scale_sel_b": 1}, (1, 1)),
+        ):
+            with self.subTest(attrs=attrs):
+                self.assertEqual(wmma_scale_selectors(attrs), selectors)
+                ll = _lower_kernel_to_llvm_python(
+                    _build_scaled_atom(scale16=False, attrs=attrs or None),
+                    llvm_flavor="llvm23",
+                    arch="gfx1250",
+                )
+                call = next(
+                    line
+                    for line in ll.splitlines()
+                    if "@llvm.amdgcn.wmma.scale." in line and " = call " in line
+                )
+                sel_a, sel_b = selectors
+                self.assertRegex(
+                    call, rf"i32 {sel_a}, i32 0, i32 %[\w.]+, i32 {sel_b}, i32 0, i32 %"
+                )
+        for bad in ({"scale_sel_a": 2}, {"scale_sel_b": True}, {"scale_sel_a": -1}):
+            with (
+                self.subTest(bad=bad),
+                self.assertRaisesRegex(ValueError, "must be 0 or 1"),
+            ):
+                wmma_scale_selectors(bad)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
         # A native rejection is retried in Python unless strict C++ is requested.
