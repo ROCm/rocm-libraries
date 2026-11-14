@@ -153,6 +153,20 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | non-naive time.
       - | Integer percentage (default: 300)
 
+    * - | ``MIOPEN_NAIVE_BOUND_SKIP``
+        | When enabled, Find skips a naive solver without building or
+        | launching it if a lower bound on its run time already exceeds
+        | the ``MIOPEN_NAIVE_TIMEOUT_FACTOR`` budget. The bound takes
+        | the problem's multiply-accumulate count and assumes the naive
+        | kernel reaches at most 10 percent of the device's fp32 FMA
+        | peak. Such a naive solver would have been abandoned by the
+        | timeout anyway, but only after it ran, and the abandoned
+        | kernel keeps the GPU busy and delays the next call. Only takes
+        | effect when ``MIOPEN_NAIVE_TIMEOUT`` is enabled and a
+        | non-naive solver has already succeeded.
+      - | 1 or unset: Enable (default)
+        | 0: Disable
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb

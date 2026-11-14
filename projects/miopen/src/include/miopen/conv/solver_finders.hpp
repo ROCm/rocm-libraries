@@ -162,6 +162,10 @@ struct FindCoreResult
     std::vector<Solution> solutions;
     float find_search_best_time = std::numeric_limits<float>::max();
     bool is_optimal;
+    /// Lower bound, in ms, on the run time of a naive solver for the problem being found, or 0
+    /// if unknown. EvaluateInvokers() skips a naive solver that cannot finish within the naive
+    /// timeout budget without building or launching it. See conv::NaiveTimeFloorMs().
+    float naive_floor_ms = 0.0f;
 };
 
 std::vector<Solution> EvaluateInvokers(const Handle& handle,
@@ -179,7 +183,8 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const PrimitiveFindParameters& parameters,
                         const std::vector<std::unique_ptr<ISolversFinder>>& finders,
                         const std::optional<FindOptions>& options = std::nullopt,
-                        bool force_attach_binary                  = false);
+                        bool force_attach_binary                  = false,
+                        float naive_floor_ms                      = 0.0f);
 
 namespace conv {
 MIOPEN_INTERNALS_EXPORT bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo,
@@ -189,6 +194,14 @@ MIOPEN_INTERNALS_EXPORT bool IsEnoughWorkspace(std::string_view where,
                                                std::size_t required_size,
                                                const miopen::AnyInvokeParams* invokeParams,
                                                bool log_as_warning = true);
+
+/// Lower bound, in ms, on how fast a ConvDirectNaiveConv* solver can run \p problem on the
+/// handle's device. The naive kernels use one scalar fp32 FMA path with no matrix instructions.
+/// The bound assumes they reach at most NaiveMaxPeakFractionPct percent of the device's fp32 FMA
+/// peak, which is far above what they achieve in practice. Returns 0 when the device clock or
+/// problem size is unavailable.
+MIOPEN_INTERNALS_EXPORT float NaiveTimeFloorMs(const Handle& handle,
+                                               const ProblemDescription& problem);
 
 struct ConvFindParameters : PrimitiveFindParameters
 {
