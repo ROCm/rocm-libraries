@@ -5,8 +5,17 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+namespace hipblaslt_ext::experimental::jit::detail
+{
+    struct GemmRequest;
+}
+
 namespace hipblaslt_jit
 {
+    // The TensileLite problem hipBLASLt solves for a rocBLASLt GEMM.
+    TensileLite::ContractionProblemGemm RocblasltToTensileContractionProblemGemm(
+        const hipblaslt_ext::experimental::jit::detail::GemmRequest& request);
+
     // A single strided batched GEMM in TensileLite's canonical index form.
     struct CanonicalGemm
     {

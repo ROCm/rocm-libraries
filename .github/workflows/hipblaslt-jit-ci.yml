@@ -10,12 +10,21 @@ on:
       - "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-*"
       - "projects/hipblaslt/CMakeLists.txt"
       - "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt"
+      - "projects/hipblaslt/library/src/amd_detail/hipblaslt.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/hipblaslt-ext.cpp"
       - "projects/hipblaslt/clients/tests/jit/**"
       - "projects/hipblaslt/scripts/jit/**"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/tensile_host.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/tensile_host.hpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/rocblaslt_auxiliary.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/rocblaslt_mat.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/handle.cpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/AMDGPUPredicates.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/CachingLibrary.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/ExactLogicLibrary.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/LocalKernelIndex.hpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/ProviderRows.hpp"
+      - "projects/hipblaslt/tensilelite/src/ProviderRows.cpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/Tensile.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/ContractionProblem.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp"
@@ -161,6 +170,11 @@ jobs:
               bash projects/hipblaslt/scripts/jit/configure-build.sh
           ctest --test-dir build/nojit/clients/tests/jit -L jit-cpu --no-tests=error \
               --output-on-failure 2>&1 | tee jit-test-logs/nojit/ctest-cpu.log
+      - name: Run the JIT tests of the build without JIT that need a GPU
+        timeout-minutes: 15
+        run: |
+          ctest --test-dir build/nojit/clients/tests/jit -L jit-gpu --no-tests=error \
+              --output-on-failure 2>&1 | tee jit-test-logs/nojit/ctest-gpu.log
       - name: Upload logs
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2

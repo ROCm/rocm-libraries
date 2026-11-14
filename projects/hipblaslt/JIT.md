@@ -17,9 +17,49 @@ JIT generation produces kernels for a problem when they are needed. A comgr
 code-object builder, a TensileLite source bundle reader and the JIT solution
 library are implemented. They build generated kernel sources into code objects
 and publish them as TensileLite solutions into a persistent library on disk,
-whose solutions a later process loads without building again. A JIT backend,
-the generator that turns a request into kernel sources, is not part of this
-page.
+whose solutions a later process loads without building again. A JIT backend
+is the generator that turns a request into kernel sources; the replay backend,
+which replays pre-generated TensileLite kernels, is the one implemented.
+`hipblasLtMatmulAlgoGetHeuristic` and `Gemm::algoGetHeuristic` consult the JIT
+library when hipBLASLt is built with JIT support and `HIPBLASLT_JIT` is `1` or
+`2`.
+
+## Heuristic queries
+
+`HIPBLASLT_JIT` is read once per process. A build without JIT support does not
+read it. Any value other than unset, empty, `0`, `1` or `2` warns once and
+leaves the mode off.
+
+| Value | Lookup |
+| --- | --- |
+| unset, empty or `0` | Heuristic queries do not consult JIT and return what a build without JIT returns. |
+| `1` | The override file, then the Equality provider rows, then the JIT library, then the other provider rows, then the `getAllSolutions` fill. Each source fills only the remaining request, and a kernel already returned is skipped. |
+| `2` | The JIT library only. The override file is not read. A problem the library does not solve returns success with no algorithms. |
+
+A miss asks each backend added with `jit::addHeuristicBackend`, in order, for
+the slots still open, and publishes what it builds; a later query reuses the
+published index, also from another process. The library adds no backend; the
+JIT tests add the replay backend. A process with no backend warns once: mode
+`1` leaves the query unchanged, and mode `2` returns no algorithms. Grouped
+GEMM is not filled from the JIT library: mode `1` leaves that query on its
+existing path, and mode `2` returns success with no algorithms.
+
+The returned algorithms are JIT library indices and run through the same path
+as a prebuilt index. The process library's root is `HIPBLASLT_JIT_LIBRARY_PATH`
+or, when that is unset or empty, `/tmp/hipblaslt-jit-<uid>/` on Linux and
+`%TEMP%\hipblaslt-jit-<user>` on Windows. A prebuilt library with an index in
+the JIT range disables the JIT library.
+
+The internal header `library/src/amd_detail/hipblaslt-jit.hpp`, which is not
+installed, declares the entry points the JIT tests use: `jit::makeGemmRequest`
+captures GEMM descriptors and host scalars, and `jit::getJitAlgo` looks a
+request up, generates and publishes it on a miss, and returns a heuristic
+result whose `algo` carries the index and whose `workspaceSize` is the
+solution's. `libhipblaslt.so` exports them, `jit::addHeuristicBackend` and
+`jit::replay::createBackend` for the test binaries only; they are not a
+supported API. On a capturing stream `jit::getJitAlgo` returns a published
+index and does not generate. Heuristic queries carry no stream, so modes `1`
+and `2` may build during stream capture.
 
 ## Components
 
@@ -45,6 +85,11 @@ A `Target` is a TensileLite `AMDGPU::Processor` with an `Any`, `On` or `Off`
 setting for `sramecc` and `xnack`. `Target::fromTargetId` parses a target ID,
 such as `hipDeviceProp_t::gcnArchName`, and rejects an unknown processor or
 feature.
+
+A `Backend` generates source bundles for a `GenerationRequest`. `Jit`, built by
+`makeJit`, asks it for bundles, keeps the solutions `supportingSolutions`
+accepts, builds each bundle and publishes it into the JIT solution library,
+trying the next bundle when one fails; each failure is recorded with its stage.
 
 ## Build
 
@@ -91,12 +136,18 @@ by the git revision `hipblasLtGetGitRevision` reports, so it never loads
 kernels that a build packing kernel arguments differently published. Within
 it, each device and backend has a directory named by a filesystem-safe literal
 of the target ID, wavefront size, backend id and backend version. The
-toolchain is not part of that name. A query opens one slice: a standard lazy
-TensileLite library, keyed by TensileLite's lazy placeholder grain, with one
-entry (`.dat`) and code object (`.co`) per published executable. All files are
+toolchain is not part of that name. `cache-key.msgpack` records the target
+ID, wavefront size, backend id and backend version; a present field that
+disagrees with the directory fails its lookups and publications. To resolve an
+index it has not looked up, a `JitLibrary` constructed with a `DeviceKey`
+searches the directories for its device, so a later process can run the
+solution without configuring the backend that generated it. A query opens one
+slice: a standard lazy TensileLite library, keyed by TensileLite's lazy
+placeholder grain, with one entry (`.dat`) and code object (`.co`) per
+published executable. All files are
 MessagePack. TensileLite's writer writes the master, the mapping and the
-entries; the JIT library writes only the index allocator and the index-to-slice
-map.
+entries; the JIT library writes only the index allocator, the cache key and
+the index-to-slice map.
 
 ```text
 <root>/
@@ -105,6 +156,7 @@ map.
         ├── allocator.dat                  next free solution index
         ├── lock                           publication lock for this build
         └── gfx950_..._<backend>_<version>/ one directory per device and backend
+            ├── cache-key.msgpack          the directory's device and backend
             ├── indices.msgpack            solution index to slice key
             ├── helpers/<helper kernel>.o  relocatable linked into a solution
             ├── slices/<slice key>/
