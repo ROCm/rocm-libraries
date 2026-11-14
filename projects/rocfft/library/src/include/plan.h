@@ -351,7 +351,7 @@ struct rocfft_plan_description_t
      * 
      * - Usage of multiple I/O fields in descriptors is reported as unsupported;
      * 
-     * - I/O array types are not planar if the corresponding field(s) are set;
+     * - I/O array types are not planar if any (input or output) field is set;
      * 
      * - I/O array types are consistent with the expected data types;
      * 
