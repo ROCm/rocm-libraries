@@ -45,6 +45,10 @@ int main(int argc, char* argv[])
     // hip Device number for running tests:
     int deviceId{};
 
+    // Ignore runtime failures.
+    // eg: hipMalloc failing when there isn't enough free vram.
+    bool ignore_hip_runtime_failures{true};
+
     // Number of performance trial samples
     int ntrial{};
 
@@ -120,6 +124,10 @@ int main(int argc, char* argv[])
     non_token->add_option("--odist", params.odist, "Logical distance between output batches")
         ->default_val(0)
         ->each([&](const std::string& val) { std::cout << "odist: " << val << "\n"; });
+
+    app.add_flag("--ignore_runtime_failures,!--no-ignore_runtime_failures",
+                 ignore_hip_runtime_failures,
+                 "Ignore hip runtime failures");
 
     app.add_option("--device", deviceId, "Select a specific device id")->default_val(0);
     app.add_option("--verbose", verbose, "Control output verbosity")->default_val(0);
@@ -264,7 +272,17 @@ int main(int argc, char* argv[])
     {
         hip_rt = ibuffer[i].alloc(ibuffer_sizes[i]);
         if(hip_rt != hipSuccess)
-            throw std::runtime_error("Creating input Buffer failed");
+	{
+          if(ignore_hip_runtime_failures)
+	    {
+	      std::cout << "Creating input Buffer failed\n";
+	      return EXIT_SUCCESS;
+	    }
+	  else
+	    {
+	      throw std::runtime_error("Creating input Buffer failed");
+	    }
+	}
         pibuffer[i] = ibuffer[i].data();
     }
 
@@ -350,15 +368,9 @@ int main(int argc, char* argv[])
     // Run the transform several times and record the execution time:
     std::vector<double> gpu_time(ntrial);
 
-    hipEvent_t start, stop;
-    hip_rt = hipEventCreate(&start);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipEventCreate failed");
-
-    hip_rt = hipEventCreate(&stop);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipEventCreate failed");
-
+    hipEvent_wrapper_t start, stop;
+    start.alloc();
+    stop.alloc();
     for(size_t itrial = 0; itrial < gpu_time.size(); ++itrial)
     {
 #ifdef USE_HIPRAND

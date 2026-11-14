@@ -40,7 +40,7 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-tests LANGUAGES CXX )
+project( rocfft-clients-tests LANGUAGES CXX C )
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -328,8 +328,13 @@ if( NOT BUILD_SHARED_LIBS )
 endif()
 
 if( NOT ROCFFT_BUILD_SCOPE )
-  find_package(SQLite3 REQUIRED)
-  set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
+  find_package(SQLite3 QUIET)
+  if( SQLITE_FOUND )
+    set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
+  else()
+    include( ../../cmake/sqlite.cmake )
+    add_dependencies( rocfft-test sqlite3 )
+  endif()
 endif()
 
 find_package( hiprtc REQUIRED CONFIG PATHS ${ROCM_PATH} )
