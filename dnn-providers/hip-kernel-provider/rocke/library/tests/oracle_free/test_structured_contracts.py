@@ -3110,9 +3110,10 @@ def _decimal_target_bits(dtype: str, exponent: int, item, digits: int) -> int:
     with localcontext() as context:
         context.prec = digits
         growth = (Decimal(item.logit.numerator) / Decimal(item.logit.denominator)).exp()
-        value = Fraction(
-            (item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0)
-        ) * Fraction(2) ** exponent
+        value = (
+            Fraction((item.m_c * growth + item.m_0) / (item.n_c * growth + item.n_0))
+            * Fraction(2) ** exponent
+        )
     return target_bits(value.numerator, value.denominator, dtype)
 
 
