@@ -14,6 +14,7 @@
 #include <hipblaslt_init.hpp>
 #include <limits>
 #include <numeric>
+#include <tuple>
 #include <vector>
 
 #include "../include/hipblaslt_random.hpp"
@@ -129,7 +130,7 @@ struct AMaxTestData
     uint32_t    n;
 };
 
-class ExtOpSoftmaxTest : public testing::TestWithParam<uint32_t>
+class ExtOpSoftmaxTest : public testing::TestWithParam<std::tuple<uint32_t, uint32_t>>
 {
 };
 class ExtOpSoftmaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
@@ -152,8 +153,7 @@ class ExtOpAMaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataTy
 
 TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 {
-    uint32_t           m = GetParam();
-    uint32_t           n = 16;
+    auto [m, n] = GetParam();
     std::vector<float> input(m * n, 0.f);
     std::vector<float> output(m * n, 0.f);
     hipblaslt_uniform_int_1_10_run_float(input.data(), input.size());
@@ -366,7 +366,10 @@ TEST(ExtOpTest, amaxFailureInvalidValue)
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_INVALID_VALUE);
 }
 
-INSTANTIATE_TEST_SUITE_P(ExtOpTest, ExtOpSoftmaxTest, testing::Values<uint32_t>(1, 16, 1335));
+INSTANTIATE_TEST_SUITE_P(ExtOpTest,
+                         ExtOpSoftmaxTest,
+                         testing::Combine(testing::Values<uint32_t>(1, 16, 1335),
+                                          testing::Values<uint32_t>(16, 256)));
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpSoftmaxUnsupportedDatatypeTest,
                          testing::Values<hipDataType>(HIP_R_16F, HIP_R_16BF));
