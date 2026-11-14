@@ -40,7 +40,7 @@ on:
         default: ""
       pr_labels:
         type: string
-        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). On pull_request events the labels come from the event payload instead."
+        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). A 'test_filter:' label sets the test category of this manual run. On pull_request events the labels come from the event payload instead."
         default: ""
       prebuilt_stages:
         type: string
@@ -145,6 +145,9 @@ jobs:
         id: configure
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Manual runs only: a test_filter: label sets test_type (for example
+          # test_filter:workloads). Empty on pull_request and push events.
+          PR_LABELS: ${{ inputs.pr_labels }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
