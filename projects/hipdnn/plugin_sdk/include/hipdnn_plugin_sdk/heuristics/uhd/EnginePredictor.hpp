@@ -125,8 +125,8 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
             loaded->reason = "grouped tree_data artifact cannot be bound to the predict_engine "
                              "role: grouped L1 models have no per-row contract";
         }
-        // Only tree_data reads its feature count from the artifact; native and custom_library
-        // adapters take it from the signature (RFC 0019 OQ11).
+        // tree_data and mlp_data read their feature count from the artifact; native and
+        // custom_library adapters take it from the signature (RFC 0019 OQ11).
         else if(loaded->adapter->expectedFeatureCount() != loaded->extractor->featureCount())
         {
             loaded->reason = "UHD model feature contract does not match its signature";
@@ -169,14 +169,17 @@ inline void validateBinding(const UhdConfig& config,
                                       "transform (one of "
                                     + score_transform::supportedTransformList() + ")");
     }
-    if(config.adapterType != "tree_data" && config.adapterType != "native"
-       && config.adapterType != "custom_library")
+    if(config.adapterType != "tree_data" && config.adapterType != "mlp_data"
+       && config.adapterType != "native" && config.adapterType != "custom_library")
     {
-        throw std::invalid_argument("L1 UHD requires tree_data, native, or custom_library adapter");
+        throw std::invalid_argument(
+            "L1 UHD requires tree_data, mlp_data, native, or custom_library adapter");
     }
-    if(config.adapterType == "tree_data" && config.featuresSignature.empty())
+    if((config.adapterType == "tree_data" || config.adapterType == "mlp_data")
+       && config.featuresSignature.empty())
     {
-        throw std::invalid_argument("L1 tree_data UHD requires a feature signature");
+        throw std::invalid_argument("L1 " + config.adapterType
+                                    + " UHD requires a feature signature");
     }
 }
 } // namespace prediction_detail

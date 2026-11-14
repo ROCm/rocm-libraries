@@ -354,6 +354,9 @@ public:
         case UhdAdapter::LINEAR_DATA:
             config.adapterType = "linear_data";
             break;
+        case UhdAdapter::MLP_DATA:
+            config.adapterType = "mlp_data";
+            break;
         case UhdAdapter::TABLE:
             config.adapterType = "table";
             break;

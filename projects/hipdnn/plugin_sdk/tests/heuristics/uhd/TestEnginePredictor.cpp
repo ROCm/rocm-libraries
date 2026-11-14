@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/mlp_model_generated.h>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
@@ -359,6 +360,61 @@ TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
     EXPECT_EQ(asTime.status, PredictionStatus::INVALID);
     EXPECT_EQ(asTime.metric, "time");
     EXPECT_DOUBLE_EQ(asTime.value, 0.0);
+}
+
+/// An mlp_data model whose one network outputs 0, so the score is its target mean: the log of
+/// @p value in @p metric.
+bool writeConstantMlp(const std::string& path,
+                      const std::string& featuresHash,
+                      const std::string& metric,
+                      double value)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    fb::MlpModelT model;
+    model.num_features = 1;
+    model.metric = metric;
+    model.features_hash = featuresHash;
+    auto input = std::make_unique<fb::MlpInputT>();
+    input->feature = 0;
+    model.inputs.push_back(std::move(input));
+    auto layer = std::make_unique<fb::MlpLayerT>();
+    layer->inputs = 1;
+    layer->outputs = 1;
+    layer->weights = {0.0F};
+    layer->biases = {0.0F};
+    auto network = std::make_unique<fb::MlpNetworkT>();
+    network->layers.push_back(std::move(layer));
+    model.networks.push_back(std::move(network));
+    model.target_mean = std::log(value);
+    model.target_scale = 1.0;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(fb::MlpModel::Pack(builder, &model), fb::MlpModelIdentifier());
+    std::ofstream file(path, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
+               static_cast<std::streamsize>(builder.GetSize()));
+    return static_cast<bool>(file);
+}
+
+/// RFC 0019 §7.6: an mlp_data score is the log of the metric its artifact names.
+TEST_F(TestEnginePredictor, AnMlpModelEstimatesTheMetricItsArtifactNames)
+{
+    auto doc = document();
+    doc["adapter"] = "mlp_data";
+    doc.erase("native");
+    doc["score"]["transform"] = "log";
+    doc["mlp_data"] = {{"artifact", "mlp.fb"}};
+    const auto hash = doc.at("features_hash").get<std::string>();
+
+    ASSERT_TRUE(writeConstantMlp(artifactPath("mlp.fb"), hash, "tflops", 42.0));
+    const auto estimate = predict(config(doc));
+    ASSERT_EQ(estimate.status, PredictionStatus::AVAILABLE) << estimate.reason;
+    EXPECT_EQ(estimate.metric, "tflops");
+    EXPECT_NEAR(estimate.value, 42.0, 1e-9);
+
+    // The same network trained on time cannot answer as throughput.
+    doc["mlp_data"] = {{"artifact", "mlp_time.fb"}};
+    ASSERT_TRUE(writeConstantMlp(artifactPath("mlp_time.fb"), hash, "time", 42.0));
+    EXPECT_EQ(predict(config(doc)).status, PredictionStatus::INVALID);
 }
 
 /// Same names and features_hash, different meaning, so UNAVAILABLE naming both revisions.

@@ -2,7 +2,7 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
@@ -427,7 +427,7 @@ engine rather than folded into one model. **OPEN:** See [Open Question 2](#schem
 
 The UHD parser (`heuristics/uhd/UhdParser.hpp`) admits the schema in this section, and
 `parseHeuristicDescriptor()` in `DescriptorLoader.hpp` reads it. `heuristics/uhd/AdapterFactory.hpp`
-builds the `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters; `static_order` needs no
+builds the `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters; `static_order` needs no
 adapter. Not yet built: the `onnx` adapter. The parser admits an `onnx` UHD, and the engine then ranks
 its catalog by `priority`, then `id`.
 
@@ -593,7 +593,7 @@ hold the schema and the packer together (below).
     "version": {"const": "1.0"},
     "id": {"$ref": "#/definitions/uuid"},
     "name": {"type": "string", "minLength": 1},
-    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "onnx", "custom_library"]},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]},
     "provenance": {"description": "Free-form authoring notes; never read by the loader."},
     "features_signature": {
       "type": "array",
@@ -663,6 +663,7 @@ hold the schema and the packer together (below).
     "table": {"$ref": "#/definitions/artifact"},
     "tree_data": {"$ref": "#/definitions/artifact"},
     "linear_data": {"$ref": "#/definitions/artifact"},
+    "mlp_data": {"$ref": "#/definitions/artifact"},
     "onnx": {"$ref": "#/definitions/artifact"},
     "custom_library": {
       "type": "object",
@@ -683,6 +684,7 @@ hold the schema and the packer together (below).
     {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
     {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
     {"required": ["linear_data"], "properties": {"adapter": {"const": "linear_data"}}},
+    {"required": ["mlp_data"], "properties": {"adapter": {"const": "mlp_data"}}},
     {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
     {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
   ],
@@ -691,21 +693,26 @@ hold the schema and the packer together (below).
       {"required": ["static_order"]}, {"required": ["native"]},
       {"required": ["table"]}, {"required": ["tree_data"]},
       {"required": ["linear_data"]},
+      {"required": ["mlp_data"]},
       {"required": ["onnx"]}, {"required": ["custom_library"]}
     ]},
-    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "linear_data", "onnx"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "linear_data", "mlp_data", "onnx"]}}},
      "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
     {"if": {"required": ["features_signature"]},
      "then": {"required": ["features_hash", "trained_against"]}},
     {"if": {"required": ["categorical_encoding"]},
      "then": {"required": ["features_signature"]}},
-    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "linear_data", "onnx", "custom_library"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]}}},
      "then": {"required": ["objective"]}},
     {"if": {"properties": {"adapter": {"const": "linear_data"}}},
      "then": {"properties": {"objective": {"const": "min"},
                              "score": {"not": {"required": ["metric"]},
                                        "properties": {"calibrated": {"const": false},
                                                       "transform": {"const": "identity"}}}}}},
+    {"if": {"properties": {"adapter": {"const": "mlp_data"}}},
+     "then": {"required": ["score"],
+              "properties": {"score": {"required": ["metric", "transform"],
+                                       "properties": {"transform": {"const": "log"}}}}}},
     {"if": {"required": ["score"],
             "properties": {"score": {"required": ["calibrated"],
                                      "properties": {"calibrated": {"const": true}}}}},
@@ -738,7 +745,7 @@ naming, because each needs an explicit construct rather than falling out of the 
   rest rather than being left as the one adapter whose absent body validates. Its body is closed: a
   declared ordering criterion (`order`) is refused.
 - **The scoring and training fields are conditioned, and their subfields are reachable.** Every adapter
-  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `linear_data`, `onnx`) also
+  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `linear_data`, `mlp_data`, `onnx`) also
   require the feature contract and `trained_against`, and any document declaring a
   `features_signature` requires `features_hash` and `trained_against` with it, whatever its adapter.
   `trained_against` in turn
@@ -812,6 +819,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
 | `linear_data` | A per-config linear ranker (RelLin): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
+| `mlp_data` | An ensemble of small MLPs predicting log(metric) for one engine, carried as a FlatBuffer | Score each row (the graph's, or each candidate's), in the metric's direction | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
 
@@ -1804,6 +1812,7 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
 | `linear_data` | none | Yes | Per-config linear ranker: one hash lookup and one dot product per candidate; a within-catalog ranker only ([Section 7.5](#75-linear_data)) |
+| `mlp_data` | none | Yes | Per-engine MLP ensemble: a few small matrix products per row; engine estimates or catalog ranking ([Section 7.6](#76-mlp_data)) |
 | `onnx` | ONNX runtime | Yes, if dep present | Opt-in, dependency-gated |
 | `custom_library` | none on provider | Yes | Engine ships its own `.so`, `dlopen`'d through a tiny C ABI |
 
@@ -1915,7 +1924,8 @@ and always available; `native` proves the seam with a compiled function and need
 `tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
 heuristics. `onnx` is added when a concrete need appears. `custom_library` is implemented with no trust
 gate; [Open Question 11](#operational) records what the code does. `linear_data` ([Section 7.5](#75-linear_data))
-is a cheaper alternative to `tree_data` for small catalogs.
+is a cheaper alternative to `tree_data` for small catalogs, and `mlp_data`
+([Section 7.6](#76-mlp_data)) a cheaper one where a ranking costs one estimate per engine.
 
 ### 7.5 `linear_data`
 
@@ -1950,6 +1960,38 @@ needs a corpus in which every problem is measured on several configurations, bec
 slowdown relative to the best of the problem. The adapter loads under the same checks as `table`: digest,
 file identifier, FlatBuffers verifier, `features_hash`, then the model's own bounds (indices, lengths,
 finiteness, unique keys).
+
+### 7.6 `mlp_data`
+
+The UHD names this adapter as `"adapter": "mlp_data"` and points `mlp_data.artifact` at a FlatBuffer
+(`flatbuffers_sdk/schemas/mlp_model.fbs`, file identifier `HMLP`), with the artifact's `hash` as for
+`tree_data`. It scores a feature row to the **log of a registered ranking metric**: for an engine
+estimate (`predict_engine`) one model per engine and architecture scores the graph's row, and as a
+catalog ranker (`sort_kernel_catalog`) it scores each candidate's row like an ungrouped `tree_data`
+model. The artifact names that metric, and the UHD declares the same one with `transform: "log"`
+(`score: {metric, transform: "log"}` and the metric's `objective`; `calibrated` follows the role, as
+for any adapter). The parser refuses an `mlp_data` UHD without `score.metric` or with another
+transform, and the adapter refuses an artifact whose metric is not the UHD's.
+
+The model is an ensemble of small fully connected networks over one standardized input:
+
+```text
+t     = sign(x) * log1p(|x|)        a missing (NaN) value gives t = 0
+z     = (t - mean) / scale          per network input; a non-finite z declines the row
+input = [z..., isnan(x[slot])...]   the standardized inputs, then one 0/1 missing flag per slot
+score = target_mean + target_scale * (mean over networks of network(input))
+```
+
+Every layer of a network but the last is followed by SiLU, `x / (1 + exp(-x))`; the last has one output.
+The networks run in float32 with the ensemble mean in double. An estimate costs a few small matrix
+products: about 2 us for three networks of two 64-wide layers, against 6-15 us for a 500-tree
+`tree_data` model, whose cost rises as more engines' models compete for the CPU cache. One estimate is
+made per applicable engine and graph, so that cost grows with the number of engines.
+Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
+loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be
+`mlp_data` or `tree_data` is the evaluation's to decide. The adapter loads under the checks of
+`linear_data`: digest, file identifier and FlatBuffers verifier, then the model's own bounds (slots,
+layer shapes, widths of at most 512, finiteness), its metric and `features_hash`.
 
 ---
 

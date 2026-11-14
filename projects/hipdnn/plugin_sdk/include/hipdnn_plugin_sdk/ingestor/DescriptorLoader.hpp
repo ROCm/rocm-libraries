@@ -547,6 +547,10 @@ inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::strin
     {
         return UhdAdapter::CUSTOM_LIBRARY;
     }
+    if(text == "mlp_data")
+    {
+        return UhdAdapter::MLP_DATA;
+    }
     if(text == "linear_data")
     {
         return UhdAdapter::LINEAR_DATA;
@@ -554,7 +558,8 @@ inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::strin
     // `onnx` (RFC 0019 §7) is rejected by name: makeUhdAdapter cannot build it, so a
     // descriptor naming it would silently rank by declared order.
     fail("unknown or unsupported UHD adapter '" + text + "' in " + where
-         + " (expected static_order, native, tree_data, table, linear_data or custom_library)");
+         + " (expected static_order, native, tree_data, table, linear_data, mlp_data or "
+           "custom_library)");
 }
 
 inline MatchScope matchScopeFromString(const std::string& text, const std::string& where)

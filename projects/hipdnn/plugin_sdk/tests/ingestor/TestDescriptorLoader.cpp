@@ -2557,22 +2557,33 @@ TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
 namespace
 {
 
-/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
-/// artifact itself is left to the caller.
+/// Turns the set's UHD into a data-artifact one (tree_data unless @p adapter says otherwise)
+/// naming @p artifact and writes the tree; the artifact itself is left to the caller.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
-                                             const std::string& artifact)
+                                             const std::string& artifact,
+                                             const std::string& adapter = "tree_data")
 {
     auto documents = makeSetDocuments('1', engineName);
     auto& heuristic = documentOfType(documents, ".uhd.json");
-    heuristic["adapter"] = "tree_data";
+    heuristic["adapter"] = adapter;
     heuristic.erase("native");
     heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
     heuristic["features_hash"]
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
     heuristic["objective"] = "max";
-    heuristic["tree_data"] = {{"artifact", artifact}};
+    if(adapter == "linear_data")
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        heuristic["objective"] = "min";
+    }
+    else if(adapter == "mlp_data")
+    {
+        // An engine estimate: the log of a registered metric.
+        heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log"}};
+    }
+    heuristic[adapter] = {{"artifact", artifact}};
     writeDocuments(root, documents);
     return root;
 }
@@ -2606,6 +2617,34 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
+}
+
+/// Each data-artifact adapter a descriptor can name loads as its own UhdAdapter: a spelling the
+/// loader does not map would drop the engine's model.
+TEST(TestDescriptorLoader, ReadsEachDataArtifactAdapterAsItsOwn)
+{
+    const ScopedSymbols symbols;
+    const std::vector<std::pair<std::string, UhdAdapter>> adapters = {
+        {"tree_data", UhdAdapter::TREE_DATA},
+        {"linear_data", UhdAdapter::LINEAR_DATA},
+        {"mlp_data", UhdAdapter::MLP_DATA},
+    };
+    for(const auto& [name, expected] : adapters)
+    {
+        SCOPED_TRACE(name);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("adapter_" + name));
+        writeModelHeuristicSet(dir.path(), "test:adapter_" + name, "model.bin", name);
+        writeArtifact(dir.path() / "model.bin");
+
+        const auto sets = validatedSetsFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        ASSERT_TRUE(sets.front().heuristic.has_value());
+        EXPECT_EQ(sets.front().heuristic->adapter, expected);
+        EXPECT_EQ(
+            std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+            "model.bin");
+    }
 }
 
 /// The packer copies a shared model UHD and its artifact into every arch shard. Each copy

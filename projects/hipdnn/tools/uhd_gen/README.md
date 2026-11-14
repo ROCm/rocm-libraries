@@ -11,6 +11,9 @@ This tool takes benchmark timing data and produces:
 
 `train --adapter linear_data` produces a RelLin per-configuration linear model and the
 `LinearDataAdapter` artifact instead ([below](#the-linear_data-adapter-rellin)).
+`train --adapter mlp_data` produces an ensemble of small neural networks, for an engine's
+L1 estimate (`--role predict_engine`) or as a catalog ranker (`--role sort_kernel_catalog`),
+and the `MlpDataAdapter` artifact ([below](#the-mlp_data-adapter)).
 
 Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
 reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
@@ -180,10 +183,15 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
 | `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
 | `--early-exit` | No | `auto` (default), `none`, or `TREES:KEEP[,TREES:KEEP...]`: the catalog-ranking early-exit schedule written into `model.bin` (see [Early exit](#early-exit)) |
-| `--adapter` | No | Model family: `tree_data` (default) or `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)). `generate` takes the same flag |
+| `--adapter` | No | Model family: `tree_data` (default), `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)) or `mlp_data` (either role, a catalog ranker for `sort_kernel_catalog`; refuses `--group-by-feature`; see [The `mlp_data` adapter](#the-mlp_data-adapter)). `generate` takes the same flag |
 | `--key-features` | No | `linear_data`: the features whose values together identify a kernel configuration (default: every `$kernel.*` reference in the signature) |
 | `--family-features` | No | `linear_data`: a coarser key whose family fit scores a configuration never seen in training (default: none) |
 | `--ridge` / `--min-rows` | No | `linear_data`: ridge strength (default `1e-2`) and the row count below which a configuration is shrunk harder (default `10`) |
+| `--mlp-hidden` | No | `mlp_data`: comma-separated hidden layer widths of each network (default `64,64`) |
+| `--mlp-members` | No | `mlp_data`: networks in the ensemble (default `3`) |
+| `--mlp-epochs` | No | `mlp_data`: epochs of the cosine schedule; a member stops earlier when its validation loss stops improving (default `300`) |
+| `--mlp-seed` | No | `mlp_data`: seed of the first member; member `k` uses `seed + k` (default `0`) |
+| `--mlp-max-rows` | No | `mlp_data`: subsample a corpus of more rows than this, seeded; `0` uses every row (default `0`) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -241,7 +249,7 @@ reports), or `--uhd-id METRIC=UUID`. With neither, promotion is refused — a mo
 any other id is one the engine never reads. Because the loader keys on the id, not the
 path, a different model already installed under that id anywhere in the tree is
 **replaced where it lies** (document and artifact, under their existing file names) when
-it is this slot's model: a `tree_data` model of the same `score.metric` whose artifact's
+it is this slot's model: a `tree_data` or `mlp_data` model of the same `score.metric` whose artifact's
 training architectures are all among those being promoted for (`--arch`, or the
 manifest's `training_arches` for `--arch default`). That is how a retrained ASM SDPA
 model replaces the one shipped beside the provider. An installed model under the id that
@@ -261,6 +269,9 @@ It validates everything before writing anything, and refuses rather than half-su
   verifier's structural checks (every offset, vtable, vector, string terminator and nested
   table, as `VerifyGbdtModelBuffer`), the artifact's `features_hash` matching the
   descriptor's, and its `num_features` equal to the `features_signature` slot count; for
+  `linear_data` and `mlp_data`, the same checks on their artifacts (`HLIN` and `HMLP`
+  identifiers, their own verifiers and bounds) -- an `mlp_data` artifact must also name the
+  UHD's `score.metric`, and installs under either role; for
   any other artifact, the declared digest. A `predict_engine` model must not be a grouped
   (two-layer) artifact. A `custom_library` body's `config` must be omitted or empty, as
   the runtime parser requires.
@@ -457,7 +468,7 @@ is.
 |----------|----------|-------------|
 | `--input` | Yes | Benchmark CSV/JSON to evaluate on |
 | `--model-dir` | Yes | A `train --output-dir` result |
-| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact` — the file the engine itself loads) |
+| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data` (or `linear_data` or `mlp_data`) `.artifact` -- the file the engine itself loads) |
 | `--output` | No | Report path (default: `<model-dir>/eval_report.json`) |
 | `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
 | `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
@@ -763,7 +774,9 @@ work count, it falls back to `robustMeanMs`/`min`/uncalibrated with **no** `scor
 — the engine's metric-less default ranker, which is legal (§2.5, §15.1), ranks this
 engine's own catalog just as well, and warns that the score is no longer comparable with
 another engine's; the thorough policy then falls back to the engine's L1 prediction. An
-explicitly requested `--metric tflops` without a work count fails instead.
+explicitly requested `--metric tflops` without a work count fails instead. `mlp_data` has no
+such fallback: a catalog `generate --adapter mlp_data` must pass `--metric`
+([below](#the-mlp_data-adapter)).
 
 `generate` takes the work count from the engine's own published `graph.flops`, which is
 the effective count the runtime computed for the graph it just ran. A corpus that was
@@ -1161,7 +1174,13 @@ measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep wit
 A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
 loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
 `--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
-explicit other target, such as `avgTimeMs`.
+explicit other target, such as `avgTimeMs`. An `mlp_data` model always names the metric it
+predicts, so it can never be a slot ranker (a slot has no time of its own, and a slot ranker
+must be metric-less): `generate --adapter mlp_data --slot` is refused before anything is read,
+and `promote` and the packer refuse such a model bound to a slot. Use `tree_data` or
+`linear_data` for slot rankers. A slotted engine's own L1 estimate is another matter: its
+`predict_engine` model names a metric and records every slot's KMD in `trained_against.kmds`
+(a `1.1` UHD), and it may be `mlp_data`.
 
 **Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
 `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
@@ -1230,6 +1249,99 @@ python -m uhd_gen train --adapter linear_data \
     --group-by benchmark device --target avgTimeMs --objective min \
     --output-dir ./uhd_output
 ```
+
+## The `mlp_data` adapter
+
+`python -m uhd_gen train --adapter mlp_data --metric tflops ...` fits an ensemble of small
+fully connected networks to the log of one metric (`MlpDataAdapter`, `mlp_model.fbs`,
+identifier `HMLP`). It serves both roles. With `--role predict_engine` it is one engine's L1
+estimate: the same job a `tree_data` L1 model does, at similar accuracy on the corpora it was
+developed on, for about 2 us per engine at run time where a 500-tree model takes 6-15 us,
+more as engines' models crowd the CPU cache. Pick it when the cost of scoring every engine
+of a graph matters; compare the two with `evaluate` on a held-out corpus first, since
+accuracy is the corpus's to decide. With `--role sort_kernel_catalog` it is a catalog
+ranker, an ungrouped one like a single-layer `tree_data` model (see the end of this
+section). `--group-by-feature` is refused: there is one ensemble per model and no grouped
+artifact.
+
+What it predicts. The network estimates the **log** of the registered ranking metric
+(`--metric`, default `tflops` as for any L1 model; a non-default `--target` needs `--metric`
+too, since the artifact names the metric it predicts), so the descriptor is the one a
+`tree_data` model of that role has: `objective` the metric's direction, `score: {metric,
+calibrated, transform: log}`, and `mlp_data: {artifact, hash}`. The artifact records the
+metric it predicts and the runtime refuses it when the UHD's `score.metric` differs.
+
+How it fits (`mlp.py`, numpy only: no new dependency, deterministic given its seeds).
+
+- Per engine, every row of its L1 corpus, or every candidate row of a catalog corpus
+  (`--mlp-max-rows` subsamples a larger one). The
+  feature matrix is the one `tree_data` fits, after constant columns are dropped.
+- Inputs: `t = sign(x) * log1p(|x|)` with a missing value at 0, standardized by the column's
+  mean and spread over the training rows. A column that never varies is not an input; a
+  column missing in some but not all rows also contributes a 0/1 missing flag.
+- The target is `log(metric)`, standardized (`target_mean`, `target_scale = std + 1e-9`).
+- Each network is `input -> 64 -> SiLU -> 64 -> SiLU -> 1` (`--mlp-hidden`), initialised as
+  PyTorch's `nn.Linear` is, trained on L1 loss by AdamW (rate `3e-3`, weight decay `1e-4`)
+  under cosine annealing over `--mlp-epochs`, in minibatches of 256. A seeded 15% of the rows
+  (of the problems, for a catalog) validate; a member stops after 25 epochs without a better
+  validation loss and keeps its best weights.
+- The score is the mean of `--mlp-members` such networks (member `k` seeded `--mlp-seed + k`
+  for its weights, split and shuffles), mapped back by `target_mean + target_scale * mean`.
+  `train_manifest.json` records the fit (`mlp_fit`): widths, seeds, rows, epochs run and each
+  member's held-out loss.
+
+`model.bin` is an `MlpModel`. Loading it checks, in order: the size (at most 64 MiB), the
+digest, the identifier, the FlatBuffers verifier, then the model's bounds -- 1 to 4096
+features, a network input of 1 to 512 values, at most 512 wide layers, 1 to 8 layers per
+network and 1 to 64 networks, every slot in range, finite weights and standardization with
+`scale > 0`, each layer's inputs equal to the last one's outputs and one output at the end --
+then the UHD's `score.metric` and `features_hash`. `artifact.load_mlp_artifact` repeats those
+checks offline with the runtime's reasons, `promote` runs it before installing, and
+`evaluate` scores the shipped bytes through `evaluate._mlp_scorer` (float32 members and a
+double ensemble mean, as the runtime does; a row with an infinite feature scores NaN, which
+the runtime declines). `TestMlpDataAdapter` pins the C++ adapter against the writer on a
+shared fixture. An installed `mlp_data` model and a `tree_data` one may replace each other in
+place for the same slot (`promote`, [above](#promote-arguments)).
+
+As a catalog ranker (`--role sort_kernel_catalog`) the model is trained, evaluated and
+installed like an ungrouped `tree_data` model: `evaluate` ranks the held-out problems'
+candidates by its score and reports the regret against the best candidate, and `promote`
+installs it into the role's slot. Nothing prefers it: whether it is the model to ship is what
+that evaluation decides, against a `tree_data` or `linear_data` one trained on the same
+corpus. `sort_kernel_catalog` ranks the candidates of one problem, so its rows come in
+problems; the early-stopping split therefore holds out whole problems (15% of them, seeded),
+keyed by the first `--group-by` column (the `benchmark` column by default) as the
+`tree_data` trainer's `GroupKFold` keys them, so a candidate is never validated against
+siblings it trained next to. A corpus with no problem identity, and an L1 corpus (one row per
+graph), split by row. `mlp_fit.validation_split` records `group` or `row`.
+
+```bash
+python -m uhd_gen train --adapter mlp_data --role predict_engine --metric time \
+    --engine provider:engine7 --input l1_corpus.json \
+    --features graph.flops graph.nodes \
+    --mlp-hidden 64,64 --mlp-members 3 --mlp-epochs 300 \
+    --output-dir ./uhd_l1
+```
+
+**`generate --adapter mlp_data`** trains through `train`, so it holds an `mlp_data` run to
+what `train` needs, and refuses a run that cannot meet it before it measures or reads anything:
+
+- *The metric is forwarded.* `--metric` reaches `train` as `--metric`, not only as the label
+  column and direction it implies, so the artifact names it (`generate --dataset <published>
+  --adapter mlp_data --metric time` writes `score.metric: time`). A `tree_data` run still
+  reaches `train` as `--target`/`--objective`: there `--metric time` only picks the label, and
+  a slot ranker has to stay metric-less.
+- *No `--slot`.* A slot ranker must be metric-less (RFC 0021 §7) and an `mlp_data` model always
+  names a metric, so `--slot` with `--adapter mlp_data` is refused.
+- *No `robustMeanMs` fallback.* A catalog run without `--metric` falls back to the metric-less
+  `robustMeanMs` label when the engine publishes no `graph.flops`, which `mlp_data` cannot
+  train; that is only known after the sweep, so a catalog (`sort_kernel_catalog`) run needs
+  `--metric tflops` or `--metric time` up front. An L1 (`predict_engine`) run keeps its default
+  `tflops`.
+
+A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
+UHD); its slot rankers may not.
+
 ## Output
 
 `train` generates:
@@ -1237,7 +1349,7 @@ python -m uhd_gen train --adapter linear_data \
 ```
 output_dir/
 ├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
-├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter)
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter, MlpModel for MlpDataAdapter)
 └── train_manifest.json # training provenance
 ```
 
@@ -1391,7 +1503,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 _generated/hipdnn_flatbuffers_sdk/data_objects/
 ├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
 ├── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
-└── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
+├── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
+└── MlpModel.py, MlpNetwork.py, MlpLayer.py, MlpInput.py             # mlp_model.fbs
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1405,7 +1518,8 @@ does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
 ```bash
 python projects/hipdnn/scripts/run_flatc.py \
     projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs \
-    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs
+    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/mlp_model.fbs
 ```
 
 That command emits both the C++ header and these bindings from one invocation, so

@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -213,6 +214,54 @@ TEST(TestIngestorUhdAdapters, TheFactoryBuildsALinearDataAdapterAndVerifiesItsDe
     const auto loaded = makeUhdAdapter(config);
     ASSERT_NE(loaded, nullptr);
     EXPECT_DOUBLE_EQ(loaded->score({0.0}), 2.5) << "not the linear model's global entry";
+
+    config.modelArtifactPath.clear();
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+}
+
+TEST(TestIngestorUhdAdapters, TheFactoryBuildsAnMlpDataAdapterAndVerifiesItsDeclaredHash)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path()
+        / ("uhd_adapters_mlp_"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+    UhdConfig config;
+    config.adapterType = "mlp_data";
+    config.scoreMetric = "tflops";
+    config.modelArtifactPath = (dir.path() / "mlp.fb").string();
+    config.featuresHash = FEATURES_HASH;
+
+    // One network that outputs 0, so every row scores the target mean.
+    fb::MlpModelT model;
+    model.num_features = 1;
+    model.metric = "tflops";
+    model.features_hash = FEATURES_HASH;
+    model.inputs.push_back(std::make_unique<fb::MlpInputT>());
+    auto layer = std::make_unique<fb::MlpLayerT>();
+    layer->inputs = 1;
+    layer->outputs = 1;
+    layer->weights = {0.0F};
+    layer->biases = {0.0F};
+    auto network = std::make_unique<fb::MlpNetworkT>();
+    network->layers.push_back(std::move(layer));
+    model.networks.push_back(std::move(network));
+    model.target_mean = 2.5;
+    model.target_scale = 1.0;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(fb::MlpModel::Pack(builder, &model), fb::MlpModelIdentifier());
+    std::ofstream(config.modelArtifactPath, std::ios::binary)
+        .write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
+               static_cast<std::streamsize>(builder.GetSize()));
+
+    // A well-formed digest of other bytes: the descriptor's hash is not this artifact's.
+    config.modelHash = sha256(std::string("a different model"));
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+
+    config.modelHash = sha256(builder.GetBufferPointer(), builder.GetSize());
+    const auto loaded = makeUhdAdapter(config);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_DOUBLE_EQ(loaded->score({0.0}), 2.5) << "not the mlp model's target mean";
 
     config.modelArtifactPath.clear();
     EXPECT_EQ(makeUhdAdapter(config), nullptr);

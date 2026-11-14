@@ -238,6 +238,7 @@ enum class UhdAdapter
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
     LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
+    MLP_DATA, ///< Per-engine MLP ensemble estimating log(metric), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
@@ -354,7 +355,7 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / LINEAR_DATA / CUSTOM_LIBRARY: the artifact path the adapter opens.
+    /// TREE_DATA / TABLE / LINEAR_DATA / MLP_DATA / CUSTOM_LIBRARY: the artifact path it opens.
     /// The loader stores it resolved and absolute; a descriptor built in memory may give it
     /// relative to @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
