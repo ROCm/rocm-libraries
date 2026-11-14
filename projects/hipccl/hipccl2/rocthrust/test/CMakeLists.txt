@@ -61,8 +61,12 @@ function(add_rocthrust_test TEST)
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-            ${sqlite_local_SOURCE_DIR}
     )
+    # NOTE(hipccl2): the SQLite include directory arrives through the
+    # SQLite::SQLite3 usage requirements from target_link_libraries() below.
+    # Do not use the sqlite3.cmake module's internal FetchContent variables
+    # here. They are only visible when this directory includes the module
+    # first.
 
     # NOTE(hipccl2): PRIVATE, not INTERFACE. ${TEST_TARGET} is an *executable*
     # (add_executable above), so INTERFACE usage requirements only apply to

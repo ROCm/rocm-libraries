@@ -25,7 +25,7 @@ find_package(hip REQUIRED CONFIG PATHS "${ROCM_ROOT}/lib/cmake/hip")
 
 if(HIP_COMPILER STREQUAL "nvcc")
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-        include(SetupNVCC)
+        include("${CMAKE_CURRENT_LIST_DIR}/SetupNVCC.cmake")
     else()
         message(WARNING "On CUDA platform 'g++' is recommended C++ compiler.")
     endif()
