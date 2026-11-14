@@ -420,7 +420,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 #if(MIO_BN_USESAVED == 0)
         //==== CALC MEAN and VARIANCE ONCE AGAIN =======================
         FpPrecType variance = 0;
-        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
+        // The vectorized stats path assumes read_size == 4 (thread stride lid << 2). When HW is
+        // not a multiple of 4, read_size is 1 (see above) and the scalar path must be used.
+        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096 && read_size == 4)
         {
             fp_prec_read_vec_type read4;
             for(unsigned int k = lid << 2; k < less4; k += grprd)

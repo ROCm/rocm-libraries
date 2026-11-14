@@ -231,7 +231,12 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
+        // The float4 path below reads 4 consecutive elements of the flattened NHW range.
+        // When HW is not a multiple of 4, a read that starts near the end of a channel row
+        // crosses into the next channel (and skips the start of the next sample), so the
+        // statistics would mix data from two channels. Use the scalar path in that case.
+        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096 &&
+                     mio_bn_config::hw % 4 == 0)
         {
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
