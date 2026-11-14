@@ -57,6 +57,7 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -80,6 +81,37 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
 *
 *  \note
+*  If \p source and \p target have different data types, only the conversions
+*  \ref rocsparse_datatype_f32_r <-> \ref rocsparse_datatype_f64_r,
+*  \ref rocsparse_datatype_f32_r or \ref rocsparse_datatype_f64_r -> \ref rocsparse_datatype_f32_c
+*  and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c are supported, depending on
+*  the format of \p target:
+*  - same format as \p source: the values are converted.
+*  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos target: the values are converted.
+*    From the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and
+*    the conversion goes through an intermediate CSR matrix.
+*  - \ref rocsparse_format_csr target: the values are also converted from the COO and COO AoS
+*    formats.
+*  - \ref rocsparse_format_csc, \ref rocsparse_format_ell or \ref rocsparse_format_bsr target: only
+*    from the same format.
+*
+*  Other combinations return \ref rocsparse_status_not_implemented. The ELL to CSR and CSR to BSR
+*  conversions (also to BSR in permissive mode) only return it in the
+*  \ref rocsparse_sparse_to_sparse_stage_compute stage, after the
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage has written the row pointer array of
+*  \p target.
+*
+*  A matrix with zero nonzeros is an exception. For the conversions above that convert the
+*  values, its sparsity pattern is converted and \ref rocsparse_status_success is returned for
+*  any pair of data types. The CSR to CSC, CSC to CSR and BSR to CSR conversions only check the
+*  data types when the value arrays of both \p source and \p target are set, so they also convert
+*  a matrix with zero nonzeros and no value arrays for any pair of data types.
+*
+*  Conversions to a single-precision type round each value (each real and imaginary part) to
+*  nearest. Values that overflow single precision become infinity of the same sign, NaN is
+*  preserved, and \ref rocsparse_status_success is returned.
+*
+*  \note
 *  This routine does not support batched computation.
 *
 *  @param[in]
@@ -98,6 +130,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example

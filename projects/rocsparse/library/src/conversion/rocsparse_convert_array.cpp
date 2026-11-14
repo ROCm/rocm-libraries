@@ -30,6 +30,8 @@
 
 #include "rocsparse_convert_array.hpp"
 
+#include <sstream>
+
 namespace rocsparse
 {
     //
@@ -367,17 +369,10 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
+    // Pairs without a specialization below have no kernel.
     template <typename TARGET, typename SOURCE, class FILTER = void>
     struct copy_farray_mix_safe_kernel_t
     {
-        template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
-        {
-        }
     };
 
     template <typename TARGET, typename SOURCE>
@@ -644,6 +639,19 @@ namespace rocsparse
         }
     };
 
+    template <typename KERNEL, uint32_t BLOCKSIZE, class FILTER = void>
+    struct has_run_kernel_t : std::false_type
+    {
+    };
+
+    template <typename KERNEL, uint32_t BLOCKSIZE>
+    struct has_run_kernel_t<KERNEL,
+                            BLOCKSIZE,
+                            std::void_t<decltype(&KERNEL::template run<BLOCKSIZE>)>>
+        : std::true_type
+    {
+    };
+
     template <typename TARGET, typename SOURCE>
     static rocsparse_status convert_data_array_compute_core(rocsparse_handle handle_,
                                                             size_t           nitems_,
@@ -653,32 +661,46 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const SOURCE*             source_   = (const SOURCE*)source__;
-        const TARGET*             target_   = (const TARGET*)target__;
-        static constexpr uint32_t BLOCKSIZE = 1024;
-        floating_data_t<SOURCE>*  derr      = (floating_data_t<SOURCE>*)handle_->buffer;
-        floating_data_t<SOURCE>   herr;
         if(nitems_ == 0)
         {
             host_error[0] = 0;
             return rocsparse_status_success;
         }
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::template run<BLOCKSIZE>),
-            dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
-            dim3(BLOCKSIZE),
-            0,
-            handle_->stream,
-            nitems_,
-            (TARGET*)target_,
-            (const SOURCE*)source_,
-            (floating_data_t<SOURCE>*)derr);
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-            &herr, derr, sizeof(floating_data_t<SOURCE>), hipMemcpyDeviceToHost, handle_->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
-        host_error[0] = static_cast<double>(herr);
+
+        using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
+        static constexpr uint32_t BLOCKSIZE = 1024;
+        if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the conversion between these two data types is not implemented");
+        }
+        else
+        {
+            const SOURCE*            source_ = (const SOURCE*)source__;
+            const TARGET*            target_ = (const TARGET*)target__;
+            floating_data_t<SOURCE>* derr    = (floating_data_t<SOURCE>*)handle_->buffer;
+            floating_data_t<SOURCE>  herr;
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (kernel_t::template run<BLOCKSIZE>),
+                dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
+                dim3(BLOCKSIZE),
+                0,
+                handle_->stream,
+                nitems_,
+                (TARGET*)target_,
+                (const SOURCE*)source_,
+                (floating_data_t<SOURCE>*)derr);
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&herr,
+                                                         derr,
+                                                         sizeof(floating_data_t<SOURCE>),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
+            host_error[0] = static_cast<double>(herr);
+        }
         return rocsparse_status_success;
     }
 
@@ -989,8 +1011,9 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
                                                                         source_,
                                                                         &conversion_error_max));
 
-        std::cout << "rocsparse_convert_array numerical conversion error " << conversion_error_max
-                  << " invalid data." << std::endl;
+        std::ostringstream message;
+        message << "rocsparse_convert_array numerical conversion error " << conversion_error_max;
+        rocsparse::log_debug(handle_, message.str());
         return rocsparse_status_success;
     }
 }
