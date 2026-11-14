@@ -481,6 +481,10 @@ auto GenericSearch(const Solver s,
 
     const auto total_threads = GetTuningThreadsMax();
 
+    // Kernel binaries compiled by the agents are committed to the kernel cache in bounded
+    // transactions instead of one transaction per binary.
+    KernelCacheBatch kernel_cache_batch;
+
     ThreadSafeQueue<std::tuple<PerformanceConfig, ConvSolution, bool>> solution_queue;
     std::vector<std::thread> compile_agents;
     compile_agents.reserve(total_threads);
@@ -518,6 +522,17 @@ auto GenericSearch(const Solver s,
             {
                 MIOPEN_LOG_I2("Ending Search by patience: " << patience);
                 break;
+            }
+
+            // Once the agents stop storing binaries, nothing else enforces the batch age bound
+            // during the remaining measurements. Must not throw while the agents are running.
+            try
+            {
+                kernel_cache_batch.FlushExpired();
+            }
+            catch(const std::exception& e)
+            {
+                MIOPEN_LOG_E(e.what());
             }
 
             MIOPEN_LOG_I2("Waiting for item in queue");
@@ -729,6 +744,8 @@ auto GenericSearch(const Solver s,
 
     for(auto& agent : compile_agents)
         agent.join();
+
+    kernel_cache_batch.Commit();
 
     MIOPEN_LOG_I("Done: " << n_runs_total << '/' << n_failed << '/' << n_runs_total << ", best #"
                           << n_best << ' ' << best_time << ' ' << best_config);

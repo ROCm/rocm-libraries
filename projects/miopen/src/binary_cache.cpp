@@ -233,6 +233,39 @@ void SaveBinary(const std::vector<char>& hsaco,
     MIOPEN_LOG_I2("Saving binary for: " << filename << "; args: " << args);
     db.StoreRecord(cfg);
 }
+
+KernelCacheBatch::KernelCacheBatch() { KernDb::BeginBatch(); }
+
+KernelCacheBatch::~KernelCacheBatch()
+{
+    if(!active)
+        return;
+    KernDb::EndBatch();
+    try
+    {
+        KernDb::FlushAll();
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_E(ex.what());
+    }
+}
+
+void KernelCacheBatch::Commit()
+{
+    if(!active)
+        return;
+    active = false;
+    // End the batch first so that stores racing with this commit are written through.
+    KernDb::EndBatch();
+    KernDb::FlushAll();
+}
+
+void KernelCacheBatch::FlushExpired() const
+{
+    if(active)
+        KernDb::FlushAll(true);
+}
 #else
 fs::path LoadBinary(const TargetProperties& target,
                     const size_t num_cu,

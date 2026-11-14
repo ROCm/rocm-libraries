@@ -164,6 +164,25 @@ public:
         int BindInt64(int idx, int64_t);
     };
 
+    /// Explicit write transaction spanning several statements on one connection.
+    /// Starts with BEGIN IMMEDIATE so the write lock is taken (and any contention resolved by the
+    /// busy handler) before the first statement runs, rather than by a read-to-write lock upgrade
+    /// in the middle of the transaction. Rolls back on destruction unless Commit() succeeded.
+    /// The caller must serialize all use of the connection while the transaction is open.
+    class MIOPEN_INTERNALS_EXPORT Transaction
+    {
+        const SQLite* sql;
+        bool committed = false;
+
+    public:
+        explicit Transaction(const SQLite& sql_);
+        ~Transaction();
+        Transaction(const Transaction&)            = delete;
+        Transaction& operator=(const Transaction&) = delete;
+        /// Throws if COMMIT fails; the destructor then rolls the transaction back.
+        void Commit();
+    };
+
     using result_type = std::vector<std::unordered_map<std::string, std::string>>;
     MIOPEN_INTERNALS_EXPORT SQLite();
     MIOPEN_INTERNALS_EXPORT SQLite(const fs::path& filename_, bool is_system);
@@ -174,6 +193,8 @@ public:
     MIOPEN_INTERNALS_EXPORT bool Valid() const;
     MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
     MIOPEN_INTERNALS_EXPORT int Changes() const;
+    /// True while an explicit transaction is open on this connection.
+    MIOPEN_INTERNALS_EXPORT bool InTransaction() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);
     MIOPEN_INTERNALS_EXPORT std::string ErrorMessage() const;

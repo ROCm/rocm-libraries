@@ -192,6 +192,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   speedups on representative model shapes.
 * Optimized the kernel cache by reusing cached database connections instead of opening and
   closing SQLite on every binary load or store.
+* Optimized kernel cache writes during tuning and Find precompilation by committing newly
+  compiled kernels in bounded batches instead of one SQLite transaction per kernel, reducing
+  commit and file synchronization calls. Other processes see a batch's kernels once it's
+  committed.
 
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
