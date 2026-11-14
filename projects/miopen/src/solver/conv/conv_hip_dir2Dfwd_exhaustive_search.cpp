@@ -6,25 +6,30 @@
 #include <miopen/allocator.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/db_path.hpp>
+#include <miopen/generic_search.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/legacy_exhaustive_search.hpp>
 #include <miopen/bfloat16.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
+#include <miopen/par_for.hpp>
 #include <half/half.hpp>
 
-#ifdef max
-#undef max
-#endif
+#include <algorithm>
+#include <chrono>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
-#ifdef min
+// Plain #undef, no #ifdef: cppcheck treats every #ifdef as a configuration and would check this
+// TU with min/max defined as macros, where std::min<T>/std::max<T> in the included headers
+// (e.g. par_for.hpp) is a syntax error. #undef of an undefined macro is a no-op.
+#undef max
 #undef min
-#endif
 
 namespace miopen {
 namespace solver {
-
-std::size_t GetTuningIterationsMax();
-
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
@@ -111,50 +116,88 @@ LegacyPerformanceConfig ConvHipDirectFwdLegacyExhaustiveSearch::GetDefaultPerfor
     return result;
 }
 
-/*
- * Measure the current configuration performance.
- */
-template <typename Tgpu, class... Solvers>
-static int MeasurePerfConfig(const Handle& handle,
-                             ConstData_t bot_buf,
-                             Data_t top_buf,
-                             ConstData_t wei_buf,
-                             ConstData_t bias_buf,
-                             double& processing_time,
-                             const ExecutionContext& ctx,
-                             const ProblemDescription& problem,
-                             const LegacyPerformanceConfig& config)
+namespace {
+
+/// Returns the solution for the config, or a failed solution if the solver rejects the config.
+ConvSolution GetCandidateSolution(const ExecutionContext& ctx,
+                                  const ProblemDescription& problem,
+                                  const LegacyPerformanceConfig& config)
 {
-    ConvSolution kernel_search_result{miopenStatusNotInitialized};
+    const ConvHipDirectFwd solver{};
+    if(!solver.IsApplicable(ctx, problem) || !solver.IsValidPerformanceConfig(ctx, problem, config))
+        return ConvSolution{miopenStatusNotInitialized};
+    return solver.GetSolution(ctx, problem, config);
+}
 
-    miopen::each_args(
-        [&](auto s) {
-            if(!kernel_search_result.Succeeded()) // once
-            {
-                if(s.IsApplicable(ctx, problem))
-                {
-                    if(s.IsValidPerformanceConfig(ctx, problem, config))
-                    {
-                        kernel_search_result = s.GetSolution(ctx, problem, config);
-                    }
-                }
-            }
-        },
-        Solvers{}...);
+/// Two solutions with the same key build and launch the same kernels.
+std::string KernelKey(const ConvSolution& solution)
+{
+    std::ostringstream ss;
+    for(const auto& kernel : solution.construction_params)
+        ss << kernel << ';';
+    return ss.str();
+}
 
-    if(!kernel_search_result.Succeeded())
+/// Builds the programs of the solutions that are not cached in the handle yet, on up to
+/// GetTuningThreadsMax() threads, and adds them to the handle's program cache. A program whose
+/// build throws is skipped here; MeasureSolution() builds it again and reports the failure.
+void PrecompileCandidates(const Handle& handle, const std::vector<const ConvSolution*>& solutions)
+{
+    std::vector<KernelInfo> kernels;
+    std::unordered_set<std::string> programs_to_build;
+    for(const auto* solution : solutions)
     {
-        return 1;
+        for(const auto& kernel : solution->construction_params)
+        {
+            if(!handle.HasProgram(kernel.kernel_file, kernel.comp_options) &&
+               programs_to_build.insert(kernel.kernel_file.string() + '\n' + kernel.comp_options)
+                   .second)
+                kernels.push_back(kernel);
+        }
     }
+    if(kernels.size() < 2 || GetTuningThreadsMax() < 2)
+        return; // No parallelism to gain, MeasureSolution() builds it.
+
+    std::vector<Program> programs(kernels.size());
+    std::vector<char> built(kernels.size(), 0);
+    par_for_strided(kernels.size(), max_threads{GetTuningThreadsMax()}, [&](auto i) {
+        try
+        {
+            programs[i] = handle.LoadProgram(kernels[i].kernel_file, kernels[i].comp_options, "");
+            built[i]    = 1;
+        }
+        catch(const std::exception& ex)
+        {
+            MIOPEN_LOG_I2("Precompile failed: " << ex.what());
+        }
+    });
+    for(std::size_t i = 0; i < kernels.size(); ++i)
+    {
+        if(built[i] != 0)
+            handle.AddProgram(programs[i], kernels[i].kernel_file, kernels[i].comp_options);
+    }
+}
+
+/*
+ * Measure the performance of a candidate solution.
+ */
+template <typename Tgpu>
+int MeasureSolution(const Handle& handle,
+                    ConstData_t bot_buf,
+                    Data_t top_buf,
+                    ConstData_t wei_buf,
+                    ConstData_t bias_buf,
+                    double& processing_time,
+                    const ProblemDescription& problem,
+                    const ConvSolution& solution)
+{
     if(problem.GetBias() && bias_buf == nullptr)
     {
         MIOPEN_LOG_WE("Legacy search: Bias buffer required");
         return 2;
     }
 
-    MIOPEN_LOG_I2("Trying " << config);
-    const auto kernel_params     = kernel_search_result.construction_params[0];
-    std::string compiler_options = kernel_params.comp_options;
+    const auto& kernel_params = solution.construction_params[0];
 
     try
     {
@@ -167,7 +210,7 @@ static int MeasurePerfConfig(const Handle& handle,
                                   kernel_params.kernel_name,
                                   kernel_params.l_wk,
                                   kernel_params.g_wk,
-                                  compiler_options);
+                                  kernel_params.comp_options);
 
         if(problem.GetBias())
         {
@@ -188,6 +231,8 @@ static int MeasurePerfConfig(const Handle& handle,
     MIOPEN_LOG_I2("\t\t\t\t" << processing_time);
     return 0;
 }
+
+} // namespace
 
 LegacyPerformanceConfig
 ConvHipDirectFwdLegacyExhaustiveSearch::Search(const ExecutionContext& ctx,
@@ -256,7 +301,7 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
 
     double min_proc_time = std::numeric_limits<double>::max();
 
-    size_t run_counter = 0, failed_counter = 0;
+    std::size_t run_counter = 0, failed_counter = 0;
 
     int out_pix_tl_cnt = 3; // out_pix_tile_sz[1];
     int n_out_tls      = 4;
@@ -279,11 +324,9 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
         n_tile1_sz  = 2;
     }
 
-    int n_tiles_cnt = n_tile0_sz * n_tile1_sz;
-
     size_t report_inteval = 25;
 
-    long long runs_left = 0, total_runs = 0;
+    std::vector<LegacyPerformanceConfig> candidates;
 
     if(problem.GetWeightsWidth() == 1 && problem.GetWeightsHeight() == 1 &&
        problem.GetGroupCount() ==
@@ -317,10 +360,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
             n_out_tls          = (n_out_tiles_rg[1] - n_out_tiles_rg[0] + 1);
             n_grp_tiles0       = 1;
             grp_tl_ln[0]       = 64;
-
-            runs_left =
-                static_cast<long long>(out_pix_tl_cnt) * n_out_tls * n_in_tls * (n_grp_tiles0 + 1);
-            total_runs = runs_left;
 
             result.out_pix_tile1 = 1;
         }
@@ -357,17 +396,12 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
             n_in_tiles_rg[0] = 2;
             n_in_tiles_rg[1] = (problem.GetInChannels() % 8 == 0) ? 3 : 2;
 
-            grp_tl_ln[0]     = 64;
-            grp_tl_ln[1]     = 128;
-            grp_tl_ln[2]     = 256;
-            n_grp_tiles0     = 3;
-            int n_grp_tiles1 = 1;
-
-            int n_grp_tiles = n_grp_tiles1 * n_grp_tiles0;
-            n_out_tls       = (n_out_tiles_rg[1] - n_out_tiles_rg[0] + 1);
-            n_in_tls        = 2;
-            runs_left = static_cast<long long>(n_grp_tiles) * out_pix_tl_cnt * n_out_tls * n_in_tls;
-            total_runs = runs_left;
+            grp_tl_ln[0] = 64;
+            grp_tl_ln[1] = 128;
+            grp_tl_ln[2] = 256;
+            n_grp_tiles0 = 3;
+            n_out_tls    = (n_out_tiles_rg[1] - n_out_tiles_rg[0] + 1);
+            n_in_tls     = 2;
 
             result.out_pix_tile1 = 0;
         }
@@ -403,64 +437,15 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                             result.n_in_data_tiles = (1 << i_t);
                         }
 
-                        const auto ret = MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                                                   bot_ptr,
-                                                                                   top_ptr,
-                                                                                   wei_ptr,
-                                                                                   bias_ptr,
-                                                                                   processing_time,
-                                                                                   ctx,
-                                                                                   problem,
-                                                                                   result);
-                        --runs_left;
-                        if(ret != 0)
-                        {
-                            ++failed_counter;
-                            continue;
-                        }
-
-                        is_passed = true;
-                        MIOPEN_LOG_T("##(n_current, n_failed, n_runs_total): "
-                                     << run_counter << " / " << failed_counter << " / "
-                                     << total_runs << " elapsed_time: " << processing_time
-                                     << " best_time: " << processing_time << ", " << result);
-
-                        if(processing_time < min_proc_time)
-                        {
-                            MIOPEN_LOG_I('#' << run_counter << ' ' << processing_time << " < "
-                                             << min_proc_time << ' ' << result);
-                            min_proc_time = processing_time;
-                            candidate     = result;
-                        }
-
-                        if(run_counter % report_inteval == 0)
-                        {
-                            MIOPEN_LOG_W("Runs left: " << runs_left << ", "
-                                                       << "min time so far: " << min_proc_time
-                                                       << ", " << "curr time: " << processing_time
-                                                       << ' ' << result);
-                        }
-                        run_counter++;
-                        if(run_counter >= GetTuningIterationsMax())
-                            break;
+                        candidates.push_back(result);
                     }
-                    if(run_counter >= GetTuningIterationsMax())
-                        break;
                 }
-                if(run_counter >= GetTuningIterationsMax())
-                    break;
             }
-            if(run_counter >= GetTuningIterationsMax())
-                break;
         }
     }
     else
     {
         MIOPEN_LOG_W("Searching the best solution in the 9 dim space. Please, be patient...");
-        runs_left = static_cast<long long>(n_tiles_cnt) * out_pix_tl_cnt * out_pix_tl_cnt *
-                    n_out_tls * n_in_tls * stack_cnt;
-        total_runs = runs_left;
-
         // tile1
         for(int j = 0; j < n_tile1_sz; ++j)
         {
@@ -468,7 +453,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
             result.in_tile1 = tile_sz1[j];
             if(problem.GetOutHeight() * 2 <= result.in_tile1 && result.in_tile1 > tile_sz[0])
             {
-                --runs_left;
                 continue;
             }
 
@@ -478,19 +462,16 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                 result.in_tile0 = tile_sz0[i];
                 if((problem.GetOutWidth() * 2 <= result.in_tile0 && result.in_tile0 > tile_sz[0]))
                 {
-                    --runs_left;
                     continue;
                 }
                 if(problem.GetOutHeight() > 16 && problem.GetOutWidth() > 16 &&
                    ((result.in_tile1 == 8 && result.in_tile0 == 8) ||
                     (result.grp_tile0 == 8 && result.grp_tile1 == 8)))
                 {
-                    --runs_left;
                     continue;
                 }
                 if(problem.GetOutWidth() > 32 && result.in_tile1 > result.in_tile0)
                 {
-                    --runs_left;
                     continue;
                 }
                 // out pix 1
@@ -501,7 +482,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                     result.grp_tile1     = result.in_tile1 / result.out_pix_tile1;
                     if(result.out_pix_tile1 > result.in_tile1 || result.grp_tile1 < 8)
                     {
-                        --runs_left;
                         continue;
                     }
                     // out pix 0
@@ -513,7 +493,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
 
                         if(result.out_pix_tile0 > result.in_tile0 || result.grp_tile0 < 8)
                         {
-                            --runs_left;
                             continue;
                         }
 
@@ -522,7 +501,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                             result.n_out_pix_tiles = n_out_tiles_rg[o_t];
                             if(problem.GetOutChannels() < result.n_out_pix_tiles)
                             {
-                                --runs_left;
                                 continue;
                             }
 
@@ -531,7 +509,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                                 result.n_in_data_tiles = n_in_tiles_rg[i_t];
                                 if(problem.GetInChannels() < result.n_in_data_tiles)
                                 {
-                                    --runs_left;
                                     continue;
                                 }
 
@@ -541,7 +518,6 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                                     result.n_stacks = n_in_stacks_sz[s];
                                     if(result.n_stacks > problem.GetBatchSize())
                                     {
-                                        --runs_left;
                                         continue;
                                     }
 
@@ -549,89 +525,138 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                                            result.n_out_pix_tiles * result.n_stacks >=
                                        128)
                                     {
-                                        --runs_left;
                                         continue;
                                     }
 
-                                    const auto ret =
-                                        MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                                                  bot_ptr,
-                                                                                  top_ptr,
-                                                                                  wei_ptr,
-                                                                                  bias_ptr,
-                                                                                  processing_time,
-                                                                                  ctx,
-                                                                                  problem,
-                                                                                  result);
-
-                                    --runs_left;
-                                    if(ret != 0)
-                                    {
-                                        ++failed_counter;
-                                        continue;
-                                    }
-
-                                    is_passed = true;
-                                    MIOPEN_LOG_T(
-                                        "##(n_current, n_failed, n_runs_total): "
-                                        << run_counter << " / " << failed_counter << " / "
-                                        << total_runs << " elapsed_time: " << processing_time
-                                        << " best_time: " << processing_time << ", " << result);
-
-                                    if(processing_time < min_proc_time)
-                                    {
-                                        MIOPEN_LOG_I('#' << run_counter << ' ' << processing_time
-                                                         << " < " << min_proc_time << ' '
-                                                         << result);
-                                        min_proc_time = processing_time;
-                                        candidate     = result;
-                                    }
-
-                                    if(run_counter % report_inteval == 0)
-                                    {
-                                        MIOPEN_LOG_W("Runs left: "
-                                                     << runs_left << ", "
-                                                     << "min time so far: " << min_proc_time << ", "
-                                                     << "curr time: " << processing_time << ' '
-                                                     << result);
-                                    }
-                                    run_counter++;
-                                    if(run_counter >= GetTuningIterationsMax())
-                                        break;
+                                    candidates.push_back(result);
                                 }
-                                if(run_counter >= GetTuningIterationsMax())
-                                    break;
                             }
-                            if(run_counter >= GetTuningIterationsMax())
-                                break;
                         }
-                        if(run_counter >= GetTuningIterationsMax())
-                            break;
                     }
-                    if(run_counter >= GetTuningIterationsMax())
-                        break;
                 }
-                if(run_counter >= GetTuningIterationsMax())
-                    break;
             }
-            if(run_counter >= GetTuningIterationsMax())
-                break;
         }
     }
+
+    // Different configs can produce the same kernel. For example, n_stacks is clamped to the
+    // number of ALU tile stacks that fit in the work group, which is often 1. Time each distinct
+    // kernel once.
+    std::vector<std::pair<LegacyPerformanceConfig, ConvSolution>> solutions;
+    {
+        std::unordered_set<std::string> seen;
+        for(const auto& config : candidates)
+        {
+            auto solution = GetCandidateSolution(ctx, problem, config);
+            if(!solution.Succeeded())
+            {
+                ++failed_counter;
+                continue;
+            }
+            if(seen.insert(KernelKey(solution)).second)
+                solutions.emplace_back(config, std::move(solution));
+        }
+    }
+    MIOPEN_LOG_I("Configs: " << candidates.size() << ", rejected: " << failed_counter
+                             << ", distinct kernels: " << solutions.size());
+
+    // Build the kernels in batches of GetTuningThreadsMax() in parallel, then time each of them.
+    // The search ends early on the same limits the generic search uses.
+    const auto time_budget             = GetTuningTimeMax(ctx, problem);
+    const auto patience                = GetTuningPatience(ctx, problem);
+    const auto batch_size              = std::max<std::size_t>(GetTuningThreadsMax(), 1);
+    const auto start_time              = std::chrono::steady_clock::now();
+    std::size_t runs_since_improvement = 0;
+    bool stop                          = false;
+
+    for(std::size_t first = 0; first < solutions.size() && !stop; first += batch_size)
+    {
+        const auto last = std::min(first + batch_size, solutions.size());
+        {
+            std::vector<const ConvSolution*> batch;
+            for(auto i = first; i < last; ++i)
+                batch.push_back(&solutions[i].second);
+            PrecompileCandidates(profile_h, batch);
+        }
+
+        for(auto i = first; i < last; ++i)
+        {
+            const auto& config = solutions[i].first;
+            MIOPEN_LOG_I2("Trying " << config);
+            const auto ret = MeasureSolution<Tgpu>(profile_h,
+                                                   bot_ptr,
+                                                   top_ptr,
+                                                   wei_ptr,
+                                                   bias_ptr,
+                                                   processing_time,
+                                                   problem,
+                                                   solutions[i].second);
+            if(ret != 0)
+            {
+                ++failed_counter;
+                continue;
+            }
+
+            is_passed = true;
+            MIOPEN_LOG_T("##(n_current, n_failed, n_runs_total): "
+                         << run_counter << " / " << failed_counter << " / " << solutions.size()
+                         << " elapsed_time: " << processing_time
+                         << " best_time: " << processing_time << ", " << config);
+
+            ++runs_since_improvement;
+            if(processing_time < min_proc_time)
+            {
+                MIOPEN_LOG_I('#' << run_counter << ' ' << processing_time << " < " << min_proc_time
+                                 << ' ' << config);
+                min_proc_time          = processing_time;
+                candidate              = config;
+                runs_since_improvement = 0;
+            }
+
+            if(run_counter % report_inteval == 0)
+            {
+                MIOPEN_LOG_W("Runs left: " << solutions.size() - i - 1 << ", "
+                                           << "min time so far: " << min_proc_time << ", "
+                                           << "curr time: " << processing_time << ' ' << config);
+            }
+            run_counter++;
+            if(run_counter >= GetTuningIterationsMax())
+            {
+                stop = true;
+                break;
+            }
+            if(runs_since_improvement >= patience)
+            {
+                MIOPEN_LOG_W("Ending search, no improvement in " << patience << " runs");
+                stop = true;
+                break;
+            }
+            if(std::chrono::steady_clock::now() - start_time > time_budget)
+            {
+                MIOPEN_LOG_W("Ending search, tuning time budget of " << time_budget.count()
+                                                                     << " ms is exhausted");
+                stop = true;
+                break;
+            }
+        }
+    }
+
     // Compare search results vs. default performance config.
     {
-        int ret                   = -1;
-        double default_time       = std::numeric_limits<double>::max();
-        const auto default_config = GetDefaultPerformanceConfig(ctx, problem);
-        ret                       = MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                        bot_ptr,
-                                                        top_ptr,
-                                                        wei_ptr,
-                                                        bias_ptr,
-                                                        default_time,
-                                                        ctx,
-                                                        problem,
-                                                        default_config);
+        int ret                     = -1;
+        double default_time         = std::numeric_limits<double>::max();
+        const auto default_config   = GetDefaultPerformanceConfig(ctx, problem);
+        const auto default_solution = GetCandidateSolution(ctx, problem, default_config);
+        if(default_solution.Succeeded())
+        {
+            ret = MeasureSolution<Tgpu>(profile_h,
+                                        bot_ptr,
+                                        top_ptr,
+                                        wei_ptr,
+                                        bias_ptr,
+                                        default_time,
+                                        problem,
+                                        default_solution);
+        }
         if(ret == 0)
         {
             is_passed = true;
