@@ -1097,6 +1097,259 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasStatus_t run(void* deviceUserArgs, hipStream_t stream);
     };
 
+    /*! \ingroup types_module
+     *  \brief The dimension along which a PartitionedGemm splits the problem.
+     *
+     *  \details With ``M``, every partition computes ``m_i x n x k`` and the first operand
+     * (A) is split. With ``N``, every partition computes ``m x n_i x k`` and the second
+     * operand (B) is split. The first ``N - 1`` partitions take ``size / N`` and the last
+     * partition takes the remainder.
+     */
+    enum class SplitDim
+    {
+        M, //!< Split rows of op(A), C and D.
+        N, //!< Split columns of op(B), C and D.
+    };
+
+    /*! \ingroup types_module
+     *  \brief A hint that says how to read the pointers passed for one matrix.
+     *
+     *  \details hipBLASLt does not allocate or copy these matrices. The caller owns the
+     * memory and keeps replicated copies equal. The hint only tells PartitionedGemm how many
+     * pointers to expect and whether to add the partition's slice offset.
+     *
+     *  | Hint       | Pointers | The library uses for partition ``i``          |
+     *  |------------|----------|------------------------------------------------|
+     *  | Shared     | 1        | ``ptr + offset_i`` (the whole matrix, reachable from every partition) |
+     *  | Replicated | N        | ``ptr[i] + offset_i`` (a whole copy per partition) |
+     *  | Sliced     | N        | ``ptr[i]`` (already points at partition i's slice) |
+     *
+     *  The leading dimension and batch stride passed to PartitionedGemm::setProblem apply
+     * to the matrix as laid out for the hint: the whole matrix for ``Shared`` and
+     * ``Replicated``, and each partition's slice buffer for ``Sliced``. A matrix that is not
+     * split by the chosen SplitDim (for example B when splitting M) is used whole by every
+     * partition, so its hint only decides whether 1 or N pointers are passed.
+     */
+    enum class Placement
+    {
+        Shared,
+        Replicated,
+        Sliced,
+    };
+
+    /*! \ingroup types_module
+     *  \brief The inputs of a PartitionedGemm.
+     *
+     *  \details ``a``, ``b`` and ``c`` hold 1 pointer for a ``Shared`` matrix and N pointers
+     * otherwise. ``d`` follows the same rule. ``alpha`` and ``beta`` are host pointers, as in
+     * GemmInputs, and apply to every partition.
+     */
+    struct PartitionedGemmInputs
+    {
+        std::vector<const void*> a; //!< A matrix pointers.
+        std::vector<const void*> b; //!< B matrix pointers.
+        std::vector<const void*> c; //!< C matrix pointers.
+        std::vector<void*>       d; //!< D matrix pointers.
+        const void*              alpha = nullptr; //!< Host pointer to alpha.
+        const void*              beta  = nullptr; //!< Host pointer to beta.
+    };
+
+    /*! \ingroup types_module
+     *  \brief hipBLASLt extension that runs one GEMM as slices on several devices.
+     *
+     *  \details A device that is partitioned (for example DPX) shows up as several HIP
+     * devices. A PartitionedGemm takes the full problem, gives each partition a slice of it
+     * (see SplitDim), and launches the slices on one stream per partition. It owns one
+     * Gemm per partition and does not allocate memory or copy data.
+     *
+     *  Handle, stream, workspace, pointer and event number ``i`` all belong to partition
+     * ``i``. Each handle must be created with its partition's device current, and each stream
+     * must belong to the same device as its handle. The streams must belong to different
+     * devices.
+     *
+     *  Calls follow the order of Gemm: setProblem, algoGetHeuristic (or isAlgoSupported),
+     * initialize, then run. Call setProblem again to change a pointer.
+     *
+     *  The first version supports plain GEMM: no epilogue, no scale or aux inputs and no MX
+     * types. Device user arguments are declared but not supported yet.
+     */
+    class PartitionedGemm
+    {
+    public:
+        /*! \ingroup library_module
+        *  \brief Constructor.
+        *
+        *  @param[in]
+        *  handles                    One hipBLASLt handle per partition. The number of
+        * partitions is ``handles.size()``.
+        *  @param[in]
+        *  opA,opB                    The transpose type of matrices A and B.
+        *  @param[in]
+        *  typeA,typeB,typeC,typeD    The data type of matrices A, B, C, and D.
+        *  @param[in]
+        *  typeCompute                The compute type of the GEMM problem.
+        */
+        HIPBLASLT_EXPORT explicit PartitionedGemm(const std::vector<hipblasLtHandle_t>& handles,
+                                                  hipblasOperation_t                    opA,
+                                                  hipblasOperation_t                    opB,
+                                                  hipDataType                           typeA,
+                                                  hipDataType                           typeB,
+                                                  hipDataType                           typeC,
+                                                  hipDataType                           typeD,
+                                                  hipblasComputeType_t                  typeCompute);
+        HIPBLASLT_EXPORT ~PartitionedGemm();
+
+        PartitionedGemm(const PartitionedGemm&)            = delete;
+        PartitionedGemm& operator=(const PartitionedGemm&) = delete;
+        HIPBLASLT_EXPORT PartitionedGemm(PartitionedGemm&&) noexcept;
+        HIPBLASLT_EXPORT PartitionedGemm& operator=(PartitionedGemm&&) noexcept;
+
+        //! The number of partitions.
+        HIPBLASLT_EXPORT size_t getPartitionCount() const;
+
+        /*! \ingroup library_module
+        *  \brief Sets up the full GEMM problem and its partitioning.
+        *
+        *  \details ``m``, ``n``, ``k``, the leading dimensions and the strides describe the
+        * full matrices (see Placement for ``Sliced``). The pointers come from ``inputs``.
+        *
+        *  @param[in]
+        *  m,n,k                            The size of the full problem.
+        *  @param[in]
+        *  batch_count                      The batch count.
+        *  @param[in]
+        *  lda,ldb,ldc,ldd                  The leading dimensions of the matrices.
+        *  @param[in]
+        *  strideA,strideB,strideC,strideD  The batch strides of the matrices.
+        *  @param[in]
+        *  dim                              The dimension to split.
+        *  @param[in]
+        *  placementA,placementB,placementC,placementD  How to read the pointers of each matrix.
+        *  @param[in]
+        *  inputs                           The pointers and the host alpha and beta.
+        *
+        *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If the number of pointers does not match
+        * the placement, a size is not positive, or the split dimension is smaller than the
+        * number of partitions.
+        *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not
+        * supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t                      m,
+                                                    int64_t                      n,
+                                                    int64_t                      k,
+                                                    int64_t                      batch_count,
+                                                    int64_t                      lda,
+                                                    int64_t                      ldb,
+                                                    int64_t                      ldc,
+                                                    int64_t                      ldd,
+                                                    int64_t                      strideA,
+                                                    int64_t                      strideB,
+                                                    int64_t                      strideC,
+                                                    int64_t                      strideD,
+                                                    SplitDim                     dim,
+                                                    Placement                    placementA,
+                                                    Placement                    placementB,
+                                                    Placement                    placementC,
+                                                    Placement                    placementD,
+                                                    const PartitionedGemmInputs& inputs);
+
+        /*! \ingroup library_module
+        *  \brief The slice of partition ``partition`` along the split dimension.
+        *
+        *  @param[in]
+        *  partition        The partition index.
+        *  @param[out]
+        *  offset,size      The first index and the number of indices of the slice.
+        *
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE If the index is out of range or no problem is set.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t getSlice(size_t partition, int64_t& offset, int64_t& size) const;
+
+        /*! \ingroup library_module
+        *  \brief Retrieve the algorithms that every partition accepts.
+        *
+        *  \details The heuristic runs on partition 0. Algorithms that any partition rejects
+        * for its slice are dropped. The workspace size of a result is the largest over the
+        * partitions.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t
+            algoGetHeuristic(const int                                      requestedAlgoCount,
+                             const GemmPreference&                          pref,
+                             std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
+
+        /*! \ingroup library_module
+        *  \brief Check whether the algorithm supports every partition's slice.
+        *
+        *  @param[in]
+        *  algo                  The algorithm heuristic.
+        *  @param[out]
+        *  workspaceSizeInBytes  The required workspace size of each partition.
+        *
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE The algorithm does not support some slice.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t&  algo,
+                                                         std::vector<size_t>&    workspaceSizeInBytes);
+
+        //! Sets the maximum workspace size of every partition.
+        HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
+
+        /*! \ingroup library_module
+        *  \brief Creates the kernel arguments of every partition.
+        *
+        *  @param[in]
+        *  algo          The algorithm to use.
+        *  @param[in]
+        *  workspaces    One workspace pointer per partition (16B aligned).
+        *  @param[in]
+        *  useUserArgs   Like Gemm::initialize; it does not affect a standard GEMM.
+        *  @param[in]
+        *  streams       One stream per partition.
+        *
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE If a vector size is not the partition count, or
+        * two streams belong to the same device.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t&   algo,
+                                                    const std::vector<void*>&      workspaces,
+                                                    bool                           useUserArgs,
+                                                    const std::vector<hipStream_t>& streams);
+
+        /*! \ingroup library_module
+        *  \brief Launches every partition's slice on its stream and returns without waiting.
+        *
+        *  @param[in]
+        *  streams       One stream per partition.
+        *  @param[in]
+        *  start,stop    Optional events, one per partition (or empty).
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t run(const std::vector<hipStream_t>& streams,
+                                             const std::vector<hipEvent_t>&  start = {},
+                                             const std::vector<hipEvent_t>&  stop  = {});
+
+        /*! \ingroup library_module
+        *  \brief Reserved. Runs with device user arguments, one buffer per partition.
+        *
+        *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If any pointer in ``deviceUserArgs`` is not
+        * null. The call is declared now so that adding it later changes no signature.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t run(const std::vector<void*>&       deviceUserArgs,
+                                             const std::vector<hipStream_t>& streams,
+                                             const std::vector<hipEvent_t>&  start = {},
+                                             const std::vector<hipEvent_t>&  stop  = {});
+
+        /*! \ingroup library_module
+        *  \brief Reserved. Fills one host ``UserArguments`` buffer per partition.
+        *
+        *  \retval HIPBLAS_STATUS_NOT_SUPPORTED Always, in this version.
+        */
+        HIPBLASLT_EXPORT hipblasStatus_t
+            getDefaultValueForDeviceUserArguments(const std::vector<void*>& hostDeviceUserArgs);
+
+    private:
+        class PartitionedGemmImpl;
+        std::unique_ptr<PartitionedGemmImpl> pimpl;
+    };
+
     /*******************************************************************************
      * Ext APIs
      ******************************************************************************/
