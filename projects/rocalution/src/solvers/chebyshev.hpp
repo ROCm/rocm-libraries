@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,12 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Print(void) const;
 
-        /** \brief Set the minimum and maximum eigenvalues of the operator */
+        /** \brief Set the minimum and maximum eigenvalues of the operator
+      * \details
+      * ReBuildNumeric() keeps the eigenvalues. When new values of the operator change
+      * them, call Set() again; this needs no Build(). Clear() and a Build() of a built
+      * solver drop them, so call Set() again after these.
+      */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);
 

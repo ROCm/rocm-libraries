@@ -43,6 +43,19 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed the preconditioned BiCGStab solver returning a wrong solution after a breakdown in the second half of an iteration.
+* Fixed the BiCGStab solver not detecting an infinite omega for complex types.
+* Fixed the QMRCGStab solver starting a second solve from the search direction of the previous solve, returning NaN when the first half step solves the system exactly, and reporting one iteration more than it performed.
+* Fixed the MixedPrecisionDC solver counting a residual check as an iteration, so that a maximum of one iteration made no correction, and `ReBuildNumeric()` keeping the values of the old matrix in its low precision copy, also after `ResetOperator()`. The reset operator must have the same sparsity pattern.
+* Fixed the BiCGStab(l) solver iterating when the initial residual is already within the tolerance.
+* Fixed `FixedPoint::SolveZeroSol()` returning the previous solution instead of zero when it does not iterate. This also fixes the multigrid cycles without pre-smoothing, where the coarse levels started from their previous correction.
+* Fixed the minimum iteration count being ignored at the restarts of GMRES and FGMRES, in the BiCG part of BiCGStab(l) and in the inner steps of IDR. At these checks, `GetCurrentResidual()` now returns the residual just checked, and reaching the maximum iteration count takes precedence over the divergence tolerance, as at the other checks.
+* Fixed GMRES and FGMRES returning NaN when a cycle solves the system exactly below the minimum iteration count. They now stop with the exact solution and status 0, as no tolerance is reached below the minimum.
+* Fixed the BiCGStab(l) solver returning NaN when it iterates far past convergence, below the minimum iteration count or with zero tolerances, until its residuals underflow, and at a breakdown with omega = 0. It now stops with the last solution and status 0.
+* Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
+* Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed. `ReBuildNumeric()` of the Chebyshev iteration keeps its eigenvalue bounds; to change them, call `Chebyshev::Set()`, which needs no new `Build()`.
+* Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate and its residual. The breakdown checks also catch an M(k,k) or omega of -inf, and infinite values of complex types. When a step solves the system exactly below the minimum iteration count, IDR now stops with the exact solution and status 0 instead of a breakdown.
+* Fixed the LU solver ending the program for a DENSE operator with the default triangular solve.
 
 ## (Unreleased) rocALUTION 4.1.1
 

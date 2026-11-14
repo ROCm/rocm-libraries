@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -309,7 +309,7 @@ namespace rocalution
             // omega = <t,r> / <t,t>
             omega = t->Dot(*r) / t->Dot(*t);
 
-            if((std::abs(omega) == std::numeric_limits<ValueType>::infinity()) || (omega != omega)
+            if((std::abs(omega) == std::numeric_limits<double>::infinity()) || (omega != omega)
                || (omega == static_cast<ValueType>(0)))
             {
                 LOG_INFO(
@@ -435,15 +435,15 @@ namespace rocalution
             // omega = (t,r) / (t,t)
             omega = t->Dot(*r) / t->Dot(*t);
 
-            if((std::abs(omega) == std::numeric_limits<ValueType>::infinity()) || (omega != omega)
+            if((std::abs(omega) == std::numeric_limits<double>::infinity()) || (omega != omega)
                || (omega == static_cast<ValueType>(0)))
             {
                 LOG_INFO(
                     "BiCGStab omega == 0 || Nan || Inf !!! Updated solution only in p-direction");
 
                 // Update only for p
-                // x = x + alpha * p
-                x->AddScale(*p, alpha);
+                // x = x + alpha * z, z = M^-1 p
+                x->AddScale(*z, alpha);
 
                 op->Apply(*x, p);
                 p->ScaleAdd(static_cast<ValueType>(-1), rhs);

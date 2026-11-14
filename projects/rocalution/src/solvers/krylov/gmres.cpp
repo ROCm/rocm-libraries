@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -345,8 +345,14 @@ namespace rocalution
                 // H_i+1i = ||v_i+1||
                 H[ip1i] = this->Norm_(*v[i + 1]);
 
+                // An invariant Krylov space (H_i+1i == 0) leaves no v_i+1 to normalize
+                const bool exhausted = H[ip1i] == static_cast<ValueType>(0);
+
                 // v_i+1 /= H_i+1i
-                v[i + 1]->Scale(one / H[ip1i]);
+                if(!exhausted)
+                {
+                    v[i + 1]->Scale(one / H[ip1i]);
+                }
 
                 // Apply Givens rotation J(0),...,J(j-1) on (H(0,i),...,H(i,i))
                 for(int k = 0; k < i; ++k)
@@ -366,7 +372,7 @@ namespace rocalution
                 this->ApplyGivensRotation_(c[i], s[i], r[i], r[i + 1]);
 
                 // Check convergence
-                if(this->iter_ctrl_.CheckResidual(std::abs(r[++i])))
+                if(this->iter_ctrl_.CheckResidual(std::abs(r[++i])) || exhausted)
                 {
                     break;
                 }
@@ -403,6 +409,12 @@ namespace rocalution
 
             // Check convergence
             if(this->iter_ctrl_.CheckResidualNoCount(std::abs(r[0])))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to normalize
+            if(r[0] == static_cast<ValueType>(0))
             {
                 break;
             }
@@ -494,8 +506,14 @@ namespace rocalution
                 // H_i+1i = ||v_i+1||
                 H[ip1i] = this->Norm_(*v[i + 1]);
 
+                // An invariant Krylov space (H_i+1i == 0) leaves no v_i+1 to normalize
+                const bool exhausted = H[ip1i] == static_cast<ValueType>(0);
+
                 // v_i+1 /= H_i+1i
-                v[i + 1]->Scale(one / H[ip1i]);
+                if(!exhausted)
+                {
+                    v[i + 1]->Scale(one / H[ip1i]);
+                }
 
                 // Apply Givens rotation J(0),...,J(j-1) on (H(0,i),...,H(i,i))
                 for(int k = 0; k < i; ++k)
@@ -515,7 +533,7 @@ namespace rocalution
                 this->ApplyGivensRotation_(c[i], s[i], r[i], r[i + 1]);
 
                 // Check convergence
-                if(this->iter_ctrl_.CheckResidual(std::abs(r[++i])))
+                if(this->iter_ctrl_.CheckResidual(std::abs(r[++i])) || exhausted)
                 {
                     break;
                 }
@@ -555,6 +573,12 @@ namespace rocalution
 
             // Check convergence
             if(this->iter_ctrl_.CheckResidualNoCount(std::abs(r[0])))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to normalize
+            if(r[0] == static_cast<ValueType>(0))
             {
                 break;
             }
