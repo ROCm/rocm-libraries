@@ -276,7 +276,7 @@ TEST(FusedA2ASdmaEngine_smoke, RotateReportsAnUnusableEngineFirst)
     }
     catch(const std::runtime_error& e)
     {
-        EXPECT_EQ(std::string(e.what()).find("--fused-a2a-sdma-rotate=0"), std::string::npos);
+        EXPECT_EQ(std::string(e.what()).find("14 xGMI"), std::string::npos);
     }
 }
 
