@@ -156,7 +156,9 @@ The group is a preview, off in two places:
 
 - **Build:** `HIPKERNELPROVIDER_ENABLE_CONV` is OFF by default, so a default build (TheRock's
   included) ships no conv engine. The rocm-libraries superbuild presets `hipdnn-dev-all` and
-  `miopen-hipdnn-dev-all` turn it ON, so the group is built and tested there.
+  `miopen-hipdnn-dev-all` turn it ON, so the group is built and tested there. The group is built
+  and tested on Linux only: the superbuild CI's Windows lane turns it OFF, and a Windows build
+  is a follow-up.
 - **Runtime:** a build that ships the group serves its engines only in a process with
   `HIP_KERNEL_PROVIDER_ENABLE_CONV` set to `1` (or `true`, `on`, `yes`). Unset, or any other
   value, the provider withdraws every `hipkernel:CONV_*` engine from its descriptor catalog
