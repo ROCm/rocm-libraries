@@ -1,0 +1,445 @@
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx1151
+ArchitectureName: gfx1151
+CUCount: null
+DeviceNames: [Device 1536]
+ProblemType:
+  Activation: false
+  ActivationComputeDataType: 0
+  ActivationNoGuard: false
+  ActivationType: none
+  AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  BetaOnlyUseBias: false
+  BiasDataTypeList: []
+  BiasSrc: D
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 0
+  DataTypeA: 0
+  DataTypeAmaxD: 0
+  DataTypeB: 0
+  DataTypeE: 0
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
+  DestDataType: 0
+  F32XdlMathOp: 0
+  FusedGemmA2A: false
+  GateResidualDataTypeList: []
+  Gradient: false
+  GroupedGemm: false
+  HighPrecisionAccumulate: false
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [1, 3, 2]
+  IndexAssignmentsLD: [4, 5, 6, 7]
+  IndexAssignmentsMetadata: [3, 0, 2]
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 1
+  IndexUnrollM: 0
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  Int4EncodingA: Signed
+  MXBlockA: 0
+  MXBlockB: 0
+  MacDataTypeA: 0
+  MacDataTypeB: 0
+  MetadataLayout: 0
+  MirrorDimsA: []
+  MirrorDimsB: []
+  MirrorDimsMXSA: []
+  MirrorDimsMXSB: []
+  MirrorDimsMetadata: []
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  OutputAmaxD: false
+  ScaleBlockSizesA: []
+  ScaleZeroPointA: false
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SetConstStrideBias: []
+  SetConstStrideGate: []
+  SilentHighPrecisionAccumulate: false
+  Sparse: 0
+  StochasticRounding: false
+  StridedBatched: true
+  SupportUserArgs: false
+  SwizzleTensorA: false
+  SwizzleTensorB: false
+  TLUA: false
+  TLUB: true
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: true
+  UseBeta: true
+  UseBias: 0
+  UseE: false
+  UseGateResidual: false
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  UseScaleAB: ''
+  UseScaleAlphaVec: 0
+  UseScaleCD: false
+  isMixMode: false
+DefaultSolution:
+  1LDSBuffer: 0
+  ActivationAlt: false
+  ActivationFuncCall: true
+  ActivationFused: true
+  AdaptiveGemm: 0
+  AdaptiveGemmGSUA: 0
+  AdaptiveGemmNTAB: 0
+  AssertAIGreaterThanEqual: -1
+  AssertAILessThanEqual: -1
+  AssertFree0ElementMultiple: 1
+  AssertFree1ElementMultiple: 1
+  AssertSummationElementMultiple: 1
+  BufferLoad: true
+  BufferStore: true
+  ClusterAIDMapping: -1
+  ClusterDim: [1, 1]
+  ClusterLocalRead: 1
+  CompactLoopStore: false
+  ConvertAfterDS: false
+  DebugPersistentKernelLoopForever: false
+  DebugStreamK: 0
+  DepthU: -1
+  DirectToLds: 0
+  DirectToLdsMetadata: 1
+  DirectToVgprA: false
+  DirectToVgprB: false
+  DirectToVgprMXSA: false
+  DirectToVgprMXSB: false
+  DirectToVgprSparseMetadata: false
+  DtlPlusLdsBuf: -1
+  ExpandPointerSwap: true
+  ExtraLatencyForLR: 0
+  ExtraMiLatencyLeft: -1
+  ForceDisableShadowInit: false
+  GlobalReadPerMfma: 1.0
+  GlobalReadVectorWidthA: -1
+  GlobalReadVectorWidthB: -1
+  GlobalSplitU: 1
+  GlobalSplitUAlgorithm: MultipleBuffer
+  GlobalSplitUCoalesced: false
+  GlobalSplitUWorkGroupMappingRoundRobin: false
+  GroupLoadStore: false
+  HalfPLR: 0
+  InitCIterWmma: -1
+  InnerUnroll: 1
+  InterleaveAlpha: 0
+  KernelLanguage: Assembly
+  LDSSegmentBRotate: 0
+  LDSSegmentInterleave: 0
+  LDSTrInst: false
+  LdsBlockSizePerPadA: -1
+  LdsBlockSizePerPadB: -1
+  LdsBlockSizePerPadMXSA: -1
+  LdsBlockSizePerPadMXSB: -1
+  LdsBlockSizePerPadMetadata: -1
+  LdsPadA: -1
+  LdsPadB: -1
+  LdsPadMXSA: -1
+  LdsPadMXSB: -1
+  LdsPadMetadata: -1
+  LocalReadVectorWidth: -1
+  LocalReadVectorWidthA: -1
+  LocalReadVectorWidthB: -1
+  LocalWritePerMfma: -1
+  MIArchVgpr: false
+  MXLoadInst: Auto
+  MXScaleFormat: Auto
+  MagicDivAlg: 2
+  MatrixInstruction: []
+  MaxLDS: -1
+  MaxOccupancy: 64
+  MbskPrefetchMethod: -1
+  MinGRIncPerMfma: -1
+  NoReject: false
+  NonTemporal: -1
+  NonTemporalA: 0
+  NonTemporalB: 0
+  NonTemporalC: 0
+  NonTemporalD: 0
+  NonTemporalE: 0
+  NonTemporalGate: 0
+  NonTemporalMXSA: 0
+  NonTemporalMXSB: 0
+  NonTemporalMetadata: 0
+  NonTemporalWS: 0
+  NonVolatile: -1
+  NonVolatileA: 0
+  NonVolatileB: 0
+  NonVolatileC: 0
+  NonVolatileD: 0
+  NonVolatileE: 0
+  NonVolatileGate: 0
+  NonVolatileMXSA: 0
+  NonVolatileMXSB: 0
+  NonVolatileMetadata: 0
+  NonVolatileWS: 0
+  NumElementsPerBatchStore: 0
+  NumLoadsCoalescedA: 1
+  NumLoadsCoalescedB: 1
+  OptNoLoadLoop: 1
+  PersistentXCCMapping: 0
+  PrefetchAcrossPersistent: 0
+  PrefetchGL2: 0
+  PrefetchGlobalRead: 1
+  PrefetchLocalRead: 1
+  PreloadKernArgs: true
+  ReuseAcrossPersistent: 0
+  SFCWGM:
+  - [1, 1]
+  - [1, 1]
+  ScheduleGROverBarrier: -1
+  ScheduleGlobalRead: 1
+  ScheduleIterAlg: 3
+  ScheduleLocalWrite: 1
+  SourceSwap: false
+  SpaceFillingAlgo: []
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  StinkyTofuRegisterAllocation: 0
+  StorePriorityOpt: false
+  StoreRemapVectorWidth: 0
+  StoreSyncOpt: 0
+  StoreVectorWidth: -1
+  StreamKAtomic: 0
+  StreamKFixupTreeReduction: 0
+  SuppressNoLoadLoop: false
+  SwInstructionPrefetch: 1
+  SwapGlobalReadOrder: 0
+  TDMInst: 0
+  TDMIterateMode: 0
+  TDMLoadWaveSync: false
+  TDMPlusLdsBuf: 0
+  TDMSplit: false
+  TailloopInNll: false
+  TemporalHint: -1
+  TemporalHintA: 0
+  TemporalHintB: 0
+  TemporalHintC: 0
+  TemporalHintD: 0
+  TemporalHintE: 0
+  TemporalHintGate: 0
+  TemporalHintMXSA: 0
+  TemporalHintMXSB: 0
+  TemporalHintMetadata: 0
+  TemporalHintWS: 0
+  ThreadTile: [4, 4]
+  TileProcessingStrategy: None
+  TransposeLDS: -1
+  TransposeLDSMetadata: -1
+  UnrollLoopSwapGlobalReadOrder: 0
+  Use64bShadowLimit: true
+  Use64bShadowLimitMX: false
+  UseCustomMainLoopSchedule: -1
+  UseDualFMAC: false
+  UseInstOffsetForGRO: 0
+  UsePLRPack: 0
+  UseSgprForGRO: -1
+  UseSubtileImpl: false
+  VectorStore: -1
+  VectorWidthA: -1
+  VectorWidthB: -1
+  WaveSeparateGlobalReadA: 0
+  WaveSeparateGlobalReadB: 0
+  WaveSeparateGlobalReadMetadata: 0
+  WaveSplitK: false
+  WavefrontSize: -1
+  WorkAssignment: StaticGrid
+  WorkGroup: [16, 16, 1]
+  WorkGroupMapping: 8
+  WorkGroupMappingXCC: 1
+  WorkGroupMappingXCCGroup: -1
+  WorkGroupReduction: false
+  WorkQueueStealing: 0
+Solutions:
+- SolutionIndex: 0
+  AssertFree0ElementMultiple: 256
+  AssertFree1ElementMultiple: 128
+  AssertStrideAEqual: {1: 4112}
+  AssertStrideBEqual: {1: 4112}
+  AssertSummationElementMultiple: 16
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: 4
+  CustomKernel:
+    name: Custom_Cijk_Alik_Bjlk_S_B_MT512x128x8_ScalarB_gfx1151
+    args:
+    - {type: uint32, semantic: GemmInfo}
+    - {type: uint32, semantic: InternalArgs}
+    - {type: uint32, semantic: InternalArgs1}
+    - {type: uint32, semantic: NumWorkGroups}
+    - {type: uint32, semantic: SizeFree0}
+    - {type: uint32, semantic: SizeFree1}
+    - {type: uint32, semantic: SizeFree2}
+    - {type: uint32, semantic: SizeSum}
+    - {type: address, semantic: AddressD}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: uint32, semantic: StrideD0}
+    - {type: uint32, semantic: StrideD1}
+    - {type: uint32, semantic: StrideC0}
+    - {type: uint32, semantic: StrideC1}
+    - {type: uint32, semantic: StrideA0}
+    - {type: uint32, semantic: StrideA1}
+    - {type: uint32, semantic: StrideB0}
+    - {type: uint32, semantic: StrideB1}
+    - {type: uint32, semantic: Alpha}
+    - {type: uint32, semantic: Beta}
+    - {type: uint64, semantic: BatchOffsetD}
+    - {type: uint64, semantic: BatchOffsetC}
+    - {type: uint64, semantic: BatchOffsetA}
+    - {type: uint64, semantic: BatchOffsetB}
+    macrotile: [512, 128, 8]
+    threads: [512, 1, 1]
+    grid: [TilesXYBatchGSU, One, One]
+    workspaceType: None
+    workspaceSizePerElemC: 0
+    workspaceSizePerElemBias: 0
+  CustomKernelName: Custom_Cijk_Alik_Bjlk_S_B_MT512x128x8_ScalarB_gfx1151
+  DepthU: 8
+  DeviceNames: [Device 1536]
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableMatrixInstruction: false
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [11, 5, 1]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  LocalSplitU: 1
+  MIWaveGroup: [0, 0]
+  MIWaveTile: [0, 0]
+  MacroTile0: 512
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  NumElementsPerThread: 128
+  NumThreads: 512
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [16, 8]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 32
+  WorkGroup: [32, 16, 1]
+  WorkGroupMapping: 16
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 1
+  AssertFree0ElementMultiple: 256
+  AssertFree1ElementMultiple: 128
+  AssertStrideAEqual: {1: 32784}
+  AssertStrideBEqual: {1: 4112}
+  AssertSummationElementMultiple: 16
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: 4
+  CustomKernel:
+    name: Custom_Cijk_Alik_Bjlk_S_B_MT512x128x8_ScalarB_gfx1151
+    args:
+    - {type: uint32, semantic: GemmInfo}
+    - {type: uint32, semantic: InternalArgs}
+    - {type: uint32, semantic: InternalArgs1}
+    - {type: uint32, semantic: NumWorkGroups}
+    - {type: uint32, semantic: SizeFree0}
+    - {type: uint32, semantic: SizeFree1}
+    - {type: uint32, semantic: SizeFree2}
+    - {type: uint32, semantic: SizeSum}
+    - {type: address, semantic: AddressD}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: uint32, semantic: StrideD0}
+    - {type: uint32, semantic: StrideD1}
+    - {type: uint32, semantic: StrideC0}
+    - {type: uint32, semantic: StrideC1}
+    - {type: uint32, semantic: StrideA0}
+    - {type: uint32, semantic: StrideA1}
+    - {type: uint32, semantic: StrideB0}
+    - {type: uint32, semantic: StrideB1}
+    - {type: uint32, semantic: Alpha}
+    - {type: uint32, semantic: Beta}
+    - {type: uint64, semantic: BatchOffsetD}
+    - {type: uint64, semantic: BatchOffsetC}
+    - {type: uint64, semantic: BatchOffsetA}
+    - {type: uint64, semantic: BatchOffsetB}
+    macrotile: [512, 128, 8]
+    threads: [512, 1, 1]
+    grid: [TilesXYBatchGSU, One, One]
+    workspaceType: None
+    workspaceSizePerElemC: 0
+    workspaceSizePerElemBias: 0
+  CustomKernelName: Custom_Cijk_Alik_Bjlk_S_B_MT512x128x8_ScalarB_gfx1151
+  DepthU: 8
+  DeviceNames: [Device 1536]
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableMatrixInstruction: false
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [11, 5, 1]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  LocalSplitU: 1
+  MIWaveGroup: [0, 0]
+  MIWaveTile: [0, 0]
+  MacroTile0: 512
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  NumElementsPerThread: 128
+  NumThreads: 512
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [16, 8]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 32
+  WorkGroup: [32, 16, 1]
+  WorkGroupMapping: 16
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+IndexOrder: [2, 3, 0, 1]
+ExactLogic:
+- - [5120, 4096, 1, 4096]
+  - [0, 0.886812]
+- - [5120, 4096, 1, 32768]
+  - [1, 0.886812]
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Equality
