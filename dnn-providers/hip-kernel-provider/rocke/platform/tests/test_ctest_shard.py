@@ -21,6 +21,7 @@ import sys
 import textwrap
 import types
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
@@ -467,8 +468,16 @@ def test_ctest_passes_every_shard_of_an_entry(tmp_path):
     build = tmp_path / "build"
     build.mkdir()
     (build / "CTestTestfile.cmake").write_text("".join(entries), encoding="utf-8")
+    junit = tmp_path / "ctest-junit.xml"
     run = subprocess.run(
-        [ctest, "--output-on-failure", "--parallel", "4"],
+        [
+            ctest,
+            "--output-on-failure",
+            "--parallel",
+            "4",
+            "--output-junit",
+            str(junit),
+        ],
         cwd=build,
         env=_child_env(),
         capture_output=True,
@@ -478,8 +487,16 @@ def test_ctest_passes_every_shard_of_an_entry(tmp_path):
     )
     out = run.stdout + run.stderr
     assert run.returncode == 0, out
-    assert "100% tests passed, 0 tests failed out of 4" in out
     assert "(Skipped)" not in out
+    cases = list(ElementTree.parse(junit).getroot().iter("testcase"))
+    assert sorted(case.get("name") for case in cases) == [
+        f"shard_{index}" for index in range(4)
+    ], out
+    for case in cases:
+        assert case.get("status") == "run", out
+        assert not [
+            child.tag for child in case if child.tag in ("failure", "error", "skipped")
+        ], out
 
 
 @pytest.mark.parametrize(
