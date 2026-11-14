@@ -158,12 +158,18 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0)
+        // (as in LAPACK's xLASYF, a NaN pivot is not singular, except in column 0, factored last,
+        // where there is no off-diagonal element to search for an interchange)
+        if(std::max(absakk, colmax) == 0 || (k == 0 && std::isnan(absakk)))
         {
-            // singularity found
+            // singularity found: column k of A is the updated column in W
             if(tid == 0 && _info == 0)
                 _info = k + 1;
             kp = k;
+            for(i = tid; i <= k; i += MAX_THDS)
+                A[idx2D(i, k, lda)] = W[idx2D(i, kw, ldw)];
+            // (column k of A is read by the update of the next columns)
+            __syncthreads();
         }
         else
         {
@@ -220,6 +226,10 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
                     kstep = 2;
                 }
             }
+
+            // all threads must have read the diagonal element used to choose the pivot (and
+            // agree on kp and kstep) before it is overwritten by the interchange
+            __syncthreads();
 
             kk = k - kstep + 1;
             kkw = nb + kk - n;
@@ -401,12 +411,18 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0)
+        // (as in LAPACK's xLASYF, a NaN pivot is not singular, except in column n - 1, factored
+        // last, where there is no off-diagonal element to search for an interchange)
+        if(std::max(absakk, colmax) == 0 || (k == n - 1 && std::isnan(absakk)))
         {
-            // singularity found
+            // singularity found: column k of A is the updated column in W
             if(tid == 0 && _info == 0)
                 _info = k + 1;
             kp = k;
+            for(i = tid; i < n - k; i += MAX_THDS)
+                A[idx2D(k + i, k, lda)] = W[idx2D(k + i, k, ldw)];
+            // (column k of A is read by the update of the next columns)
+            __syncthreads();
         }
         else
         {
@@ -468,6 +484,10 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
                     kstep = 2;
                 }
             }
+
+            // all threads must have read the diagonal element used to choose the pivot (and
+            // agree on kp and kstep) before it is overwritten by the interchange
+            __syncthreads();
 
             kk = k + kstep - 1;
             if(kp != kk)

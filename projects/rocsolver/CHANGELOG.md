@@ -13,6 +13,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* SYTF2, SYTRF and LASYF could choose different pivots in different threads (the diagonal element
+  used to choose the pivot was read while it was being interchanged), which gave wrong
+  factorizations, and memory access faults, for some matrices
+* SYTF2 (and SYTRF, for the columns that it factorizes with SYTF2) report a NaN pivot in info, as
+  LAPACK's xSYTF2, instead of reading out of bounds
+* LASYF (and SYTRF for n > 128) did not store in A a pivot column that became exactly zero, so that
+  D did not have a zero there and the factors did not reproduce A
+
 ### Known issues
 ### Upcoming changes
 
