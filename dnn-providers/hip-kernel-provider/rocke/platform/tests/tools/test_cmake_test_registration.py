@@ -13,6 +13,7 @@ _FRAGMENTS = (
     "CoreTests.cmake",
     "PortableIrTests.cmake",
     "InstanceTests.cmake",
+    "NativeGoldenTests.cmake",
     "TestCategoryLabels.cmake",
 )
 _EXPECTED_INCLUDES = tuple(

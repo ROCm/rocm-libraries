@@ -237,6 +237,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/test_attention_bwd_dq_refusal_rows.py"
+    "tests/library/tests/test_attention_bwd_layout_spill_rows.py"
     "tests/library/tests/oracle_free/test_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})

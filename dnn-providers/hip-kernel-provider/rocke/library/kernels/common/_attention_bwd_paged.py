@@ -3,7 +3,9 @@
 
 """Paged address generator of the unified attention backward main kernel.
 
-Family glue for the backward kernels (Python-only, no C++ twin). Like
+Family glue for the backward kernels (C++ twin:
+``helper_rocke.instances.common._attention_bwd_paged.h``, byte-identical by
+``tests/parity/attention_bwd_paged_emit``). Like
 :mod:`._attention_bwd_addr`, everything here emits integer / pointer / load /
 store IR through the builder it is handed.
 
