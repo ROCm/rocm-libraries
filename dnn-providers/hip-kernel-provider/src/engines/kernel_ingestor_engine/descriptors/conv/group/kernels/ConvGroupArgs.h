@@ -10,6 +10,31 @@
 // HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
 // macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
 
+/// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the
+/// graph's filter w[k][c][t][r][s] (any strides: element (k, c, t, r, s) at k sK + c sC + t sT +
+/// r sR + s sS), cg channels a group each way. Tap (v, q, u) reads filter tap (tBase + tStep v,
+/// rBase + rStep q, sBase + sStep u), zero outside the filter; reflect (true convolution)
+/// reflects that again. swap: n is the input channel and k the output channel (backward data),
+/// else the other way round.
+struct K4ExpandArgs
+{
+    const void* src;
+    void* dst;
+    long long sK, sC, sT, sR, sS;
+    int c; // channels (all groups)
+    int cg;
+    int t, r, s; // filter extent
+    int tc, rc, sc; // expanded taps
+    int tBase, tStep, rBase, rStep, sBase, sStep;
+    int swap;
+    int reflect;
+    int elementBytes;
+    // Wide groups (16 < cg <= 64): the input (and output) 16-channel blocks a group spans,
+    // padded; the expansion is then dense per group: w16[group][out block][tap][in block][n][k],
+    // zero past cg. 0: the block-diagonal layout above.
+    int nbi;
+};
+
 /// One small-group convolution as a gather over channels-last activations:
 ///   out[n][od osd + ood][oh osh + ooh][ow osw + oow][g cg + o]
 ///     = sum over taps (t, r, s) < (T, R, S) and the group's cg channels i of
@@ -45,31 +70,9 @@ struct K4Args
     // filter's three parts (hi | hi' | lo and hi | lo | hi'); unused otherwise.
     long long xps;
     long long wpt;
-};
-
-/// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the
-/// graph's filter w[k][c][t][r][s] (any strides: element (k, c, t, r, s) at k sK + c sC + t sT +
-/// r sR + s sS), cg channels a group each way. Tap (v, q, u) reads filter tap (tBase + tStep v,
-/// rBase + rStep q, sBase + sStep u), zero outside the filter; reflect (true convolution)
-/// reflects that again. swap: n is the input channel and k the output channel (backward data),
-/// else the other way round.
-struct K4ExpandArgs
-{
-    const void* src;
-    void* dst;
-    long long sK, sC, sT, sR, sS;
-    int c; // channels (all groups)
-    int cg;
-    int t, r, s; // filter extent
-    int tc, rc, sc; // expanded taps
-    int tBase, tStep, rBase, rStep, sBase, sStep;
-    int swap;
-    int reflect;
-    int elementBytes;
-    // Wide groups (16 < cg <= 64): the input (and output) 16-channel blocks a group spans,
-    // padded; the expansion is then dense per group: w16[group][out block][tap][in block][n][k],
-    // zero past cg. 0: the block-diagonal layout above.
-    int nbi;
+    // Row streaming (k4ConvMmaRows): the graph's filter (filter.src) and the expansion's mapping
+    // of it, which the kernel's prologue applies itself: no expansion launch, no expanded copy.
+    K4ExpandArgs filter;
 };
 
 /// Backward weights (CONV_GROUP_WRW): per group, filter tap (t, r, s) and channels k, c of it,

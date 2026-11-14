@@ -354,8 +354,8 @@ struct K4RowsVector<K1AtomWmma11Bf16>
 // output columns x a band of TH output rows x CB 16-channel blocks (one a wave) of one output
 // plane, and streams the band's input rows top to bottom: each (row, depth tap) step stages one
 // input row segment (TW + S - 1 pixels x 16 CB channels) in LDS, double-buffered, with DEPTH later
-// steps' global loads in flight in registers. A wave keeps its block's expanded filter in
-// registers for the whole band (every tap's A fragment) and its output rows in a ring of R
+// steps' global loads in flight in registers. A wave keeps its block's expanded filter (gathered
+// from the graph's filter, a.filter) in registers for the whole band (every tap's A fragment) and its output rows in a ring of R
 // accumulator rows: input row t of the band adds tap row r into output row t - r, so after row t
 // the output row t - (R - 1) is complete and goes straight from registers to global memory (a
 // lane holds consecutive output channels of one pixel). Every input element is read once a band
@@ -410,7 +410,6 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     const int band = a.ho - oh0 < TH ? a.ho - oh0 : TH;
     const int ow0 = twi * TW;
     const T* in = static_cast<const T*>(a.in);
-    const T* w = static_cast<const T*>(a.w);
     T* out = static_cast<T*>(a.out);
     const int tid = threadIdx.x;
     const int lane = tid % WAVE, wave = tid / WAVE;
@@ -418,16 +417,41 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     const int cb = cbt * CB + wave;
 
-    // The block's expanded filter, every tap, held for the whole band; in registers before the
-    // row loop, so the loop's waits count row loads only.
+    // The block's expanded filter, every tap, held for the whole band: each element gathered from
+    // the graph's filter through the expansion's mapping (zero off the group's diagonal block and
+    // outside the filter); in registers before the row loop, so the loop's waits count row loads
+    // only.
+    const K4ExpandArgs& e = a.filter;
+    const T* w = static_cast<const T*>(e.src);
     typename Atom::frag wf[TAPS][KC];
 #pragma unroll
     for(int tap = 0; tap < TAPS; ++tap)
+    {
+        const int v = tap / (R * S), qr = (tap / S) % R, u = tap % S;
+        int ft = e.tBase + e.tStep * v, fr = e.rBase + e.rStep * qr, fs = e.sBase + e.sStep * u;
+        const bool inside = ft >= 0 && ft < e.t && fr >= 0 && fr < e.r && fs >= 0 && fs < e.s;
+        if(e.reflect)
+        {
+            ft = e.t - 1 - ft;
+            fr = e.r - 1 - fr;
+            fs = e.s - 1 - fs;
+        }
 #pragma unroll
         for(int q = 0; q < KC; ++q)
-            wf[tap][q]
-                = k1Frag<Atom>(w + ((static_cast<long long>(cb) * TAPS + tap) * 16 + col) * 16
-                               + q * Atom::KA + kb);
+        {
+            T val[Atom::KPL];
+#pragma unroll
+            for(int i = 0; i < Atom::KPL; ++i)
+            {
+                const int n = cb * 16 + col, k = cb * 16 + kb + q * Atom::KA + i;
+                const int oc = e.swap ? k : n, ic = e.swap ? n : k;
+                const bool own = inside && oc / e.cg == ic / e.cg;
+                val[i] = own ? w[oc * e.sK + (ic % e.cg) * e.sC + ft * e.sT + fr * e.sR + fs * e.sS]
+                             : T{};
+            }
+            wf[tap][q] = k1Frag<Atom>(val);
+        }
+    }
 #pragma unroll
     for(int tap = 0; tap < TAPS; ++tap)
 #pragma unroll

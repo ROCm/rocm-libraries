@@ -113,7 +113,7 @@ RS_TILES = [
     for wp in (1, 2, 4)
     for cb in (4, 8, 16)
     for d in (1, 2)
-]
+] + [(16, wp, cb, 1) for wp in (1, 2) for cb in (4, 8)]
 
 
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
