@@ -80,6 +80,8 @@ endif()
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
         hipdnn_lru_cache.cpp
+        hipdnn_output_hash.cpp
+        hipdnn_shim_batchnorm.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp
         hipdnn_shim_conv_translation.cpp
@@ -190,6 +192,12 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "")
     else()
       set(MIOPEN_GTEST_PREFIX "Smoke")
+    endif()
+
+    # The hipDNN wrapper's host-only unit tests are plain TEST()s with no instantiation prefix,
+    # so a Smoke prefix would leave both binaries with no tests.
+    if("${TEST_NAME}" STREQUAL "test_hipdnn_lru_cache" OR "${TEST_NAME}" STREQUAL "test_hipdnn_output_hash")
+      set(MIOPEN_GTEST_PREFIX "")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -305,9 +313,9 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   endif()
 
-  # Among discrete binaries only the hipdnn_shim_conv*.cpp files have shim tests; any other
+  # Among discrete binaries only the hipdnn_shim_*.cpp files have shim tests; any other
   # would replay nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_conv"))
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_"))
     miopen_forwarding_parity_entries(BUILD ${TEST_NAME})
   endif()
 

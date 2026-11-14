@@ -57,6 +57,36 @@ bool ToPointwiseActivation(miopenActivationMode_t mode, fe::PointwiseMode& out)
     return false;
 }
 
+const char* ActivationModeName(miopenActivationMode_t mode)
+{
+    // A table rather than a switch, so a mode MIOpen adds later falls through to
+    // "unknown" instead of tripping -Wswitch-enum -Werror.
+    struct Entry
+    {
+        miopenActivationMode_t mode;
+        const char* name;
+    };
+    static constexpr Entry names[] = {
+        {miopenActivationPASTHRU, "PASTHRU"},
+        {miopenActivationLOGISTIC, "LOGISTIC"},
+        {miopenActivationTANH, "TANH"},
+        {miopenActivationRELU, "RELU"},
+        {miopenActivationSOFTRELU, "SOFTRELU"},
+        {miopenActivationABS, "ABS"},
+        {miopenActivationPOWER, "POWER"},
+        {miopenActivationCLIPPEDRELU, "CLIPPEDRELU"},
+        {miopenActivationLEAKYRELU, "LEAKYRELU"},
+        {miopenActivationELU, "ELU"},
+        {miopenActivationCLAMP, "CLAMP"},
+    };
+    for(const auto& entry : names)
+    {
+        if(entry.mode == mode)
+            return entry.name;
+    }
+    return "unknown";
+}
+
 miopenStatus_t TranslateHipdnnError(const fe::Error& error)
 {
     const auto code = error.get_code();

@@ -7,11 +7,11 @@ suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_lis
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
-token `HipdnnShim`. Parameterized tests get it from the instantiation prefix, e.g.
-`INSTANTIATE_TEST_SUITE_P(HipdnnShim, GPU_ConvFwdApi_FP32, ...)`. Non-parameterized tests
-carry it directly in the suite name instead, e.g. `TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`,
-since `check_names.py`'s prefix check only applies to the `Smoke`/`Standard`/`Full`/`Perf`/
-`Unit` token used by parameterized instantiations.
+token `HipdnnShim`. Every shim test carries it in its suite name, e.g.
+`INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipdnnShimBNFwdTrain_FP32, ...)` or
+`TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`. It cannot go in an instantiation's prefix,
+because `check_names.py` requires that prefix to be one of `Smoke`/`Standard`/`Full`/`Perf`/
+`Unit`.
 
 The token is deliberately specific: it is a filter, so a generic word like `Forwarding`
 would sooner or later pull in an unrelated test and silently double its runtime.
@@ -24,10 +24,11 @@ reachable through public entry points makes the comparison meaningless.
 Two consequences of that being the only entry path, both easy to "fix" in the wrong
 direction:
 
-- **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized
-  smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a matching
-  pattern would register a third run of tests the parity entries already run twice. Absence
-  from that file is the design, not a gap.
+- **Shim-surface tests stay out of the `test_categories.yaml` tiers on purpose.** The
+  categorized smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a
+  matching pattern would register a third run of tests the parity entries already run twice.
+  The quick tier's `Smoke/*` would match the `Smoke` instantiations of shim tests, so it
+  excludes `*HipdnnShim*`; add the same exclude to any tier that gains a pattern that broad.
 - **Excluding a shim-surface test means narrowing the parity filter,** not calling
   `add_gtest_negative_filter`. That function feeds the shard filter, which the parity entries
   do not use, so disabling a shim test through it looks like it worked and changes nothing.
@@ -40,7 +41,7 @@ To qualify, a shim-surface test must:
 3. Use a tolerance appropriate for cross-implementation comparison, not
    bit-reproducibility.
 
-See `hipdnn_shim_conv.cpp` for worked examples.
+See `hipdnn_shim_conv.cpp` and `hipdnn_shim_batchnorm.cpp` for worked examples.
 
 ## Forwarding parity harness
 
@@ -74,9 +75,11 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
-  replay a filter that matches nothing, and the comparison rejects two empty runs.
-- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
+- **In a discrete build, only the `test_hipdnn_shim_*` binaries get entries.** Any other
+  binary would replay a filter that matches nothing, and the comparison rejects two empty runs.
+- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests. A CPU test for
+  the harness's own helpers goes in a file outside `hipdnn_shim_*.cpp` with no `HipdnnShim` in
+  its name, as `hipdnn_output_hash.cpp` does.
 
 The packaged test list (`bin/MIOpen/CTestTestfile.cmake`) is generated from
 `test_categories.yaml` and does not see `add_test()` calls, so the harness entries and
@@ -124,6 +127,12 @@ they agreed when one of them did no work.
 
 Record a property from within the test's own execution, keyed so that two cases in one test
 cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+`parity_output_hash` (`hipdnn_shim_test::RecordOutputHash`) records a hash of the bytes a test
+read back, so it requires the two replays to agree bit for bit, not just within the test's
+tolerance. A test that records it must get the same inputs in both replays whatever ran before
+it: the batchnorm hash wrappers in `hipdnn_shim_batchnorm.cpp` call `prng::reset_seed()` in
+`SetUp` for that reason.
 
 ### Known divergences
 

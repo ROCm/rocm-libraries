@@ -154,6 +154,9 @@ DisabledSet ParseDisabledSet(const char* value, ForwardingSet set, std::ostream&
 // effect after each entry point's first call.
 const DisabledSet& GetDisabledSet();
 
+// ASCII lower case, for the case-insensitive environment values.
+std::string ToLower(std::string_view value);
+
 // Parses MIOPEN_LOG_LEVEL as MIOpen does (strtoull, base 0, trailing text
 // ignored) so both agree on what a value means. Unset or unparsable is 0,
 // MIOpen's default level. The result is not range-limited; the two checks below

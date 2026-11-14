@@ -25,25 +25,6 @@ std::string CaseName(const std::string& problem, Direction direction)
     return problem;
 }
 
-// Natively, 1-D and 4-D calls fail with UnknownError, so unknown_error_declines counts that as a
-// decline in that mode only. Returns whether the case was served.
-bool RecordOutcome(const std::string& case_name,
-                   const CallResult& result,
-                   bool unknown_error_declines = false)
-{
-    const bool served   = result.status == miopenStatusSuccess;
-    const bool declined = result.status == miopenStatusUnsupportedOp ||
-                          result.status == miopenStatusNotImplemented ||
-                          (unknown_error_declines && !ForwardingEnabled() &&
-                           result.status == miopenStatusUnknownError);
-    EXPECT_TRUE(served || declined)
-        << case_name << ": unexpected status " << result.status << ": " << result.message;
-    if(declined)
-        ExpectForwardedDecline(result);
-    RecordServed(case_name, served);
-    return served;
-}
-
 // Transposed mode swaps the roles of forward and backward data, as conv_common.hpp does.
 void CheckAgainstCpu(Direction direction,
                      miopenConvolutionMode_t mode,
@@ -147,7 +128,8 @@ void RunDirections(const std::string& problem,
         tensor<float> y_arg = direction == Direction::Forward ? tensor<float>{y.desc} : y;
 
         const auto result = FindAndRun(direction, conv, x_arg, w_arg, y_arg);
-        if(!RecordOutcome(case_name, result, unknown_error_declines))
+        // Natively, 1-D and 4-D calls fail with UnknownError.
+        if(!RecordGapOutcome(case_name, result, nullptr, unknown_error_declines))
             continue;
 
         const tensor<float>& got = direction == Direction::Forward        ? y_arg

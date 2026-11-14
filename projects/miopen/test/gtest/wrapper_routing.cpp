@@ -233,18 +233,37 @@ TEST(CPU_WrapperRoutingForwardingSet_NONE, EmptySetMatchesNothing)
 
 // Adding an entry point to the build's forwarding set has to break this test,
 // so the addition is deliberate rather than silent.
-TEST(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheConvolutionFamily)
+TEST(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsConvolutionAndBatchnorm)
 {
-    EXPECT_EQ(DefaultForwardingSet().size(), 4u);
+    EXPECT_EQ(DefaultForwardingSet().size(), 17u);
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionForward"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardData"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardWeights"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBiasActivationForward"));
 
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining_V3"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardTrainingActivation"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardTrainingActivation_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInference"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInference_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInferenceInvVariance"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardInferenceActivationInvVariance"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardInferenceActivation"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationBackward"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationBackward_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormBackwardActivation"));
+
     // The bias-only entry points are standalone bias kernels rather than
     // convolutions, so they stay on the MIOpen path.
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionForwardBias"));
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionBackwardBias"));
+
+    // Deriving a batchnorm descriptor runs nothing, and fusion-plan batchnorm
+    // state lives inside the fusion plan, which is not forwarded.
+    EXPECT_FALSE(IsInForwardingSet("miopenDeriveBNTensorDescriptor"));
+    EXPECT_FALSE(IsInForwardingSet("miopenCreateOpBatchNormForward"));
 
     EXPECT_FALSE(IsInForwardingSet("miopenSetTensorDescriptor"));
     EXPECT_FALSE(IsInForwardingSet("miopenCreate"));
@@ -298,10 +317,14 @@ INSTANTIATE_TEST_SUITE_P(
         ResolveCase{ForwardingMode::Enabled, "", Route::Miopen}));
 
 // Kept separate from the injected-set cases so the difference between "the logic
-// works" and "this build forwards these four names" stays explicit.
-TEST(CPU_WrapperRoutingResolve_NONE, DefaultSetRoutesTheConvolutionFamily)
+// works" and "this build forwards these names" stays explicit.
+TEST(CPU_WrapperRoutingResolve_NONE, DefaultSetRoutesConvolutionAndBatchnorm)
 {
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenConvolutionForward"), Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenBatchNormalizationForwardTraining"),
+              Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenDeriveBNTensorDescriptor"),
+              Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenSetTensorDescriptor"), Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Disabled, "miopenConvolutionForward"), Route::Miopen);
 }

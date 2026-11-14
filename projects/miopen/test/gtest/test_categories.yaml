@@ -143,6 +143,9 @@ test_categories:
       # Each fans out to 32 worker processes loading MIOpen, OOM-killing
       # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
       - "CPU_PerfDb_NONE.*"
+      # Shim-surface tests run in the forwarding_parity entries instead (see
+      # README.md). Their Smoke instantiations would otherwise match "Smoke/*".
+      - "*HipdnnShim*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
