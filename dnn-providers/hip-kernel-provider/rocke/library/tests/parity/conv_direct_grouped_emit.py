@@ -2424,8 +2424,57 @@ def _wgrad_stem_spec(idx: int):
     return ("wgrad", sel, "gfx1250")
 
 
+# ---------------------------------------------------------------------------
+# Tiled wgrad ping-pong on one wave group (q_groups 1: the two halves of the
+# block's waves share one row stream), indices 359..363: a short last
+# segment, packed images under a deeper prefetch, blocks walking several
+# segments, and an odd wave count and a row_unroll off the extra row buffer
+# that both engines must reject.
+# ---------------------------------------------------------------------------
+_WGRAD_PP_CFG_BASE = 359
+
+
+def _wgrad_pp_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_PP_CFG_BASE + idx``, or None."""
+    ts = DirectWgradTiledSpec
+    table = {
+        0: ts(problem=_wp(H=13), pingpong=True, rows_per_seg=12),
+        1: ts(
+            problem=_wp(N=5, H=12, W=8, dtype="fp16"),
+            pingpong=True,
+            waves_k=2,
+            waves_c=4,
+            wave_c16=1,
+            prefetch=4,
+            row_unroll=6,
+            rows_per_seg=6,
+            unfold_n=4,
+        ),
+        2: ts(
+            problem=_wp(H=20),
+            pingpong=True,
+            waves_k=2,
+            wave_c16=1,
+            row_unroll=4,
+            rows_per_seg=8,
+            target_blocks=2,
+        ),
+        3: ts(problem=_wp(), pingpong=True, waves_k=1, waves_c=1, rows_per_seg=12),
+        4: ts(problem=_wp(), pingpong=True, row_unroll=3, rows_per_seg=12),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad_tiled", sel, "gfx950")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_PP_CFG_BASE:
+        sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_STEM_CFG_BASE:
         sel = _wgrad_stem_spec(idx - _WGRAD_STEM_CFG_BASE)
         if sel is not None:

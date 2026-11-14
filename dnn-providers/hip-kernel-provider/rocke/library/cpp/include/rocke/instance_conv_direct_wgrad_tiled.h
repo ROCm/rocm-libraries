@@ -71,10 +71,10 @@ typedef struct rocke_direct_wgrad_tiled_spec
     int rows_per_seg; /* default 30 */
     int prefetch; /* default 2 */
     int target_blocks; /* default 256 */
-    int row_unroll; /* default 0 (= lcm(prefetch + 1, KH)) */
+    int row_unroll; /* default 0 (= lcm(n_buffers, KH)) */
     int unfold_n; /* default 1 */
     int q_groups; /* default 1 */
-    bool pingpong; /* default false */
+    bool pingpong; /* default false; with q_groups 1 the two wave halves */
 } rocke_direct_wgrad_tiled_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

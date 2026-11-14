@@ -1654,6 +1654,15 @@ in fp32.
   that `pick_swizzle` picks at build time so the `ds_read_b64_tr_b16` fragment
   reads are bank-conflict free. `unfold_n` packs several images into one strip;
   `q_groups=2` (+`pingpong`) runs two wave groups half a row apart.
+- **Ping-pong on one row stream.** `pingpong` with `q_groups=1` splits the
+  block's waves into two halves that share the row buffers, the second half a
+  barrier behind, so one half's MFMAs run while the other reads its fragments
+  (two barriers per row). The row DMA is issued after the fragment reads,
+  pinned there by scheduling barriers, so its address math runs under the read
+  latency and the waitcnt pass does not drain it before every read. The mid
+  barrier skips the LDS wait (each MFMA waits for its own fragment); one extra
+  row buffer (`n_buffers = prefetch + 2`) keeps the refill clear of reads still
+  in flight. Each segment starts staggered and ends realigned.
 - **Partial slots + fold.** Same-address fp32 atomics serialize, and a
   depthwise `dW` has only a few thousand addresses, so the depthwise and gather
   kernels store one partial slot per partition with plain stores and
@@ -1692,8 +1701,9 @@ also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
 (`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
 (`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
-`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+), Python IR
-golden `conv_direct_wgrad/*` in `library/tests/test_conv_ir_golden.py`.
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+;
+single-group ping-pong 359+), Python IR golden `conv_direct_wgrad/*` in
+`library/tests/test_conv_ir_golden.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:

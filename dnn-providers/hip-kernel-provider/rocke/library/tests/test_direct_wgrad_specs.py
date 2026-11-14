@@ -96,6 +96,11 @@ _BUILT = [
         build_direct_wgrad_tiled,
         DirectWgradTiledSpec(problem=_p(), q_groups=2, waves_k=2, rows_per_seg=6),
     ),
+    # Ping-pong on one wave group: one more row buffer than the prefetch needs.
+    (
+        build_direct_wgrad_tiled,
+        DirectWgradTiledSpec(problem=_p(), pingpong=True, rows_per_seg=12),
+    ),
     (
         build_direct_wgrad_tiled,
         DirectWgradTiledSpec(
@@ -231,10 +236,39 @@ def test_unknown_target_is_rejected(spec, valid):
         # -3 % 3 == 0 and 30 % -3 == 0: without the sign check the row loop
         # runs no iterations and dW stays zero.
         (DirectWgradTiledSpec(problem=_p(), row_unroll=-3), is_valid_wgrad_tiled_spec),
+        # Ping-pong on one wave group splits the waves into two halves.
+        (
+            DirectWgradTiledSpec(
+                problem=_p(), pingpong=True, waves_k=1, waves_c=1, rows_per_seg=12
+            ),
+            is_valid_wgrad_tiled_spec,
+        ),
+        # Its unroll must cover the extra row buffer (prefetch + 2 = 4).
+        (
+            DirectWgradTiledSpec(
+                problem=_p(), pingpong=True, row_unroll=3, rows_per_seg=12
+            ),
+            is_valid_wgrad_tiled_spec,
+        ),
     ],
 )
 def test_degenerate_knobs_are_rejected(spec, valid):
     assert not valid(spec)[0]
+
+
+def test_single_group_pingpong_keeps_an_extra_row_buffer():
+    """The lagging half reads row t while the leading half refills a buffer;
+    one buffer more than the prefetch keeps that buffer out of row t's reach."""
+    base = DirectWgradTiledSpec(problem=_p(), prefetch=3, rows_per_seg=60)
+    pp = DirectWgradTiledSpec(problem=_p(), prefetch=3, rows_per_seg=60, pingpong=True)
+    qg2 = DirectWgradTiledSpec(
+        problem=_p(), prefetch=3, q_groups=2, waves_k=2, pingpong=True, rows_per_seg=60
+    )
+    assert (base.n_buffers, pp.n_buffers, qg2.n_buffers) == (4, 5, 4)
+    assert pp.lds_bytes() == base.lds_bytes() * 5 // 4
+    assert pp.unroll == 15  # lcm(n_buffers, KH)
+    assert pp.threads_per_block == base.threads_per_block
+    assert is_valid_wgrad_tiled_spec(pp)[0]
 
 
 @pytest.mark.parametrize(
