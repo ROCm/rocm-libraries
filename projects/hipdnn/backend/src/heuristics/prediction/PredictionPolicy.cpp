@@ -200,7 +200,7 @@ const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
     {
         // The provider's own reason, e.g. a model refused for another selector revision.
         why = EnumNamePredictionStatus(prediction->status());
-        if(prediction->reason() != nullptr && prediction->reason()->size() != 0)
+        if(prediction->reason() != nullptr && !prediction->reason()->string_view().empty())
         {
             why += ": " + prediction->reason()->str();
         }
