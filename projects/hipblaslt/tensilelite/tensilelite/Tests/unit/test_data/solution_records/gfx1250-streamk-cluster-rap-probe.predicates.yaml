@@ -1,0 +1,99 @@
+problem:
+  type: And
+  value:
+  - type: OperationIdentifierEqual
+    value: Contraction_l_Alik_Bljk_Cijk_Dijk
+  - type: BiasDataTypeWhiteList
+    value: []
+  - type: GateResidualDataTypeWhiteList
+    value: []
+  - type: BiasSrcWhiteList
+    value:
+    - 3
+  - type: AmaxDCheck
+    value: false
+  - type: TypesEqual
+    value:
+    - BFloat16
+    - BFloat16
+    - Float
+    - Float
+    - BFloat16
+    - BFloat16
+  - type: HighPrecisionAccumulate
+    value: true
+  - type: Activation
+    value: None
+  - type: ActivationComputeType
+    value: Float
+  - type: ActivationNoGuard
+    value: false
+  - type: UseGradient
+    value: false
+  - type: UseBias
+    value: 0
+  - type: UseE
+    value: false
+  - type: UseGateResidual
+    value: false
+  - type: DataTypeE
+    value: Float
+  - type: StridedBatched
+    value: true
+  - type: GroupedGemm
+    value: false
+  - type: UseScaleAB
+    value: ''
+  - type: UseScaleCD
+    value: false
+  - type: UseScaleAlphaVec
+    value: 0
+  - type: Sparse
+    value: 0
+  - type: F32XdlMathOp
+    value: Float
+  - type: SupportDeviceUserArguments
+    value: true
+  - type: SwizzleTensorA
+    value: false
+  - type: SwizzleTensorB
+    value: false
+  - type: FusedGemmA2A
+    value: false
+  - type: MXBlockA
+    value: 0
+  - type: MXBlockB
+    value: 0
+  - type: LeadingFree0SizesGreaterOrEqual
+    value: 1
+  - type: LeadingFree1SizesGreaterOrEqual
+    value: 1
+  - type: KernelLanguageCompatible
+    value: Assembly
+  - type: BufferLoadOffsetLimitCheck
+    value:
+      ShiftPtrElemB: 0
+      ShiftPtrElemA: 0
+      DUorMT1: 32
+      DUorMT0: 32
+  - type: BufferLoadOffsetLimitCheck_Beta
+    value: 32
+  - type: BufferStoreOffsetLimitCheck
+    value: 32
+  - type: WorkgroupMappingXCCCheck
+    value:
+    - 1
+    - -1
+  - type: SizeGreaterThan
+    index: 3
+    value: 0
+  - type: SizeLessThan
+    index: 3
+    value: 193
+task:
+  type: WorkspaceCheck
+hardware:
+  type: AMDGPU
+  value:
+    type: Processor
+    value: gfx1250

@@ -1,0 +1,15 @@
+74a0 gfx942
+74a1 gfx942
+74a2 gfx942
+74a3 gfx942
+74a5 gfx942
+74a9 gfx942
+75a0 gfx950
+75b0 gfx950
+75a2 gfx950
+75b2 gfx950
+75a3 gfx950
+75b3 gfx950
+75a8 gfx950
+75b8 gfx950
+PciChipId gfx950

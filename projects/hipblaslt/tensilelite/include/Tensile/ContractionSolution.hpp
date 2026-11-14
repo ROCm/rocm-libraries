@@ -465,7 +465,7 @@ namespace TensileLite
         dim3                   macroTile;
         int                    magicDivAlg            = 1;
         int                    MathClocksUnrolledLoop = 0;
-        std::array<int, 4>     matrixInstruction;
+        std::array<int, 4>     matrixInstruction{};
         int                    Multicast                  = 0;
         int                    nonTemporalA               = 0;
         int                    nonTemporalB               = 0;
@@ -492,7 +492,7 @@ namespace TensileLite
         int                    temporalHintA              = 0;
         int                    temporalHintB              = 0;
         int                    temporalHintD              = 0;
-        dim3                   threadTile;
+        dim3                   threadTile{0, 0, 0};
         TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
         int                    UnrollLoopSwapGlobalReadOrder = 0;
         int                    UnrollMajorLDSA               = -1;
@@ -501,7 +501,7 @@ namespace TensileLite
         int                    VectorWidthA                  = 1;
         int                    VectorWidthB                  = 1;
         int                    WavefrontSize                 = 0;
-        std::array<int, 2>     waveGroup;
+        std::array<int, 2>     waveGroup{};
         size_t                 waveNum                  = 0;
         int                    WaveSeparateGlobalReadA  = 0;
         int                    WaveSeparateGlobalReadB  = 0;

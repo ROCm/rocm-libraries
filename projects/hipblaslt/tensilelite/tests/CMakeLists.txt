@@ -70,6 +70,21 @@ target_sources(tensilelite-tests
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
 if(NOT TENSILELITE_ENABLE_YAML)
+    # The solution-record fixtures are written into TEST_DATA_DIR on every
+    # build, where TestData::Instance() finds them in build and installed trees.
+    set(SOLUTION_STATE_UNIT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit")
+    set(SOLUTION_STATE_FIXTURE_DIR "${TEST_DATA_DIR}/solution-state")
+    add_custom_target(tensilelite-solution-state-fixtures
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${SOLUTION_STATE_FIXTURE_DIR}"
+        COMMAND "${Python3_EXECUTABLE}" "${SOLUTION_STATE_UNIT_DIR}/solution_state_fixtures.py"
+                "${SOLUTION_STATE_FIXTURE_DIR}/record"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${SOLUTION_STATE_UNIT_DIR}/test_data/catalog_chip_ids.txt"
+                "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMENT "Writing solution-state fixtures into ${SOLUTION_STATE_FIXTURE_DIR}")
+    add_dependencies(tensilelite-tests tensilelite-solution-state-fixtures)
+
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -78,6 +93,8 @@ if(NOT TENSILELITE_ENABLE_YAML)
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
     )
 endif()
 
