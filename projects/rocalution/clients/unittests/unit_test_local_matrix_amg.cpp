@@ -1113,9 +1113,7 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
     expect_ext_interpolations(
         TypeParam::backend, ref, in, {{"matrix-matrix ext+i", mm}, {"matrix-matrix ext+e", mm}});
 
-    const Csr<T>                                expected = with_row_1({{0, 1.0}, {1, 0.0}});
-    const std::vector<T>                        D        = dense(expected);
-    std::vector<std::pair<std::string, Csr<T>>> ext;
+    const Csr<T> expected = with_row_1({{0, 1.0}, {1, 0.0}});
     for(const auto& interpolation : ext_interpolations<T>())
     {
         if(interpolation.first != "ext+i" && interpolation.first != "ext+i FF1")
@@ -1123,34 +1121,108 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
             continue;
         }
         SCOPED_TRACE(interpolation.first);
-        ext.emplace_back(interpolation.first,
-                         interpolated_on(TypeParam::backend, ref, in, interpolation.second));
-        const Csr<T>&        P  = ext.back().second;
-        const std::vector<T> DP = dense(P);
-        ASSERT_EQ(DP.size(), D.size());
-        EXPECT_EQ(P.row_offset, expected.row_offset);
-        EXPECT_EQ(P.col, expected.col);
-        for(int i = 0; i < expected.n; ++i)
-        {
-            if(i == 1)
-            {
-                continue;
-            }
-            for(int j = 0; j < expected.m; ++j)
-            {
-                EXPECT_NEAR(DP[i * expected.m + j], D[i * expected.m + j], tol<T>())
-                    << "row " << i << ", column " << j;
-            }
-        }
+        const Csr<T> P = interpolated_on(TypeParam::backend, ref, in, interpolation.second);
+        expect_interpolation(P, in.cf);
+        expect_near(P, expected, tol<T>());
     }
+}
 
-    KNOWN_BUG("with D_k = 0 the a_ik / D_k is infinite and a_ik is dropped instead of lumped "
-              "into the diagonal, so w_1 = (1/2, 0)");
-    for(const auto& P : ext)
+// The F point 1 has only the strong F neighbour 2, whose strong C point 3 joins C^_1 = {3}
+// with a_13 = 0. D_2 = 0 (a_21 = 0, a_23 = 1), so a_12 is lumped and cancels the diagonal:
+// a_11 + a_12 = 0, which leaves the row without interpolation: w_13 = 0, so P does not
+// reproduce constants in row 1. hypre's BuildExtPIInterp skips the scaling instead and keeps
+// the numerator, which is 0 here too.
+//   row 2: C^_2 = {3}, weak a_24 lumped, w_23 = -a_23 / (a_22 + a_24) = 1
+TYPED_TEST(local_matrix_amg, rs_ext_interpolation_with_a_lumped_diagonal_of_zero)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = from_rows<T>(5,
+                                    {{{0, 1.0}, {1, -1.0}},
+                                     {{1, 1.0}, {2, -1.0}},
+                                     {{2, 1.0}, {3, 1.0}, {4, -2.0}},
+                                     {{2, -1.0}, {3, 1.0}},
+                                     {{2, -1.0}, {4, 1.0}}});
+    SetupInputs  in;
+    in.cf = {1, 2, 2, 1, 1};
+    in.S  = flags_at(ref, {{1, 2}, {2, 3}});
+
+    const Csr<T> expected
+        = from_rows<T>(3, {{{0, 1.0}}, {{1, 0.0}}, {{1, 1.0}}, {{1, 1.0}}, {{2, 1.0}}});
+    for(const auto& interpolation : ext_interpolations<T>())
     {
-        SCOPED_TRACE(P.first);
-        expect_interpolation(P.second, in.cf);
-        expect_near(dense(P.second), D, tol<T>());
+        if(interpolation.first != "ext+i" && interpolation.first != "ext+i FF1")
+        {
+            continue;
+        }
+        SCOPED_TRACE(interpolation.first);
+        const Csr<T> P = interpolated_on(TypeParam::backend, ref, in, interpolation.second);
+        expect_near(P, expected, tol<T>());
+    }
+}
+
+// The matrix of rs_ext_interpolation_without_distribution_through_a_strong_f_point with the
+// rows 0 and 1 on this process and the rows 2 to 4 on another, so that the strong F
+// neighbour 2 of 1 is the ghost column 0. The overloads with the ghost part get the strong
+// C points of the ghost rows (3 for row 2) and their full rows in global columns, as
+// GlobalMatrix::RSExtPIInterpolation() receives them. D_2 = 0 there too, so a_12 is lumped:
+//   row 1: atilde_11 = a_11 + a_12 = 1, w_1 = -(a_10, 0) / 1 = (1, 0)
+// with the weight 0 of the global C point 3 in the ghost part of P.
+TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a_ghost_f_point)
+{
+    using T               = typename TypeParam::value_type;
+    const Csr<T> interior = from_rows<T>(2, {{{0, 1.0}, {1, -1.0}}, {{0, -1.0}, {1, 2.0}}});
+    const Csr<T> ghost    = from_rows<T>(1, {{}, {{0, -1.0}}});
+
+    std::vector<bool> strong = flags_at(interior, {{1, 0}});
+    strong.push_back(true);
+
+    for(bool ff1 : {false, true})
+    {
+        SCOPED_TRACE(ff1 ? "ext+i FF1" : "ext+i");
+        auto A       = this->make(interior);
+        auto G       = this->make(ghost);
+        auto l2g     = make_local_vector(*A, std::vector<int64_t>{2});
+        auto cf      = make_local_vector(*A, std::vector<int>{1, 2, 2});
+        auto S       = make_local_vector(*A, strong);
+        auto bnd_ptr = make_local_vector(*A, std::vector<PtrType>{0, 1});
+        auto bnd_col = make_local_vector(*A, std::vector<int64_t>{3});
+        auto ext_ptr = make_local_vector(*A, std::vector<PtrType>{0, 3});
+        auto ext_col = make_local_vector(*A, std::vector<int64_t>{2, 3, 4});
+        auto ext_val = make_local_vector(*A, std::vector<T>{T(1), T(1), T(-2)});
+
+        auto           f2c       = this->template vector_like<int>(*A);
+        auto           ghost_col = this->template vector_like<int64_t>(*A);
+        LocalMatrix<T> P_int, P_gst;
+        f2c->Allocate("f2c", interior.n + 1);
+        P_int.CloneBackend(*A);
+        P_gst.CloneBackend(*A);
+
+        A->RSExtPIProlongNnz(
+            0, 2, ff1, *l2g, *cf, *S, *G, *bnd_ptr, *bnd_col, f2c.get(), &P_int, &P_gst);
+        A->RSExtPIProlongFill(0,
+                              2,
+                              ff1,
+                              *l2g,
+                              *f2c,
+                              *cf,
+                              *S,
+                              *G,
+                              *bnd_ptr,
+                              *bnd_col,
+                              *ext_ptr,
+                              *ext_col,
+                              *ext_val,
+                              &P_int,
+                              &P_gst,
+                              ghost_col.get());
+
+        expect_near(csr_of(P_int), from_rows<T>(1, {{{0, 1.0}}, {{0, 1.0}}}), tol<T>());
+
+        // The columns of the ghost part are set by GlobalMatrix from ghost_col
+        const Csr<T> P_ghost = csr_of(P_gst);
+        EXPECT_EQ(P_ghost.row_offset, (std::vector<PtrType>{0, 0, 1}));
+        expect_near(P_ghost.val, std::vector<T>{T(0)}, tol<T>());
+        EXPECT_EQ(values_of(*ghost_col), (std::vector<int64_t>{3}));
     }
 }
 

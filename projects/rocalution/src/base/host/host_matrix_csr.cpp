@@ -1262,6 +1262,19 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    PtrType HostMatrixCSR<ValueType>::LLDiagonal_(int ai) const
+    {
+        PtrType diag_idx = this->mat_.row_offset[ai];
+
+        while(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] < ai)
+        {
+            ++diag_idx;
+        }
+
+        return diag_idx;
+    }
+
+    template <typename ValueType>
     bool HostMatrixCSR<ValueType>::LLSolve(const BaseVector<ValueType>& in,
                                            BaseVector<ValueType>*       out) const
     {
@@ -1280,7 +1293,9 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
+
+            assert(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] == ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1293,7 +1308,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] / this->mat_.val[diag_idx];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -1330,7 +1345,7 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1343,7 +1358,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] * cast_diag->vec_[ai];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -3179,7 +3194,7 @@ namespace rocalution
             HostMatrixCSR<ValueType> tmp(this->local_backend_);
             tmp.CopyFrom(*this);
 
-            for(int i = 0; i < p; ++i)
+            for(int i = 1; i < p; ++i)
             {
                 this->SymbolicMatMatMult(tmp);
             }
@@ -8985,6 +9000,14 @@ namespace rocalution
                         // COVERAGE_EXCL_NO_MPI_STOP
                     }
 
+                    // Without couplings to distribute a_ik through, it is lumped into the
+                    // diagonal
+                    if(sum_l == zero)
+                    {
+                        sum_n += val_ik;
+                        continue;
+                    }
+
                     // Update sum over l with a_ik
                     sum_l = val_ik / sum_l;
 
@@ -9188,6 +9211,14 @@ namespace rocalution
                             }
                         }
 
+                        // Without couplings to distribute a_ik through, it is lumped into the
+                        // diagonal
+                        if(sum_l == zero)
+                        {
+                            sum_n += val_ik;
+                            continue;
+                        }
+
                         // Store a_ki, if present
                         ValueType val_ki = zero;
 
@@ -9272,8 +9303,10 @@ namespace rocalution
                 // COVERAGE_EXCL_NO_MPI_STOP
             }
 
-            // Precompute a_ii_tilde
-            ValueType a_ii_tilde = static_cast<ValueType>(-1) / (sum_n + sum_k + val_ii);
+            // Precompute a_ii_tilde. A zero diagonal, for example after lumping a_ik into it,
+            // leaves the row without interpolation
+            ValueType diagonal   = sum_n + sum_k + val_ii;
+            ValueType a_ii_tilde = diagonal == zero ? zero : static_cast<ValueType>(-1) / diagonal;
 
             // Entry point into P (interior)
             PtrType int_idx = cast_pi->mat_.row_offset[row];

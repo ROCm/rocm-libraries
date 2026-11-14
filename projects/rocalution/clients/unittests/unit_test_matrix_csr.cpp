@@ -1215,11 +1215,6 @@ TYPED_TEST(matrix_csr, symbolic_power)
     {
         SCOPED_TRACE("power " + std::to_string(p));
 
-        if(p > 8 && TypeParam::backend == Backend::Host)
-        {
-            KNOWN_BUG("above 8 it gives the pattern of A^(p+1)");
-        }
-
         auto A = this->make(ref);
         ASSERT_IN_LOOP(A != nullptr);
 
@@ -2084,5 +2079,25 @@ TEST(host_matrix_csr_DeathTest, ic_factorize_of_a_row_without_a_diagonal_ends_th
         auto A        = from_dense(3, 3, D).host_csr();
         auto inv_diag = host_vector(std::vector<double>(3, 0.0));
         EXPECT_FATAL_ERROR(A->ICFactorize(inv_diag.get()), "host_matrix_csr\\.cpp");
+    }
+}
+
+// Without the inverse diagonal, LLSolve divides by the diagonal of every row
+TEST(host_matrix_csr_DeathTest, ll_solve_of_a_row_without_a_diagonal_asserts)
+{
+    for(double upper : {-1.0, 0.0})
+    {
+        SCOPED_TRACE(upper != 0.0 ? "an entry above the diagonal" : "only an entry below it");
+        // clang-format off
+        const std::vector<double> D = {
+             4, -1,     0,
+            -1,  0, upper,
+             0, upper,  4,
+        };
+        // clang-format on
+        auto A   = from_dense(3, 3, D).host_csr();
+        auto in  = host_vector(std::vector<double>(3, 1.0));
+        auto out = host_vector(std::vector<double>(3, 0.0));
+        EXPECT_ASSERT_DEATH(A->LLSolve(*in, out.get()), "col\\[diag_idx\\] == ai");
     }
 }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -744,7 +744,6 @@ namespace rocalution
         // Temporary vectors on the current level
         VectorType* r  = this->r_level_[this->current_level_];
         VectorType* rc = this->t_level_[this->current_level_ + 1];
-        VectorType* rf = this->t_level_[this->current_level_];
         VectorType* xc = this->d_level_[this->current_level_ + 1];
         VectorType* s  = (this->scaling_) ? this->s_level_[this->current_level_] : NULL;
 
@@ -796,8 +795,8 @@ namespace rocalution
         op->Apply(*x, r);
         r->ScaleAdd(static_cast<ValueType>(-1), rhs);
 
-        // Copy s when scaling is enabled
-        if(this->scaling_ && this->current_level_ == 0)
+        // Keep a copy of the residual in s for the scaling factor (r, e) / (Ae, e)
+        if(this->scaling_ && this->current_level_ < this->levels_ - 2)
         {
             s->CopyFrom(*r);
         }
@@ -868,14 +867,7 @@ namespace rocalution
         // Scaling
         if(this->scaling_ == true && this->current_level_ < this->levels_ - 2)
         {
-            if(this->current_level_ == 0)
-            {
-                s->PointWiseMult(*r);
-            }
-            else
-            {
-                s->PointWiseMult(*r, *rf);
-            }
+            s->PointWiseMult(*r);
 
             factor = s->Reduce();
 
