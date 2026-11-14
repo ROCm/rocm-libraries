@@ -317,6 +317,9 @@ try
     std::string api_method_str  = "";
     std::string algo_method_str = "";
 
+    int         partitions_opt = 1;
+    std::string split_dim_str  = "N";
+
     bool verify = 0;
     bool ulp    = 0;
 
@@ -708,6 +711,19 @@ try
          "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
          "Options: c, mix, cpp, grouped_gemm_c.")
 
+        ("partitions",
+         value<int>(&partitions_opt)->default_value(1),
+         "Run each GEMM as slices on this many devices (device 0 .. partitions-1), one stream each, "
+         "with hipblaslt_ext::PartitionedGemm. The time is the full span, first launch to last "
+         "partition done. A, B, C and D stay in the device 0 buffers and the other partitions "
+         "reach them over peer access. Needs plain GEMM and the heuristic solution selection; "
+         "1 = off.")
+
+        ("split_dim",
+         value<std::string>(&split_dim_str)->default_value("N"),
+         "With --partitions: the dimension to split, M or N. The first partitions take size/partitions "
+         "and the last takes the rest.")
+
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
          "Print solution, kernel name and solution index.")
@@ -880,6 +896,19 @@ try
         hipblaslt_cerr << "Invalid api method: " << api_method_str << std::endl;
         return 1;
     }
+
+    if(partitions_opt < 1 || partitions_opt > 255)
+    {
+        hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
+        return 1;
+    }
+    if(split_dim_str != "M" && split_dim_str != "N" && split_dim_str != "m" && split_dim_str != "n")
+    {
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M or N)" << std::endl;
+        return 1;
+    }
+    arg.partitions = static_cast<uint8_t>(partitions_opt);
+    arg.split_dim  = split_dim_str[0] == 'm' || split_dim_str[0] == 'M' ? 'M' : 'N';
 
     if(algo_method_str.compare("heuristic") == 0)
     {

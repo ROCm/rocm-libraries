@@ -114,7 +114,7 @@ dimension to split, and the first ``N - 1`` partitions take ``size / N`` while t
 the remainder. hipBLASLt does not allocate or copy any matrix. A ``Placement`` hint per matrix
 tells the library how to read the pointers that the caller passes. See
 ``clients/samples/31_hipblaslt_gemm_partitioned_ext`` for an example and
-``hipblaslt-bench-partitioned`` to benchmark it. This version supports plain GEMM; the device
+``hipblaslt-bench --partitions`` to benchmark it. This version supports plain GEMM; the device
 user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED``.
 
 .. doxygenclass:: hipblaslt_ext::PartitionedGemm

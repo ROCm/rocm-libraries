@@ -132,6 +132,8 @@ void Arguments::init()
     devices = 0;
 
     a2a_world  = 1;
+    partitions = 1;
+    split_dim  = 'N';
     a2a_extent = 0;
 
     norm_check     = 0;

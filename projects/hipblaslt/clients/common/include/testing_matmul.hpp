@@ -1188,6 +1188,43 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     return {};
 }
 
+// Returns why --partitions cannot run this configuration, or an empty string when it can.
+// hipblaslt_ext::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
+inline std::string partitioned_unsupported_reason(const Arguments& arg,
+                                                  hipDataType      TiA,
+                                                  hipDataType      TiB,
+                                                  hipDataType      To)
+{
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess)
+        devices = 0;
+    if(int(arg.partitions) > devices)
+        return "--partitions " + std::to_string(int(arg.partitions)) + " needs that many devices, found "
+               + std::to_string(devices);
+    if(arg.split_dim != 'M' && arg.split_dim != 'N')
+        return "split_dim must be M or N";
+    if(arg.grouped_gemm > 0 || arg.batch_mode != 0)
+        return "partitions support a single strided-batched GEMM only";
+    if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
+       || arg.gradient || arg.scaleA != hipblaslt_scaling_format::none
+       || arg.scaleB != hipblaslt_scaling_format::none || arg.scaleC || arg.scaleD || arg.scaleE
+       || arg.scaleAlpha_vector || arg.device_scalar_alpha || arg.amaxScaleA || arg.amaxScaleB
+       || arg.amaxD)
+        return "partitions support a plain GEMM: no bias, activation, aux or scaling";
+    if(arg.swizzle_a || arg.swizzle_b)
+        return "partitions do not support swizzled A or B";
+    if(arg.rotating != 0)
+        return "partitions do not support rotating buffers";
+    if(arg.algo_method != 0)
+        return "partitions use the heuristic solution selection only (algo_method 0)";
+    if(arg.use_user_args)
+        return "partitions do not support user arguments";
+    for(hipDataType t : {TiA, TiB, To})
+        if(t == HIP_R_4F_E2M1 || isFp6Datatype(t))
+            return "partitions do not support sub-byte types";
+    return {};
+}
+
 // Returns why this process cannot select Stream-K solutions, or an empty string when it can.
 // TensileLite reads TENSILE_SOLUTION_SELECTION_METHOD once per process (Debug::Instance). A case's
 // tensile_solution_selection_method sets the variable per handle, after that read, so a case that
@@ -2006,6 +2043,20 @@ void testing_matmul(const Arguments& arg)
         }
     }
 
+    if(arg.partitions > 1)
+    {
+        const std::string reason = partitioned_unsupported_reason(arg, arg.a_type, arg.b_type, arg.c_type);
+        if(!reason.empty())
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << reason;
+#else
+            hipblaslt_cout << "Skipping partitions: " << reason << std::endl;
+            return;
+#endif
+        }
+    }
+
     if(arg.api_method == kApiMethodGroupedC)
     {
         const std::string reason = groupedCApiUnsupportedReason(arg);
@@ -2109,6 +2160,176 @@ private:
     hipStream_t m_stream = nullptr;
 };
 
+// --partitions N: one GEMM run as slices on devices 0..N-1 with hipblaslt_ext::PartitionedGemm.
+// Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
+// workspace, events). A, B, C and D stay in the caller's device 0 buffers (Placement::Shared) and
+// the other partitions reach them over peer access, so the copy-back, the check and the
+// reporting of testing_matmul see one full D. run() joins every partition's stream back into the
+// caller's stream, so a timer or an event on that stream covers the whole span.
+class PartitionedRun
+{
+public:
+    PartitionedRun(const Arguments& arg, hipblasLtHandle_t handle0, hipStream_t stream0,
+                   hipblasOperation_t transA, hipblasOperation_t transB)
+        : m_dim(arg.split_dim == 'M' ? hipblaslt_ext::SplitDim::M : hipblaslt_ext::SplitDim::N)
+    {
+        int previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        std::vector<hipblasLtHandle_t> handles{handle0};
+        m_streams.push_back(stream0);
+        check(hipEventCreate(&m_start), "hipEventCreate");
+        for(int i = 1; i < int(arg.partitions); i++)
+        {
+            check(hipSetDevice(i), "hipSetDevice");
+            m_handleOwners.push_back(std::make_unique<hipblaslt_local_handle>(arg));
+            handles.push_back(static_cast<hipblasLtHandle_t&>(*m_handleOwners.back()));
+            hipStream_t stream = nullptr;
+            check(hipStreamCreate(&stream), "hipStreamCreate");
+            m_streams.push_back(stream);
+            hipEvent_t stop = nullptr;
+            check(hipEventCreate(&stop), "hipEventCreate");
+            m_stops.push_back(stop);
+            // reach the device 0 buffers
+            hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
+            if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
+                throw std::runtime_error("no peer access from device " + std::to_string(i)
+                                         + " to device " + std::to_string(previous));
+            static_cast<void>(hipGetLastError());
+        }
+        check(hipSetDevice(previous), "hipSetDevice");
+        m_gemm = std::make_unique<hipblaslt_ext::PartitionedGemm>(handles,
+                                                                  transA,
+                                                                  transB,
+                                                                  arg.a_type,
+                                                                  arg.b_type,
+                                                                  arg.c_type,
+                                                                  arg.d_type,
+                                                                  arg.compute_type);
+    }
+
+    ~PartitionedRun()
+    {
+        int previous = 0;
+        static_cast<void>(hipGetDevice(&previous));
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            static_cast<void>(hipSetDevice(int(i)));
+            static_cast<void>(hipStreamSynchronize(m_streams[i]));
+            static_cast<void>(hipStreamDestroy(m_streams[i]));
+            static_cast<void>(hipEventDestroy(m_stops[i - 1]));
+            if(i - 1 < m_workspaces.size())
+                static_cast<void>(hipFree(m_workspaces[i - 1]));
+        }
+        static_cast<void>(hipSetDevice(previous));
+        static_cast<void>(hipEventDestroy(m_start));
+    }
+    PartitionedRun(const PartitionedRun&)            = delete;
+    PartitionedRun& operator=(const PartitionedRun&) = delete;
+
+    // The full problem; A, B, C and D are the device 0 buffers.
+    hipblasStatus_t setProblem(int64_t     m,
+                               int64_t     n,
+                               int64_t     k,
+                               int64_t     batch,
+                               int64_t     lda,
+                               int64_t     ldb,
+                               int64_t     ldc,
+                               int64_t     ldd,
+                               int64_t     strideA,
+                               int64_t     strideB,
+                               int64_t     strideC,
+                               int64_t     strideD,
+                               const void* a,
+                               const void* b,
+                               const void* c,
+                               void*       d,
+                               const void* alpha,
+                               const void* beta)
+    {
+        hipblaslt_ext::PartitionedGemmInputs in;
+        in.a     = {a};
+        in.b     = {b};
+        in.c     = {c};
+        in.d     = {d};
+        in.alpha = alpha;
+        in.beta  = beta;
+        using P  = hipblaslt_ext::Placement;
+        return m_gemm->setProblem(m, n, k, batch, lda, ldb, ldc, ldd, strideA, strideB, strideC,
+                                  strideD, m_dim, P::Shared, P::Shared, P::Shared, P::Shared, in);
+    }
+
+    hipblasStatus_t algoGetHeuristic(int                                            requestCount,
+                                     const hipblaslt_ext::GemmPreference&           pref,
+                                     std::vector<hipblasLtMatmulHeuristicResult_t>& results)
+    {
+        return m_gemm->algoGetHeuristic(requestCount, pref, results);
+    }
+
+    // The workspace size that every partition needs for `algo`, or a failure status.
+    hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t& algo, size_t& workspaceBytes)
+    {
+        std::vector<size_t> sizes;
+        auto                status = m_gemm->isAlgoSupported(algo, sizes);
+        workspaceBytes             = sizes.empty() ? 0 : *std::max_element(sizes.begin(), sizes.end());
+        return status;
+    }
+
+    // `workspace0` is partition 0's workspace (the caller's); the others are allocated here.
+    hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo, void* workspace0, size_t bytes)
+    {
+        std::vector<void*> workspaces{workspace0};
+        if(m_workspaces.empty())
+            for(size_t i = 1; i < m_streams.size(); i++)
+            {
+                int previous = 0;
+                check(hipGetDevice(&previous), "hipGetDevice");
+                check(hipSetDevice(int(i)), "hipSetDevice");
+                void* ptr = nullptr;
+                check(hipMalloc(&ptr, std::max<size_t>(bytes, 1)), "hipMalloc");
+                m_workspaces.push_back(ptr);
+                check(hipSetDevice(previous), "hipSetDevice");
+            }
+        workspaces.insert(workspaces.end(), m_workspaces.begin(), m_workspaces.end());
+        m_gemm->setMaxWorkspaceBytes(bytes);
+        return m_gemm->initialize(algo, workspaces, true, m_streams);
+    }
+
+    // One launch of every partition. Partitions wait for work already queued on stream0, and
+    // stream0 waits for all of them, so stream0 sees the whole span.
+    hipblasStatus_t run()
+    {
+        int previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
+        for(size_t i = 1; i < m_streams.size(); i++)
+            check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
+        auto status = m_gemm->run(m_streams);
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            check(hipSetDevice(int(i)), "hipSetDevice");
+            check(hipEventRecord(m_stops[i - 1], m_streams[i]), "hipEventRecord");
+            check(hipSetDevice(previous), "hipSetDevice");
+            check(hipStreamWaitEvent(m_streams[0], m_stops[i - 1], 0), "hipStreamWaitEvent");
+        }
+        return status;
+    }
+
+private:
+    static void check(hipError_t e, const char* what)
+    {
+        if(e != hipSuccess)
+            throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(e));
+    }
+
+    hipblaslt_ext::SplitDim                                m_dim;
+    std::vector<std::unique_ptr<hipblaslt_local_handle>>   m_handleOwners;
+    std::vector<hipStream_t>                               m_streams; // [0] is the caller's
+    std::vector<hipEvent_t>                                m_stops;
+    std::vector<void*>                                     m_workspaces; // partitions 1..N-1
+    hipEvent_t                                             m_start = nullptr;
+    std::unique_ptr<hipblaslt_ext::PartitionedGemm>        m_gemm;
+};
+
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
                               hipDataType      TiB,
@@ -2171,6 +2392,14 @@ void testing_matmul_with_bias(const Arguments& arg,
     HipEventOwner event_gpu_time_start_owner{event_gpu_time_start, &hipEventDestroy};
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
     HipEventOwner event_gpu_time_end_owner{event_gpu_time_end, &hipEventDestroy};
+
+    // --partitions N (validated in testing_matmul): the problem is run as slices on N devices.
+    const bool                      partitioned = arg.partitions > 1;
+    std::unique_ptr<PartitionedRun> partitionedRun;
+    if(partitioned)
+        partitionedRun = std::make_unique<PartitionedRun>(arg, handle, stream, transA, transB);
+    // Whether the C++ extension objects (Gemm, or PartitionedGemm) launch the problem.
+    const bool useExtPath = arg.use_ext || partitioned;
 
     // If input type is complex then alpha is set to complex datatype else compute type 
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
@@ -5419,7 +5648,48 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(!do_grouped_gemm)
         {
-            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            if(partitioned)
+            {
+                CHECK_HIPBLASLT_ERROR(partitionedRun->setProblem(M[0],
+                                                                 N[0],
+                                                                 K[0],
+                                                                 num_batches[0],
+                                                                 lda[0],
+                                                                 ldb[0],
+                                                                 ldc[0],
+                                                                 ldd[0],
+                                                                 stride_da[0],
+                                                                 stride_db[0],
+                                                                 stride_c[0],
+                                                                 stride_d[0],
+                                                                 dA[0].buf(),
+                                                                 dB[0].buf(),
+                                                                 dC[0].buf(),
+                                                                 (*dDp)[0].buf(),
+                                                                 descriptorAlphaForBlock(0),
+                                                                 &h_beta[0]));
+                CHECK_HIPBLASLT_ERROR(
+                    partitionedRun->algoGetHeuristic(requestAlgoCount, gemmPref, tmpAlgo));
+                heuristicResult.clear();
+                heuristicTuningIndex.clear();
+                for(int j = 0; j < tmpAlgo.size(); j++)
+                {
+                    size_t tmpWorkspaceSize = 0;
+                    if(partitionedRun->isAlgoSupported(tmpAlgo[j].algo, tmpWorkspaceSize)
+                       == HIPBLAS_STATUS_SUCCESS)
+                    {
+                        if(tmpWorkspaceSize <= max_workspace_size)
+                        {
+                            heuristicResult.push_back(tmpAlgo[j]);
+                            heuristicTuningIndex.push_back(0);
+                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                        }
+                    }
+                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+                }
+                returnedAlgoCount = heuristicResult.size();
+            }
+            else if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.use_ext_setproblem)
                 {
@@ -5688,6 +5958,26 @@ void testing_matmul_with_bias(const Arguments& arg,
     dWorkspace                = std::make_unique<device_vector<unsigned char>>(
         placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
+
+    // One initialize and one run of candidate `sol` on rotation block `b`, whichever API
+    // launches the problem: a Gemm, or the PartitionedGemm of --partitions.
+    auto initializeCandidate = [&](int32_t b, size_t sol, void* workspace) {
+        if(partitioned)
+        {
+            CHECK_HIPBLASLT_ERROR(
+                partitionedRun->initialize(heuristicResult[sol].algo, workspace, workspace_size));
+            return;
+        }
+        gemmVec[b].setMaxWorkspaceBytes(workspace_size);
+        CHECK_HIPBLASLT_ERROR(gemmVec[b].initialize(
+            heuristicResult[sol].algo, tuningVec[heuristicTuningIndex[sol]], workspace));
+    };
+    auto runCandidate = [&](int32_t b) {
+        if(partitioned)
+            CHECK_HIPBLASLT_ERROR(partitionedRun->run());
+        else
+            CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
+    };
 
     // The workspace the checked solutions use. A placed workspace moves for each solution, so
     // that solution's own workspace straddles the 4 GiB boundary.
@@ -6370,14 +6660,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(!do_grouped_gemm)
             {
-                if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                if(useExtPath && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
-                    gemmVec[0].setMaxWorkspaceBytes(workspace_size);
-                    CHECK_HIPBLASLT_ERROR(
-                        gemmVec[0].initialize(heuristicResult[sol].algo,
-                                              tuningVec[heuristicTuningIndex[sol]],
-                                              workspacePtr));
-                    CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream));
+                    initializeCandidate(0, sol, workspacePtr);
+                    runCandidate(0);
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
@@ -7297,9 +7583,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         else if(!do_grouped_gemm)
         {
             searchCfg.flush = arg.flush;
-            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            if(useExtPath && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                relaunch = [&](size_t) { CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream)); };
+                relaunch = [&](size_t) { runCandidate(0); };
                 search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -7311,23 +7597,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .prepare([&](size_t sol) {
                             prepareCandidate(sol);
                             for(int32_t b = 0; b < block_count; b++)
-                            {
-                                gemmVec[b].setMaxWorkspaceBytes(workspace_size);
-                                CHECK_HIPBLASLT_ERROR(
-                                    gemmVec[b].initialize(heuristicResult[sol].algo,
-                                                          tuningVec[heuristicTuningIndex[sol]],
-                                                          *dWorkspace));
-                            }
+                                initializeCandidate(b, sol, *dWorkspace);
                             startCotenant();
                         })
                         .cold([&](size_t, int32_t i) {
-                            CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
+                            runCandidate(i % block_count);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                                 copyOutputsToHost(gemm_count);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
-                            CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
+                            runCandidate(b);
                         }),
                     timingAbort);
             }

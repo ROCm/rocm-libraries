@@ -14,12 +14,6 @@ The following client executables are available for use with hipBLASLt:
 
 *  ``hipblaslt-bench``
 
-*  ``hipblaslt-bench-partitioned``, which benchmarks ``hipblaslt_ext::PartitionedGemm`` on the
-   devices of a partitioned GPU. For example, ``./hipblaslt-bench-partitioned -m 4096 -n 4096 -k 4096
-   --partitions 2 --split_dim N --verify --single`` splits one GEMM over devices 0 and 1,
-   compares every slice with the same GEMM on device 0, and also times that single-device run.
-   See ``--help`` for the placement options.
-
 To build these clients, follow the instructions in :doc:`Building and installing hipBLASLt <../install/building-installing-hipblaslt>`.
 After building the hipBLASLt clients, you can find them in the ``hipBLASLt/build/release/clients`` directory.
 
@@ -151,6 +145,8 @@ For more information, run the command with the ``--help`` option. The output of 
    --wgm <value>                      [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --flush                            Flush icache, only works for gemm.
    --uniform_summation_order <value>  Set the handle-level uniform summation order request for every API method. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. A YAML case's explicit 0 or 1 overrides the command-line value. When neither specifies a value, the library default for the device applies.
+   --partitions <value>               Run each GEMM as slices on this many devices (device 0 .. partitions-1), one stream each, with hipblaslt_ext::PartitionedGemm. A, B, C and D stay in the device 0 buffers and the other partitions reach them over peer access. Plain GEMM only, with the heuristic solution selection. The time is the full span, from the first launch to the last partition done.  (Default value is: 1)
+   --split_dim <value>                With --partitions: the dimension to split, M or N. The first partitions take size/partitions and the last takes the rest.  (Default value is: N)
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 

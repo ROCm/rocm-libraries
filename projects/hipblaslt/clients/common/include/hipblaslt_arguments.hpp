@@ -168,6 +168,10 @@ struct Arguments
     // bytes
     uint8_t devices;
     uint8_t a2a_world;
+    // Run one GEMM as slices on this many devices (hipblaslt_ext::PartitionedGemm); 1 = off.
+    uint8_t partitions;
+    // Dimension the slices split: M or N.
+    char split_dim;
 
     int8_t norm_check;
     int8_t allclose_check;
@@ -324,6 +328,8 @@ struct Arguments
     OPER(streams) SEP                \
     OPER(devices) SEP                \
     OPER(a2a_world) SEP              \
+    OPER(partitions) SEP             \
+    OPER(split_dim) SEP              \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \

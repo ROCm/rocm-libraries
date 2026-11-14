@@ -746,7 +746,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench
             hipblaslt-api-overhead
             hipblaslt-bench-groupedgemm-fixed-mk
-            hipblaslt-bench-partitioned
             hipblaslt-bench-extop-layernorm
             hipblaslt-bench-extop-matrixtransform
             hipblaslt-bench-extop-softmax
