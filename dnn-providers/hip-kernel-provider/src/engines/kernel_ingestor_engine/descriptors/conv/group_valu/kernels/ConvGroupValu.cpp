@@ -32,6 +32,8 @@
 //   GV_SW      stride along the width (forward);  GV_US  upsampling of in along the width
 //              (backward data: the graph's width stride);  GV_DW  dilation along the width;
 //              GV_PW  the kernel's width padding
+//   GV_UPROWS  1 when in is upsampled along the height or depth (backward data at a height or
+//              depth stride above 1): the per-row stride checks and the phase order
 //   GV_NW      waves a workgroup;  GV_WAVE  lanes a wave
 //   GV_VBX     bytes a load of in;  GV_VBY  bytes a store of out
 //   GV_RAGGED  1 when a lane's window can reach past the end of an input row (element loads, the
@@ -74,6 +76,9 @@
 #ifndef GV_DW
 #define GV_DW 1
 #endif
+#ifndef GV_UPROWS
+#define GV_UPROWS 0
+#endif
 #ifndef GV_PW
 #define GV_PW 1
 #endif
@@ -102,6 +107,7 @@ constexpr int FS = GV_FS;
 constexpr int TAPS = FD * FR * FS;
 constexpr int SW = GV_SW;
 constexpr int US = GV_US;
+constexpr bool UPROWS = GV_UPROWS != 0;
 constexpr int DWD = GV_DW;
 constexpr int PW = GV_PW;
 constexpr int NW = GV_NW;
@@ -506,8 +512,13 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvG
         const bool rowOk = row < rowEnd;
         const int n = row / rowsAnImage;
         const int within = row - n * rowsAnImage;
-        const int od = phased(within / a.ho, a.dOut, a.ud);
-        const int oy = phased(within - (within / a.ho) * a.ho, a.ho, a.uh);
+        int od = within / a.ho;
+        int oy = within - od * a.ho;
+        if constexpr(UPROWS)
+        {
+            od = phased(od, a.dOut, a.ud);
+            oy = phased(oy, a.ho, a.uh);
+        }
         const int dn = n - n0;
 
         // The input row every filter row (depth tap x row) reads, and whether it exists: inside
@@ -519,16 +530,16 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvG
         for(int t = 0; t < FD; ++t)
         {
             const int md = od * a.sd - a.pd + t * a.dd;
-            const int id = md / a.ud;
-            const bool dIn
-                = (md % a.ud == 0) & (static_cast<unsigned>(id) < static_cast<unsigned>(a.di));
+            const int id = UPROWS ? md / a.ud : md;
+            const bool dIn = (!UPROWS || md % a.ud == 0)
+                             & (static_cast<unsigned>(id) < static_cast<unsigned>(a.di));
 #pragma unroll
             for(int r = 0; r < FR; ++r)
             {
                 const int mh = oy * a.sh - a.ph + r * a.dh;
-                const int iy = mh / a.uh;
+                const int iy = UPROWS ? mh / a.uh : mh;
                 const int fr = t * FR + r;
-                rowIn[fr] = rowOk & dIn & (mh % a.uh == 0)
+                rowIn[fr] = rowOk & dIn & (!UPROWS || mh % a.uh == 0)
                             & (static_cast<unsigned>(iy) < static_cast<unsigned>(a.hi));
                 rowOff[fr] = id * isd + iy * ish;
                 rowAny[fr] = anyLane(rowIn[fr] & colY);

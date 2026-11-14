@@ -20,7 +20,8 @@
 // 3-D: a tile is also one depth tap t (the grid's tiles are fd x the plane's), its reduction rows
 // images x output depth x output rows; a row reads the x depth slice od sd - pd + t dd, and a
 // row whose slice is depth padding adds nothing. The depth is a runtime argument: the 2-D configs
-// serve every depth filter. (The row ring stays 2-D.)
+// serve every depth filter (GVW_3D compiles the depth in; 2-D problems run without it). (The row
+// ring stays 2-D.)
 //
 // One HIPRTC compile per config and alignment class; every shape is a runtime argument
 // (ConvGroupValuWrwArgs.h).
@@ -39,6 +40,7 @@
 //   GVW_COLMASK 1 when a lane's output columns can reach past the output row (wo not a multiple of
 //               P): the products of those columns are dropped (their x operand selected to 0), so
 //               an inf / NaN in x never meets an output column the convolution does not have
+//   GVW_3D      1 for a 3-D problem: tiles per depth tap, rows over the output depth (see above)
 //   GVW_RING    channels-first, unit height stride and dilation: a lane group walks consecutive
 //               output rows of one image with the filter's input rows in a register ring, so
 //               each input row is read once (not once a filter row), and the next row's loads
@@ -96,6 +98,9 @@
 #ifndef GVW_RING
 #define GVW_RING 0
 #endif
+#ifndef GVW_3D
+#define GVW_3D 0
+#endif
 #ifndef GVW_COLMASK
 #define GVW_COLMASK 0
 #endif
@@ -116,6 +121,7 @@ constexpr int WAVE = GVW_WAVE;
 constexpr bool RAGGED = GVW_RAGGED != 0;
 constexpr bool DOT2 = GVW_DOT2 != 0;
 constexpr bool RING = GVW_RING != 0;
+constexpr bool D3 = GVW_3D != 0;
 constexpr bool COLMASK = GVW_COLMASK != 0;
 constexpr bool NCHW = GVW_LAYOUT == 1;
 
@@ -368,7 +374,7 @@ __device__ inline void halve(float (&v)[NAP], int lane)
 /// Writes the sum @p value of filter element @p e of tile @p tile to dw, in dw's element type.
 __device__ inline void writeDw(const ConvGroupValuWrwArgs& a, int tile, int e, float value)
 {
-    const int t = tile / a.tilesPlane;
+    const int t = D3 ? tile / a.tilesPlane : 0;
     const int planeTile = tile - t * a.tilesPlane;
     const int g = planeTile / (a.cBlocks * a.kBlocks);
     const int rem = planeTile - g * (a.cBlocks * a.kBlocks);
@@ -382,7 +388,7 @@ __device__ inline void writeDw(const ConvGroupValuWrwArgs& a, int tile, int e, f
     const long long cc = static_cast<long long>(cb) * CB + c;
     const long long rr = a.flip != 0 ? FR - 1 - r : r;
     const long long ss = a.flip != 0 ? FS - 1 - s : s;
-    const long long tt = a.flip != 0 ? a.fd - 1 - t : t;
+    const long long tt = D3 ? (a.flip != 0 ? a.fd - 1 - t : t) : 0;
     Raw* dw = static_cast<Raw*>(a.dw);
     dw[kk * a.ws[0] + cc * a.ws[1] + tt * a.wsd + rr * a.ws[2] + ss * a.ws[3]] = fromFloat(value);
 }
@@ -828,7 +834,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
 {
     const int tile = static_cast<int>(blockIdx.x);
     const int split = static_cast<int>(blockIdx.y);
-    const int tap = tile / a.tilesPlane; // the depth tap
+    const int tap = D3 ? tile / a.tilesPlane : 0; // the depth tap
     const int planeTile = tile - tap * a.tilesPlane;
     const int g = planeTile / (a.cBlocks * a.kBlocks);
     const int rem = planeTile - g * (a.cBlocks * a.kBlocks);
@@ -970,16 +976,21 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
             const int row = pr + slot;
             const int n = row / a.rowsAnImage;
             const int plane = row - n * a.rowsAnImage;
-            const int od = plane / a.ho;
-            const int oy = plane - od * a.ho;
+            int od = 0;
+            int oy = plane;
+            if constexpr(D3)
+            {
+                od = plane / a.ho;
+                oy = plane - od * a.ho;
+            }
             const int dn = n - n0;
             // The x depth slice this row's tap reads; outside x (depth padding) the row adds
             // nothing.
             const int id = od * a.sd - a.pd + tap * a.dd;
             const bool rowOk
-                = (row < rowEnd) & (static_cast<unsigned>(id) < static_cast<unsigned>(a.di));
-            const int xImg = dn * xsn + id * xsd;
-            const int yImg = dn * ysn + od * ysd;
+                = (row < rowEnd) & (!D3 || static_cast<unsigned>(id) < static_cast<unsigned>(a.di));
+            const int xImg = D3 ? dn * xsn + id * xsd : dn * xsn;
+            const int yImg = D3 ? dn * ysn + od * ysd : dn * ysn;
 
             if constexpr(DOT2)
             {

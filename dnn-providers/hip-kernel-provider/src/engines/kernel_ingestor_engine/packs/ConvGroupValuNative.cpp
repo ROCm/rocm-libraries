@@ -239,6 +239,7 @@ public:
         const bool bwd = config.direction == "BWD";
         options.add("GV_SW", bwd ? 1 : config.sw);
         options.add("GV_US", bwd ? config.sw : 1);
+        options.add("GV_UPROWS", plan.args.uh > 1 || plan.args.ud > 1 ? 1 : 0);
         options.add("GV_DW", config.dw);
         options.add("GV_PW", plan.kernelPw);
         options.add("GV_NW", config.nw);
