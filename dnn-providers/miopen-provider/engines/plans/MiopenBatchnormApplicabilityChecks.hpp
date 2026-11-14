@@ -136,6 +136,12 @@ BatchnormTensorGroups batchnormTensorGroups(
 bool hasPairedSavedStatistics(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr);
 
+// Running statistics must be a complete set (prev/next running mean and variance plus momentum)
+// and saved mean / inv_variance a pair. When running statistics are used or the training node
+// is fused with an activation, the saved pair must also be present. Throws BAD_PARAM otherwise.
+void checkBatchnormFwdTrainingStatisticsSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr, bool hasActivation);
+
 void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const std::unordered_map<int64_t,

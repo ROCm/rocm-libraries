@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <set>
+#include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -91,7 +94,9 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
 }
 
 // Generic IO-tensor validation shared by every unary pointwise activation:
-// non-virtual, FLOAT/HALF only, matching dtypes, rank in [1, 4], matching element counts.
+// non-virtual, FLOAT/HALF only, matching dtypes, rank in [1, 4], matching element counts,
+// identical dims on input and output, identical memory layout when both are packed, and
+// packed rank-1 tensors.
 // `opName` is used only to make exception/log messages activation-specific
 // (e.g. "Relu plan builder: ...").
 void checkTensorsSupported(
@@ -139,6 +144,43 @@ void checkTensorsSupported(
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             opName + " plan builder: input and output tensors must have the same element count");
+    }
+
+    // MIOpen walks two packed tensors flat, so the logical index of an element must sit at the
+    // same memory offset in the input and the output. Strides of unit dims never contribute to
+    // an offset. A tensor that is not packed is served by the strided activation solver, which
+    // takes the strides of both tensors.
+    const std::vector<int64_t> inDims(inputDims->begin(), inputDims->end());
+    const std::vector<int64_t> outDims(outputDims->begin(), outputDims->end());
+    const std::vector<int64_t> inStrides(inputTensor.strides()->begin(),
+                                         inputTensor.strides()->end());
+    const std::vector<int64_t> outStrides(outputTensor.strides()->begin(),
+                                          outputTensor.strides()->end());
+    bool sameLayout = inDims == outDims && inStrides.size() == outStrides.size()
+                      && inDims.size() == inStrides.size();
+    const bool bothPacked = sameLayout
+                            && hipdnn_data_sdk::utilities::isTensorPacked(inDims, inStrides)
+                            && hipdnn_data_sdk::utilities::isTensorPacked(outDims, outStrides);
+    for(size_t i = 0; bothPacked && sameLayout && i < inDims.size(); ++i)
+    {
+        sameLayout = inDims[i] == 1 || inStrides[i] == outStrides[i];
+    }
+    if(!sameLayout)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: input and output tensors must have the same dims and strides");
+    }
+
+    // MIOpen indexes strides[rank - 2] of tensors it cannot treat as packed, which does not
+    // exist at rank 1.
+    if(rank == 1
+       && (!hipdnn_data_sdk::utilities::isTensorPacked(inDims, inStrides)
+           || !hipdnn_data_sdk::utilities::isTensorPacked(outDims, outStrides)))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: rank-1 tensors must be packed");
     }
 }
 

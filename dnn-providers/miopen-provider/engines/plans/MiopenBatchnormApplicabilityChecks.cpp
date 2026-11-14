@@ -1,8 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <numeric>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -533,6 +537,31 @@ bool hasPairedSavedStatistics(
 namespace
 {
 
+// Batchnorm reads x, y, scale, bias and the statistics from device buffers. A pass-by-value role
+// is legal only for the epsilon and momentum scalars, which are not part of any tensor group.
+void checkBuffersNotPassByValue(
+    const std::vector<std::vector<int64_t>>& tensorIdGroups,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    for(const auto& group : tensorIdGroups)
+    {
+        for(const auto uid : group)
+        {
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(
+                   &miopen_utils::findTensorAttributes(tensorMap, uid)))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "Batchnorm does not support pass-by-value tensors for device-buffer roles "
+                    "(tensor uid "
+                        + std::to_string(uid) + ")");
+            }
+        }
+    }
+}
+
 void checkBatchnormTensorConfigSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
@@ -543,6 +572,8 @@ void checkBatchnormTensorConfigSupported(
         tensorMap,
     bool isTraining)
 {
+    checkBuffersNotPassByValue({ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds},
+                               tensorMap);
     checkTensorLayoutsAndDimsSupported(tensorMap);
     checkTensorDataTypesSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap);
@@ -550,6 +581,46 @@ void checkBatchnormTensorConfigSupported(
 }
 
 } // namespace
+
+// The training plan honours running statistics only as a complete set, and saved mean /
+// inv_variance only as a pair; any other subset would be dropped silently at execute time.
+// The running-statistics (V3) and activation (V2) MIOpen entry points dereference the saved
+// statistics descriptors, so those paths additionally require the saved pair to be present.
+void checkBatchnormFwdTrainingStatisticsSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr, bool hasActivation)
+{
+    const std::array<bool, 5> runningStatsPresent
+        = {bnAttr.prev_running_mean_tensor_uid().has_value(),
+           bnAttr.prev_running_variance_tensor_uid().has_value(),
+           bnAttr.momentum_tensor_uid().has_value(),
+           bnAttr.next_running_mean_tensor_uid().has_value(),
+           bnAttr.next_running_variance_tensor_uid().has_value()};
+    const auto runningStatsCount
+        = std::count(runningStatsPresent.begin(), runningStatsPresent.end(), true);
+    if(runningStatsCount != 0
+       && runningStatsCount != static_cast<std::ptrdiff_t>(runningStatsPresent.size()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm running statistics require prev/next running mean, prev/next running "
+            "variance and momentum together");
+    }
+
+    if(!hasPairedSavedStatistics(bnAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm saved mean and inv_variance must be provided together");
+    }
+
+    if((runningStatsCount != 0 || hasActivation) && !bnAttr.mean_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm training with running statistics or a fused activation requires saved "
+            "mean and inv_variance");
+    }
+}
 
 void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
@@ -720,13 +791,24 @@ void checkBatchnormActivationModeSupported(
        == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
                  : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
-        if(!miopen_utils::hasLeakyReluSlope(activAttr))
+        if(miopen_utils::hasLeakyReluSlope(activAttr))
         {
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused activation does not support Leaky ReLU.");
         }
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fused activation does not support Leaky ReLU.");
+
+        // MIOpen has no activation for a shifted lower knee: without an upper clip a non-zero
+        // lower clip cannot be mapped (see MiopenUtils::mapPointwiseModeToMiopenActivation).
+        if(!activAttr.relu_upper_clip().has_value() && activAttr.relu_lower_clip().has_value()
+           && *activAttr.relu_lower_clip() != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused ReLU with a non-zero lower_clip and no upper_clip is not "
+                "supported.");
+        }
+        return;
     }
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(

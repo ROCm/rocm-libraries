@@ -2786,6 +2786,30 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormFwdActivationModeSup
          flatbuffers::Optional<double>(0.0),
          flatbuffers::Optional<double>(6.0),
          flatbuffers::Optional<double>(0.01)},
+        {"AcceptsClampWithNonZeroLowerClip",
+         true,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+         flatbuffers::Optional<double>(0.1),
+         flatbuffers::Optional<double>(6.0),
+         flatbuffers::nullopt},
+        {"RejectsReluLowerClipOnly",
+         false,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+         flatbuffers::Optional<double>(0.1),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
+        {"RejectsNegativeReluLowerClipOnly",
+         false,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+         flatbuffers::Optional<double>(-0.1),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
+        {"AcceptsReluZeroLowerClipOnly",
+         true,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+         flatbuffers::Optional<double>(0.0),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
         {"RejectsSigmoid",
          false,
          hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
@@ -2849,6 +2873,30 @@ inline std::vector<ActivationModeTestCase> getCheckBatchnormBwdActivationModeSup
          flatbuffers::nullopt,
          flatbuffers::nullopt,
          flatbuffers::Optional<double>(0.01)},
+        {"AcceptsClampWithNonZeroLowerClipBwd",
+         true,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+         flatbuffers::Optional<double>(0.1),
+         flatbuffers::Optional<double>(6.0),
+         flatbuffers::nullopt},
+        {"RejectsReluLowerClipOnlyBwd",
+         false,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+         flatbuffers::Optional<double>(0.1),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
+        {"RejectsNegativeReluLowerClipOnlyBwd",
+         false,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+         flatbuffers::Optional<double>(-0.1),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
+        {"AcceptsReluZeroLowerClipOnlyBwd",
+         true,
+         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+         flatbuffers::Optional<double>(0.0),
+         flatbuffers::nullopt,
+         flatbuffers::nullopt},
         {"RejectsSigmoidBwd",
          false,
          hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
@@ -4313,6 +4361,172 @@ INSTANTIATE_TEST_SUITE_P(EveryRunningStatistic,
                          [](const ::testing::TestParamInfo<RunningStatisticCase>& info) {
                              return std::string(info.param.tensorName);
                          });
+
+// --- Device-buffer roles must not be pass-by-value ---
+
+struct BufferRoleCase
+{
+    const char* tensorName;
+};
+
+class TestCheckBatchnormTrainingBufferRoles : public ::testing::TestWithParam<BufferRoleCase>
+{
+protected:
+    static bool isSupported(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto* attrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+        EXPECT_NE(attrs, nullptr);
+        try
+        {
+            checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap());
+            return true;
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        {
+            return false;
+        }
+    }
+};
+
+TEST_P(TestCheckBatchnormTrainingBufferRoles, DeclinesRuntimePassByValueBuffer)
+{
+    EXPECT_TRUE(isSupported(createTrainingGraphWithAllRunningStats()));
+
+    const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        createTrainingGraphWithAllRunningStats(), [&](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == GetParam().tensorName)
+                {
+                    tensor->is_runtime_pass_by_value = true;
+                }
+            }
+        });
+    EXPECT_FALSE(isSupported(builder));
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryBufferRole,
+                         TestCheckBatchnormTrainingBufferRoles,
+                         ::testing::Values(BufferRoleCase{"x"},
+                                           BufferRoleCase{"y"},
+                                           BufferRoleCase{"scale"},
+                                           BufferRoleCase{"bias"},
+                                           BufferRoleCase{"mean"},
+                                           BufferRoleCase{"inv_variance"},
+                                           BufferRoleCase{"prev_running_mean"},
+                                           BufferRoleCase{"next_running_variance"}),
+                         [](const ::testing::TestParamInfo<BufferRoleCase>& info) {
+                             return std::string(info.param.tensorName);
+                         });
+
+TEST(TestCheckBatchnormBufferRoles, AcceptsRuntimeEpsilonAndMomentumScalars)
+{
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1}, {1, 3, 14, 14}, true, false, true, true, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto* attrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_NO_THROW(checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap()));
+}
+
+TEST(TestCheckBatchnormBufferRoles, FusedTrainingDeclinesPassByValueBuffer)
+{
+    const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true),
+        [](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == "scale")
+                {
+                    tensor->is_runtime_pass_by_value = true;
+                }
+            }
+        });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto* bnAttrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+    const auto* actAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(bnAttrs, nullptr);
+    ASSERT_NE(actAttrs, nullptr);
+
+    EXPECT_THROW(checkBatchnormFwdTrainingActivationTensorConfigSupported(
+                     *bnAttrs, *actAttrs, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// --- Saved statistics policy of the fwd-training builder ---
+
+class TestCheckBatchnormFwdTrainingStatistics : public ::testing::Test
+{
+protected:
+    // True when the statistics policy accepts the graph; `mutate` edits the attributes.
+    template <typename Mutate>
+    static bool isSupported(const flatbuffers::FlatBufferBuilder& source,
+                            bool hasActivation,
+                            Mutate&& mutate)
+    {
+        const auto builder
+            = hipdnn_test_sdk::utilities::mutateGraph(source, [&](fb::GraphT& graph) {
+                  mutate(*graph.nodes.at(0)->attributes.AsBatchnormAttributes());
+              });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto* attrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+        EXPECT_NE(attrs, nullptr);
+        try
+        {
+            checkBatchnormFwdTrainingStatisticsSupported(*attrs, hasActivation);
+            return true;
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+        {
+            return false;
+        }
+    }
+
+    static void dropSavedStatistics(fb::BatchnormAttributesT& attrs)
+    {
+        attrs.mean_tensor_uid = flatbuffers::nullopt;
+        attrs.inv_variance_tensor_uid = flatbuffers::nullopt;
+    }
+
+    static void keep(fb::BatchnormAttributesT& /*attrs*/) {}
+};
+
+TEST_F(TestCheckBatchnormFwdTrainingStatistics, RunningStatisticsRequireSavedPair)
+{
+    EXPECT_TRUE(isSupported(createTrainingGraphWithAllRunningStats(), false, keep));
+    EXPECT_FALSE(isSupported(createTrainingGraphWithAllRunningStats(), false, dropSavedStatistics));
+}
+
+TEST_F(TestCheckBatchnormFwdTrainingStatistics, ActivationRequiresSavedPair)
+{
+    EXPECT_TRUE(isSupported(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(), true, keep));
+    EXPECT_FALSE(isSupported(hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+                             true,
+                             dropSavedStatistics));
+}
+
+TEST_F(TestCheckBatchnormFwdTrainingStatistics, StandaloneTrainingAcceptsAbsentSavedPair)
+{
+    EXPECT_TRUE(isSupported(hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+                            false,
+                            dropSavedStatistics));
+}
+
+TEST_F(TestCheckBatchnormFwdTrainingStatistics, DeclinesUnpairedSavedStatistics)
+{
+    EXPECT_FALSE(isSupported(hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+                             false,
+                             [](fb::BatchnormAttributesT& attrs) {
+                                 attrs.inv_variance_tensor_uid = flatbuffers::nullopt;
+                             }));
+}
 
 } // namespace
 

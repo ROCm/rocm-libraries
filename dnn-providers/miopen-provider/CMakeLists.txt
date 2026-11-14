@@ -215,6 +215,7 @@ add_library(
     engines/plans/MiopenBinaryPointwiseChecks.cpp
     engines/plans/MiopenBinaryPointwisePlan.cpp
     engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
+    engines/plans/MiopenConvApplicabilityChecks.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
