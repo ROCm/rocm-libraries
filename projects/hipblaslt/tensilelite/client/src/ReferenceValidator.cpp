@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <sstream>
 
 namespace TensileLite
@@ -167,6 +168,11 @@ namespace TensileLite
                                                                                       solution))
                         continue;
                     ScopedTimer timer("cpu_reference_gemm_per_solution");
+                    struct PerSolutionScope
+                    {
+                        PerSolutionScope() { g_inPerSolutionReference = true; }
+                        ~PerSolutionScope() { g_inPerSolutionReference = false; }
+                    } perSolutionScope;
                     SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }
@@ -221,10 +227,15 @@ namespace TensileLite
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    auto reference
-                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]);
-                    auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
-                    rv             = validate(*problem, reference, result);
+                    // These copy the whole ContractionInputs structs (including their vectors).
+                    std::optional<ContractionInputs> reference;
+                    std::optional<ContractionInputs> result;
+                    {
+                        ScopedTimer timer("validate_inputs_copy");
+                        reference.emplace(dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]));
+                        result.emplace(dynamic_cast<ContractionInputs const&>(*inputs));
+                    }
+                    rv = validate(*problem, *reference, *result);
                 }
                 else
                 {
@@ -487,11 +498,13 @@ namespace TensileLite
             if(problem.tensors().empty())
                 return false;
 
+            ScopedTimer validateTotalTimer("validate_total");
             bool rv = true;
 
             if(m_printAny)
                 printTensors(problem, reference, result);
 
+            auto const validateSetupStart = TimingClock::now();
             auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
             bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
@@ -505,6 +518,7 @@ namespace TensileLite
             } else if (isTF32x1) {
                 threshold = 0.3 * sqrt(double(k));
             }
+            recordTimingSince("validate_setup", validateSetupStart);
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -921,6 +935,7 @@ namespace TensileLite
                                                    size_t                  validationStride,
                                                    double                  threshold)
         {
+            ScopedTimer checkTypedTimer("validate_check_results_typed");
             size_t elementsToCopy       = tensor.totalAllocatedElements();
             size_t elementsOffsetToCopy = 0;
             size_t elementsBeforeData   = 0;
@@ -951,7 +966,10 @@ namespace TensileLite
                 throw std::runtime_error(ss.str());
             }
 
-            allocateResultBuffer(bytesToCopy);
+            {
+                ScopedTimer timer("validate_result_buffer_alloc");
+                allocateResultBuffer(bytesToCopy);
+            }
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 
@@ -1066,8 +1084,11 @@ namespace TensileLite
                 forEachElement(tensor, reference, resultData, validationStride, comparePrint);
             }
 
-            compareValid.report();
-            compareInvalid.report();
+            {
+                ScopedTimer timer("validate_report");
+                compareValid.report();
+                compareInvalid.report();
+            }
 
             if(compareValid.error() || compareInvalid.error())
             {

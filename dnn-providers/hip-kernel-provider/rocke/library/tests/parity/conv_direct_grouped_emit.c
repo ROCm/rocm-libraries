@@ -23,7 +23,12 @@
  * channel-packed cpl > 1 forms; from index 179 the depthwise dgrad kernels:
  * rocke_direct_depthwise_dgrad_stream_spec_t, scalar and channel-packed, and
  * rocke_direct_depthwise_tiled_spec_t with dgrad = true on large, non-square
- * and per-axis-padded filters) identically to the Python emitter
+ * and per-axis-padded filters; from index 201 the fp32-storage (fp32 / tf32)
+ * non-grouped spec; from index 218 the fp32-storage configs of the grouped
+ * kernels, see make_f32_cfg; from index 318 the gfx1250 wave32 and
+ * image-per-block wgrad spec, from index 349 the depthwise wgrad spec and
+ * from index 356 the small-C wgrad stems of the AOT grid) identically to the
+ * Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -71,7 +76,8 @@ enum
     KIND_WGRAD_GATHER = 20,
     KIND_DW_WGRAD_MFMA = 21,
     KIND_GROUPED_WGRAD_MFMA = 22,
-    KIND_DW_DGRAD_STREAM = 23
+    KIND_DW_DGRAD_STREAM = 23,
+    KIND_DW_WGRAD = 24
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -101,6 +107,12 @@ enum
  * the bf16 4c ones: see _wave32_spec in the Python emitter. The depthwise
  * dgrad configs 179..200 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
 #define WAVE32_CFG_BASE 166
+/* fp32-storage (fp32 / tf32) non-grouped configs 201..217 follow the depthwise
+ * dgrad ones: see _nongrouped_f32_spec in the Python emitter. */
+#define NONGROUPED_F32_CFG_BASE 201
+/* fp32-storage configs of the grouped kernels, 218.., after the non-grouped
+ * ones: see _f32_spec in the Python emitter. */
+#define F32_CFG_BASE 218
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
  * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
@@ -149,6 +161,465 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
     }
     s4->problem = p;
     return 0;
+}
+
+/* gfx1250 (wave32) direct wgrad configs 318..348 follow the fp32-storage
+ * ones. */
+#define WGRAD_W32_CFG_BASE 318
+/* Direct depthwise wgrad configs follow the 31 wave32 wgrad ones. */
+#define DW_WGRAD_CFG_BASE 349
+/* gfx1250 small-C wgrad stems of the AOT grid follow the 7 depthwise wgrad
+ * ones. */
+#define WGRAD_STEM_CFG_BASE 356
+
+/* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
+ * W=13, groups = C, cpg = kpg. */
+static rocke_direct_conv_problem_t
+    mk_dw_wgrad_problem(int C, int F, int stride, int PAD, const char* dtype, int cpg)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 2;
+    p.H = 9;
+    p.W = 13;
+    p.groups = C;
+    p.cpg = cpg;
+    p.kpg = cpg;
+    p.KH = F;
+    p.KW = F;
+    p.PAD = PAD;
+    p.stride = stride;
+    p.dtype = dtype;
+    return p;
+}
+
+/* Direct depthwise wgrad configs, emitted as DW_WGRAD_CFG_BASE + idx (see
+ * _dw_wgrad_spec in the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_dw_wgrad_cfg(int idx, rocke_direct_depthwise_wgrad_spec_t* s, const char** arch)
+{
+    *s = rocke_direct_depthwise_wgrad_spec_default();
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        /* (a) 3x3 stride 1, bf16, two rows per wave over four replicas. */
+        s->problem = mk_dw_wgrad_problem(64, 3, 1, 1, "bf16", 1);
+        s->wave_size = 32;
+        s->waves = 4;
+        s->rows_per_wave = 2;
+        s->wo_chunk = 4;
+        s->ws_replicas = 4;
+        return 0;
+    case 1:
+        /* (b) 7x7 over four filter-row groups, 8 B loads, no prefetch. */
+        s->problem = mk_dw_wgrad_problem(32, 7, 1, 3, "fp16", 1);
+        s->wave_size = 32;
+        s->chan_per_lane = 4;
+        s->rows_per_wave = 1;
+        s->r_split = 4;
+        s->prefetch = 0;
+        return 0;
+    case 2:
+        /* (c) 3x3 stride 2 without the carried window, 16 B loads. */
+        s->problem = mk_dw_wgrad_problem(48, 3, 2, 1, "bf16", 1);
+        s->wave_size = 32;
+        s->chan_per_lane = 8;
+        s->waves = 3;
+        s->rows_per_wave = 3;
+        s->wo_chunk = 3;
+        s->r_split = 3;
+        s->carry = 0;
+        return 0;
+    case 3:
+        /* (d) wave64 (gfx950), 5x5 stride 2, a single replica. */
+        s->problem = mk_dw_wgrad_problem(128, 5, 2, 2, "fp16", 1);
+        s->waves = 4;
+        s->rows_per_wave = 2;
+        s->ws_replicas = 1;
+        *arch = "gfx950";
+        return 0;
+    case 4:
+        /* (e) Must reject: not depthwise (cpg = 2). */
+        s->problem = mk_dw_wgrad_problem(32, 3, 1, 1, "fp16", 2);
+        *arch = "gfx950";
+        return 0;
+    case 5:
+        /* (f) Must reject: wave_size 32 on wave64 gfx950. */
+        s->problem = mk_dw_wgrad_problem(64, 3, 1, 1, "fp16", 1);
+        s->wave_size = 32;
+        *arch = "gfx950";
+        return 0;
+    case 6:
+        /* (g) Must reject: the 14 waves' 49-tap fp32 tiles exceed the LDS. */
+        s->problem = mk_dw_wgrad_problem(256, 7, 1, 3, "fp16", 1);
+        s->wave_size = 32;
+        s->chan_per_lane = 8;
+        s->waves = 14;
+        s->r_split = 7;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Problem helper mirroring prob() in the Python _wgrad_w32_spec: N=2, H=8
+ * (configs that pass H= override it after the call), W=37 (a ragged last wo
+ * tile), stride 1. */
+static rocke_direct_conv_problem_t
+    mk_w32_problem(int groups, int cpg, int kpg, int KH, int KW, int PAD, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 2;
+    p.H = 8;
+    p.W = 37;
+    p.groups = groups;
+    p.cpg = cpg;
+    p.kpg = kpg;
+    p.KH = KH;
+    p.KW = KW;
+    p.PAD = PAD;
+    p.stride = 1;
+    p.dtype = dtype;
+    return p;
+}
+
+/* Problem helper mirroring sprob() in the Python _wgrad_w32_spec: the
+ * small-C configs' one-group, F x F problem at any stride, N=2, H=13, W=37. */
+static rocke_direct_conv_problem_t
+    mk_w32_sc_problem(int cpg, int kpg, int F, int stride, int PAD, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 2;
+    p.H = 13;
+    p.W = 37;
+    p.groups = 1;
+    p.cpg = cpg;
+    p.kpg = kpg;
+    p.KH = F;
+    p.KW = F;
+    p.PAD = PAD;
+    p.stride = stride;
+    p.dtype = dtype;
+    return p;
+}
+
+/* gfx1250 small-C wgrad stems, emitted as WGRAD_STEM_CFG_BASE + idx (see
+ * _wgrad_stem_spec in the Python emitter): 3x3 stems with the uniform wave
+ * index off. Returns 0 on success, -1 if unknown. */
+static int make_wgrad_stem_cfg(int idx, rocke_direct_conv_wgrad_spec_t* swg, const char** arch)
+{
+    /* waves_k, waves_c, wave_tiles_k, wave_tiles_c, vec_x, sub_steps,
+     * ws_replicas, row_blocks */
+    static const int knobs[3][8] = {
+        {4, 4, 2, 2, 4, 4, 4, 8},
+        {8, 1, 1, 3, 4, 2, 32, 4},
+        {2, 4, 2, 3, 8, 1, 32, 2},
+    };
+    *swg = rocke_direct_conv_wgrad_spec_default();
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        swg->problem = mk_w32_sc_problem(4, 64, 3, 1, 1, "fp16");
+        break;
+    case 1:
+        swg->problem = mk_w32_sc_problem(3, 32, 3, 1, 1, "bf16");
+        break;
+    case 2:
+        swg->problem = mk_w32_sc_problem(3, 32, 3, 2, 0, "fp16");
+        break;
+    default:
+        return -1;
+    }
+    swg->wave_size = 32;
+    swg->small_c = 1;
+    swg->waves_k = knobs[idx][0];
+    swg->waves_c = knobs[idx][1];
+    swg->wave_tiles_k = knobs[idx][2];
+    swg->wave_tiles_c = knobs[idx][3];
+    swg->vec_x = knobs[idx][4];
+    swg->sub_steps = knobs[idx][5];
+    swg->ws_replicas = knobs[idx][6];
+    swg->row_blocks = knobs[idx][7];
+    swg->uniform_wave = 0;
+    return 0;
+}
+
+/* gfx1250 direct wgrad configs, emitted as WGRAD_W32_CFG_BASE + idx (see
+ * _wgrad_w32_spec in the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_wgrad_w32_cfg(int idx, rocke_direct_conv_wgrad_spec_t* swg, const char** arch)
+{
+    *swg = rocke_direct_conv_wgrad_spec_default();
+    swg->wave_size = 32;
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        /* (a) The wave32 port, bf16, two groups. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "bf16");
+        return 0;
+    case 1:
+        /* (b) fp16, K/C/Q split (waves_c=3) with runtime channels. */
+        swg->problem = mk_w32_problem(1, 48, 64, 3, 3, 1, "fp16");
+        swg->waves_k = 2;
+        swg->waves_c = 3;
+        swg->waves_q = 2;
+        swg->ho_per_block = 3;
+        swg->runtime_channels = 1;
+        return 0;
+    case 2:
+        /* (c) 5x5 filter: three strip passes per row on wave32. */
+        swg->problem = mk_w32_problem(1, 32, 32, 5, 5, 2, "fp16");
+        swg->ho_per_block = 5;
+        return 0;
+    case 3:
+        /* (d) Image per block, 4x4 waves, KH rows behind one barrier pair. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "bf16");
+        swg->waves_k = 4;
+        swg->waves_c = 4;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        return 0;
+    case 4:
+        /* (e) Image per block with two k tiles per wave, one row per sync. */
+        swg->problem = mk_w32_problem(1, 32, 64, 3, 3, 1, "fp16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->wave_tiles_k = 2;
+        return 0;
+    case 5:
+        /* (f) Image per block with two c tiles per wave and runtime channels. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "bf16");
+        swg->waves_k = 2;
+        swg->image_per_block = 1;
+        swg->wave_tiles_c = 2;
+        swg->runtime_channels = 1;
+        return 0;
+    case 6:
+        /* (g) Must reject: wave32 has no 16-wide (mfma_k=16) atom. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->mfma_k = 16;
+        return 0;
+    case 7:
+        /* (h) Must reject: image_per_block is wave32-only. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->wave_size = 64;
+        swg->image_per_block = 1;
+        *arch = "gfx950";
+        return 0;
+    case 8:
+        /* (i) Row split over three blocks, register staging, KH rows per sync. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "bf16");
+        swg->problem.H = 12;
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->row_blocks = 3;
+        return 0;
+    case 9:
+        /* (j) Row split over two blocks, one row per sync, runtime channels. */
+        swg->problem = mk_w32_problem(2, 32, 48, 3, 3, 1, "fp16");
+        swg->problem.H = 10;
+        swg->waves_k = 2;
+        swg->image_per_block = 1;
+        swg->row_blocks = 2;
+        swg->runtime_channels = 1;
+        return 0;
+    case 10:
+        /* (k) Two-stage TDM ring, one row per sync, 2x2 waves. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "bf16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->tdm_stages = 2;
+        return 0;
+    case 11:
+        /* (l) Three-stage TDM ring, KH rows per sync, 4x2 waves (one per
+         * transfer of a step). */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "fp16");
+        swg->waves_k = 4;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->tdm_stages = 3;
+        return 0;
+    case 12:
+        /* (m) Three-stage TDM ring with a row split and two k tiles per wave. */
+        swg->problem = mk_w32_problem(1, 64, 128, 3, 3, 1, "bf16");
+        swg->problem.H = 12;
+        swg->waves_k = 4;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->wave_tiles_k = 2;
+        swg->row_blocks = 2;
+        swg->tdm_stages = 3;
+        return 0;
+    case 13:
+        /* (n) Two groups, ragged channels, runtime channels, TDM with KH rows
+         * per sync. */
+        swg->problem = mk_w32_problem(2, 48, 40, 3, 3, 1, "fp16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->tdm_stages = 2;
+        swg->runtime_channels = 1;
+        return 0;
+    case 14:
+        /* (o) Must reject: a three-stage TDM ring needs a wave per transfer of
+         * a step (2 * rows_per_sync = 6), and this has 2. */
+        swg->problem = mk_w32_problem(1, 32, 32, 3, 3, 1, "fp16");
+        swg->waves_k = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->tdm_stages = 3;
+        return 0;
+    case 15:
+        /* (p) Must reject: row_blocks needs image_per_block. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->row_blocks = 2;
+        return 0;
+    case 16:
+        /* (q) Four scratch replicas, register staging, a row split. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "bf16");
+        swg->problem.H = 12;
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->row_blocks = 2;
+        swg->ws_replicas = 4;
+        return 0;
+    case 17:
+        /* (r) Eight scratch replicas over two groups, three-stage TDM ring,
+         * runtime channels. */
+        swg->problem = mk_w32_problem(2, 32, 64, 3, 3, 1, "fp16");
+        swg->waves_k = 4;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->tdm_stages = 3;
+        swg->ws_replicas = 8;
+        swg->runtime_channels = 1;
+        return 0;
+    case 18:
+        /* (s) Must reject: ws_replicas needs image_per_block. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->ws_replicas = 2;
+        return 0;
+    case 19:
+        /* (t) LDS-staged coalesced epilogue on the register path. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "bf16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->lds_epilogue = 1;
+        return 0;
+    case 20:
+        /* (u) LDS epilogue into four scratch replicas, a row split and a
+         * three-stage TDM ring. */
+        swg->problem = mk_w32_problem(1, 64, 64, 3, 3, 1, "fp16");
+        swg->problem.H = 12;
+        swg->waves_k = 4;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->row_blocks = 2;
+        swg->tdm_stages = 3;
+        swg->ws_replicas = 4;
+        swg->lds_epilogue = 1;
+        return 0;
+    case 21:
+        /* (v) LDS epilogue with runtime channels over two groups of ragged
+         * channel counts. */
+        swg->problem = mk_w32_problem(2, 48, 40, 3, 3, 1, "fp16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->image_per_block = 1;
+        swg->rows_per_sync = 3;
+        swg->runtime_channels = 1;
+        swg->lds_epilogue = 1;
+        return 0;
+    case 22:
+        /* (w) Must reject: lds_epilogue needs image_per_block. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->lds_epilogue = 1;
+        return 0;
+    case 23:
+        /* (x) Must reject: the staged 128 x 9 x (64 + 4) fp32 dW tile is over
+         * the LDS epilogue budget. */
+        swg->problem = mk_w32_problem(1, 64, 128, 3, 3, 1, "fp16");
+        swg->waves_k = 8;
+        swg->waves_c = 2;
+        swg->wave_tiles_c = 2;
+        swg->image_per_block = 1;
+        swg->lds_epilogue = 1;
+        return 0;
+    case 24:
+        /* (y) Small-C stem: C=3, 3x3 stride 2, gathered X, a row split into
+         * four pixel blocks over four scratch replicas. */
+        swg->problem = mk_w32_sc_problem(3, 24, 3, 2, 1, "bf16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->small_c = 1;
+        swg->row_blocks = 4;
+        swg->ws_replicas = 4;
+        return 0;
+    case 25:
+        /* (z) Small-C 7x7 stride 2: 16 B vector X runs padded 21 -> 24, two
+         * pixel chunks per sync, register blocking, two N tiles. */
+        swg->problem = mk_w32_sc_problem(3, 64, 7, 2, 3, "fp16");
+        swg->waves_k = 2;
+        swg->waves_c = 2;
+        swg->wave_tiles_k = 2;
+        swg->wave_tiles_c = 3;
+        swg->small_c = 1;
+        swg->row_blocks = 3;
+        swg->ws_replicas = 2;
+        swg->sub_steps = 2;
+        swg->vec_x = 8;
+        return 0;
+    case 26:
+        /* (aa) Small-C patchify (4x4 stride 4): 8 B vector runs, a uniform
+         * wave index, three chunks per sync on a single wave. */
+        swg->problem = mk_w32_sc_problem(3, 32, 4, 4, 0, "bf16");
+        swg->wave_tiles_k = 2;
+        swg->wave_tiles_c = 3;
+        swg->small_c = 1;
+        swg->row_blocks = 2;
+        swg->sub_steps = 3;
+        swg->vec_x = 4;
+        swg->uniform_wave = 1;
+        return 0;
+    case 27:
+        /* (ab) Small-C, C=1 at stride 1: runs padded 3 -> 4 and remapped in
+         * the epilogue. */
+        swg->problem = mk_w32_sc_problem(1, 16, 3, 1, 1, "fp16");
+        swg->waves_c = 2;
+        swg->small_c = 1;
+        swg->vec_x = 4;
+        return 0;
+    case 28:
+        /* (ac) Must reject: small_c needs groups=1. */
+        swg->problem = mk_w32_problem(2, 3, 16, 3, 3, 1, "fp16");
+        swg->small_c = 1;
+        return 0;
+    case 29:
+        /* (ad) Must reject: vec_x needs small_c. */
+        swg->problem = mk_w32_problem(2, 32, 32, 3, 3, 1, "fp16");
+        swg->vec_x = 4;
+        return 0;
+    case 30:
+        /* (ae) Must reject: small_c is wave32 gfx1250 only. */
+        swg->problem = mk_w32_sc_problem(3, 24, 3, 2, 1, "fp16");
+        swg->small_c = 1;
+        *arch = "gfx950";
+        return 0;
+    default:
+        return -1;
+    }
 }
 
 static rocke_direct_conv_problem_t
@@ -450,6 +921,152 @@ static int
         *s = mk_nongrouped_spec(p);
         s->ck = 16;
         s->double_buffer = true;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Python _nongrouped_s(p, **_NONGROUPED_F32_BASE): mk_nongrouped_spec with
+ * tile_h 4, tile_k 32, ck 16, waves_m 1 and the conflict-free 4-float pad, a
+ * tile whose 4-byte staging fits gfx942's 64 KiB of LDS. */
+static rocke_direct_conv_nongrouped_spec_t mk_nongrouped_f32_spec(rocke_direct_conv_problem_t p)
+{
+    rocke_direct_conv_nongrouped_spec_t s = mk_nongrouped_spec(p);
+    s.tile_h = 4;
+    s.tile_k = 32;
+    s.ck = 16;
+    s.waves_m = 1;
+    s.lds_pad = 4;
+    return s;
+}
+
+/* fp32-storage non-grouped configs, emitted as NONGROUPED_F32_CFG_BASE + idx
+ * (mirrors Python _nongrouped_f32_spec / _NONGROUPED_F32_CFGS). Returns 0 on
+ * success, -1 past the last one. */
+static int
+    make_nongrouped_f32_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, const char** arch)
+{
+    rocke_direct_conv_problem_t p;
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        /* 0..3: 32x32x16, 8-element fragment, both dtypes on both arches. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        return 0;
+    case 1:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        return 0;
+    case 2:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        *arch = "gfx942";
+        return 0;
+    case 3:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        *arch = "gfx942";
+        return 0;
+    case 4:
+        /* gfx950 TF32 on a 4-element fragment (zero-padded to the emulated
+         * atom), stride 2, double-buffered LDS, no swizzle. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 24, 40, 64, 64, 3, 3, 1, 2, "tf32"));
+        s->atom = "32x32x8";
+        s->double_buffer = true;
+        s->chiplet_swizzle = false;
+        return 0;
+    case 5:
+        /* gfx942 TF32 on a 4-element fragment (two native atoms), double
+         * buffered. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 32, 64, 3, 3, 1, 1, "tf32"));
+        s->atom = "32x32x8";
+        s->double_buffer = true;
+        s->tile_h = 2;
+        *arch = "gfx942";
+        return 0;
+    case 6:
+        /* fp32 16x16x32 on partial H / W tiles, waves_per_eu without iglp, and
+         * a 12-float pad (named p12). */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 10, 40, 64, 64, 3, 3, 1, 1, "fp32"));
+        s->atom = "16x16x32";
+        s->tile_w = 16;
+        s->ck = 32;
+        s->waves_m = 2;
+        s->iglp = ROCKE_DCONV_NONGROUPED_IGLP_NONE;
+        s->waves_per_eu = 2;
+        s->lds_pad = 12;
+        return 0;
+    case 7:
+        /* gfx942 TF32 16x16x32 (four native 16x16x8 atoms), stride 2. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 2, "tf32"));
+        s->atom = "16x16x32";
+        s->ck = 32;
+        s->tile_h = 2;
+        s->tile_w = 16;
+        *arch = "gfx942";
+        return 0;
+    case 8:
+        /* gfx950 TF32 16x16x16 (zero-padded to 16x16x32), 1x1 filter, a
+         * partial K tile. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 14, 14, 64, 96, 1, 1, 0, 1, "tf32"));
+        s->atom = "16x16x16";
+        s->tile_w = 16;
+        return 0;
+    case 9:
+        /* gfx942 fp32 16x16x16, both axes dilated. */
+        p = mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 2, 1, "fp32");
+        p.dil_h = 2;
+        p.dil_w = 2;
+        *s = mk_nongrouped_f32_spec(p);
+        s->atom = "16x16x16";
+        s->tile_w = 16;
+        *arch = "gfx942";
+        return 0;
+    case 10:
+        /* gfx950 TF32, stride 2 with column dilation and the 16-bit pad of 8
+         * floats (named p8). */
+        p = mk_nongrouped_problem(1, 32, 32, 64, 64, 3, 3, 2, 2, "tf32");
+        p.dil_w = 2;
+        *s = mk_nongrouped_f32_spec(p);
+        s->lds_pad = 8;
+        return 0;
+    case 11:
+        /* gfx942 fp32 32x32x8, stride 2, two channel-tile waves, no pad (p0). */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 128, 3, 3, 1, 2, "fp32"));
+        s->atom = "32x32x8";
+        s->tile_h = 2;
+        s->tile_k = 64;
+        s->waves_m = 2;
+        s->lds_pad = 0;
+        *arch = "gfx942";
+        return 0;
+    case 12:
+        /* gfx950 fp32, a 5x5 filter under a 64-wide tile over four waves,
+         * iglp 1. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 20, 64, 128, 64, 5, 5, 2, 1, "fp32"));
+        s->tile_h = 8;
+        s->tile_w = 64;
+        s->waves_n = 4;
+        s->iglp = 1;
+        return 0;
+    case 13:
+        /* 13..16: must reject. split-C and the grouped mode are 16-bit only. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        s->split_c = 2;
+        return 0;
+    case 14:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        s->grouped = true;
+        *arch = "gfx942";
+        return 0;
+    case 15:
+        /* A 2-float pad is 8 bytes: ds_read_b128 needs 16. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        s->lds_pad = 2;
+        return 0;
+    case 16:
+        /* A of 2**29 elements fits as fp16 but is 2 GiB in fp32. */
+        *s = mk_nongrouped_f32_spec(
+            mk_nongrouped_problem(16384, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
         return 0;
     default:
         return -1;
@@ -2361,6 +2978,384 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
     }
 }
 
+/* The spec slots make_f32_cfg may fill (one per kernel kind it covers). */
+typedef struct f32_specs
+{
+    rocke_direct_conv_16c_spec_t* s16;
+    rocke_direct_conv_4c_spec_t* s4;
+    rocke_direct_conv_8c_spec_t* s8;
+    rocke_direct_conv_32c_spec_t* s32;
+    rocke_direct_conv_spec_t* sgen;
+    rocke_direct_transpose_weights_dgrad_spec_t* stp;
+    rocke_direct_reorganize_weights_spec_t* sreorg;
+    rocke_direct_conv_wgrad_spec_t* swg;
+    rocke_direct_conv_dgrad_spec_t* sdgrad;
+    rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad;
+    rocke_direct_depthwise_dgrad_stream_spec_t* sdgs;
+    rocke_direct_depthwise_spec_t* sdw;
+    rocke_direct_depthwise_spatial_spec_t* ssp;
+    rocke_direct_depthwise_col_spec_t* sdwc;
+    rocke_direct_depthwise_tiled_spec_t* stiled;
+} f32_specs_t;
+
+static const char* const F32_ARCHES[2] = {"gfx942", "gfx950"};
+static const char* const F32_DTYPES[2] = {"fp32", "tf32"};
+
+/* Python _f32p: N=1, H=8, W=20, 3x3 filter, PAD 1, stride 1. */
+static rocke_direct_conv_problem_t mk_f32p(int groups, int cpg, int kpg, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 1;
+    p.H = 8;
+    p.W = 20;
+    p.groups = groups;
+    p.cpg = cpg;
+    p.kpg = kpg;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
+    p.stride = 1;
+    p.dtype = dtype;
+    return p;
+}
+
+/* Python _f32dw: a depthwise (cpg = kpg = 1) problem, N=2, H=W=14, square
+ * KH x KH filter. */
+static rocke_direct_conv_problem_t mk_f32dw(const char* dtype, int groups, int KH, int PAD)
+{
+    rocke_direct_conv_problem_t p = mk_f32p(groups, 1, 1, dtype);
+    p.N = 2;
+    p.H = 14;
+    p.W = 14;
+    p.KH = KH;
+    p.KW = KH;
+    p.PAD = PAD;
+    return p;
+}
+
+/* fp32-storage configs, emitted as F32_CFG_BASE + idx (mirrors Python
+ * _f32_spec). Returns 0 on success, -1 past the last one. */
+static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** arch)
+{
+    if(idx < 8)
+    {
+        *arch = F32_ARCHES[idx / 4];
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(16, 16, 16, F32_DTYPES[(idx / 2) % 2]);
+        sp->s16->block_groups = 8;
+        sp->s16->fold_k32 = idx % 2 == 0;
+        return 0;
+    }
+    if(idx == 8)
+    {
+        *arch = "gfx950";
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(8, 16, 16, "tf32");
+        sp->s16->block_q = 32;
+        sp->s16->block_groups = 4;
+        sp->s16->double_buffer = false;
+        sp->s16->fold_k32 = false;
+        return 0;
+    }
+    if(idx == 9)
+    {
+        *arch = "gfx942";
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(16, 16, 16, "fp32");
+        sp->s16->problem.W = 64;
+        sp->s16->block_q = 64;
+        sp->s16->block_groups = 8;
+        return 0;
+    }
+    if(idx < 14)
+    {
+        *arch = F32_ARCHES[(idx - 10) / 2];
+        *kind = KIND_8C;
+        *sp->s8 = rocke_direct_conv_8c_spec_default();
+        sp->s8->problem = mk_f32p(16, 8, 8, F32_DTYPES[(idx - 10) % 2]);
+        return 0;
+    }
+    if(idx < 18)
+    {
+        *arch = F32_ARCHES[(idx - 14) / 2];
+        *kind = KIND_32C;
+        *sp->s32 = rocke_direct_conv_32c_spec_default();
+        sp->s32->problem = mk_f32p(8, 32, 32, F32_DTYPES[(idx - 14) % 2]);
+        return 0;
+    }
+    if(idx == 18)
+    {
+        *arch = "gfx950";
+        *kind = KIND_8C;
+        *sp->s8 = rocke_direct_conv_8c_spec_default();
+        sp->s8->problem = mk_f32p(16, 8, 8, "tf32");
+        sp->s8->block_q = 32;
+        sp->s8->double_buffer = false;
+        return 0;
+    }
+    if(idx == 19)
+    {
+        *arch = "gfx942";
+        *kind = KIND_32C;
+        *sp->s32 = rocke_direct_conv_32c_spec_default();
+        sp->s32->problem = mk_f32p(8, 32, 32, "fp32");
+        sp->s32->double_buffer = false;
+        return 0;
+    }
+    if(idx < 24)
+    {
+        *arch = F32_ARCHES[(idx - 20) / 2];
+        *kind = KIND_4C;
+        *sp->s4 = rocke_direct_conv_4c_spec_default();
+        sp->s4->problem = mk_f32p(16, 4, 4, F32_DTYPES[(idx - 20) % 2]);
+        return 0;
+    }
+    if(idx < 38)
+    {
+        rocke_direct_conv_spec_t* g = sp->sgen;
+        *kind = KIND_GENERIC;
+        *g = rocke_direct_conv_spec_default();
+        g->block_groups = 1;
+        g->block_h = 4;
+        if(idx < 32)
+        {
+            const bool fold = idx % 2 == 0;
+            *arch = F32_ARCHES[(idx - 24) / 4];
+            g->problem = mk_f32p(4, fold ? 32 : 16, 16, F32_DTYPES[((idx - 24) / 2) % 2]);
+            g->fold_k32 = fold;
+            return 0;
+        }
+        switch(idx)
+        {
+        case 32:
+            *arch = "gfx950";
+            g->problem = mk_f32p(16, 4, 4, "tf32");
+            break;
+        case 33:
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 32, 16, "fp32");
+            g->waves_k = 2;
+            break;
+        case 34:
+            *arch = "gfx950";
+            g->problem = mk_f32p(4, 16, 16, "tf32");
+            g->runtime_channels = true;
+            g->k_atoms = 1;
+            g->m_tiles = 1;
+            break;
+        case 35:
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 20, 12, "tf32");
+            g->runtime_k_loop = true;
+            break;
+        case 36:
+            *arch = "gfx950";
+            g->problem = mk_f32p(4, 16, 16, "fp32");
+            g->persistent_grid = true;
+            g->lds_pad = 8;
+            break;
+        default: /* 37 */
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 16, 16, "tf32");
+            g->dgrad_fused_weights = true;
+            break;
+        }
+        return 0;
+    }
+    if(idx < 42)
+    {
+        *arch = F32_ARCHES[(idx - 38) / 2];
+        *kind = KIND_TRANSPOSE;
+        memset(sp->stp, 0, sizeof(*sp->stp));
+        sp->stp->problem = mk_f32p(2, 24, 40, F32_DTYPES[(idx - 38) % 2]);
+        return 0;
+    }
+    if(idx < 50)
+    {
+        *arch = F32_ARCHES[(idx - 42) / 4];
+        *kind = KIND_REORG;
+        memset(sp->sreorg, 0, sizeof(*sp->sreorg));
+        sp->sreorg->problem = mk_f32p(2, 24, 64, F32_DTYPES[((idx - 42) / 2) % 2]);
+        sp->sreorg->fold_k32 = idx % 2 == 0;
+        return 0;
+    }
+    if(idx == 50)
+    {
+        *arch = "gfx950";
+        *kind = KIND_TRANSPOSE;
+        memset(sp->stp, 0, sizeof(*sp->stp));
+        sp->stp->problem = mk_f32p(1, 48, 40, "tf32");
+        sp->stp->runtime_channels = true;
+        return 0;
+    }
+    if(idx == 51)
+    {
+        *arch = "gfx942";
+        *kind = KIND_REORG;
+        memset(sp->sreorg, 0, sizeof(*sp->sreorg));
+        sp->sreorg->problem = mk_f32p(1, 24, 64, "fp32");
+        sp->sreorg->fold_k32 = true;
+        sp->sreorg->runtime_channels = true;
+        return 0;
+    }
+    if(idx < 63)
+    {
+        rocke_direct_conv_wgrad_spec_t* w = sp->swg;
+        *kind = KIND_WGRAD;
+        *w = rocke_direct_conv_wgrad_spec_default();
+        if(idx < 60)
+        {
+            *arch = F32_ARCHES[(idx - 52) / 4];
+            w->problem = mk_f32p(8, 16, 16, F32_DTYPES[((idx - 52) / 2) % 2]);
+            w->mfma_k = idx % 2 == 0 ? 32 : 16;
+            return 0;
+        }
+        if(idx == 60)
+        {
+            *arch = "gfx950";
+            w->problem = mk_f32p(4, 64, 64, "tf32");
+            w->waves_k = 2;
+            w->waves_c = 2;
+            w->waves_q = 2;
+            w->ho_per_block = 3;
+            return 0;
+        }
+        if(idx == 61)
+        {
+            *arch = "gfx942";
+            w->problem = mk_f32p(8, 16, 16, "tf32");
+            w->runtime_channels = true;
+            return 0;
+        }
+        *arch = "gfx950";
+        w->problem = mk_f32p(8, 24, 20, "fp32");
+        w->problem.KH = 5;
+        w->problem.KW = 5;
+        w->problem.PAD = 2;
+        w->mfma_k = 16;
+        w->ho_per_block = 2;
+        return 0;
+    }
+    if(idx < 95)
+    {
+        /* The scalar-FMA kernels, four (arch, dtype) configs each. */
+        const int which = (idx - 63) / 4;
+        const char* dt = F32_DTYPES[(idx - 63) % 2];
+        *arch = F32_ARCHES[((idx - 63) % 4) / 2];
+        switch(which)
+        {
+        case 0:
+            *kind = KIND_DGRAD;
+            *sp->sdgrad = rocke_direct_conv_dgrad_spec_default();
+            sp->sdgrad->problem = mk_f32p(8, 16, 16, dt);
+            sp->sdgrad->block_q = 16;
+            sp->sdgrad->block_groups = 8;
+            break;
+        case 1:
+            *kind = KIND_DW_DGRAD;
+            *sp->sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+            sp->sdw_dgrad->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdw_dgrad->block_w = 8;
+            sp->sdw_dgrad->block_waves = 1;
+            break;
+        case 2:
+            *kind = KIND_DW_DGRAD_STREAM;
+            *sp->sdgs = rocke_direct_depthwise_dgrad_stream_spec_default();
+            sp->sdgs->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdgs->block_w = 8;
+            sp->sdgs->block_waves = 1;
+            break;
+        case 3:
+            *kind = KIND_DW;
+            *sp->sdw = rocke_direct_depthwise_spec_default();
+            sp->sdw->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdw->block_w = 8;
+            sp->sdw->block_waves = 1;
+            break;
+        case 4:
+        case 5:
+            *kind = KIND_DW_TILED;
+            *sp->stiled = rocke_direct_depthwise_tiled_spec_default();
+            sp->stiled->problem = which == 4 ? mk_f32dw(dt, 64, 3, 1) : mk_f32dw(dt, 64, 5, 2);
+            sp->stiled->block_w = 8;
+            sp->stiled->block_h = 2;
+            sp->stiled->dgrad = which == 5;
+            break;
+        case 6:
+            *kind = KIND_DWCOL;
+            *sp->sdwc = rocke_direct_depthwise_col_spec_default();
+            sp->sdwc->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdwc->block_h = 8;
+            sp->sdwc->block_w = 2;
+            sp->sdwc->block_waves = 1;
+            sp->sdwc->dtype = dt;
+            break;
+        default: /* 7 */
+            *kind = KIND_SPATIAL;
+            *sp->ssp = rocke_direct_depthwise_spatial_spec_default();
+            sp->ssp->problem = mk_f32dw(dt, 16, 3, 1);
+            sp->ssp->block_waves = 1;
+            break;
+        }
+        return 0;
+    }
+    switch(idx)
+    {
+    case 95:
+        *arch = "gfx950";
+        *kind = KIND_DW;
+        *sp->sdw = rocke_direct_depthwise_spec_default();
+        sp->sdw->problem = mk_f32dw("fp32", 64, 3, 1);
+        sp->sdw->block_w = 8;
+        sp->sdw->block_waves = 1;
+        sp->sdw->cpl = 2;
+        return 0;
+    case 96:
+        *arch = "gfx942";
+        *kind = KIND_DW_DGRAD_STREAM;
+        *sp->sdgs = rocke_direct_depthwise_dgrad_stream_spec_default();
+        sp->sdgs->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->sdgs->block_w = 8;
+        sp->sdgs->block_waves = 1;
+        sp->sdgs->cpl = 2;
+        return 0;
+    case 97:
+        *arch = "gfx950";
+        *kind = KIND_DW_TILED;
+        *sp->stiled = rocke_direct_depthwise_tiled_spec_default();
+        sp->stiled->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->stiled->block_w = 8;
+        sp->stiled->block_h = 2;
+        sp->stiled->cpl = 2;
+        return 0;
+    case 98:
+        *arch = "gfx950";
+        *kind = KIND_DWCOL;
+        *sp->sdwc = rocke_direct_depthwise_col_spec_default();
+        sp->sdwc->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->sdwc->block_h = 8;
+        sp->sdwc->block_w = 2;
+        sp->sdwc->block_waves = 1;
+        sp->sdwc->dtype = "TF32";
+        return 0;
+    case 99:
+        *arch = "gfx950";
+        *kind = KIND_DGRAD;
+        *sp->sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sp->sdgrad->problem = mk_f32p(8, 16, 8, "tf32");
+        sp->sdgrad->problem.stride = 2;
+        sp->sdgrad->block_q = 16;
+        sp->sdgrad->block_groups = 8;
+        return 0;
+    default:
+        break;
+    }
+    return -1;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -2390,8 +3385,68 @@ int main(int argc, char** argv)
     wgrad_direct_specs_t swd;
     rocke_direct_conv_split_reduce_spec_t sred;
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
+    rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WAVE32_CFG_BASE)
+    if(idx >= WGRAD_STEM_CFG_BASE)
+    {
+        if(make_wgrad_stem_cfg(idx - WGRAD_STEM_CFG_BASE, &swg, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_WGRAD;
+    }
+    else if(idx >= DW_WGRAD_CFG_BASE)
+    {
+        if(make_dw_wgrad_cfg(idx - DW_WGRAD_CFG_BASE, &sdww, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_DW_WGRAD;
+    }
+    else if(idx >= WGRAD_W32_CFG_BASE)
+    {
+        if(make_wgrad_w32_cfg(idx - WGRAD_W32_CFG_BASE, &swg, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_WGRAD;
+    }
+    else if(idx >= F32_CFG_BASE)
+    {
+        const f32_specs_t sp = {&s16,
+                                &s4,
+                                &s8,
+                                &s32,
+                                &sgen,
+                                &stp,
+                                &sreorg,
+                                &swg,
+                                &sdgrad,
+                                &sdw_dgrad,
+                                &sdgs,
+                                &sdw,
+                                &ssp,
+                                &sdwc,
+                                &stiled};
+        if(make_f32_cfg(idx - F32_CFG_BASE, &kind, &sp, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= NONGROUPED_F32_CFG_BASE)
+    {
+        kind = KIND_NONGROUPED;
+        if(make_nongrouped_f32_cfg(idx - NONGROUPED_F32_CFG_BASE, &snongrouped, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WAVE32_CFG_BASE)
     {
         if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &sdgs, &arch)
            != 0)
@@ -2484,6 +3539,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_depthwise_dgrad_streaming_new(&b, &sdgs, arch);
     else if(kind == KIND_WGRAD)
         kernel = rocke_build_direct_conv_wgrad_new(&b, &swg, arch);
+    else if(kind == KIND_DW_WGRAD)
+        kernel = rocke_build_direct_depthwise_wgrad_new(&b, &sdww, arch);
     else if(kind == KIND_NONGROUPED)
         kernel = rocke_build_direct_conv_nongrouped_new(&b, &snongrouped, arch);
     else if(kind == KIND_GENERIC)

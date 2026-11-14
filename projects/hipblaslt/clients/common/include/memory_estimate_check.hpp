@@ -9,10 +9,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -29,6 +31,42 @@ inline MemoryEstimateMeasurement& last_memory_estimate_measurement()
 {
     static MemoryEstimateMeasurement measurement;
     return measurement;
+}
+
+// A "key: value kB" line of /proc/self/status, such as VmHWM or VmRSS, in bytes.
+inline bool read_self_status(const char* key, size_t& bytes)
+{
+    std::ifstream status("/proc/self/status");
+    std::string   name;
+    size_t        kib = 0;
+    for(std::string line; std::getline(status, line);)
+    {
+        std::istringstream fields(line);
+        if(fields >> name >> kib && name == key)
+        {
+            bytes = kib * 1024;
+            return true;
+        }
+    }
+    return false;
+}
+
+// The highest peak resident memory (VmHWM) seen before MemoryEstimateCheck reset it.
+inline size_t& peak_resident_before_reset()
+{
+    static size_t bytes = 0;
+    return bytes;
+}
+
+// The process's peak resident memory over the whole run, pinned host buffers included, or
+// nothing where /proc/self/status cannot be read. A reset of VmHWM, which also resets what
+// getrusage and GNU time report, does not hide a peak from before it.
+inline std::optional<size_t> peak_resident_bytes()
+{
+    size_t hwm = 0;
+    if(!read_self_status("VmHWM:", hwm))
+        return std::nullopt;
+    return std::max(hwm, peak_resident_before_reset());
 }
 
 // With HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE=1, a matmul case whose host-memory estimate is at
@@ -60,10 +98,12 @@ public:
             return;
         // Buffers an earlier test left in the pool would be reused without raising the peak.
         memory_pool<h_memory>::ReleaseCached();
+        size_t hwm = 0;
+        if(read_self_status("VmHWM:", hwm))
+            peak_resident_before_reset() = std::max(peak_resident_before_reset(), hwm);
         // Writing 5 resets the peak (VmHWM) to the current resident memory (VmRSS).
         std::ofstream("/proc/self/clear_refs") << "5";
-        size_t hwm = 0;
-        if(!read_status("VmRSS:", m_baseline) || !read_status("VmHWM:", hwm)
+        if(!read_self_status("VmRSS:", m_baseline) || !read_self_status("VmHWM:", hwm)
            || hwm > m_baseline + (size_t(64) << 20))
             return;
         m_estimate                                  = estimate;
@@ -77,7 +117,7 @@ public:
     ~MemoryEstimateCheck()
     {
         size_t hwm = 0;
-        if(!m_active || !read_status("VmHWM:", hwm))
+        if(!m_active || !read_self_status("VmHWM:", hwm))
             return;
         const size_t used                  = hwm > m_baseline ? hwm - m_baseline : 0;
         last_memory_estimate_measurement() = {true, m_estimate, used};
@@ -91,23 +131,6 @@ public:
     MemoryEstimateCheck& operator=(const MemoryEstimateCheck&) = delete;
 
 private:
-    static bool read_status(const char* key, size_t& bytes)
-    {
-        std::ifstream status("/proc/self/status");
-        std::string   name;
-        size_t        kib = 0;
-        for(std::string line; std::getline(status, line);)
-        {
-            std::istringstream fields(line);
-            if(fields >> name >> kib && name == key)
-            {
-                bytes = kib * 1024;
-                return true;
-            }
-        }
-        return false;
-    }
-
     static std::string gib(size_t bytes)
     {
         std::ostringstream s;

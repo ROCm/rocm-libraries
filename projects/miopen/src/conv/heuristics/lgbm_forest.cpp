@@ -90,7 +90,7 @@ LgbmForest::LgbmForest(BinReader& reader)
         const auto left               = ReadChildren(reader, child_width, num_nodes);
         const auto right              = ReadChildren(reader, child_width, num_nodes);
         const auto flags              = reader.ReadArray<std::uint8_t>(num_nodes);
-        auto leaf_values = ReadLeaves(reader, leaf_width, std::size_t{num_nodes} + 1);
+        auto leaf_values              = ReadLeaves(reader, leaf_width, std::size_t{num_nodes} + 1);
 
         const std::uint16_t cat_bitset_len = reader.ReadU16();
         auto cat_bitset                    = reader.ReadArray<std::uint32_t>(cat_bitset_len);
@@ -116,7 +116,7 @@ LgbmForest::LgbmForest(BinReader& reader)
             node.left              = left[i];
             node.right             = right[i];
             node.default_left      = (flags[i] & kFlagDefaultLeft) != 0;
-            node.missing_type = (flags[i] >> kFlagMissingTypeShift) & kFlagMissingTypeMask;
+            node.missing_type      = (flags[i] >> kFlagMissingTypeShift) & kFlagMissingTypeMask;
             if(categorical)
             {
                 node.cat_index = split_index[i];

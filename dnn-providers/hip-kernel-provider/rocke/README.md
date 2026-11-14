@@ -53,18 +53,19 @@ of every change that touches emitted IR
 
 ```
 rocke/
-├── platform/   # authoring SDK + engine (installable `rocke`) — NON-attention kernels
+├── platform/   # authoring SDK + engine (installable `rocke`)
 │   ├── python/rocke/   core, helpers, instances, runtime, dispatch, analysis, benchmark
 │   ├── cpp/            C++20 engine (librocke_core.a) + pybind bindings
 │   └── dsl_docs/       the field manual
-└── library/    # the SDPA/MHA product — build-time-only Python (NOT installed, no wheel)
-    └── kernels/ builders/ dispatch/ benchmarks/
+└── library/    # the kernel library (SDPA/MHA, conv, ...): build-time Python + C++ mirrors
+    ├── kernels/ builders/ dispatch/ benchmarks/
+    └── cpp/        C++ mirrors (librocke_library.a, ships as ckc::rocke_library)
 ```
 
 One-way dependency: **`library → platform`** only, so platform stays
-standalone-installable. `library/` is a build/verify harness for attention
-kernels and is never packaged into the `rocke` wheel; the provider plugin is
-emitted by the provider's own `src/`.
+standalone-installable. `library/` is a build/verify harness for the library
+kernels (attention, conv, ...) and is never packaged into the `rocke` wheel;
+the provider plugin is emitted by the provider's own `src/`.
 
 ## Start here
 

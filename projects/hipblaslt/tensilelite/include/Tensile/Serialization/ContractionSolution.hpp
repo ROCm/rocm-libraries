@@ -222,6 +222,7 @@ namespace TensileLite
                 iot::mapOptional(io, "temporalHintA", s.temporalHintA);
                 iot::mapOptional(io, "temporalHintB", s.temporalHintB);
                 iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
+                iot::mapOptional(io, "adaptiveGemm", s.adaptiveGemm);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
@@ -249,6 +250,12 @@ namespace TensileLite
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "BufferLoad", s.BufferLoad);
                 iot::mapOptional(io, "BufferStore", s.BufferStore);
+                iot::mapOptional(io, "temporalHintD", s.temporalHintD);
+                iot::mapOptional(io, "PrefetchLocalRead", s.PrefetchLocalRead);
+                iot::mapOptional(io, "HalfPLR", s.HalfPLR);
+                iot::mapOptional(io, "PrefetchGL2", s.PrefetchGL2);
+                iot::mapOptional(io, "TDMInst", s.TDMInst);
+                iot::mapOptional(io, "Multicast", s.Multicast);
             }
 
             const static bool flow = false;
@@ -363,6 +370,33 @@ namespace TensileLite
                 iot::mapRequired(io, "ShiftPtrElemB", s.shiftPtrElemB);
                 iot::mapRequired(io, "DUorMT0", s.depthUorMT0);
                 iot::mapRequired(io, "DUorMT1", s.depthUorMT1);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<GL2PrefetchSAddrCheckPacket, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, GL2PrefetchSAddrCheckPacket& s)
+            {
+                iot::mapRequired(io, "TLUA", s.tluA);
+                iot::mapRequired(io, "TLUB", s.tluB);
+                iot::mapRequired(io, "DepthUA", s.depthUA);
+                iot::mapRequired(io, "DepthUB", s.depthUB);
+                iot::mapRequired(io, "ClusterMT0", s.clusterMT0);
+                iot::mapRequired(io, "ClusterMT1", s.clusterMT1);
+                iot::mapRequired(io, "DepthU", s.depthU);
+                iot::mapRequired(io, "MatrixInstK", s.matrixInstK);
+                iot::mapRequired(io, "MXBlockA", s.mxBlockA);
+                iot::mapRequired(io, "MXBlockB", s.mxBlockB);
+                iot::mapRequired(io, "MXBlockFreeA", s.mxBlockFreeA);
+                iot::mapRequired(io, "MXBlockFreeB", s.mxBlockFreeB);
+                iot::mapRequired(io, "Metadata", s.metadata);
+                iot::mapRequired(io, "TLUMetadata", s.tluMetadata);
+                iot::mapRequired(io, "DepthUMetadata", s.depthUMetadata);
+                iot::mapRequired(io, "ClusterMTMetadata", s.clusterMTMetadata);
             }
 
             const static bool flow = false;

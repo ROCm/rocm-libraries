@@ -91,7 +91,7 @@ listed as an accepted hint (the last row).
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
 | Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied) | SEM-015 |
 | fp8 Q/K/V descales | scalar or `[B, H_kv, 1, 1]` FLOAT (a paged side needs a scalar on the GPU) | |
-| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout | SEM-024 |
+| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout, except probability 0 without an rng_dump (no dropout, SEM-015) | SEM-024 |
 | Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (ragged: any container-valid layout, e.g. `[H,T]` or `[T,H]`; `Max` and `Sum_exp` served by the dense rewrite, bound by `seq_len_q`) | SEM-011, 023 |
 | `generate_stats`, `mma_core_mode`, `implementation`, the node's `compute_data_type` | accepted; engine hints with no meaning for an FP32 oracle | |
 
@@ -105,6 +105,7 @@ listed as an accepted hint (the last row).
 | Scale, band, padding, ALiBi | as forward |
 | Bias and `dbias` | `dbias` = unscaled dS summed over every broadcast dim (SEM-014) |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`, `dropout_scale_inv`) | cuDNN's composition (SEM-015) |
+| Dropout, probability 0 (`dropout_probability = 0`, no mask or scale; seed and offset given or absent) | no dropout: bit-identical to the graph without dropout fields (SEM-015) |
 | Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
 | Philox dropout | **No**: the backward node has no `rng_dump` (needs an API change, below) |
 

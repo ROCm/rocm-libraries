@@ -40,6 +40,18 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaDropoutMask",
+         &registerFlydslSdpaDropoutMaskSymbols,
+         &resetFlydslSdpaDropoutMaskModuleCache},
+        {"hipkernel:FlydslSdpaHeadPad",
+         &registerFlydslSdpaHeadPadSymbols,
+         &resetFlydslSdpaHeadPadModuleCache},
+        {"hipkernel:FlydslSdpaBwdMerged",
+         &registerFlydslSdpaBwdMergedSymbols,
+         &resetFlydslSdpaBwdMergedModuleCache},
+        {"hipkernel:FlydslSdpaBwdSplit",
+         &registerFlydslSdpaBwdSplitSymbols,
+         &resetFlydslSdpaBwdSplitModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
@@ -65,6 +77,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx950ConvDgradAot",
          &registerGfx950ConvDgradAotSymbols,
          &resetGfx950ConvDgradAotModuleCache},
+        {"hipkernel:Gfx1250ConvDgradAot",
+         &registerGfx1250ConvDgradAotSymbols,
+         &resetGfx1250ConvDgradAotModuleCache},
     };
     return s_packs;
 }

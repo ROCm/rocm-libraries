@@ -45,6 +45,7 @@ from .param_facts import (
     stored_int,
     two_bounds_refusals,
 )
+from .storage import SCALE_ENCODINGS
 from .value_sources import (
     ARITHMETIC,
     ASSUME_RANGE_OP,
@@ -744,6 +745,14 @@ def _check_i32(op: str, field: str, value: int) -> int:
     return v
 
 
+# gfx12+ atomic cache-policy immediate (bits [2:0] th, [4:3] scope) for a
+# device-scope cascade add: th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2).
+# The WGP and L2 caches accumulate the adds locally and write the sum back
+# once, which sheds most of the global RMW traffic of a cross-workgroup
+# reduction. The destination must be pre-zeroed.
+CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3)
+
+
 def _check_cachepolicy(op: str, value: int) -> int:
     """Validate the gfx12+ five-bit cache-policy immediate."""
     v = int(value)
@@ -1121,18 +1130,14 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 # narrow forms are the ones that keep a byte-exact last element.
 _BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
 
-# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
-# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
-# vector of them. Their bytes move as u8.
-_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
-
 
 def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
     """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
 
     The element is any scalar whose width is whole bytes and that has a value
-    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
-    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    form (not one of ``core.storage.SCALE_ENCODINGS``, the MMA scale encodings,
+    whose bytes move as u8); ``count`` is an int and ``count`` elements together
+    must make one of :data:`_BUFFER_ACCESS_BYTES`.
     The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
     refuses with the same texts.
     """
@@ -1140,7 +1145,7 @@ def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
         raise TypeError(
             f"{op_name}: the element type must be a scalar, got {elem.name}"
         )
-    if elem.name in _SCALE_ENCODING_SCALARS:
+    if elem.name in SCALE_ENCODINGS:
         raise TypeError(
             f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
             "move its bytes as u8"
@@ -2495,8 +2500,10 @@ class IRBuilder:
         captured into a graph (``GpuCheckCaptureRefused``): nothing reads the
         word after a replay.
 
-        The check does not trap (:meth:`trap`): on Windows the trap handler
-        parks a trapped wave and the launch never returns.
+        The check does not trap (:meth:`trap`): a taken trap does not let the
+        process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete.
 
         So the check is a last line of defence for a value the host cannot
         see, not a way to reject input; make bad input impossible upstream.
@@ -3428,7 +3435,7 @@ class IRBuilder:
         _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, U8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -6436,19 +6443,16 @@ class IRBuilder:
 
     def trap(self) -> None:
         """Abort the kernel: ``call void @llvm.trap()`` (HIP
-        ``__builtin_trap()``). The AMDGPU backend emits ``s_trap 2``; on gfx11
-        it emits its simulated trap instead: ``s_trap 2``, then ``s_sendmsg``,
-        then an ``s_sethalt`` loop.
+        ``__builtin_trap()``), which the AMDGPU backend emits as ``s_trap 2``
+        or, on some processors, as its simulated trap. Which processors, and
+        what a taken trap does on each host, is stated in the ``tile.trap``
+        section of ``dsl_docs/reference/op_vocabulary.md``.
 
-        What a taken trap does depends on the host. On Linux (ROCr) the queue
-        reports an error and the runtime aborts the process. On Windows the
-        HIP runtime never turns the trap into an error: the launch never
-        returns. Under a debugger the wave stops at the trap. None of these
-        lets the process carry on, so a trap is the last resort, for a
-        condition the host checks before the launch and that must still never
-        reach a memory access on the device. Put it under a branch on that
-        condition (``scf_if``). A check the process must survive belongs on
-        the host, before the launch, not in a trap.
+        A taken trap does not let the process carry on, so a trap is the last
+        resort, for a condition the host checks before the launch and that
+        must still never reach a memory access on the device. Put it under a
+        branch on that condition (``scf_if``). A check the process must
+        survive belongs on the host, before the launch, not in a trap.
         """
         self._op("tile.trap")
 
@@ -6779,6 +6783,38 @@ class IRBuilder:
         """
         _buffer_vector_bytes("buffer_store_vN", "value", value.type)
         self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
+
+    def buffer_atomic_fadd_f32(
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """f32 atomic add through a buffer resource (``raw_ptr_buffer_atomic_fadd``).
+
+        ``voffset`` / ``soffset`` are byte offsets. Callers must guard invalid
+        offsets (e.g. with ``scf_if``) instead of steering them out of range:
+        unlike a buffer load, which reads 0 there, a buffer atomic at the
+        out-of-range sentinel offset faults on gfx1250. ``cachepolicy`` is the raw
+        immediate the intrinsic takes -- on gfx12+ bits [2:0] are th and [4:3]
+        scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
+        is discarded, so the backend selects the no-return form.
+        """
+        # _check_cachepolicy coerces with int(); refuse what it would round.
+        if isinstance(cachepolicy, bool) or not isinstance(cachepolicy, int):
+            raise ValueError(
+                f"buffer_atomic_fadd_f32 cachepolicy must be an int, got {cachepolicy!r}"
+            )
+        self._op(
+            "tile.buffer_atomic_fadd_f32",
+            [rsrc, voffset, soffset, value],
+            attrs={
+                "cachepolicy": _check_cachepolicy("buffer_atomic_fadd_f32", cachepolicy)
+            },
+        )
 
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
