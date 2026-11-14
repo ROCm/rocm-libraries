@@ -1069,9 +1069,9 @@ struct SelectedKernel {{
         false, false>;"""
 
         # Tile partitioner. comp_tdm_v3 walks the output tiles in plain row-major
-        # order (tile id -> (id / NBlocks, id % NBlocks)), the raster of the
-        # rocKE kernel it ports; GemmTile2DPartitioner gives the same order but
-        # does not build with GemmKernel outside cluster launch.
+        # order (tile id -> (id / NBlocks, id % NBlocks)); GemmTile2DPartitioner
+        # gives the same order but does not build with GemmKernel outside cluster
+        # launch.
         if pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE:
             instance_code += """
 
@@ -1225,7 +1225,10 @@ struct SelectedKernel {{
     // Launch function
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
 
-        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline in ("comp_tdm", "comp_tdm_v2"):
+        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline in (
+            "comp_tdm",
+            "comp_tdm_v2",
+        ):
             instance_code += """
         if (args.k_batch != 1 || args.N % TileN != 0 || args.K % TileK != 0) {
             throw std::runtime_error("Compute TDM requires complete N/K tiles and k_batch=1");
@@ -1371,9 +1374,10 @@ struct SelectedKernel {{
 
         elif self.kernel_name_prefix in ["gemm_universal", "gemm_preshuffle"]:
             persistent_check = (
-                'static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel, '
+                "static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel, "
                 '"Pipeline and launch disagree on persistent mode");'
-                if self.kernel_name_prefix == "gemm_preshuffle" else ""
+                if self.kernel_name_prefix == "gemm_preshuffle"
+                else ""
             )
             instance_code += f"""
 

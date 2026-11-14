@@ -179,7 +179,7 @@ struct Operands
     std::vector<uint8_t> a, b, a_natural, b_natural, a_scale, b_scale;
 };
 
-// rocKE's exact-sum inputs: elements in {-2, -1, 0, 1, 2} (FP4 / FP8 codes), scales 2^-1..2^1.
+// Exact-sum inputs: elements in {-2, -1, 0, 1, 2} (FP4 / FP8 codes), scales 2^-1..2^1.
 template <typename T>
 Operands make_operands(index_t M, index_t N, long_index_t K, uint32_t seed)
 {

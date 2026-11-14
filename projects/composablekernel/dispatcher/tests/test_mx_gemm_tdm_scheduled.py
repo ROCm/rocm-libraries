@@ -3,10 +3,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests of comp_tdm_scheduled (rocKE's mx_gemm) in tile_engine and the dispatcher.
+"""CPU-only tests of comp_tdm_scheduled in tile_engine and the dispatcher.
 
 The tuning token, the tile_engine listing and generation, the dispatcher codegen and the
-rocKE conversion. No GPU or hipcc is required.
+compile flags. No GPU or hipcc is required.
 """
 
 import dataclasses
@@ -26,7 +26,6 @@ for _p in (_DISP / "python", _DISP / "codegen", _GEMM, _MX):
 
 import gemm_validation_utils as vu  # noqa: E402
 import mx_gemm_utils as mx  # noqa: E402
-import rocke_spec_to_ck as conv  # noqa: E402
 import unified_mx_gemm_codegen as codegen  # noqa: E402
 
 sched = vu.load_mx_tdm_scheduled()
@@ -50,8 +49,8 @@ class TestTuning(unittest.TestCase):
             {
                 "cluster_dim": {"values": [[4, 4], [2, 1, 1]]},
                 "gl2_prefetch_distance": {"values": [4, 2]},
-                "half_plr": {"values": ["b", "none"]},
-                "lds_segment_interleave": {"values": [True, False]},
+                "split_b_lds_read": {"values": [True, False]},
+                "interleave_lds_regions": {"values": [True, False]},
                 "store_width": {"values": [0, 4]},
             }
         )
@@ -75,7 +74,7 @@ class TestTuning(unittest.TestCase):
             )
 
         self.assertEqual(reason({}), "ok")
-        self.assertEqual(reason({"local_prefetch": 0}), "half_plr_b")
+        self.assertEqual(reason({"prefetch_lds_read": False}), "split_b_read")
         self.assertEqual(reason({"store_width": 16}), "store_width")
         self.assertEqual(reason({"store_width": 3}), "store_width")
         self.assertEqual(reason({"tail_steps": 4}), "tail_steps")
@@ -84,7 +83,7 @@ class TestTuning(unittest.TestCase):
     def test_cpp_spelling(self):
         t = {
             "cluster_dim": [2, 2],
-            "lds_segment_interleave": False,
+            "interleave_lds_regions": False,
         }
         spec = sched.spec_from_tile(TILE, t, out_dtype="fp16")
         self.assertEqual(sched.cpp_cluster_sequence(t), "ck_tile::sequence<2, 2, 1>")
@@ -94,8 +93,7 @@ class TestTuning(unittest.TestCase):
         )
         self.assertEqual(
             sched.cpp_policy_type(t),
-            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, "
-            "ck_tile::MxTdmScheduledHalfPlr::B, false>",
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, false>",
         )
         self.assertEqual(
             sched.cpp_kernel_traits(spec, {"edge": False, "tail_steps": 2}),
@@ -216,21 +214,21 @@ class TestValidationUtils(unittest.TestCase):
             )
 
         self.assertTrue(valid())
-        # Valid with half_plr none only: kept for the tuning_config product to decide.
+        # Valid without SplitBLdsRead only: kept for the tuning_config product to decide.
         self.assertTrue(valid(tile_n=64, warp_m=1, warp_n=4))
         self.assertTrue(
             valid(tile_m=128, tile_n=16, warp_m=4, warp_n=1, warp_tile_m=16)
         )
         dims = [{**TILE, "tile_n": 64, "warp_m": 1, "warp_n": 4}[k] for k in TILE]
         self.assertIn(
-            "half_plr_b",
+            "split_b_read",
             vu.mx_tdm_scheduled_reject_reason(
                 *dims, "fp4", "fp4", "fp16", "gfx1250", {}
             ),
         )
         self.assertEqual(
             vu.mx_tdm_scheduled_reject_reason(
-                *dims, "fp4", "fp4", "fp16", "gfx1250", {"half_plr": "none"}
+                *dims, "fp4", "fp4", "fp16", "gfx1250", {"split_b_lds_read": False}
             ),
             "",
         )
@@ -317,15 +315,15 @@ class TestTileEngine(unittest.TestCase):
         rows = self._list(
             self._config(
                 {
-                    "local_prefetch": {"values": [0, 1]},
-                    "half_plr": {"values": ["b", "none"]},
+                    "prefetch_lds_read": {"values": [False, True]},
+                    "split_b_lds_read": {"values": [True, False]},
                 }
             )
         )
         tunings = {sched.encode_tuning(sched.decode_tuning(r[3])) for r in rows}
         for t in tunings:
             t = sched.decode_tuning(t)
-            self.assertFalse(t["local_prefetch"] == 0 and t["half_plr"] == "b")
+            self.assertFalse(not t["prefetch_lds_read"] and t["split_b_lds_read"])
         self.assertEqual(len(tunings), 3)
 
     def test_mixed_pipelines(self):
@@ -396,7 +394,7 @@ class TestTileEngine(unittest.TestCase):
                 "--trait_combo",
                 "comp_tdm_scheduled_direct_intrawave_False_False_False_False",
                 "--tuning",
-                sched.encode_tuning({"local_prefetch": 0}),
+                sched.encode_tuning({"prefetch_lds_read": False}),
             )
 
 
@@ -433,8 +431,8 @@ class TestDispatcher(unittest.TestCase):
         )
 
     def test_rejects(self):
-        with self.assertRaisesRegex(ValueError, "half_plr_b"):
-            codegen.kernel_name(_cfg(local_prefetch=0))
+        with self.assertRaisesRegex(ValueError, "split_b_read"):
+            codegen.kernel_name(_cfg(prefetch_lds_read=False))
         with self.assertRaisesRegex(ValueError, "only for comp_tdm_scheduled"):
             codegen.kernel_name(_cfg(pipeline="comp_tdm", cluster_dim=[2, 2]))
         with self.assertRaisesRegex(ValueError, "epilogue"):
@@ -449,7 +447,8 @@ class TestDispatcher(unittest.TestCase):
         self.assertTrue(path.name.endswith("_c2x2.hpp"))
         self.assertIn("using Cluster = ck_tile::sequence<2, 2, 1>;", header)
         self.assertIn(
-            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, ", header
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, true>",
+            header,
         )
         self.assertIn("KMajorScales = true", header)
         self.assertIn("ck_tile::MxDirectStoreEpilogue<", header)
@@ -479,54 +478,6 @@ class TestDispatcher(unittest.TestCase):
         self.assertEqual(cfg["epilogue"], "direct")
         self.assertEqual(cfg["cluster_dim"], [2, 2])
         self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_pf2"))
-
-
-class TestRockeConversion(unittest.TestCase):
-    def test_out_dtype(self):
-        fp8_out = "mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4"
-        with self.assertRaisesRegex(ValueError, "D type"):
-            conv.to_dispatcher_config(fp8_out)
-        cfg = conv.to_dispatcher_config(fp8_out + "_fp16")
-        self.assertEqual(cfg["edge"], False)
-        self.assertNotIn("odd_tiles", cfg)
-        self.assertTrue(codegen.kernel_name(cfg).endswith("_32x16x128_c4x4_noedge"))
-
-    def test_fixed_knobs_rejected(self):
-        name = "mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4"
-        with self.assertRaisesRegex(ValueError, "hblate"):
-            sched.parse_kernel_name(name + "_hblate")
-        with self.assertRaisesRegex(ValueError, "cs"):
-            sched.parse_kernel_name(name + "_cs3")
-        spec = sched.parse_kernel_name(name)[1].to_dict()
-        rocke_defaults = {"half_b_order": "ahead", "cluster_signal_wmmas": None}
-        self.assertEqual(
-            sched.MxTdmScheduledSpec.from_dict({**spec, **rocke_defaults}),
-            sched.MxTdmScheduledSpec.from_dict(spec),
-        )
-        with self.assertRaisesRegex(ValueError, "half_b_order"):
-            sched.MxTdmScheduledSpec.from_dict({**spec, "half_b_order": "late"})
-        with self.assertRaisesRegex(ValueError, "cluster_signal_wmmas"):
-            sched.MxTdmScheduledSpec.from_dict({**spec, "cluster_signal_wmmas": 3})
-        for key, value in (("half_b_order", "late"), ("cluster_signal_wmmas", 3)):
-            with self.assertRaisesRegex(ValueError, key):
-                sched.normalize_tuning({key: value})
-
-    def test_cli(self):
-        r = subprocess.run(
-            [
-                sys.executable,
-                str(_MX / "rocke_spec_to_ck.py"),
-                "mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4_fp16",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        config = json.loads(r.stdout)
-        self.assertEqual(
-            config["trait_config"]["pipeline"]["values"], ["comp_tdm_scheduled"]
-        )
-        self.assertEqual(config["tuning_config"]["cluster_dim"]["values"], [[4, 4, 1]])
 
 
 if __name__ == "__main__":

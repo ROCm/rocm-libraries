@@ -31,7 +31,7 @@ struct MxDirectStoreEpilogueProblem
 };
 
 /**
- * @brief Epilogue of MxGemmPipelineAgBgCrCompTDMScheduled after rocKE's mx_gemm: E = acc, stored
+ * @brief Epilogue of MxGemmPipelineAgBgCrCompTDMScheduled: E = acc, stored
  *        from the accumulators without LDS.
  *
  * The C block tile is shuffled to the store distribution (N repeat innermost), so each thread

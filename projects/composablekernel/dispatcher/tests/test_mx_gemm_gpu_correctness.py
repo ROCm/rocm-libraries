@@ -132,7 +132,7 @@ class TestMxGemmGpu(unittest.TestCase):
                 )
                 for pipeline in ("comp_tdm", "comp_tdm_v2")
             ]
-            # rocKE's mx_gemm (K-major scales); a 1x1 cluster runs any grid.
+            # comp_tdm_scheduled (K-major scales); a 1x1 cluster runs any grid.
             configs += [
                 MxGemmKernelConfig(
                     datatype=dtype,

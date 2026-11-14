@@ -17,7 +17,7 @@
 
 /**
  * @file
- * Host side of MxGemmPipelineAgBgCrCompTDMScheduled (rocKE's mx_gemm): the K-major E8M0 scale
+ * Host side of MxGemmPipelineAgBgCrCompTDMScheduled: the K-major E8M0 scale
  * layout, bit-exact element codecs, the output rounding of its epilogue and a reference GEMM.
  *
  * Scales. One E8M0 byte per 32 K values of each A or B row. The natural layout is
@@ -302,8 +302,8 @@ CK_TILE_HOST void store_out(void* data, std::size_t i, float v)
  * @brief E = A @ B^T with K-major scales, as MxGemmPipelineAgBgCrCompTDMScheduled.
  *
  * The products are summed in double and rounded once to f32; with inputs whose f32 sums are
- * exact in any order (rocKE's check inputs) this is the kernel's accumulator bit for bit. Then
- * the output rounding (FP8 saturating).
+ * exact in any order (the tests' sparse check inputs) this is the kernel's accumulator bit for bit.
+ * Then the output rounding (FP8 saturating).
  *
  * ADataType and BDataType are pk_fp4_t, fp8_t or bf8_t, ODataType fp8_t, half_t or bf16_t.
  * A and B are M (N) rows of row_bytes<T>(K) bytes, lda (ldb) bytes apart; the scales are

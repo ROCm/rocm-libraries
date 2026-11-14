@@ -12,7 +12,6 @@ namespace {
 using namespace mx_tdm_scheduled_test;
 using ck_tile::fp8_t;
 using ck_tile::half_t;
-using ck_tile::MxTdmScheduledHalfPlr;
 using ck_tile::pk_fp4_t;
 
 std::vector<index_t> sample_rows(index_t M, index_t tile_m)
@@ -62,7 +61,7 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      4,
                      1,
                      16,
-                     Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
+                     Tu<1, 4, 0, false, false>,
                      ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0, 1>>;
     check_sampled<K>(65536, 16, 81920);
 }

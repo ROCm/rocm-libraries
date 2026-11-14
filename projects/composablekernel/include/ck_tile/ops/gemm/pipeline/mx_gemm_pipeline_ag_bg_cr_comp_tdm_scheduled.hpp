@@ -70,16 +70,18 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
 };
 
 /**
- * @brief MX GEMM main loop for gfx1250 after rocKE's mx_gemm (instances/gfx1250/mx_gemm.py at
- *        commit b32989439dc): TDM loads of A, B and their K-major scales into two LDS buffers,
- *        scaled WMMAs scheduled explicitly, optional cluster multicast and GL2 prefetch.
+ * @brief MX GEMM main loop for gfx1250: TDM loads of A, B and their K-major scales into two LDS
+ *        buffers, scaled WMMAs scheduled explicitly, optional cluster multicast and GL2 prefetch.
  *
- * The roles follow rocKE's, in PipelineImpl: TdmLoader (descriptors built once, each tile patches
- * only its LDS address, global address and remaining sizes; even waves load one B component, odd
- * waves one A component), Gl2Prefetcher, LdsReader (16 B reads), TileCompute (local_prefetch,
- * half-B and the cluster signal) and Pipeline (PrefetchGlobalRead 2: tile k refills its own
- * buffer with tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K
- * step).
+ * PipelineImpl has five roles: TdmLoader (descriptors built once, each tile patches only its LDS
+ * address, global address and remaining sizes; even waves load one B component, odd waves one A
+ * component), Gl2Prefetcher, LdsReader (16 B reads), TileCompute (PrefetchLdsRead, SplitBLdsRead
+ * and the cluster signal) and Pipeline (PrefetchStages 2: tile k refills its own buffer with
+ * tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K step).
+ *
+ * The schedule is one intrawave loop, written with explicit waits rather than left to the
+ * compiler's schedulers, so Problem::Scheduler must be GemmPipelineScheduler::Intrawave; the
+ * tuning knobs are the policy's (MxGemmPipelineAgBgCrCompTDMScheduledPolicy).
  *
  * M, N and K are run time; the Problem's traits (MxTdmScheduledGemmTraits) carry the code paths
  * that depend on them (edges, wide offsets, a K tail). Tile t uses LDS buffer t % 2 and the loop
@@ -114,7 +116,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
 
     static_assert(mx_tdm_scheduled::InvalidTuning<Policy::template GetReason<Problem>()>::value,
-                  "comp_tdm_scheduled: the Problem and policy break a rule of rocKE's validate()");
+                  "comp_tdm_scheduled: the Problem and policy break a rule of the policy's "
+                  "GetReason");
+
+    static constexpr auto Scheduler = Problem::Scheduler;
+    static_assert(Scheduler == GemmPipelineScheduler::Intrawave,
+                  "comp_tdm_scheduled is one explicitly scheduled intrawave loop: "
+                  "Problem::Scheduler must be GemmPipelineScheduler::Intrawave");
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr index_t BlockSize      = Problem::kBlockSize;
@@ -169,8 +177,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kKSteps           = Policy::template GetKSteps<Problem>();
     static constexpr index_t kAtomM            = BlockGemmShape::WarpTile::at(number<0>{});
     static constexpr index_t kKPerByte         = Policy::template GetKPerByte<Problem>();
-    static constexpr bool kLocalPrefetch       = Policy::template GetLocalPrefetch<Problem>();
-    static constexpr bool kHalfB               = Policy::template GetHalfB<Problem>();
+    static constexpr bool kPrefetchLdsRead     = Policy::template GetPrefetchLdsRead<Problem>();
+    static constexpr bool kSplitBLdsRead       = Policy::template GetSplitBLdsRead<Problem>();
     static constexpr index_t kHalf             = kRn / 2;
     static constexpr bool kHasCluster          = Policy::template HasCluster<Problem>();
     static constexpr index_t kClusterX         = BlockGemmShape::kclusterN;
@@ -203,13 +211,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                Policy::template GetTuningName<Problem>();
     }
 
-    /// rocKE's name of an A or B type.
+    /// The kernel-name spelling of an A or B type.
     template <typename T>
     CK_TILE_HOST static const char* GetDtypeName()
     {
         return std::is_same_v<T, pk_fp4_t> ? "fp4" : std::is_same_v<T, fp8_t> ? "fp8" : "bf8";
     }
-    /// rocKE's MxGemmSpec dtype tag: mx, A's type, then B's if it differs.
+    /// The kernel-name type tag: mx, A's type, then B's if it differs.
     CK_TILE_HOST static std::string GetDtypeTag()
     {
         std::string tag = std::string("mx") + GetDtypeName<ADataType>();
@@ -221,17 +229,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     {
         return "_t" + std::to_string(kTileM) + "x" + std::to_string(kTileN) + "x" +
                std::to_string(kTileK);
-    }
-
-    /// rocKE's MxGemmSpec.kernel_name() of an M x N x K problem for a spec named `prefix`.
-    CK_TILE_HOST static std::string GetRockeName(long_index_t M,
-                                                 long_index_t N,
-                                                 long_index_t K,
-                                                 const std::string& prefix = "mx_gemm")
-    {
-        return prefix + "_" + GetDtypeTag() + "_M" + std::to_string(M) + "N" + std::to_string(N) +
-               "K" + std::to_string(K) + GetTileName() +
-               Policy::template GetTuningName<Problem>(true);
     }
 
     /// The name of an MxGemmKernel of this pipeline: data types, tile, tuning and traits.
@@ -248,8 +245,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return name + "_w" + std::to_string(Traits::kStoreWidth);
     }
 
-    /// nullptr if this instance runs an M x N x K problem, else why not: a shape rule of rocKE's
-    /// validate() (the others hold at compile time), or a shape path the traits lack.
+    /// nullptr if this instance runs an M x N x K problem, else why not: a rule that needs the
+    /// problem's shape (the others hold at compile time), or a shape path the traits lack.
     CK_TILE_HOST static const char* GetUnsupportedReason(index_t M, index_t N, index_t K)
     {
         using R  = MxTdmScheduledReason;
@@ -754,7 +751,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             PrefetchAhead<StaticParity>(k0);
             sched_fence<kAluMayCross>();
-            if constexpr(kLocalPrefetch)
+            if constexpr(kPrefetchLdsRead)
             {
                 // Tile k+1 is read next, from this point: it is the only TDM load in flight, and
                 // the barrier below publishes it.
@@ -823,7 +820,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 arrive();
         }
 
-        /// local_prefetch 1, half-B: all reads of K step s + 1 before the first wait but
+        /// PrefetchLdsRead and SplitBLdsRead: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void k_tile_half_b(AccTile& acc,
@@ -867,7 +864,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             });
         }
 
-        /// local_prefetch 1, B whole.
+        /// PrefetchLdsRead, B whole.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void k_tile_full(AccTile& acc,
                                         ATile& a_tile,
@@ -901,7 +898,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             });
         }
 
-        /// local_prefetch 0: each K step reads, drains and computes. The tile's last read is the
+        /// PrefetchLdsRead off: each K step reads, drains and computes. The tile's last read is the
         /// last K step's: its refill (GL2 prefetch, the signal) follows the drain, the cluster
         /// wait and TDM come kSignalWmmas WMMAs later (at once without a cluster).
         template <index_t Steps, index_t StaticParity>
@@ -934,12 +931,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             const index_t buffer      = BufferBase(parity);
             const index_t next_buffer = BufferBase(1 - parity);
-            if constexpr(!kLocalPrefetch)
+            if constexpr(!kPrefetchLdsRead)
             {
                 wait_next_tile();
                 k_tile_direct<Steps, StaticParity>(acc, k0, parity, buffer);
             }
-            else if constexpr(kHalfB)
+            else if constexpr(kSplitBLdsRead)
                 k_tile_half_b<Steps, StaticParity>(
                     acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
             else
@@ -970,13 +967,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<2, (kGl2Distance > 2 ? kGl2Distance : 2), 1>{}([&](auto ahead) {
                 prefetch_for_tdm_cluster<decltype(ahead)::value % 2>(ahead * kTileK);
             });
-            if constexpr(kLocalPrefetch)
+            if constexpr(kPrefetchLdsRead)
                 wait_next_tile();
             clear_tile(acc);
             // The register tiles of the next K step, read one step ahead.
             ATile a_tile{};
             BTile b_tile{};
-            if constexpr(kLocalPrefetch)
+            if constexpr(kPrefetchLdsRead)
             {
                 a_tile = block_gemm.LocalPrefetchA(BufferBase(0), 0);
                 block_gemm.template LocalPrefetchB<0, kRn>(b_tile, BufferBase(0), 0);

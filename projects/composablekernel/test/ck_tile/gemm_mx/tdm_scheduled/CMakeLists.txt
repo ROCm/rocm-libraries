@@ -1,15 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# comp_tdm_scheduled (the rocKE gfx1250 mx_gemm kernel). Included from ../CMakeLists.txt under its gfx125
+# comp_tdm_scheduled (the gfx1250 MX GEMM pipeline). Included from ../CMakeLists.txt under its gfx125
 # block, so TEST_MX_GEMM_COMPILE_OPTIONS is set.
-
-# Host-only: the LDS layout and policy against rocKE, the K-major scale helpers and the reference.
+# Host-only: the LDS layout and policy rules, the K-major scale helpers and the reference.
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_host test_mx_gemm_tdm_scheduled_host.cpp)
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_host_ref test_mx_gemm_tdm_scheduled_host_ref.cpp)
 # Every GPU case compiled for gfx1250 and checked as a problem its instance runs, without a launch.
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_cases test_mx_gemm_tdm_scheduled.cpp)
-# On a gfx1250 device: bitwise against the reference on rocKE's sparse check inputs.
+# On a gfx1250 device: bitwise against the reference on the sparse check inputs.
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled test_mx_gemm_tdm_scheduled.cpp)
 add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_large_cases test_mx_gemm_tdm_scheduled_large_cases.cpp)
 
@@ -32,10 +31,10 @@ if(TARGET test_ck_tile_mx_gemm_tdm_scheduled_cases)
     target_compile_definitions(test_ck_tile_mx_gemm_tdm_scheduled_cases PRIVATE MX_TDM_SCHEDULED_DRY_RUN)
 endif()
 
-# Instances the pipeline must reject at compile time (test_mx_gemm_tdm_scheduled_reject.cpp): half PLR 'b'
-# without local prefetch, 8-bit on the 32x16 atom, an E store wider than the N repeat, GL2 distance 1 and a
+# Instances the pipeline must reject at compile time (test_mx_gemm_tdm_scheduled_reject.cpp): SplitBLdsRead
+# without PrefetchLdsRead, 8-bit on the 32x16 atom, an E store wider than the N repeat, GL2 distance 1 and a
 # 32-workgroup cluster.
-set(MX_TDM_SCHEDULED_REJECT_1 "InvalidTuning<ck_tile::MxTdmScheduledReason::HalfPlrB>")
+set(MX_TDM_SCHEDULED_REJECT_1 "InvalidTuning<ck_tile::MxTdmScheduledReason::SplitBRead>")
 set(MX_TDM_SCHEDULED_REJECT_2 "InvalidTuning<ck_tile::MxTdmScheduledReason::Mma>")
 set(MX_TDM_SCHEDULED_REJECT_3 "the E store width must be")
 set(MX_TDM_SCHEDULED_REJECT_4 "InvalidTuning<ck_tile::MxTdmScheduledReason::Gl2Distance>")

@@ -1,23 +1,18 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// MX GEMM on the comp_tdm_scheduled pipeline (the rocKE gfx1250 mx_gemm kernel): E = A @ B^T with
-// K-major E8M0 scales [ceil(K/128)][MN][4]. Named instances carry rocKE's tuning knobs; -list
-// prints them, -kernel picks one. -epilogue picks how E is stored: direct (from the accumulators,
+// MX GEMM on the comp_tdm_scheduled pipeline (gfx1250): E = A @ B^T with K-major E8M0 scales
+// [ceil(K/128)][MN][4]. Named instances carry the policy's tuning knobs; -list prints them,
+// -kernel picks one. -epilogue picks how E is stored: direct (from the accumulators,
 // MxDirectStoreEpilogue) or tdm (through LDS, TdmEpilogue).
 //
-//   verify  rocKE's sparse check inputs, E bit for bit against the host reference (sampled rows
+//   verify  the sparse check inputs, E bit for bit against the host reference (sampled rows
 //           when the problem is large)
-//   bench   timed on rocKE's timing data (-data=tensile, FP4 sin/cos codes) or random finite
-//           inputs (-data=random)
+//   bench   timed on FP4 sin/cos codes (-data=trig) or random finite inputs (-data=random)
 //   check   whether the instance runs the problem; no device work
-//   file    A, B and scales from -load (raw a.bin, b.bin, a_scale.bin, b_scale.bin in the
-//           kernel's layouts), E to -save_d: the rocKE cross-check feeds both kernels the same
-//           bytes this way
 
 #include <cmath>
 #include <cstdio>
-#include <fstream>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -38,7 +33,6 @@ namespace {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
-using ck_tile::MxTdmScheduledHalfPlr;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 template <typename A,
@@ -99,16 +93,19 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
     }
 }
 
+/// A tuning: the cluster (CX N tiles by CY M tiles), then the policy's knobs with its defaults:
+/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions.
 template <index_t CX,
           index_t CY,
-          index_t Gl2               = 4,
-          index_t Lp                = 1,
-          MxTdmScheduledHalfPlr Plr = MxTdmScheduledHalfPlr::B,
-          bool Lsi                  = true>
+          index_t Gl2      = 4,
+          bool LdsPrefetch = true,
+          bool SplitB      = true,
+          bool Interleave  = true>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Lp, Plr, Lsi>;
+    using Policy =
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, LdsPrefetch, SplitB, Interleave>;
 };
 
 // Whole M and N tiles, no K tail.
@@ -127,28 +124,16 @@ using ck_tile::pk_fp4_t;
 struct Options
 {
     index_t M, N, K;
-    std::string epilogue, mode, load, save_d, data;
+    std::string epilogue, mode, data;
     int warmup, repeat;
     uint32_t seed;
 };
 
-std::vector<uint8_t> read_file(const std::string& path, std::size_t bytes)
-{
-    std::ifstream f(path, std::ios::binary);
-    if(!f)
-        throw std::runtime_error("cannot open " + path);
-    std::vector<uint8_t> data(bytes);
-    f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(bytes));
-    if(f.gcount() != static_cast<std::streamsize>(bytes))
-        throw std::runtime_error(path + ": expected " + std::to_string(bytes) + " bytes");
-    return data;
-}
-
-/// rocKE's sparse check inputs (see test_mx_gemm_tdm_scheduled_util.hpp) or random finite ones: FP4
-/// any code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. The sparse scales carry rocKE's
-/// alpha 2^-6 as 2^-3 on each operand, which keeps E in FP8 range. With `trig` FP4 A and B are
-/// rocKE's timing data instead (the Tensile client's initArrayTrig): the E2M1 code, rounded to
-/// nearest even, of sin (A) or cos (B) of the element's linear index, K fastest.
+/// The sparse check inputs (see test_mx_gemm_tdm_scheduled_util.hpp) or random finite ones: FP4
+/// any code, 8-bit codes below 2 in magnitude, E8M0 2^-3..2^3. The sparse scales carry an alpha
+/// of 2^-6 as 2^-3 on each operand, which keeps E in FP8 range. With `trig` FP4 A and B are
+/// instead the E2M1 code, rounded to nearest even, of sin (A) or cos (B) of the element's linear
+/// index, K fastest.
 struct Host
 {
     std::vector<uint8_t> a, b, as, bs;
@@ -281,16 +266,8 @@ int run_kernel(const Options& o)
               << K::GetSmemSize() << "\n";
     if(o.mode == "check")
         return 0;
-    Host h;
-    if(o.mode == "file")
-        h = Host{
-            read_file(o.load + "/a.bin", static_cast<std::size_t>(o.M) * sched::row_bytes<A>(o.K)),
-            read_file(o.load + "/b.bin", static_cast<std::size_t>(o.N) * sched::row_bytes<B>(o.K)),
-            read_file(o.load + "/a_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.M, o.K)),
-            read_file(o.load + "/b_scale.bin", ck_tile::mx_scale_kmajor_bytes(o.N, o.K))};
-    else
-        h = make_inputs<A, B>(
-            o.M, o.N, o.K, P::kTileK, o.mode == "verify", o.data == "tensile", o.seed);
+    const Host h =
+        make_inputs<A, B>(o.M, o.N, o.K, P::kTileK, o.mode == "verify", o.data == "trig", o.seed);
 
     const std::size_t e_bytes = static_cast<std::size_t>(o.M) * o.N * sched::out_bytes<O>();
     ck_tile::DeviceMem a(h.a.size()), b(h.b.size()), as(h.as.size()), bs(h.bs.size()), e(e_bytes);
@@ -328,15 +305,6 @@ int run_kernel(const Options& o)
     HIP_CHECK_ERROR(hipDeviceSynchronize());
     std::vector<uint8_t> got(e_bytes);
     e.FromDevice(got.data());
-    if(o.mode == "file")
-    {
-        std::ofstream(o.save_d, std::ios::binary)
-            .write(reinterpret_cast<const char*>(got.data()),
-                   static_cast<std::streamsize>(got.size()));
-        std::cout << "E written to " << o.save_d << "\n";
-        return 0;
-    }
-
     // Full check up to 2^32 multiply-adds, else the first and last tile of rows and 64 random.
     std::vector<index_t> rows;
     if(static_cast<double>(o.M) * o.N * o.K <= 4294967296.0)
@@ -398,7 +366,8 @@ int run(const Options& o)
     return o.epilogue == "tdm" ? run_kernel<TdmKernel<P>>(o) : run_kernel<DirectKernel<P>>(o);
 }
 
-/// The named instances: rocKE's winners for the ck_backport problems and variants of each knob.
+/// The named instances: the tuned instances of the maf, medium and mab problems and variants of
+/// each knob.
 const std::map<std::string, std::pair<const char*, std::function<int(const Options&)>>>& instances()
 {
     static const std::map<std::string, std::pair<const char*, std::function<int(const Options&)>>>
@@ -469,7 +438,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            Tu<2, 2>,
                            Whole<4>>>}},
             {"medium",
-             {"mxfp4 t128x128x1024 16x16 atom, c4x4, no half-PLR (medium winner)",
+             {"mxfp4 t128x128x1024 16x16 atom, c4x4, no SplitBLdsRead (medium winner)",
               run<Pipeline<pk_fp4_t,
                            pk_fp4_t,
                            fp8_t,
@@ -479,10 +448,10 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            2,
                            16,
-                           Tu<4, 4, 4, 1, MxTdmScheduledHalfPlr::None>,
+                           Tu<4, 4, 4, true, false>,
                            Whole<4>>>}},
             {"mab",
-             {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no local prefetch (MAB)",
+             {"mxfp4 t128x16x512 wave 4x1, 16x16 atom, c1x4, no PrefetchLdsRead (MAB)",
               run<Pipeline<pk_fp4_t,
                            pk_fp4_t,
                            fp8_t,
@@ -492,7 +461,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            4,
                            1,
                            16,
-                           Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
+                           Tu<1, 4, 0, false, false>,
                            Whole<1>>>}},
             {"mab256",
              {"mab with a t256x16x512 tile (MAB winner)",
@@ -505,7 +474,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            4,
                            1,
                            16,
-                           Tu<1, 4, 0, 0, MxTdmScheduledHalfPlr::None>,
+                           Tu<1, 4, 0, false, false>,
                            Whole<1>>>}},
             {"any",
              {"mxfp4 t256x256x512 c1x1 for any M, N and tile count (no K tail)",
@@ -531,12 +500,8 @@ int main(int argc, char* argv[])
         .insert("n", "1024", "N")
         .insert("k", "2048", "K (a multiple of 32)")
         .insert("epilogue", "direct", "direct (from the accumulators) | tdm (through LDS)")
-        .insert("mode", "verify", "verify | bench | file | check")
-        .insert("load", "", "file mode: directory of a.bin, b.bin, a_scale.bin, b_scale.bin")
-        .insert("save_d", "d.bin", "file mode: where E goes")
-        .insert("data",
-                "tensile",
-                "bench data: tensile (rocKE's timing data: FP4 sin/cos codes) | random")
+        .insert("mode", "verify", "verify | bench | check")
+        .insert("data", "trig", "bench data: trig (FP4 sin/cos codes) | random")
         .insert("warmup", "50", "bench: untimed launches")
         .insert("repeat", "200", "bench: timed launches")
         .insert("seed", "23206", "input RNG seed");
@@ -559,15 +524,13 @@ int main(int argc, char* argv[])
                     arg.get_int("k"),
                     arg.get_str("epilogue"),
                     arg.get_str("mode"),
-                    arg.get_str("load"),
-                    arg.get_str("save_d"),
                     arg.get_str("data"),
                     arg.get_int("warmup"),
                     arg.get_int("repeat"),
                     static_cast<uint32_t>(arg.get_int("seed"))};
-    if(o.mode != "verify" && o.mode != "bench" && o.mode != "file" && o.mode != "check")
+    if(o.mode != "verify" && o.mode != "bench" && o.mode != "check")
     {
-        std::cerr << "-mode must be verify, bench, file or check\n";
+        std::cerr << "-mode must be verify, bench or check\n";
         return 1;
     }
     if(o.epilogue != "direct" && o.epilogue != "tdm")
@@ -575,9 +538,9 @@ int main(int argc, char* argv[])
         std::cerr << "-epilogue must be direct or tdm\n";
         return 1;
     }
-    if(o.data != "tensile" && o.data != "random")
+    if(o.data != "trig" && o.data != "random")
     {
-        std::cerr << "-data must be tensile or random\n";
+        std::cerr << "-data must be trig or random\n";
         return 1;
     }
     return it->second.second(o);

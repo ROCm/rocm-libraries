@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-// Shared by the comp_tdm_scheduled GPU tests: instance aliases, rocKE's sparse check inputs, a
+// Shared by the comp_tdm_scheduled GPU tests: instance aliases, the sparse check inputs, a
 // device run and the bitwise check against reference_mx_gemm_tdm_scheduled.
 
 #include <algorithm>
@@ -32,7 +32,7 @@ using ck_tile::long_index_t;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 /// A comp_tdm_scheduled pipeline: A, B and E types, tile, wave group, WMMA atom (32 or 16 rows),
-/// tuning (a Tu) and the shape traits (edge M/N, wide A/B/E, odd tiles, tail steps, store width).
+/// tuning (a Tu) and the shape traits (edge M/N, wide A/B/E, tail steps, store width).
 template <typename A,
           typename B,
           typename O,
@@ -99,28 +99,29 @@ template <typename A,
 using TdmKernel =
     TdmKernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
 
-/// rocKE's tuning knobs: the cluster (CX N tiles by CY M tiles), then the policy's parameters
-/// with its defaults: GL2 distance, local prefetch, half PLR, segment interleave.
+/// A tuning: the cluster (CX N tiles by CY M tiles), then the policy's knobs with its defaults:
+/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions.
 template <index_t CX,
           index_t CY,
-          index_t Gl2                        = 4,
-          index_t Lp                         = 1,
-          ck_tile::MxTdmScheduledHalfPlr Plr = ck_tile::MxTdmScheduledHalfPlr::B,
-          bool Lsi                           = true>
+          index_t Gl2      = 4,
+          bool LdsPrefetch = true,
+          bool SplitB      = true,
+          bool Interleave  = true>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, Lp, Plr, Lsi>;
+    using Policy =
+        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, LdsPrefetch, SplitB, Interleave>;
 };
 
 template <bool EdgeM, bool EdgeN, index_t TailSteps, index_t StoreWidth>
 using Shape =
     ck_tile::MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, false, TailSteps, StoreWidth>;
 
-/// rocKE's sparse check (mx_gemm_bench.sparse_inputs): A and B nonzero only in a few 128-K steps
+/// The sparse check: A and B nonzero only in a few 128-K steps
 /// (the first and last, both sides of the first and last tile boundaries, then random ones up to
 /// 12), FP4 all 16 codes with E8M0 2^-2..2^1, 8-bit +-(1 + m / 2^bits) * 2^e, e in {-1, 0}, with
-/// E8M0 2^-1..2^0. rocKE's alpha 2^-6 is folded into the scales, 2^-3 on each operand
+/// E8M0 2^-1..2^0. An alpha of 2^-6 is folded into the scales, 2^-3 on each operand
 /// (kSparseScaleShift), which keeps E in FP8 range. Every FP32 partial sum is exact, so E is
 /// checked bit for bit at any K, and at any scale shift that keeps the sums finite and normal.
 struct Inputs
@@ -131,7 +132,7 @@ struct Inputs
     std::vector<uint8_t> b_scale; // K-major
 };
 
-/// The E8M0 exponent offset of each operand's scales in the sparse check: rocKE's alpha 2^-6.
+/// The E8M0 exponent offset of each operand's scales in the sparse check: alpha 2^-6.
 inline constexpr int kSparseScaleShift = -3;
 
 inline std::vector<long_index_t> sparse_steps(long_index_t K, index_t tile_k, std::mt19937& rng)
@@ -167,7 +168,7 @@ uint8_t sparse_code(std::mt19937& rng)
     return static_cast<uint8_t>((sign << 7) | (exponent << bits) | mantissa);
 }
 
-/// rocKE's sparse inputs of A and B types A and B (pk_fp4_t, fp8_t or bf8_t).
+/// The sparse inputs of A and B types A and B (pk_fp4_t, fp8_t or bf8_t).
 template <typename A, typename B>
 Inputs make_inputs(index_t M,
                    index_t N,
@@ -366,7 +367,7 @@ first_mismatch(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want
     return "";
 }
 
-/// Runs `Kernel` on rocKE's sparse inputs, their scales scale_shift above E8M0's bias, and
+/// Runs `Kernel` on the sparse inputs, their scales scale_shift above E8M0's bias, and
 /// requires bitwise equality with the reference.
 template <typename Kernel>
 void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)

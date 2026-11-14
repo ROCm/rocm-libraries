@@ -7,8 +7,8 @@ FP4 stores the even K element in the low nibble and the odd K element in the hig
 nibble, so its input storage is `[M, K/2]` and `[N, K/2]` bytes.
 
 The bridge exposes all five pipeline choices in the native MX GEMM selector, and
-on gfx1250 also `comp_tdm_scheduled`, the CK backport of rocKE's `mx_gemm` (see
-[comp_tdm_scheduled](#comp_tdm_scheduled-rockes-mx_gemm)):
+on gfx1250 also `comp_tdm_scheduled`, an explicitly scheduled MX GEMM with K-major scales
+(see [comp_tdm_scheduled](#comp_tdm_scheduled)):
 
 | Target | Pipeline | Native implementation | Epilogue |
 | --- | --- | --- | --- |
@@ -79,10 +79,10 @@ entry points use the same generated kernel, while their host code chooses the
 architecture's native scale reshuffling helper. Select one GPU architecture per
 Tile Engine build.
 
-## comp_tdm_scheduled (rocKE's mx_gemm)
+## comp_tdm_scheduled
 
-`comp_tdm_scheduled` is rocKE's gfx1250 `mx_gemm` kernel (rocKE commit `b32989439dc`) in
-CK-Tile: `E = A @ B^T`, with FP4, FP8 or BF8 inputs and an FP8, FP16 or BF16 E
+`comp_tdm_scheduled` (`MxGemmPipelineAgBgCrCompTDMScheduled`) is a gfx1250 MX GEMM whose
+loop is scheduled in the source: `E = A @ B^T`, with FP4, FP8 or BF8 inputs and an FP8, FP16 or BF16 E
 (FP8 saturating to ±448). The bridge and Tile Engine build it with one input type
 (FP4 or FP8) and an FP16 E. Example 56
 (`example/ck_tile/56_gemm_comp_tdm_scheduled_mx`) and the C++ tests cover the rest.
@@ -103,27 +103,27 @@ says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 32, and the K tail, the tile parity and partial M and N tiles must match the
 instance's shape traits.
 
-rocKE tunes each kernel with schedule knobs that CK-Tile pipelines normally fix.
-`comp_tdm_scheduled` takes them as a tuning, set per kernel (dispatcher) or as a
-product (Tile Engine). Missing keys take rocKE's defaults:
+`comp_tdm_scheduled` takes the cluster and its policy's knobs
+(`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel (dispatcher) or as
+a product (Tile Engine). Missing keys take the defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `cluster_dim` | `[4, 4]` | Workgroup cluster (x, y); the grid must divide by it |
 | `gl2_prefetch_distance` | `4` | K tiles of GL2 prefetch ahead; `0` turns it off |
-| `local_prefetch` | `1` | LDS-to-register prefetch depth (0 or 1) |
-| `half_plr` | `"b"` | Split the B register prefetch in halves (`"b"`) or not (`"none"`) |
-| `lds_segment_interleave` | `true` | Interleave the LDS segments |
+| `prefetch_lds_read` | `true` | Read K step s+1 from LDS while step s computes |
+| `split_b_lds_read` | `true` | Read B from LDS in two halves (needs `prefetch_lds_read` and an even N repeat) |
+| `interleave_lds_regions` | `true` | Place the A and B components in different 64 KiB LDS segments |
 | `edge` | `true` | Partial M and N tiles (`false` drops the edge code) |
 | `tail_steps` | `0` | K tail in 128-wide steps (`K mod tile_k`) |
 | `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
 | `store_width` | `0` | D store width in elements; `0` is the widest the tile allows |
 
-The first five are rocKE's knobs; the last four are shape traits fixed at
-compile time (rocKE derives them from its compile-time M, N and K). Every kernel
-runs any K tile count: the pipeline picks the odd or even variant at run time,
-as the other TDM pipelines do. The kernel name adds rocKE's tuning suffix and
-the non-default traits, for example
+The first five are the tuning knobs; the last four are shape traits fixed at
+compile time. Every kernel runs any K tile count: the pipeline picks the odd or even
+variant at run time, as the other TDM pipelines do. The kernel name adds the tuning
+suffix (`_pf<n>`, and `_lp0`, `_hplrnone` and `_lsi0` for the three knobs turned off)
+and the non-default traits, for example
 `..._256x256x512_2x2x1_32x16x128_c2x2_pf2_noedge`.
 
 In the dispatcher, put the keys at the top level of the configuration, or in
@@ -136,8 +136,8 @@ MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_sche
 ```
 
 In a Tile Engine JSON, add a `tuning_config` section; every combination of its
-values is tried with every tile, and invalid combinations are dropped by rocKE's
-rules (`mx_gemm/mx_tdm_scheduled.py`):
+values is tried with every tile, and invalid combinations are dropped by the
+policy's rules (`mx_gemm/mx_tdm_scheduled.py`):
 
 ```json
 "tuning_config": {
@@ -146,16 +146,7 @@ rules (`mx_gemm/mx_tdm_scheduled.py`):
 }
 ```
 
-Other pipelines reject tuning keys. `mx_gemm/rocke_spec_to_ck.py` turns a rocKE
-kernel name or spec into a Tile Engine or dispatcher configuration and back. With
-the problem in the name, it selects the shape traits that problem needs:
-
-```bash
-python3 tile_engine/ops/gemm/mx_gemm/rocke_spec_to_ck.py \
-    mx_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4_fp16 --format dispatcher
-```
-
-A rocKE kernel with an FP8 D (rocKE's default) needs `--out-dtype fp16`.
+Other pipelines reject tuning keys.
 
 ## Run the bridge
 
@@ -295,7 +286,7 @@ bridge generator:
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
 | `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
 | `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
-| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `direct` or `tdm` epilogue; rocKE's rules for each tuning |
+| `comp_tdm_scheduled` | gfx1250 | `2 × 2 × 1`, `4 × 1 × 1` or `1 × 4 × 1` warps; warp tile `32 × 16 × 128` (FP4) or `16 × 16 × 128`; `direct` or `tdm` epilogue; the policy's rules for each tuning |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
 `persistent`. Phase 1 prints `Expanded configs: N`, the number of kernels left
@@ -416,7 +407,7 @@ python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_cmake.py -v
 ```
 
 The `comp_tdm_scheduled` suite checks the tuning configuration, the Tile Engine kernel
-list and generated headers, the dispatcher generator and the rocKE conversion; it
+list and generated headers, the dispatcher generator and the compile flags; it
 needs neither a GPU nor a compiler:
 
 ```bash

@@ -24,10 +24,10 @@ Each header is compiled per-kernel via force-include:
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
 pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue,
-and comp_tdm_scheduled (rocKE's mx_gemm: K-major scales, the direct-store epilogue or
-the TDM one). Only
-comp_tdm_scheduled takes tuning keys, at the top level of the config (rocKE's knobs and the
-instance's shape traits; mx_tdm_scheduled.TUNING_DEFAULTS and SHAPE_DEFAULTS).
+and comp_tdm_scheduled (K-major scales, the direct-store epilogue or the TDM one).
+Only comp_tdm_scheduled takes tuning keys, at the top level of the config (the cluster, the
+policy's knobs and the instance's shape traits; mx_tdm_scheduled.TUNING_DEFAULTS and
+SHAPE_DEFAULTS).
 Both use intrawave scheduling. The default warp tile is 16x16x128;
 gfx1250 TDM V1/V2 also expose 32x32x128 and FP4 32x16x128. Native pipeline
 compilation determines instruction support; codegen does not distinguish A0/B0.

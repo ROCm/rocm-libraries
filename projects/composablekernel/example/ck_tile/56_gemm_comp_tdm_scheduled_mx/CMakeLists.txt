@@ -1,8 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# MX GEMM on the comp_tdm_scheduled pipeline (the rocKE gfx1250 mx_gemm kernel): named instances,
-# correctness check, timing and the file mode of the rocKE cross-check (gfx125x only).
+# MX GEMM on the comp_tdm_scheduled pipeline: named instances, correctness check and timing
+# (gfx125x only).
 if(GPU_TARGETS MATCHES "gfx125")
   set(EXAMPLE_COMP_TDM_SCHEDULED_MX tile_example_gemm_comp_tdm_scheduled_mx_bench)
   set_source_files_properties(gemm_comp_tdm_scheduled_mx_bench.cpp PROPERTIES LANGUAGE HIP)

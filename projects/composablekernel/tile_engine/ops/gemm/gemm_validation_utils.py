@@ -411,7 +411,7 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
-# rocKE's mx_gemm: K-major scales, its own tuning knobs and two epilogues: "direct"
+# comp_tdm_scheduled: K-major scales, its own tuning knobs and two epilogues: "direct"
 # (MxDirectStoreEpilogue, E from the accumulators; the default) and "tdm" (TdmEpilogue, E
 # through LDS).
 MX_TDM_SCHEDULED_PIPELINE = "comp_tdm_scheduled"

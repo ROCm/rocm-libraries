@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only checks of MxGemmPipelineAgBgCrCompTDMScheduled's compile-time rules against rocKE: the
-// LDS layout of the hipBLASLt solutions, the lane chunks of a K step, and the policy building and
-// rejecting Problems and policies as rocKE does.
+// Host-only checks of MxGemmPipelineAgBgCrCompTDMScheduled's compile-time rules: the LDS layout of
+// the hipBLASLt solutions, the lane chunks of a K step, and the policy building and rejecting
+// Problems and policies.
 
 #include <algorithm>
 #include <string>
@@ -18,8 +18,6 @@ namespace {
 
 using ck_tile::index_t;
 using ck_tile::MxTdmScheduledReason;
-
-using H = ck_tile::MxTdmScheduledHalfPlr;
 
 template <typename P, typename Policy>
 using PipelineOf = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<P, Policy>;
@@ -71,14 +69,14 @@ void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
         EXPECT_EQ(got[i], want[i]) << "field " << i;
 }
 
-// rocKE's test_lds_layout_matches_the_hipblaslt_solutions (Tensile A = rocKE B).
+// The LDS layouts of the matching hipBLASLt solutions (its A is this pipeline's B).
 TEST(MxGemmTdmScheduledHost, LayoutMatchesTheHipblasltSolutions)
 {
     using ck_tile::fp8_t;
     using ck_tile::pk_fp4_t;
-    using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
-    using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, H::None, false>;
-    using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, 1, H::None>;
+    using Default  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using MabTu    = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false, false>;
+    using MediumTu = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
     {
         SCOPED_TRACE("maf fp4");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32>, Default>(
@@ -173,23 +171,21 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     // 3 scale reads and 2 chunks of 4 x 2 A rows and 8 B fragments.
     static_assert(Default::GetReadsPerStep<MafProblem>() == 35);
     static_assert(Default::GetSignalWmmas<MafProblem>() == 6);
-    EXPECT_EQ((PipelineOf<MafProblem, Default>::GetRockeName(4096, 4096, 65536, "mxfp4_gemm")),
-              "mxfp4_gemm_mxfp4_M4096N4096K65536_t256x256x512_c4x4");
+    EXPECT_EQ((PipelineOf<MafProblem, Default>::GetKernelName()),
+              "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_w1");
     EXPECT_EQ(Default::GetTuningName<MafProblem>(), "_c4x4");
 
     using Pf2 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2>;
     EXPECT_EQ(Pf2::GetTuningName<MafProblem>(), "_c4x4_pf2");
 
-    using Mab = ck_tile::
-        MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, 0, ck_tile::MxTdmScheduledHalfPlr::None>;
+    using Mab = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, false, false>;
     static_assert(Mab::GetReason<MabProblem>() == MxTdmScheduledReason::Ok);
-    EXPECT_EQ(
-        (PipelineOf<MabProblem, Mab>::GetRockeName(65536, 16, 65536, "mxfp4_gemm")),
-        "mxfp4_gemm_mxfp4_M65536N16K65536_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16");
+    EXPECT_EQ((PipelineOf<MabProblem, Mab>::GetKernelName()),
+              "mx_gemm_tdm_scheduled_mxfp4_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16_w1");
     EXPECT_EQ(Mab::GetTuningName<MabProblem>(), "_c1x4_pf0_lp0_hplrnone");
 }
 
-TEST(MxGemmTdmScheduledHost, PolicyRejectsWhatRockeRejects)
+TEST(MxGemmTdmScheduledHost, PolicyRejectsInvalidProblems)
 {
     using Default  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
     using Shape1x1 = ck_tile::ClusterTileGemmShape<ck_tile::sequence<4, 4, 1>,

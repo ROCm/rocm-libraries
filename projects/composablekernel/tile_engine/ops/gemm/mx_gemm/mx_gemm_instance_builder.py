@@ -90,10 +90,9 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             and not (arch == "gfx1250" and (combo[5] or combo[6]))  # pad_k, persistent
         ]
 
-    # comp_tdm_scheduled (rocKE's mx_gemm) carries a tuning besides its tile and traits: rocKE's
-    # schedule knobs and the shape traits of the instance, from the optional "tuning_config"
-    # section (the product of its values; rocKE's defaults when absent). Other pipelines take no
-    # tuning.
+    # comp_tdm_scheduled carries a tuning besides its tile and traits: the cluster, the policy's
+    # knobs and the shape traits of the instance, from the optional "tuning_config" section (the
+    # product of its values; the defaults when absent). Other pipelines take no tuning.
 
     def _v4_tunings(self):
         return mx_tdm_scheduled.expand_tuning_config(self.config.get("tuning_config"))
@@ -245,7 +244,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
 // Kernel name for display
 constexpr const char* KERNEL_NAME = "{kernel_name}";
 
-// rocKE's mx_gemm (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, E = A * B^T.
+// comp_tdm_scheduled (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, E = A * B^T.
 struct SelectedKernel {{
     static constexpr ck_tile::index_t BlockSize = 128;
     static constexpr ck_tile::index_t TileM = {t["tile_m"]};

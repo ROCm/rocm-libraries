@@ -1,24 +1,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""comp_tdm_scheduled (the rocKE gfx1250 mx_gemm kernel) in Python: spec, validator, names, tuning.
+"""comp_tdm_scheduled in Python: spec, validator, names, tuning.
 
 The Python side of MxGemmPipelineAgBgCrCompTDMScheduledPolicy's compile-time rules (in
 include/ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp) and
-the pipeline's shape rules, both ports of rocKE's MxGemmSpec (instances/gfx1250/mx_gemm.py at
-b32989439dc).
+the pipeline's shape rules (MxGemmPipelineAgBgCrCompTDMScheduled::GetUnsupportedReason); the two
+must agree.
 
-Field names and defaults are rocKE's. The tuning knobs (TUNING_DEFAULTS) are what tile_engine's
-``tuning_config`` section and the dispatcher's config carry; the rest comes from the tile config
-and the data types.
+The tuning knobs (TUNING_DEFAULTS) are the policy's template parameters and the cluster, which
+tile_engine's ``tuning_config`` section and the dispatcher's config carry; the rest comes from the
+tile config and the data types.
 """
 
 from __future__ import annotations
 
 import itertools
-import re
-from dataclasses import asdict, dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 ATOM_K = 128
 WAVE = 32
@@ -42,18 +41,18 @@ LANE_GROUPS = 2
 MX_DTYPES = ("fp4", "fp8", "bf8")
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 
-#: rocKE's tuning knobs and defaults.
+#: The tuning knobs and their defaults: the cluster and the policy's template parameters
+#: (Gl2PrefetchDistance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions).
 TUNING_DEFAULTS: Dict[str, object] = {
     "cluster_dim": (4, 4, 1),
     "gl2_prefetch_distance": 4,
-    "local_prefetch": 1,
-    "half_plr": "b",
-    "lds_segment_interleave": True,
+    "prefetch_lds_read": True,
+    "split_b_lds_read": True,
+    "interleave_lds_regions": True,
 }
 
-#: Shape-dependent code paths of a CK instance (the Problem's MxTdmScheduledGemmTraits). rocKE derives
-#: them from its compile-time M, N and K; a CK instance fixes them and runs every problem they
-#: cover. The defaults run any M and N with no K tail; store_width 0 means the widest the tile
+#: Shape-dependent code paths of an instance (the Problem's MxTdmScheduledGemmTraits): an
+#: instance fixes them and runs every problem they cover. The defaults run any M and N with no K tail; store_width 0 means the widest the tile
 #: allows. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
 SHAPE_DEFAULTS: Dict[str, object] = {
     "edge": True,
@@ -77,18 +76,16 @@ REASONS = (
     "tile_atoms",
     "scale_span",
     "k_short",
-    "local_prefetch",
-    "half_plr",
-    "half_plr_b",
+    "split_b_read",
     "gl2_distance",
     "cluster_dim",
     "cluster_size",
     "cluster_grid",
     "lds_pad",
     "accumulators",
-    "lsi_repeat",
-    "lsi_baseline_split",
-    "lsi_capacity",
+    "interleave_repeat",
+    "interleave_baseline_split",
+    "interleave_capacity",
     "lds_capacity",
 )
 
@@ -186,24 +183,9 @@ def _place(
     )
 
 
-def _drop_fixed_knobs(fields: Dict, what: str) -> None:
-    """Removes rocKE knobs that comp_tdm_scheduled fixes: half_b_order (only "ahead") and
-    cluster_signal_wmmas (only derived: None or negative)."""
-    order = str(fields.pop("half_b_order", "ahead")).lower()
-    if order != "ahead":
-        raise ValueError(
-            f"half_b_order {order!r} in the {what} is not supported (only 'ahead')"
-        )
-    signal = fields.pop("cluster_signal_wmmas", None)
-    if signal is not None and signal >= 0:
-        raise ValueError(
-            f"cluster_signal_wmmas {signal!r} in the {what} is not supported (only derived)"
-        )
-
-
 @dataclass(frozen=True)
 class MxTdmScheduledSpec:
-    """One comp_tdm_scheduled kernel: problem, tile and tuning, with rocKE's field names and defaults."""
+    """One comp_tdm_scheduled kernel: problem, tile and tuning."""
 
     M: int = 0
     N: int = 0
@@ -215,27 +197,12 @@ class MxTdmScheduledSpec:
     wave_group: Tuple[int, int] = (2, 2)
     cluster_dim: Tuple[int, int, int] = (4, 4, 1)
     gl2_prefetch_distance: int = 4
-    local_prefetch: int = 1
-    half_plr: str = "b"
-    lds_segment_interleave: bool = True
+    prefetch_lds_read: bool = True
+    split_b_lds_read: bool = True
+    interleave_lds_regions: bool = True
     mma: str = "32x16"
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
-
-    @classmethod
-    def from_dict(cls, d: Dict) -> "MxTdmScheduledSpec":
-        fields = dict(d)
-        _drop_fixed_knobs(fields, "spec")
-        for key in ("wave_group", "cluster_dim"):
-            if key in fields:
-                fields[key] = tuple(fields[key])
-        return cls(**fields)
-
-    def to_dict(self) -> Dict:
-        d = asdict(self)
-        d["wave_group"] = list(self.wave_group)
-        d["cluster_dim"] = list(self.cluster_dim)
-        return d
 
     # The WMMA atom.
     @property
@@ -343,7 +310,7 @@ class MxTdmScheduledSpec:
 
     @property
     def half_b(self) -> bool:
-        return self.local_prefetch == 1 and self.half_plr == "b"
+        return self.prefetch_lds_read and self.split_b_lds_read
 
     @property
     def fp8_convert_width(self) -> int:
@@ -368,7 +335,7 @@ class MxTdmScheduledSpec:
 
     @property
     def late_pending_reads(self) -> int:
-        return self.reads_per_step if self.local_prefetch else 0
+        return self.reads_per_step if self.prefetch_lds_read else 0
 
     @property
     def grid(self) -> Tuple[int, int]:
@@ -379,15 +346,15 @@ class MxTdmScheduledSpec:
     def derived_pads(self) -> Dict[str, Pad]:
         k_bytes = self.tile_k // self.k_per_byte
 
-        def data_block(vector_width: int) -> int:
+        def data_block(repeat: int) -> int:
             block = _round_up(k_bytes, BANK_CYCLE_BYTES)
-            if k_bytes * vector_width > BANK_CYCLE_BYTES:
-                block = _round_up(k_bytes * vector_width, BANK_CYCLE_BYTES)
+            if k_bytes * repeat > BANK_CYCLE_BYTES:
+                block = _round_up(k_bytes * repeat, BANK_CYCLE_BYTES)
             return block
 
-        def scale_pad(vector_width: int) -> Pad:
-            per_block = (ATOM_K // 32) * vector_width
-            if vector_width < 4 or per_block % 16 or (per_block // 16) & 1:
+        def scale_pad(repeat: int) -> Pad:
+            per_block = (ATOM_K // 32) * repeat
+            if repeat < 4 or per_block % 16 or (per_block // 16) & 1:
                 return Pad()
             return Pad(MXS_PAD_BYTES, MXS_BLOCK_BYTES)
 
@@ -417,9 +384,9 @@ class MxTdmScheduledSpec:
             comp_share = comp_a if active_b else comp_b
             data_act = data_b if active_b else data_a
             if not coarse(active_b):
-                return _Placement("lsi_repeat")
+                return _Placement("interleave_repeat")
             if active_b and data_b <= seg and comp_b >= seg:
-                return _Placement("lsi_baseline_split")
+                return _Placement("interleave_baseline_split")
             stride = comp_act + 2 * comp_share
             if stride // seg > (data_act - 1) // seg:
                 return _place(active_b, comp_act, stride, comp_share, stride + comp_act)
@@ -429,7 +396,7 @@ class MxTdmScheduledSpec:
                 active_b, comp_act, pre, comp_share, span, True, span + scales
             )
         if not coarse(True):
-            return _Placement("lsi_repeat")
+            return _Placement("interleave_repeat")
         a_cols = self.atom_m * self.warp_m * self.wave_repeat_m
         a_readable = coarse(False) or (self.tile_m // 2) % a_cols == 0
         if not a_readable:
@@ -484,7 +451,7 @@ class MxTdmScheduledSpec:
         placement = _Placement("ok", a_base, a_bytes, 0, b_bytes, b_end)
         baseline_span = a_base + 2 * a_bytes
         natural_stride = a_base + _round_up(2 * a_bytes, align)
-        if self.lds_segment_interleave:
+        if self.interleave_lds_regions:
             placement = self._interleave_placement(
                 a_bytes,
                 b_bytes,
@@ -497,7 +464,7 @@ class MxTdmScheduledSpec:
         if placement.aligned:
             buffer_stride = _pow2_ceil(max(natural_stride, placement.span))
             if 2 * buffer_stride > LDS_CAPACITY_BYTES:
-                return LdsLayout(reason="lsi_capacity")
+                return LdsLayout(reason="interleave_capacity")
             lds_bytes = max(
                 buffer_stride + baseline_span, buffer_stride + placement.span
             )
@@ -571,7 +538,8 @@ class MxTdmScheduledSpec:
         return "ok"
 
     def validate(self, check_shape: bool = True) -> str:
-        """rocKE's validate(): "ok" if the spec builds, else the code of the first rule broken.
+        """ "ok" if the spec builds, else the code of the first rule broken (GetReason, then
+        GetUnsupportedReason for the rules that need M, N and K).
 
         check_shape: check the rules that need M, N and K (off for a tile-only instance)."""
         if check_shape:
@@ -608,12 +576,8 @@ class MxTdmScheduledSpec:
                 return "scale_span"
             if self.K < self.tile_k:
                 return "k_short"
-        if self.local_prefetch not in (0, 1):
-            return "local_prefetch"
-        if self.half_plr not in ("b", "none"):
-            return "half_plr"
-        if self.half_plr == "b" and (self.local_prefetch != 1 or rn % 2):
-            return "half_plr_b"
+        if self.split_b_lds_read and (not self.prefetch_lds_read or rn % 2):
+            return "split_b_read"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:
             return "gl2_distance"
         cx, cy, cz = self.cluster_dim
@@ -654,7 +618,7 @@ class MxTdmScheduledSpec:
 
     # Names.
     def tuning_name(self, with_shape_parts: bool = True) -> str:
-        """rocKE's name after the tile: cluster, then each non-default value (the policy's GetTuningName)."""
+        """The kernel name after the tile: cluster, then each non-default value (the policy's GetTuningName)."""
         cx, cy, _ = self.cluster_dim
         name = f"_c{cx}x{cy}"
         if with_shape_parts and self.out_dtype != "fp8e4m3":
@@ -663,90 +627,22 @@ class MxTdmScheduledSpec:
             name += f"_wg{self.warp_m}x{self.warp_n}"
         if self.gl2_prefetch_distance != 4:
             name += f"_pf{self.gl2_prefetch_distance}"
-        if self.local_prefetch == 0:
+        if not self.prefetch_lds_read:
             name += "_lp0"
-        if self.half_plr == "none":
+        if not self.split_b_lds_read:
             name += "_hplrnone"
-        if not self.lds_segment_interleave:
+        if not self.interleave_lds_regions:
             name += "_lsi0"
         if with_shape_parts and self.mma == "16x16":
             name += "_mma16"
         return name
-
-    def kernel_name(self, prefix: str = "mx_gemm") -> str:
-        """rocKE's MxGemmSpec.kernel_name()."""
-        tag = (
-            "mx" + self.a_dtype + (self.b_dtype if self.b_dtype != self.a_dtype else "")
-        )
-        return (
-            f"{prefix}_{tag}_M{self.M}N{self.N}K{self.K}"
-            f"_t{self.tile_m}x{self.tile_n}x{self.tile_k}{self.tuning_name()}"
-        )
-
-    def tuning(self) -> Dict[str, object]:
-        return {key: getattr(self, key) for key in TUNING_DEFAULTS}
-
-
-_NAME = re.compile(
-    r"^(?P<prefix>.+?)_mx(?P<a>fp4|fp8|bf8)(?P<b>fp4|fp8|bf8)?"
-    r"(?:_M(?P<M>\d+)N(?P<N>\d+)K(?P<K>\d+))?"
-    r"_t(?P<tm>\d+)x(?P<tn>\d+)x(?P<tk>\d+)_c(?P<cx>\d+)x(?P<cy>\d+)(?P<rest>(?:_\w+?)*)$"
-)
-_FLAG = re.compile(
-    r"_(?:(?P<out>fp16|bf16)|wg(?P<wm>\d)x(?P<wn>\d)|pf(?P<pf>\d+)|cs(?P<cs>\d+)"
-    r"|(?P<lp0>lp0)|(?P<hplrnone>hplrnone)|(?P<hblate>hblate)|(?P<lsi0>lsi0)|(?P<mma16>mma16))"
-)
-
-
-def parse_kernel_name(name: str) -> Tuple[str, MxTdmScheduledSpec]:
-    """(prefix, spec) of a rocKE kernel name; M, N and K are 0 when the name has none."""
-    m = _NAME.match(name)
-    if not m:
-        raise ValueError(f"not a rocKE mx_gemm kernel name: {name!r}")
-    fields: Dict[str, object] = {
-        "a_dtype": m["a"],
-        "b_dtype": m["b"] or m["a"],
-        "M": int(m["M"] or 0),
-        "N": int(m["N"] or 0),
-        "K": int(m["K"] or 0),
-        "tile_m": int(m["tm"]),
-        "tile_n": int(m["tn"]),
-        "tile_k": int(m["tk"]),
-        "cluster_dim": (int(m["cx"]), int(m["cy"]), 1),
-    }
-    rest = m["rest"]
-    pos = 0
-    while pos < len(rest):
-        f = _FLAG.match(rest, pos)
-        if not f:
-            raise ValueError(f"unknown part {rest[pos:]!r} in {name!r}")
-        pos = f.end()
-        if f["out"]:
-            fields["out_dtype"] = f["out"]
-        elif f["wm"]:
-            fields["wave_group"] = (int(f["wm"]), int(f["wn"]))
-        elif f["pf"]:
-            fields["gl2_prefetch_distance"] = int(f["pf"])
-        elif f["cs"]:
-            raise ValueError(f"cluster_signal_wmmas (cs) is not supported: {name!r}")
-        elif f["lp0"]:
-            fields["local_prefetch"] = 0
-        elif f["hplrnone"]:
-            fields["half_plr"] = "none"
-        elif f["hblate"]:
-            raise ValueError(f"half-B late (hblate) is not supported: {name!r}")
-        elif f["lsi0"]:
-            fields["lds_segment_interleave"] = False
-        elif f["mma16"]:
-            fields["mma"] = "16x16"
-    return m["prefix"], MxTdmScheduledSpec(**fields)
 
 
 # tile_engine / dispatcher configs.
 
 
 def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
-    """A complete tuning dict: rocKE's defaults for missing keys; unknown keys are an error."""
+    """A complete tuning dict: the defaults for missing keys; unknown keys are an error."""
     tuning = dict(tuning or {})
     unknown = set(tuning) - set(TUNING_DEFAULTS) - set(SHAPE_DEFAULTS)
     if unknown:
@@ -757,8 +653,8 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
     out["cluster_dim"] = tuple(out["cluster_dim"])
     if len(out["cluster_dim"]) == 2:
         out["cluster_dim"] = (*out["cluster_dim"], 1)
-    out["half_plr"] = str(out["half_plr"]).lower()
-    out["lds_segment_interleave"] = bool(out["lds_segment_interleave"])
+    for key in ("prefetch_lds_read", "split_b_lds_read", "interleave_lds_regions"):
+        out[key] = bool(out[key])
     out["edge"] = bool(out["edge"])
     out["wide"] = bool(out["wide"])
     return out
@@ -771,12 +667,18 @@ def is_default_tuning(tuning: Optional[Dict]) -> bool:
 
 def schedule_tunings() -> List[Dict[str, object]]:
     """Tunings that reach every tile-dependent outcome of validate() (the defaults first): the
-    knobs a tile's validity turns on are half PLR, local prefetch and segment interleave."""
+    knobs a tile's validity turns on are SplitBLdsRead, PrefetchLdsRead and InterleaveLdsRegions."""
     return [
         normalize_tuning(
-            {"half_plr": plr, "local_prefetch": lp, "lds_segment_interleave": lsi}
+            {
+                "split_b_lds_read": split_b,
+                "prefetch_lds_read": prefetch,
+                "interleave_lds_regions": interleave,
+            }
         )
-        for plr, lp, lsi in itertools.product(("b", "none"), (1, 0), (True, False))
+        for split_b, prefetch, interleave in itertools.product(
+            (True, False), (True, False), (True, False)
+        )
     ]
 
 
@@ -829,17 +731,8 @@ def expand_tuning_config(tuning_config: Optional[Dict]) -> List[Dict[str, object
     ]
 
 
-#: tile_engine / dispatcher datatype names to rocKE's.
-TE_DTYPES = {"fp4": "fp4", "fp8": "fp8", "bf8": "bf8"}
+#: tile_engine / dispatcher output datatype names to the spec's.
 TE_OUT_DTYPES = {"fp8": "fp8e4m3", "fp16": "fp16", "bf16": "bf16"}
-CPP_TYPES = {
-    "fp4": "ck_tile::pk_fp4_t",
-    "fp8": "ck_tile::fp8_t",
-    "bf8": "ck_tile::bf8_t",
-    "fp8e4m3": "ck_tile::fp8_t",
-    "fp16": "ck_tile::half_t",
-    "bf16": "ck_tile::bf16_t",
-}
 
 
 def spec_from_tile(
@@ -877,9 +770,9 @@ def spec_from_tile(
         wave_group=(tile_config["warp_m"], tile_config["warp_n"]),
         cluster_dim=t["cluster_dim"],
         gl2_prefetch_distance=t["gl2_prefetch_distance"],
-        local_prefetch=t["local_prefetch"],
-        half_plr=t["half_plr"],
-        lds_segment_interleave=t["lds_segment_interleave"],
+        prefetch_lds_read=t["prefetch_lds_read"],
+        split_b_lds_read=t["split_b_lds_read"],
+        interleave_lds_regions=t["interleave_lds_regions"],
         mma=mma,
         a_dtype=a_dtype,
         b_dtype=b_dtype or a_dtype,
@@ -908,7 +801,7 @@ def instance_store_width(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> in
 
 
 def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
-    """What a comp_tdm_scheduled instance adds to the tile_engine kernel name: rocKE's tuning suffix without the
+    """What a comp_tdm_scheduled instance adds to the tile_engine kernel name: the tuning suffix without the
     parts the name already carries, then the shape traits that are not the defaults."""
     t = normalize_tuning(tuning)
     suffix = spec.tuning_name(with_shape_parts=False)
@@ -946,7 +839,7 @@ def instance_unsupported_reason(
     spec: MxTdmScheduledSpec, tuning: Optional[Dict]
 ) -> str:
     """MxGemmKernel::GetUnsupportedReason of the comp_tdm_scheduled instance on spec's M, N and K: "" if it
-    runs them, else the rocKE reason code or the shape trait it lacks."""
+    runs them, else the reason code or the shape trait it lacks."""
     reason = spec.validate()
     if reason != "ok":
         return reason
@@ -971,11 +864,11 @@ def cpp_cluster_sequence(tuning: Optional[Dict]) -> str:
 def cpp_policy_type(tuning: Optional[Dict]) -> str:
     """The MxGemmPipelineAgBgCrCompTDMScheduledPolicy<...> spelling of a tuning's other knobs."""
     t = normalize_tuning(tuning)
-    plr = "B" if t["half_plr"] == "b" else "None"
-    lsi = "true" if t["lds_segment_interleave"] else "false"
+    knobs = ("prefetch_lds_read", "split_b_lds_read", "interleave_lds_regions")
+    flags = ", ".join("true" if t[k] else "false" for k in knobs)
     return (
         f"ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<{t['gl2_prefetch_distance']}, "
-        f"{t['local_prefetch']}, ck_tile::MxTdmScheduledHalfPlr::{plr}, {lsi}>"
+        f"{flags}>"
     )
 
 
@@ -988,39 +881,6 @@ def cpp_kernel_traits(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
         f"ck_tile::MxTdmScheduledGemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
         f"{t['tail_steps']}, {instance_store_width(spec, t)}>"
     )
-
-
-def te_tuning_from_spec(
-    spec: MxTdmScheduledSpec, shape_traits: bool = False
-) -> Dict[str, object]:
-    """The tuning dict of a spec; with shape_traits, the traits its M, N and K need exactly."""
-    t: Dict[str, object] = {k: getattr(spec, k) for k in TUNING_DEFAULTS}
-    t["cluster_dim"] = list(spec.cluster_dim)
-    if shape_traits and spec.M and spec.N and spec.K:
-        t.update(
-            edge=spec.edge_m or spec.edge_n,
-            tail_steps=spec.tail_steps,
-            wide=spec.wide_a or spec.wide_b or spec.wide_d,
-            store_width=0
-            if spec.store_width == spec.max_store_width
-            else spec.store_width,
-        )
-    return t
-
-
-def tuning_config_section(
-    tunings: Iterable[Dict[str, object]],
-) -> Dict[str, Dict[str, list]]:
-    """A tuning_config section holding exactly these values per key (for one tuning: an exact
-    instance; for several, their product)."""
-    section: Dict[str, Dict[str, list]] = {}
-    for t in tunings:
-        for key, value in t.items():
-            value = list(value) if isinstance(value, tuple) else value
-            vals = section.setdefault(key, {"values": []})["values"]
-            if value not in vals:
-                vals.append(value)
-    return section
 
 
 __all__ = [
@@ -1042,11 +902,8 @@ __all__ = [
     "instance_unsupported_reason",
     "is_default_tuning",
     "normalize_tuning",
-    "parse_kernel_name",
     "schedule_tunings",
     "spec_from_tile",
-    "te_tuning_from_spec",
     "tile_from_spec",
-    "tuning_config_section",
     "validate_instance",
 ]

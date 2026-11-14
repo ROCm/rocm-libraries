@@ -278,8 +278,8 @@ class MxGemmKernelConfig:
 
     k_block_per_cu: int = 1
 
-    # comp_tdm_scheduled only: rocKE's tuning knobs and the instance's shape traits (keys of
-    # mx_tdm_scheduled.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take rocKE's defaults).
+    # comp_tdm_scheduled only: the tuning knobs and the instance's shape traits (keys of
+    # mx_tdm_scheduled.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take the defaults).
     tuning: Optional[Dict[str, Any]] = None
 
     # cached name so we do not re-shell the codegen repeatedly.
