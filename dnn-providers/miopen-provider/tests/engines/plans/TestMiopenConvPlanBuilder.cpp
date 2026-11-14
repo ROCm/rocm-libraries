@@ -1,12 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <exception>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "MiopenApi.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -200,6 +204,173 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
         const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
+}
+
+// True when MIOpen itself reports a forward solution for the graph. The decline tests below only
+// mean something when it does: otherwise MIOpen rejects the graph on its own and the provider's
+// check is never exercised.
+static bool miopenReportsForwardSolution(const HipdnnMiopenHandle& handle, const IGraph& graph)
+{
+    try
+    {
+        const auto& attr
+            = graph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+        const ConvFwdParams params(attr, graph.getTensorMap());
+
+        size_t solutionCount = 0;
+        const auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &solutionCount);
+        return status == miopenStatusSuccess && solutionCount != 0;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+// createValidConvFwdGraph gives x, w and y one data type; this sets them individually.
+static void setConvFwdTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType xType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType wType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType yType)
+{
+    auto* mutableTensors
+        = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer())
+              ->mutable_tensors();
+    EXPECT_TRUE(mutableTensors->GetMutableObject(0)->mutate_data_type(xType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(1)->mutate_data_type(wType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(2)->mutate_data_type(yType));
+}
+
+// Controls: a uniform packed forward convolution (one data type, x, w and y all channels-first or
+// all channels-last) stays applicable.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForwardTensors)
+{
+    const std::vector<int64_t> xDims = {2, 4, 8, 8};
+    const std::vector<int64_t> wDims = {4, 4, 3, 3};
+    const std::vector<int64_t> yDims = {2, 4, 6, 6};
+
+    for(const bool channelsLast : {false, true})
+    {
+        const auto strides = [channelsLast](const std::vector<int64_t>& dims) {
+            return channelsLast
+                       ? hipdnn_data_sdk::utilities::generateStrides(
+                             dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                       : hipdnn_data_sdk::utilities::generateStrides(dims);
+        };
+
+        for(const auto dataType : {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16})
+        {
+            SCOPED_TRACE(std::string(channelsLast ? "channels-last " : "channels-first ")
+                         + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+
+            auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                               strides(xDims),
+                                                                               wDims,
+                                                                               strides(wDims),
+                                                                               yDims,
+                                                                               strides(yDims),
+                                                                               {0, 0},
+                                                                               {0, 0},
+                                                                               {1, 1},
+                                                                               {1, 1},
+                                                                               dataType);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+
+            EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
+        }
+    }
+}
+
+// ALMIOPEN-3017: x channels-first, w channels-last, y channels-first (the F15 1D bf16 shape).
+// MIOpen reports a solution and Find may pick a solver that computes this wrongly.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {8, 16, 16},
+        {256, 16, 1},
+        {32, 16, 1},
+        {16, 1, 16},
+        {8, 32, 16},
+        {512, 16, 1},
+        {0},
+        {0},
+        {1},
+        {1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
+}
+
+// ALMIOPEN-3018: x with padded rows (strides keep the channels-first order, so the layout is
+// uniform) next to packed w and y.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph({2, 4, 8, 8},
+                                                                       {512, 128, 16, 1},
+                                                                       {4, 4, 3, 3},
+                                                                       {36, 9, 3, 1},
+                                                                       {2, 4, 6, 6},
+                                                                       {144, 36, 6, 1},
+                                                                       {0, 0},
+                                                                       {0, 0},
+                                                                       {1, 1},
+                                                                       {1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
+}
+
+// ALMIOPEN-3015: x and w HALF with y FLOAT, layouts uniform and packed. MIOpen reports a solution
+// and then fails at execution or returns garbage.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {2, 4, 8, 8},
+        {256, 64, 8, 1},
+        {4, 4, 3, 3},
+        {36, 9, 3, 1},
+        {2, 4, 6, 6},
+        {144, 36, 6, 1},
+        {0, 0},
+        {0, 0},
+        {1, 1},
+        {1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    setConvFwdTensorTypes(builder,
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)

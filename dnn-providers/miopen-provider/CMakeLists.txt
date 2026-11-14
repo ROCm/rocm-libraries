@@ -220,6 +220,7 @@ add_library(
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
+    engines/plans/MiopenConvTensorChecks.cpp
     engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenPointwiseTensorChecks.cpp
     engines/plans/MiopenUnaryActivationChecks.cpp
