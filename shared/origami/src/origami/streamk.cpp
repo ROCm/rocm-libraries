@@ -54,8 +54,9 @@ constexpr size_t num_fixup_peers_v2(size_t g,
   // If tiles don't evenly divide there are always at least 2 fixup peers, and more if
   // iters_per_tile > iters_per_cta
   size_t hasFixup =
-      (iters_total % g == 0 &&               // Check if some WGs have more iters than others
-       iters_per_cta % iters_per_tile == 0)  // Check if WGs have an even number of full tiles
+      (iters_total % g == 0 &&                 // Check if some WGs have more iters than others
+       (iters_per_tile == 0 ||                 // K = 0: no iterations, nothing to fix up
+        iters_per_cta % iters_per_tile == 0))  // Check if WGs have an even number of full tiles
           ? 0
           : 1;
   return math::safe_ceil_div(iters_per_tile, iters_per_cta) + hasFixup;
@@ -298,6 +299,7 @@ size_t grid_analytical(const problem_t& problem,
   // compute how many 32×32 tiles are needed in each dim,
   // then multiply to get total grid size:
   size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
+  if (grid == 0) return 0;  // Empty problem: no output tiles, no workgroups.
 
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
   const size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
@@ -370,6 +372,7 @@ size_t grid_k_split_aware(const problem_t& problem,
                           size_t cu_budget) {
   size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  if (tiles == 0) return 0;  // Empty problem: no output tiles, no workgroups.
 
   size_t sk_grid = tiles;  // Fallback if no good fractional tile is found
   if (cu_budget > 0) sk_grid = std::min(sk_grid, cu_budget);
@@ -428,7 +431,8 @@ size_t grid_k_split_aware(const problem_t& problem,
       const size_t maxSplitsForIters = iters_per_tile / MinItersPerCU;
 
       const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
-      sk_grid                = tiles * maxSplits;
+      // Too few K iterations to split (including K = 0): keep one workgroup per tile.
+      if (maxSplits > 0) sk_grid = tiles * maxSplits;
     } else {
       const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
       for (size_t frac : tile_fractions) {

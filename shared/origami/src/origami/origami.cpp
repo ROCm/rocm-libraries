@@ -12,6 +12,7 @@
 
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
@@ -696,6 +697,8 @@ double compute_ranked_latency(const problem_t& problem,
       log_config_rejection(config, "LDS capacity exceeded");
       return kRejectedLatency;
     }
+    // Nothing to model; only the per-kernel launch cost remains.
+    if (problem.is_empty()) { return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD; }
     return attention::compute_total_latency(problem, hardware, config);
   }
 
@@ -732,6 +735,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     } else {
       invalid_configs.push_back({latency, std::cref(config)});
     }
+  }
+
+  // Empty problem: every valid config costs only the launch overhead, so
+  // there is nothing to sort or tie-break. Return the valid configs, then the
+  // rejected ones, each in input order.
+  if (problem.is_empty()) {
+    std::vector<prediction_result_t> results;
+    results.reserve(configs.size());
+    for (const auto* list : {&valid_configs, &invalid_configs}) {
+      for (const auto& r : *list) { results.push_back({r.latency, r.config.get()}); }
+    }
+    return results;
   }
 
   // Fallback: when the analytical model rejected every candidate, rank the

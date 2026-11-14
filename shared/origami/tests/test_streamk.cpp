@@ -457,3 +457,75 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
                 p, make_hardware(950), c, origami::grid_selection_t::k_split_aware) == 768);
   }
 }
+
+TEST_CASE("Origami streamk: select_grid_size handles empty and K = 0 problems",
+          "[origami][streamk][empty]") {
+  const auto hardware = make_hardware(950);
+  auto config         = make_config(128, 128, 64, 16, 16, 32);
+
+  SECTION("empty problems launch no workgroups") {
+    const origami::problem_t problems[] = {
+        make_problem(0, 1024, 1024),
+        make_problem(1024, 0, 1024),
+        make_problem(1024, 1024, 1024, origami::transpose_t::T, origami::transpose_t::N, 0),
+    };
+    for (const auto& problem : problems) {
+      for (auto reduction : {origami::reduction_t::tree, origami::reduction_t::parallel}) {
+        config.reduction_strategy = reduction;
+        for (uint32_t a = 0; a < static_cast<uint32_t>(origami::grid_selection_t::count); ++a) {
+          const auto algorithm = static_cast<origami::grid_selection_t>(a);
+          const size_t grid =
+              origami::streamk::select_grid_size(problem, hardware, config, algorithm);
+          switch (algorithm) {
+            case origami::grid_selection_t::number_of_cus:
+              // Ignores the problem by design: always the CU count.
+              REQUIRE(grid == hardware.N_CU);
+              break;
+            case origami::grid_selection_t::reduction_cost_aware:
+              // Searches grids from 1 up, so never returns 0.
+              REQUIRE(grid == 1);
+              break;
+            default:
+              // Tile-count based: no tiles, no workgroups.
+              REQUIRE(grid == 0);
+              break;
+          }
+        }
+        // compute_launch_parameters is the path that reaches grid_k_split_aware
+        // from the model.
+        auto [strategy, wgs, cus, timesteps, split] = origami::gemm::compute_launch_parameters(
+            problem, hardware, config, origami::grid_selection_t::k_split_aware);
+        REQUIRE(wgs == 0);
+        REQUIRE(timesteps == 0);
+      }
+    }
+  }
+
+  SECTION("K = 0 still launches workgroups") {
+    const auto problem = make_problem(1024, 1024, 0);
+    for (uint32_t a = 0; a < static_cast<uint32_t>(origami::grid_selection_t::count); ++a) {
+      const auto algorithm = static_cast<origami::grid_selection_t>(a);
+      REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algorithm) > 0);
+    }
+  }
+}
+
+TEST_CASE("Origami streamk: k_split_aware parallel reduction with too few K iterations",
+          "[origami][streamk][empty]") {
+  // Fewer tiles than CUs and a parallel reduction: the split factor is capped
+  // by iters_per_tile / 8, which is 0 with fewer than 8 K iterations per tile
+  // (K <= 7 * MT_K, K = 0 included). The grid must then stay at one workgroup
+  // per tile rather than collapse to 0.
+  const auto hardware       = make_hardware(950);
+  auto config               = make_config(256, 256, 64, 16, 16, 32);
+  config.reduction_strategy = origami::reduction_t::parallel;
+  const size_t tiles        = 4 * 4;  // 1024 x 1024 with 256 x 256 tiles
+
+  for (size_t k : {size_t(0), size_t(64), size_t(7 * 64)}) {
+    DYNAMIC_SECTION("K = " << k) {
+      const auto problem = make_problem(1024, 1024, k);
+      REQUIRE(origami::streamk::select_grid_size(
+                  problem, hardware, config, origami::grid_selection_t::k_split_aware) == tiles);
+    }
+  }
+}
