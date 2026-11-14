@@ -90,6 +90,7 @@ try:
         att_round_elements_to_128B,
         att_compute_mem_bw_from_occupancy,
         att_compute_l2_hit_rate_global,
+        att_causal_active_tile_pairs,
     )
 except ImportError as e:
     raise ImportError(
@@ -180,6 +181,7 @@ __all__ = [
     "att_round_elements_to_128B",
     "att_compute_mem_bw_from_occupancy",
     "att_compute_l2_hit_rate_global",
+    "att_causal_active_tile_pairs",
 ]
 
 try:
