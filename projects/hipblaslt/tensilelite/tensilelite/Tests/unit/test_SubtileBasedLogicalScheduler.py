@@ -4900,3 +4900,864 @@ class TestInitCMakeOpWiring:
         # Last MFMA should NOT have reuse (no successor)
         assert not mfmas[-1].reuseA
         assert not mfmas[-1].reuseB
+
+
+def _rank_emitter(cfg):
+    from types import SimpleNamespace
+    from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+
+    emitter = object.__new__(InstructionEmitter)
+    emitter.config = cfg
+    emitter.writer = SimpleNamespace(states=SimpleNamespace(asmCaps={}))
+    return emitter
+
+
+def _rank_placement(cfg, tensor, tile_id, partition, mt_iteration):
+    gran = {
+        "A": cfg.lrA, "B": cfg.lrB,
+        "SA": cfg.lrSA, "SB": cfg.lrSB,
+    }[tensor]
+    return LRPlacement(
+        tensor=tensor,
+        mtIteration=mt_iteration,
+        tiles=MFMATileRange(0, 1, tile_id, tile_id + gran.mn),
+        subIterK_slot=0,
+        partition=partition,
+        targetPartition=(partition + 1) % cfg.numPartitions,
+    )
+
+
+class TestFirstConsumerRank:
+    """The emit-identity rank is the MFMA ordinal of the next consumer.
+
+    It is relative to the end of the producer partition and does not depend
+    on a macrotile size. Kernels that are not on the partition-prefetch path
+    stay unranked.
+    """
+
+    @staticmethod
+    def _cfg_8x8():
+        return SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=8, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=4, partitionSizeN=4,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+
+    @pytest.mark.parametrize(
+        "partition,mt_iteration,tensor,tile_id,expected",
+        [
+            (0, 0, "SA", 0, 0),
+            (0, 0, "B", 5, 1),
+            (0, 0, "SA", 2, 8),
+            (0, 0, "SB", 2, 18),
+            (2, 1, "A", 0, 16),
+            (3, 1, "B", 3, 3),
+            (0, 2, "A", 0, 112),
+        ],
+    )
+    def test_rank_uses_partition_geometry(
+            self, partition, mt_iteration, tensor, tile_id, expected):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(
+            cfg, tensor, tile_id, partition, mt_iteration)
+        assert emitter._first_consumer_rank(placement, tile_id) == expected
+
+    def test_rank_supports_non_square_partition_grid(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(4, 2),
+            partitionSizeM=4, partitionSizeN=2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "SA", 2, 0, 0)
+        # Partition 1 is 4x2. A2 is first consumed after A0/A1 (four MFMAs).
+        assert emitter._first_consumer_rank(placement, 2) == 4
+
+    def test_rank_is_absent_without_partition_prefetch(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=4, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            pgr=2, plr=1,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = LRPlacement(
+            tensor="A", mtIteration=0,
+            tiles=MFMATileRange(0, 1, 0, 1),
+            subIterK_slot=0, partition=0, targetPartition=0)
+        assert emitter._first_consumer_rank(placement, 0) is None
+
+    def test_local_read_group_metadata_repeats_the_rank(self):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "A", 0, 0, 0)
+        meta = emitter._local_read_group_metadata(["r0", "r1"], placement, 0)
+        assert meta == [(0, 2), (0, 2)]
+
+
+class TestPartitionZeroIssueOrder:
+    """Partition-zero issue order follows the first-consumer rank.
+
+    The helpers leave a path alone when the rank is missing, which is how
+    schedules outside the dual-period epoch stay in their original order.
+    """
+
+    @staticmethod
+    def _read(comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(
+            dst=vgpr(8, 4), src=vgpr(1),
+            ds=DSModifiers(offset=0), comment=comment)
+
+    def test_local_reads_issue_in_consumer_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+            _splitAfterFirstConsumerCohort,
+        )
+        late = self._read("late")
+        early = self._read("early")
+        same = self._read("same")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[late], instructionMetadata=[(5, 1)]),
+            EmittedModule(moduleId=1, instructions=[early, same],
+                          instructionMetadata=[(1, 2), (1, 2)]),
+        ]
+        ordered = _orderLocalReadsByFirstConsumer(
+            [(0, late), (1, early), (1, same)], modules)
+        assert [inst.comment for _, inst in ordered] == ["early", "same", "late"]
+        first, rest = _splitAfterFirstConsumerCohort(ordered, modules)
+        assert [inst.comment for _, inst in first] == ["early", "same"]
+        assert [inst.comment for _, inst in rest] == ["late"]
+
+    def test_missing_rank_keeps_the_original_read_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+        )
+        read = self._read("unread")
+        modules = [EmittedModule(moduleId=0, instructions=[read], instructionMetadata=[])]
+        assert _orderLocalReadsByFirstConsumer([(0, read)], modules) is None
+
+    def test_global_read_bundles_sort_and_keep_their_tail(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderGlobalReadBundlesByFirstConsumer,
+        )
+        late = [self._read("late-m0"), self._read("late-load")]
+        early = [self._read("early-m0"), self._read("early-load")]
+        tail = self._read("srd")
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=late,
+                instructionMetadata=[(4, 2), (4, 2)],
+                source=GRPlacement(
+                    tensor="A", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=1, instructions=early,
+                instructionMetadata=[(1, 2), (1, 2)],
+                source=GRPlacement(
+                    tensor="B", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=2, instructions=[tail],
+                source=type("Inc", (), {"kind": "gr_inc"})()),
+        ]
+        ordered = _orderGlobalReadBundlesByFirstConsumer(
+            [[(0, late[0]), (0, late[1])],
+             [(1, early[0]), (1, early[1]), (2, tail)]],
+            modules)
+        assert [inst.comment for _, inst in ordered] == [
+            "early-m0", "early-load", "late-m0", "late-load", "srd"]
+
+    def test_current_cell_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target):
+            return LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 0, 1),
+                subIterK_slot=0, partition=0, targetPartition=target)
+
+        scale = self._read("SA tile 0")
+        current = self._read("A current")
+        prefetch = self._read("A next")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[scale], source=lr("SA", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=1, instructions=[current], source=lr("A", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=2, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(1, 1)]),
+            EmittedModule(moduleId=3, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=4, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(5))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "SA tile 0", "A current", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert wait.dscnt == 0
+        assert payload_order == [2]
+        assert [inst.comment for _, inst in payload] == ["A next"]
+
+        retained = _splitPartitionZeroPrefetch(
+            [list(range(5))], modules, retainAllLocalReads=True)
+        assert [inst.comment for _, inst in retained[1]] == [
+            "SA tile 0", "A current", "A next",
+            "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert retained[2] == []
+
+    def test_hoisted_overwrite_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target, protect=False):
+            placement = LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 2, 4),
+                subIterK_slot=0, partition=0, targetPartition=target)
+            placement.mustPrecedeP0Overwrite = protect
+            return placement
+
+        hoisted = self._read("A tile 3")
+        prefetch = self._read("A later")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[hoisted], source=lr("A", 1, True),
+                          instructionMetadata=[(2, 1)]),
+            EmittedModule(moduleId=1, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(4, 1)]),
+            EmittedModule(moduleId=2, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=3, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(4))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "A tile 3", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert payload_order == [1]
+        assert [inst.comment for _, inst in payload] == ["A later"]
+
+    def test_overwrite_reads_move_to_the_previous_k_when_vgprs_are_free(self):
+        """A mustPrecede ds_read leaves the prefix once its dest is dead.
+
+        The previous copy has to have flipped the LDS pointer, and four
+        MFMAs have to have issued after the last reader. The first copy
+        is also seeded after the preloop barrier. A dest that is still
+        live stays in front of the entry wait.
+        """
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MXMFMAInstruction, SBarrier, SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _p0OverwriteReadIds,
+            clearPartitionZeroOverwriteMarks,
+            guardExitOverwriteReread,
+            relocatePartitionZeroOverwriteReads,
+        )
+
+        def mfma(start, comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(start, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def other_read(comment):
+            return DSLoadB128(
+                dst=vgpr(20, 4), src=vgpr(7),
+                ds=DSModifiers(offset=0), comment=comment)
+
+        def overwrite(dst, comment):
+            return DSLoadB128(
+                dst=vgpr(dst, 4), src=vgpr(2 if dst == 52 else 4),
+                ds=DSModifiers(offset=8192), comment=comment)
+
+        def tail():
+            body = [
+                VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A"),
+                VXorB32(dst=vgpr(4), src0=vgpr(4), src1=vgpr(5), comment="swap A high"),
+                mfma(52, "last use"),
+            ]
+            for index in range(4):
+                body.append(mfma(60, f"gap {index}"))
+            body.append(other_read("pack 0"))
+            body.append(other_read("pack 1"))
+            body.append(mfma(60, "cover 0"))
+            body.append(other_read("pack 2"))
+            body.append(other_read("pack 3"))
+            body.append(mfma(60, "cover 1"))
+            return body
+
+        def marked_prefix(tag):
+            low = overwrite(52, f"{tag} low")
+            high = overwrite(56, f"{tag} high")
+            _p0OverwriteReadIds.add(id(low))
+            _p0OverwriteReadIds.add(id(high))
+            return [low, high, SWaitCnt(kmcnt=0, comment=f"{tag} wait"), mfma(20, f"{tag} mfma")]
+
+        clearPartitionZeroOverwriteMarks()
+        c0 = Module("C0")
+        for inst in marked_prefix("c0") + tail():
+            c0.add(inst)
+        c1 = Module("C1")
+        for inst in marked_prefix("c1") + tail():
+            c1.add(inst)
+        preloop = Module("PRELOOP")
+        preloop.add(SBarrier(comment="Barrier"))
+        preloop.add(other_read("preloop A0"))
+
+        moved = relocatePartitionZeroOverwriteReads([c0, c1], preloop, gap=4)
+        assert moved == set(range(52, 60))
+
+        def comments(module):
+            return [getattr(inst, "comment", "") for inst in module.flatitems()]
+
+        c0_comments = comments(c0)
+        c1_comments = comments(c1)
+        assert c0_comments[0] == "c0 wait"
+        assert c1_comments[0] == "c1 wait"
+        assert "c1 low; issued in the previous K iteration" in c0_comments
+        assert "c0 high; issued in the previous K iteration" in c1_comments
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("gap 3")
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("swap A high")
+        pre_comments = comments(preloop)
+        assert pre_comments[:3] == [
+            "Barrier", "c0 low; issued in the preloop", "c0 high; issued in the preloop"]
+
+        exit_path = Module("NGLL")
+        exit_path.add(overwrite(52, "ngll low"))
+        exit_path.add(overwrite(56, "ngll high"))
+        exit_path.add(mfma(20, "ngll mfma"))
+        guardExitOverwriteReread(exit_path, moved)
+        assert comments(exit_path)[0] == (
+            "retire the prior-iteration overwrite read before re-reading it")
+
+        clearPartitionZeroOverwriteMarks()
+        live = Module("LIVE")
+        held = overwrite(52, "still live")
+        _p0OverwriteReadIds.add(id(held))
+        live.add(held)
+        live.add(SWaitCnt(kmcnt=0, comment="live wait"))
+        live.add(mfma(20, "live mfma"))
+        # The previous copy still reads v[52:55] and has only one MFMA after that.
+        still = Module("STILL")
+        still.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap late"))
+        still.add(mfma(52, "holds the vgpr"))
+        still.add(mfma(60, "only one later"))
+        fresh = Module("PRELOOP2")
+        fresh.add(SBarrier(comment="Barrier"))
+        stayed = relocatePartitionZeroOverwriteReads([live, still], fresh, gap=4)
+        assert stayed == set()
+        assert comments(live)[0] == "still live"
+        assert comments(fresh) == ["Barrier"]
+
+    def test_reads_across_a_wait_require_the_mxfp8_exception(self):
+        from rocisa.instruction import SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(intervals=6, numModules=1, pathOrders=[])
+        read = self._read("across")
+        wait = SWaitCnt(dscnt=0)
+
+        legacy = _SchedulingRules(totalSlots=placer.totalSlots)
+        legacy.earliestWaitCntPos = 3
+        legacy.lastDsReadPos = 4
+        assert not legacy.minGapDsReadBeforeWait(placer, 4, read)
+        assert not legacy.minGapDsReadToWait(placer, 3, wait)
+
+        mxfp8 = _SchedulingRules(
+            totalSlots=placer.totalSlots, allowReadsAcrossWait=True)
+        mxfp8.earliestWaitCntPos = 3
+        mxfp8.lastDsReadPos = 4
+        assert mxfp8.minGapDsReadBeforeWait(placer, 4, read)
+        assert mxfp8.minGapDsReadToWait(placer, 3, wait)
+
+    def test_mxfp8_followers_use_five_slots(self):
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(
+            intervals=2, numModules=1, pathOrders=[],
+            slotsPerInterval=_MXFP8_FOLLOWER_SLOTS, maxPerSlot=1,
+            dataDsReadCap=(2, 3))
+        rules = _SchedulingRules(totalSlots=placer.totalSlots)
+        read = self._read("r")
+        valu = VMovB32(dst=vgpr(1), src=vgpr(2))
+        assert placer.totalSlots == 10
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, read)
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, valu)
+        assert rules.noDsReadOrValuInFirstSlot(placer, 1, read)
+        assert rules.oneDsReadPerInterval(placer, 1, read)
+        placer._placed[1].append((0, read))
+        assert rules.oneDsReadPerInterval(placer, 2, read)
+        placer._placed[2].append((0, read))
+        assert not rules.oneDsReadPerInterval(placer, 3, read)
+        load = BufferLoadB128(
+            dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="dtl")
+        assert rules.oneDtlLoadPerInterval(placer, 3, load)
+        placer._placed[3].append((0, load))
+        assert not rules.oneDtlLoadPerInterval(placer, 4, load)
+
+        legacy = _SlotPlacer(intervals=1, numModules=1, pathOrders=[])
+        legacy_rules = _SchedulingRules(totalSlots=legacy.totalSlots)
+        assert legacy.totalSlots == 2 and legacy.dataDsReadCap is None
+        assert legacy_rules.oneDsReadPerInterval(legacy, 0, read)
+        legacy._placed[0].append((0, read))
+        assert not legacy_rules.oneDsReadPerInterval(legacy, 1, read)
+
+    def test_direct_to_lds_bundle_uses_the_latest_shadow(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer,
+            _rightAlignM0AndVmem)
+
+        def bundle(tag):
+            setup = SMovB32(dst=mgpr(0), src=0, comment=f"m0-{tag}")
+            load = BufferLoadB128(
+                dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+                comment=f"gr-{tag}")
+            return setup, load
+
+        def positions(placer):
+            found = {}
+            for pos, slot in enumerate(placer._placed):
+                for _mid, inst in slot:
+                    found[inst.comment] = pos
+            return found
+
+        width = _MXFP8_FOLLOWER_SLOTS
+        rules = _SchedulingRules(totalSlots=3 * width)
+        placer = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(0)
+        placer.place(0, (0, setup))
+        placer.place(1, (0, load))
+        _rightAlignM0AndVmem(placer)
+        found = positions(placer)
+        assert found["m0-0"] == 2 * width
+        assert found["gr-0"] == 2 * width + 1
+
+        blocked = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(1)
+        blocked.place(0, (0, setup))
+        blocked.place(1, (0, load))
+        blocked.place(2 * width, (0, SBarrier(comment="stop")))
+        _rightAlignM0AndVmem(blocked)
+        found = positions(blocked)
+        assert found["m0-1"] == width
+        assert found["gr-1"] == width + 1
+        assert found["stop"] == 2 * width
+
+    def test_short_c1_tail_spills_scale_refresh_into_c0(self):
+        """A short final partition keeps a full shadow and spills the rest.
+
+        The spill issues in the next C0, before that VGPR is read and
+        before the scale-pointer swap.
+        """
+        from rocisa.code import Module, TextBlock
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            appendC1ScaleShadowReads, spillC0ScaleRefreshes)
+
+        def mfma(sa=18, sb=84):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(sa), mxsb=vgpr(sb), comment="scaled")
+
+        def entry(register, tensor, last_use, first_use=0):
+            return {
+                "canonicalVgpr": register,
+                "tensor": tensor,
+                "readTemplate": DSLoadB32(
+                    dst=vgpr(register), src=vgpr(1),
+                    ds=DSModifiers(offset=0),
+                    comment=f"{tensor} MT=n tile=0 K=0"),
+                "firstC0Mfma": first_use,
+                "lastC1Mfma": last_use,
+            }
+
+        def items(module):
+            return list(module.flatitems())
+
+        held = Module("C1")
+        for index in range(10):
+            held.add(mfma())
+            if index == 6:
+                held.add(SBarrier(comment="final barrier"))
+        placed = appendC1ScaleShadowReads(held, [entry(18, "SA", 0)], 4)
+        assert placed == ([], 10)
+        held_items = items(held)
+        refresh_at = next(
+            index for index, inst in enumerate(held_items)
+            if "prior C1 shadow" in (getattr(inst, "comment", "") or ""))
+        target = sum(
+            1 for inst in held_items[:refresh_at]
+            if isinstance(inst, MXMFMAInstruction)) - 1
+        assert target - 0 + 1 >= 9
+
+        short = Module("C1-short")
+        for index in range(4):
+            short.add(mfma())
+            if index == 2:
+                short.add(SBarrier(comment="final barrier"))
+        missed = appendC1ScaleShadowReads(short, [entry(18, "SA", 0)], 2)
+        assert missed is not None and missed[0]
+
+        c0 = Module("C0")
+        c0.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        c0.add(mfma())
+        c0.add(TextBlock("// swap MXSA LR\n"))
+        assert spillC0ScaleRefreshes(c0, missed[0], 16)
+        spilled = items(c0)
+
+        def comment_at(needle):
+            return next(
+                index for index, inst in enumerate(spilled)
+                if needle in " ".join(
+                    getattr(inst, attr, "") or ""
+                    for attr in ("comment", "text", "name"))
+            )
+
+        refresh_at = comment_at("next C0 prologue")
+        wait_at = comment_at("Wait for current-cell LR")
+        use_at = next(
+            index for index, inst in enumerate(spilled)
+            if isinstance(inst, MXMFMAInstruction))
+        swap_at = comment_at("swap MXSA LR")
+        assert refresh_at < wait_at < use_at < swap_at
+
+    def test_right_align_places_m0_and_vmem_from_the_back(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        extra = SAddU32(
+            dst=mgpr(0), src0=sgpr(20), src1=2048, comment="m0-extra")
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr(20), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((4096, 6144))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placer._placed[0] = [(0, extra)]
+        placer._placed[1] = [(0, setups[0])]
+        placer._placed[2] = [(0, loads[0])]
+        placer._placed[3] = [(0, setups[1])]
+        placer._placed[4] = [(0, loads[1])]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-extra", "m0-0", "gr-0", "m0-1", "gr-1", "stop"
+        )] == [9, 10, 11, 15, 16, 18]
+        assert located["m0-0"] % 5 == 0
+        assert located["gr-0"] == located["m0-0"] + 1
+        assert located["m0-1"] % 5 == 0
+        assert located["gr-1"] == located["m0-1"] + 1
+
+    def test_right_align_keeps_gr_address_updates_with_their_loads(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, SAddCU32, SAddU32, SBarrier, SXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((0, 2048))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        address = [
+            SAddU32(
+                dst=sgpr("SrdB"), src0=sgpr("SrdB"), src1=128,
+                comment="srd"),
+            SAddCU32(
+                dst=sgpr("SrdB+1"), src0=sgpr("SrdB+1"), src1=0,
+                comment="carry"),
+            SXorB32(
+                dst=sgpr("LocalWriteBaseAddrB"),
+                src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"),
+                comment="swap"),
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placed = [setups[0], loads[0], *address, setups[1], loads[1]]
+        for slot, inst in enumerate(placed):
+            placer._placed[slot] = [(0, inst)]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-0", "gr-0", "srd", "carry", "swap", "m0-1", "gr-1", "stop"
+        )] == [10, 11, 12, 13, 14, 15, 16, 18]
+
+    def test_right_align_uses_an_empty_slot0_and_slot4(self):
+        from rocisa.container import DSModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer, _rightAlignM0AndVmem)
+
+        width = 5
+        rules = _SchedulingRules(totalSlots=3 * width)
+        placer = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+                rules.oneDsReadPerInterval,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            dataDsReadCap=(2, 3),
+            maxInstructionsPerInterval=width)
+        setup = SMovB32(dst=mgpr(0), src=0, comment="m0-0")
+        load = BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr-0")
+        read = DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(2),
+            ds=DSModifiers(offset=0), comment="ds")
+        # Slot 0 and slot 4 of the second shadow are empty. The ds_read
+        # in slot 1 has to move down so the bundle can take slots 0 and 1.
+        placer.place(0, (0, setup))
+        placer.place(1, (0, load))
+        placer.place(width + 1, (0, read))
+        placer.place(width + 2, (0, SMovB32(dst=sgpr(3), src=0, comment="mid-a")))
+        placer.place(width + 3, (0, SMovB32(dst=sgpr(4), src=0, comment="mid-b")))
+        placer.place(2 * width, (0, SBarrier(comment="stop")))
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert located["m0-0"] == width
+        assert located["gr-0"] == width + 1
+        assert located["ds"] == width + 2
+        assert located["mid-a"] == width + 3
+        assert located["mid-b"] == width + 4
+        assert located["stop"] == 2 * width
+
+
+class TestLateScalePrefetch:
+    """Staging VGPRs for scales that partition zero does not consume."""
+
+    def test_prefetch_stays_inside_the_rounded_block(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            scale_prefetch_fits)
+        assert scale_prefetch_fits(249, 4)
+        assert scale_prefetch_fits(250, 6)
+        assert scale_prefetch_fits(252, 4)
+        assert not scale_prefetch_fits(253, 4)
+        assert not scale_prefetch_fits(256, 1)
+        assert not scale_prefetch_fits(249, 0)
+
+    def test_prefetch_plan_retargets_the_staging_register(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            selectLateScalePrefetch)
+
+        template = DSLoadB32(
+            dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+            comment="SA MT=n tile=4 K=0")
+        deferred = [{
+            "canonicalVgpr": 19,
+            "tensor": "SA",
+            "readTemplate": template,
+            "firstC0Mfma": 16,
+            "lastC1Mfma": 63,
+        }]
+        plan = selectLateScalePrefetch(deferred, {19: 252}, {19: 4})
+        assert len(plan) == 1
+        assert plan[0]["extraVgpr"] == 252
+        assert plan[0]["readTemplate"].dst.regIdx == 252
+        assert plan[0]["canonicalRead"].dst.regIdx == 19
+        assert template.dst.regIdx == 19
+        assert plan[0]["minShadow"] == 4
+        early = dict(deferred[0])
+        early["firstC0Mfma"] = 4
+        assert selectLateScalePrefetch(
+            [early], {19: 252}, {19: 4}) == []
+        assert selectLateScalePrefetch(deferred, {}, {19: 4}) == []
+
+    def test_copy_waits_for_the_source_window(self):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction, SWaitCnt, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(20):
+            schedule.add(mfma())
+            schedule.add(VMovB32(dst=vgpr(1), src=vgpr(2), comment="keep"))
+        assert insertPrefetchedScaleCopies(schedule, [{
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 16,
+            "minShadow": 4,
+        }]) == []
+        items = list(schedule.flatitems())
+        copy_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, VMovB32)
+            and getattr(inst, "comment", "").startswith("copy prefetched"))
+        issued = sum(
+            isinstance(inst, MXMFMAInstruction) for inst in items[:copy_at])
+        assert issued == 5
+        assert any(
+            isinstance(inst, MXMFMAInstruction)
+            and inst.mxsa.regIdx == 19
+            for inst in items[copy_at:])
+
+    def test_empty_window_keeps_the_c0_read(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies, restoreCanonicalScaleReads)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(8):
+            schedule.add(mfma())
+        move = {
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 8,
+            "minShadow": 4,
+            "canonicalRead": DSLoadB32(
+                dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+                comment="SA MT=n tile=4 K=0"),
+        }
+        assert insertPrefetchedScaleCopies(schedule, [move]) == [move]
+        assert not any(
+            getattr(inst, "comment", "").startswith("copy prefetched")
+            for inst in schedule.flatitems())
+        restoreCanonicalScaleReads(schedule, [move])
+        items = list(schedule.flatitems())
+        read_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, DSLoadB32))
+        wait_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SWaitCnt) and getattr(inst, "dscnt", -1) == 0)
+        assert read_at < wait_at
+        assert "keep C0 scale read" in items[read_at].comment

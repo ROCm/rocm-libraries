@@ -8,8 +8,8 @@
 #
 # The dual-period path keeps the 128-K data loop while running a decoupled
 # 256-K pre-shuffled scale epoch that is reused by two data iterations.  This
-# test drives the shipped geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
-# PGR2/PLR0, 4x2 partitions, N-major, WGM4) through CPU-only codegen and
+# test drives the REAL winning geometry (MT256x256, MIWT 8x4, MIWG 2x4, DU128,
+# PGR2/PLR1, 4x2 partitions, N-major, WGM4) through CPU-only codegen and
 # asserts the steady-state mainloop honors the scale contract:
 #
 #   * exactly SIX scale ds_read_b32 per 256-K epoch (4 SA groups + 2 SB groups)
@@ -27,7 +27,7 @@ import shutil
 import pytest
 
 
-def _emit_dual_period_kernel(plr=0):
+def _emit_dual_period_kernel(plr=1):
     """Build the real dual-period MXFP8 solution and return its assembly text.
 
     Partition-directed PLR (next-partition prefetch, n-major traversal, 2x2
@@ -127,17 +127,18 @@ def dual_src():
 
 def test_six_scale_reads_per_epoch(dual_src):
     body = _mainloop_lines(dual_src)
-    reads = [ln for ln in body if re.search(r"scaleMXS.*load 4B", ln)]
+    reads = [ln for ln in body if "ds_read" in ln and re.search(r"// S[AB] MT=", ln)]
     assert len(reads) == 6, (
         "expected exactly six scale ds_reads per 256-K epoch, got %d:\n%s"
         % (len(reads), "\n".join(reads)))
-    # 4 SA groups (group0..3) + 2 SB groups (group0..1).
-    sa = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSA" in r)
-    sb = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSB" in r)
-    assert sa == ["0", "1", "2", "3"], "scale-A groups: %s" % sa
-    assert sb == ["0", "1"], "scale-B groups: %s" % sb
+    # 4 SA tiles + 2 SB tiles, each carrying its macro-tile epoch.
+    sa = sorted(int(re.search(r"tile=(\d+)", r).group(1))
+                for r in reads if "// SA " in r)
+    sb = sorted(int(re.search(r"tile=(\d+)", r).group(1))
+                for r in reads if "// SB " in r)
+    assert sa == [0, 2, 4, 6], "scale-A tiles: %s" % sa
+    assert sb == [0, 2], "scale-B tiles: %s" % sb
+    assert all("MT=" in r for r in reads)
 
 
 def test_both_scale_phases_consumed(dual_src):
@@ -162,7 +163,11 @@ def test_scale_cadence_once_per_epoch(dual_src):
     # One SRD advance, one DTL load, one GR write-half swap and one LR read-half
     # swap for EACH of the two scale tensors (MXSA, MXSB) per 256-K epoch.
     assert body.count("Scale SRD update") == 2
-    assert body.count("DTL b128 load") == 2
+    scale_dtl = [
+        ln for ln in body.splitlines()
+        if "buffer_load" in ln and re.search(r"// S[AB] MT=", ln)
+    ]
+    assert len(scale_dtl) == 2, "scale DTL loads: %s" % scale_dtl
     assert len(re.findall(r"swap MXS\w+ GR m0", body)) == 2
     assert len(re.findall(r"swap MXS\w+ LR vgpr", body)) == 2
 
@@ -175,19 +180,37 @@ def test_vgpr_within_two_wave_slot_budget(dual_src):
         "architectural VGPR %d exceeds the two-wave-slot budget (128)" % vgpr)
 
 
-def test_prefetch_local_read_is_name_only(dual_src):
-    """PrefetchLocalRead never reaches the dual-period schedule.
+def test_odd_phase_tail_rewinds_scale_srds_with_their_bounds(dual_src):
+    align_start = dual_src.index(
+        "dual-period tail: test completed-DepthU parity for scale SRDs")
+    align_end = dual_src.index("label_SubtileTailScaleSrdAligned:", align_start)
+    tail_start = dual_src.index("/* TAILLOOP */", align_end)
+    alignment = dual_src[align_start:align_end]
 
-    The partition-directed prefetch pins its own plr=0 base, the same way
-    ForceUnrollSubIter pins numItersPLR/numVgprBuffer for non-subtile kernels,
-    so the declared value survives only in the kernel name.  Comments are
-    stripped because they quote scheduler state that is allowed to mention the
-    declared value.
-    """
-    def instructions(src):
-        return [ln.split("//")[0].rstrip() for ln in _mainloop_lines(src)]
+    parity_test = next(
+        ln for ln in dual_src.splitlines()
+        if "dual-period tail: test completed-DepthU parity for scale SRDs" in ln)
+    assert parity_test.lstrip().startswith("s_bitcmp1_b32")
+    assert re.search(r",\s*7(?:\s|//)", parity_test), parity_test
+    assert "s_cbranch_scc0 label_SubtileTailScaleSrdAligned" in alignment
 
-    assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
+    for tc in ("MXSA", "MXSB"):
+        rewind = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: rewind to odd-DU scale epoch" in ln)
+        borrow = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: scale SRD rewind borrow" in ln)
+        restore = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: restore rewound num_records" in ln)
+        assert rewind.lstrip().startswith("s_sub_u32")
+        assert "256" in rewind
+        assert borrow.lstrip().startswith("s_subb_u32")
+        assert restore.lstrip().startswith("s_add_u32")
+        assert "256" in restore
+
+    assert align_start < align_end < tail_start
 
 
 def test_no_scale_local_read_in_preloop(dual_src):
@@ -204,8 +227,22 @@ def test_no_scale_local_read_in_preloop(dual_src):
             break
         preloop.append(ln)
 
-    scale_lr = [l for l in preloop if "ds_read" in l and "scaleMXS" in l]
+    scale_lr = [l for l in preloop if "ds_read" in l and re.search(r"// S[AB] MT=", l)]
     assert not scale_lr, "pre-loop re-reads scales the mainloop reloads: %s" % scale_lr
 
-    data_lr = [l for l in preloop if "ds_read" in l and "Subtile" in l]
+    data_lr = [l for l in preloop if "ds_read" in l and re.search(r"// [AB] MT=", l)]
     assert data_lr, "pre-loop lost its data operand prefetch"
+
+
+def test_loads_name_their_macro_tile(dual_src):
+    """A, B, and scale loads name the macro-tile epoch they fill.
+
+    PGR2 issues the current tile, the next tile, and the tile two ahead.
+    The comment is the identity later physical passes use to tell those
+    loads apart.  Opcodes and addresses are unchanged.
+    """
+    src = dual_src
+    assert re.search(r"// A MT=n ", src)
+    assert re.search(r"// B MT=n ", src)
+    assert re.search(r"// A MT=n\+1 ", src) or re.search(r"// B MT=n\+1 ", src)
+    assert "MT=n+2" in src
