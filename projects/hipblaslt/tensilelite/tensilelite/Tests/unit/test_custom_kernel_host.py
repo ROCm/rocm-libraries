@@ -253,6 +253,39 @@ def test_assign_custom_kernel_params_no_workspace_without_partials(over):
     assert state["_WorkspaceSizePerElemC"] == 0
 
 
+def _post_kernel_state(**over):
+    state = _ck_state(TileProcessingStrategy="StreamK", **over)
+    state["CustomKernel"]["reductions"] = ["tree", "parallel"]
+    state["CustomKernel"]["postKernels"] = [{"kind": "streamKReduce", "name": "k_streamKReduce"}]
+    return state
+
+
+def test_assign_custom_kernel_params_post_kernels_get_streamk_workspace():
+    state = _post_kernel_state()
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
+
+
+# Parallel partials start at the workspace base, where amax and bias-gradient
+# scratch would also go.
+@pytest.mark.parametrize("problem_type", [
+    {"OutputAmaxD": True},
+    {"UseBias": True, "Gradient": True},
+])
+def test_assign_custom_kernel_params_post_kernels_refuse_workspace_aliasing(problem_type):
+    state = _post_kernel_state(ProblemType=problem_type)
+    with pytest.raises(RuntimeError, match="do not support OutputAmaxD or a bias gradient"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_parallel_requires_workspace():
+    # Atomic Stream-K derives no partials workspace.
+    state = _post_kernel_state(StreamKAtomic=1)
+    with pytest.raises(RuntimeError, match="needs a Stream-K workspace"):
+        Solution._assignCustomKernelParameters(state)
+
+
 def test_assign_custom_kernel_params_single_buffer_accumulation():
     # SingleBuffer only sets accumulation when compute dtype != dest dtype.
     state = _ck_state(

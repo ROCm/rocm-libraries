@@ -25,7 +25,7 @@
 from .resources import custom_kernel_names, custom_kernel_text
 from .Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK
+from .ExecutionPolicy import hasDynamicAssignment, isPersistent, isPersistentDataParallel, isStreamK
 
 import re
 import yaml
@@ -452,7 +452,9 @@ def validateCustomPostKernels(kernelConfig):
     PersistentLoopArgsVersion 3, which older runtimes reject instead of
     running the main kernel alone. A ``parallel`` reduction is performed by a
     ``streamKReduce`` post kernel, so each requires the other. All of these
-    require a Stream-K solution. Does not mutate the descriptor.
+    require a Stream-K solution; post kernels also require the main grid
+    [StreamKNoBatch, One, One] and a work assignment other than
+    DynamicWorkQueue. Does not mutate the descriptor.
     """
     isp = kernelConfig.get("InternalSupportParams", {})
     version = isp.get("PersistentLoopArgsVersion", 0)
@@ -504,6 +506,12 @@ def validateCustomPostKernels(kernelConfig):
         raise ValueError("Parallel reduction, post kernels and PersistentLoopArgsVersion=3 require TileProcessingStrategy=StreamK")
     if ("parallel" in reductions) != ("streamKReduce" in kinds):
         raise ValueError("CustomKernel.reductions includes parallel if and only if a streamKReduce post kernel is declared")
+    # The tile count already includes the batch, and a dynamic work queue never
+    # runs parallel reduction.
+    if postKernels and descriptor.get("grid") != ["StreamKNoBatch", "One", "One"]:
+        raise ValueError("CustomKernel.postKernels require the main grid [StreamKNoBatch, One, One]")
+    if postKernels and hasDynamicAssignment(kernelConfig):
+        raise ValueError("CustomKernel.postKernels require WorkAssignment StaticGrid or Hybrid")
     if postKernels and version != 3:
         raise ValueError("CustomKernel.postKernels requires PersistentLoopArgsVersion=3")
     if version == 3 and not postKernels:

@@ -1808,6 +1808,9 @@ def _dropPostKernels(config):
     (_setDescriptor("postKernels", []), "parallel if and only if"),
     (_setVersion(0), "postKernels requires PersistentLoopArgsVersion=3"),
     (_dropPostKernels, "PersistentLoopArgsVersion=3 requires CustomKernel.postKernels"),
+    (_setDescriptor("grid", ["StreamKWithBatch", "One", "One"]), r"main grid \[StreamKNoBatch"),
+    (_setDescriptor("grid", ["StreamKNoBatch", "One", "Batch"]), r"main grid \[StreamKNoBatch"),
+    (lambda config: config.update(WorkAssignment="DynamicWorkQueue"), "StaticGrid or Hybrid"),
 ])
 def test_post_kernel_validation_errors(mutate, match):
     config = _post_kernel_config()
@@ -1823,6 +1826,13 @@ def test_post_kernels_require_stream_k(strategy):
     config["TileProcessingStrategy"] = strategy
     with pytest.raises(ValueError, match="require TileProcessingStrategy=StreamK"):
         ck_mod.validateCustomPostKernels(config)
+
+
+@pytest.mark.parametrize("assignment", ["StaticGrid", "Hybrid"])
+def test_post_kernels_accept_assignments_that_run_parallel(assignment):
+    config = _post_kernel_config()
+    config["WorkAssignment"] = assignment
+    ck_mod.validateCustomPostKernels(config)
 
 
 def test_post_kernel_validation_does_not_mutate():

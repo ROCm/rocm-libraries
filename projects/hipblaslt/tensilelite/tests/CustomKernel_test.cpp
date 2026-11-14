@@ -640,8 +640,12 @@ namespace
         solution.internalArgsSupport.persistentLoopArgsVersion = 3;
         solution.customKernel.name                             = "probe";
         solution.customKernel.threads                          = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
         solution.customKernel.reductions
             = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+        solution.customKernel.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
+        solution.customKernel.workspaceSizePerElemC = 4;
 
         CustomPostKernel post;
         post.name    = "probe_streamKReduce";
@@ -695,6 +699,23 @@ TEST(CustomKernelTest, PostKernelsValidate)
         {[](Solution& s) { s.customKernel.postKernels[0].version = 2; }, "unsupported version"},
         {[](Solution& s) { s.customKernel.generated = true; },
          "require a handwritten custom kernel"},
+        {[](Solution& s) { s.problemType.outputAmaxD = true; },
+         "do not support amax output or bias-gradient"},
+        {[](Solution& s) {
+             s.problemType.useGradient = true;
+             s.problemType.useBias     = true;
+         },
+         "do not support amax output or bias-gradient"},
+        {[](Solution& s) { s.customKernel.workspaceSizePerElemC = 0; },
+         "requires a Stream-K workspace"},
+        {[](Solution& s) { s.customKernel.workspaceType = CustomWorkspaceType::None; },
+         "requires a Stream-K workspace"},
+        {[](Solution& s) { s.customKernel.grid.x = CustomGridSize::StreamKWithBatch; },
+         "main kernel grid [StreamKNoBatch, One, One]"},
+        {[](Solution& s) { s.customKernel.grid.z = CustomGridSize::Batch; },
+         "main kernel grid [StreamKNoBatch, One, One]"},
+        {[](Solution& s) { s.sizeMapping.workAssignment = WorkAssignment::DynamicWorkQueue; },
+         "require StaticGrid or Hybrid work assignment"},
         {[](Solution& s) {
              s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
          },
@@ -731,7 +752,7 @@ TEST(CustomKernelTest, ParallelReductionRequiresStreamK)
     EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
 }
 
-TEST(CustomKernelTest, PostKernelsAreNotLaunchedYet)
+TEST(CustomKernelTest, PostKernelsRefuseGroupedGemm)
 {
     ContractionSolution solution;
     configurePostKernels(solution);
@@ -743,11 +764,9 @@ TEST(CustomKernelTest, PostKernelsAreNotLaunchedYet)
         }
         catch(std::runtime_error const& e)
         {
-            EXPECT_STREQ(e.what(), "postKernels launch not implemented");
+            EXPECT_STREQ(e.what(), "Post kernels are not supported for grouped GEMM");
         }
     };
-    expectRefused(
-        [&] { solution.solve(dummyProblem(), ContractionInputs(), probeDevice()); });
     expectRefused([&] {
         solution.solveGroupedGemm({dummyProblem()},
                                   ContractionSolution::GroupedInputs(),
@@ -1004,14 +1023,17 @@ namespace
                  launch.grid      = 128;
                  launch.reduction = origami::reduction_t::parallel;
              },
+             // Parallel digests encode the post-kernel contract: the main
+             // kernel keeps the real C and D; partials go through
+             // AddressWorkspace.
              [](auto const& call) {
                  EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 2u);
                  EXPECT_EQ(address(call, "AddressFlags"), nullptr);
-                 EXPECT_EQ(address(call, "AddressC"), inputWs);
-                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+                 EXPECT_EQ(address(call, "AddressC"), reinterpret_cast<void*>(0xc000));
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
              },
              316,
-             0x89b5fa721fdaf378ull},
+             0x3f5df171b01d18a8ull},
             {"streamKParallelPostKernels",
              [](auto& solution, auto&, auto& launch) {
                  configureStreamK(solution, launch);
@@ -1022,10 +1044,11 @@ namespace
              [](auto const& call) {
                  EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 3u);
                  EXPECT_NE(namedArg<uint32_t>(call, "TotalIters"), 0u);
-                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+                 EXPECT_EQ(call.numWorkGroups.x, 192u);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
              },
              316,
-             0x9a053eb3611e583dull},
+             0xcb1e99bb5fad2dadull},
             {"dataParallelV1Cluster",
              [](auto& solution, auto&, auto& launch) {
                  solution.internalArgsSupport.version                   = 3;
@@ -1113,13 +1136,12 @@ TEST(CustomKernelTest, TilesBandsLaunchesBandsPerTile)
                  std::runtime_error);
 }
 
-// In Stream-K parallel reduction a post kernel's AddressC/D and strides name
-// the real C and D, while the main kernel's name the workspace partials.
-TEST(CustomKernelTest, PostRoleKeepsRealCAndD)
+// In Stream-K parallel reduction AddressC/D and their strides name the real C
+// and D for every kernel; partials are reached only through AddressWorkspace.
+TEST(CustomKernelTest, ParallelReductionKeepsRealCAndD)
 {
-    using Role = ContractionSolution::CustomArgRole;
-    using S    = CustomArgSemantic;
-    using T    = CustomArgType;
+    using S = CustomArgSemantic;
+    using T = CustomArgType;
 
     ContractionSolution      solution;
     PersistentLaunchSettings launch;
@@ -1127,7 +1149,7 @@ TEST(CustomKernelTest, PostRoleKeepsRealCAndD)
     configureStreamK(solution, launch);
     launch.grid      = 128;
     launch.reduction = origami::reduction_t::parallel;
-    // ldc > M, so the problem strides differ from the packed workspace strides.
+    // ldc > M, so the problem strides differ from packed workspace strides.
     auto problem = ContractionProblemGemm::GEMM(
         false, false, 1024, 768, 512, 1024, 512, 1536, 1.0, false, 2);
     auto device = probeDevice();
@@ -1142,35 +1164,18 @@ TEST(CustomKernelTest, PostRoleKeepsRealCAndD)
         {T::uint32, S::StrideD1},
         {T::address, S::AddressWorkspace},
     };
-    auto const schedule = solution.customCallSchedule(problem, device, launch);
-    auto       pack     = [&](Role role) {
-        KernelInvocation rv;
-        solution.customCallGrid(rv,
-                                solution.customKernel.threads,
-                                solution.customKernel.grid,
-                                0,
-                                args,
-                                schedule,
-                                launch);
-        solution.packCustomArgs<false>(rv, args, role, problem, inputs, device, launch, schedule);
-        return rv;
-    };
+    auto const       schedule = solution.customCallSchedule(problem, device, launch);
+    KernelInvocation call;
+    solution.customCallGrid(
+        call, solution.customKernel.threads, solution.customKernel.grid, 0, args, schedule, launch);
+    solution.packCustomArgs<false>(call, args, problem, inputs, device, launch, schedule);
 
-    auto const post = pack(Role::Post);
-    EXPECT_EQ(namedArg<void*>(post, "AddressC"), inputs.c);
-    EXPECT_EQ(namedArg<void*>(post, "AddressD"), inputs.d);
-    EXPECT_EQ(namedArg<uint32_t>(post, "StrideC0"), problem.c().strides()[1]);
-    EXPECT_EQ(namedArg<uint32_t>(post, "StrideC1"), problem.c().strides()[2]);
-    EXPECT_EQ(namedArg<uint32_t>(post, "StrideD0"), problem.d().strides()[1]);
-    EXPECT_EQ(namedArg<uint32_t>(post, "StrideD1"), problem.d().strides()[2]);
-    EXPECT_EQ(namedArg<void*>(post, "AddressWorkspace"), inputWs);
-
-    auto const main = pack(Role::Main);
-    EXPECT_EQ(namedArg<void*>(main, "AddressC"), inputWs);
-    EXPECT_EQ(namedArg<void*>(main, "AddressD"), inputWs);
-    EXPECT_EQ(namedArg<uint32_t>(main, "StrideC0"), 1024u);
-    EXPECT_EQ(namedArg<uint32_t>(main, "StrideC1"), 1024u * 768u);
-    EXPECT_EQ(namedArg<uint32_t>(main, "StrideD0"), 1024u);
-    EXPECT_EQ(namedArg<uint32_t>(main, "StrideD1"), 1024u * 768u);
-    EXPECT_EQ(namedArg<void*>(main, "AddressWorkspace"), inputWs);
+    EXPECT_EQ(namedArg<void*>(call, "AddressC"), inputs.c);
+    EXPECT_EQ(namedArg<void*>(call, "AddressD"), inputs.d);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideC0"), problem.c().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideC1"), problem.c().strides()[2]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideD0"), problem.d().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideD1"), problem.d().strides()[2]);
+    EXPECT_NE(namedArg<uint32_t>(call, "StrideC0"), 1024u);
+    EXPECT_EQ(namedArg<void*>(call, "AddressWorkspace"), inputWs);
 }

@@ -67,11 +67,11 @@ namespace TensileLite
             // Covers the possible uses of the pointer: Flags in singleCallArgs
             // for StreamK, the dstD/Synchronizer block for MBSK, AmaxSync for
             // amaxD, and the AddressFlags/AddressSynchronizer/AmaxSync args of
-            // handwritten custom kernels (custom StreamK workspace types are
-            // scanned as well). A custom Synchronizer arg gets the buffer only
-            // when the resolved accumulation is MBSK; getAccumulation() returns
-            // either the static globalAccumulation or MultipleBuffer, so the
-            // MBSK check covers it.
+            // handwritten custom kernels and their post kernels (custom StreamK
+            // workspace types are scanned as well). A custom Synchronizer arg
+            // gets the buffer only when the resolved accumulation is MBSK;
+            // getAccumulation() returns either the static globalAccumulation or
+            // MultipleBuffer, so the MBSK check covers it.
             // AdaptiveGemmGSUA kernels pick MBSK at run time by checking the
             // pointer for null, and the grouped user-args launch always passes
             // it, so they are scanned regardless of the static mode.
@@ -95,13 +95,19 @@ namespace TensileLite
                                         || ck.workspaceType == CustomWorkspaceType::StreamKWithReduction;
             bool const  mbsk             = sm.globalAccumulation == 3 || sm.adaptiveGemmGSUA == 1;
             bool const  handwritten      = !ck.name.empty() && !ck.generated;
-            bool const  customArg
+            auto const  usesSync         = [](std::vector<CustomArgDefinition> const& args) {
+                return std::any_of(args.begin(), args.end(), [](CustomArgDefinition const& a) {
+                    return a.semantic == CustomArgSemantic::AddressFlags
+                           || a.semantic == CustomArgSemantic::AddressSynchronizer
+                           || a.semantic == CustomArgSemantic::AmaxSync;
+                });
+            };
+            bool const customArg
                 = handwritten
-                  && std::any_of(ck.args.begin(), ck.args.end(), [](CustomArgDefinition const& a) {
-                         return a.semantic == CustomArgSemantic::AddressFlags
-                                || a.semantic == CustomArgSemantic::AddressSynchronizer
-                                || a.semantic == CustomArgSemantic::AmaxSync;
-                     });
+                  && (usesSync(ck.args)
+                      || std::any_of(ck.postKernels.begin(),
+                                     ck.postKernels.end(),
+                                     [&](CustomPostKernel const& p) { return usesSync(p.args); }));
             m_mayUseSynchronizer = partialReduction || customStreamK || mbsk || customArg
                                    || solution->problemType.outputAmaxD
                                    || solution->problemType.fusedGemmA2A;

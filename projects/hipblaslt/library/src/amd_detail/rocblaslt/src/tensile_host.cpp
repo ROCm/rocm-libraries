@@ -9227,6 +9227,14 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
             log_error(__func__, "code object does not define kernel", solution->KernelName());
             return rocblaslt_status_invalid_value;
         }
+        for(auto const& post : solution->customKernel.postKernels)
+        {
+            if(adapter->getLocalKernel(function, coPath, post.name) != hipSuccess)
+            {
+                log_error(__func__, "code object does not define post kernel", post.name);
+                return rocblaslt_status_invalid_value;
+            }
+        }
         solution->codeObjectFilename = coPath;
     }
 

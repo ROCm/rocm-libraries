@@ -3224,7 +3224,9 @@ namespace TensileLite
 
             if(twoTileStreamK) // Two-tile K partitioning
             {
-                if(launch.reduction == origami::reduction_t::parallel)
+                // The data-parallel clamp packs as parallel with a split of 1.
+                if(launch.reduction == origami::reduction_t::parallel
+                   || customDataParallelClamp(launch.reduction))
                 {
                     uint32_t skSplit = static_cast<uint32_t>(launch.grid / numTiles);
                     // Same K-unit quantisation as the other parallel-reduction packer.
@@ -3360,7 +3362,6 @@ namespace TensileLite
     template <bool T_Debug>
     void ContractionSolution::packCustomArgs(KernelInvocation&                       rv,
                                              std::vector<CustomArgDefinition> const& args,
-                                             CustomArgRole                           role,
                                              Problem const&                          problem,
                                              ContractionInputs const&                inputs,
                                              Hardware const&                         hardware,
@@ -3377,6 +3378,13 @@ namespace TensileLite
         const uint32_t skMagicShiftItersPerTile   = schedule.skMagicShiftItersPerTile;
         const uint32_t skItersPerWG               = schedule.skItersPerWG;
         const uint32_t skTotalTiles               = schedule.skTotalTiles;
+        const uint32_t numTiles
+            = static_cast<uint32_t>(schedule.tiles.x * schedule.tiles.y * schedule.tiles.z);
+        uint32_t skSplitFactor = 0;
+        if(launch.reduction == origami::reduction_t::parallel && numTiles > 0)
+            skSplitFactor = static_cast<uint32_t>(launch.grid / numTiles);
+        else if(customDataParallelClamp(launch.reduction))
+            skSplitFactor = 1;
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
             = calculateAutoWGM(problem, &hardware, launch.grid);
@@ -3389,16 +3397,13 @@ namespace TensileLite
         uint32_t debugPattern = 0xDB000001;
         bool appendedInternalArgs = false;
 
-        // For multi-buffer GSU and Stream-K parallel reduction, the kernel
-        // writes to the GSU/SK workspace and expects strides derived from
-        // d.sizes() (matching the legacy `strideW_D`/`strideW_C` layout used
-        // in singleCallArgs on develop).  Outside those modes the regular
-        // tensor strides apply.
-        bool gsuWSStride
+        // For multi-buffer GSU the kernel writes to the GSU workspace and
+        // expects strides derived from d.sizes() (matching the legacy
+        // `strideW_D`/`strideW_C` layout used in singleCallArgs on develop).
+        // Otherwise the regular tensor strides apply: Stream-K parallel
+        // partials are reached through AddressWorkspace, never C or D.
+        bool useWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && !sizeMapping.isStreamK();
-        const bool skPartials = role == CustomArgRole::Main && sizeMapping.isStreamK()
-                                && launch.reduction == origami::reduction_t::parallel;
-        bool useWSStride = gsuWSStride || skPartials;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
         const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
         const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
@@ -3753,8 +3758,6 @@ namespace TensileLite
                             && sizeMapping.globalAccumulation != 3)
                             useWsC = true;
                     }
-                    if(skPartials)
-                        useWsC = true;
                     if(useWsC)
                         rv.args.template append<void const*>("AddressC", inputs.ws);
                     else
@@ -3776,8 +3779,6 @@ namespace TensileLite
                            || sizeMapping.globalAccumulation == 3)
                             useWsD = true;
                     }
-                    if(skPartials)
-                        useWsD = true;
                     if(useWsD)
                         rv.args.template append<void const*>("AddressD", inputs.ws);
                     else
@@ -3797,7 +3798,8 @@ namespace TensileLite
                     rv.args.template append<void const*>(toString(arg.semantic), inputs.ws);
                     break;
                 case CustomArgSemantic::AddressFlags:
-                    if(launch.reduction == origami::reduction_t::parallel)
+                    if(launch.reduction == origami::reduction_t::parallel
+                       || customDataParallelClamp(launch.reduction))
                         rv.args.template append<void*>("AddressFlags", nullptr);
                     else
                         rv.args.template append<void*>("AddressFlags", inputs.Synchronizer);
@@ -3966,6 +3968,22 @@ namespace TensileLite
                 case CustomArgSemantic::SKTilesAndSplit:
                     rv.args.appendCustomType(toString(arg.semantic), skTotalTiles, arg.type);
                     break;
+                // F >= 2: parallel, each tile split across F workgroups whose
+                // partials a streamKReduce post kernel reduces into D; the grid
+                // is F * NumTiles and every (tile, split) partial slot is
+                // written. 1: each workgroup owns a whole tile and applies the
+                // epilogue to D directly. 0: tree reduction through
+                // AddressFlags, or no Stream-K.
+                case CustomArgSemantic::SKSplitFactor:
+                    rv.args.appendCustomType(toString(arg.semantic), skSplitFactor, arg.type);
+                    break;
+                case CustomArgSemantic::NumTiles:
+                    rv.args.appendCustomType(toString(arg.semantic), numTiles, arg.type);
+                    break;
+                // The partials region starts at the workspace base.
+                case CustomArgSemantic::WorkspaceOffsetPartials:
+                    rv.args.appendCustomType(toString(arg.semantic), uint32_t(0), arg.type);
+                    break;
 
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
@@ -4119,10 +4137,12 @@ namespace TensileLite
     }
 
     template <bool T_Debug>
-    KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
+    KernelInvocation
+        ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                PersistentLaunchSettings const&              launch) const
+                                                PersistentLaunchSettings const&     launch,
+                                                std::vector<KernelInvocation>*      postCalls) const
     {
         validatePersistentLoopArgsVersion();
         if(usesStreamKSpatialCluster())
@@ -4205,16 +4225,25 @@ namespace TensileLite
 
         rv.sharedMemBytes = 0;
 
-        packCustomArgs<T_Debug>(rv,
-                                customKernel.args,
-                                CustomArgRole::Main,
-                                problem,
-                                inputs,
-                                hardware,
-                                launch,
-                                schedule);
+        packCustomArgs<T_Debug>(rv, customKernel.args, problem, inputs, hardware, launch, schedule);
 
         rv.codeObjectFile = codeObjectFilename.load();
+
+        for(auto const& post : customKernel.postKernels)
+        {
+            // A streamKReduce kernel runs only when the main kernel wrote partials.
+            if(postCalls == nullptr || post.kind != CustomPostKernelKind::StreamKReduce
+               || launch.reduction != origami::reduction_t::parallel)
+                continue;
+            KernelInvocation call;
+            call.kernelName     = post.name;
+            call.codeObjectFile = rv.codeObjectFile;
+            call.args           = KernelArguments(T_Debug);
+            call.args.reserve(1024, 128);
+            customCallGrid(call, post.threads, post.grid, post.bands, post.args, schedule, launch);
+            packCustomArgs<T_Debug>(call, post.args, problem, inputs, hardware, launch, schedule);
+            postCalls->push_back(std::move(call));
+        }
         return rv;
     }
 
@@ -5646,6 +5675,28 @@ namespace TensileLite
            != kinds[static_cast<size_t>(CustomPostKernelKind::StreamKReduce)])
             throw std::runtime_error(
                 "Parallel reduction requires a streamKReduce post kernel and vice versa");
+        // The partials start at the workspace base, where amax and bias-gradient
+        // scratch would also go.
+        if(!customKernel.postKernels.empty()
+           && (problemType.outputAmaxD || (problemType.useGradient && problemType.useBias)))
+            throw std::runtime_error(
+                "Post kernels do not support amax output or bias-gradient reductions");
+        // The tile count already includes the batch, and a dynamic work queue
+        // never runs parallel reduction.
+        if(!customKernel.postKernels.empty()
+           && (customKernel.grid.x != CustomGridSize::StreamKNoBatch
+               || customKernel.grid.y != CustomGridSize::One
+               || customKernel.grid.z != CustomGridSize::One))
+            throw std::runtime_error(
+                "Post kernels require the main kernel grid [StreamKNoBatch, One, One]");
+        if(!customKernel.postKernels.empty() && sizeMapping.hasDynamicAssignment())
+            throw std::runtime_error("Post kernels require StaticGrid or Hybrid work assignment");
+        if(modes[static_cast<size_t>(CustomReductionMode::Parallel)]
+           && ((customKernel.workspaceType != CustomWorkspaceType::StreamK
+                && customKernel.workspaceType != CustomWorkspaceType::StreamKWithReduction)
+               || customKernel.workspaceSizePerElemC == 0))
+            throw std::runtime_error(
+                "Parallel reduction requires a Stream-K workspace with workspaceSizePerElemC");
     }
 
     void ContractionSolution::validateStreamKClusterDescriptor() const
@@ -5766,8 +5817,6 @@ namespace TensileLite
                                    ContractionSolution::Inputs const&  inputs,
                                    Hardware const&                     hardware) const
     {
-        if(!customKernel.postKernels.empty())
-            throw std::runtime_error("postKernels launch not implemented");
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
@@ -5985,12 +6034,15 @@ namespace TensileLite
         // generateSingleCall path restored from develop, so their launch
         // arguments stay byte-identical to develop.
         bool useCustomCall = !customKernel.name.empty() && !customKernel.generated;
+        std::vector<KernelInvocation> postCalls;
         if(useCustomCall)
         {
             if(debug)
-                rv.push_back(generateCustomCall<true>(problem, inputs, hardware, launch));
+                rv.push_back(
+                    generateCustomCall<true>(problem, inputs, hardware, launch, &postCalls));
             else
-                rv.push_back(generateCustomCall<false>(problem, inputs, hardware, launch));
+                rv.push_back(
+                    generateCustomCall<false>(problem, inputs, hardware, launch, &postCalls));
         }
         else
         {
@@ -6000,8 +6052,11 @@ namespace TensileLite
                 rv.push_back(generateSingleCall<false>(problem, inputs, hardware, launch, gsuSettings));
         }
 
-        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
-           || launch.reduction == origami::reduction_t::parallel)
+        // Post kernels replace the output conversion.
+        rv.insert(rv.end(), postCalls.begin(), postCalls.end());
+        if(customKernel.postKernels.empty()
+           && ((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
+               || launch.reduction == origami::reduction_t::parallel))
         {
             if(debug)
                 rv.push_back(generateOutputConversionCall<true>(
@@ -6041,7 +6096,7 @@ namespace TensileLite
         hipStream_t                                      stream) const
     {
         if(!customKernel.postKernels.empty())
-            throw std::runtime_error("postKernels launch not implemented");
+            throw std::runtime_error("Post kernels are not supported for grouped GEMM");
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
                       << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
@@ -6194,7 +6249,7 @@ namespace TensileLite
                                                  hipStream_t                 stream) const
     {
         if(!customKernel.postKernels.empty())
-            throw std::runtime_error("postKernels launch not implemented");
+            throw std::runtime_error("Post kernels are not supported for grouped GEMM");
         if(!problemType.supportDeviceUserArguments)
         {
             throw std::runtime_error("Currently this solution does not support user args.");
@@ -6496,6 +6551,7 @@ namespace TensileLite
                 // rule keys on.
                 const size_t itersPerTile
                     = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                snapCustomParallelGrid(reductionStrat, skGrid, tiles, itersPerTile);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -6508,7 +6564,7 @@ namespace TensileLite
                         size += idealWorkspace;
                 }
                 else if(streamKStraddlesTiles(itersPerTile, skGrid, tiles) && !streamKDP
-                        && !forceDPOnly)
+                        && !forceDPOnly && !customDataParallelClamp(reductionStrat))
                 {
                     // The workspace holds the partial tiles only. The per-XCD
                     // work-queue counters live at the base of the flag buffer
@@ -6690,10 +6746,11 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        // Handwritten custom kernels only support single-kernel (tree) reduction.
+        // Handwritten custom kernels use single-kernel (tree) reduction unless
+        // they declare parallel, which a streamKReduce post kernel completes.
         // Tensile-generated kernels also set customKernel.name, with generated=true,
         // and still go through origami reduction selection.
-        if(handwrittenCustomKernel())
+        if(handwrittenCustomKernel() && !customKernelReduces(CustomReductionMode::Parallel))
         {
             reductionStrat = origami::reduction_t::tree;
         }
@@ -6924,6 +6981,34 @@ namespace TensileLite
     bool ContractionSolution::handwrittenCustomKernel() const
     {
         return !customKernel.name.empty() && !customKernel.generated;
+    }
+
+    bool ContractionSolution::customKernelReduces(CustomReductionMode mode) const
+    {
+        return std::find(customKernel.reductions.begin(), customKernel.reductions.end(), mode)
+               != customKernel.reductions.end();
+    }
+
+    bool ContractionSolution::customDataParallelClamp(origami::reduction_t reduction) const
+    {
+        return handwrittenCustomKernel() && !customKernelReduces(CustomReductionMode::Tree)
+               && reduction != origami::reduction_t::parallel;
+    }
+
+    void ContractionSolution::snapCustomParallelGrid(origami::reduction_t& reduction,
+                                                     size_t&               grid,
+                                                     size_t                tiles,
+                                                     size_t                itersPerTile) const
+    {
+        if(!handwrittenCustomKernel() || reduction != origami::reduction_t::parallel || tiles == 0)
+            return;
+        const size_t split = grid / tiles;
+        const size_t units
+            = skPaddedItersPerTile(itersPerTile, skKGranularity()) / skKGranularity();
+        if(split > units)
+            reduction = origami::reduction_t::tree;
+        else
+            grid = split * tiles;
     }
 
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
@@ -7198,6 +7283,13 @@ namespace TensileLite
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
         const size_t itersPerTile
             = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+        // Same snap as requiredWorkspaceSize(), before sizing and packing.
+        snapCustomParallelGrid(sk.reduction, sk.grid, tiles, itersPerTile);
+        // Handwritten partials use the custom macrotile, as requiredWorkspaceSize() does.
+        auto customParallelWorkspace
+            = [&] { return requiredWorkspaceSizeForSplitTiles(problem, sk.grid / tiles, sk.grid); };
+        const bool customParallel
+            = handwrittenCustomKernel() && sk.reduction == origami::reduction_t::parallel;
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
                || (streamKStraddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP
@@ -7213,7 +7305,8 @@ namespace TensileLite
             // addresses, and would have made this launch-path threshold disagree
             // with the two workspace-size queries (requiredWorkspaceSize() and
             // computeStreamKDecisions()), which carry no such term.
-            size_t idealWorkspace = partialTileSize(sk.grid);
+            size_t idealWorkspace
+                = customParallel ? customParallelWorkspace() : partialTileSize(sk.grid);
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
@@ -7225,7 +7318,18 @@ namespace TensileLite
             }
         }
 
-        if(sizeMapping.requiresPartialReduction() && sk.grid > 0)
+        // A kernel without tree support runs every other outcome data parallel:
+        // one workgroup per tile, no partials and no flags.
+        if(customDataParallelClamp(sk.reduction))
+        {
+            sk.reduction = origami::reduction_t::none;
+            sk.grid      = tiles;
+            return sk;
+        }
+
+        if(handwrittenCustomKernel() && sk.reduction == origami::reduction_t::parallel)
+            sk.workspaceBytes = customParallelWorkspace();
+        else if(sizeMapping.requiresPartialReduction() && sk.grid > 0)
         {
             if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
                 sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);

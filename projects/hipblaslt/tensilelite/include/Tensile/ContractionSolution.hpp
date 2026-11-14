@@ -1450,15 +1450,6 @@ namespace TensileLite
             uint32_t skTotalTiles               = 0;
         };
 
-        // Kernel an argument list is packed for. In Stream-K parallel reduction the
-        // main kernel's AddressC/D and their strides point at the workspace partials;
-        // a post kernel's point at the real C and D.
-        enum class CustomArgRole
-        {
-            Main,
-            Post,
-        };
-
         CustomCallSchedule customCallSchedule(Problem const&                  problem,
                                               Hardware const&                 hardware,
                                               PersistentLaunchSettings const& launch) const;
@@ -1478,18 +1469,21 @@ namespace TensileLite
         template <bool T_Debug>
         void packCustomArgs(KernelInvocation&                       rv,
                             std::vector<CustomArgDefinition> const& args,
-                            CustomArgRole                           role,
                             Problem const&                          problem,
                             ContractionInputs const&                inputs,
                             Hardware const&                         hardware,
                             PersistentLaunchSettings const&         launch,
                             CustomCallSchedule const&               schedule) const;
 
+        // Under parallel reduction, postCalls (when given) receives one call per
+        // post kernel, packed from the main kernel's schedule and launch.
         template <bool T_Debug>
-        KernelInvocation generateCustomCall(Problem const&           problem,
-                                            ContractionInputs const& inputs,
-                                            Hardware const&          hardware,
-                                            PersistentLaunchSettings const&   launch) const;
+        KernelInvocation generateCustomCall(Problem const&                  problem,
+                                            ContractionInputs const&        inputs,
+                                            Hardware const&                 hardware,
+                                            PersistentLaunchSettings const& launch,
+                                            std::vector<KernelInvocation>*  postCalls
+                                            = nullptr) const;
 
         // Temporary: the proven per-feature argument-packing path, restored from
         // develop and used for all Tensile-generated kernels while the generic
@@ -1756,6 +1750,16 @@ namespace TensileLite
                                                  size_t         tiles) const;
 
         bool handwrittenCustomKernel() const;
+        bool customKernelReduces(CustomReductionMode mode) const;
+        // A handwritten kernel without tree support launches data parallel
+        // whenever the resolved reduction is not parallel.
+        bool customDataParallelClamp(origami::reduction_t reduction) const;
+        // A handwritten parallel launch is exactly F workgroups per tile, each
+        // with at least one K unit; otherwise it demotes to tree.
+        void snapCustomParallelGrid(origami::reduction_t& reduction,
+                                    size_t&               grid,
+                                    size_t                tiles,
+                                    size_t                itersPerTile) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.
