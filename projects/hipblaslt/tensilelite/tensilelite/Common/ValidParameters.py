@@ -1159,6 +1159,7 @@ validParameters = { # we need to make sure this matches develop
     # Group together unroll iterations inside the unroll loop.
     # For example, InnerUnroll=2 will fetch LDS for two unroll iterations
     "InnerUnroll": [1, 2, 4, 8, 16, 32, 64],
+    "LocalDotLayout": [1, 2, 4, 8],
     # Enable CP preload kernel arguments feature
     # It can reduce time of loading kernel arguments by s_load.
     # It needs new complier and vbios to support this feature.

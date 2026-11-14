@@ -1332,6 +1332,21 @@ class Solution(collections.abc.Mapping):
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
+    if (not state["EnableMatrixInstruction"]
+        and state["ProblemType"]["HighPrecisionAccumulate"]
+        and state["ProblemType"]["DataType"].isInt8()
+        and state.get("LocalDotLayout", 1) == 4
+        and isaInfoMap[state["ISA"]].asmCaps.get("v_dot4c_i32_i8", False)):
+      state["UseDotInstruction"] = True
+      state["NumDotElements"] = 4
+      state["InnerUnroll"] = 1
+      state["TransposeLDS"] = 2
+      state["VectorWidthA"] = state["VectorWidthB"] = 1
+      state["GlobalReadVectorWidthA"] = state["GlobalReadVectorWidthB"] = 1
+      state["LocalReadVectorWidth"] = 4
+      state["LocalReadVectorWidthA"] = state["LocalReadVectorWidthB"] = 4
+      state["LocalRead2A"] = state["LocalRead2B"] = False
+      state["LocalWrite2A"] = state["LocalWrite2B"] = False
     if not state["UseDotInstruction"] and state["WaveSplitK"]:
       reject(state, "WaveSplitK currently only support dot2 kernel.")
       return
@@ -6004,9 +6019,10 @@ class Solution(collections.abc.Mapping):
       if not bufferLoad:
         reject(state, "dot2 kernel only support bufferLoad!")
       if not ((isaInfoMap[isa].asmCaps['v_dot2_f32_f16'] and state["ProblemType"]["DataType"].isHalf()) \
-      or (isaInfoMap[isa].asmCaps['v_dot2_f32_bf16'] and state["ProblemType"]["DataType"].isBFloat16())) \
+      or (isaInfoMap[isa].asmCaps['v_dot2_f32_bf16'] and state["ProblemType"]["DataType"].isBFloat16()) \
+      or (isaInfoMap[isa].asmCaps.get('v_dot4c_i32_i8', False) and state["ProblemType"]["DataType"].isInt8())) \
       and state["ProblemType"]["HighPrecisionAccumulate"]:
-        reject(state, "dot2 kernel only support DataType fp16 or bf16 with HPA")
+        reject(state, "dot kernel requires supported fp16, bf16 or int8 with HPA")
       if state["InnerUnroll"] not in [1,2,4]:
         reject(state, "dot2 kernel requires InnerUnroll = 1,2 or 4")
       if state["NumWaveSplitK"] not in [1,2,4,8,16,32,64]:
