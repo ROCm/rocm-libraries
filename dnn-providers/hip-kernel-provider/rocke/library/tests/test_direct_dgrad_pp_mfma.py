@@ -120,6 +120,60 @@ def test_transposed_problem_flips_dilated_padding():
         assert dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=tp)) == "dilation must be 1"
 
 
+@pytest.mark.skipif(not _HAS_TORCH, reason="needs torch (CPU)")
+@pytest.mark.parametrize(
+    "KH, KW, PAD, dil, pad_w",
+    [
+        (3, 3, 1, (2, 1), -1),
+        (3, 3, 1, (2, 3), -1),
+        (3, 3, 2, (2, 1), 0),
+        (3, 5, 1, (1, 1), -1),
+        (5, 5, 4, (2, 2), -1),
+    ],
+)
+def test_transposed_problem_matches_cpu_dgrad(KH, KW, PAD, dil, pad_w):
+    """The forward conv over the transposed problem (flipped, k<->c
+    transposed filter) is the CPU dgrad: same dX extents and values. An
+    implicit pad_w stays -1 only when the column flip equals the row flip
+    (dil_w*(KW-1) == dil_h*(KH-1)); else it is dil_w*(KW-1)-PAD."""
+    import torch
+
+    dh, dw = dil
+    d = replace(
+        _dgrad(N=1, H=9, W=11, C=4, K=3, KH=KH),
+        KW=KW,
+        PAD=PAD,
+        dil_h=dh,
+        dil_w=dw,
+        pad_w=pad_w,
+    )
+    tp = dgrad_pp_mfma_problem(d)
+    if pad_w == -1 and dw * (KW - 1) == dh * (KH - 1):
+        assert tp.pad_w == -1, (d, tp)
+    else:
+        assert tp.pad_w == dw * (KW - 1) - d.PAD_W, (d, tp)
+    assert (tp.Ho, tp.Wo) == (d.H, d.W), (d, tp)
+
+    torch.manual_seed(0)
+    w = torch.randn(d.total_k, d.total_c, KH, KW, dtype=torch.float64)
+    dy = torch.randn(d.N, d.total_k, d.Ho, d.Wo, dtype=torch.float64)
+    ref = torch.nn.grad.conv2d_input(
+        (d.N, d.total_c, d.H, d.W),
+        w,
+        dy,
+        padding=(d.PAD, d.PAD_W),
+        dilation=(dh, dw),
+    )
+    got = torch.nn.functional.conv2d(
+        dy,
+        w.flip(2, 3).transpose(0, 1),
+        padding=(tp.PAD, tp.PAD_W),
+        dilation=(tp.dil_h, tp.dil_w),
+    )
+    assert got.shape == ref.shape, (d, tp)
+    torch.testing.assert_close(got, ref)
+
+
 def test_reasons():
     ok = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
     assert dgrad_pp_mfma_reason(ok) is None

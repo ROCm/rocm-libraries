@@ -14164,10 +14164,11 @@ def is_valid_dgrad_4c_problem(problem: DirectConvProblem) -> tuple[bool, str]:
 def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem:
     """The forward problem a single-kernel stride-1 dgrad runs (the 4c dgrad
     and ``conv_direct_dgrad_pp_mfma``): ``(dY, W_T) -> dX`` with ``H = Ho,
-    W = Wo, cpg' = kpg, kpg' = cpg, PAD' = dil_h*(KH-1)-PAD`` and, when the
-    column padding is explicit, ``pad_w' = dil_w*(KW-1)-pad_w`` (a negative
-    ``pad_w`` is kept: -1 still means PAD, and the validators refuse the
-    rest). The flipped padding is the general one, so the transposed
+    W = Wo, cpg' = kpg, kpg' = cpg, PAD' = dil_h*(KH-1)-PAD`` and
+    ``pad_w' = dil_w*(KW-1)-PAD_W``. An implicit ``pad_w`` (-1) stays -1
+    when ``dil_w*(KW-1) == dil_h*(KH-1)`` (the column flip then equals the
+    row flip); other negative values are kept (the validators refuse them).
+    The flipped padding is the general one, so the transposed
     problem's ``Ho, Wo`` are the dgrad's ``H, W`` for any dilation (it is
     ``KH-1-PAD`` at dilation 1). Stride and dilation are kept, so the forward
     validators refuse a strided or dilated dgrad (no check here)."""
@@ -14186,8 +14187,18 @@ def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem
         dtype=p.dtype,
         dil_h=p.dil_h,
         dil_w=p.dil_w,
-        pad_w=p.pad_w if p.pad_w < 0 else p.dil_w * (p.KW - 1) - p.pad_w,
+        pad_w=_dgrad_transposed_pad_w(p),
     )
+
+
+def _dgrad_transposed_pad_w(p: DirectConvProblem) -> int:
+    """``pad_w`` of :func:`dgrad_4c_transposed_problem`: the column flip
+    ``dil_w*(KW-1)-PAD_W``, left implicit (-1) when it equals the row flip."""
+    if p.pad_w < -1:
+        return p.pad_w
+    if p.pad_w == -1 and p.dil_w * (p.KW - 1) == p.dil_h * (p.KH - 1):
+        return -1
+    return p.dil_w * (p.KW - 1) - p.PAD_W
 
 
 def make_dgrad_4c_spec(
