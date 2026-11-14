@@ -47,16 +47,27 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
     const bool is_batch_prefill = sig.family == FmhaKernelFamily::BatchPrefill ||
                                   problem.requested_family == FmhaKernelFamily::BatchPrefill;
 
+    // The split-KV combine only merges o_acc and lse_acc. The mask, bias, logits
+    // soft cap, sink and paged KV (page size included) are all consumed by the
+    // split stage, so one combine kernel serves every value of them. Its key does
+    // not say so consistently: the stock instance list leaves these fields at
+    // their defaults, the Python JIT path copies them from the parent split, and
+    // the C++ examples declare them by hand. Comparing them would reject some of
+    // those combines and drop the whole split-KV plan, so the combine skips them.
+    const bool is_combine = sig.family == FmhaKernelFamily::FwdSplitKvCombine;
+
     if(!(sig.family == problem.requested_family && sig.data_type == problem.data_type &&
          sig.is_group_mode == problem.is_group_mode && sig.is_v_rowmajor == problem.is_v_rowmajor &&
-         sig.has_logits_soft_cap == problem.has_logits_soft_cap &&
-         fmha_mask_compatible(sig.mask_type, problem.mask_type) &&
-         sig.bias_type == problem.bias_type && sig.has_lse == problem.has_lse &&
+         (is_combine || sig.has_logits_soft_cap == problem.has_logits_soft_cap) &&
+         (is_combine || fmha_mask_compatible(sig.mask_type, problem.mask_type)) &&
+         (is_combine || sig.bias_type == problem.bias_type) && sig.has_lse == problem.has_lse &&
          sig.has_dropout == problem.has_dropout && sig.qscale_type == problem.qscale_type &&
-         sig.rope_type == problem.rope_type && sig.use_paged_kv == problem.use_paged_kv &&
+         sig.rope_type == problem.rope_type &&
+         (is_combine || sig.use_paged_kv == problem.use_paged_kv) &&
          sig.do_fp8_static_quant == problem.do_fp8_static_quant &&
-         sig.skip_min_seqlen_q == problem.skip_min_seqlen_q && sig.has_sink == problem.has_sink &&
-         sig.has_dbias == problem.has_dbias && sig.is_store_randval == problem.is_store_randval &&
+         sig.skip_min_seqlen_q == problem.skip_min_seqlen_q &&
+         (is_combine || sig.has_sink == problem.has_sink) && sig.has_dbias == problem.has_dbias &&
+         sig.is_store_randval == problem.is_store_randval &&
          sig.is_deterministic == problem.is_deterministic && problem.hdim_q <= sig.hdim_q &&
          problem.hdim_v <= sig.hdim_v))
     {
@@ -72,7 +83,7 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
         }
     }
 
-    if(compare_page_size && sig.page_size != problem.page_size &&
+    if(compare_page_size && !is_combine && sig.page_size != problem.page_size &&
        (is_batch_prefill || sig.page_size > 1))
     {
         return false;
