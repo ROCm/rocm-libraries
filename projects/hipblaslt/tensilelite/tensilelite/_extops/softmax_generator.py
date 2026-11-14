@@ -751,7 +751,7 @@ if __name__ == '__main__':
         assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
-    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    waveFrontSize = 32 if isa[0] in [10, 11, 12] else 64
     _global_ti.setKernel(isa, waveFrontSize)
     softmax = SoftmaxKernelGenerator(DataType('S'), n, m, 256, waveFrontSize, arch, isa)
     kernel_body = softmax.softmax_kernel_body()

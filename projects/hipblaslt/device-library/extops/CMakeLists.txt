@@ -19,7 +19,7 @@ foreach(arch IN LISTS archs)
         set(extop_xnack_args --xnack)
     endif()
     set(WAVEFRONT "-mwavefrontsize64")
-    if(arch MATCHES "^gfx1[12][0-9][0-9](-[a-z0-9]+)*$")
+    if(arch MATCHES "^gfx1[0-2][0-9][0-9](-[a-z0-9]+)*$")
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
     # Enable true16 on all gfx11*/gfx12* (NoSDWA). "SHELL:" keeps the flag group
@@ -75,6 +75,9 @@ foreach(arch IN LISTS archs)
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/tensilelite/_extops/amax_generator.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/tensilelite/_extops/layer_norm_generator.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/tensilelite/_extops/softmax_generator.py"
     )
 
     set(output_code_object_file "${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co")
