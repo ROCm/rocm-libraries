@@ -1705,6 +1705,10 @@ void check(const Arguments&              arg,
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
             }
+            // The skip_launch_solution self-test expects the solution it never launched to fail
+            // here, and fails the case itself when any other solution does.
+            if(arg.norm_check_assert && arg.skip_launch_solution < 0)
+                CHECK_SUCCESS(failure.bad_count == 0);
         }
 
         if(arg.ulp_check)
