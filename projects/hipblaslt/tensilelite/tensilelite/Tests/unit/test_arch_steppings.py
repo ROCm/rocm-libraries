@@ -1688,7 +1688,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     monkeypatch.setattr(
         RunModule,
         "_buildGroupsSeparately",
-        lambda groups, _jobs: captured.__setitem__("groups", groups),
+        lambda groups, _jobs, argv=None: captured.__setitem__("groups", groups),
     )
 
     try:
@@ -2619,6 +2619,50 @@ def test_everything_the_caller_asked_for_survives_into_the_children(monkeypatch)
             "/build/Tensile",
             "HIP",
         ]
+
+
+@pytest.mark.parametrize("argument_source", ["list", "tuple", "sys.argv"])
+def test_entry_point_forwards_arguments_into_group_builds(monkeypatch, tmp_path, argument_source):
+    """In-process calls must not hand children the benchmark's command line."""
+    from unittest.mock import MagicMock
+    from tensilelite.create_library import run as Run
+
+    argv = [
+        "--architecture=gfx1250;gfx1250-strict",
+        "--jobs=8",
+        "--disable-asm-comments",
+        str(tmp_path / "logic"),
+        str(tmp_path / "out"),
+        "HIP",
+    ]
+    original = list(argv)
+    if argument_source == "sys.argv":
+        monkeypatch.setattr(sys, "argv", ["TensileCreateLibrary", *argv])
+        explicit = None
+    else:
+        monkeypatch.setattr(sys, "argv", ["Tensile", "/host/config.yaml", "/host/out"])
+        explicit = tuple(argv) if argument_source == "tuple" else argv
+
+    spawned = []
+
+    def popen(cmd, env=None):
+        spawned.append(cmd)
+        return MagicMock(wait=lambda: 0, poll=lambda: 0)
+
+    monkeypatch.setattr(Run.subprocess, "Popen", popen)
+    monkeypatch.setattr(Run, "validateToolchain", lambda *args: ("cxx", None, "bundler", None))
+    monkeypatch.setattr(Run, "setVerbosity", lambda value: None)
+    monkeypatch.setattr(Run, "_cpuCount", lambda: 128)
+
+    Run.main(explicit)
+
+    assert spawned == [
+        [sys.executable, "-m", "tensilelite.create_library", "--disable-asm-comments",
+         str(tmp_path / "logic"), str(tmp_path / "out"), "HIP",
+         f"--architecture={arch}", "--jobs=4"]
+        for arch in (GFX1250, GFX1250_STRICT)
+    ]
+    assert argv == original
 
 
 def test_the_requested_parallelism_is_split_across_the_groups(monkeypatch):

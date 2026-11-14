@@ -27,6 +27,7 @@ import os.path
 import subprocess
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Dict
 
@@ -36,7 +37,7 @@ from ..Toolchain.Component import get_rocm_version
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
 from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
-     getVerbosity
+     getVerbosity, setVerbosity
 from .ValidParameters import validISA, validParameters
 
 startTime = time.time()
@@ -759,6 +760,28 @@ libraryLogicTypeOverrides = {
 # a yaml file is compatible with TensileLite if
 # TensileLite.major == yaml.major and TensileLite.minor.step > yaml.minor.step
 ################################################################################
+@contextmanager
+def preserveGlobalParameters():
+    """Restore caller configuration after nested, in-process library creation.
+
+    Keep the global dictionary object so imports elsewhere still reference it.
+    The nested call also changes verbosity and the ISA allow-list independently
+    of this dictionary. This scope is for sequential calls, not concurrent ones.
+    """
+    saved = deepcopy(globalParameters)
+    savedIsas = validParameters["ISA"]
+    savedIsaValues = deepcopy(savedIsas)
+    savedVerbosity = getVerbosity()
+    try:
+        yield
+    finally:
+        globalParameters.clear()
+        globalParameters.update(saved)
+        savedIsas[:] = savedIsaValues
+        validParameters["ISA"] = savedIsas
+        setVerbosity(savedVerbosity)
+
+
 def restoreDefaultGlobalParameters():
     """
     Restores `globalParameters` back to defaults.

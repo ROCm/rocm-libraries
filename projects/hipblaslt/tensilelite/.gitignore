@@ -1,5 +1,11 @@
 .tox/
 
+# Package build outputs. setup.py stamps _build_info.py only into build/lib and
+# sdists; the entry guards against a stray copy in the source tree. Ignoring
+# them also keeps a build from marking the tree dirty for the next build.
+/dist/
+tensilelite/_build_info.py
+
 # mutmut mutation-testing artifacts (copy dir + cache)
 mutants/
 .mutmut-cache
