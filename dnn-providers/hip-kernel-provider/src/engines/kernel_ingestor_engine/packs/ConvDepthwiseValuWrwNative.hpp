@@ -74,9 +74,8 @@ struct WrwConfig
     int64_t strip = 0;
 };
 
-/// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic);
-/// @p staged: gfx950's in-memory-order staging rows too.
-int64_t hankelLdsBytes(const WrwConfig& config, bool staged);
+/// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic).
+int64_t hankelLdsBytes(const WrwConfig& config);
 
 /**
  * @brief Whether the hankel config @p config serves @p problem on @p gcnArchName: 4x4x4 MFMA
