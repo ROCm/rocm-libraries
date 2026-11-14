@@ -1427,10 +1427,11 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                 (roiTensorPtrSrc[i].xywhROI.roiWidth * (100 - pixelationPercentage)) / 100;
             internalDstImgSizes[i].height = internalRoiTensorPtrSrc[i].xywhROI.roiHeight =
                 (roiTensorPtrSrc[i].xywhROI.roiHeight * (100 - pixelationPercentage)) / 100;
-            internalRoiTensorPtrSrc[i].xywhROI.xy.x =
-                (roiTensorPtrSrc[i].xywhROI.xy.x * (100 - pixelationPercentage)) / 100;
-            internalRoiTensorPtrSrc[i].xywhROI.xy.y =
-                (roiTensorPtrSrc[i].xywhROI.xy.y * (100 - pixelationPercentage)) / 100;
+            // The intermediate downscaled buffer is always packed starting at the origin, so
+            // step 2 (nearest-neighbor upscale) must read from (0, 0) regardless of the source
+            // ROI's offset. Only the extents (roiWidth/roiHeight, scaled above) carry over.
+            internalRoiTensorPtrSrc[i].xywhROI.xy.x = 0;
+            internalRoiTensorPtrSrc[i].xywhROI.xy.y = 0;
         }
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
@@ -1543,10 +1544,11 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                 internalRoiTensorPtrSrc[i].xywhROI.roiHeight =
                     (internalRoiTensorPtrSrc[i].xywhROI.roiHeight * (100 - pixelationPercentage)) /
                     100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.x =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.x * (100 - pixelationPercentage)) / 100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.y =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.y * (100 - pixelationPercentage)) / 100;
+                // Explicitly zero the intermediate's source origin instead of scaling a
+                // previously-unset field (relying on scratch happening to be zeroed). Step 2
+                // always reads the downscaled buffer from (0, 0); only the extents are scaled.
+                internalRoiTensorPtrSrc[i].xywhROI.xy.x = 0;
+                internalRoiTensorPtrSrc[i].xywhROI.xy.y = 0;
             }
             status = hip_exec_resize_tensor(static_cast<Rpp8u*>(interDstPtr), interDescPtr,
                                             static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
@@ -1572,10 +1574,11 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                 internalRoiTensorPtrSrc[i].xywhROI.roiHeight =
                     (internalRoiTensorPtrSrc[i].xywhROI.roiHeight * (100 - pixelationPercentage)) /
                     100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.x =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.x * (100 - pixelationPercentage)) / 100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.y =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.y * (100 - pixelationPercentage)) / 100;
+                // Explicitly zero the intermediate's source origin instead of scaling a
+                // previously-unset field (relying on scratch happening to be zeroed). Step 2
+                // always reads the downscaled buffer from (0, 0); only the extents are scaled.
+                internalRoiTensorPtrSrc[i].xywhROI.xy.x = 0;
+                internalRoiTensorPtrSrc[i].xywhROI.xy.y = 0;
             }
             status = hip_exec_resize_tensor(
                 reinterpret_cast<half*>(static_cast<Rpp8u*>(interDstPtr)), interDescPtr,
@@ -1603,10 +1606,11 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                 internalRoiTensorPtrSrc[i].xywhROI.roiHeight =
                     (internalRoiTensorPtrSrc[i].xywhROI.roiHeight * (100 - pixelationPercentage)) /
                     100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.x =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.x * (100 - pixelationPercentage)) / 100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.y =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.y * (100 - pixelationPercentage)) / 100;
+                // Explicitly zero the intermediate's source origin instead of scaling a
+                // previously-unset field (relying on scratch happening to be zeroed). Step 2
+                // always reads the downscaled buffer from (0, 0); only the extents are scaled.
+                internalRoiTensorPtrSrc[i].xywhROI.xy.x = 0;
+                internalRoiTensorPtrSrc[i].xywhROI.xy.y = 0;
             }
             status = hip_exec_resize_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(interDstPtr)), interDescPtr,
@@ -1633,10 +1637,11 @@ RppStatus rppt_pixelate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                 internalRoiTensorPtrSrc[i].xywhROI.roiHeight =
                     (internalRoiTensorPtrSrc[i].xywhROI.roiHeight * (100 - pixelationPercentage)) /
                     100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.x =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.x * (100 - pixelationPercentage)) / 100;
-                internalRoiTensorPtrSrc[i].xywhROI.xy.y =
-                    (internalRoiTensorPtrSrc[i].xywhROI.xy.y * (100 - pixelationPercentage)) / 100;
+                // Explicitly zero the intermediate's source origin instead of scaling a
+                // previously-unset field (relying on scratch happening to be zeroed). Step 2
+                // always reads the downscaled buffer from (0, 0); only the extents are scaled.
+                internalRoiTensorPtrSrc[i].xywhROI.xy.x = 0;
+                internalRoiTensorPtrSrc[i].xywhROI.xy.y = 0;
             }
             status = hip_exec_resize_tensor(static_cast<Rpp8s*>(interDstPtr), interDescPtr,
                                             static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
