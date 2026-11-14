@@ -59,6 +59,14 @@ target_link_libraries(
 # make it so tests inside folders can find the mocks folder without having to use a relative path.
 target_include_directories(miopen_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# TestMiopenEngine checks the shipped L1 models against the revision the engine computes,
+# from a table embedded here at configure time: the binary may run where no checkout exists.
+include(MiopenShippedModels)
+miopen_write_shipped_models_header(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/MiopenShippedModels.hpp"
+    NAMESPACE miopen_plugin::shipped_models)
+target_include_directories(miopen_plugin_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 clang_tidy_check(miopen_plugin_tests)
 
 add_unit_test_target(miopen_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
