@@ -1074,6 +1074,15 @@ def test_build_from_metadata_macrotile_name_fallback():
     assert ck["macrotile"] == [128, 256, 64]
 
 
+def test_build_from_metadata_does_not_read_a_rocroller_tile_name():
+    # A rocRoller capture declares its tile in custom.config; the WGT_ token in
+    # its name is not a source for it.
+    ck = _buildCustomKernelFromMetadata(
+        "RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_128x256x64_UR_2", _kernel_yaml([_D_ARG]), {}
+    )
+    assert ck["macrotile"] == [0, 0, 0]
+
+
 # --------------------------------------------------------------------------- #
 # validateCustomKernelMetadata edge branches
 # --------------------------------------------------------------------------- #

@@ -12,6 +12,7 @@ from tensilelite.LibraryLogic import (
     LogicAnalyzer,
     customKernelTile,
     isCustomKernelSolution,
+    isRocRollerCapture,
     libraryDeviceNames,
     preferredExactCustomKernel,
 )
@@ -21,13 +22,20 @@ class _Kernel:
     """Solution-shaped stub: fields live behind __getitem__, not attributes.
 
     LibraryLogic merges Tensile Solution objects, which store CustomKernelName
-    in state and do not expose it as an attribute.
+    in state and do not expose it as an attribute. The tile, workgroup mapping
+    and operand types live where a real solution keeps them: the CustomKernel
+    macrotile, an RR_WorkgroupMapping kernarg, and the ProblemType. The name is
+    a label only.
     """
 
-    def __init__(self, name):
+    def __init__(self, name, macrotile, wgm, typeA, typeB):
+        args = [{"type": "address", "semantic": "AddressD"}]
+        if wgm:
+            args.append({"type": "int32", "semantic": "RR_WorkgroupMapping"})
         self._state = {
             "CustomKernelName": name,
-            "CustomKernel": {"name": name},
+            "CustomKernel": {"name": name, "macrotile": list(macrotile), "args": args},
+            "ProblemType": {"DataTypeA": typeA, "DataTypeB": typeB},
         }
 
     def __getitem__(self, key):
@@ -43,20 +51,26 @@ class _Kernel:
         return hash(self._state["CustomKernelName"])
 
 
-def _kernel(name):
-    return _Kernel(name)
+_TYPE_CHARS = {"FP6": "F6", "BF6": "B6", "FP8": "F8", "BF8": "B8", "FP4": "F4"}
 
 
 def _names(*tiles):
+    """One stub per (pair, tile): pair is "<A>_<B>_...", tile "MxNxK[_WGM]"."""
     prefix = "RR_GEMM_TN_{pair}_SA_BE8M0_32_SB_BE8M0_32_WGT_{tile}"
     out = []
     for pair, tile in tiles:
-        suffix = "_WGM_" if "WGM" in tile or tile.endswith("wgm") else ""
-        tile = tile.replace("_wgm", "")
-        if tile.endswith("WGM"):
-            suffix = "_WGM_"
-            tile = tile[: -len("WGM")].rstrip("_")
-        out.append(_kernel(prefix.format(pair=pair, tile=tile) + suffix))
+        wgm = tile.endswith("WGM")
+        tile = tile[: -len("WGM")].rstrip("_") if wgm else tile
+        typeA, typeB = (_TYPE_CHARS[t] for t in pair.split("_")[:2])
+        out.append(
+            _Kernel(
+                prefix.format(pair=pair, tile=tile) + ("_WGM_" if wgm else ""),
+                [int(x) for x in tile.split("x")],
+                wgm,
+                typeA,
+                typeB,
+            )
+        )
     return out
 
 
@@ -129,16 +143,16 @@ def test_tied_custom_kernels_are_kept_and_exact_sizes_remap():
     assert analyzer.exactWinners[huge][0] == 1
     small = solutions[2]["CustomKernelSizePredicate"]
     big = solutions[1]["CustomKernelSizePredicate"]
-    assert {"tag": "SizeLessThan", "index": 0, "value": 129} in small
+    assert not any(pred["tag"] == "SizeLessThan" for pred in small + big)
+    assert {"tag": "SizeGreaterThan", "index": 0, "value": 63} in small
     assert {"tag": "SizeGreaterThan", "index": 0, "value": 3071} in big
 
 
-def test_gfx950_without_a_supported_id_uses_mi355_ids():
-    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == [
-        "Device 75a3",
-        "Device 75a2",
-    ]
-    assert libraryDeviceNames("gfx950", "fallback") == ["Device 75a3", "Device 75a2"]
+def test_gfx950_without_a_supported_id_adds_the_default_chip_id():
+    generated = ["Device 75a3", "Device 75a2", "Device 75a0"]
+    assert libraryDeviceNames("gfx950", ["Device 0049", "Device 0050"]) == generated
+    assert libraryDeviceNames("gfx950", "fallback") == generated
+    assert libraryDeviceNames("gfx950", None) == generated
     assert libraryDeviceNames("gfx950", ["Device 75a3", "Device 75a2"]) == [
         "Device 75a3",
         "Device 75a2",
@@ -148,11 +162,23 @@ def test_gfx950_without_a_supported_id_uses_mi355_ids():
         "Device 0050",
     ]
     assert libraryDeviceNames("gfx950", "Device 75a3") == "Device 75a3"
+    assert libraryDeviceNames("gfx950", ["Device 75a0"]) == ["Device 75a0"]
+
+
+def test_every_other_gfx950_chip_id_falls_back_to_75a0():
+    from tensilelite.Common.Architectures import GFX_CHIP_IDS, SUPPORTED_CHIP_ID_FALLBACKS
+
+    for chipId in GFX_CHIP_IDS["gfx950"]:
+        if chipId != "75a0":
+            assert SUPPORTED_CHIP_ID_FALLBACKS["id=" + chipId] == ["id=75a0"], chipId
+
+
+_WGM_ARG = {"type": "int32", "semantic": "RR_WorkgroupMapping"}
 
 
 def test_custom_kernel_tile_sources():
-    wgm = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_"
-    assert customKernelTile({"CustomKernel": {"name": wgm}}) == (128, 128, 128, True)
+    wgm = {"macrotile": [128, 128, 128], "args": [_WGM_ARG]}
+    assert customKernelTile({"CustomKernel": wgm}) == (128, 128, 128, True)
     assert customKernelTile({"CustomKernel": {"macrotile": [64, 32, 128, 1]}}) == (
         64,
         32,
@@ -164,13 +190,65 @@ def test_custom_kernel_tile_sources():
 
     # Not subscriptable: fields fall back to attributes.
     plain = SimpleNamespace(
-        CustomKernelName="RR_GEMM_TN_FP6_FP6_Float_Float_Float_WGT_32x32x64"
+        CustomKernelName="RR_GEMM_TN_FP6_FP6_Float_Float_Float_WGT_32x32x64",
+        CustomKernel={"macrotile": [32, 32, 64]},
     )
     assert customKernelTile(plain) == (32, 32, 64, False)
     assert isCustomKernelSolution(plain)
     assert isCustomKernelSolution({"CustomKernel": {"macrotile": [16, 16, 128]}})
     assert not isCustomKernelSolution({"CustomKernel": {}})
     assert not isCustomKernelSolution({})
+
+
+def test_custom_kernel_tile_does_not_read_the_name():
+    name = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_"
+    # A name alone carries no tile.
+    assert customKernelTile({"CustomKernelName": name, "CustomKernel": {"name": name}}) is None
+    # The macrotile and the kernargs decide, whatever the name says.
+    assert customKernelTile(
+        {"CustomKernelName": name, "CustomKernel": {"name": name, "macrotile": [32, 32, 64]}}
+    ) == (32, 32, 64, False)
+    plain = "RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+    assert customKernelTile(
+        {"CustomKernel": {"name": plain, "macrotile": [256, 256, 128], "args": [_WGM_ARG]}}
+    ) == (256, 256, 128, True)
+
+
+@pytest.mark.parametrize(
+    "problemType, sixBit",
+    [
+        ({"DataTypeA": "F6", "DataTypeB": "F6"}, True),
+        ({"DataTypeA": "B6", "DataTypeB": "F6"}, True),
+        ({"DataTypeA": "F6", "DataTypeB": "F8"}, False),
+        ({"DataTypeA": "F8", "DataTypeB": "B6"}, False),
+        ({"DataTypeA": "F4", "DataTypeB": "F4"}, False),
+        # A custom.config can leave DataTypeA/B to DataType, as ProblemType does.
+        ({"DataType": "B6"}, True),
+        ({"DataType": "F8"}, False),
+        ({}, False),
+    ],
+)
+def test_six_bit_pair_reads_the_problem_type(problemType, sixBit):
+    """3072 WGM launches 256x256 only for an FP6/BF6 pair on both operands."""
+    solutions = _names(
+        ("FP8_FP4_Half_Half_Float", "128x128x128_WGM"),
+        ("FP8_FP4_Half_Half_Float", "256x256x128_WGM"),
+    )
+    for solution in solutions:
+        solution["ProblemType"] = problemType
+    expected = solutions[1] if sixBit else solutions[0]
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is expected
+
+
+def test_six_bit_pair_does_not_read_the_name():
+    # Named FP6_FP6, typed FP8 x FP4: the ProblemType decides.
+    solutions = _names(
+        ("FP6_FP6_Half_Half_Float", "128x128x128_WGM"),
+        ("FP6_FP6_Half_Half_Float", "256x256x128_WGM"),
+    )
+    for solution in solutions:
+        solution["ProblemType"] = {"DataTypeA": "F8", "DataTypeB": "F4"}
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is solutions[0]
 
 
 def test_preferred_kernel_without_a_parsable_tile():
@@ -244,8 +322,10 @@ def test_ties_without_wgm_kernels_add_no_large_sizes():
     assert analyzer.exactWinners[(64, 96, 1, 128, 64, 96, 128, 128)][0] == 1
     assert (3072, 3072, 1, 16384, 3072, 3072, 16384, 16384) not in analyzer.exactWinners
     assert (4096, 4096, 1, 16384, 4096, 4096, 16384, 16384) not in analyzer.exactWinners
-    assert {"tag": "SizeLessThan", "index": 0, "value": 97} in solutions[0][
-        "CustomKernelSizePredicate"
+    assert solutions[0]["CustomKernelSizePredicate"] == [
+        {"tag": "SizeGreaterThan", "index": 0, "value": 95},
+        {"tag": "SizeGreaterThan", "index": 1, "value": 95},
+        {"tag": "SizeGreaterThan", "index": 3, "value": 127},
     ]
 
 
@@ -260,14 +340,19 @@ def test_size_predicates_follow_the_k_index(problemType, kIndex):
     analyzer.problemType = problemType
     analyzer._assignCustomKernelSizePredicates()
 
-    # M starts at 0, so it has no lower bound.
+    # M starts at 0, so it has no lower bound, and no index gets an upper one.
     assert solutions[0]["CustomKernelSizePredicate"] == [
-        {"tag": "SizeLessThan", "index": 0, "value": 129},
         {"tag": "SizeGreaterThan", "index": 1, "value": 63},
-        {"tag": "SizeLessThan", "index": 1, "value": 65},
         {"tag": "SizeGreaterThan", "index": kIndex, "value": 127},
-        {"tag": "SizeLessThan", "index": kIndex, "value": 257},
     ]
+
+
+def test_a_winner_from_zero_gets_no_size_predicate():
+    solutions = _names(("FP6_FP6_Float_Float_Float", "32x32x64"))
+    analyzer = _analyzer(solutions, exactWinners={(0, 0, 1, 0, 0, 0, 0, 0): [0, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+
+    assert "CustomKernelSizePredicate" not in solutions[0]._state
 
 
 def test_least_important_solution_skips_must_keep_kernels():
@@ -311,3 +396,145 @@ def test_must_keep_indices_follow_removed_solutions(monkeypatch):
     assert analyzer.exactWinners[size][0] == 0
     assert analyzer.solutions == [solutions[2]]
     assert list(analyzer.data) == [3.0]
+
+
+def _pureMxSolutions(pair, withWgmSmall=False):
+    """The checked-in pure-MX tile family: A and B the same MX type."""
+    tiles = [(pair, "32x32x64"), (pair, "16x16x128")]
+    if withWgmSmall:
+        tiles.append((pair, "32x32x128_WGM"))
+    tiles.append((pair, "256x128x128"))
+    tiles.append((pair, "256x256x128_WGM"))
+    return _names(*tiles)
+
+
+def test_pure_mx_same_type_pair_walks_the_whole_ladder():
+    # FP8_FP8 / BF8_BF8 / FP4_FP4 have no 6-bit operand, so _sixBitPair() is
+    # False for the entire family.
+    solutions = _pureMxSolutions("FP8_FP8_Half_Half_Float")
+    small, mid, big, wgm = solutions
+
+    assert preferredExactCustomKernel(64, 64, 128, solutions) is small
+    assert preferredExactCustomKernel(128, 128, 128, solutions) is small
+    assert preferredExactCustomKernel(256, 256, 256, solutions) is mid
+    # 1040 = 16*65 and 528 = 16*33, so 256x128 does not divide it and MN is
+    # below the big-tile bound either way.
+    assert preferredExactCustomKernel(1040, 528, 1024, solutions) is mid
+    assert preferredExactCustomKernel(2560, 16384, 2560, solutions) is big
+    assert preferredExactCustomKernel(4096, 4096, 16384, solutions) is wgm
+
+
+def test_big_plain_tile_needs_both_size_and_divisibility():
+    solutions = _pureMxSolutions("BF8_BF8_Float_Float_Float")
+    mid, big = solutions[1], solutions[2]
+
+    # Big enough and 256x128 divides it.
+    assert preferredExactCustomKernel(2560, 16384, 2560, solutions) is big
+    assert preferredExactCustomKernel(1024, 1024, 2560, solutions) is big
+    # Big enough but 256 does not divide M.
+    assert preferredExactCustomKernel(1040, 1024, 2560, solutions) is mid
+    # Divides, but MN is below the bound: 256x256x256 keeps 16x16x128.
+    assert preferredExactCustomKernel(512, 512, 256, solutions) is mid
+
+
+def test_small_mn_wgm_prefers_32x32x128():
+    solutions = _pureMxSolutions("FP4_FP4_Half_Half_Float", withWgmSmall=True)
+    wgmSmall, wgmBig = solutions[2], solutions[4]
+
+    # K == _ROCROLLER_WGM_K turns workgroup mapping on; 512x512 is below the
+    # 128x128 / 256x256 duopoly and has its own tile.
+    assert preferredExactCustomKernel(512, 512, 4096, solutions) is wgmSmall
+    # Just above the small-MN bound the duopoly takes over again.
+    assert preferredExactCustomKernel(1024, 1024, 4096, solutions) is wgmBig
+    # K below the threshold is not a WGM problem at all.
+    assert preferredExactCustomKernel(512, 512, 2048, solutions) is solutions[1]
+
+
+def test_pure_mx_3072_pins_to_256x256():
+    """Regression pin.
+
+    FP8xFP8 at 3072x3072x16384 lands on 256x256 only because the pure-MX family
+    ships no 128x128 WGM kernel: want256 is False (not a six-bit pair, M and N
+    are under 4096), so find(128, 128) is tried first and returns None. Adding a
+    128x128 WGM kernel to this family would silently flip the pick. If this
+    assert fails, that is what happened - decide deliberately, do not retune it.
+    """
+    pair = "FP8_FP8_Half_Half_Float"
+    solutions = _pureMxSolutions(pair)
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is solutions[3]
+
+    withSmallWgm = _names(
+        (pair, "32x32x64"),
+        (pair, "128x128x128_WGM"),
+        (pair, "256x256x128_WGM"),
+    )
+    assert preferredExactCustomKernel(3072, 3072, 16384, withSmallWgm) is withSmallWgm[1]
+
+
+def test_pure_mx_adds_its_two_extra_exact_rows():
+    solutions = _pureMxSolutions("FP4_FP4_Float_Float_Float", withWgmSmall=True)
+    size64 = (64, 64, 1, 128, 64, 64, 128, 128)
+    analyzer = _analyzer(
+        solutions,
+        exactWinners={size64: [0, 1000.0]},
+        exactScores={size64: {idx: 1000.0 for idx in range(len(solutions))}},
+    )
+    analyzer._retainTiedExactCustomKernels()
+
+    bigPlain = (2560, 16384, 1, 2560, 2560, 16384, 2560, 2560)
+    wgmSmall = (512, 512, 1, 4096, 512, 512, 4096, 4096)
+    assert analyzer.exactWinners[bigPlain][0] == 3    # 256x128x128
+    assert analyzer.exactWinners[wgmSmall][0] == 2    # 32x32x128_WGM
+
+
+def test_f6_library_does_not_grow_the_pure_mx_rows():
+    f6 = "FP6_FP6_Half_Half_Float"
+    solutions = _names((f6, "32x32x64"), (f6, "128x128x128_WGM"), (f6, "256x256x128_WGM"))
+    size64 = (64, 64, 1, 128, 64, 64, 128, 128)
+    analyzer = _analyzer(
+        solutions,
+        exactWinners={size64: [0, 1000.0]},
+        exactScores={size64: {0: 1000.0, 1: 1000.0, 2: 1000.0}},
+    )
+    analyzer._retainTiedExactCustomKernels()
+
+    assert (2560, 16384, 1, 2560, 2560, 16384, 2560, 2560) not in analyzer.exactWinners
+    assert (512, 512, 1, 4096, 512, 512, 4096, 4096) not in analyzer.exactWinners
+
+
+_CAPTURED_RR_KERNEL = (
+    "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_"
+)
+
+
+def test_a_rocroller_capture_gets_no_size_window():
+    captured = _Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4")
+    stub = _names(("FP8_FP4_Half_Half_Float", "32x32x64"))[0]
+    size = (1024, 1024, 1, 4096, 1024, 1024, 4096, 4096)
+    analyzer = _analyzer([captured, stub], exactWinners={size: [0, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+    assert "CustomKernelSizePredicate" not in captured._state
+
+    analyzer = _analyzer([captured, stub], exactWinners={size: [1, 1000.0]})
+    analyzer._assignCustomKernelSizePredicates()
+    assert stub["CustomKernelSizePredicate"][0] == {
+        "tag": "SizeGreaterThan", "index": 0, "value": 1023
+    }
+
+
+_NON_MX_RR_KERNEL = (
+    "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
+    "LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_"
+    "SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e"
+)
+
+
+def test_a_capture_is_recognized_by_its_custom_config():
+    assert isRocRollerCapture(_Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4"))
+    # Named like the family, but no checked-in custom.config declares it.
+    assert not isRocRollerCapture(_names(("FP8_FP4_Half_Half_Float", "32x32x64"))[0])
+    # A rocRoller capture without MX scales has no tile predicates to rely on.
+    assert not isRocRollerCapture(_Kernel(_NON_MX_RR_KERNEL, (64, 64, 64), False, "H", "H"))
+    generated = _Kernel(_CAPTURED_RR_KERNEL, (256, 128, 128), True, "F8", "F4")
+    generated["CustomKernel"]["generated"] = True
+    assert not isRocRollerCapture(generated)
