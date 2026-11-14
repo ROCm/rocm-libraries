@@ -17,6 +17,8 @@ in rocKE and elsewhere, replace them.
 
 ## Engines
 
+Each engine family has a design doc covering what it is for, how it works, its precision, how it compares with MIOpen, and next steps: [docs/engines](docs/engines/README.md).
+
 | Engine family | Engines | Status | What it is |
 |---|---|---|---|
 | Naive | `hipkernel:CONV_NAIVE_FWD`, `hipkernel:CONV_NAIVE_BWD`, `hipkernel:CONV_NAIVE_WRW` | In progress | Direct convolution, one thread per output element, fp32 accumulation. Correct for every layout, group count, padding, stride, dilation, 1-D/2-D/3-D shape and both convolution modes, in fp32, fp16 and bf16. The coverage floor: accepted only for problems small enough that its speed does not matter. |
