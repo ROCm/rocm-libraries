@@ -190,7 +190,7 @@ void RMSnormValidator::checkFwdActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormFwdAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr)
 {
-    checkActivationModeSupported(pointwiseAttr);
+    checkActivationModeSupported(pointwiseAttr, false);
 
     const std::vector<int64_t> ioTensorIds
         = {rmsNormFwdAttr.x_tensor_uid(), pointwiseAttr.out_0_tensor_uid()};
@@ -248,22 +248,27 @@ void RMSnormValidator::checkBwdActivationTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr,
     const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr)
 {
-    checkActivationModeSupported(pointwiseAttr);
+    checkActivationModeSupported(pointwiseAttr, true);
 
     const auto activationIn1Uid = pointwiseAttr.in_1_tensor_uid();
-    if(!activationIn1Uid.has_value())
+    if(!activationIn1Uid.has_value()
+       && pointwiseAttr.operation()
+              != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation backward node must have a second input tensor (in_1)");
     }
 
-    const std::vector<int64_t> ioTensorIds = {
+    std::vector<int64_t> ioTensorIds = {
         pointwiseAttr.in_0_tensor_uid(),
         rmsNormBwdAttr.x_tensor_uid(),
         rmsNormBwdAttr.dx_tensor_uid(),
-        activationIn1Uid.value(),
     };
+    if(activationIn1Uid.has_value())
+    {
+        ioTensorIds.push_back(activationIn1Uid.value());
+    }
     const std::vector<int64_t> statTensorIds = {rmsNormBwdAttr.inv_rms_tensor_uid()};
     std::vector<int64_t> affineTensorIds
         = {rmsNormBwdAttr.scale_tensor_uid(), rmsNormBwdAttr.dscale_tensor_uid()};
@@ -286,38 +291,9 @@ void RMSnormValidator::checkBwdActivationTensorConfigSupported(
 }
 
 void RMSnormValidator::checkActivationModeSupported(
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr, bool isBwd)
 {
-    // hip-kernel-provider rmsnorm supports: PASSTHRU, RELU, CLIPPEDRELU, CLAMP (no Leaky ReLU)
-
-    switch(pointwiseAttr.operation())
-    {
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
-        return;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
-        if(pointwiseAttr.relu_lower_clip_slope().has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Rmsnorm fused activation does not support Leaky ReLU.");
-        }
-        if(pointwiseAttr.relu_lower_clip().has_value()
-           && pointwiseAttr.relu_lower_clip().value() != 0.0f
-           && !pointwiseAttr.relu_upper_clip().has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Rmsnorm fused activation does not support standard ReLU with a non-zero "
-                "lower_clip.");
-        }
-        return;
-    default:
-        const std::string activationModeName(EnumNamePointwiseMode(pointwiseAttr.operation()));
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Unsupported activation mode for rmsnorm fusion: " + activationModeName + ".");
-    }
+    checkNormalizationActivationModeSupported(pointwiseAttr, isBwd, "Rmsnorm");
 }
 
 } // namespace hip_kernel_provider::rmsnorm

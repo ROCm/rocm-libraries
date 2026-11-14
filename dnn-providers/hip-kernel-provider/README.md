@@ -31,6 +31,29 @@ HipKernelEngine
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
+### HIP MLops normalization fusion
+
+The HIP MLops batch normalization and RMS normalization plans support
+ReLU, clipped ReLU, and clamp with
+`RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
+forward plans, including training, also accept a fused `IDENTITY` node.
+RMS normalization accepts unary `IDENTITY` in either direction; backward
+passthrough does not require ReLU's second input. Existing tensor/layout and
+graph connectivity requirements still apply.
+
+Batch normalization and RMS normalization share the same activation-mode
+validation for direction, passthrough and supported ReLU parameters.
+
+Leaky ReLU is **unsupported** in these normalization fusions: any supplied
+`relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
+Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
+do not implement its forward function or gradient, so accepting the slope would
+silently produce incorrect results.
+
+Layer normalization supports only a single normalization node, not fused
+pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
+describe the HIP MLops engine, not kernel-ingestor descriptor support.
+
 ## Building
 
 This plugin is built as a standalone project outside of the main hipDNN build. It depends on the hipDNN SDK packages (`hipdnn_data_sdk` and `hipdnn_plugin_sdk`), which must be available on the system before building.

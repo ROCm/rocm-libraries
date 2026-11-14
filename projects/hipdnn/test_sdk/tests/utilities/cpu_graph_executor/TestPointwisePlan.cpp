@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <gtest/gtest.h>
 
 #include "PointwiseGraphUtils.hpp"
@@ -9,6 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
@@ -25,6 +27,65 @@ using namespace hipdnn_sdk_test_utils;
 class TestPointwisePlan : public ::testing::Test
 {
 };
+
+template <DataType InputDataType, DataType OutputDataType>
+struct IdentitySignature
+{
+    static constexpr DataType INPUT_DATA_TYPE = InputDataType;
+    static constexpr DataType OUTPUT_DATA_TYPE = OutputDataType;
+    using InputType = DataTypeToNative<InputDataType>;
+    using OutputType = DataTypeToNative<OutputDataType>;
+};
+
+using IdentitySignatures
+    = ::testing::Types<IdentitySignature<DataType::FLOAT, DataType::FLOAT>,
+                       IdentitySignature<DataType::HALF, DataType::HALF>,
+                       IdentitySignature<DataType::BFLOAT16, DataType::BFLOAT16>,
+                       IdentitySignature<DataType::FLOAT, DataType::HALF>,
+                       IdentitySignature<DataType::FLOAT, DataType::BFLOAT16>>;
+
+template <typename Signature>
+class PointwiseIdentityPlan : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(PointwiseIdentityPlan, IdentitySignatures, );
+
+TYPED_TEST(PointwiseIdentityPlan, ExecutePlanUnaryIdentityPreservesValues)
+{
+    using InputType = typename TypeParam::InputType;
+    using OutputType = typename TypeParam::OutputType;
+    constexpr auto INPUT_DATA_TYPE = TypeParam::INPUT_DATA_TYPE;
+    constexpr auto OUTPUT_DATA_TYPE = TypeParam::OUTPUT_DATA_TYPE;
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 2, 2},
+                                   {1, 3, 2, 2},
+                                   INPUT_DATA_TYPE,
+                                   DataType::FLOAT,
+                                   OUTPUT_DATA_TYPE,
+                                   hipdnn_frontend::PointwiseMode::IDENTITY);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const NodeWrapper nodeWrapper(&graphWrapper.getNode(0));
+    const auto& attributes = nodeWrapper.attributesAs<PointwiseAttributes>();
+    auto* input = static_cast<InputType*>(variantPack.at(attributes.in_0_tensor_uid()));
+    const auto* output
+        = static_cast<const OutputType*>(variantPack.at(attributes.out_0_tensor_uid()));
+    const std::array<float, 12> expected
+        = {-3.0f, -2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        input[i] = static_cast<InputType>(expected[i]);
+    }
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(static_cast<float>(output[i]), expected[i]) << "element " << i;
+    }
+}
 
 TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
 {
