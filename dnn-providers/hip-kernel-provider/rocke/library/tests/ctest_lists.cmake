@@ -191,6 +191,7 @@ endif()
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
+# gfx1250 3D kernel's paged reads staying bounded to the sequence's last page, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
@@ -232,6 +233,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
     "tests/library/tests/test_d256_gfx942_fast_routing.py"
+    "tests/library/tests/test_gfx1250_tiled_3d_bounds.py"
     "tests/library/tests/test_sdpa_seqlen.py"
     "tests/library/tests/test_sdpa_padding_mask.py"
     "tests/library/tests/test_fmha_mfma_free_stride.py"
