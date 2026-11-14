@@ -157,6 +157,12 @@ NO_BUFFER_OOB_KERNELS = {
         for name in custom_kernel_names()
         if name.startswith("wvSplitK_vllm_")
     },
+    # All compiled from one source.
+    **{
+        name: "vLLM wvSplitKQ, global_store only"
+        for name in custom_kernel_names()
+        if name.startswith("wvSplitKQ_vllm_")
+    },
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
 # mask against the free size taken at entry.
