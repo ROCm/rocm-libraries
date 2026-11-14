@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,20 @@ Tests:
   category: pre_checkin
   function: check_matrix_csr_bad_arg
   precision: *single_double_precisions_complex_real
+
+# m = 0: a valid empty CSR matrix, including (0, n) and (0, 0).
+- name: check_matrix_csr_empty
+  category: quick
+  function: check_matrix_csr
+  precision: *double_only_precisions
+  M_N:
+    - { M: 0, N: 4 }
+    - { M: 0, N: 0 }
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix_type: [rocsparse_matrix_type_general]
+  uplo: [rocsparse_fill_mode_lower]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_random]
 
 - name: check_matrix_csr
   category: quick
