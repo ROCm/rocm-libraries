@@ -5,7 +5,7 @@
 ``runtime_layout=True`` makes one compiled object serve any head count, sliding
 window, DENSE or RAGGED query layout, Q/O strides and paged-KV layout (vLLM's
 interleaved ``[nb, Hkv, bs, 2D]`` view, NHD, HND): the head counts and window
-are the body's runtime shape kernargs, the rest 16 appended kernargs.
+are the body's runtime shape kernargs, the rest 17 appended kernargs.
 
 The CPU tests check that every catalog spec passes ``supports_tiled_2d_spec``
 and emits, and that the Python and native (C) checks reject incompatible specs.
@@ -467,7 +467,7 @@ def _decode(a, dtype):
     return a.view(np.float16).astype(np.float32)
 
 
-def _run_case(spec, sc, rng, sink_f32=False):
+def _run_case(spec, sc, rng, sink_f32=False, bad_page=None):
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import DeviceMem, LaunchConfig
@@ -597,8 +597,19 @@ def _run_case(spec, sc, rng, sink_f32=False):
     o_ptr = o_base + _GUARD * 2
 
     seq_lens_dev = upload(np.array(seq_lens, np.int32))
-    table_dev = upload(table)
-    v_table_dev = upload(v_table) if v_table is not table else table_dev
+    dev_table, dev_v_table = table, v_table
+    bad_seq = nseq - 1
+    if bad_page is not None:
+        # The last sequence's page ids (K and V) all lie outside [0, nb): they read
+        # as masked pages, so its K and V are zeros and its output is zero.
+        assert used[bad_seq] > 0, "the corrupted sequence must own blocks"
+        bad = {"past_end": nb, "int_max": 0x7FFFFFFF, "negative": -1}[bad_page]
+        dev_table = table.copy()
+        dev_table[bad_seq, : used[bad_seq]] = bad
+        dev_v_table = dev_table if v_table is table else v_table.copy()
+        dev_v_table[bad_seq, : used[bad_seq]] = bad
+    table_dev = upload(dev_table)
+    v_table_dev = upload(dev_v_table) if dev_v_table is not dev_table else table_dev
     lq_dev = upload(np.array(q_lens_kernel if not dense else q_lens, np.int32))
     off_dev = upload(np.array(off, np.int32)) if not dense else seq_lens_dev
 
@@ -650,6 +661,7 @@ def _run_case(spec, sc, rng, sink_f32=False):
         kv_block_span_bytes=span_bytes,
         q_block_grid=grid_y,
         sink_is_f32=int(sink_f32),
+        num_kv_blocks=nb,
     )
     _launcher(spec)(
         values,
@@ -673,6 +685,10 @@ def _run_case(spec, sc, rng, sink_f32=False):
         sinks_np,
         v_table,
     )
+    if bad_page is not None:
+        for (b, s), res in ref.items():
+            if b == bad_seq:
+                res[:] = 0.0
     written = np.zeros(got.shape, bool)
     for (b, s), res in ref.items():
         base = _GUARD + (tok_base[b] + s) * o_tok
@@ -727,6 +743,27 @@ def test_runtime_layout_numerics(dtype, head_size, block_size, qpk):
     )
     for sc in _scenarios(block_size):
         _run_case(spec, sc, rng)
+
+
+@pytest.mark.gpu
+@requires_gfx942_gpu
+@pytest.mark.parametrize("bad_page", ("past_end", "int_max", "negative"))
+@pytest.mark.parametrize("dtype,head_size,block_size,qpk", _GPU_KERNELS[:3])
+def test_runtime_layout_contains_out_of_range_page_ids(
+    dtype, head_size, block_size, qpk, bad_page
+):
+    """A page id outside the cache reads as masked: no memory outside the cache is read
+    (the other sequences are exact), and the corrupted sequence's output is zero."""
+    spec = runtime_layout_catalog_spec(
+        dtype=dtype, head_size=head_size, block_size=block_size, num_queries_per_kv=qpk
+    )
+    rng = np.random.default_rng(
+        zlib.crc32(f"bad:{dtype}:{head_size}:{block_size}:{qpk}".encode())
+    )
+    sc = next(
+        s for s in _scenarios(block_size) if s["seq_lens"][-1] > 0 and s["mode"] == "dense"
+    )
+    _run_case(spec, sc, rng, bad_page=bad_page)
 
 
 # Sink objects: _HKV=2 KV heads, so query heads of KV head 1 (h >= qpk) need

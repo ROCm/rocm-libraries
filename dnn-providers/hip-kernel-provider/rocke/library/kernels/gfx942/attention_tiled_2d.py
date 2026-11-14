@@ -512,9 +512,9 @@ class UnifiedAttention2DTiledSpec:
     # Runtime-layout mode (hipDNN paged/ragged SDPA engine, vLLM KV-cache view).
     # The head counts, the window and the batch's search trip count are already
     # kernargs (``RUNTIME_KERNARG_FIELDS``, ``RUNTIME_SEARCH_ITERS``). When True
-    # the kernel also takes 16 appended kernargs (block_tables_v_ptr,
+    # the kernel also takes 17 appended kernargs (block_tables_v_ptr,
     # seq_lens_q_ptr, has_seq_lens_q, q_uniform_len, the Q/O/KV element strides,
-    # kv_block_span_bytes, q_block_grid, sink_is_f32) and serves a
+    # kv_block_span_bytes, q_block_grid, sink_is_f32, num_kv_blocks) and serves a
     # dense-or-ragged Q and a real paged-KV layout from one compiled object:
     # Q/O/KV strides are runtime, K pages through ``block_tables_ptr`` and V
     # through ``block_tables_v_ptr``
@@ -1986,6 +1986,10 @@ def build_unified_attention_2d_tiled(
         )
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
         seq_len = b.global_load_i32(seq_lens, seq_idx)
+        # A length past the table row would walk the page-table read off its end:
+        # bound it by the row's extent (block_table_stride * block_size).
+        rtl_bt_cap = b.mul(bt_stride_p, b.const_i32(BS))
+        seq_len = b.select(b.cmp_ult(seq_len, rtl_bt_cap), seq_len, rtl_bt_cap)
         context_len = b.sub(seq_len, cur_batch_q_len)
         qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
         rtl_rows_if = b.scf_if(b.cmp_lt(qb_start_pos, rtl_q_rows))
@@ -3216,8 +3220,14 @@ def build_unified_attention_2d_tiled(
         )
         phys = b.buffer_load_vN(bt_rsrc, bt_voff, zero_soff, I32, 1)
         phys = b.to_sgpr_u32(b.vec_extract(phys, 0))
+        # A page id outside [0, num_kv_blocks) would address memory outside the
+        # cache: it reads as a masked page (block 0, zero-size resource).
+        phys_ok = b.cmp_ult(phys, rtl_p["num_kv_blocks"])
+        phys = b.select(phys_ok, phys, b.const_i32(0))
         page = b.global_ptr_add(cache, b.mul(b.zext(phys, I64), rtl_kv_page_stride_b))
-        rsrc = b.buffer_rsrc(page, rtl_p["kv_block_span_bytes"])
+        rsrc = b.buffer_rsrc(
+            page, b.select(phys_ok, rtl_p["kv_block_span_bytes"], b.const_i32(0))
+        )
         return tok0, b.sub(tok0, lblk_tok), rsrc
 
     def _rtl_kv_call(call: int, blk: Tuple[Value, Value, Value]) -> Tuple[Value, Value]:

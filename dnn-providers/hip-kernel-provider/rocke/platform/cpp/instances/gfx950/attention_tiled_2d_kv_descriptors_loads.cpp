@@ -604,10 +604,17 @@ static rocke_value_t* rocke__rtl_kv_page(rocke_gfx950_attn2d_build_ctx_t* ctx,
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
     rocke_value_t* phys = rocke_b_masked_global_load(b, table, idx, in_table, c0, rocke_i32(), 4);
     rocke_value_t* phys_s = rocke_b_to_sgpr_u32(b, phys);
+    /* A page id outside [0, num_kv_blocks) would address memory outside the
+     * cache: it reads as a masked page (block 0, zero-size resource). */
+    rocke_value_t* phys_ok
+        = rocke_b_cmp_ult(b, phys_s, ctx->rtl_p[ROCKE_ATTN2D_RTL_NUM_KV_BLOCKS]);
+    phys_s = rocke_b_select(b, phys_ok, phys_s, rocke_b_const_i32(b, 0));
     rocke_value_t* phys64 = rocke_b_zext(b, phys_s, rocke_i64());
     rocke_value_t* page_off = rocke_b_mul(b, phys64, ctx->rtl_kv_page_stride_b);
     rocke_value_t* page = rocke_b_global_ptr_add(b, src, page_off);
-    return rocke_b_buffer_rsrc(b, page, ctx->rtl_p[ROCKE_ATTN2D_RTL_KV_BLOCK_SPAN_BYTES]);
+    rocke_value_t* span = rocke_b_select(
+        b, phys_ok, ctx->rtl_p[ROCKE_ATTN2D_RTL_KV_BLOCK_SPAN_BYTES], rocke_b_const_i32(b, 0));
+    return rocke_b_buffer_rsrc(b, page, span);
 }
 
 /* _rtl_kv_voff(kv_tile_idx, linear_half): this lane's voffset within the page

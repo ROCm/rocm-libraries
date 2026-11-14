@@ -126,21 +126,26 @@ the cache's K and V halves as two containers over one allocation, its `block_tab
 page tables (one tensor, `[B, 1, max_blocks, 1]`), `seq_lens` as `seq_len_kv`, the query lengths as
 `seq_len_q`, and `query_start_loc` as the ragged offset of Q and O.
 
-### Device-read inputs are trusted
+### Device-read inputs are contained
 
-Because these values are read only on the device, the engine cannot validate them at
-execute without a device-to-host copy, which would break HIP graph capture. The caller
-guarantees, as with cuDNN and vLLM's own kernels:
+The page tables and lengths are read only on the device, so the engine cannot check their
+contents at execute without a device-to-host copy, which would break HIP graph capture.
+The kernels contain them instead, with the container's block count passed as the
+`num_kv_blocks` argument:
 
-- every K and V page id the lengths reach is in `[0, num_blocks)` of the K/V containers (a
-  page id outside that range addresses memory outside the cache: the kernel bounds reads
-  within a page, not the page);
-- `seq_len_kv[b] <= max_blocks * block_size`, `seq_len_q[b] >= 0`, and ragged offsets as
-  described in the Graphs served list of `AttentionPagedUnifiedNative.cpp`.
+- a K or V page id outside `[0, num_kv_blocks)` (negative included) reads as a masked page:
+  block 0 with a zero-size buffer resource, so it touches no memory and the tile contributes
+  zeros;
+- `seq_len_kv[b]` is bounded by the table row's extent, `block_table_stride * block_size`,
+  so the page-table read stays inside its row. A longer length is a caller bug and attends
+  to masked pages past the table.
 
-What a graph's descriptors fix (ranks, dtypes, strides, extents, alignment, table widths) is
-checked when the engine matches. A serving stack that cannot vouch for its page tables
-checks them on the host before launch.
+An invalid page id or length makes that sequence's output wrong (no error is reported); it
+cannot read or write outside the cache, the table or the output. Other device-read values
+(`seq_len_q`, ragged offsets) keep their documented preconditions: the kernel writes only
+rows the offsets and `seq_len_q` own. What the graph's descriptors fix (ranks, dtypes,
+strides, extents, alignment, table widths, `M * block_size` within int32) is checked when
+the engine matches.
 
 ## Saved plans
 
@@ -153,7 +158,8 @@ both page tables, `seq_len_kv`, `seq_len_q`, the ragged offset and the sink (`-1
 absent), the scale (any finite float, stored exactly as a double), every by-value kernel
 argument (`num_seqs`, `block_table_stride`, the head counts, `sliding_window`,
 `q_uniform_len` (`Sq` for a dense Q, 0 for a ragged one), the Q/O/KV strides,
-`kv_block_span_bytes`, `q_block_grid`, `sink_is_f32` (1 for a FLOAT sink, else 0)) and
+`kv_block_span_bytes`, `q_block_grid`, `sink_is_f32` (1 for a FLOAT sink, else 0),
+`num_kv_blocks`) and
 `block_threads`. The loaded plan
 launches the same grid, `(num_kv_heads, q_block_grid)`, with `block_threads` threads. A load
 refuses a value of another type, an extra or missing value, or one outside what the kernel

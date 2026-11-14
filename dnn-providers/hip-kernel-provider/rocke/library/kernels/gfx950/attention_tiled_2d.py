@@ -1668,6 +1668,10 @@ def build_unified_attention_2d_tiled(
         )
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
         seq_len = b.global_load_i32(seq_lens, seq_idx)
+        # A length past the table row would walk the page-table read off its end:
+        # bound it by the row's extent (block_table_stride * block_size).
+        rtl_bt_cap = b.mul(bt_stride_p, b.const_i32(BS))
+        seq_len = b.select(b.cmp_ult(seq_len, rtl_bt_cap), seq_len, rtl_bt_cap)
         context_len = b.sub(seq_len, cur_batch_q_len)
         # Per-sequence Q/O base terms in i64 (ragged offsets times the
         # multiplier can pass 2^31 elements); within-sequence terms stay i32.
@@ -2560,10 +2564,15 @@ def build_unified_attention_2d_tiled(
                 dtype=I32,
                 align=4,
             )
+            phys = b.to_sgpr_u32(phys)
+            # A page id outside [0, num_kv_blocks) would address memory outside
+            # the cache: it reads as a masked page (block 0, zero-size resource).
+            phys_ok = b.cmp_ult(phys, rtl["num_kv_blocks"])
+            phys = b.select(phys_ok, phys, b.const_i32(0))
             page = b.global_ptr_add(
-                src, b.mul(b.zext(b.to_sgpr_u32(phys), I64), rtl_kv_page_stride_b)
+                src, b.mul(b.zext(phys, I64), rtl_kv_page_stride_b)
             )
-            return b.buffer_rsrc(page, rtl_kv_span)
+            return b.buffer_rsrc(page, b.select(phys_ok, rtl_kv_span, b.const_i32(0)))
 
         def _rtl_kv_voff(kv_tile_idx: Value, linear_half: Value) -> Value:
             """This lane's voffset within the page for one async-DMA call.

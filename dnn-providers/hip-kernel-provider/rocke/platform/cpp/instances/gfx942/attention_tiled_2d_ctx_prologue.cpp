@@ -184,6 +184,14 @@ static void rocke_a2d_rtl_seq_lookup(rocke_gfx942_attn2d_build_ctx_t* ctx, int B
     ctx->q_block_start_idx = rocke_b_select(b, dense, qbs_dense, qbs_ragged);
     ctx->q_block_local_idx = rocke_b_sub(b, qb, ctx->q_block_start_idx);
     ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, seq_idx, 0);
+    /* A length past the table row would walk the page-table read off its end:
+     * bound it by the row's extent (block_table_stride * block_size). */
+    {
+        rocke_value_t* c_bs_cap = rocke_b_const_i32(b, ctx->BS);
+        rocke_value_t* bt_cap = rocke_b_mul(b, ctx->bt_stride_p, c_bs_cap);
+        rocke_value_t* in_cap = rocke_b_cmp_ult(b, ctx->seq_len, bt_cap);
+        ctx->seq_len = rocke_b_select(b, in_cap, ctx->seq_len, bt_cap);
+    }
     ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
     bq = rocke_b_const_i32(b, BLOCK_Q);
     ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, bq);
@@ -575,7 +583,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
-        /* runtime_layout: the 16 appended arguments (RUNTIME_LAYOUT_EXTRA_ARGS). */
+        /* runtime_layout: the 17 appended arguments (RUNTIME_LAYOUT_EXTRA_ARGS). */
         if(spec->runtime_layout)
         {
             ctx->RTL = true;

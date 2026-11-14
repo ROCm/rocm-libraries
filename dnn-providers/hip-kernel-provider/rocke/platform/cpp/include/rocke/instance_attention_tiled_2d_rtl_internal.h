@@ -39,6 +39,7 @@ typedef enum rocke_attn2d_rtl_param
     ROCKE_ATTN2D_RTL_KV_BLOCK_SPAN_BYTES,
     ROCKE_ATTN2D_RTL_Q_BLOCK_GRID,
     ROCKE_ATTN2D_RTL_SINK_IS_F32,
+    ROCKE_ATTN2D_RTL_NUM_KV_BLOCKS,
     ROCKE_ATTN2D_RTL_NUM_PARAMS
 } rocke_attn2d_rtl_param_t;
 
@@ -63,6 +64,7 @@ static inline void rocke_attn2d_rtl_declare_params(rocke_ir_builder_t* b, rocke_
         "kv_block_span_bytes",
         "q_block_grid",
         "sink_is_f32",
+        "num_kv_blocks",
     };
     const rocke_type_t* ptr_i32 = rocke_ptr_type(b, rocke_i32(), "global");
     for(int i = 0; i < ROCKE_ATTN2D_RTL_NUM_PARAMS; ++i)

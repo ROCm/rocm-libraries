@@ -72,6 +72,7 @@ inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VA
     = "kv_block_span_bytes";
 inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE = "q_block_grid";
 inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE = "sink_is_f32";
+inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE = "num_kv_blocks";
 inline constexpr std::string_view ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE = "block_threads";
 
 /// The tensor uids a launch binds to device buffers. raggedOffset is NO_UID for a dense Q;
@@ -118,6 +119,7 @@ struct AttentionPagedUnifiedScalars
     int32_t kvBlockSpanBytes = 0;
     int32_t qBlockGrid = 0;
     int32_t sinkIsF32 = 0; ///< 1: the sink is FLOAT; 0: in the Q data type, or no sink
+    int32_t numKvBlocks = 0; ///< the K/V container's block count; a page id at or past it reads as masked
 };
 
 /// Everything a launch is computed from: block = (blockThreads, 1, 1) and
@@ -138,7 +140,7 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 /// value must be in the range the kernel takes (int32, positive where the kernel divides
 /// by it or indexes with it), `scale` must be a finite float stored exactly, the head
 /// counts must divide, a dense Q needs `q_uniform_len` >= 1 and a ragged one 0,
-/// `sink_is_f32` must be 0 or 1, and `block_threads` must be a whole number of waves.
+/// `sink_is_f32` must be 0 or 1, `num_kv_blocks` must be positive, and `block_threads` must be a whole number of waves.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is not the
 ///         contract, or when a value is missing, extra, of another type or out of range.

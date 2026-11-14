@@ -247,6 +247,7 @@ def _launcher(
             "kv_block_span_bytes",
             "q_block_grid",
             "sink_is_f32",
+            "num_kv_blocks",
         ):
             sb.scalar(name, "i32")
         launcher = KernelLauncher(
@@ -324,6 +325,7 @@ def _run(
     sc: Scenario,
     use_sinks: bool = False,
     sink_f32: bool = False,
+    bad_page: Optional[str] = None,
 ):
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
@@ -418,6 +420,17 @@ def _run(
                 k_cache[blk, tt] = kf[t]
                 v_cache[vblk, tt] = vf[t]
         gathered.append((_decode(kf, dtype), _decode(vf, dtype)))
+    if bad_page is not None:
+        # The last sequence's page ids (K and V) all lie outside [0, num_blocks):
+        # they read as masked pages, so its K and V are zeros and its output is
+        # zero, whatever the cache holds there (NaN in the unowned blocks).
+        bad = {"past_end": num_blocks, "int_max": 0x7FFFFFFF, "negative": -1}[bad_page]
+        last = B - 1
+        assert nblk[last] > 0, "the corrupted sequence must own blocks"
+        block_tables[last, : nblk[last]] = bad
+        v_block_tables[last, : nblk[last]] = bad
+        kf0, vf0 = gathered[last]
+        gathered[last] = (np.zeros_like(kf0), np.zeros_like(vf0))
 
     # ---- launch ----
     bq = spec.block_q
@@ -506,6 +519,7 @@ def _run(
         "kv_block_span_bytes": kv_span_bytes,
         "q_block_grid": grid_y,
         "sink_is_f32": int(sink_f32),
+        "num_kv_blocks": num_blocks,
     }
     launcher(
         values,
@@ -606,6 +620,23 @@ def test_runtime_layout_sinks_match_reference(
     dtype, head_size, block_size, qpk, sc, sink_f32
 ):
     _run(dtype, head_size, block_size, qpk, sc, use_sinks=True, sink_f32=sink_f32)
+
+
+@pytest.mark.gpu
+@_NEEDS_GFX950
+@pytest.mark.parametrize("bad_page", ("past_end", "int_max", "negative"))
+@pytest.mark.parametrize("use_sinks", (False, True), ids=("nosink", "sinks"))
+@pytest.mark.parametrize(
+    "dtype,head_size,block_size,qpk", _SINK_KERNEL_CASES[:3], ids=lambda v: str(v)
+)
+def test_runtime_layout_contains_out_of_range_page_ids(
+    dtype, head_size, block_size, qpk, use_sinks, bad_page
+):
+    """A page id outside the cache reads as masked: no memory outside the cache is read
+    (the other sequences are exact), and the corrupted sequence's output is zero."""
+    sc = next(s for s in SCENARIOS if s.name == "dense_l1")
+    assert sc.seq_lens[-1] > 0
+    _run(dtype, head_size, block_size, qpk, sc, use_sinks=use_sinks, bad_page=bad_page)
 
 
 def test_runtime_layout_sinks_accepted():

@@ -23,7 +23,9 @@ from rocke.core.ir import F32, I16, I32, PtrType
 # off[b+1] - off[b] >= seq_lens_q[b] and off[B] the end of the last block.
 # Strides are in elements; ``kv_block_span_bytes`` is the per-block
 # buffer-resource size. ``sink_is_f32`` nonzero: ``sink_ptr`` holds Hq fp32
-# logits, else Hq logits in the Q dtype (ignored without sinks).
+# logits, else Hq logits in the Q dtype (ignored without sinks). ``num_kv_blocks`` is
+# the K/V container's block count: a page id at or past it (or negative) reads as a
+# masked page instead of addressing memory outside the cache.
 RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("block_tables_v_ptr", "ptr<i32>"),
     ("seq_lens_q_ptr", "ptr<i32>"),
@@ -41,6 +43,7 @@ RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("kv_block_span_bytes", "i32"),
     ("q_block_grid", "i32"),
     ("sink_is_f32", "i32"),
+    ("num_kv_blocks", "i32"),
 )
 
 

@@ -91,10 +91,12 @@
  * load (16 bytes for Q/K/V/O and the sink, 4 for the INT32 operands) are valid graphs that
  * this engine declines with a logged cause.
  *
- * The device-read inputs (page ids, lengths, ragged offsets) are the caller's to keep in
- * range: page ids in `[0, num_blocks)`, `seq_len_kv[b] <= M * block_size`. The kernels
- * bound reads within a page, not the page, and execute cannot check them without a
- * device-to-host copy (README, "Device-read inputs are trusted").
+ * The device-read inputs (page ids, lengths, ragged offsets) cannot be checked on the host
+ * at execute without a device-to-host copy, which would break HIP graph capture, so the
+ * kernels contain them: a page id outside `[0, num_kv_blocks)` reads as a masked page (a
+ * zero-size buffer resource at block 0), and `seq_len_kv[b]` is bounded by the page-table
+ * row's extent `M * block_size`. Such a graph computes a wrong answer for that sequence;
+ * it never reads or writes outside the cache or the table (README, "Device-read inputs").
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -573,12 +575,18 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
                               " entries (0x7FFF0000 bytes)"));
     }
 
+    const auto rowTokens = checkedProduct({dim(*pageTables->k, SEQ_AXIS), dim(*k, SEQ_AXIS)});
+    if(!rowTokens.has_value() || *rowTokens > INT32_LIMIT)
+    {
+        return decline("size_limit", reason("a page-table row covers more than int32 tokens"));
+    }
+
     // --- 9. Sequence lengths, both required for a paged graph (SEM-009). The kernels read
-    // the first ceil(seq_len_kv[b] / block_size) entries of row b of each table and do not
-    // clamp seq_len_kv: 0 <= seq_len_kv[b] <= max_seq_len_kv <= M * block_size is a
-    // precondition of the launch. An unset max_seq_len_kv is inferred as M * block_size
-    // (both tables have the same M), which bounds seq_len_kv the same way, so it is served
-    // either way. A dense Q's rows past seq_len_q[b] (padding) are written as zeros; a
+    // the first ceil(seq_len_kv[b] / block_size) entries of row b of each table and bound
+    // seq_len_kv[b] by M * block_size (a longer length is a caller bug, and reads as masked
+    // rather than walking off the table row); that bound is an int32, so a row of more
+    // tokens declines. An unset max_seq_len_kv is inferred as M * block_size (both tables
+    // have the same M), which bounds seq_len_kv the same way, so it is served either way. A dense Q's rows past seq_len_q[b] (padding) are written as zeros; a
     // ragged Q writes only its first seq_len_q[b] rows.
     const auto lengths = sdpa_graph::sequenceLengthsFor(
         ATTENTION_PAGED_UNIFIED_ENGINE_NAME, context, attributes, batch);
@@ -892,7 +900,8 @@ std::vector<KernelArgument> kernelSignature()
                             "kv_head_stride",
                             "kv_block_span_bytes",
                             "q_block_grid",
-                            "sink_is_f32"})
+                            "sink_is_f32",
+                            "num_kv_blocks"})
     {
         appendKernelArgument(signature, "by_value", I32, name);
     }
@@ -1066,6 +1075,7 @@ public:
                     + ": K has no block extent, so the K/V block span is undefined");
         }
         s.kvBlockSpanBytes = narrow(*kvExtent * ELEMENT_BYTES, "K/V block span");
+        s.numKvBlocks = narrow(dim(k, BATCH_AXIS), "K/V block count");
 
         // q-block grid: exact for a dense Q; for a ragged Q, enough blocks for every
         // sequence when the batch's tokens fit in Sq (the serving convention) -- the kernel's
@@ -1187,7 +1197,8 @@ public:
                     s.kvHeadStride,
                     s.kvBlockSpanBytes,
                     s.qBlockGrid,
-                    s.sinkIsF32);
+                    s.sinkIsF32,
+                    s.numKvBlocks);
     }
 
 private:
@@ -1238,6 +1249,7 @@ MetadataValues attentionPagedUnifiedLaunchValues(const AttentionPagedUnifiedLaun
             value(ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VALUE, s.kvBlockSpanBytes),
             value(ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE, s.qBlockGrid),
             value(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, s.sinkIsF32),
+            value(ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE, s.numKvBlocks),
             value(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, launch.blockThreads)};
 }
 
@@ -1275,6 +1287,7 @@ AttentionPagedUnifiedLaunchInputs
                              ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VALUE,
                              ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE,
                              ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE,
+                             ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE,
                              ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE});
 
     const auto refuse = [&inputs](std::string_view name, const std::string& rule) {
@@ -1345,6 +1358,7 @@ AttentionPagedUnifiedLaunchInputs
     s.qBlockGrid = int32(ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE, 1, MAX_GRID_Y);
     // 1: sink_ptr holds FLOAT logits; 0: logits in the Q data type (or no sink).
     s.sinkIsF32 = int32(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, 0, 1);
+    s.numKvBlocks = int32(ATTENTION_PAGED_UNIFIED_NUM_KV_BLOCKS_VALUE, 1, INT32_LIMIT);
 
     // The CTA is whole waves, at most the 1024 threads a HIP block holds.
     launch.blockThreads = int32(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, WAVE_LANES, 1024);
