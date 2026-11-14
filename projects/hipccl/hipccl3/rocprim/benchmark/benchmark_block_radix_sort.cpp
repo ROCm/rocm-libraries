@@ -34,90 +34,29 @@
     CREATE_BENCHMARK(type, block, radix_bits, 4) \
     CREATE_BENCHMARK(type, block, radix_bits, 8)
 
+#define QUEUE_BENCHMARK(block, radix_bits)                                             \
+    benchmark_types::queue_type<(benchmark_types::Type_Category::type_int32            \
+                                 | benchmark_types::Type_Category::integer_8           \
+                                 | benchmark_types::Type_Category::type_half           \
+                                 | benchmark_types::Type_Category::type_custom_i32_i32 \
+                                 | benchmark_types::Type_Category::type_int64          \
+                                 | benchmark_types::Type_Category::integer_128)>(      \
+        executor,                                                                      \
+        [&](auto type_tag)                                                             \
+        { BENCHMARK_TYPE(typename decltype(type_tag)::type, block, radix_bits) });
+
 template<benchmark_kinds BenchmarkKind>
 void add_benchmarks(primbench::executor& executor)
 {
-    using custom_int_type = common::custom_type<int32_t, int32_t>;
+    QUEUE_BENCHMARK(64, 3)
+    QUEUE_BENCHMARK(512, 3)
 
-    BENCHMARK_TYPE(int32_t, 64, 3)
-    BENCHMARK_TYPE(int32_t, 512, 3)
-
-    BENCHMARK_TYPE(int32_t, 64, 4)
-    BENCHMARK_TYPE(int32_t, 128, 4)
-    BENCHMARK_TYPE(int32_t, 192, 4)
-    BENCHMARK_TYPE(int32_t, 256, 4)
-    BENCHMARK_TYPE(int32_t, 320, 4)
-    BENCHMARK_TYPE(int32_t, 512, 4)
-
-    BENCHMARK_TYPE(int8_t, 64, 3)
-    BENCHMARK_TYPE(int8_t, 512, 3)
-
-    BENCHMARK_TYPE(int8_t, 64, 4)
-    BENCHMARK_TYPE(int8_t, 128, 4)
-    BENCHMARK_TYPE(int8_t, 192, 4)
-    BENCHMARK_TYPE(int8_t, 256, 4)
-    BENCHMARK_TYPE(int8_t, 320, 4)
-    BENCHMARK_TYPE(int8_t, 512, 4)
-
-    BENCHMARK_TYPE(uint8_t, 64, 3)
-    BENCHMARK_TYPE(uint8_t, 512, 3)
-
-    BENCHMARK_TYPE(uint8_t, 64, 4)
-    BENCHMARK_TYPE(uint8_t, 128, 4)
-    BENCHMARK_TYPE(uint8_t, 192, 4)
-    BENCHMARK_TYPE(uint8_t, 256, 4)
-    BENCHMARK_TYPE(uint8_t, 320, 4)
-    BENCHMARK_TYPE(uint8_t, 512, 4)
-
-    BENCHMARK_TYPE(rocprim::half, 64, 3)
-    BENCHMARK_TYPE(rocprim::half, 512, 3)
-
-    BENCHMARK_TYPE(rocprim::half, 64, 4)
-    BENCHMARK_TYPE(rocprim::half, 128, 4)
-    BENCHMARK_TYPE(rocprim::half, 192, 4)
-    BENCHMARK_TYPE(rocprim::half, 256, 4)
-    BENCHMARK_TYPE(rocprim::half, 320, 4)
-    BENCHMARK_TYPE(rocprim::half, 512, 4)
-
-    BENCHMARK_TYPE(int64_t, 64, 3)
-    BENCHMARK_TYPE(int64_t, 512, 3)
-
-    BENCHMARK_TYPE(int64_t, 64, 4)
-    BENCHMARK_TYPE(int64_t, 128, 4)
-    BENCHMARK_TYPE(int64_t, 192, 4)
-    BENCHMARK_TYPE(int64_t, 256, 4)
-    BENCHMARK_TYPE(int64_t, 320, 4)
-    BENCHMARK_TYPE(int64_t, 512, 4)
-
-    BENCHMARK_TYPE(custom_int_type, 64, 3)
-    BENCHMARK_TYPE(custom_int_type, 512, 3)
-
-    BENCHMARK_TYPE(custom_int_type, 64, 4)
-    BENCHMARK_TYPE(custom_int_type, 128, 4)
-    BENCHMARK_TYPE(custom_int_type, 192, 4)
-    BENCHMARK_TYPE(custom_int_type, 256, 4)
-    BENCHMARK_TYPE(custom_int_type, 320, 4)
-    BENCHMARK_TYPE(custom_int_type, 512, 4)
-
-    BENCHMARK_TYPE(rocprim::int128_t, 64, 3)
-    BENCHMARK_TYPE(rocprim::int128_t, 512, 3)
-
-    BENCHMARK_TYPE(rocprim::int128_t, 64, 4)
-    BENCHMARK_TYPE(rocprim::int128_t, 128, 4)
-    BENCHMARK_TYPE(rocprim::int128_t, 192, 4)
-    BENCHMARK_TYPE(rocprim::int128_t, 256, 4)
-    BENCHMARK_TYPE(rocprim::int128_t, 320, 4)
-    BENCHMARK_TYPE(rocprim::int128_t, 512, 4)
-
-    BENCHMARK_TYPE(rocprim::uint128_t, 64, 3)
-    BENCHMARK_TYPE(rocprim::uint128_t, 512, 3)
-
-    BENCHMARK_TYPE(rocprim::uint128_t, 64, 4)
-    BENCHMARK_TYPE(rocprim::uint128_t, 128, 4)
-    BENCHMARK_TYPE(rocprim::uint128_t, 192, 4)
-    BENCHMARK_TYPE(rocprim::uint128_t, 256, 4)
-    BENCHMARK_TYPE(rocprim::uint128_t, 320, 4)
-    BENCHMARK_TYPE(rocprim::uint128_t, 512, 4)
+    QUEUE_BENCHMARK(64, 4)
+    QUEUE_BENCHMARK(128, 4)
+    QUEUE_BENCHMARK(192, 4)
+    QUEUE_BENCHMARK(256, 4)
+    QUEUE_BENCHMARK(320, 4)
+    QUEUE_BENCHMARK(512, 4)
 }
 
 int main(int argc, char* argv[])

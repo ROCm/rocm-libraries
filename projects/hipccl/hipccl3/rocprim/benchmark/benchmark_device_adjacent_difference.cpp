@@ -59,14 +59,10 @@ int main(int argc, char* argv[])
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
-    CREATE_BENCHMARKS(rocprim::int128_t);
-    CREATE_BENCHMARKS(int64_t);
-    CREATE_BENCHMARKS(int32_t);
-    CREATE_BENCHMARKS(int16_t);
-    CREATE_BENCHMARKS(int8_t);
-    CREATE_BENCHMARKS(double);
-    CREATE_BENCHMARKS(float);
-    CREATE_BENCHMARKS(rocprim::half);
+    benchmark_types::queue_type<(benchmark_types::Type_Category::integer_signed
+                                 | benchmark_types::Type_Category::floating_point)>(
+        executor,
+        [&](auto type_tag) { CREATE_BENCHMARKS(typename decltype(type_tag)::type) });
 
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
     // Not tuned types

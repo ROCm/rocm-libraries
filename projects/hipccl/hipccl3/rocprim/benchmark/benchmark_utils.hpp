@@ -39,21 +39,15 @@
 #include <rocprim/types/tuple.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
 #include <limits>
-#include <memory>
-#include <numeric>
 #include <random>
-#include <regex>
-#include <sstream>
+#include <cstdint>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
+#include <sys/types.h>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -531,6 +525,7 @@ PRIMBENCH_REGISTER_TYPE(int32_t, "i32")
 PRIMBENCH_REGISTER_TYPE(int64_t, "i64")
 
 PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+// None of the benchmarks use uint16_t, so it is not registered.
 PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
 PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
 
@@ -584,3 +579,172 @@ PRIMBENCH_REGISTER_TYPE(huge_1024_f32_f32, "huge<1024,f32,f32>")
 
 using huge_2048_f32_f32 = common::custom_huge_type<2048, float, float>;
 PRIMBENCH_REGISTER_TYPE(huge_2048_f32_f32, "huge<2048,f32,f32>")
+
+struct benchmark_types
+{
+    // Important: the ordering of these types should correspond with
+    // the bit order of the `Type_Category` enum. Modifications here
+    // should be reflected there as well!
+    using types = std::tuple<
+        // Signed integer types
+        int8_t,
+        int16_t,
+        int32_t,
+        int64_t,
+        rocprim::int128_t,
+        // Unsigned integer types
+        uint8_t,
+        uint32_t,
+        uint64_t,
+        rocprim::uint128_t,
+        // Floating-point types
+        rocprim::half,
+        float,
+        double,
+        // Vectors
+        float2,
+        float4,
+        double2,
+        // Custom types
+        custom_i8_i16,
+        custom_i8_f64,
+        custom_f32_i16,
+        custom_i32_i32,
+        custom_f32_f32,
+        custom_i32_f64,
+        custom_f64_f64,
+        custom_i64_f64,
+        custom_i64_i64,
+        copyable_i8_f64,
+        copyable_f64_f64,
+        huge_1024_f32_f32,
+        huge_2048_f32_f32,
+        // Empty type
+        rocprim::empty_type>;
+
+    /*
+    * Provides a way to categorize types for filtering in benchmarks. 
+    * Each type is assigned a unique bit in a 32-bit bit mask, allowing for efficient combination and checking of type categories with bitwise operators.
+    * Some commonly used predefined categories are provided.
+    */
+    enum class Type_Category : uint32_t
+    {
+        // Important: the ordering of these enums should correspond with
+        // the bit order of the above `types` type. Modifications here 
+        // should be reflected there as well!
+        none        = 0,
+        type_int8   = 1u << 0,
+        type_int16  = 1u << 1,
+        type_int32  = 1u << 2,
+        type_int64  = 1u << 3,
+        type_int128 = 1u << 4,
+
+        type_uint8   = 1u << 5,
+        type_uint32  = 1u << 6,
+        type_uint64  = 1u << 7,
+        type_uint128 = 1u << 8,
+
+        type_half    = 1u << 9,
+        type_float32 = 1u << 10,
+        type_float64 = 1u << 11,
+
+        type_float2  = 1u << 12,
+        type_float4  = 1u << 13,
+        type_double2 = 1u << 14,
+
+        type_custom_i8_i16  = 1u << 15,
+        type_custom_i8_f64  = 1u << 16,
+        type_custom_f32_i16 = 1u << 17,
+        type_custom_i32_i32 = 1u << 18,
+        type_custom_f32_f32 = 1u << 19,
+        type_custom_i32_f64 = 1u << 20,
+        type_custom_f64_f64 = 1u << 21,
+        type_custom_i64_f64 = 1u << 22,
+        type_custom_i64_i64 = 1u << 23,
+
+        type_copyable_i8_f64  = 1u << 24,
+        type_copyable_f64_f64 = 1u << 25,
+
+        type_huge_1024_f32_f32 = 1u << 26,
+        type_huge_2048_f32_f32 = 1u << 27,
+
+        type_empty_type = 1u << 28,
+
+        integer_signed = type_int8 | type_int16 | type_int32 | type_int64 | type_int128,
+
+        integer_unsigned = type_uint8 | type_uint32 | type_uint64 | type_uint128,
+
+        integer_8 = type_int8 | type_uint8,
+
+        integer_128 = type_int128 | type_uint128,
+
+        floating_point = type_half | type_float32 | type_float64,
+
+        rocprim_vector = type_float2 | type_float4 | type_double2,
+
+        custom_integer = type_custom_i8_i16 | type_custom_i32_i32 | type_custom_i64_i64,
+
+        custom_floating_point = type_custom_f32_f32 | type_custom_f64_f64,
+
+        custom_mixed
+        = type_custom_i8_f64 | type_custom_f32_i16 | type_custom_i32_f64 | type_custom_i64_f64,
+
+        warp        = floating_point | integer_8 | type_int32 | integer_128,
+        device_sort = integer_signed | (floating_point ^ type_float64) | type_uint128 | type_uint8
+                      | custom_floating_point | type_custom_i32_i32 | type_custom_i8_f64
+                      | type_custom_i64_f64,
+
+        custom     = custom_integer | custom_floating_point | custom_mixed,
+        integer    = integer_signed | integer_unsigned,
+        arithmetic = integer | floating_point,
+        all        = arithmetic | custom
+    };
+
+    template<Type_Category category_mask = Type_Category::none,
+             size_t        Index         = 0,
+             typename Functor,
+             typename TypesTuple = benchmark_types::types>
+    constexpr static void queue_type(primbench::executor& executor, Functor&& f)
+    {
+        if constexpr(Index < std::tuple_size_v<TypesTuple>)
+        {
+            constexpr auto mask      = static_cast<u_int32_t>(category_mask);
+            constexpr auto index_bit = static_cast<u_int32_t>(1u << Index);
+            if constexpr((mask & index_bit) != 0u)
+            {
+                using type = std::tuple_element_t<Index, TypesTuple>;
+                f(__hip_internal::type_identity<type>{});
+            }
+            queue_type<category_mask, Index + 1, Functor, TypesTuple>(executor,
+                                                                      std::forward<Functor>(f));
+        }
+    }
+};
+
+// Predefined bitwise operators for benchmark_types::Type_Category. Allows combining type categories using bitwise operations.
+
+inline constexpr benchmark_types::Type_Category operator|(benchmark_types::Type_Category a,
+                                                          benchmark_types::Type_Category b)
+{
+    return static_cast<benchmark_types::Type_Category>(static_cast<uint32_t>(a)
+                                                       | static_cast<uint32_t>(b));
+}
+
+inline constexpr benchmark_types::Type_Category operator&(benchmark_types::Type_Category a,
+                                                          benchmark_types::Type_Category b)
+{
+    return static_cast<benchmark_types::Type_Category>(static_cast<uint32_t>(a)
+                                                       & static_cast<uint32_t>(b));
+}
+
+inline constexpr benchmark_types::Type_Category operator~(benchmark_types::Type_Category a)
+{
+    return static_cast<benchmark_types::Type_Category>(~static_cast<uint32_t>(a));
+}
+
+inline constexpr benchmark_types::Type_Category operator^(benchmark_types::Type_Category a,
+                                                          benchmark_types::Type_Category b)
+{
+    return static_cast<benchmark_types::Type_Category>(static_cast<uint32_t>(a)
+                                                       ^ static_cast<uint32_t>(b));
+}
