@@ -113,6 +113,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
+* [Conv] Skip a naive convolution solver before building and launching it when a run-time lower
+  bound already exceeds its existing find timeout budget. This prevents work that the timeout
+  would abandon from continuing on the GPU and slowing the next call. The bound assumes the naive
+  kernel reaches at most 10 percent of the device's fp32 FMA peak. Set ``MIOPEN_NAIVE_BOUND_SKIP=0``
+  to disable the lower-bound shortcut.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

@@ -24,6 +24,10 @@
 // CaptureAfterATimedOutNaiveEvaluationSucceeds covers issue #12121: a naive
 // evaluation abandoned by find must not break a later HIP graph capture.
 //
+// A naive solver whose run time lower bound (conv::NaiveTimeFloorMs) exceeds the budget is
+// skipped before it is built or launched, so nothing is abandoned. MIOPEN_NAIVE_BOUND_SKIP=0
+// turns that off; CaptureAfterATimedOutNaiveEvaluationSucceeds sets it so a kernel is abandoned.
+//
 // Path B uses MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvDirectNaiveConvFwd to restrict
 // the candidate set to the naive solver only.
 //
@@ -39,6 +43,8 @@
 #include <miopen/convolution.hpp>
 #include <miopen/find_db.hpp>
 #include <miopen/solver_id.hpp>
+#include <miopen/conv/problem_description.hpp>
+#include <miopen/conv/solver_finders.hpp>
 
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
@@ -46,6 +52,7 @@
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT)
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT_FACTOR)
+MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_BOUND_SKIP)
 
 namespace {
 
@@ -231,6 +238,8 @@ TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
 
     ScopedFindDb no_cache;
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    // The run-time bound would skip naive before it is launched, and nothing would be abandoned.
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, false);
     ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
 
     tensor<float> x{8, 128, 28, 28};
@@ -309,6 +318,29 @@ TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
         miopenDestroy(handle);              // waits for the abandoned naive kernel
         (void)hipStreamDestroy(stream);
     }
+}
+
+// The bound EvaluateInvokers() uses to skip a naive solver before launching it must be positive
+// and must grow with the amount of work in the problem.
+TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
+{
+    auto& handle = get_handle();
+
+    const auto floor_ms = [&](int batch) {
+        tensor<float> x{static_cast<size_t>(batch), 128, 28, 28};
+        tensor<float> w{128, 128, 3, 3};
+        miopen::ConvolutionDescriptor conv{
+            2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+        tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+        const miopen::conv::ProblemDescription problem{
+            x.desc, w.desc, y.desc, conv, miopen::conv::Direction::Forward};
+        return miopen::conv::NaiveTimeFloorMs(handle, problem);
+    };
+
+    const float small = floor_ms(8);
+    const float large = floor_ms(16);
+    ASSERT_GT(small, 0.0f);
+    EXPECT_NEAR(large / small, 2.0f, 1e-3f);
 }
 
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug

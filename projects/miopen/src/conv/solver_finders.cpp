@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <numeric>
 #include <thread>
 
@@ -22,6 +23,7 @@
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solution.hpp>
+#include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/utility/modified_z.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM)
@@ -36,6 +38,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_TIMEOUT, true)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_NAIVE_TIMEOUT_FACTOR, 300)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_BOUND_SKIP, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
@@ -268,6 +271,17 @@ std::string NaiveSkipReason(NaiveWarmup::Status status, float best_time)
     return "completed";
 }
 
+/// Time, in ms, a naive solver may take before TryNaiveWithTimeout() gives up on it.
+float NaiveBudgetMs(float best_time)
+{
+    return best_time * static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
+}
+
+bool IsNaiveSolution(const solver::ConvSolution& s)
+{
+    return s.solver_id.find("Naive") != std::string::npos;
+}
+
 } // namespace
 
 static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
@@ -330,9 +344,7 @@ static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
         throw;
     }
 
-    const float timeout_factor =
-        static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
-    const float naive_budget = best_time * timeout_factor;
+    const float naive_budget = NaiveBudgetMs(best_time);
     const auto deadline      = std::chrono::steady_clock::now() +
                           std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
     bool finished = false;
@@ -378,9 +390,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
-    const auto is_naive_solver = [](const solver::ConvSolution& s) {
-        return s.solver_id.find("Naive") != std::string::npos;
-    };
+    const auto is_naive_solver = IsNaiveSolution;
 
     bool naive_timeout       = env::value(MIOPEN_NAIVE_TIMEOUT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
@@ -427,6 +437,23 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             // unless this is explicitly enabled via environment setting.
             if(!env::enabled(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE))
                 core_result.is_optimal = false;
+            continue;
+        }
+
+        // A naive solver that cannot finish inside its timeout budget is abandoned after it has
+        // been built and launched, and the kernel it leaves behind keeps running on the device.
+        // When its run time cannot be below the budget, skip it before building and launching it.
+        // The outcome is the one TryNaiveWithTimeout() would reach, without the abandoned kernel.
+        if(cutoff_naive && env::value(MIOPEN_NAIVE_BOUND_SKIP) &&
+           core_result.naive_floor_ms > 0.0f &&
+           core_result.naive_floor_ms > NaiveBudgetMs(core_result.find_search_best_time))
+        {
+            MIOPEN_LOG_I("Skipped naive solver "
+                         << algorithm_name.ToString() << ":" << sol.solver_id
+                         << ": run time lower bound " << core_result.naive_floor_ms
+                         << " ms exceeds " << env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)
+                         << "% of best non-naive time (" << core_result.find_search_best_time
+                         << " ms)");
             continue;
         }
 
@@ -615,15 +642,41 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
         ++it;
     }
 
+    float naive_floor_ms = 0.0f;
+    if(env::value(MIOPEN_NAIVE_TIMEOUT))
+    {
+        const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
+        bool has_naive          = false;
+        bool has_non_naive      = false;
+        for(const auto& ss : solutions)
+            for(const auto& s : ss.second)
+            {
+                has_naive |= IsNaiveSolution(s);
+                has_non_naive |= !IsNaiveSolution(s);
+            }
+        if(conv_problem != nullptr && has_naive && has_non_naive)
+            naive_floor_ms = conv::NaiveTimeFloorMs(handle, *conv_problem);
+    }
+
+    // Naive solvers are left out of the precompile list when another solver is available. A naive
+    // solver that EvaluateInvokers() decides to run is built then, by PrepareInvoker(). The ones
+    // it skips are never built. Compile-only runs exist to build every kernel, so they keep them.
+    const bool precompile_naive =
+        !env::value(MIOPEN_NAIVE_TIMEOUT) || env::enabled(MIOPEN_DEBUG_COMPILE_ONLY) ||
+        std::none_of(solutions.begin(), solutions.end(), [](const auto& ss) {
+            return std::any_of(ss.second.begin(), ss.second.end(), [](const auto& s) {
+                return !IsNaiveSolution(s);
+            });
+        });
+
     // Precompile
     {
         auto all = std::vector<const miopen::solver::ConvSolution*>{};
         all.reserve(total);
         for(const auto& ss : solutions)
-            std::transform(ss.second.begin(),
-                           ss.second.end(),
-                           std::back_inserter(all),
-                           [](auto&& s) { return &s; });
+            for(const auto& s : ss.second)
+                if(precompile_naive || !IsNaiveSolution(s))
+                    all.push_back(&s);
         PrecompileSolutions(handle, all, force_attach_binary);
     }
 
@@ -642,6 +695,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
     const auto network_config = problem.MakeNetworkConfig();
     auto ret                  = FindCoreResult();
     ret.is_optimal            = true;
+    ret.naive_floor_ms        = naive_floor_ms;
 
     ret.solutions.reserve(total);
 
@@ -719,6 +773,41 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
 
     // Disable future algos by default to enforce explicit handling
     return true;
+}
+
+float NaiveTimeFloorMs(const Handle& handle, const ProblemDescription& problem)
+{
+    if(!env::value(MIOPEN_NAIVE_TIMEOUT))
+        return 0.0f;
+    using Interp = solver::ProblemInterpreter;
+    // The naive kernels run one scalar thread per output element and never use matrix
+    // instructions. This 10 percent ceiling is a measured heuristic, not a hardware guarantee; if
+    // naive exceeds it, the estimate can be too high and skip a solver that would have completed.
+    constexpr double NaiveMaxPeakFractionPct = 10.0;
+    // fp32 FMA lanes per hardware CU per clock, counting RDNA dual issue.
+    constexpr double FmaLanesPerCu = 128.0;
+
+    const double out_pos = static_cast<double>(Interp::GetBatchN(problem)) *
+                           Interp::GetOutputChannelK(problem) * Interp::GetOutputDepthDo(problem) *
+                           Interp::GetOutputHeightHo(problem) * Interp::GetOutputWidthWo(problem);
+    const double reduction = static_cast<double>(Interp::GetInputChannelC(problem)) /
+                             Interp::GetGroupCountG(problem) * Interp::GetFilterDepthZ(problem) *
+                             Interp::GetFilterHeightY(problem) * Interp::GetFilterWidthX(problem);
+    const double flops = 2.0 * out_pos * reduction;
+
+    double peak_flops = 0.0;
+    try
+    {
+        peak_flops = static_cast<double>(handle.GetMaxHardwareComputeUnits()) * FmaLanesPerCu *
+                     2.0 * static_cast<double>(handle.GetClockRateKhz()) * 1e3;
+    }
+    catch(const std::exception&)
+    {
+        return 0.0f;
+    }
+    if(!(flops > 0.0) || !(peak_flops > 0.0))
+        return 0.0f;
+    return static_cast<float>(flops / (peak_flops * NaiveMaxPeakFractionPct / 100.0) * 1e3);
 }
 
 bool IsEnoughWorkspace(std::string_view where,
