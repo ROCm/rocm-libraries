@@ -2426,9 +2426,10 @@ def _wgrad_stem_spec(idx: int):
 
 # ---------------------------------------------------------------------------
 # Auto-launch tiled wgrad (rows_per_seg 0: whole strips, one-round grid),
-# indices 359..362: H not a multiple of the unroll, a grid budget below the
+# indices 359..363: H not a multiple of the unroll, a grid budget below the
 # channel tiles (clamped to one block per tile) with packed images, the
-# ping-pong wave groups, and a negative rows_per_seg both engines must reject.
+# ping-pong wave groups, and two rows_per_seg both engines must reject: a
+# negative one and one (31) that is not a multiple of the unroll (3).
 # ---------------------------------------------------------------------------
 _WGRAD_AUTO_CFG_BASE = 359
 
@@ -2464,6 +2465,7 @@ def _wgrad_auto_spec(idx: int):
             target_blocks=64,
         ),
         3: ts(problem=_wp(), rows_per_seg=-3),
+        4: ts(problem=_wp(), rows_per_seg=31),
     }
     sel = table.get(idx)
     if sel is None:

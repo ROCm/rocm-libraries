@@ -3019,6 +3019,9 @@ static int make_wgrad_auto_cfg(int idx, rocke_direct_wgrad_tiled_spec_t* ts)
     case 3: /* must reject: a negative rows_per_seg */
         ts->rows_per_seg = -3;
         return 0;
+    case 4: /* must reject: rows_per_seg not a multiple of the unroll (3) */
+        ts->rows_per_seg = 31;
+        return 0;
     default:
         return -1;
     }

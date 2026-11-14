@@ -247,26 +247,47 @@ def test_unknown_target_is_rejected(spec, valid):
             DirectWgradTiledSpec(problem=_p(), rows_per_seg=-3),
             is_valid_wgrad_tiled_spec,
         ),
+        # 31 is not a multiple of the unroll (3): the row loop runs 31 // 3
+        # trips and each segment's last row is never read.
+        (
+            DirectWgradTiledSpec(problem=_p(), rows_per_seg=31),
+            is_valid_wgrad_tiled_spec,
+        ),
     ],
 )
 def test_degenerate_knobs_are_rejected(spec, valid):
     assert not valid(spec)[0]
 
 
+# 8 channel tiles (block 64 x 32 over 128 x 128) and 16 segments: the budget,
+# not the segment count, decides the split.
+_AUTO_BUDGET = (dict(N=8, H=7, W=40, cpg=128, kpg=128), dict(waves_k=2, wave_c16=1))
+
+
 @pytest.mark.parametrize(
-    "over,kw",
+    "over,kw,want_splits",
     [
-        (dict(N=1, H=30), dict(waves_k=2, wave_c16=1, prefetch=3, row_unroll=4)),
-        (dict(N=4, H=15, W=40), dict(waves_k=2, unfold_n=4, target_blocks=3)),
-        (dict(N=16, H=64, W=64, cpg=256, kpg=512), dict(waves_k=2, wave_c16=1)),
-        (dict(N=8, H=7, W=7), dict(q_groups=2, pingpong=True, waves_k=2, wave_k16=1)),
+        (dict(N=1, H=30), dict(waves_k=2, wave_c16=1, prefetch=3, row_unroll=4), 1),
+        (dict(N=4, H=15, W=40), dict(waves_k=2, unfold_n=4, target_blocks=3), 3),
+        (dict(N=16, H=64, W=64, cpg=256, kpg=512), dict(waves_k=2, wave_c16=1), 8),
+        (
+            dict(N=8, H=7, W=7),
+            dict(q_groups=2, pingpong=True, waves_k=2, wave_k16=1),
+            4,
+        ),
+        # floor(12 / 8) = 1 split; ceil would give 2 and a second round.
+        (_AUTO_BUDGET[0], dict(_AUTO_BUDGET[1], target_blocks=12), 1),
+        # floor(1 / 8) = 0: clamped to one split, else the grid is empty and
+        # dW stays zero.
+        (_AUTO_BUDGET[0], dict(_AUTO_BUDGET[1], target_blocks=1), 1),
     ],
 )
-def test_auto_launch_covers_each_segment_once_in_one_round(over, kw):
+def test_auto_launch_covers_each_segment_once_in_one_round(over, kw, want_splits):
     """rows_per_seg 0: one segment per strip, at most target_blocks blocks
     (at least one per channel tile), and the in-kernel walk (block split
     takes segments split, split + n_splits, ...) visits every segment of
     every channel tile exactly once."""
+    kw = dict(kw)
     kw.setdefault("target_blocks", 512)
     spec = DirectWgradTiledSpec(problem=_p(**over), rows_per_seg=0, **kw)
     assert is_valid_wgrad_tiled_spec(spec)[0]
@@ -274,6 +295,7 @@ def test_auto_launch_covers_each_segment_once_in_one_round(over, kw):
     segs = -(-p.N // spec.unfold_n) * -(-p.Wo // spec.strip_w)
     assert spec.n_segments() == segs
     splits = spec.n_splits()
+    assert splits == want_splits
     assert spec.launch_geometry()[0][0] == tiles * splits
     assert tiles * splits <= max(spec.target_blocks, tiles)
     seen = [0] * segs
