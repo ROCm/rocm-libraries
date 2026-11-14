@@ -1817,6 +1817,90 @@ namespace TensileLite
                 }
             };
 
+            // Every tensor the kernel addresses must fit one buffer descriptor.
+            //
+            // BufferLoad/StoreOffsetLimitCheck bound a tile's extent, because a
+            // generated kernel re-bases its descriptor per workgroup. A kernel that
+            // programs num_records once over the whole tensor has no such bound: at
+            // 4 GiB the 32-bit field wraps, after which loads read back 0 and stores
+            // are dropped, so the launch succeeds and the answer is wrong. The
+            // rocRoller-on path rejects these problems in
+            // RocRollerGemmKernel::exceedsBufferAddressingLimit; this is the
+            // counterpart for checked-in rocRoller kernels, which the off path
+            // reaches through the solution library instead.
+            //
+            // The extent is max(stride[i] * size[i]) over dimensions of size > 1,
+            // not the tight totalAllocatedElements: the kernel programs
+            // num_records from the stride product, so leading-dimension padding
+            // counts in full. That, and counting the scale tensors, makes this
+            // stricter than the rocRoller-on check, which counts packed extents
+            // only. A size-1 dimension (the batch of a single-batch call) never
+            // advances the address, so its stride does not count.
+            struct BufferAddressingLimitCheck
+                : public Predicate_CRTP<BufferAddressingLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                BufferAddressingLimitCheck() = default;
+
+                static std::string Type()
+                {
+                    return "BufferAddressingLimitCheck";
+                }
+
+                static constexpr uint64_t MaxBufferBytes = uint64_t(1) << 32; // 4 GiB
+
+                // The scale tensors are empty when the problem is not block-scaled,
+                // which makes their extent 0 and the test vacuous.
+                static uint64_t largestTensorBytes(ContractionProblemGemm const& problem)
+                {
+                    static constexpr ContractionProblemGemm::TENSOR addressed[]
+                        = {ContractionProblemGemm::TENSOR::A,
+                           ContractionProblemGemm::TENSOR::B,
+                           ContractionProblemGemm::TENSOR::C,
+                           ContractionProblemGemm::TENSOR::D,
+                           ContractionProblemGemm::TENSOR::MXSA,
+                           ContractionProblemGemm::TENSOR::MXSB};
+
+                    uint64_t largest = 0;
+                    for(auto which : addressed)
+                    {
+                        auto const& t = problem.tensor(which);
+                        for(size_t i = 0; i < t.sizes().size(); i++)
+                        {
+                            if(t.sizes()[i] <= 1)
+                                continue;
+                            largest = std::max<uint64_t>(
+                                largest,
+                                multiplyElementSize(t.strides()[i] * t.sizes()[i],
+                                                    t.elementBytes()));
+                        }
+                    }
+                    return largest;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return largestTensorBytes(problem) < MaxBufferBytes;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "largest_tensor_bytes",
+                                        largestTensorBytes(problem),
+                                        "<",
+                                        "max",
+                                        MaxBufferBytes);
+                }
+            };
+
             struct WorkgroupNumberCheck
                 : public Predicate_CRTP<WorkgroupNumberCheck, ContractionProblemGemm>
             {
