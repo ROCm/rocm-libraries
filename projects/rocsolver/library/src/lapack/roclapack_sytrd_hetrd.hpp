@@ -33,6 +33,7 @@
 #pragma once
 
 #include "auxiliary/rocauxiliary_latrd_forsytrd.hpp"
+#include "checked_arithmetic.hpp"
 #include "rocblas.hpp"
 #include "roclapack_sytd2_hetd2.hpp"
 #include "rocsolver/rocsolver.h"
@@ -71,8 +72,7 @@ void rocsolver_sytrd_hetrd_getMemorySize(const rocblas_int n,
     if(n > xxTRD_xxTD2_SWITCHSIZE)
     {
         // size required to store temporary matrix W
-        s1 = n * xxTRD_BLOCKSIZE;
-        s1 *= sizeof(T) * batch_count;
+        s1 = rocsolver_saturating_mul<size_t>(n, xxTRD_BLOCKSIZE, sizeof(T), batch_count);
 
         // extra requirements to call latrd_forsytrd
         rocsolver_latrd_forsytrd_getMemorySize<BATCHED, T>(n, xxTRD_BLOCKSIZE, batch_count,

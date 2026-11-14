@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     April 2012
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #include "auxiliary/rocauxiliary_ormbr_unmbr.hpp"
 #include "auxiliary/rocauxiliary_ormlq_unmlq.hpp"
 #include "auxiliary/rocauxiliary_ormqr_unmqr.hpp"
+#include "checked_arithmetic.hpp"
 #include "rocblas.hpp"
 #include "roclapack_gebrd.hpp"
 #include "roclapack_gelqf.hpp"
@@ -187,9 +188,9 @@ void rocsolver_gesvdx_notransv_getMemorySize(const rocblas_svect left_svect,
     size_t w[5] = {0, 0, 0, 0, 0};
 
     // general requirements for bdsvdx and gebrd
-    *size_tmpDE = 2 * k * sizeof(S) * bc;
-    *size_tauqp = 2 * k * sizeof(T) * bc;
-    *size_tmpZ = 2 * k * nsv_max * sizeof(S) * bc;
+    *size_tmpDE = rocsolver_saturating_mul<size_t>(2, k, sizeof(S), bc);
+    *size_tauqp = rocsolver_saturating_mul<size_t>(2, k, sizeof(T), bc);
+    *size_tmpZ = rocsolver_saturating_mul<size_t>(2, k, nsv_max, sizeof(S), bc);
     rocsolver_bdsvdx_getMemorySize<S>(k, bc, size_WS_svdx1, &a[0], &b[0], &c[0], &d[0],
                                       size_WS_svdx6, size_WS_svdx7, size_WS_svdx8, size_WS_svdx9,
                                       &e[0], &f[0], &g[0]);
@@ -197,8 +198,8 @@ void rocsolver_gesvdx_notransv_getMemorySize(const rocblas_svect left_svect,
     if(thinSVD)
     {
         // requirements for column/row compression
-        *size_tau = k * sizeof(T) * bc;
-        *size_tmpT = k * k * sizeof(T) * bc;
+        *size_tau = rocsolver_saturating_mul<size_t>(k, sizeof(T), bc);
+        *size_tmpT = rocsolver_saturating_mul<size_t>(k, k, sizeof(T), bc);
         if(row)
             rocsolver_geqrf_getMemorySize<BATCHED, T>(m, n, bc, size_scalars, &a[1], &b[1], &c[1],
                                                       &w[0]);

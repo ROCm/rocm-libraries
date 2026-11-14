@@ -33,6 +33,7 @@
 #pragma once
 
 #include "auxiliary/rocauxiliary_labrd.hpp"
+#include "checked_arithmetic.hpp"
 #include "rocblas.hpp"
 #include "roclapack_gebd2.hpp"
 #include "rocsolver/rocsolver.h"
@@ -83,12 +84,10 @@ void rocsolver_gebrd_getMemorySize(const rocblas_int m,
         *size_Abyx_norms = std::max(s1, s2);
 
         // size of matrix X
-        *size_X = m * k;
-        *size_X *= sizeof(T) * batch_count;
+        *size_X = rocsolver_saturating_mul<size_t>(m, k, sizeof(T), batch_count);
 
         // size of matrix Y
-        *size_Y = n * k;
-        *size_Y *= sizeof(T) * batch_count;
+        *size_Y = rocsolver_saturating_mul<size_t>(n, k, sizeof(T), batch_count);
     }
 }
 

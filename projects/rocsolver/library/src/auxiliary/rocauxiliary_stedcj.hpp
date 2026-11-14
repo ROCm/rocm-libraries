@@ -1,5 +1,5 @@
 /************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include <algorithm>
 
 #include "asan_helpers.hpp"
+#include "checked_arithmetic.hpp"
 #include "lapack/roclapack_syevj_heevj.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
@@ -1589,14 +1590,17 @@ void rocsolver_stedcj_getMemorySize(const rocblas_evect evect,
 
     size_t s1, s2;
 
+    // n*n fits size_t for any valid rocblas_int n (n <= ~2^31, so n*n <= ~2^62)
+    const size_t nn = size_t(n) * size_t(n);
+
     // requirements for solver of small independent blocks
-    s1 = sizeof(S) * (n * n + 2) * batch_count;
+    s1 = rocsolver_saturating_mul<size_t>(sizeof(S), nn + 2, batch_count);
 
     // extra requirements for original eigenvectors of small independent blocks
-    *size_tempvect = (n * n) * batch_count * sizeof(S);
-    *size_tempgemm = 2 * (n * n) * batch_count * sizeof(S);
+    *size_tempvect = rocsolver_saturating_mul<size_t>(nn, batch_count, sizeof(S));
+    *size_tempgemm = rocsolver_saturating_mul<size_t>(2, nn, batch_count, sizeof(S));
     if(COMPLEX)
-        s2 = n * n * batch_count * sizeof(S);
+        s2 = rocsolver_saturating_mul<size_t>(nn, batch_count, sizeof(S));
     else
         s2 = 0;
     if(BATCHED && !COMPLEX)
@@ -1606,10 +1610,11 @@ void rocsolver_stedcj_getMemorySize(const rocblas_evect evect,
     *size_work_stack = std::max(s1, s2);
 
     // size for split blocks and sub-blocks positions
-    *size_splits_map = sizeof(rocblas_int) * (5 * n + 2) * batch_count;
+    *size_splits_map
+        = rocsolver_saturating_mul<size_t>(sizeof(rocblas_int), size_t(5) * n + 2, batch_count);
 
     // size for temporary diagonal and rank-1 modif vector
-    *size_tmpz = sizeof(S) * (2 * n) * batch_count;
+    *size_tmpz = rocsolver_saturating_mul<size_t>(sizeof(S), size_t(2) * n, batch_count);
 }
 
 //--------------------------------------------------------------------------------------//
