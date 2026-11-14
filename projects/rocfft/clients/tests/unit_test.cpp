@@ -1090,17 +1090,27 @@ TEST(rocfft_UnitTest, rtc_test_harness)
             // we should have generated at least a few kernels
             ASSERT_FALSE(files.empty());
 
+            // TheRock keeps device bitcode in lib/llvm/amdgcn/bitcode. amdclang++
+            // does not search there when ROCM_PATH is set.
+            const fs::path device_lib
+                = fs::path(rocfft_getenv("ROCM_PATH")) / "lib" / "llvm" / "amdgcn" / "bitcode";
+            std::error_code   device_lib_ec;
+            const std::string device_lib_flag
+                = fs::is_regular_file(device_lib / "ocml.bc", device_lib_ec)
+                      ? " --rocm-device-lib-path=\"" + device_lib.string() + "\""
+                      : "";
+
 #ifdef _OPENMP
 #pragma omp parallel for num_threads(rocfft_concurrency())
 #endif
             for(i = 0; i < files.size(); ++i)
             {
 #ifdef _WIN32
-                const std::string command
-                    = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
+                const std::string command = "amdclang++ -x hip -c -std=c++20" + device_lib_flag
+                                            + " -o NUL " + files[i].first;
 #else
-                const std::string command
-                    = "amdclang++ -x hip -c -std=c++20 -o /dev/null " + files[i].first;
+                const std::string command = "amdclang++ -x hip -c -std=c++20" + device_lib_flag
+                                            + " -o /dev/null " + files[i].first;
 #endif
                 files[i].second = std::system(command.c_str());
             }
